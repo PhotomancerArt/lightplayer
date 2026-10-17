@@ -77,6 +77,13 @@ pub fn untracked<T>(f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Restart the window without a line: `(peak, live)` of the window it
+/// ends (a caller timing one step, the boot's mount, brackets it with two).
+pub fn restart() -> (usize, usize) {
+    let live = LIVE.load(Ordering::Relaxed);
+    (PEAK.swap(live, Ordering::Relaxed).max(live), live)
+}
+
 /// The `[heap]` line, and the window's restart.
 pub fn log_line() {
     let live = LIVE.load(Ordering::Relaxed);

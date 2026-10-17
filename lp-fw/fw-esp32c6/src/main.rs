@@ -676,6 +676,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // filesystem: the tree store's perf figures (plan D5/Q17).
     #[cfg(feature = "heap_peak_diag")]
     let mount_t0 = embassy_time::Instant::now();
+    #[cfg(feature = "heap_peak_diag")]
+    let mount_heap0 = heap_peak_diag::restart();
     first_light::mark(first_light::Mark::Mount);
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let (base_fs, fs_boot_state): (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) = {
@@ -830,6 +832,17 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(feature = "heap_peak_diag")]
     // No `{:?}`: the image builds with `-Z fmt-debug=none`.
     esp_println::println!("[perf] fs mount {} us", mount_t0.elapsed().as_micros());
+    #[cfg(feature = "heap_peak_diag")]
+    {
+        // The mount's own heap: its peak over what was live before it, and
+        // what it still holds (the store's resident structures).
+        let (peak, live) = heap_peak_diag::restart();
+        esp_println::println!(
+            "[perf] fs mount-heap peak=+{} held=+{} B",
+            peak.saturating_sub(mount_heap0.1),
+            live.saturating_sub(mount_heap0.1)
+        );
+    }
     #[cfg(feature = "memory_fs")]
     esp_println::println!("[INIT] In-memory filesystem created");
 

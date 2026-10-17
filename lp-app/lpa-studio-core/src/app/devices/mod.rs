@@ -40,7 +40,6 @@ pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
 pub mod add_device_offers;
-pub mod age_words;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
@@ -158,7 +157,6 @@ pub use add_device_offers::{
     USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
     WifiAddressReach, add_device_offers,
 };
-pub use age_words::{age_words, duration_words};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_files_memory::{BoardFilesMemory, FRESH_STARTS_STORAGE_KEY};

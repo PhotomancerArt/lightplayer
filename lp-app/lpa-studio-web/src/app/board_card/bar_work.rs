@@ -1,48 +1,18 @@
-//! [`BarWork`]: work in progress, in the bar doing it (D34) — the bar's
-//! content while it carries [`UiBarWork`]: Studio's conic spinner and the
-//! step and percent while it runs, with the iridescent fill along the
-//! bar's foot ([`WorkFoot`]: its width the percent, a sweep when the
-//! percent is unknown, quieter when another device runs it, all of it
-//! inside a clipped track the bar's width); the check and
-//! the words, green, when it ended well (core keeps it there for a few
-//! seconds); the failure's mark and words, striped, when it failed. The
-//! bar's row draws the tint ([`super::stack_bar::bar_class`]) and the
-//! work's Cancel or Retry beside it. The picture and the status corner
-//! never change for work.
+//! A row's work (D34), the parts of it that are not the row's line: the
+//! iridescent fill along the row's foot while it runs ([`WorkFoot`]: its
+//! width the percent, a sweep when the percent is unknown, quieter when
+//! another device runs it, all of it inside a clipped track the row's
+//! width), and the hook word for where it stands. The line itself — the
+//! spinner in the icon's place, the kind, the name, the work's words as the
+//! state — is the row's own ([`super::stack_bar`]): work is a state of the
+//! row, not a second line. The picture and the status corner never change
+//! for work.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{BarWorkState, UiBarWork};
+use lpa_studio_core::BarWorkState;
 
 use super::card_action::use_card_scope;
-use crate::base::{
-    StudioIcon, StudioIconName, conic_spinner_class, iridescent_fill_class,
-    iridescent_fill_static_class,
-};
-
-/// The work, as the bar's content. See the module doc.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn BarWork(work: UiBarWork) -> Element {
-    let mark = match work.state {
-        BarWorkState::Running => rsx! {
-            span { class: "{conic_spinner_class()} ux-board-spinner", aria_hidden: "true" }
-        },
-        BarWorkState::Done => rsx! {
-            span { class: "tw:inline-flex tw:flex-none", aria_hidden: "true",
-                StudioIcon { name: StudioIconName::StepComplete, size: 12 }
-            }
-        },
-        BarWorkState::Failed { .. } => rsx! {
-            span { class: "tw:inline-flex tw:flex-none", aria_hidden: "true",
-                StudioIcon { name: StudioIconName::StatusError, size: 12 }
-            }
-        },
-    };
-    rsx! {
-        {mark}
-        span { class: words_class(&work.state), "{work.words}" }
-    }
-}
+use crate::base::{iridescent_fill_class, iridescent_fill_static_class};
 
 /// The running work's fill along the bar's foot: a track the bar's width
 /// and 2 px tall, absolutely placed so it costs the row no height, and
@@ -70,19 +40,6 @@ pub(crate) fn work_state_name(state: &BarWorkState) -> &'static str {
         BarWorkState::Running => "running",
         BarWorkState::Done => "done",
         BarWorkState::Failed { .. } => "failed",
-    }
-}
-
-/// The words: strong while running (the row is neutral), the row's own
-/// tinted ink once it ended. One line, cut, never wrapped.
-fn words_class(state: &BarWorkState) -> &'static str {
-    match state {
-        BarWorkState::Running => {
-            "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold tw:text-strong-foreground"
-        }
-        BarWorkState::Done | BarWorkState::Failed { .. } => {
-            "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold"
-        }
     }
 }
 
@@ -169,20 +126,11 @@ mod tests {
         assert_eq!(foot_style(Some(40), Some(85)), "width: 40%;");
     }
 
-    /// A bar with work is the same one fixed row in every state: the track
-    /// is absolutely placed, and the words are one cut line.
+    /// A row with work is the same one fixed row in every state: the track
+    /// is absolutely placed, and costs the row no height.
     #[test]
     fn the_work_is_one_fixed_row_in_every_state() {
         assert!(TRACK_CLASS.contains("tw:absolute"));
-        for state in [
-            BarWorkState::Running,
-            BarWorkState::Done,
-            BarWorkState::Failed { retry: None },
-        ] {
-            let class = words_class(&state);
-            assert!(class.contains("tw:truncate"), "{class}");
-            assert!(!class.contains("wrap"), "{class}");
-        }
         assert_eq!(work_state_name(&BarWorkState::Running), "running");
         assert_eq!(work_state_name(&BarWorkState::Done), "done");
         assert_eq!(

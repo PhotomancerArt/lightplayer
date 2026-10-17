@@ -65,7 +65,7 @@ bad:  In this tab · off                # card 10-14: "does that mean it's emula
 bad:  Nothing on it yet                # card 10-14: it has firmware; the project is what's missing
 ```
 
-study: board-card-words (once round 2 converges) ·
+anatomy: [board card](anatomy/board-card.md) (round 2, shipped) ·
 app: `lpa-studio-core/…/board_card/project_bar.rs`
 
 ## P2. say it once
@@ -156,7 +156,7 @@ a way out.
 
 ```text
 do:   │ XIAO ESP32-C6        │ + Add a project │      # the next step that works
-do:   ▲ Firmware  data lost  │ Restore │ Reset │      # the fix, and a way out
+do:   ◆ Project   none  data lost  │ Restore │ Reset │      # the fix, and a way out (O3)
 
 bad:  │ XIAO ESP32-C6        │ Connect         │  (grey)      # card 10-14: "confusing"
 bad:  Its files need restoring                        # card 10-14: "what if I just want to reset it?"
@@ -323,8 +323,9 @@ bad:  12 s ago · last frame · 12 s ago · last heard 12 s ago · quiet — las
                                                         # shipped: one age, four phrasings
 ```
 
-app: `lpa-studio-core/…/devices/age_words.rs` (the model to copy) ·
-story: data kinds (to build: one story, every kind, every case)
+app: `lpa-studio-core/src/core/data_kinds/` (ages, byte sizes, percents,
+dates, firmware versions) · story: `core/data-kinds/every-kind` (every kind,
+every case)
 
 ---
 

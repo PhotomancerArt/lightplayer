@@ -18,6 +18,11 @@ pub mod app;
 pub mod controller;
 pub mod core;
 
+pub use self::core::data_kinds::{
+    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_words, byte_size,
+    date_words, duration_words, firmware_label_version, firmware_version, percent, percent_of,
+    pre_ota_version,
+};
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
@@ -52,10 +57,11 @@ pub use app::devices::BrowserSerialTransport;
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
     ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
-    BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONNECTING,
-    COULDNT_CONNECT, CornerMark, DATA_UNREADABLE, FILES_ARE_GONE, FILES_NEED_NEWER_FIRMWARE,
-    LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, PictureSource, RECONNECTING,
-    RosterCardsInput, SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork,
+    BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONFIRMATION_REQUIRED,
+    CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, EDITING,
+    LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN,
+    PROJECT_NONE, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
+    UPDATE_INTERRUPTED, UPDATE_REQUIRED, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork,
     UiBluetoothSwitch, UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiCardAction,
     UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
     UiStatusCorner, activity_bar, activity_words, bluetooth_switch, board_card, board_panel_picks,
@@ -97,10 +103,7 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
-pub use app::devices::{
-    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
-    duration_words,
-};
+pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,

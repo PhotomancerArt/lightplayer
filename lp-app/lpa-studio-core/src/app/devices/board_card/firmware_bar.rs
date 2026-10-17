@@ -1,44 +1,53 @@
-//! The firmware bar: the version alone, blue when Update is offered, its
-//! work in the bar, and everything else in its details.
+//! The Firmware row: what runs the board (`docs/ux/anatomy/board-card.md`,
+//! "Firmware ▲"). **Firmware · version · state · action**; its work in the
+//! row, and everything else in its details.
 //!
 //! The busiest part of today's card — the face's verdict, the update
-//! story's line and bar, the layout question, the restore face, Flash,
-//! Update, Reinstall, Other version…, From a file…, Restore from a backup
-//! file…, Start fresh, Download backup and Factory reset — as one bar.
+//! story's line and bar, the layout question, Flash, Update, Reinstall,
+//! Other version…, From a file…, Finish update, Download backup and Factory
+//! reset — as one row.
 //!
 //! First match wins:
 //!
-//! | Board | Summary | Aside | Tone | Action / work |
+//! | Board | Name | State | Tone | Action / work |
 //! |---|---|---|---|---|
-//! | Flash or erase running | (the work shows) | — | Neutral | the work's Cancel |
-//! | An update running, or about to (its story is progress) | (the work: the update's short words) | — | Neutral | Cancel while backing up |
-//! | The layout question or refusal open | "Needs your answer" (a flash's own step shows as its work) | — | Attention | — (the details rise) |
-//! | Its file store refused (`fs: refused`, an `fs-tree` build) | "Data unreadable" | — | Attention | — (the details say where the files are; no click here is safe) |
-//! | Its files are gone (only on evidence it had some: never a fresh install) | "Its files are gone" | — | Attention | Restore files, or Start fresh with no backup here |
-//! | Its files are waiting | "Files waiting" | — | Attention | Finish update |
-//! | Needs you: keeps crashing | the update's words | — | Attention | Reinstall |
-//! | Needs you: a version Studio can't get | the update's words | — | Attention | Install <Studio's own> |
-//! | Needs you: one update over USB | the update's words | — | Attention | Update (by USB) |
-//! | An update offered over the air | the version alone | — | Live | the offer's word ("Update", "Install <v>") |
-//! | Older, the update offered by USB | the version alone | — | Live | Update (the board pick, when it must pick) |
-//! | Play only, an update available | the version alone | — | Live | Update with a lock (Unlock) |
-//! | Offline, or a closed port (nothing heard this time) | the remembered version | "last seen" ("when it's back" when the standing says Available) | Neutral (Live) | — |
-//! | The flash wants firmware | "No firmware", "Pre-hello firmware", … | — | Attention | — (Install is the primary); Update (by USB) for an older LightPlayer whose board is known |
-//! | Nothing known | "Firmware not known" | — | Neutral | — |
-//! | Otherwise | the version alone | — | Neutral | — |
+//! | Flash or erase running | the version, else nothing | (work: "installing · 30%", "erasing") | Neutral | the work's Cancel |
+//! | An update running, or about to (its story is progress) | the version | (work: "updating · 42%", "backing up · 12%") | Neutral | Cancel while backing up |
+//! | The layout question or refusal open | the version | "confirmation required" | Attention | Review (opens the details, which rise) |
+//! | Its file store refused (`fs: refused`, an `fs-tree` build) | the version | "data unreadable" | Attention | — (the details say where the files are; no click here is safe) |
+//! | Its files wait for a firmware that reads their store | the version | "update required" | Attention | — |
+//! | Its files are waiting (a move that stopped half-way) | the version | "update interrupted" | Attention | Resume (`finish-update`) |
+//! | Keeps crashing | the version | "crashing" | Error | Reinstall |
+//! | Missing a part Studio can't get | the version | "incomplete" | Attention | Install (Studio's own) |
+//! | Only its core runs (no engine) | the version | "incomplete" (or "updating" mid-update) | Attention | — |
+//! | A core from before over-the-air updates | "v… (pre-OTA)" | — | Neutral | Update (by USB, once) |
+//! | A core that updates nearby once (not over Wi‑Fi or the relay yet) | the version | — | Neutral | — (its details say how) |
+//! | Play only, an update available | the version | — | Neutral | Update with a lock (Unlock) |
+//! | An update offered (over the air, or by USB) | the version | — | Neutral | Update |
+//! | Offline, or a closed port (nothing heard this time) | the version remembered, dimmed | — | Neutral | — |
+//! | Too old to say hello | "unknown (pre-2026.07)" | — | Neutral | Install (the USB update), unless the primary is Install firmware |
+//! | No LightPlayer on it (blank, another firmware, download mode, silent) | "none", or what it is | the state, when it says one | Neutral | — (Install firmware is the primary) |
+//! | Nothing known | "unknown" | — | Neutral | — |
+//! | Otherwise | the version | — | Neutral | — |
 //!
-//! "The version alone" never repeats the board, the MAC or a verdict
-//! (R7): the update story's version when there is one, else the firmware
-//! label the board said hello with (`dev 5eb70a7`, `fw-esp32c6 abc1234`).
-//! Blue means Update and nothing else; orange means it needs you.
+//! The name is Studio's one firmware version ([`crate::firmware_version`]):
+//! a release as its tag, `v2026.10.16-1`, a local build `dev c688c99`,
+//! never the build's target prefix (`fw-esp32c6 …`, the details' "Build").
+//! An update on offer is no alarm: the row is untinted and its button
+//! carries it (P16). The button says the verb alone — "Update", "Install"
+//! — because "Update to v2026.10.16-1" does not fit beside the version at
+//! the card's width; the version it brings is the details' "Newest". Orange
+//! means it needs you; red that it is broken. A board whose data was lost
+//! says so on its Project row (O3), and its ways back are there.
 
 use lpa_devices::view::{FirmwareFace, PendingLinkView};
-use lpa_devices::{FirmwareAge, WireVersion};
+use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 
-use super::bar_work::{bar_work, board_pick};
+use super::bar_work::{bar_work, board_pick, update_work_words};
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{danger, facts, notice, verbs, without_empty};
-use super::ui_bar_work::BarWorkState;
+use super::project_bar::data_lost;
+use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
@@ -46,20 +55,29 @@ use crate::app::devices::device_firmware_face::{device_firmware_line, pending_fi
 use crate::app::devices::device_identity::{IdentityFirmware, device_identity_line};
 use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
+use crate::core::data_kinds::{
+    FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, firmware_label_version, firmware_version,
+    pre_ota_version,
+};
 use crate::{RichLine, UiOffer, UiStatusKind};
 
-/// The bar's words when nothing says which firmware the board runs.
-const FIRMWARE_NOT_KNOWN: &str = "Firmware not known";
-/// The bar's words for a board that came back without the files it had.
-pub const FILES_ARE_GONE: &str = "Its files are gone";
-/// The bar's words for a board that refused its file store: its files are
-/// kept, and nothing on the card can read them.
-pub const DATA_UNREADABLE: &str = "Data unreadable";
-/// The bar's words for a board whose firmware does not read the tree store
-/// its files are in: kept, waiting for a firmware that does.
-pub const FILES_NEED_NEWER_FIRMWARE: &str = "Files need newer firmware";
+/// The state of a board whose file store it refused: its files are kept,
+/// and nothing on the card can read them.
+pub const DATA_UNREADABLE: &str = "data unreadable";
+/// The state of a board whose firmware does not read the tree store its
+/// files are in: kept, waiting for a firmware that does.
+pub const UPDATE_REQUIRED: &str = "update required";
+/// The state of a board holding its files for a move that stopped
+/// half-way; Resume finishes it.
+pub const UPDATE_INTERRUPTED: &str = "update interrupted";
+/// The state while the layout question waits for an answer.
+pub const CONFIRMATION_REQUIRED: &str = "confirmation required";
+/// The state of a board whose firmware keeps crashing.
+const CRASHING: &str = "crashing";
+/// The state of a board missing a part of its firmware.
+const INCOMPLETE: &str = "incomplete";
 
-/// The firmware bar.
+/// The Firmware row.
 pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let view = input.view;
     let update = input.update;
@@ -68,10 +86,15 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let blocked = view.firmware_blocked.is_some();
     let identity = device_identity_line(view);
     let version = version_alone(input, &identity.firmware);
-    let mut aside = None;
-    let (summary, tone, action) = if layout.is_some_and(|layout| layout.panel.is_some()) {
+    let mut stale = false;
+    let mut opens_details = None;
+    let (summary, aside, tone, action): (String, Option<&str>, UiStatusKind, _) = if layout
+        .is_some_and(|layout| layout.panel.is_some())
+    {
+        opens_details = Some("Review");
         (
-            "Needs your answer".to_string(),
+            version.clone(),
+            Some(CONFIRMATION_REQUIRED),
             UiStatusKind::Attention,
             None,
         )
@@ -79,51 +102,65 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         // Words only: the details say a firmware that reads the store
         // brings the files back.
         (
-            FILES_NEED_NEWER_FIRMWARE.to_string(),
+            version.clone(),
+            Some(UPDATE_REQUIRED),
             UiStatusKind::Attention,
             None,
         )
     } else if layout.is_some_and(|layout| layout.store_refused) {
         // Words only: the details name the tool that reads its files.
-        (DATA_UNREADABLE.to_string(), UiStatusKind::Attention, None)
-    } else if input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some() {
-        // The way back when this browser kept a backup; else the way on.
-        // Restore from a backup file… is in the details either way.
-        let restore = input
-            .offer("restore-files")
-            .filter(|_| !blocked)
-            .map(|restore| UiCardAction::press(restore, "Restore files").with_icon("upload"));
-        let start_fresh = || input.offer("start-fresh").map(start_fresh);
         (
-            FILES_ARE_GONE.to_string(),
+            version.clone(),
+            Some(DATA_UNREADABLE),
             UiStatusKind::Attention,
-            restore.or_else(start_fresh),
+            None,
         )
-    } else if let Some(finish) = input.offer("finish-update") {
+    } else if let Some(finish) = input.offer("finish-update").filter(|_| !data_lost(input)) {
         (
-            "Files waiting".to_string(),
+            version.clone(),
+            Some(UPDATE_INTERRUPTED),
             UiStatusKind::Attention,
-            (!blocked).then(|| UiCardAction::press(finish, "Finish update").with_icon("download")),
+            (!blocked).then(|| UiCardAction::press(finish, "Resume").with_icon("download")),
         )
-    } else if let Some(update) = update.filter(|update| update.kind == UpdateRowKind::NeedsYou) {
-        let answer = match standing {
-            Some(UpdateStanding::KeepsCrashing { .. }) => input
-                .offer("reinstall-firmware")
-                .map(|reinstall| UiCardAction::press(reinstall, "Reinstall").with_icon("retry")),
-            Some(UpdateStanding::CantGetVersion { .. }) => input
-                .offer("install-firmware")
-                .filter(|install| install.params().is_empty())
-                .map(|install| UiCardAction::own_words(install).with_icon("download")),
-            Some(UpdateStanding::NeedsUsbOnce { .. }) => input
-                .offer("update-firmware")
-                .map(|update| usb_update(input, update)),
-            _ => None,
-        };
-        (update.line.clone(), UiStatusKind::Attention, answer)
+    } else if update.is_some_and(|update| update.kind == UpdateRowKind::NeedsYou) {
+        match standing {
+            Some(UpdateStanding::KeepsCrashing { .. }) => (
+                version.clone(),
+                Some(CRASHING),
+                UiStatusKind::Error,
+                input.offer("reinstall-firmware").map(|reinstall| {
+                    UiCardAction::press(reinstall, "Reinstall").with_icon("retry")
+                }),
+            ),
+            Some(UpdateStanding::CantGetVersion { .. }) => (
+                version.clone(),
+                Some(INCOMPLETE),
+                UiStatusKind::Attention,
+                input
+                    .offer("install-firmware")
+                    .filter(|install| install.params().is_empty())
+                    .map(|install| UiCardAction::press(install, "Install").with_icon("download")),
+            ),
+            // Pre-OTA: one update over USB, and from then on it updates
+            // without a cable. No tone: the button carries it.
+            Some(UpdateStanding::NeedsUsbOnce { board, .. }) => (
+                pre_ota_version(&board.version),
+                None,
+                UiStatusKind::Neutral,
+                input
+                    .offer("update-firmware")
+                    .map(|update| usb_update(input, update).with_icon("usb")),
+            ),
+            // Updates nearby once (a core from before updates through
+            // Wi‑Fi or the relay): nothing to press here; its details say
+            // how.
+            _ => (version.clone(), None, UiStatusKind::Neutral, None),
+        }
     } else if let Some(UpdateStanding::PlayOnly { .. }) = standing {
         (
             version.clone(),
-            UiStatusKind::Live,
+            None,
+            UiStatusKind::Neutral,
             input.offer("unlock").map(|unlock| {
                 UiCardAction::press(unlock, "Update")
                     .with_icon("lock")
@@ -138,108 +175,128 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             // The flash path by USB: Lasting, arms in place; the board pick
             // when the board must be picked.
             true => usb_update(input, offer),
-            // Over the air: one press, in the offer's own word.
-            false => UiCardAction::own_words(offer).with_icon("download"),
+            // Over the air: one press.
+            false => UiCardAction::press(offer, "Update").with_icon("download"),
         };
-        (version.clone(), UiStatusKind::Live, Some(action))
+        (version.clone(), None, UiStatusKind::Neutral, Some(action))
     } else if let (IdentityFirmware::Remembered(_), FirmwareFace::Unknown) =
         (&identity.firmware, &view.firmware_face)
     {
-        let available = matches!(standing, Some(UpdateStanding::Available { .. }));
-        aside = Some(
-            match available {
-                true => "when it's back",
-                false => "last seen",
-            }
-            .to_string(),
-        );
-        let tone = match available {
-            true => UiStatusKind::Live,
-            false => UiStatusKind::Neutral,
-        };
-        (version.clone(), tone, None)
+        // Last known, dimmed (P13); only the Link row says since when.
+        stale = true;
+        (version.clone(), None, UiStatusKind::Neutral, None)
     } else if view.firmware_face.wants_flash() {
-        // Install (`flash`) is the primary. An older LightPlayer whose board
-        // is known is offered the USB update instead of a flash: that is
-        // the bar's answer, here where the face says it is needed.
+        // Install firmware (`flash`) is the primary. An older LightPlayer
+        // whose board is known is offered the USB update instead of a
+        // flash: that is the row's answer, here where the face says it is
+        // needed.
         let update = input
             .offer("update-firmware")
             .filter(|_| input.offer("flash").is_none())
-            .map(|update| usb_update(input, update));
-        (
-            face_words(&view.firmware_face).to_string(),
-            UiStatusKind::Attention,
-            update,
-        )
-    } else if let FirmwareFace::CoreOnly { .. } = view.firmware_face {
-        (
-            device_firmware_line(&view.firmware_face, None),
-            UiStatusKind::Attention,
-            None,
-        )
+            .map(|update| {
+                let word = match view.firmware_face {
+                    FirmwareFace::NoHello => "Install",
+                    _ => "Update",
+                };
+                UiCardAction {
+                    word: word.to_string(),
+                    ..usb_update(input, update)
+                }
+            });
+        let (name, state) = face_words(&view.firmware_face);
+        (name, state, UiStatusKind::Neutral, update)
+    } else if let FirmwareFace::CoreOnly {
+        version: core,
+        state,
+    } = &view.firmware_face
+    {
+        let (name, state, tone) = core_only_words(core.as_deref(), *state);
+        (name, state, tone, None)
     } else {
-        (version.clone(), UiStatusKind::Neutral, None)
+        (version.clone(), None, UiStatusKind::Neutral, None)
     };
-    let work = firmware_work(input);
+    // A flash waiting for the layout question's answer is not working: the
+    // row says the confirmation it needs, and Review opens it.
+    let work = firmware_work(input).filter(|_| opens_details.is_none());
     let running = work
         .as_ref()
         .is_some_and(|work| work.state == BarWorkState::Running);
+    // A flash on a board with no LightPlayer yet: the work's words take the
+    // name's place ("installing · 30%").
+    let summary = match (running, view.firmware_face.wants_flash()) {
+        (true, true) => String::new(),
+        _ => summary,
+    };
     UiStackBar {
-        layer: BarLayer::Firmware,
-        icon: "firmware".to_string(),
         details: details(input, &version, tone, action.as_ref()),
-        summary,
-        aside,
-        mark: None,
+        aside: aside.filter(|_| !running).map(str::to_string),
         tone: if running { UiStatusKind::Neutral } else { tone },
         action: if running { None } else { action },
+        opens_details: opens_details.filter(|_| !running),
+        stale,
         work,
+        ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
     }
 }
 
-/// A new board's firmware bar: what the settled verdict says, short, in
-/// Attention when it wants a flash; "Known once it identifies" until then.
-/// No action: Install is the primary.
+/// A new board's Firmware row: "unknown" while it identifies; once it
+/// settles, what the verdict found — "none" on a blank chip, "unknown
+/// (pre-2026.07)" on a LightPlayer too old to say hello. Quiet, with no
+/// action: Install firmware is the primary.
 pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
     let face = &pending.firmware_face;
-    let (summary, tone) = match face {
-        FirmwareFace::Unknown => (
-            "Known once it identifies".to_string(),
+    let (summary, aside, tone) = match face {
+        FirmwareFace::Unknown => (FIRMWARE_UNKNOWN.to_string(), None, UiStatusKind::Neutral),
+        // A core with no engine says no hello, so it waits here: the same
+        // words as the board's own card once it is kept.
+        FirmwareFace::CoreOnly { version, state } => core_only_words(version.as_deref(), *state),
+        face if face.wants_flash() => {
+            let (summary, aside) = face_words(face);
+            (summary, aside, UiStatusKind::Neutral)
+        }
+        face => (
+            firmware_label_version(&device_firmware_line(face, None)),
+            None,
             UiStatusKind::Neutral,
         ),
-        face if face.wants_flash() => (face_words(face).to_string(), UiStatusKind::Attention),
-        face => (device_firmware_line(face, None), UiStatusKind::Neutral),
     };
-    let line = pending_firmware_line(face);
-    let sections = match tone {
-        UiStatusKind::Attention => vec![notice("Firmware", tone, line, None)],
-        _ => {
-            let mut said = facts("Firmware", Vec::new());
-            said.sentence = Some(line);
-            vec![said]
-        }
-    };
+    let mut said = facts("Firmware", Vec::new());
+    said.sentence = Some(pending_firmware_line(face));
     UiStackBar {
-        layer: BarLayer::Firmware,
-        icon: "firmware".to_string(),
-        summary,
-        aside: None,
-        mark: None,
+        aside: aside.map(str::to_string),
         tone,
-        action: None,
-        work: None,
         details: UiBarDetails {
-            sections,
+            sections: vec![said],
             panels: Vec::new(),
             raised: false,
         },
+        ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
     }
 }
 
-/// The firmware bar's work: a flash, an erase or an update running (the
-/// update in its story's words), or an update story in progress with no
-/// activity of its own here (another device's, one about to start).
-fn firmware_work(input: &BoardCardInput<'_>) -> Option<super::ui_bar_work::UiBarWork> {
+/// A core with no engine, as the row's name, state and tone: its version
+/// and "incomplete" (orange) while it waits for its engine, "crashing"
+/// (red) when the engine keeps crashing, "updating" while it finishes.
+fn core_only_words(
+    core: Option<&str>,
+    state: UpdateBoardState,
+) -> (String, Option<&'static str>, UiStatusKind) {
+    let name = core.map_or_else(|| FIRMWARE_UNKNOWN.to_string(), firmware_version);
+    match state {
+        UpdateBoardState::EngineCrashing => (name, Some(CRASHING), UiStatusKind::Error),
+        UpdateBoardState::Updating | UpdateBoardState::OnTrial => {
+            (name, Some("updating"), UiStatusKind::Neutral)
+        }
+        UpdateBoardState::NeedsEngine | UpdateBoardState::Running | UpdateBoardState::Unknown => {
+            (name, Some(INCOMPLETE), UiStatusKind::Attention)
+        }
+    }
+}
+
+/// The Firmware row's work: a flash, an erase or an update running (the
+/// update as one number), or an update story in progress with no activity
+/// of its own here (another device's, one about to start).
+fn firmware_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
     if let Some(work) = bar_work(input, BarLayer::Firmware) {
         return Some(work);
     }
@@ -247,31 +304,29 @@ fn firmware_work(input: &BoardCardInput<'_>) -> Option<super::ui_bar_work::UiBar
         .update
         .filter(|update| update.kind == UpdateRowKind::Progress)?;
     let progress = update.progress?;
-    Some(super::ui_bar_work::UiBarWork {
-        words: update.line.clone(),
-        percent: progress.percent,
-        state: BarWorkState::Running,
-        cancel: None,
+    let (words, percent) = update_work_words(&update.standing)?;
+    Some(UiBarWork {
         other_device: progress.other_device,
+        ..UiBarWork::running(words, percent.or(progress.percent))
     })
 }
 
-/// The version alone: the update story's version when there is one, else
-/// the label the board said hello with (or the one it is remembered by),
-/// else "Firmware not known".
+/// The version alone, in Studio's one firmware version: the update story's
+/// version when there is one, else the version the board said hello with
+/// (or the one it is remembered by), else "unknown".
 fn version_alone(input: &BoardCardInput<'_>, firmware: &IdentityFirmware) -> String {
     if let Some(update) = input.update {
         return update.version.text.clone();
     }
     firmware
         .label()
-        .map_or_else(|| FIRMWARE_NOT_KNOWN.to_string(), str::to_string)
+        .map_or_else(|| FIRMWARE_UNKNOWN.to_string(), firmware_label_version)
 }
 
 /// Whether the board is older than this Studio, so the USB update is the
-/// bar's blue action rather than a verb in its details: an update story
-/// that says one is available, or a face older than Studio by its version
-/// (or, with no version to compare, its wire).
+/// row's action rather than a verb in its details: an update story that
+/// says one is available, or a face older than Studio by its version (or,
+/// with no version to compare, its wire).
 fn update_recommended(input: &BoardCardInput<'_>) -> bool {
     if let Some(update) = input.update {
         return matches!(update.standing, UpdateStanding::Available { .. });
@@ -289,11 +344,6 @@ fn update_recommended(input: &BoardCardInput<'_>) -> bool {
     )
 }
 
-/// Start fresh: let the lost files go; the board waits for a project.
-fn start_fresh(offer: &UiOffer) -> UiCardAction {
-    UiCardAction::press(offer, "Start fresh").with_icon("add")
-}
-
 /// The update by USB: "Update", arming in place; the board pick when the
 /// board must be picked.
 fn usb_update(input: &BoardCardInput<'_>, offer: &UiOffer) -> UiCardAction {
@@ -304,24 +354,34 @@ fn usb_update(input: &BoardCardInput<'_>, offer: &UiOffer) -> UiCardAction {
     }
 }
 
-/// A face that wants a flash, in the bar's words.
-fn face_words(face: &FirmwareFace) -> &'static str {
+/// A face that wants a flash, as the row's name and state: "none" on a
+/// blank chip, "unknown (pre-2026.07)" on a LightPlayer too old to say
+/// hello, what else it runs otherwise.
+fn face_words(face: &FirmwareFace) -> (String, Option<&'static str>) {
     match face {
-        FirmwareFace::Blank => "No firmware",
-        FirmwareFace::NoHello => "Pre-hello firmware",
-        FirmwareFace::Bootloader => "In download mode",
-        FirmwareFace::Foreign { .. } => "Other firmware",
-        FirmwareFace::Silent => "No response",
-        FirmwareFace::OlderLightPlayer { .. } => "Older LightPlayer",
+        FirmwareFace::Blank => (FIRMWARE_NONE.to_string(), None),
+        FirmwareFace::NoHello => (PRE_HELLO_FIRMWARE.to_string(), None),
+        FirmwareFace::Bootloader => (FIRMWARE_UNKNOWN.to_string(), Some("download mode")),
+        FirmwareFace::Foreign { label } => (
+            label
+                .clone()
+                .unwrap_or_else(|| "other firmware".to_string()),
+            None,
+        ),
+        FirmwareFace::Silent => (FIRMWARE_UNKNOWN.to_string(), Some("no response")),
+        FirmwareFace::OlderLightPlayer { .. } => {
+            (FIRMWARE_UNKNOWN.to_string(), Some("older LightPlayer"))
+        }
         FirmwareFace::Unknown
         | FirmwareFace::LightPlayer { .. }
-        | FirmwareFace::CoreOnly { .. } => FIRMWARE_NOT_KNOWN,
+        | FirmwareFace::CoreOnly { .. } => (FIRMWARE_UNKNOWN.to_string(), None),
     }
 }
 
-/// The firmware bar's details: the notice, the firmware's facts, its
+/// The Firmware row's details: the notice, the firmware's facts, its
 /// panels, every firmware verb not drawn as the action, and Factory reset
-/// apart.
+/// apart. A board whose data was lost has its ways back on the Project
+/// row's details (O3), not here.
 fn details(
     input: &BoardCardInput<'_>,
     version: &str,
@@ -332,12 +392,27 @@ fn details(
     let update = input.update;
     let layout = input.layout;
     let mut sections = Vec::new();
+    let lost = data_lost(input);
 
     // 1. The notice. A refused store's line is the notice, before any
     // update story.
     let refused = layout.is_some_and(|layout| layout.store_refused);
+    // The row's action is the update (or its Unlock): the story says what
+    // it brings.
+    let offers_the_update = action.is_some_and(|action| {
+        ["update-firmware", "unlock"]
+            .into_iter()
+            .filter_map(|verb| input.offer(verb))
+            .any(|offer| offer.path == action.offer)
+    });
     let story = update.filter(|update| {
-        !refused && (update.kind == UpdateRowKind::NeedsYou || tone == UiStatusKind::Live)
+        !refused
+            && (update.kind == UpdateRowKind::NeedsYou
+                || (offers_the_update
+                    && matches!(
+                        update.standing,
+                        UpdateStanding::Available { .. } | UpdateStanding::PlayOnly { .. }
+                    )))
     });
     if let Some(update) = story {
         sections.push(notice(
@@ -353,7 +428,10 @@ fn details(
             panel.title.clone(),
             None,
         ));
-    } else if let Some(line) = layout.and_then(|layout| layout.line.clone()) {
+    } else if let Some(line) = layout
+        .and_then(|layout| layout.line.clone())
+        .filter(|_| !lost)
+    {
         sections.push(notice(
             "Firmware",
             UiStatusKind::Attention,
@@ -361,14 +439,16 @@ fn details(
             action.cloned(),
         ));
     } else if view.firmware_face.wants_flash() {
+        // Quiet: Install firmware is the primary; the face's verdict is
+        // the details' sentence.
         let board = device_identity_line(view).board;
         sections.push(notice(
             "Firmware",
-            UiStatusKind::Attention,
+            UiStatusKind::Neutral,
             device_firmware_line(&view.firmware_face, board.as_deref()),
             None,
         ));
-    } else if tone == UiStatusKind::Attention {
+    } else if tone != UiStatusKind::Neutral {
         sections.push(notice(
             "Firmware",
             tone,
@@ -425,7 +505,7 @@ fn details(
                 .map(|file| file.path.clone()),
         });
     }
-    if let Some(restore) = input.offer("restore-from-file") {
+    if let Some(restore) = input.offer("restore-from-file").filter(|_| !lost) {
         panels.push(UiDetailPanel::RestoreFromFile {
             offer: restore.path.clone(),
             current_base_mac: layout.and_then(|layout| layout.current_base_mac.clone()),
@@ -453,19 +533,13 @@ fn details(
             None,
             "download",
         ),
+        verb(input.offer("finish-update"), Some("Resume"), "download"),
+        update_verb,
         verb(
-            input.offer("restore-files"),
-            Some("Restore files"),
-            "upload",
-        ),
-        verb(
-            input.offer("finish-update"),
-            Some("Finish update"),
+            input.offer("download-backup").filter(|_| !lost),
+            None,
             "download",
         ),
-        update_verb,
-        verb(input.offer("download-backup"), None, "download"),
-        input.offer("start-fresh").map(start_fresh),
     ]
     .into_iter()
     .flatten()
@@ -554,35 +628,23 @@ mod tests {
         ));
         let bar = firmware_bar(&fixture.input());
         let work = bar.work.expect("the flash");
-        assert_eq!(work.words, "Flashing firmware · 62%");
+        assert_eq!(work.words, "installing · 62%");
         assert!(work.cancel.is_some());
         assert_eq!(bar.action, None);
         assert_eq!(bar.tone, UiStatusKind::Neutral);
     }
 
-    /// Ported: the update's own short words are the bar's work while it
-    /// runs (the header chip used to take them; the bar does now).
+    /// The update is the row's work while it runs, one number for the
+    /// whole of it (never "1 of 2"), and the version stays the name.
     #[test]
-    fn the_header_chip_takes_the_updates_word_while_it_owns_the_board() {
+    fn an_update_is_the_rows_work_as_one_number() {
         for (row, words, other) in [
-            (UpdateFixtureRow::BackingUp, "Backing up · 18%", false),
-            (UpdateFixtureRow::Updating, "Updating · 1 of 2 · 40%", false),
-            (
-                UpdateFixtureRow::Finishing,
-                "Updating · 2 of 2 · 70%",
-                false,
-            ),
-            (
-                UpdateFixtureRow::FinishingResumed,
-                "Resuming · 2 of 2 · 70%",
-                false,
-            ),
-            (UpdateFixtureRow::Restoring, "Restoring · 35%", false),
-            (
-                UpdateFixtureRow::AnotherDevice,
-                "Another device is updating it · 40%",
-                true,
-            ),
+            (UpdateFixtureRow::BackingUp, "backing up · 18%", false),
+            (UpdateFixtureRow::Updating, "updating · 20%", false),
+            (UpdateFixtureRow::Finishing, "updating · 85%", false),
+            (UpdateFixtureRow::FinishingResumed, "resuming · 85%", false),
+            (UpdateFixtureRow::Restoring, "restoring · 35%", false),
+            (UpdateFixtureRow::AnotherDevice, "updating · 40%", true),
         ] {
             let mut fixture = story(row);
             let bar = firmware_bar(&fixture.input());
@@ -677,12 +739,15 @@ mod tests {
         assert_eq!(line(&firmware_bar(&newer.input()), "Newest"), None);
     }
 
+    /// Broken firmware is red, the state a word: "crashing", with
+    /// Reinstall.
     #[test]
-    fn a_crashing_board_offers_reinstall() {
+    fn a_crashing_board_is_red_and_offers_reinstall() {
         let mut fixture = story(UpdateFixtureRow::KeepsCrashing);
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "2026.10.03-1 keeps crashing");
-        assert_eq!(bar.tone, UiStatusKind::Attention);
+        assert_eq!(bar.summary, "v2026.10.03-1");
+        assert_eq!(bar.aside.as_deref(), Some("crashing"));
+        assert_eq!(bar.tone, UiStatusKind::Error);
         let reinstall = bar.action.clone().expect("Reinstall");
         assert_eq!(reinstall.word, "Reinstall");
         assert!(reinstall.offer.to_string().ends_with("/reinstall-firmware"));
@@ -711,8 +776,13 @@ mod tests {
         let mut fixture = story_with(UpdateFixtureRow::CantGetVersion, UiLinkKind::Usb, true);
         let bar = firmware_bar(&fixture.input());
         assert_eq!(bar.tone, UiStatusKind::Attention);
-        let install = bar.action.expect("Install <own>");
-        assert_eq!(install.word, "Install 2026.10.05-2");
+        assert_eq!(bar.aside.as_deref(), Some("incomplete"));
+        let install = bar.action.clone().expect("Install <own>");
+        assert_eq!(
+            install.word, "Install",
+            "the version it brings is the details'"
+        );
+        assert_eq!(line(&bar, "Newest").as_deref(), Some("v2026.10.05-2"));
         assert!(install.offer.to_string().ends_with("/install-firmware"));
 
         let mut listed = story(UpdateFixtureRow::CantGetVersion);
@@ -726,14 +796,17 @@ mod tests {
         );
     }
 
+    /// A core from before over-the-air updates says so after its version,
+    /// in place (P3), untinted, with Update by USB.
     #[test]
-    fn a_board_needing_one_update_over_usb_updates_by_usb() {
+    fn a_pre_ota_board_updates_by_usb_once() {
         let mut fixture = story(UpdateFixtureRow::NeedsUsbOnce);
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "Needs one update over USB");
-        assert_eq!(bar.tone, UiStatusKind::Attention);
+        assert_eq!(bar.summary, "v2026.10.03-1 (pre-OTA)");
+        assert_eq!(bar.tone, UiStatusKind::Neutral);
         let update = bar.action.expect("Update");
         assert_eq!(update.word, "Update");
+        assert_eq!(update.icon.as_deref(), Some("usb"), "the USB icon says how");
         assert!(update.offer.to_string().ends_with("/update-firmware"));
     }
 
@@ -743,16 +816,21 @@ mod tests {
     fn the_update_line_sets_the_version_apart() {
         let mut fixture = story(UpdateFixtureRow::Available);
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "2026.10.03-1");
+        assert_eq!(bar.summary, "v2026.10.03-1");
+        assert_eq!(bar.kind, Some("Firmware"));
         assert!(!bar.summary.contains('→'));
         assert!(!bar.summary.contains("a0:f2"));
-        assert_eq!(bar.tone, UiStatusKind::Live, "blue: an update is offered");
+        assert_eq!(
+            bar.tone,
+            UiStatusKind::Neutral,
+            "no tone: the button carries it (P16)"
+        );
         let update = bar.action.clone().expect("Update");
         assert_eq!(update.word, "Update");
         assert_eq!(update.draw, UiActionDraw::Press);
         assert!(update.offer.to_string().ends_with("/update-firmware"));
-        assert_eq!(line(&bar, "Newest").as_deref(), Some("2026.10.05-2"));
-        assert_eq!(line(&bar, "Version").as_deref(), Some("2026.10.03-1"));
+        assert_eq!(line(&bar, "Newest").as_deref(), Some("v2026.10.05-2"));
+        assert_eq!(line(&bar, "Version").as_deref(), Some("v2026.10.03-1"));
         assert_eq!(line(&bar, "Commit").as_deref(), Some("a41c9e2"));
         assert!(
             line(&bar, "Build").is_some_and(|build| build.starts_with("2026.10.03-1+")),
@@ -760,12 +838,12 @@ mod tests {
         );
         assert_eq!(
             bar.details.notice().map(|notice| notice.tone),
-            Some(UiStatusKind::Live)
+            Some(UiStatusKind::Neutral)
         );
     }
 
     #[test]
-    fn an_older_board_by_usb_is_blue_with_update() {
+    fn an_older_board_by_usb_offers_update_untinted() {
         let mut fixture = CardFixture::ready();
         fixture.view.firmware_face = FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 2026.10.01-1".to_string()),
@@ -773,8 +851,8 @@ mod tests {
             age: FirmwareAge::Older,
         };
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "fw-esp32c6 2026.10.01-1");
-        assert_eq!(bar.tone, UiStatusKind::Live);
+        assert_eq!(bar.summary, "v2026.10.01-1", "never the target prefix");
+        assert_eq!(bar.tone, UiStatusKind::Neutral);
         let update = bar.action.expect("Update");
         assert_eq!(update.word, "Update");
         assert!(update.offer.to_string().ends_with("/update-firmware"));
@@ -796,7 +874,7 @@ mod tests {
             ..UiDeviceAccess::default()
         });
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.tone, UiStatusKind::Live);
+        assert_eq!(bar.tone, UiStatusKind::Neutral);
         let update = bar.action.expect("Update");
         assert_eq!(update.word, "Update");
         assert_eq!(update.icon.as_deref(), Some("lock"));
@@ -804,29 +882,37 @@ mod tests {
         assert!(update.offer.to_string().ends_with("/unlock"));
     }
 
-    /// Offline, the standing is not known (the window that held the board's
-    /// update facts closed with its link), so the bar says "last seen".
+    /// Offline, the version remembered stays, dimmed (P13); only the Link
+    /// row says since when.
     #[test]
-    fn an_offline_board_says_its_remembered_version_last_seen() {
+    fn an_offline_board_keeps_its_remembered_version_dimmed() {
         let mut fixture = CardFixture::offline();
         fixture.view.remembered_firmware = Some("fw-esp32c6 2026.10.05-2".to_string());
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "fw-esp32c6 2026.10.05-2");
-        assert_eq!(bar.aside.as_deref(), Some("last seen"));
+        assert_eq!(bar.summary, "v2026.10.05-2");
+        assert_eq!(bar.aside, None);
+        assert!(bar.stale);
         assert_eq!(bar.tone, UiStatusKind::Neutral);
     }
 
+    /// No LightPlayer on it is no alarm: the row says what is there,
+    /// quietly, and Install firmware is the primary.
     #[test]
-    fn a_face_that_wants_a_flash_says_so_in_attention() {
-        for (face, words) in [
-            (FirmwareFace::Blank, "No firmware"),
-            (FirmwareFace::NoHello, "Pre-hello firmware"),
-            (FirmwareFace::Bootloader, "In download mode"),
-            (FirmwareFace::Foreign { label: None }, "Other firmware"),
-            (FirmwareFace::Silent, "No response"),
+    fn a_face_that_wants_a_flash_says_what_is_there_quietly() {
+        for (face, name, state) in [
+            (FirmwareFace::Blank, "none", None),
+            (FirmwareFace::NoHello, "unknown (pre-2026.07)", None),
+            (FirmwareFace::Bootloader, "unknown", Some("download mode")),
+            (
+                FirmwareFace::Foreign { label: None },
+                "other firmware",
+                None,
+            ),
+            (FirmwareFace::Silent, "unknown", Some("no response")),
             (
                 FirmwareFace::OlderLightPlayer { proto: None },
-                "Older LightPlayer",
+                "unknown",
+                Some("older LightPlayer"),
             ),
         ] {
             let mut fixture = CardFixture::ready();
@@ -837,9 +923,10 @@ mod tests {
             fixture.view.can_remove_project = false;
             fixture.view.board_id = None;
             let bar = firmware_bar(&fixture.input());
-            assert_eq!(bar.summary, words, "{face:?}");
-            assert_eq!(bar.tone, UiStatusKind::Attention, "{face:?}");
-            assert_eq!(bar.action, None, "Install is the primary");
+            assert_eq!(bar.summary, name, "{face:?}");
+            assert_eq!(bar.aside.as_deref(), state, "{face:?}");
+            assert_eq!(bar.tone, UiStatusKind::Neutral, "{face:?}");
+            assert_eq!(bar.action, None, "Install firmware is the primary");
         }
     }
 
@@ -856,8 +943,8 @@ mod tests {
         let input = fixture.input();
         assert!(input.offer("flash").is_none(), "no flash for a known board");
         let bar = firmware_bar(&input);
-        assert_eq!(bar.summary, "Older LightPlayer");
-        assert_eq!(bar.tone, UiStatusKind::Attention);
+        assert_eq!(bar.aside.as_deref(), Some("older LightPlayer"));
+        assert_eq!(bar.tone, UiStatusKind::Neutral, "the button carries it");
         let action = bar.action.expect("the USB update");
         assert_eq!(action.offer, board().child("update-firmware"));
         assert_eq!(action.word, "Update");
@@ -883,7 +970,10 @@ mod tests {
         );
         let mut running = CardFixture::ready();
         let bar = firmware_bar(&running.input());
-        assert_eq!(bar.summary, "fw-esp32c6 2026.10.05-2");
+        assert_eq!(
+            bar.summary, "v2026.10.05-2",
+            "the version, never the build label"
+        );
         assert!(
             !bar.summary.contains("XIAO"),
             "the board is the hardware bar's"
@@ -898,7 +988,7 @@ mod tests {
     fn nothing_known_names_what_is_not_known() {
         let mut fixture = CardFixture::ready();
         fixture.view.firmware_face = FirmwareFace::Unknown;
-        assert_eq!(firmware_bar(&fixture.input()).summary, "Firmware not known");
+        assert_eq!(firmware_bar(&fixture.input()).summary, "unknown");
     }
 
     /// Over a link that cannot carry firmware, every refused verb keeps its
@@ -926,22 +1016,75 @@ mod tests {
     }
 
     #[test]
-    fn a_new_board_says_known_once_it_identifies_or_no_firmware() {
+    fn a_new_board_is_unknown_then_none() {
         let mut pending = pending_view();
         let bar = pending_firmware_bar(&pending);
-        assert_eq!(bar.summary, "Known once it identifies");
+        assert_eq!(bar.summary, "unknown");
         assert_eq!(bar.tone, UiStatusKind::Neutral);
         pending.firmware_face = FirmwareFace::Blank;
         let bar = pending_firmware_bar(&pending);
-        assert_eq!(bar.summary, "No firmware");
-        assert_eq!(bar.tone, UiStatusKind::Attention);
+        assert_eq!(bar.summary, "none");
         assert_eq!(
-            bar.details
-                .notice()
-                .and_then(|notice| notice.sentence.as_deref()),
+            bar.tone,
+            UiStatusKind::Neutral,
+            "Install firmware is the primary"
+        );
+        assert_eq!(
+            bar.details.sections[0].sentence.as_deref(),
             Some("Blank flash — needs firmware")
         );
         assert_eq!(bar.action, None);
+        pending.firmware_face = FirmwareFace::NoHello;
+        assert_eq!(
+            pending_firmware_bar(&pending).summary,
+            "unknown (pre-2026.07)"
+        );
+    }
+
+    /// A core with no engine says no hello, so it waits as a new board:
+    /// its row reads as the kept card's will, the version and "incomplete".
+    #[test]
+    fn a_new_core_only_board_is_incomplete() {
+        let mut pending = pending_view();
+        pending.firmware_face = FirmwareFace::CoreOnly {
+            version: Some("2026.10.16-1".to_string()),
+            state: UpdateBoardState::NeedsEngine,
+        };
+        let bar = pending_firmware_bar(&pending);
+        assert_eq!(bar.summary, "v2026.10.16-1");
+        assert_eq!(bar.aside.as_deref(), Some("incomplete"));
+        assert_eq!(bar.tone, UiStatusKind::Attention);
+        pending.firmware_face = FirmwareFace::CoreOnly {
+            version: None,
+            state: UpdateBoardState::EngineCrashing,
+        };
+        let bar = pending_firmware_bar(&pending);
+        assert_eq!(bar.summary, "unknown");
+        assert_eq!(bar.aside.as_deref(), Some("crashing"));
+        assert_eq!(bar.tone, UiStatusKind::Error);
+    }
+
+    /// The layout question is a confirmation the row asks for: orange,
+    /// "confirmation required", and Review opens the details that rise.
+    #[test]
+    fn the_layout_question_is_a_confirmation_with_review() {
+        let mut fixture = CardFixture::ready();
+        let mut layout = crate::UiDeviceLayout::note_only(fixture.board.clone(), "studio-b");
+        layout.project_note = None;
+        layout.panel = Some(crate::UiLayoutPanel {
+            title: "Move this board's files?".to_string(),
+            body: String::new(),
+            warning: None,
+            download: fixture.board.clone().child("download-backup"),
+            continue_action: None,
+            cancel: None,
+        });
+        fixture.layout = Some(layout);
+        let bar = firmware_bar(&fixture.input());
+        assert_eq!(bar.aside.as_deref(), Some(CONFIRMATION_REQUIRED));
+        assert_eq!(bar.tone, UiStatusKind::Attention);
+        assert_eq!(bar.opens_details, Some("Review"));
+        assert!(bar.details.raised);
     }
 
     /// `row` on the fixture board over USB: its update story's words, and
