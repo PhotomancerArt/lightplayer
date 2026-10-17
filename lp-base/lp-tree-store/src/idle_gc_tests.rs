@@ -257,6 +257,67 @@ fn idle_packing_near_full_wears_no_more_than_the_write_path() {
     }
 }
 
+/// A day of churn on the C6's 176 sectors (about c40's content; then a
+/// re-push, 10 saves and 1,440 panel saves — the endurance driver's day),
+/// once back to back and once with the quiet between them a board has
+/// (idle steps until settled): what the next mount reads, and the erases.
+/// The mount is priced by the silicon model's read rate (a host estimate).
+#[test]
+fn a_day_of_churn_leaves_less_for_the_mount() {
+    let c = StoreConfig::default();
+    let mut out = [(0u64, 0u32, 0u64); 2];
+    for (k, idle_between) in [false, true].into_iter().enumerate() {
+        let mut st = mount(formatted(NorGeometry::c6(176), &c), &c);
+        demo_project(&mut st, 0);
+        let e0 = st.flash().stats().erases_total();
+        let mut quiet = |st: &mut Store| {
+            if idle_between {
+                idle_until_settled(st);
+            }
+        };
+        demo_project(&mut st, 1);
+        quiet(&mut st);
+        for i in 0..1440u64 {
+            if i % 144 == 0 {
+                let m = i / 144;
+                st.put(
+                    &format!("/projects/demo/modules/m{m:02}/node.json"),
+                    &text(700 + m, 1800),
+                )
+                .unwrap();
+                quiet(&mut st);
+            }
+            st.put("/projects/demo/.lp/panel.json", &text(5000 + i, 450))
+                .unwrap();
+            quiet(&mut st);
+        }
+        let erases = st.flash().stats().erases_total() - e0;
+        let want = snapshot(&mut st);
+        let flash = st.into_flash();
+        let (read, trusted) = mount_reads(flash.clone(), &c);
+        assert_eq!(snapshot(&mut mount(flash, &c)), want);
+        out[k] = (read, trusted, erases);
+    }
+    let ms = |b: u64| b as f64 * 0.000_42;
+    std::println!(
+        "a day of churn, then a mount: back to back {} B over {} trusted sectors (~{:.0} ms, \
+         {} erases); with idle steps {} B over {} (~{:.0} ms, {} erases)",
+        out[0].0,
+        out[0].1,
+        ms(out[0].0),
+        out[0].2,
+        out[1].0,
+        out[1].1,
+        ms(out[1].0),
+        out[1].2
+    );
+    assert!(out[1].0 < out[0].0 && out[1].1 < out[0].1);
+    assert!(
+        out[1].2 <= out[0].2 + out[0].2 / 10,
+        "idle steps wore the store"
+    );
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 const SECTORS: u32 = 16;
@@ -466,6 +527,26 @@ fn near_full(c: &StoreConfig, files: u32) -> Store {
         .unwrap();
     }
     st
+}
+
+/// About c40's content, written as a push would (`rev` changes every file).
+fn demo_project(st: &mut Store, rev: u64) {
+    st.begin().unwrap();
+    for m in 0..44u64 {
+        st.put(
+            &format!("/projects/demo/modules/m{m:02}/shader.glsl"),
+            &text(m + 1000 * rev, 2900),
+        )
+        .unwrap();
+        st.put(
+            &format!("/projects/demo/modules/m{m:02}/node.json"),
+            &text(m + 100 + 1000 * rev, 1800),
+        )
+        .unwrap();
+    }
+    st.put("/projects/demo/.lp/panel.json", &text(7 + rev, 450))
+        .unwrap();
+    st.commit().unwrap();
 }
 
 /// A silicon estimate of the flash work between two simulator counters.
