@@ -5,6 +5,7 @@
 //!   lp-fw-split verify <elf> <map>
 //!   lp-fw-split headroom <out>/split.json [--margin 65536]
 //!   lp-fw-split segments <core.bin>...
+//!   lp-fw-split bootloader <out>   (rebuild only our second stage into a build)
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,11 +34,15 @@ enum Command {
         /// fw-esp32c6 features (its defaults are always on).
         #[arg(long, default_value = "esp32c6,server")]
         features: String,
-        /// The second-stage bootloader to merge (default:
-        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin, the
-        /// one the esp32c6-4mb build def ships).
+        /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries
+        /// (default: the esp32c6-4mb build def's IDF bootloader,
+        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin).
         #[arg(long)]
         bootloader: Option<PathBuf>,
+        /// The second stage `merged.bin` boots through: `lightplayer` (our
+        /// own, the default) or `idf`. Both doors' images are always written.
+        #[arg(long, default_value = "lightplayer")]
+        door: lp_fw_split::Door,
         /// The partition table (default: lp-fw/fw-esp32c6/partitions.csv).
         #[arg(long)]
         partitions: Option<PathBuf>,
@@ -67,6 +72,16 @@ enum Command {
         #[arg(long)]
         emit_ld: PathBuf,
     },
+    /// Rebuild our second stage (the loader's bootloader flavour) into an
+    /// existing build: `bootloader.bin`, `merged-lp.bin`, and `merged.bin`
+    /// when that build's door is ours. Nothing else is relinked.
+    Bootloader {
+        /// A build's output directory.
+        out: PathBuf,
+        /// The repository root (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
     /// Check one (pass-2) link: no core section in the engine region.
     Verify { elf: PathBuf, map: PathBuf },
     /// List core images' segments and fail when the loader cannot place one
@@ -94,6 +109,7 @@ fn run(command: Command) -> Result<bool> {
             out,
             features,
             bootloader,
+            door,
             partitions,
             repo,
             target,
@@ -103,11 +119,16 @@ fn run(command: Command) -> Result<bool> {
             if let Some(b) = bootloader {
                 opts.bootloader = Some(b);
             }
+            opts.door = door;
             opts.target = target;
             if let Some(p) = partitions {
                 opts.partitions = p;
             }
             lp_fw_split::build(&opts)?;
+            Ok(true)
+        }
+        Command::Bootloader { out, repo } => {
+            lp_fw_split::split_build::rebuild_bootloader(&repo, &out)?;
             Ok(true)
         }
         Command::Reach { elf, map, emit_ld } => {

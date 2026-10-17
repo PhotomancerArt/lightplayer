@@ -127,6 +127,8 @@ mod tests {
             build_id: String::new(),
             loader_version: 1,
             loader: piece(LOADER_OFFSET, 2800),
+            door: crate::Door::Lightplayer,
+            bootloader: None,
             core: piece(REGION_START, core),
             engine: piece(engine_off, engine),
             app_bin: piece(LOADER_OFFSET, engine_off + engine - LOADER_OFFSET),

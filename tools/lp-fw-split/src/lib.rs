@@ -18,6 +18,7 @@
 //! loader still cannot place. See `README.md`.
 
 pub mod app_image;
+pub mod bootloader_image;
 pub mod core_padding;
 pub mod core_segments;
 pub mod elf_symbol;
@@ -33,4 +34,4 @@ pub mod split_build;
 pub mod tree_guard;
 pub mod verify_report;
 
-pub use split_build::{BuildOptions, SplitReport, build, verify};
+pub use split_build::{BuildOptions, Door, SplitReport, build, verify};

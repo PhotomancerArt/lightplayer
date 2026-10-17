@@ -508,7 +508,7 @@ fn cargo_build_fw(root: &Path, image: &FwImage) -> Result<(), String> {
 }
 
 /// A split image: the directory `lp-fw-split build` writes for one feature
-/// set. Only the four files a boot test reads are part of the artefact.
+/// set. Only the five files a boot test reads are part of the artefact.
 ///
 /// The emulator knows nothing of the layout inside (the MIT fence): a test
 /// boots [`merged`](Self::merged) from the reset vector, or direct-loads
@@ -522,11 +522,26 @@ pub struct SplitImage {
 
 impl SplitImage {
     /// The files that make the artefact, relative to [`Self::dir`].
-    pub const FILES: [&'static str; 4] = ["merged.bin", "loader.elf", "p2.elf", "split.json"];
+    pub const FILES: [&'static str; 5] = [
+        "merged.bin",
+        "merged-idf.bin",
+        "loader.elf",
+        "p2.elf",
+        "split.json",
+    ];
 
     /// The whole chip, padded to the part: what a flasher would have written.
+    /// Its second stage at `0x0` is the build's own door (LightPlayer's
+    /// bootloader, by default).
     pub fn merged(&self) -> PathBuf {
         self.dir.join("merged.bin")
+    }
+
+    /// The same `app.bin` behind the ESP-IDF second stage (the door every
+    /// board flashed before the cutover boots through): only `0x0..0x8000`
+    /// differs from [`Self::merged`].
+    pub fn merged_idf(&self) -> PathBuf {
+        self.dir.join("merged-idf.bin")
     }
 
     /// The RAM-only loader the bootloader starts.
@@ -595,7 +610,7 @@ pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
         .join("lp-emu-c6")
         .join(format!("{slug}-{key}"));
     // The directory is published by one rename, so `merged.bin` being there
-    // means the other three are too.
+    // means the others are too.
     let merged = resolve(
         &what,
         &[],

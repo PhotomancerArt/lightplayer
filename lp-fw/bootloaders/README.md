@@ -1,5 +1,18 @@
 # Vendored second-stage bootloaders
 
+**Since 2026-10-17 the C6 product image boots through LightPlayer's own
+second stage** (`lp-fw/fw-esp32c6-loader --features bootloader`, built and
+written by `tools/lp-fw-split` — `bootloader.bin`, at `0x0` of every split
+`merged.bin` and so of every package, release and Studio USB install; ADR
+`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`). The IDF
+bootloaders below remain **the IDF door**: `merged-idf.bin` (the same
+`app.bin`), the boards that have only been updated over the air, the
+monolithic dev images the `espflash flash` recipes write, and the emulator
+gates that boot every split image through both doors. The packaging guard
+accepts our stage by its `LPLB` word and checks it as the ROM does; it needs
+no `lpa_devices::bootloader` entry (there is no analog-master wedge to detect
+in it).
+
 Every C6 USB flash writes a second-stage bootloader at `0x0`, and **the
 `esp32c6-4mb` build def's `bootloader` names which file**
 (`lp-fw/builds/esp32c6-4mb.json`). Its mirrors — `lp-fw-split`'s default

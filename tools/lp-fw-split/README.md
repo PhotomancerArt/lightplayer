@@ -73,18 +73,32 @@ come from `lp-bootctl` itself.
 8. **Loader.** Built from its own directory; its ESP image by espflash. The
    build refuses a loader image without this tree's version word
    (`lp_bootctl::loader_identity`) or longer than `LOADER_MAX_LEN`.
+   **Then our second stage**: the same crate with `--features bootloader`
+   (`bootloader.x`), whose image `bootloader_image` writes itself — header
+   (DIO, 40 MHz, 4 MB, chip id `0x000D`), RAM segments, XOR checksum,
+   appended SHA-256 — and checks the way the ROM reads it, refusing a stage
+   without this tree's `LPLB` word or one that would run into the partition
+   table. `bootloader.elf`, `bootloader.bin`. See
+   [`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
 9. **`app.bin`** for `0x10000`: loader, record sector 0 (seq 1, proven),
    record sector 1 erased, core at `0x18000`, engine at the first 32 KiB page
    after the core — all through `lp-bootctl` — then `0xFF` to the next 4 KiB
    flash sector (`image_end`): no image this tool makes ends mid-word.
-10. **`merged.bin`**: the whole 4 MiB chip — espflash 3.3.0's bundled
-    bootloader (or a build def's override), the partition table, `app.bin` —
-    with the flash settings `scripts/emu/build-merged-image.sh` uses (DIO,
-    40 MHz, 4 MB).
+10. **The merged images**: the whole 4 MiB chip, the partition table and
+    `app.bin` behind each front door. `merged-idf.bin`: espflash 3.3.0's
+    bundled IDF bootloader (or `--bootloader`'s) with the flash settings
+    `scripts/emu/build-merged-image.sh` uses (DIO, 40 MHz, 4 MB), which
+    starts the factory loader. `merged-lp.bin`: the same bytes with
+    `bootloader.bin` at `0x0` and `0xFF` to `0x8000` — the two differ in
+    `0x0..0x8000` only. **`merged.bin`** is the build's door (`--door
+    lightplayer`, the default, or `--door idf`); packaging, Studio and the
+    emulator gates read it. `lp-fw-split bootloader <out>` rebuilds only the
+    second stage into an existing build.
 11. **`split.json`**: offsets, lengths and SHA-256s of every piece.
 
 Outputs: `p1.elf p1.map engine.x p2.elf p2.map verify.txt loader.elf
-loader.bin core.bin engine.bin app.bin merged.bin split.json`.
+loader.bin bootloader.elf bootloader.bin core.bin engine.bin app.bin
+merged-idf.bin merged-lp.bin merged.bin split.json`.
 
 ## Why placement is by reachability (the spike's six traps)
 
@@ -124,7 +138,8 @@ The split-link spike (2026-10-01) hit six traps; each is now built in:
 ## The page
 
 The layout assumes a **32 KiB** MMU page, what espflash 3.3.0's bundled IDF
-bootloader selects on a 4 MB C6 (`app_image::PAGE`). The loader and the core
+bootloader selects on a 4 MB C6 and what our second stage sets explicitly
+(`app_image::PAGE`). The loader and the core
 read the real page from the MMU and refuse a mismatch; the ROM-up emulator
 gate boots the real bootloader, so a bootloader that chose another page
 fails CI.
