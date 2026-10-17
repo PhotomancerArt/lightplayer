@@ -237,6 +237,9 @@ where
         // same command queue the UI feeds; hand the controller a sender
         // before it takes ownership.
         controller.set_agent_command_sender(tx.clone());
+        // The Graph's page applies its input to core's editor directly and
+        // tells the actor what changed on the same queue.
+        controller.set_graph_command_sender(tx.clone());
         // Access conversations (login on connect, device-store writes)
         // report back on the same queue.
         controller.set_access_command_sender(tx.clone());
@@ -345,6 +348,9 @@ where
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
+        if let Some(note) = plan.graph {
+            self.controller.apply_graph_note(note);
+        }
         // Device folds run BEFORE this batch's actions, and each is
         // synchronous (invariant I7 — the fold never awaits device IO). A
         // gesture that lands beside a burst of link events therefore acts on
@@ -387,6 +393,9 @@ where
             let feed_preempted = self.run_card_feed_tick(standing).await;
             self.note_passive_run_end(refresh_preempted || feed_preempted);
         }
+        // The Graph: open the project on it, or bring it back in step with
+        // its files, while it is the place.
+        self.controller.settle_graph().await;
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
         // settle inside dispatch).
@@ -733,6 +742,9 @@ struct CommandPlan {
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
+    /// The Graph page's notes, merged: the actor reads the editor for
+    /// what changed, so one note says it all.
+    graph: Option<crate::app::graph::GraphNote>,
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
@@ -766,6 +778,7 @@ impl CommandPlan {
         let mut board_hold = Vec::new();
         let mut hold_edge = Vec::new();
         let mut agent = Vec::new();
+        let mut graph: Option<crate::app::graph::GraphNote> = None;
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
@@ -803,6 +816,11 @@ impl CommandPlan {
                 // gesture whose relative order matters (e.g. Clear between
                 // two level changes).
                 StudioCommand::Console(command) => console.push(command),
+                StudioCommand::Graph(note) => {
+                    let merged = graph.get_or_insert_with(Default::default);
+                    merged.edited |= note.edited;
+                    merged.selected |= note.selected;
+                }
                 StudioCommand::Settings(command) => settings.push(command),
                 StudioCommand::Access(command) => access.push(command),
                 StudioCommand::Network(command) => network.push(command),
@@ -821,6 +839,7 @@ impl CommandPlan {
             board_hold,
             hold_edge,
             agent,
+            graph,
             actions,
             tick,
             shutdown,

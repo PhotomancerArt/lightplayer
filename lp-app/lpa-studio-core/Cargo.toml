@@ -60,6 +60,13 @@ lpc-relay = { path = "../../lp-core/lpc-relay" }
 # `app/project/control_display_layout_fallback`).
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 lpc-model = { path = "../../lp-core/lpc-model" }
+# The Graph tab (`app/graph`): the mapping design lab's model, layout and
+# files crates, used as they are while the lab still iterates (plan
+# 2026-10-17-0202-mapping-lab-into-studio, D5). The lab's fence runs the
+# other way: no lab crate depends on a product crate.
+lab-layout = { path = "../../lab/mapping/layout" }
+lab-mapping-files = { path = "../../lab/mapping/files" }
+lab-mapping-model = { path = "../../lab/mapping/model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 # The save-time all-entries check (D19): loads the just-saved library copy
