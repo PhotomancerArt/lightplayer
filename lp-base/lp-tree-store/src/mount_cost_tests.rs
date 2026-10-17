@@ -344,3 +344,134 @@ fn write_scenario_images() {
         }
     }
 }
+
+/// EXPERIMENT (exp/c6-flash-mode): the panel-heavy history written the way
+/// a board writes it — with the server's idle steps (`collect_step`)
+/// between saves — instead of with no idle at all.
+///
+/// - `panel-settled` — every save followed by steps until settled.
+/// - `panel-burst` — bursts of 20 saves (a knob dragged, ~2 saves/s, so no
+///   2 s quiet inside one), then 10 s quiet: (10 − 2) / 0.5 = 16 steps; the
+///   history ends on a burst (mounted before the quiet that would follow).
+/// - `panel-burst-quiet` — the same, ending after the quiet.
+/// - `panel-slow` — one save every 3 s (each gap quiet 1 s past the 2 s: 2 steps).
+pub fn panel_idle_scenarios(sectors: u32) -> Vec<(String, NorFlashSim)> {
+    let c = StoreConfig::default();
+    let geom = NorGeometry::c6(sectors);
+    let mut st = mount(formatted(geom, &c), &c);
+    push_c40(&mut st, &c, "/projects/a");
+    let c40 = st.into_flash();
+    let target = 3 * u64::from(sectors);
+    let mut out = Vec::new();
+    let steps = |st: &mut crate::test_support::Store, n: u32| {
+        let mut k = 0;
+        while k < n && st.collect_step().unwrap() {
+            k += 1;
+        }
+    };
+    let mut st = mount(c40.clone(), &c);
+    let mut i = 0u64;
+    while st.stats().erases < target {
+        st.put("/projects/a/.lp/panel.json", &text(9000 + i, 450))
+            .unwrap();
+        steps(&mut st, u32::MAX);
+        i += 1;
+    }
+    out.push((String::from("panel-settled"), st.into_flash()));
+    for end_quiet in [false, true] {
+        let mut st = mount(c40.clone(), &c);
+        let mut i = 0u64;
+        while st.stats().erases < target {
+            for _ in 0..20 {
+                st.put("/projects/a/.lp/panel.json", &text(9000 + i, 450))
+                    .unwrap();
+                i += 1;
+            }
+            if st.stats().erases >= target && !end_quiet {
+                break;
+            }
+            steps(&mut st, 16);
+        }
+        let name = if end_quiet {
+            "panel-burst-quiet"
+        } else {
+            "panel-burst"
+        };
+        out.push((String::from(name), st.into_flash()));
+    }
+    let mut st = mount(c40.clone(), &c);
+    let mut i = 0u64;
+    while st.stats().erases < target {
+        st.put("/projects/a/.lp/panel.json", &text(9000 + i, 450))
+            .unwrap();
+        steps(&mut st, 2);
+        i += 1;
+    }
+    out.push((String::from("panel-slow"), st.into_flash()));
+    out
+}
+
+/// Sectors whose first word is not erased (a header, live or killed).
+fn nonblank_sectors(f: &NorFlashSim) -> u32 {
+    let g = f.geometry();
+    let mut hdr = [0u8; 4];
+    (0..g.sector_count)
+        .filter(|&s| {
+            f.peek(s * g.sector_size, &mut hdr);
+            hdr != [0xFF; 4]
+        })
+        .count() as u32
+}
+
+#[test]
+fn panel_idle_report() {
+    if std::env::var("LP_TREE_PANEL_IDLE").is_err() {
+        return;
+    }
+    let c = StoreConfig::default();
+    std::println!(
+        "{:<28} {:>7} {:>9} {:>8} {:>9} {:>7} {:>9} {:>5} {:>7} {:>8}",
+        "store / sectors",
+        "calls",
+        "bytes",
+        "c6 calls",
+        "c6 bytes",
+        "p1 calls",
+        "p1 bytes",
+        "scans",
+        "peak",
+        "nonblank"
+    );
+    let dir = std::env::var("LP_TREE_WRITE_IMAGES").ok();
+    for (sectors, suffix) in [(128u32, "128in176"), (176, "176")] {
+        let mut all: Vec<(String, NorFlashSim)> = scenarios(sectors)
+            .into_iter()
+            .filter(|(n, _)| n == "panel")
+            .collect();
+        all.extend(panel_idle_scenarios(sectors));
+        for (name, f) in all {
+            let (m, _) = mount_cost(deep_copy(&f), &c);
+            std::println!(
+                "{:<28} {:>7} {:>9} {:>8} {:>9} {:>7} {:>9} {:>5} {:>7} {:>8}",
+                format!("{name} / {sectors}"),
+                m.calls,
+                m.bytes,
+                m.c6_calls,
+                m.c6_bytes,
+                m.pass1_calls,
+                m.pass1_bytes,
+                m.scans,
+                m.peak,
+                nonblank_sectors(&f)
+            );
+            if let Some(d) = &dir
+                && name != "panel"
+            {
+                let g = f.geometry();
+                let mut bytes = alloc::vec![0xFFu8; (176 * g.sector_size) as usize];
+                f.peek(0, &mut bytes[..(g.sector_count * g.sector_size) as usize]);
+                std::fs::write(std::format!("{d}/{name}-{suffix}.bin"), &bytes).unwrap();
+            }
+        }
+    }
+}

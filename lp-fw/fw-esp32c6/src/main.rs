@@ -167,6 +167,9 @@ mod serial;
 // Time to first light and its parts: one `[perf] first light` line a boot.
 #[cfg(not(fw_harness))]
 mod first_light;
+// EXPERIMENT (exp/c6-flash-mode): flash controller readout / switch.
+#[cfg(not(fw_harness))]
+mod flash_mode_exp;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
@@ -576,6 +579,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     esp_println::println!("[INIT] Initializing board...");
     let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi, rwdt) =
         init_board();
+    flash_mode_exp::run();
     // Paint the main stack before anything deep runs, so the heartbeat's
     // high-water report measures the whole app (see `stack_probe`).
     stack_probe::paint();
