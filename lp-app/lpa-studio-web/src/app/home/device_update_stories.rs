@@ -457,6 +457,7 @@ fn porch_lights(link: Link) -> DeviceView {
         state_label: "Ready".to_string(),
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: Some("last heard 1 s ago".to_string()),
+        heard_age_ms: Some(1000),
         identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),

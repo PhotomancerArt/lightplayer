@@ -8,7 +8,7 @@ use lpa_studio_core::{
     ActionConfirmation, ControllerId, HOME_NODE_ID, HomeOp, PreviewSource, UiAction, UiPackageCard,
 };
 
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::age_words;
 use lpc_cloud_api::share_link::slugify;
 
 use crate::router::canonical_share_path;
@@ -49,7 +49,7 @@ pub(crate) fn PackageCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
-    let edited_line = card.last_saved_at.map(|at| time_ago(now, at));
+    let edited_line = card.last_saved_at.map(|at| age_words(now - at));
     // A project this Studio cannot open is still ON SCREEN — that is the
     // point (P3). It just says what is wrong instead of pretending to be
     // openable: no open link, no push, no drag, and a menu cut down to the

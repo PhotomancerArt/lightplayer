@@ -62,8 +62,8 @@ impl UiBoardCard {
     }
 
     /// Every action anywhere on the card: the primary, the panel's All
-    /// controls row's, each bar's action, its work's Retry, and every verb
-    /// in every details section.
+    /// controls row's, each bar's action and its way out, its work's Retry,
+    /// and every verb in every details section.
     pub fn actions(&self) -> Vec<&UiCardAction> {
         let mut actions = Vec::new();
         if let Some(UiPrimary::Offer(action)) = &self.name_bar.primary {
@@ -77,6 +77,7 @@ impl UiBoardCard {
         }
         for bar in &self.bars {
             actions.extend(bar.action.iter());
+            actions.extend(bar.way_out.iter());
             if let Some(UiBarWork {
                 state: BarWorkState::Failed { retry: Some(retry) },
                 ..

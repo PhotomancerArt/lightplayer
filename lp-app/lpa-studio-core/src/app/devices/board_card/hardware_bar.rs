@@ -1,44 +1,50 @@
-//! The hardware bar: what the board is.
+//! The Hardware row: what the board is (`docs/ux/anatomy/board-card.md`,
+//! "Hardware ■"). **Hardware · model · state**, the chip icon.
 //!
 //! First match wins:
 //!
-//! | Board | Summary | Aside |
+//! | Board | Name | State |
 //! |---|---|---|
-//! | A stand-in | "Emulated <board>" / "Simulated <board>" | "in this tab" |
-//! | Its board is known | the board ("XIAO ESP32-C6") | — |
-//! | Only its chip is known | the chip ("ESP32-C6") | — |
-//! | Nothing | "Board not known" | — |
+//! | Identifying | (work: "identifying") | — |
+//! | A stand-in | the board it stands in for ("XIAO ESP32-S3 Plus") | — |
+//! | Its board is known | the model ("XIAO ESP32-C6") | — |
+//! | Only its chip is known | the chip ("ESP32-C6") | "model not set" |
+//! | Nothing | "unknown" | — |
 //!
-//! Neutral, with no action. A stand-in says so first, because that is the
-//! one thing about a runtime a person has to know without opening anything
-//! (the runtime band's mark, moved here). The details hold the model, the
-//! chip, the board's id (its MAC, shown here once and nowhere else), a
-//! stand-in's speed or tier, Rename, Reset with its reason, and Forget
-//! apart.
+//! Neutral, with no action. "Simulated" is said once, on the Link row (P2):
+//! the model is the model. A chip name looks like a model, so a board known
+//! only by its chip says so (P1). The details hold the model, the chip, the
+//! board's id (its MAC, shown here once and nowhere else), a stand-in's
+//! speed or tier, Rename, Reset with its reason, and Forget apart.
 
 use lpa_devices::view::PendingLinkView;
 
+use super::bar_work::bar_work;
 use super::board_card_input::{BoardCardInput, offer_at};
 use super::detail_sections::{danger, facts, verbs, without_empty};
+use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
-use crate::app::devices::device_identity::{PENDING_CHIP_UNKNOWN, device_identity_line};
-use crate::{OfferPath, RichLine, UiOffer, UiStatusKind};
+use crate::app::devices::device_identity::device_identity_line;
+use crate::{OfferPath, RichLine, UiOffer};
 
-/// The hardware bar.
+/// The state of a board known only by its chip.
+pub const MODEL_NOT_SET: &str = "model not set";
+/// The name of a board nothing has named.
+const HARDWARE_UNKNOWN: &str = "unknown";
+
+/// The Hardware row.
 pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let identity = device_identity_line(input.view);
     let chip = identity.chip.as_deref().map(chip_words);
     let (summary, aside) = match (input.runtime, &identity.board, &chip) {
-        (Some(runtime), _, _) => (
-            format!("{} {}", runtime.kind_word(), runtime.target),
-            Some(runtime.locality.to_string()),
-        ),
+        (Some(runtime), _, _) => (runtime.target.clone(), None),
         (None, Some(board), _) => (board.clone(), None),
-        (None, None, Some(chip)) => (chip.clone(), None),
-        (None, None, None) => ("Board not known".to_string(), None),
+        (None, None, Some(chip)) => (chip.clone(), Some(MODEL_NOT_SET.to_string())),
+        (None, None, None) => (HARDWARE_UNKNOWN.to_string(), None),
     };
+    let work = bar_work(input, BarLayer::Hardware);
     let mut lines = Vec::new();
     if let Some(board) = identity
         .board
@@ -54,6 +60,10 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         lines.push(RichLine::new("Id", id.clone()));
     }
     if let Some(runtime) = input.runtime {
+        lines.push(RichLine::new(
+            "Runs",
+            format!("{} {}", runtime.kind_word(), runtime.locality),
+        ));
         if let Some(speed) = &runtime.speed {
             lines.push(RichLine::new("Speed", speed.clone()));
         }
@@ -66,15 +76,18 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     // (the model refuses a reset under an activity; Cancel is the way out).
     let reset = input.offer("reset-board");
     let forget = input.offer("forget");
+    // Identifying: the work's words take the name's place ("◌ Hardware
+    // identifying"), as on a new board; the model is back once it is done.
+    let identifying = work
+        .as_ref()
+        .is_some_and(|work| work.state == super::ui_bar_work::BarWorkState::Running);
+    let summary = match identifying {
+        true => String::new(),
+        false => summary,
+    };
     UiStackBar {
-        layer: BarLayer::Hardware,
-        icon: "chip".to_string(),
-        summary,
-        aside,
-        mark: None,
-        tone: UiStatusKind::Neutral,
-        action: None,
-        work: None,
+        aside: aside.filter(|_| work.is_none()),
+        work,
         details: UiBarDetails {
             sections: without_empty(vec![
                 facts("Board", lines),
@@ -90,35 +103,39 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 .collect(),
             raised: false,
         },
+        ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }
 }
 
-/// A new board's hardware bar: the chip its boot banner named, its MAC once
+/// A new board's Hardware row: identifying while it says who it is (the
+/// row's work; the name bar's spinner); then the chip its boot banner
+/// named, "model not set" (a flash sets it), or "unknown"; its MAC once
 /// something read it, and the way to keep it, reset it, or dismiss it.
 pub(crate) fn pending_hardware_bar(
     pending: &PendingLinkView,
     board: &OfferPath,
     offers: &[UiOffer],
 ) -> UiStackBar {
-    let chip = pending
-        .detected_chip
-        .as_deref()
-        .map(chip_words)
-        .unwrap_or_else(|| PENDING_CHIP_UNKNOWN.to_string());
-    let mut lines = vec![RichLine::new("Chip", chip.clone())];
+    let chip = pending.detected_chip.as_deref().map(chip_words);
+    let identifying = pending.firmware_face == lpa_devices::view::FirmwareFace::Unknown;
+    let mut lines = vec![RichLine::new(
+        "Chip",
+        chip.clone().unwrap_or_else(|| HARDWARE_UNKNOWN.to_string()),
+    )];
     if let Some(mac) = &pending.mac {
         lines.push(RichLine::new("Id", mac.clone()));
     }
     let verb = |name: &str| offer_at(offers, board, name).map(own_words);
+    let (summary, aside) = match (&chip, identifying) {
+        // The work's words take the name's place: "◌ Hardware identifying"
+        // (the chip is the details' meanwhile).
+        (_, true) => (String::new(), None),
+        (Some(chip), false) => (chip.clone(), Some(MODEL_NOT_SET.to_string())),
+        (None, false) => (HARDWARE_UNKNOWN.to_string(), None),
+    };
     UiStackBar {
-        layer: BarLayer::Hardware,
-        icon: "chip".to_string(),
-        summary: chip,
-        aside: None,
-        mark: None,
-        tone: UiStatusKind::Neutral,
-        action: None,
-        work: None,
+        aside,
+        work: identifying.then(|| UiBarWork::running("identifying", None)),
         details: UiBarDetails {
             sections: without_empty(vec![
                 facts("Board", lines),
@@ -133,6 +150,7 @@ pub(crate) fn pending_hardware_bar(
             panels: Vec::new(),
             raised: false,
         },
+        ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }
 }
 
@@ -156,19 +174,23 @@ mod tests {
     use super::super::card_fixtures::CardFixture;
     use super::super::primary_action::tests::pending_view;
     use super::*;
-    use crate::UiRuntimeBand;
+    use crate::{UiRuntimeBand, UiStatusKind};
 
+    /// "Simulated" is said once, on the Link row (P2): the Hardware row
+    /// names the model.
     #[test]
-    fn a_stand_in_says_emulated_or_simulated_in_this_tab() {
+    fn a_stand_in_names_its_model_alone() {
         let mut fixture = CardFixture::ready();
         fixture.runtime = Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", Some(0.5)));
         let bar = hardware_bar(&fixture.input());
-        assert_eq!(bar.summary, "Emulated XIAO ESP32-C6");
-        assert_eq!(bar.aside.as_deref(), Some("in this tab"));
+        assert_eq!(bar.summary, "XIAO ESP32-C6");
+        assert_eq!(bar.aside, None);
+        assert_eq!(bar.kind, Some("Hardware"));
+        assert_eq!(line(&bar, "Runs").as_deref(), Some("Emulated in this tab"));
         assert_eq!(line(&bar, "Speed").as_deref(), Some("0.5×"));
         fixture.runtime = Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("gpu")));
         let bar = hardware_bar(&fixture.input());
-        assert_eq!(bar.summary, "Simulated XIAO ESP32-C6");
+        assert_eq!(bar.summary, "XIAO ESP32-C6");
         assert_eq!(line(&bar, "Tier").as_deref(), Some("GPU"));
     }
 
@@ -203,8 +225,13 @@ mod tests {
             bar.summary, "ESP32-C6",
             "only the chip, in the catalog's words"
         );
+        assert_eq!(
+            bar.aside.as_deref(),
+            Some("model not set"),
+            "a chip looks like a model"
+        );
         fixture.view.detected_chip = None;
-        assert_eq!(hardware_bar(&fixture.input()).summary, "Board not known");
+        assert_eq!(hardware_bar(&fixture.input()).summary, "unknown");
     }
 
     /// Ported from the remembered tile: an offline board still names the
@@ -215,7 +242,24 @@ mod tests {
         assert_eq!(hardware_bar(&fixture.input()).summary, "XIAO ESP32-C6");
         fixture.view.board_id = None;
         fixture.view.detected_chip = None;
-        assert_eq!(hardware_bar(&fixture.input()).summary, "Board not known");
+        assert_eq!(hardware_bar(&fixture.input()).summary, "unknown");
+    }
+
+    /// Identifying is the Hardware row's work: it finds out what the board
+    /// is.
+    #[test]
+    fn identifying_is_the_hardware_rows_work() {
+        let mut fixture =
+            CardFixture::ready().with_activity(super::super::card_fixtures::activity(
+                lpa_devices::ActivityKind::Identify,
+                "Identifying…",
+                None,
+            ));
+        let bar = hardware_bar(&fixture.input());
+        assert_eq!(bar.summary, "", "◌ Hardware identifying");
+        let work = bar.work.expect("identifying");
+        assert_eq!(work.words, "identifying");
+        assert!(work.cancel.is_some());
     }
 
     /// Reset refused over a link without the author tier keeps its reason.
@@ -240,7 +284,12 @@ mod tests {
         let board = super::super::card_fixtures::board();
         let offers = crate::pending_link_offers(&pending, &board, crate::ResetReach::Lines);
         let bar = pending_hardware_bar(&pending, &board, &offers);
-        assert_eq!(bar.summary, "ESP32-C6");
+        assert_eq!(bar.summary, "", "◌ Hardware identifying");
+        assert_eq!(line(&bar, "Chip").as_deref(), Some("ESP32-C6"));
+        assert_eq!(
+            bar.work.as_ref().map(|work| work.words.as_str()),
+            Some("identifying")
+        );
         let words: Vec<&str> = bar
             .details
             .sections
@@ -251,8 +300,18 @@ mod tests {
         pending.detected_chip = None;
         pending.mac = Some("60:55:f9:0a:0b:0c".to_string());
         let bar = pending_hardware_bar(&pending, &board, &offers);
-        assert_eq!(bar.summary, PENDING_CHIP_UNKNOWN);
+        assert_eq!(bar.summary, "", "◌ Hardware identifying");
         assert_eq!(line(&bar, "Id").as_deref(), Some("60:55:f9:0a:0b:0c"));
+        // Settled on needing firmware: the chip, and that its model is not
+        // set yet (a flash sets it).
+        pending.detected_chip = Some("esp32c6".to_string());
+        pending.firmware_face = lpa_devices::view::FirmwareFace::Blank;
+        let bar = pending_hardware_bar(&pending, &board, &offers);
+        assert_eq!(
+            (bar.summary.as_str(), bar.aside.as_deref()),
+            ("ESP32-C6", Some("model not set"))
+        );
+        assert_eq!(bar.work, None);
     }
 
     fn line(bar: &UiStackBar, label: &str) -> Option<String> {

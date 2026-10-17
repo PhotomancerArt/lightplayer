@@ -21,6 +21,13 @@ pub struct StoreConfig {
     /// RAM a transaction may hold as not-yet-written directory changes
     /// (paths and entries) before it writes them as pending directories.
     pub txn_delta_max: u32,
+    /// Most RAM mount's whole id → location index may take, in bytes (12 B
+    /// a record on flash, garbage included; `mount_index.rs`). Above it the
+    /// mount drops the index and finds each tree level by scanning sector
+    /// headers instead — the same answer, more reads. 0: never index. A
+    /// per-board dial: the C6's ~48 KB keeps it inside the transient RAM a
+    /// boot can spare; a board with PSRAM may raise it.
+    pub mount_index_max: u32,
     /// The low water for [`crate::TreeStore::collect_step`]: while fewer
     /// than this percentage of the usable sectors is free, an idle step
     /// collects one sector with garbage (0 = idle steps collect none; they
@@ -48,6 +55,7 @@ impl Default for StoreConfig {
             gc_policy: GcPolicy::CostBenefit,
             reserve: 3,
             txn_delta_max: 2048,
+            mount_index_max: 48 * 1024,
             idle_free_percent: 25,
             idle_min_garbage: 1024,
             idle_pack_free: 4,

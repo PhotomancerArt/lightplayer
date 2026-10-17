@@ -1,13 +1,14 @@
 //! Borrowed shape views over static descriptors or dynamic owned shapes.
 
 use crate::{
-    LpType, SlotFieldShape, SlotMapKeyShape, SlotName, SlotRole, SlotSemantics, SlotShape,
-    SlotShapeId, SlotVariantShape,
+    LpType, SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotName, SlotRole, SlotSemantics,
+    SlotShape, SlotShapeId, SlotVariantShape,
 };
 use alloc::vec::Vec;
 
 use super::{
-    StaticSlotFieldShape, StaticSlotShapeDescriptor, StaticSlotValueShape, StaticSlotVariantShape,
+    StaticSlotEnumEncoding, StaticSlotFieldShape, StaticSlotShapeDescriptor, StaticSlotValueShape,
+    StaticSlotVariantShape,
 };
 
 /// Borrowed view of a slot shape from either the generated static catalog or
@@ -174,6 +175,93 @@ impl<'a> SlotShapeView<'a> {
             _ => None,
         }
     }
+
+    /// A record field by its name as authored text (no [`SlotName`] parse),
+    /// with its index.
+    pub fn record_field_by_str(self, name: &str) -> Option<(usize, SlotFieldShapeView<'a>)> {
+        match self {
+            Self::Static(StaticSlotShapeDescriptor::Record { fields, .. }) => fields
+                .iter()
+                .position(|field| field.name == name)
+                .map(|index| (index, SlotFieldShapeView::Static(&fields[index]))),
+            Self::Dynamic(SlotShape::Record { fields, .. }) => fields
+                .iter()
+                .position(|field| field.name.as_str() == name)
+                .map(|index| (index, SlotFieldShapeView::Dynamic(&fields[index]))),
+            _ => None,
+        }
+    }
+
+    /// The record's field names, in declaration order (empty for any other
+    /// shape).
+    pub fn record_field_names(self) -> Vec<&'a str> {
+        match self {
+            Self::Static(StaticSlotShapeDescriptor::Record { fields, .. }) => {
+                fields.iter().map(|field| field.name).collect()
+            }
+            Self::Dynamic(SlotShape::Record { fields, .. }) => {
+                fields.iter().map(|field| field.name.as_str()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// How the enum spells its active variant, or `None` if this is not an
+    /// enum shape.
+    pub fn enum_encoding(self) -> Option<SlotEnumEncodingView<'a>> {
+        match self {
+            Self::Static(StaticSlotShapeDescriptor::Enum { encoding, .. }) => {
+                Some(match encoding {
+                    StaticSlotEnumEncoding::Tagged { field } => SlotEnumEncodingView::Tagged(field),
+                    StaticSlotEnumEncoding::External => SlotEnumEncodingView::External,
+                })
+            }
+            Self::Dynamic(SlotShape::Enum { encoding, .. }) => Some(match encoding {
+                SlotEnumEncoding::Tagged { field } => SlotEnumEncodingView::Tagged(field.as_str()),
+                SlotEnumEncoding::External => SlotEnumEncodingView::External,
+            }),
+            _ => None,
+        }
+    }
+
+    /// An enum variant by its name as authored text (no [`SlotName`] parse).
+    pub fn enum_variant_by_str(self, name: &str) -> Option<SlotVariantShapeView<'a>> {
+        match self {
+            Self::Static(StaticSlotShapeDescriptor::Enum { variants, .. }) => variants
+                .iter()
+                .find(|variant| variant.name == name)
+                .map(SlotVariantShapeView::Static),
+            Self::Dynamic(SlotShape::Enum { variants, .. }) => variants
+                .iter()
+                .find(|variant| variant.name.as_str() == name)
+                .map(SlotVariantShapeView::Dynamic),
+            _ => None,
+        }
+    }
+
+    /// The enum's variant names, in declaration order (empty for any other
+    /// shape).
+    pub fn enum_variant_names(self) -> Vec<&'a str> {
+        match self {
+            Self::Static(StaticSlotShapeDescriptor::Enum { variants, .. }) => {
+                variants.iter().map(|variant| variant.name).collect()
+            }
+            Self::Dynamic(SlotShape::Enum { variants, .. }) => variants
+                .iter()
+                .map(|variant| variant.name.as_str())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Borrowed view of an enum shape's encoding ([`SlotEnumEncoding`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotEnumEncodingView<'a> {
+    /// The active variant's name is in this discriminator field.
+    Tagged(&'a str),
+    /// The active variant is the enum object's single property.
+    External,
 }
 
 /// Borrowed view of a value leaf shape.
@@ -237,6 +325,15 @@ impl<'a> SlotFieldShapeView<'a> {
         }
     }
 
+    /// The field's declarative default binding endpoint (`bus:<channel>`),
+    /// if it declares one ([`SlotFieldShape::default_bind`]).
+    pub fn default_bind(self) -> Option<&'a str> {
+        match self {
+            Self::Static(field) => field.default_bind,
+            Self::Dynamic(field) => field.default_bind.as_deref(),
+        }
+    }
+
     /// The field's panel-visibility hint for its `default_bind` wiring
     /// ([`crate::PanelHint`]).
     pub fn panel(self) -> Option<crate::PanelHint> {
@@ -273,6 +370,13 @@ impl<'a> SlotVariantShapeView<'a> {
         match self {
             Self::Static(variant) => SlotShapeView::Static(variant.shape),
             Self::Dynamic(variant) => SlotShapeView::Dynamic(&variant.shape),
+        }
+    }
+
+    pub fn to_owned_variant(self) -> SlotVariantShape {
+        match self {
+            Self::Static(variant) => variant.to_owned_variant(),
+            Self::Dynamic(variant) => variant.clone(),
         }
     }
 }

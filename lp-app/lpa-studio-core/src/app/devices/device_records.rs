@@ -154,18 +154,14 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
 /// 2. A registry key ([`registry_key`]): a board with neither uid nor MAC is
 ///    not remembered at all, and naming something unrememberable would put a
 ///    name on a card that cannot come back.
-/// 3. A known board id — the name is "<board display name> · <Mon D>", so a
-///    board that has not said what it is has nothing to be named after. The
+/// 3. A known board id — the name is the board's display name, so a board
+///    that has not said what it is has nothing to be named after. The
 ///    catalog's display name when the id resolves, the raw id otherwise
 ///    (the same fallback the header's identity line makes).
 ///
-/// `taken` is the names already in use, so two boards named on the same day
-/// get "… · Sep 3" and "… · Sep 3 2" rather than one name twice.
-pub fn auto_record_name(
-    record: &DeviceRecord,
-    epoch_secs: f64,
-    taken: &[String],
-) -> Option<String> {
+/// `taken` is the names already in use, so two boards of one model get
+/// "XIAO ESP32-C6" and "XIAO ESP32-C6 2" rather than one name twice.
+pub fn auto_record_name(record: &DeviceRecord, taken: &[String]) -> Option<String> {
     if record.name.is_some() || record.identity.name.is_some() {
         return None;
     }
@@ -174,7 +170,7 @@ pub fn auto_record_name(
     let display = lpa_boards::board_by_id(board_id)
         .map(|board| board.display_name.clone())
         .unwrap_or_else(|| board_id.to_string());
-    Some(super::derive_flash_name(&display, epoch_secs, taken))
+    Some(super::derive_flash_name(&display, taken))
 }
 
 /// One registry row as a model record, for `Roster::load_records` at boot.
@@ -363,39 +359,35 @@ mod tests {
         );
     }
 
-    /// Epoch seconds inside 2026-09-03, the day of the G1 walk that found
-    /// the bench board wearing its MAC.
-    const SEP_3_2026: f64 = 1_788_436_800.0;
-
     /// The rule: a board that hello'd, earned a row and has no name of its
-    /// own is named after the board it says it is, and the day it turned up.
+    /// own is named after the board it says it is.
     #[test]
-    fn a_registered_board_with_no_name_is_named_after_its_board_and_the_day() {
+    fn a_registered_board_with_no_name_is_named_after_its_board() {
         let mut record = record();
         record.name = None;
         record.identity.name = None;
         record.board_id = Some("seeed/xiao-esp32-c6".to_string());
 
         assert_eq!(
-            auto_record_name(&record, SEP_3_2026, &[]).as_deref(),
-            Some("XIAO ESP32-C6 · Sep 3"),
+            auto_record_name(&record, &[]).as_deref(),
+            Some("XIAO ESP32-C6"),
             "the catalog's display name, not the raw board id"
         );
     }
 
-    /// Two boards of the same kind on the same day are told apart by the
-    /// collision suffix rather than sharing a name.
+    /// Two boards of the same model are told apart by the collision suffix
+    /// rather than sharing a name.
     #[test]
-    fn a_second_board_on_the_same_day_takes_the_collision_suffix() {
+    fn a_second_board_of_the_same_model_takes_the_collision_suffix() {
         let mut record = record();
         record.name = None;
         record.identity.name = None;
         record.board_id = Some("seeed/xiao-esp32-c6".to_string());
-        let taken = vec!["XIAO ESP32-C6 · Sep 3".to_string()];
+        let taken = vec!["XIAO ESP32-C6".to_string()];
 
         assert_eq!(
-            auto_record_name(&record, SEP_3_2026, &taken).as_deref(),
-            Some("XIAO ESP32-C6 · Sep 3 2")
+            auto_record_name(&record, &taken).as_deref(),
+            Some("XIAO ESP32-C6 2")
         );
     }
 
@@ -406,7 +398,7 @@ mod tests {
     fn a_named_board_is_left_alone() {
         let named = record();
         assert_eq!(named.name.as_deref(), Some("Kitchen"));
-        assert_eq!(auto_record_name(&named, SEP_3_2026, &[]), None);
+        assert_eq!(auto_record_name(&named, &[]), None);
 
         let mut provisioned = record();
         provisioned.name = None;
@@ -415,7 +407,7 @@ mod tests {
             Some("Bench board"),
             "the device calls itself something"
         );
-        assert_eq!(auto_record_name(&provisioned, SEP_3_2026, &[]), None);
+        assert_eq!(auto_record_name(&provisioned, &[]), None);
     }
 
     /// Nothing is named after a guess: a board that has not said what it is,
@@ -426,7 +418,7 @@ mod tests {
         unknown_board.name = None;
         unknown_board.identity.name = None;
         unknown_board.board_id = None;
-        assert_eq!(auto_record_name(&unknown_board, SEP_3_2026, &[]), None);
+        assert_eq!(auto_record_name(&unknown_board, &[]), None);
 
         let mut anonymous = record();
         anonymous.name = None;
@@ -434,7 +426,7 @@ mod tests {
         anonymous.identity.uid = None;
         anonymous.identity.mac = None;
         assert_eq!(
-            auto_record_name(&anonymous, SEP_3_2026, &[]),
+            auto_record_name(&anonymous, &[]),
             None,
             "a board with no registry key is not remembered, so it is not named"
         );
@@ -450,8 +442,8 @@ mod tests {
         record.board_id = Some("someone/prototype-9".to_string());
 
         assert_eq!(
-            auto_record_name(&record, SEP_3_2026, &[]).as_deref(),
-            Some("someone/prototype-9 · Sep 3")
+            auto_record_name(&record, &[]).as_deref(),
+            Some("someone/prototype-9")
         );
     }
 

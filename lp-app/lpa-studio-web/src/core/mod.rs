@@ -5,6 +5,8 @@
 //! workflows directly when an `app` component can compose them instead.
 
 pub mod action;
+#[cfg(feature = "stories")]
+pub(crate) mod data_kinds_stories;
 pub mod issue_view;
 #[cfg(feature = "stories")]
 pub(crate) mod issue_view_stories;

@@ -14,7 +14,11 @@ use lp_nor_sim::NorGeometry;
 use crate::test_support::{formatted, heap_use, mount, text};
 use crate::{SoftSha256, StoreConfig, TreeStore};
 
-/// G1's bound on mount's peak at 128 sectors, whatever the garbage (P8).
+/// G1's bound on mount's peak at 128 sectors, whatever the garbage (P8),
+/// beside mount's whole id index (`mount_index.rs`): that one is capped by
+/// its own dial (`StoreConfig::mount_index_max`, the transient RAM a boot
+/// can spare, Yona 2026-10-16), so the bound is this plus what it held.
+/// With the dial at 0 (the level walk) this alone is the bound.
 const MOUNT_PEAK_AT_128: usize = 16 * 1024;
 
 /// c40's shape: 132 documents, ~216 KB, under one project, plus board
@@ -55,7 +59,16 @@ fn c40_resident_and_transient_are_inside_the_budget() {
 }
 
 fn c40_budget_on(sectors: u32) {
-    let c = StoreConfig::default();
+    for index_max in [StoreConfig::default().mount_index_max, 0] {
+        c40_budget_with(sectors, index_max);
+    }
+}
+
+fn c40_budget_with(sectors: u32, mount_index_max: u32) {
+    let c = StoreConfig {
+        mount_index_max,
+        ..StoreConfig::default()
+    };
     let mut st = mount(formatted(NorGeometry::c6(sectors), &c), &c);
     let files = c40_like();
     let total: usize = files.iter().map(|f| f.1.len()).sum();
@@ -99,9 +112,12 @@ fn c40_budget_on(sectors: u32) {
     );
     // Mount's peak (G1, P8): ≤ 16 KB at 128 sectors; a sector costs mount
     // ~30 B (the sector table, the sorted header list, the closed flags).
+    assert_eq!(s.mount_indexed, mount_index_max > 0);
+    assert!(s.mount_index_bytes <= mount_index_max as usize + 1024);
     assert!(
-        mount_peak <= MOUNT_PEAK_AT_128 + (sectors as usize - 128) * 32,
-        "mount peak {mount_peak}"
+        mount_peak <= MOUNT_PEAK_AT_128 + (sectors as usize - 128) * 32 + s.mount_index_bytes,
+        "mount peak {mount_peak} (index {})",
+        s.mount_index_bytes
     );
 
     // A whole-project load: every file read once, and every file's size
@@ -206,6 +222,24 @@ fn a_full_store_keeps_resident_and_the_mount_peak_bounded() {
         }
         let flash = st.into_flash();
         let in_use = flash.sectors_in_use();
+        // The level walk (no index) holds the old bound alone.
+        let level = StoreConfig {
+            mount_index_max: 0,
+            ..c.clone()
+        };
+        let (st, level_peak, _) =
+            heap_use(
+                || match TreeStore::mount(flash, SoftSha256, level.clone()) {
+                    Ok(s) => s,
+                    Err(_) => panic!("mount"),
+                },
+            );
+        assert!(!st.stats().mount_indexed);
+        assert!(
+            level_peak <= MOUNT_PEAK_AT_128,
+            "level walk's mount peak {level_peak}"
+        );
+        let flash = st.into_flash();
         let (st, mount_peak, held) =
             heap_use(|| match TreeStore::mount(flash, SoftSha256, c.clone()) {
                 Ok(s) => s,
@@ -223,6 +257,12 @@ fn a_full_store_keeps_resident_and_the_mount_peak_bounded() {
         // A regression ceiling, not the budget: the measured figure is reported.
         assert!(max_resident <= 11 * 1024, "{max_resident}");
         assert_eq!(in_use, 128, "the flash is not full of garbage");
-        assert!(mount_peak <= MOUNT_PEAK_AT_128, "mount peak {mount_peak}");
+        let index = st.stats().mount_index_bytes;
+        assert!(st.stats().mount_indexed);
+        std::println!("  level walk's peak {level_peak} B; the index {index} B");
+        assert!(
+            mount_peak <= MOUNT_PEAK_AT_128 + index,
+            "mount peak {mount_peak} (index {index})"
+        );
     }
 }

@@ -219,7 +219,7 @@ mod tests {
             .iter()
             .filter_map(|primary| match primary {
                 lpa_studio_core::UiPrimary::Offer(action) => Some(action.offer.to_string()),
-                lpa_studio_core::UiPrimary::Unavailable { .. } => None,
+                lpa_studio_core::UiPrimary::Working { .. } => None,
             });
         let bar_actions = card
             .bars
@@ -302,16 +302,14 @@ mod tests {
             1,
             "{html}"
         );
-        // The track sits in the connection bar, after the bar's trigger and
-        // action, with the fill as its only child and nothing around it that
-        // clips.
+        // Identifying is the Hardware row's work: the track sits in that
+        // row, after its trigger and action, with the fill as its only
+        // child and nothing around it that clips.
         let bar_at = html
-            .find("data-bar=\"connection\"")
-            .expect("the connection bar");
+            .find("data-bar=\"hardware\"")
+            .expect("the hardware row");
         let track_at = html.find("data-work-track").expect("a track");
-        assert!(track_at > bar_at, "the track is the connection bar's");
-        let next_bar = html.find("data-bar=\"access\"").expect("the next bar");
-        assert!(track_at < next_bar, "the track is the connection bar's");
+        assert!(track_at > bar_at, "the track is the hardware row's");
         let track = &html[html[..track_at].rfind("<div").expect("its tag")..];
         let tag = &track[..track.find('>').expect("the track's tag closes")];
         assert!(tag.contains("tw:overflow-hidden"), "{tag}");

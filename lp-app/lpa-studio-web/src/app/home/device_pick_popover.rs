@@ -88,7 +88,6 @@ use lpa_studio_core::{
 };
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
-use super::package_card::platform_now_secs;
 use super::row_cta::{RowCta, RowCtaDisabled};
 use super::thumb_poster::cached_poster;
 use crate::base::{
@@ -902,13 +901,7 @@ pub(crate) fn BoardPickPanel(
     let name_placeholder = selected
         .as_deref()
         .and_then(|value| candidates.iter().find(|choice| choice.value == value))
-        .map(|choice| {
-            lpa_studio_core::app::devices::derive_flash_name(
-                &choice.label,
-                platform_now_secs(),
-                &[],
-            )
-        })
+        .map(|choice| lpa_studio_core::app::devices::derive_flash_name(&choice.label, &[]))
         .unwrap_or_else(|| "Named after the board".to_string());
     let pick_offer = offer.clone();
 

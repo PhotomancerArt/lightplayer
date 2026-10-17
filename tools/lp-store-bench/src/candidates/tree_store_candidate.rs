@@ -38,6 +38,9 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
             "txn_delta_max" => c.txn_delta_max = num()?,
+            // 0 = mount's level walk (no whole id index); small = the index
+            // dropped part-way through pass 1.
+            "mount_index_max" => c.mount_index_max = num()?,
             "idle_free_percent" => c.idle_free_percent = num()?,
             "idle_min_garbage" => c.idle_min_garbage = num()?,
             "idle_pack_free" => c.idle_pack_free = num()?,

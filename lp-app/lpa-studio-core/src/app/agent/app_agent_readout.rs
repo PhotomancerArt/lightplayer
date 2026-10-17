@@ -1001,6 +1001,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: Some("esp32c6".to_string()),
             board_id: Some("seeed/xiao-esp32-c6".to_string()),
