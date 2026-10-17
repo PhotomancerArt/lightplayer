@@ -5616,6 +5616,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-shader",
  "lpc-engine",
+ "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
  "lpfs",

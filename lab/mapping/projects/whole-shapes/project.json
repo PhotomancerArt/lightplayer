@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Whole shapes",
+  "description": "The oracle's project for the shapes the Graph opens whole: a raster grid from its bottom-right corner, a filled polygon with a turned and slid lattice, and three rings on one strand, inner first, counter-clockwise from 45\u00b0.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

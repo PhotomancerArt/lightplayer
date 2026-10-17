@@ -1,0 +1,16 @@
+{
+  "format": 5,
+  "sample_diameter": 2.0,
+  "canvas": [0.0, 0.0, 100.0, 100.0],
+  "objects": [
+    { "id": "panel", "name": "panel", "shape": { "grid": { "origin": [10, 10], "cols": 5, "rows": 3, "pitch": 4, "routing": "raster", "start_corner": "br" } } },
+    { "id": "heart", "name": "heart", "shape": { "filled_polygon": {
+        "points": [[50, 30], [70, 15], [90, 30], [70, 60], [50, 30]],
+        "pitch": 3.5, "angle_deg": 15, "origin": [0.4, 1.1], "start_corner": "tr"
+    } } },
+    { "id": "eye", "name": "eye", "shape": { "ring": {
+        "center": [30, 75], "radius": 18, "outer_count": 30, "rings": 3,
+        "order": "inner_first", "start_angle_deg": 45, "dir": "ccw"
+    } } }
+  ]
+}
