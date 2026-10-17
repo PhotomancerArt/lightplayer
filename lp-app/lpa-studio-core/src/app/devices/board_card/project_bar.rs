@@ -188,11 +188,12 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let running = work
         .as_ref()
         .is_some_and(|work| work.state == BarWorkState::Running);
-    // While its own work runs the row keeps its name: a push names what it
-    // plays now, and "none" on a board that plays nothing yet.
-    let summary = match (running, summary.is_empty(), waiting) {
-        (true, true, false) => PROJECT_NONE.to_string(),
-        _ => summary,
+    // While its own work runs the row keeps its name — what it plays now;
+    // on a board that plays nothing yet the work's words take the name's
+    // place ("◌ Project  sending · 40%").
+    let summary = match running && !waiting && summary == PROJECT_NONE {
+        true => String::new(),
+        false => summary,
     };
     // A state's action keeps the slot; Edit takes it otherwise, and goes to
     // the details when a state holds it.

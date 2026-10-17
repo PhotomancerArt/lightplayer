@@ -76,6 +76,15 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     // (the model refuses a reset under an activity; Cancel is the way out).
     let reset = input.offer("reset-board");
     let forget = input.offer("forget");
+    // Identifying: the work's words take the name's place ("◌ Hardware
+    // identifying"), as on a new board; the model is back once it is done.
+    let identifying = work
+        .as_ref()
+        .is_some_and(|work| work.state == super::ui_bar_work::BarWorkState::Running);
+    let summary = match identifying {
+        true => String::new(),
+        false => summary,
+    };
     UiStackBar {
         aside: aside.filter(|_| work.is_none()),
         work,
@@ -118,10 +127,10 @@ pub(crate) fn pending_hardware_bar(
     }
     let verb = |name: &str| offer_at(offers, board, name).map(own_words);
     let (summary, aside) = match (&chip, identifying) {
+        // The work's words take the name's place: "◌ Hardware identifying"
+        // (the chip is the details' meanwhile).
+        (_, true) => (String::new(), None),
         (Some(chip), false) => (chip.clone(), Some(MODEL_NOT_SET.to_string())),
-        (Some(chip), true) => (chip.clone(), None),
-        // Nothing to name yet: "◌ Hardware identifying".
-        (None, true) => (String::new(), None),
         (None, false) => (HARDWARE_UNKNOWN.to_string(), None),
     };
     UiStackBar {
@@ -247,6 +256,7 @@ mod tests {
                 None,
             ));
         let bar = hardware_bar(&fixture.input());
+        assert_eq!(bar.summary, "", "◌ Hardware identifying");
         let work = bar.work.expect("identifying");
         assert_eq!(work.words, "identifying");
         assert!(work.cancel.is_some());
@@ -274,7 +284,8 @@ mod tests {
         let board = super::super::card_fixtures::board();
         let offers = crate::pending_link_offers(&pending, &board, crate::ResetReach::Lines);
         let bar = pending_hardware_bar(&pending, &board, &offers);
-        assert_eq!(bar.summary, "ESP32-C6");
+        assert_eq!(bar.summary, "", "◌ Hardware identifying");
+        assert_eq!(line(&bar, "Chip").as_deref(), Some("ESP32-C6"));
         assert_eq!(
             bar.work.as_ref().map(|work| work.words.as_str()),
             Some("identifying")
