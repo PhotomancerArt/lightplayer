@@ -512,3 +512,28 @@ and a tab closed mid-update
 Not walked by a person: the phone locked mid-update and the engine-less
 restore on Bluetooth (desk runs and the emulated walks cover them), and a
 lid closed or a second tab over Wi-Fi.
+
+## Amendment (2026-10-16): the core hashes itself after first light
+
+The core's own hash (§5) still runs every boot, but no longer before the
+engine starts. `running_hook::install` took it to build the hello's board
+manifest, and every boot paid ~185 ms (CX1) of its time to first light for
+it (`docs/reports/2026-10-16-c6-time-to-first-light.md`). Now:
+
+- the manifest kept at install leaves `coreSha256` out, and the hello fills
+  it in when it is said (`running_hook::manifest`);
+- the engine's frame hook hashes the core 256 KB a frame once the boot has
+  lit, or has given up lighting (`board_identity::core_sha256_step`; the core
+  stays mapped through one scratch window for the whole hash);
+- the server loop holds the hello until the hash is known
+  (`server_loop::set_hello_gate`): the unsolicited one, the one owed to a link
+  that opened meanwhile, and a host's `Hello` request. A host waiting on its
+  request has the rest of the hash taken at once after first light. Nothing
+  waits past `HELLO_HOLD_MAX_MS` (2 s from the loop's start); heartbeats wait
+  for the hello, which stays the first id-0 frame;
+- anything else that needs the hash first (a host's first channel-3 message,
+  core-only) takes it at once, as before.
+
+Unchanged: the hash rules, the hello's and `M`'s bytes, channel 3, lp-link,
+every on-flash format. Only *when* the hello goes out moves: a host sees it
+after the first light, not before.

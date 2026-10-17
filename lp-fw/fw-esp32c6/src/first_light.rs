@@ -129,6 +129,15 @@ pub fn on_served() {
     }
 }
 
+/// Whether this boot's first light is decided: a frame lit, or
+/// [`UNLIT_FRAMES`] went by without one — on every boot, power-on or not.
+/// The work held back until after first light waits for this (a split
+/// image's core hash, `ota::core_hash_step`).
+#[cfg(lp_split)]
+pub fn decided() -> bool {
+    DONE.load(Relaxed)
+}
+
 fn report(lit: bool) {
     DONE.store(true, Relaxed);
     if esp_hal::system::reset_reason() != Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn) {
