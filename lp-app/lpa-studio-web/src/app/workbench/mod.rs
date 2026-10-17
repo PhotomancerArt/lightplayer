@@ -37,6 +37,7 @@
 //! ([`crate::app::editor_shell::EditorShellCenter`]); the Tree's Mapping
 //! body and the Outputs panel are that editor's rails, grown in place.
 
+pub mod graph_view;
 pub mod panels;
 #[cfg(feature = "stories")]
 pub(crate) mod workbench_stories;
@@ -50,6 +51,7 @@ use lpa_studio_core::{
 
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
+use graph_view::{GraphCenter, GraphPage, GraphPropsPanel, GraphTreePanel, use_graph_page};
 use panels::{FixturesPanel, OutputsPanel, TreeGrain};
 
 /// Which center the workbench renders — the route's view suffix
@@ -64,6 +66,9 @@ pub enum WorkbenchView {
     /// (grain-follows-activity — the Mapping view shows the authored
     /// tree, this view the resolved one).
     Patching,
+    /// The mapping lab's canvas on the project (`graph_view.rs`): every
+    /// node a card, fixtures drawn in place, coloured by the board.
+    Graph,
 }
 
 /// One row of the view table: everything the chrome needs to draw and
@@ -101,6 +106,12 @@ pub const VIEWS: &[ViewSpec] = &[
         // parse alias.
         label: "Patch",
         route_view: crate::router::ProjectView::Patch,
+    },
+    ViewSpec {
+        view: WorkbenchView::Graph,
+        // A working name (plan D4), revisited when it is the only view.
+        label: "Graph",
+        route_view: crate::router::ProjectView::Graph,
     },
 ];
 
@@ -245,6 +256,9 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
         (DockSide::Right, WorkbenchView::Patching) => {
             &[PanelId::Outputs, PanelId::Props, PanelId::Device]
         }
+        // The Graph's outputs are cards on its canvas: Props (the lab's
+        // inspector) and the board.
+        (DockSide::Right, WorkbenchView::Graph) => &[PanelId::Props, PanelId::Device],
     }
 }
 
@@ -267,6 +281,12 @@ pub fn defaults(view: WorkbenchView) -> DockState {
         WorkbenchView::Patching => DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Outputs),
+        },
+        // The Graph opens as the lab does: the tree, the canvas, the
+        // inspector.
+        WorkbenchView::Graph => DockState {
+            left: Some(PanelId::Tree),
+            right: Some(PanelId::Props),
         },
     }
 }
@@ -354,9 +374,15 @@ pub fn WorkbenchFrame(
     /// Stories only: preset the mobile fold's summoned panel.
     #[props(default)]
     initial_summoned: Option<PanelId>,
+    /// The Graph's slice of the studio view (`None` until it is asked
+    /// for).
+    #[props(default)]
+    graph_view: Option<lpa_studio_core::app::graph::UiGraphView>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut memory = use_signal(move || initial_memory.clone().unwrap_or_default());
+    let graph_state = graph_view.as_ref().map(|g| g.state.clone());
+    let graph = use_graph_page(graph_view);
     let docks = memory.read().view(view);
     // The Nodes view's route — threaded to the Props stack's
     // context-strip link (and any panel that addresses the workspace).
@@ -492,6 +518,7 @@ pub fn WorkbenchFrame(
                             workspace_href: workspace_href.clone(),
                             running,
                             now_secs,
+                            graph: graph.clone(),
                             on_action,
                         }
                     }
@@ -530,6 +557,9 @@ pub fn WorkbenchFrame(
                                 on_action,
                             }
                         },
+                        WorkbenchView::Graph => rsx! {
+                            GraphCenter { page: graph.clone(), state: graph_state.clone() }
+                        },
                     }
                     if let Some(panel) = *summoned.read() {
                         // The summoned panel below the fold, in two rungs
@@ -566,6 +596,7 @@ pub fn WorkbenchFrame(
                                     workspace_href: workspace_href.clone(),
                                     running,
                                     now_secs,
+                                    graph: graph.clone(),
                                     on_action,
                                 }
                             }
@@ -590,6 +621,7 @@ pub fn WorkbenchFrame(
                             workspace_href: workspace_href.clone(),
                             running,
                             now_secs,
+                            graph: graph.clone(),
                             on_action,
                         }
                     }
@@ -825,6 +857,7 @@ fn PanelDock(
     workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
+    graph: GraphPage,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let width = match panel.side() {
@@ -847,6 +880,7 @@ fn PanelDock(
                     workspace_href,
                     running,
                     now_secs,
+                    graph: graph.clone(),
                     on_action,
                 }
             }
@@ -921,6 +955,7 @@ fn PanelBody(
     workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
+    graph: GraphPage,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     match (panel, view) {
@@ -998,6 +1033,12 @@ fn PanelBody(
                     on_action,
                 }
             }
+        },
+        (PanelId::Tree, WorkbenchView::Graph) => rsx! {
+            GraphTreePanel { page: graph }
+        },
+        (PanelId::Props, WorkbenchView::Graph) => rsx! {
+            GraphPropsPanel { page: graph }
         },
         (PanelId::Device, _) => rsx! {
             if let Some(card) = lens_card {

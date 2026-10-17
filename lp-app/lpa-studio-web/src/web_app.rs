@@ -65,6 +65,9 @@ const STYLE: &str = include_str!("style.css");
 struct StudioBridge {
     tx: CommandSender,
     delay: Rc<Cell<Duration>>,
+    /// Core's Graph editor, which the Graph tab's page applies its input
+    /// to directly (`lpa_studio_core::app::graph::GraphHandle`).
+    graph: lpa_studio_core::app::graph::GraphHandle,
 }
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -530,6 +533,7 @@ pub fn App() -> Element {
         // boards to hold.
         #[cfg(target_arch = "wasm32")]
         let board_hold = crate::browser_board_hold::install_board_hold(&mut controller);
+        let graph = controller.graph_handle();
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         // The notes other tabs say reach this tab's queue from here on.
         #[cfg(target_arch = "wasm32")]
@@ -856,8 +860,12 @@ pub fn App() -> Element {
         StudioBridge {
             tx: handle.tx,
             delay: handle.delay,
+            graph,
         }
     });
+    // The Graph tab's page reaches core's editor through this.
+    let graph_handle = bridge.graph.clone();
+    use_context_provider(move || graph_handle);
 
     // route → actor: back/forward, in-app link clicks and manual URL edits
     // dispatch the matching action. Programmatic navigate/replace calls fire

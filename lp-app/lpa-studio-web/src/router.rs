@@ -303,9 +303,9 @@ pub(crate) enum StudioRoute {
 /// ONE project address — mutually exclusive, and never a session boundary.
 ///
 /// `Workspace` is the suffix-less default: the Nodes view (today's node
-/// workspace). `Mapping` and `Patch` are workbench views (`/mapping`,
-/// `/patch`; `/map` and `/patching` parse as aliases). `Play` is the
-/// full-page zoom.
+/// workspace). `Mapping`, `Patch` and `Graph` are workbench views
+/// (`/mapping`, `/patch`, `/graph`; `/map` and `/patching` parse as
+/// aliases). `Play` is the full-page zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectView {
     #[default]
@@ -313,6 +313,8 @@ pub enum ProjectView {
     Play,
     Patch,
     Mapping,
+    /// The mapping lab's canvas on the project (`app/workbench/graph_view.rs`).
+    Graph,
 }
 
 #[cfg_attr(
@@ -362,6 +364,7 @@ impl StudioRoute {
                 (Some(uid), Some("mapping" | "map"), None) => {
                     device_route(uid, ProjectView::Mapping)
                 }
+                (Some(uid), Some("graph"), None) => device_route(uid, ProjectView::Graph),
                 _ => StudioRoute::Home,
             },
             // The project route. Exactly one link segment, optionally
@@ -384,6 +387,7 @@ impl StudioRoute {
                 (Some(link), Some("mapping" | "map"), None) => {
                     project_route(link, ProjectView::Mapping, on)
                 }
+                (Some(link), Some("graph"), None) => project_route(link, ProjectView::Graph, on),
                 _ => StudioRoute::Home,
             },
             // The kept aliases of the root: `/home`, and the Devices and
@@ -651,6 +655,7 @@ fn with_view_suffix(path: &str, view: ProjectView) -> String {
         ProjectView::Play => format!("{path}/play"),
         ProjectView::Patch => format!("{path}/patch"),
         ProjectView::Mapping => format!("{path}/mapping"),
+        ProjectView::Graph => format!("{path}/graph"),
     }
 }
 
