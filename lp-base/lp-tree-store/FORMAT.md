@@ -323,6 +323,34 @@ other file only in the cold tree.
 4. The chosen root is the committed state: the cold tree plus the hot
    files, and its retired list.
 
+**A faster reading of steps 2–3, with the same result.** Step 2 reads
+every byte ever written, and the only records a power cut can have left
+not checking are the last program in the newest sector of each head kind
+(below). So a reader may instead:
+
+- read the newest sector of each kind, and every sector closed by an
+  unknown compat flag, as step 2 says (and, if it is a writer, settle the
+  newest, below);
+- read every other trusted sector by its **record headers** only: at each
+  offset the 16 header bytes, then on to `offset + 16 + L`, ending and
+  closing exactly where step 2 would on a header (`0xFF…`, id 0, a record
+  past the sector) — reading a Root's payload, which must check and decode
+  as in step 2 (a root that does not closes the sector there);
+- in step 3, read and CRC-check **every** record of the closure it adopts,
+  blobs included; a record that does not check makes the closure
+  incomplete;
+- and when that adopts no root, read the whole flash as step 2 says and
+  decide from that alone (a newer copy that does not check, over an older
+  one that does, is adopted that way; a store with no complete root is
+  told from a blank one by that reading).
+
+"The newest sector of each kind" is the highest sector seq only while the
+seqs have not wrapped (the counter is u32 and `wrapping_add`s): a reader
+that finds trusted seqs spanning `2^31` or more reads as step 2 says. On
+any flash a writer of this format leaves, the two readings adopt the same
+root, the same copies and the same sector ends; they differ only over
+damage no cut makes.
+
 A writer appends only to a sector that is not closed (by a record that
 failed to check, or by an unknown compat flag) and whose bytes after its
 last record all read `0xFF`.

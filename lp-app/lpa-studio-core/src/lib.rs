@@ -53,13 +53,13 @@ pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
     ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
     BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONNECTING,
-    COULDNT_CONNECT, CornerMark, DATA_UNREADABLE, FILES_ARE_GONE, LENS_SOURCE_WORDS,
-    LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, PictureSource, RECONNECTING, RosterCardsInput,
-    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch,
-    UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiCardAction, UiCardControl,
-    UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar, UiStatusCorner, activity_bar,
-    activity_words, bluetooth_switch, board_card, board_panel_picks, chip_words, link_icon,
-    pending_board_card, roster_board_card, roster_board_cards,
+    COULDNT_CONNECT, CornerMark, DATA_UNREADABLE, FILES_ARE_GONE, FILES_NEED_NEWER_FIRMWARE,
+    LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, PictureSource, RECONNECTING,
+    RosterCardsInput, SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork,
+    UiBluetoothSwitch, UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiCardAction,
+    UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
+    UiStatusCorner, activity_bar, activity_words, bluetooth_switch, board_card, board_panel_picks,
+    chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{

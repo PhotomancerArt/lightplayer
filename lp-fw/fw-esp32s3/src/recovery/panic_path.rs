@@ -119,7 +119,13 @@ pub fn largest_free_block() -> usize {
         };
         // SAFETY: `size > 0`, and the pointer is freed with the same layout it
         // was allocated with, immediately, before anything else runs.
-        let ptr = unsafe { alloc::alloc::alloc(layout) };
+        //
+        // ⚠️ `black_box` is load-bearing. Rust lets the optimizer delete an
+        // allocation whose result is only freed, and on this chip it did: the
+        // shipped image's probe called nothing but `HEAP.free()` and returned
+        // it as the largest block, every time (RAM research E14, 2026-10-09;
+        // `docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.md`).
+        let ptr = core::hint::black_box(unsafe { alloc::alloc::alloc(layout) });
         if ptr.is_null() {
             false
         } else {

@@ -45,6 +45,10 @@ pub struct AlignedNorFlash<N: NorFlash> {
     offset: u32,
     sector_size: u32,
     sector_count: u32,
+    /// The store's record CRC ([`lp_tree_store::Flash::crc32`]'s shape),
+    /// when the chip has a faster engine for it than `lp-crc32`'s bitwise
+    /// one ([`with_crc32`](Self::with_crc32)).
+    crc32: Option<fn(u32, &[u8]) -> u32>,
 }
 
 impl<N: NorFlash> AlignedNorFlash<N> {
@@ -58,7 +62,16 @@ impl<N: NorFlash> AlignedNorFlash<N> {
             offset,
             sector_size,
             sector_count: len / sector_size,
+            crc32: None,
         }
+    }
+
+    /// Check records with `crc32` (the chip's own engine for FORMAT.md's
+    /// CRC-32: given the finished CRC so far, 0 to start, and more bytes, the
+    /// finished CRC of all of them) instead of `lp-crc32`'s.
+    pub fn with_crc32(mut self, crc32: fn(u32, &[u8]) -> u32) -> Self {
+        self.crc32 = Some(crc32);
+        self
     }
 
     /// The part underneath (a probe elsewhere on the same chip).
@@ -88,8 +101,13 @@ impl<N: NorFlash> lp_tree_store::Flash for AlignedNorFlash<N> {
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
-        let mut bounce = Bounce([0; BOUNCE]);
         let mut at = self.offset + addr;
+        // Word-aligned work goes to the part as it is, in one call (the store
+        // reads payloads and spans that way: `RecordLog::read_vec`).
+        if at % WORD == 0 && buf.len() % WORD as usize == 0 && buf.as_ptr().align_offset(4) == 0 {
+            return self.part.read(at, buf);
+        }
+        let mut bounce = Bounce([0; BOUNCE]);
         let mut out = buf;
         while !out.is_empty() {
             let base = at & !(WORD - 1);
@@ -126,6 +144,17 @@ impl<N: NorFlash> lp_tree_store::Flash for AlignedNorFlash<N> {
     fn erase_sector(&mut self, sector: u32) -> Result<(), Self::Error> {
         let from = self.offset + sector * self.sector_size;
         self.part.erase(from, from + self.sector_size)
+    }
+
+    fn crc32(&self, crc: u32, bytes: &[u8]) -> u32 {
+        match self.crc32 {
+            Some(f) => f(crc, bytes),
+            None => {
+                let mut c = lp_crc32::Crc32::resume(crc);
+                c.update(bytes);
+                c.finish()
+            }
+        }
     }
 }
 
