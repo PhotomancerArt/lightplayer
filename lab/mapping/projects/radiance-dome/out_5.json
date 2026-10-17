@@ -1,0 +1,139 @@
+{
+  "kind": "Output",
+  "name": "5",
+  "ports": {
+    "0": {
+      "endpoint": "ws281x:box5:P01",
+      "count": 80
+    },
+    "1": {
+      "endpoint": "ws281x:box5:P02",
+      "count": 80
+    },
+    "2": {
+      "endpoint": "ws281x:box5:P03",
+      "count": 80
+    },
+    "3": {
+      "endpoint": "ws281x:box5:P04",
+      "count": 80
+    },
+    "4": {
+      "endpoint": "ws281x:box5:P05",
+      "count": 80
+    },
+    "5": {
+      "endpoint": "ws281x:box5:P06",
+      "count": 80
+    },
+    "6": {
+      "endpoint": "ws281x:box5:P07",
+      "count": 80
+    },
+    "7": {
+      "endpoint": "ws281x:box5:P08",
+      "count": 80
+    },
+    "8": {
+      "endpoint": "ws281x:box5:P09",
+      "count": 80
+    },
+    "9": {
+      "endpoint": "ws281x:box5:P10",
+      "count": 80
+    },
+    "10": {
+      "endpoint": "ws281x:box5:P11",
+      "count": 80
+    },
+    "11": {
+      "endpoint": "ws281x:box5:P12",
+      "count": 80
+    },
+    "12": {
+      "endpoint": "ws281x:box5:P13",
+      "count": 80
+    },
+    "13": {
+      "endpoint": "ws281x:box5:P14",
+      "count": 80
+    },
+    "14": {
+      "endpoint": "ws281x:box5:P15",
+      "count": 80
+    },
+    "15": {
+      "endpoint": "ws281x:box5:P16",
+      "count": 80
+    },
+    "16": {
+      "endpoint": "ws281x:box5:P17",
+      "count": 80
+    },
+    "17": {
+      "endpoint": "ws281x:box5:P18",
+      "count": 80
+    },
+    "18": {
+      "endpoint": "ws281x:box5:P19",
+      "count": 80
+    },
+    "19": {
+      "endpoint": "ws281x:box5:P20",
+      "count": 80
+    },
+    "20": {
+      "endpoint": "ws281x:box5:P21",
+      "count": 80
+    },
+    "21": {
+      "endpoint": "ws281x:box5:P22",
+      "count": 80
+    },
+    "22": {
+      "endpoint": "ws281x:box5:P23",
+      "count": 80
+    },
+    "23": {
+      "endpoint": "ws281x:box5:P24",
+      "count": 80
+    },
+    "24": {
+      "endpoint": "ws281x:box5:P25",
+      "count": 80
+    },
+    "25": {
+      "endpoint": "ws281x:box5:P26",
+      "count": 80
+    },
+    "26": {
+      "endpoint": "ws281x:box5:P27",
+      "count": 80
+    },
+    "27": {
+      "endpoint": "ws281x:box5:P28",
+      "count": 80
+    },
+    "28": {
+      "endpoint": "ws281x:box5:P29",
+      "count": 80
+    },
+    "29": {
+      "endpoint": "ws281x:box5:P30",
+      "count": 80
+    },
+    "30": {
+      "endpoint": "ws281x:box5:P31",
+      "count": 80
+    },
+    "31": {
+      "endpoint": "ws281x:box5:P32",
+      "count": 80
+    }
+  },
+  "bindings": {
+    "input": {
+      "source": "bus:control.out"
+    }
+  }
+}

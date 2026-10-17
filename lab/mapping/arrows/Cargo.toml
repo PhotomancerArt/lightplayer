@@ -1,0 +1,17 @@
+[package]
+name = "lab-arrows"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: arrows — a semantic arrow in, renderer-agnostic geometry out (path, heads, labels lying along the line)"
+
+# The fence: this crate depends on nothing at all, workspace or crates.io.
+# It owns its tiny geometry so it can sit under the lab's model, its page,
+# or the app later, without pulling any of them in. See README.md.
+[dependencies]
+
+[lints]
+workspace = true

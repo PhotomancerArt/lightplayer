@@ -1,0 +1,22 @@
+[package]
+name = "lab-mapping-files"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: opens and saves real LightPlayer projects in the product's own formats"
+
+# The fence: the lab model and serde only — NO product crate. The product's
+# document shapes are re-created here (fit-check §6); the fit-tests crate
+# proves they agree with the product.
+[dependencies]
+lab-mapping-model = { path = "../model" }
+serde_json = { workspace = true, features = ["std", "preserve_order"] }
+
+[dev-dependencies]
+lab-layout = { path = "../layout" }
+
+[lints]
+workspace = true

@@ -1,0 +1,294 @@
+/* Mapping lab. Colours are Studio's tokens (lpa-studio-web/src/style.css),
+   copied so the lab needs nothing from the app. */
+:root {
+    color-scheme: dark;
+    --bg: #0d0d13;
+    --surface: #14141c;
+    --surface-raised: #1d1d28;
+    --outside: #08080c;
+    --border: #343444;
+    --border-strong: #4a4a5e;
+    --text: #f2f0e8;
+    --text-muted: #c9c9d2;
+    --text-subtle: #9c9cab;
+    --selection: #d6dae0;
+    --selection-bg: rgba(214, 218, 224, 0.12);
+    --hover: #8caaff;
+    --lamp: #f5d99a;
+    --refused: #ff8f8f;
+    /* The product's colour for what is bound: patches, buses. */
+    --bound: #a58af7;
+    --bound-bg: rgba(165, 138, 247, 0.16);
+    --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 var(--font); }
+
+.lab {
+    display: grid;
+    grid-template-columns: 240px 1fr 280px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "top top top" "tree canvas inspector" "hints hints hints";
+    height: 100%;
+    outline: none;
+}
+
+/* Size classes (architecture §7), from the app's width or forced in Debug.
+   md and sm: one column; the tree and inspector come over the canvas. */
+.lab { background: var(--bg); }
+.lab.size-md, .lab.size-sm {
+    grid-template-columns: 1fr;
+    grid-template-areas: "top" "canvas" "hints";
+}
+.lab.size-md .top, .lab.size-sm .top { flex-wrap: wrap; gap: 6px 10px; }
+.lab.size-sm .top kbd { display: none; }
+/* Debug's forced class frames the app at that width, like device mode. */
+html:has(.lab.forced), body:has(.lab.forced) { background: var(--outside); }
+.lab.forced { margin: 0 auto; box-shadow: 0 0 0 1px var(--border-strong); }
+.lab.forced.size-sm { max-width: 390px; }
+.lab.forced.size-md { max-width: 820px; }
+
+/* md: drawers over the canvas. */
+.drawer { position: absolute; top: 0; bottom: 0; z-index: 6; overflow: auto; background: var(--surface); box-shadow: 0 0 24px rgba(0, 0, 0, 0.5); }
+.drawer-left { left: 0; width: 240px; border-right: 1px solid var(--border); }
+.drawer-right { right: 0; width: 280px; border-left: 1px solid var(--border); }
+
+/* sm: the inspector is a bottom sheet; its handle steps peek, half, full. */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; flex-direction: column; background: var(--surface); border-top: 1px solid var(--border-strong); border-radius: 12px 12px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); transition: height 200ms ease; }
+.sheet-peek { height: 72px; }
+.sheet-half { height: 45%; }
+.sheet-full { height: calc(100% - 24px); }
+.sheet-handle { flex: none; display: flex; justify-content: center; padding: 8px 0 6px; border: none; border-radius: 12px 12px 0 0; background: none; cursor: pointer; }
+.sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--border-strong); }
+.sheet-body { flex: 1; overflow: auto; padding: 0 14px 12px; border: none; }
+/* sm: the hint bar is one line. */
+.hints.compact .bar > :not(:first-child) { display: none; }
+
+.debug { position: relative; margin-left: auto; }
+.debug-row { display: flex; align-items: center; gap: 4px; }
+.debug-label { color: var(--text-subtle); font-size: 12px; margin-right: 4px; }
+.debug-menu { position: absolute; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 10; white-space: nowrap; }
+.top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.brand { font-weight: 600; }
+.fixture-picker { color: var(--text-subtle); }
+.fixture-picker select { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.tools { display: flex; gap: 4px; }
+button { font: inherit; color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+button:disabled { opacity: 0.4; cursor: default; }
+.toggle-box { display: inline-block; width: 12px; height: 12px; line-height: 11px; font-size: 10px; text-align: center; border: 1px solid var(--border-strong); border-radius: 3px; vertical-align: -1px; }
+.tool.toggle.on .toggle-box { border-color: var(--selection); color: var(--text); }
+.tool.on { border-color: var(--selection); color: var(--text); background: var(--selection-bg); }
+kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+
+.tree { grid-area: tree; overflow: auto; border-right: 1px solid var(--border); background: var(--surface); padding: 8px 0; }
+.pane-title, .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-subtle); padding: 4px 12px; }
+.section-title { padding: 14px 0 6px; }
+.row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 10px; cursor: pointer; border-left: 2px solid transparent; }
+.row:hover { background: rgba(255, 255, 255, 0.04); }
+.row-selected { background: var(--selection-bg); border-left-color: var(--selection); }
+.row-lit { border-left-color: var(--selection); }
+.row-context .row-label { text-decoration: underline dashed var(--text-subtle); text-underline-offset: 3px; }
+.row-fixture .row-label, .row-module .row-label, .row-output .row-label { font-weight: 600; color: var(--text); }
+.row-module .row-label::before { content: "▣ "; color: var(--text-subtle); font-weight: 400; }
+.row-output .row-label::before { content: "⏚ "; color: var(--bound); font-weight: 400; }
+.row-port .row-label { color: var(--text-muted); }
+.row-derived .row-label { color: var(--text-subtle); font-style: italic; }
+.empty, .hint-inline { color: var(--text-subtle); padding: 8px 12px; font-size: 12px; }
+.hint-inline { padding: 10px 0; }
+
+.canvas-wrap { grid-area: canvas; position: relative; overflow: hidden; }
+
+/* The canvas container: it clips and takes every pointer event; nothing
+   inside does, except a control inside a face (Q1). */
+.canvas { position: absolute; inset: 0; overflow: hidden; background: var(--outside); }
+.canvas .dots, .canvas .world, .canvas .overlay, .canvas .cursor-note { pointer-events: none; }
+.face-control { pointer-events: auto; }
+.dots { position: absolute; inset: 0; width: 100%; height: 100%; }
+.overlay { position: absolute; left: 0; top: 0; overflow: visible; }
+/* The world sits in a scroller: still on the canvas, scrolling natively in
+   the stack (momentum on a phone). */
+.scroller { position: absolute; inset: 0; overflow: hidden; }
+.scroller.stack { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.scroll-extent { width: 1px; }
+
+/* The world layer: the camera's transform, and every node a flat sibling
+   inside it, in world units. Lines and borders that must stay one width on
+   screen divide by --zoom (the camera's scale) or don't scale at all. */
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.node { position: absolute; left: 0; top: 0; transition: transform 180ms ease, width 180ms ease, height 180ms ease; }
+.node-box, .node-face { position: absolute; inset: 0; }
+.card .node-box { background: var(--surface-raised); border: calc(1px / var(--zoom)) solid var(--border-strong); border-radius: calc(4px / var(--zoom)); }
+.frame.fixture .node-box { background: var(--bg); border: calc(1px / var(--zoom)) solid var(--border-strong); }
+.frame.module .node-box { background: rgba(255, 255, 255, 0.018); border: calc(1px / var(--zoom)) dashed var(--border-strong); border-radius: calc(6px / var(--zoom)); }
+/* Switching layouts: the world's own transform eases with the cards. Pan
+   and zoom never transition. */
+.world.switching { transition: transform 320ms ease; }
+.world.switching .node { transition-duration: 320ms; }
+/* In the stack a module is a rail down its children's left. */
+.world.in-stack .frame.module .node-box { border: none; border-left: calc(2px / var(--zoom)) solid var(--border-strong); border-radius: 0; background: none; }
+.face-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.face-svg * { vector-effect: non-scaling-stroke; }
+.face-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* Emphasis: one meaning, one look, everywhere (core decides which). */
+.emph-dimmed { opacity: 0.3; }
+
+/* A frame's title tab, at one size in the overlay: it is what picks it. */
+.frame-tab { fill: var(--surface-raised); stroke: var(--border); stroke-width: 1; }
+.frame-title { fill: var(--text-muted); font: 11px var(--font); }
+.frame-title-tab.module .frame-tab { fill: none; stroke: var(--border); stroke-dasharray: 3 3; }
+.frame-title-tab.module .frame-title { fill: var(--text-subtle); font-style: italic; }
+
+.card-title { fill: var(--text); font-family: var(--font); font-weight: 600; }
+.port-sep { stroke: var(--border); stroke-width: 1; }
+.port-name { fill: var(--text-muted); font-family: var(--font); dominant-baseline: middle; }
+.port-fill { fill: var(--text-subtle); font-family: var(--mono); dominant-baseline: middle; }
+.port-tint { fill: var(--bound-bg); }
+
+/* Edges fade while the cards ease to new places, then come back. */
+.edges { transition: opacity 140ms ease; }
+.edges.settling { opacity: 0; }
+.edge-line { fill: none; stroke: var(--bound); stroke-width: 1.4; opacity: 0.75; }
+.edge-selected .edge-line { opacity: 1; stroke-width: 2; }
+.edge-quiet .edge-line { opacity: 0.32; }
+.edge-arrow { fill: var(--bound); opacity: 0.85; }
+.edge-quiet .edge-arrow { opacity: 0.35; }
+.edge-selected .edge-arrow { opacity: 1; }
+.edge-hover .edge-line { opacity: 1; stroke-width: 3; }
+.edge-hover .edge-arrow { opacity: 1; }
+.edge-label-box { fill: var(--outside); stroke: var(--bound); stroke-opacity: 0.35; stroke-width: 1; }
+.edge-quiet .edge-label-box { stroke-opacity: 0.15; }
+.edge-label { fill: var(--bound); font: 10px var(--font); }
+.edge-quiet .edge-label { opacity: 0.45; }
+/* A channel's name on its edge (D53): always there, small and quiet. */
+.edge-channel { fill: var(--bound); font: 9px var(--font); opacity: 0.8; pointer-events: none; }
+.edge-quiet .edge-channel { opacity: 0.4; }
+/* A fixture's render product, faintly behind its lamps. */
+.pictures { opacity: 0.1; pointer-events: none; }
+.lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
+/* A selected lamp's pixel, ringed on its port (D47). */
+/* A pinned node's mark (D48). */
+.pin-mark line { stroke: var(--text-subtle); stroke-width: 1.3; }
+.pin-mark circle { fill: var(--text-muted); }
+.px-mark { fill: none; stroke: var(--bound); stroke-width: 1.6; rx: 1.5; pointer-events: none; }
+
+.obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.obj .arrow { fill: var(--text-subtle); }
+.obj .lamp-start { fill: none; stroke: var(--text-subtle); stroke-width: 1; }
+.obj.emph-lit .stroke { stroke: var(--selection); }
+.obj.emph-lit .arrow { fill: var(--selection); }
+/* A draft's lamps light white on the board, so here too. */
+.obj-draft .stroke { stroke: var(--hover); stroke-dasharray: 4 3; }
+.obj-draft .lamp { fill: #fff; }
+.obj-draft .lamp-outside { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.6; }
+.draft-point { fill: var(--bg); stroke: var(--hover); stroke-width: 1.2; }
+
+/* Lamps and pixels are drawn on canvases (dense_canvas.rs), with these
+   looks in code: a faint rim keeps an unlit (black) lamp visible, one
+   patched to no pixel is fainter, a lamp with no colour a dim hollow dot. */
+
+/* The data path inside a fixture: quiet, brighter where you're working. */
+.wire-line { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }
+.wire-arrow { fill: var(--text-subtle); opacity: 0.45; }
+.wire-in { fill: var(--text-subtle); font: 9px var(--mono); opacity: 0.55; }
+.wire-on .wire-line { stroke: var(--text-muted); opacity: 0.95; }
+.wire-on .wire-arrow { fill: var(--text-muted); opacity: 0.95; }
+.wire-on .wire-in { fill: var(--text-muted); opacity: 0.95; }
+
+/* Handles: small squares on the selection; the one under the pointer (or
+   being dragged) outlined. */
+.handle { fill: var(--bg); stroke: var(--selection); stroke-width: 1.2; }
+.handle-on { stroke: var(--hover); stroke-width: 2; fill: rgba(140, 170, 255, 0.25); }
+
+/* Outlines sit over coloured lamps: a dark halo keeps them readable. */
+.outline-selected { fill: var(--selection-bg); stroke: var(--selection); stroke-width: 1.5; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.outline-selected-label { fill: var(--selection); font: 600 11px var(--font); }
+.outline-context { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 5 4; }
+.outline-context-label { fill: var(--text-subtle); font: 11px var(--font); }
+.outline-hover { fill: rgba(140, 170, 255, 0.07); stroke: var(--hover); stroke-width: 1; }
+/* A path's area: its polyline stroked wide (the band), and a wider stroke
+   with the band masked out (the edge). */
+.outline-mask { fill: none; stroke: #000; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-band, .outline-hover-band, .outline-context-band { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-edge, .outline-hover-edge, .outline-context-edge { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-band { stroke: var(--selection-bg); }
+.outline-selected-edge { stroke: var(--selection); filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.outline-hover-band { stroke: rgba(140, 170, 255, 0.07); }
+.outline-hover-edge { stroke: var(--hover); }
+.outline-context-band { stroke: none; }
+.outline-context-edge { stroke: var(--text-subtle); stroke-dasharray: 5 4; }
+
+.lamp-ring-selected { fill: none; stroke: var(--selection); stroke-width: 2; }
+.lamp-ring-hover { fill: none; stroke: var(--hover); stroke-width: 1.2; }
+.select-box { fill: rgba(140, 170, 255, 0.08); stroke: var(--hover); stroke-width: 1; stroke-dasharray: 4 3; }
+.cursor-note { position: absolute; pointer-events: none; background: rgba(12, 12, 20, 0.92); border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+.inspector { grid-area: inspector; overflow: auto; border-left: 1px solid var(--border); background: var(--surface); padding: 10px 14px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.crumb { border: none; background: none; padding: 2px 4px; color: var(--text-muted); }
+.crumb-step:last-child .crumb { color: var(--text); font-weight: 600; }
+.crumb-step { display: inline-flex; align-items: center; gap: 2px; }
+.crumb-sep { color: var(--text-subtle); }
+.fact { color: var(--text-muted); padding: 2px 0; }
+.prop { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; padding: 4px 0; }
+.prop-label { color: var(--text-muted); }
+.prop-mixed { grid-column: 2; color: var(--text-subtle); font-size: 12px; text-align: right; }
+.num { display: flex; align-items: center; gap: 4px; }
+.num button { padding: 1px 8px; }
+.num input { width: 64px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; text-align: right; }
+.key-hint { margin-left: 4px; }
+.flag.on { border-color: var(--selection); color: var(--text); }
+.port-fact { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 0; color: var(--text-muted); }
+.port-fact-fill { font: 12px var(--mono); color: var(--text-subtle); }
+.port-fact-bar { grid-column: 1 / -1; height: 3px; background: var(--bg); border-radius: 2px; }
+.port-fact-bar-in { height: 100%; background: var(--bound); border-radius: 2px; }
+.patch-rule { color: var(--bound); }
+.problem { padding: 6px 0; }
+
+.hints { grid-area: hints; border-top: 1px solid var(--border); background: var(--surface); }
+.bar { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px 10px; }
+.lead { font-weight: 600; margin-bottom: 2px; }
+.hint-row { display: grid; grid-template-columns: 52px 1fr; align-items: baseline; }
+.hint-row-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); }
+.hint-row-items { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.hint { color: var(--text-muted); white-space: nowrap; display: inline-flex; align-items: baseline; gap: 6px; }
+.hint-row.quiet .hint { color: var(--text-subtle); }
+.hint-row.quiet kbd { opacity: 0.75; }
+.notice { font: 12px/1.5 var(--mono); padding: 8px 12px 0; color: var(--text-muted); }
+.notice.refused .notice-text { color: var(--refused); font-weight: 700; }
+.notice-tag { color: var(--refused); font-weight: 700; }
+.notice-line { padding-left: 2ch; }
+.notice-eq { color: var(--hover); }
+.crumb-many { color: var(--text); font-weight: 600; }
+.menu { position: absolute; width: 200px; background: rgba(20, 20, 28, 0.97); border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 0; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 5; }
+.menu-title, .menu-foot { font-size: 11px; color: var(--text-subtle); padding: 4px 10px; }
+.menu-foot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; }
+.menu-item { padding: 4px 10px; cursor: pointer; color: var(--text-muted); }
+.menu-item.on { background: var(--selection-bg); color: var(--text); }
+/* What the menu can do here, above what's under the cursor. */
+.menu-item.menu-action { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--text); }
+.menu-item.menu-action:hover { background: var(--selection-bg); }
+.menu-item.menu-action kbd { white-space: nowrap; }
+
+/* A port's pixels in runs, one per object (lp2014's channel groups). */
+.run rect { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-opacity: 0.55; }
+.run.unpatched rect { stroke-dasharray: 2 2; stroke-opacity: 0.35; }
+.run.lit rect { stroke: var(--selection); stroke-opacity: 1; stroke-width: 1.5; }
+
+/* A shader's GLSL in the inspector: shown, never run. */
+.glsl { margin: 6px 0 0; padding: 6px 8px; max-height: 240px; overflow: auto; font: 10px/1.35 var(--mono); color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; white-space: pre; }
+
+/* Lines drawn inside a card are scaled with the world by the camera's
+   transform (non-scaling-stroke only undoes the SVG's own viewBox), so each
+   divides by --zoom to keep its width, and its dashes, on screen. */
+.world .port-sep { stroke-width: calc(1px / var(--zoom)); }
+.world .obj .stroke { stroke-width: calc(1.5px / var(--zoom)); }
+.world .obj .lamp-start { stroke-width: calc(1px / var(--zoom)); }
+.world .wire-line { stroke-width: calc(1px / var(--zoom)); stroke-dasharray: calc(3px / var(--zoom)) calc(3px / var(--zoom)); }
+.world .run rect { stroke-width: calc(1px / var(--zoom)); }
+.world .run.unpatched rect { stroke-dasharray: calc(2px / var(--zoom)) calc(2px / var(--zoom)); }
+.world .run.lit rect { stroke-width: calc(1.5px / var(--zoom)); }
+.world .px-mark { stroke-width: calc(1.6px / var(--zoom)); }
