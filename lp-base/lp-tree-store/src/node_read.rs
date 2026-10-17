@@ -149,9 +149,18 @@ fn leaves_of<F: Flash>(
 }
 
 /// A directory node's entries.
+/// Directory `id`'s entries — from the directory cache when the last
+/// lookups read it (`dir_cache.rs`), else read and kept there.
 pub fn read_dir<F: Flash>(log: &mut RecordLog<F>, id: ObjectId) -> R<Vec<DirEntry>, F> {
-    let mut bytes = Vec::new();
-    read_node_into(log, id, &mut bytes)?;
-    log.note(bytes.capacity());
+    let bytes = match log.dir_cache.get(id) {
+        Some(bytes) => bytes,
+        None => {
+            let mut bytes = Vec::new();
+            read_node_into(log, id, &mut bytes)?;
+            log.note(bytes.capacity());
+            log.dir_cache.put(id, &bytes);
+            bytes
+        }
+    };
     decode_dir(&bytes).ok_or(StoreError::Corrupt("dir"))
 }

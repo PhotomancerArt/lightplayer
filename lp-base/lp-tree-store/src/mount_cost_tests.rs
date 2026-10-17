@@ -297,3 +297,54 @@ fn write_scenario_images() {
         std::fs::write(std::format!("{dir}/{name}-176.bin"), &bytes).unwrap();
     }
 }
+
+/// What a boot's project load reads: a c40 pushed as Studio pushes it
+/// (host-deflated), remounted, then every file's size asked and the file
+/// read once (in path order) — by the directory cache's size (0 = none).
+/// Store reads, the C6's calls through `AlignedNorFlash`, and the bytes
+/// CRC'd.
+#[test]
+fn project_load_report() {
+    let c = StoreConfig::default();
+    let mut st = mount(formatted(NorGeometry::c6(176), &c), &c);
+    push_c40(&mut st, &c, "/projects/a");
+    let flash = st.into_flash();
+    let mut files: Vec<String> = c40_like().into_iter().map(|f| f.0).collect();
+    files.sort();
+    std::println!(
+        "{:<14} {:>7} {:>9} {:>8} {:>9} {:>9}",
+        "dir_cache_max",
+        "calls",
+        "bytes",
+        "c6 calls",
+        "c6 bytes",
+        "crc B"
+    );
+    for max in [0u32, 1024, 2048, 4096, 8192] {
+        let cfg = StoreConfig {
+            dir_cache_max: max,
+            ..c.clone()
+        };
+        let mut st = match TreeStore::mount(Counting::new(flash.clone()), SoftSha256, cfg) {
+            Ok(s) => s,
+            Err((e, _, _)) => panic!("mount: {e:?}"),
+        };
+        let f = st.flash_mut();
+        (f.calls, f.bytes, f.c6_calls, f.c6_bytes) = (0, 0, 0, 0);
+        CRC_BYTES.with(|c| c.set(0));
+        for p in &files {
+            assert!(st.file_size(p).unwrap().is_some(), "{p}");
+            assert!(st.get(p).unwrap().is_some(), "{p}");
+        }
+        let f = st.flash();
+        std::println!(
+            "{:<14} {:>7} {:>9} {:>8} {:>9} {:>9}",
+            max,
+            f.calls,
+            f.bytes,
+            f.c6_calls,
+            f.c6_bytes,
+            CRC_BYTES.with(Cell::get)
+        );
+    }
+}

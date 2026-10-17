@@ -62,6 +62,42 @@ fn round_trip_list_delete_and_remount() {
     assert_eq!(st.put("/a/", b"x"), Err(StoreError::InvalidPath));
 }
 
+/// The directory cache fills on lookups, serves the next one without a
+/// flash read of the path's directories, and empties on a write; reads are
+/// the same with it off (`dir_cache_max: 0`).
+#[test]
+fn the_dir_cache_fills_on_lookups_and_empties_on_a_write() {
+    for max in [cfg().dir_cache_max, 0] {
+        let c = StoreConfig {
+            dir_cache_max: max,
+            ..cfg()
+        };
+        let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
+        for i in 0..20u64 {
+            st.put(&alloc::format!("/p/a/m/n{i}.json"), &text(i, 300))
+                .unwrap();
+        }
+        let want = snapshot(&mut st);
+        let mut st = mount(st.into_flash(), &c);
+        assert_eq!(st.stats().dir_cache_ram_bytes, 0, "a mount starts empty");
+        st.get("/p/a/m/n0.json").unwrap().unwrap();
+        let calls = st.log.counters.read_calls;
+        st.get("/p/a/m/n1.json").unwrap().unwrap();
+        let second = st.log.counters.read_calls - calls;
+        if max > 0 {
+            assert!(st.stats().dir_cache_ram_bytes > 0);
+            // The leaf's header and payload: no directory read again.
+            assert!(second <= 2, "{second} reads");
+            st.put("/p/a/m/n0.json", b"{}").unwrap();
+            assert_eq!(st.stats().dir_cache_ram_bytes, 0, "a write empties it");
+        } else {
+            assert!(second > 2, "{second} reads");
+        }
+        st.put("/p/a/m/n0.json", &text(0, 300)).unwrap();
+        assert_eq!(snapshot(&mut st), want);
+    }
+}
+
 #[test]
 fn valid_paths() {
     use crate::{MAX_DEPTH, valid_path};

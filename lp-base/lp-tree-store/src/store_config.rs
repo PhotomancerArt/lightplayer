@@ -21,6 +21,11 @@ pub struct StoreConfig {
     /// RAM a transaction may hold as not-yet-written directory changes
     /// (paths and entries) before it writes them as pending directories.
     pub txn_delta_max: u32,
+    /// RAM the directory cache may hold between calls, in bytes of
+    /// directory nodes (`dir_cache.rs`): the directories the last lookups
+    /// read, so a project load does not read `/projects/a/…` again for each
+    /// of its files. Dropped on every write. 0: no cache.
+    pub dir_cache_max: u32,
     /// The low water for [`crate::TreeStore::collect_step`]: while fewer
     /// than this percentage of the usable sectors is free, an idle step
     /// collects one sector with garbage (0 = idle steps collect none; they
@@ -43,6 +48,7 @@ impl Default for StoreConfig {
             gc_policy: GcPolicy::CostBenefit,
             reserve: 3,
             txn_delta_max: 2048,
+            dir_cache_max: 4096,
             idle_free_percent: 25,
             idle_min_garbage: 1024,
             idle_pack_free: 4,

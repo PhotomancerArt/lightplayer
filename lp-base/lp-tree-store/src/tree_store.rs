@@ -346,7 +346,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         s.index_entries = self.log.index.len();
         s.index_ram_bytes = self.log.index.ram_bytes();
         s.sector_table_ram_bytes = self.log.sectors.ram_bytes();
-        s.resident_ram_bytes = s.index_ram_bytes + s.sector_table_ram_bytes;
+        s.dir_cache_ram_bytes = self.log.dir_cache.ram_bytes();
+        s.resident_ram_bytes = s.index_ram_bytes + s.sector_table_ram_bytes + s.dir_cache_ram_bytes;
         s.transient_peak_bytes = s.transient_peak_bytes.max(self.log.largest_buffer);
         s.records_written = self.log.counters.records_written;
         s.record_bytes_written = self.log.counters.record_bytes_written;
@@ -370,7 +371,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 
     pub(crate) fn empty(flash: F, hasher: H, cfg: StoreConfig) -> Self {
         Self {
-            log: RecordLog::new(flash),
+            log: RecordLog {
+                dir_cache: crate::dir_cache::DirCache::new(cfg.dir_cache_max),
+                ..RecordLog::new(flash)
+            },
             hasher,
             cfg,
             committed: None,

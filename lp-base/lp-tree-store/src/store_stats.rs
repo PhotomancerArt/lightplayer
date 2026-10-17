@@ -13,7 +13,11 @@ pub struct TreeStoreStats {
     pub index_ram_bytes: usize,
     /// 12 B per sector, plus the retired list.
     pub sector_table_ram_bytes: usize,
-    /// Index + sector table: what the store holds between operations.
+    /// The directory cache (≤ `dir_cache_max` of directory bytes, empty
+    /// after any write).
+    pub dir_cache_ram_bytes: usize,
+    /// Index + sector table + directory cache: what the store holds between
+    /// operations.
     pub resident_ram_bytes: usize,
     /// The largest single buffer an operation allocated (a record, a
     /// directory's bytes, a leaf list, a mark set, an inflate buffer, the

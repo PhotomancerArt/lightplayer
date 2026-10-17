@@ -9,6 +9,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::dir_cache::DirCache;
 use crate::flash::Flash;
 use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
@@ -45,6 +46,9 @@ pub struct RecordLog<F: Flash> {
     pub next_sector_seq: u32,
     /// A sector being collected: never handed out as free.
     pub gc_victim: Option<u32>,
+    /// Directories the last lookups read (`dir_cache.rs`), cleared by every
+    /// program and erase below.
+    pub dir_cache: DirCache,
     #[cfg(feature = "stats")]
     pub counters: LogCounters,
     /// The largest transient buffer seen.
@@ -70,6 +74,7 @@ impl<F: Flash> RecordLog<F> {
             heads: [None, None],
             next_sector_seq: 1,
             gc_victim: None,
+            dir_cache: DirCache::default(),
             #[cfg(feature = "stats")]
             counters: LogCounters::default(),
             #[cfg(feature = "stats")]
@@ -325,6 +330,7 @@ impl<F: Flash> RecordLog<F> {
         if !mutant!(SkipKill) {
             self.kill_header(s)?;
         }
+        self.dir_cache.clear();
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
         stat!(self.counters.erases += 1);
         let c = &mut self.sectors.erase_count[s as usize];
@@ -427,6 +433,7 @@ impl<F: Flash> RecordLog<F> {
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> R<(), F> {
+        self.dir_cache.clear();
         self.flash.program(addr, data).map_err(StoreError::Flash)
     }
 
