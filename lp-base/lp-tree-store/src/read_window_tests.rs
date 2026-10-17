@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 
 use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry};
 
+use crate::log_order_check::check_log_order;
 use crate::read_window::{SimLineCache, WindowedFlash};
 use crate::test_support::{State, formatted, noise, sweep_tears, text};
 use crate::{SoftSha256, StoreConfig, TreeStore};
@@ -93,11 +94,15 @@ fn cuts_through_the_cache_read_one_state() {
         for k in points {
             for tear in sweep_tears() {
                 let mut st = power_on(pre.clone(), &c);
+                let mounted = st.flash().flash().clone();
                 st.flash_mut()
                     .flash_mut()
                     .set_plan(FaultPlan::cut(k, tear, i << 32 | k));
                 let _ = step(&mut st, i);
                 let mut f = st.into_flash().into_parts().0;
+                // I4 through the cache too: only appends at heads' ends and
+                // header changes, whatever the cut tore.
+                check_log_order(&mounted, &f, &format!("step {i} cut {k} {tear:?}"));
                 f.power_cycle(FaultPlan::none());
                 let mut st = power_on(f, &c);
                 let got = snap(&mut st);
