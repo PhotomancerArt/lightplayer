@@ -204,6 +204,19 @@ pub fn scenarios(sectors: u32) -> Vec<(String, NorFlashSim)> {
     }
     out.push((String::from("used"), st.into_flash()));
 
+    // Panel-heavy: c40, then panel writes until the partition has been
+    // written over three times — small hot records, the most records on
+    // flash per live byte (the mount study's worst history for a mount that
+    // reads by record).
+    let mut st = mount(c40.clone(), &c);
+    let mut i = 0u64;
+    while st.stats().erases < 3 * u64::from(sectors) {
+        st.put("/projects/a/.lp/panel.json", &text(9000 + i, 450))
+            .unwrap();
+        i += 1;
+    }
+    out.push((String::from("panel"), st.into_flash()));
+
     // Full: c40, then 4 KiB files until the store refuses.
     let mut st = mount(c40, &c);
     for i in 0.. {
@@ -215,6 +228,18 @@ pub fn scenarios(sectors: u32) -> Vec<(String, NorFlashSim)> {
     }
     out.push((String::from("full"), st.into_flash()));
     out
+}
+
+/// `f`'s bytes on a flash of its own: a clone shares its sectors until one
+/// is written, and a mount's settle would bill the copy to its peak.
+pub fn deep_copy(f: &NorFlashSim) -> NorFlashSim {
+    let g = f.geometry();
+    let mut bytes = alloc::vec![0u8; (g.sector_count * g.sector_size) as usize];
+    f.peek(0, &mut bytes);
+    let mut copy = NorFlashSim::new(g);
+    copy.program(0, &bytes).unwrap();
+    copy.reset_stats();
+    copy
 }
 
 /// Raw images from `LP_TREE_MOUNT_IMAGES`.
@@ -264,8 +289,26 @@ fn mount_cost_report() {
         }
     }
     rows.extend(images());
+    let level = StoreConfig {
+        mount_index_max: 0,
+        ..c.clone()
+    };
     for (name, f) in rows {
-        let (m, _) = mount_cost(f, &c);
+        let (lm, _) = mount_cost(deep_copy(&f), &level);
+        let (m, _) = mount_cost(deep_copy(&f), &c);
+        std::println!(
+            "{:<36} {:>7} {:>9} {:>8} {:>9} {:>9} {:>7} {:>9} {:>5} {:>7}",
+            format!("{name} (level walk)"),
+            lm.calls,
+            lm.bytes,
+            lm.c6_calls,
+            lm.c6_bytes,
+            lm.crc_bytes,
+            lm.pass1_calls,
+            lm.pass1_bytes,
+            lm.scans,
+            lm.peak
+        );
         std::println!(
             "{:<36} {:>7} {:>9} {:>8} {:>9} {:>9} {:>7} {:>9} {:>5} {:>7}",
             name,
@@ -284,16 +327,20 @@ fn mount_cost_report() {
 
 /// `LP_TREE_WRITE_IMAGES=<dir>`: write each scenario at 176 sectors (the
 /// C6's `lpfs`) as a raw image, for a board to mount (`espflash write-bin
-/// 0x350000`).
+/// 0x350000`) — and at 128 sectors (the repartition's `lpfs`), padded with
+/// erased sectors to the 176 a board has today (`<name>-128in176.bin`: the
+/// 128-sector history, mounted with 48 blank sectors beside it).
 #[test]
 fn write_scenario_images() {
     let Ok(dir) = std::env::var("LP_TREE_WRITE_IMAGES") else {
         return;
     };
-    for (name, f) in scenarios(176) {
-        let g = f.geometry();
-        let mut bytes = alloc::vec![0u8; (g.sector_count * g.sector_size) as usize];
-        f.peek(0, &mut bytes);
-        std::fs::write(std::format!("{dir}/{name}-176.bin"), &bytes).unwrap();
+    for (sectors, suffix) in [(176u32, "176"), (128, "128in176")] {
+        for (name, f) in scenarios(sectors) {
+            let g = f.geometry();
+            let mut bytes = alloc::vec![0xFFu8; (176 * g.sector_size) as usize];
+            f.peek(0, &mut bytes[..(g.sector_count * g.sector_size) as usize]);
+            std::fs::write(std::format!("{dir}/{name}-{suffix}.bin"), &bytes).unwrap();
+        }
     }
 }

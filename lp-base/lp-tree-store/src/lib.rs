@@ -54,6 +54,7 @@ mod host_deflate;
 mod image_inspect;
 #[cfg(feature = "lpfs")]
 mod lp_fs_tree;
+mod mount_index;
 mod mount_summary;
 mod mount_verdict;
 mod mount_walk;
@@ -67,6 +68,7 @@ mod object_hasher;
 mod object_id;
 mod partition_growth;
 mod ram_index;
+mod read_window;
 mod record_header;
 mod record_kind;
 mod record_log;
@@ -113,6 +115,8 @@ mod mount_verdict_tests;
 #[cfg(test)]
 mod ram_budget_tests;
 #[cfg(test)]
+mod read_window_tests;
+#[cfg(test)]
 mod store_tests;
 #[cfg(test)]
 mod test_support;
@@ -136,6 +140,9 @@ pub use object_hasher::ObjectHasher;
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
 pub use partition_growth::kill_added_sectors;
+#[cfg(any(test, feature = "nor-sim"))]
+pub use read_window::SimLineCache;
+pub use read_window::{ReadWindow, WindowedFlash};
 pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
 pub use snapshot_namespace::{SNAPSHOT_DIR, is_snapshot_path};
 pub use store_config::{GcPolicy, StoreConfig};

@@ -79,20 +79,39 @@ change has to be readable, or cleanly refused, by the core before it.
   2026-10-16; FORMAT.md "A faster reading"). Its first pass reads the
   newest sector of each kind whole and CRC-checked (the only place a cut
   can have torn a program) and every other sector by its record headers
-  alone, reading only roots whole; it indexes nothing, but notes where each
-  sector's records end, the newest two roots, and a 16-byte filter of each
-  sector's ids. Then it indexes only the newest root's closure: level by
-  level, one scan of record headers over the sectors the filters say may
-  hold the level's ids, newest sector first, so the first copy seen is the
-  one FORMAT.md keeps; each record found is visited with the mark's own
-  step where it is found, every root, directory and multi read whole and
-  CRC-checked, and indexed in one merge per level. A blob is checked when
+  alone, reading only roots whole; it notes where each sector's records
+  end, the newest two roots, a 16-byte filter of each sector's ids, and —
+  while it fits `mount_index_max` — every trusted record's id and place in
+  a transient **whole index** (12 B a record on flash, `mount_index.rs`;
+  K1+ of the mount study, 2026-10-16). Then it indexes only the newest
+  root's closure, level by level: with the whole index, each level's ids
+  are looked up there (the copy in the later sector, as FORMAT.md keeps);
+  without it (it outgrew its cap, or the dial is 0), by one scan of record
+  headers over the sectors the filters say may hold the level's ids,
+  newest sector first, so the first copy seen is the one FORMAT.md keeps.
+  The two ways adopt the same records (`mount_walk.rs`'s tests, and every
+  cut of the in-crate sweeps mounts both ways and compares). Each record
+  found is visited with the mark's own step, every root, directory and
+  multi read whole and CRC-checked, and indexed in one merge per level. A blob is checked when
   it is read, as every record is. When that adopts no root — a blank or
   foreign partition, an interrupted format, damage — mount reads and
   checks every record of every sector as it always did and takes the
   verdict and the one-root fall-back from that reading; so does a store
-  whose sector seqs may have wrapped. Its RAM is the live set's, whatever
-  the garbage on flash.
+  whose sector seqs may have wrapped. Its resident RAM is the live set's,
+  whatever the garbage on flash; its transient RAM is that plus the whole
+  index, capped by `mount_index_max`.
+- **Reads may go through a cache** (`read_window.rs`, the mount study's
+  C7). On the C6, `lpfs` is mapped by the MMU and read as memory: a 32-byte
+  line fill the first time a line is touched instead of a ROM read call
+  (~14 µs) per read. `WindowedFlash` is the store's `Flash` over such a
+  window and holds one rule: after every program and every erase, the range
+  written is invalidated before the store reads again (a stale line read
+  back as erased would make a resume, a settle or a verify trust a tail
+  that is not blank). Nothing about the format changes; the window is the
+  platform's (`fw-esp32c6`'s `tree_flash.rs`). `SimLineCache` models the
+  C6's cache for the host (stale lines served until invalidated); the
+  mutant `reads_without_invalidate` drops the rule and `lp-store-bench`'s
+  drivers, run over the model, catch it.
 - **Mount settles each head's tail** before anything trusts it. A program
   torn inside a 4-byte word can leave its one missing clear weak, so a
   record reads whole on some reads and fails its CRC on others; only the
@@ -197,10 +216,12 @@ bitset and stack, a 4 KiB inflate buffer (`put_chunk_deflated`), and — for a
 transaction — its delta (≤ `txn_delta_max` + one call). **Mount** holds the live index as it builds it, the two
 widest adjacent tree levels (16 B per id, and 4 B per id of the level
 being scanned), each sector's id filter (16 B), 2 B per sector of sorted
-headers, and a record's payload; nothing that grows with the garbage on
-flash. In exchange it reads each sector's record headers once, and again
-per tree level in the sectors whose filter may hold that level's ids
-(stopping a level once every id is found).
+headers, a record's payload, and the whole index (12 B per record on flash,
+in 3 KiB blocks, never more than `mount_index_max`: the one part that grows
+with the garbage, and the cap is where it stops). With the index it reads
+each sector's record headers once and each closure record's header once
+more; past the cap, again per tree level in the sectors whose filter may
+hold that level's ids (stopping a level once every id is found).
 
 Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
@@ -212,6 +233,7 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 | `gc_policy` | `CostBenefit` | `Greedy` (most garbage) or `CostBenefit` (LFS: `(1−u)·age/(1+u)`) |
 | `reserve` | 3 | sectors every write must leave free |
 | `txn_delta_max` | 2048 | RAM a transaction's directory delta may hold before it is written as pending directories |
+| `mount_index_max` | 48 KiB | transient RAM mount's whole id index may take (12 B a record on flash); past it mount walks the tree by level scans instead (same answer, more reads); 0 = never. A per-board dial: a board with PSRAM may raise it |
 | `idle_free_percent` | 25 | the idle low water: below this share of sectors free, an idle step collects a sector with garbage (0 = never; forgetting goes on) |
 | `idle_min_garbage` | 1024 | the least garbage (bytes) an idle collection wins back |
 | `idle_pack_free` | 4 | near full: below `reserve` + this many free sectors, idle steps also pack (0 = never) |
@@ -370,15 +392,16 @@ transactions (commit once, read your writes, abort, a bounded delta over
 120 files), appends (only new chunks written; same node as a single put),
 deflated chunks (verified, refused, stored coded, incompressible stored
 plain); `delete_prefix` taking whole directories only; RAM against the budget on a c40-shaped
-tree (and what reading every file once costs in flash reads) and on a full store (mount's peak ≤ 16 KB at 128 sectors in both),
+tree (and what reading every file once costs in flash reads) and on a full store (mount's peak ≤ 16 KB at 128 sectors in both, plus the whole index it held),
 cross-checked with a counting allocator; mount's index and live bytes equal
 to a full mark's after GC copies and a level-1 directory multi, and the
 newest of two copies indexed; a damaged newer copy sending mount back to the
 whole reading, which mounts from the older one; the `LpFs` adapter against
 `LpFsMemory`; the format golden. `mount_cost_tests.rs` reports what a mount
 reads (calls and bytes as the store asks for them and as the C6's
-`AlignedNorFlash` makes them, and the bytes it CRCs) on an empty, a c40, a
-used and a full store at 128 and 176 sectors, and on any raw `lpfs` image in
+`AlignedNorFlash` makes them, and the bytes it CRCs), by the whole index
+and by the level walk, on an empty, a c40, a used, a panel-heavy and a full
+store at 128 and 176 sectors, and on any raw `lpfs` image in
 `LP_TREE_MOUNT_IMAGES`; `LP_TREE_WRITE_IMAGES=<dir>` writes those stores as
 images for a board (`lp-cli/tests/board_tree_store_mount.rs`) or the
 emulator (`lp-cli/tests/emu_tree_store_mount.rs`).

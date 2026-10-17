@@ -265,6 +265,16 @@ the store, because they all go through `base_fs`. The table is
   buffer, and the store writes records at any byte offset, so every read
   goes through an aligned bounce buffer and every program is padded to
   whole words with `0xFF`. **Every program reaches the ROM word-aligned.**
+- **Reads go through the flash cache** (the mount study's C7): `lpfs` is
+  mapped by the MMU into the top of the loader's old scratch window
+  (`0x4278_0000..0x4280_0000` for the 512 KiB `lpfs` since the cutover, at
+  32 KiB pages; the core and the
+  engine together never reach it) and the store reads it as memory, a
+  32-byte line fill instead of a ROM read call. After every program and
+  erase, `lp_tree_store::WindowedFlash` invalidates the range with the ROM's
+  `Cache_Invalidate_Addr` before the next read; a refused invalidate, or a
+  partition that does not fit the window, sends every read back to the ROM
+  calls (`[FS] lpfs is read by ROM calls: …` at boot for the latter).
 - **Hasher:** `src/hw_sha.rs` (`StoreSha256`): the SHA accelerator, or
   software `sha2` while a boot hash holds it. Moved out of `ota/` because an
   unsplit build has no `ota/`.

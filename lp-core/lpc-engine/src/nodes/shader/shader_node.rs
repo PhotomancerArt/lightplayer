@@ -234,7 +234,13 @@ impl ShaderNode {
             input_resolve_failures: Vec::new(),
             black_fallback_frames: 0,
             needs_compile: true,
-            compile_window_requested: false,
+            // A node that has never compiled asks for its window as it is
+            // created, so the first tick after its load opens the window and
+            // the first frame that renders it compiles — rather than one
+            // black deferral frame later (ADR
+            // 2026-08-03-memory-pressure-at-compile-safe-points, amended
+            // 2026-10-16). Pressure is still broadcast before that compile.
+            compile_window_requested: true,
             compile_window: None,
             palette_cache: PaletteBakeCache::new(),
             map_templates: MapInputTemplates::new(),

@@ -65,13 +65,21 @@ pub enum Mutant {
     /// `format` erases its two sectors but leaves every other header as it
     /// reads (no kill): an earlier store's sectors stay trusted.
     FormatKeepsHeaders,
+    /// Mount's whole id index takes every record header pass 1 parses, not
+    /// only the records it trusts: one whose payload fails its CRC (or a
+    /// root that does not decode) is indexed too, and wins over an older
+    /// good copy.
+    MountIndexTakesUntrusted,
+    /// `WindowedFlash` (reads through a cache) leaves the cache as it is
+    /// after a program or an erase: stale lines go on being read.
+    ReadsWithoutInvalidate,
     /// An idle step forgets a garbage-only sector even when it is a write
     /// head (its next append lands in a sector a mount no longer reads).
     IdleForgetsHeads,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 16] = [
+    pub const ALL: [Mutant; 18] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -87,6 +95,8 @@ impl Mutant {
         Mutant::NewestByHeaders,
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
+        Mutant::MountIndexTakesUntrusted,
+        Mutant::ReadsWithoutInvalidate,
         Mutant::IdleForgetsHeads,
     ];
 
@@ -107,6 +117,8 @@ impl Mutant {
             Mutant::NewestByHeaders => "newest_by_headers",
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
+            Mutant::MountIndexTakesUntrusted => "mount_index_takes_untrusted",
+            Mutant::ReadsWithoutInvalidate => "reads_without_invalidate",
             Mutant::IdleForgetsHeads => "idle_forgets_heads",
         }
     }

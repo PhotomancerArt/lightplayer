@@ -122,6 +122,11 @@ pub struct PlaylistNode {
     current_ready: bool,
     /// What this frame's renders show, planned by `produce`.
     plan: PlaylistFramePlan,
+    /// The entry `plan` was made for. A frame may sample the plan more than
+    /// once (one call per sample stream); once a probe has failed that entry
+    /// and moved `current_entry` on, the plan's later answers are about the
+    /// failed entry and must not be charged to the next one.
+    planned_entry: u32,
     held: PlaylistHeldFrame,
     /// The same, on the texture path (a `texture_area` fixture).
     held_texture: PlaylistHeldTexture,
@@ -200,6 +205,7 @@ impl PlaylistNode {
             capture_pending: false,
             current_ready: false,
             plan: PlaylistFramePlan::Clear,
+            planned_entry: 0,
             held: PlaylistHeldFrame::default(),
             held_texture: PlaylistHeldTexture::default(),
             blend_scratch: Vec::new(),
@@ -417,6 +423,14 @@ impl PlaylistNode {
         self.rebase_cycle();
     }
 
+    /// Fail the entry this frame's plan was made for, unless a probe already
+    /// did and moved on (see `planned_entry`).
+    fn fail_planned_entry(&mut self, reason: String) {
+        if self.current_entry == self.planned_entry {
+            self.fail_entry(self.current_entry, reason);
+        }
+    }
+
     /// A readiness answer for the current entry, asked after rendering it.
     fn observe_readiness(&mut self, readiness: VisualReadiness) {
         match readiness {
@@ -436,6 +450,11 @@ impl PlaylistNode {
     }
 
     fn probe_current(&mut self, ctx: &mut RenderContext<'_>, product: lpc_model::VisualProduct) {
+        if self.current_entry != self.planned_entry {
+            // This frame's plan already failed its entry; the product is the
+            // failed one's (see `planned_entry`).
+            return;
+        }
         let readiness = ctx
             .visual_product_readiness(product)
             .unwrap_or_else(|e| VisualReadiness::Failed(format!("{e}")));
@@ -619,6 +638,7 @@ impl NodeRuntime for PlaylistNode {
         ctx.publish_runtime_slot(&self.state, &self.published_paths.output)?;
 
         self.plan = self.plan_frame(ctx, time)?;
+        self.planned_entry = self.current_entry;
         (self.shown_entry, self.shown_alpha) = match self.plan {
             PlaylistFramePlan::Live { capture: true, .. }
             | PlaylistFramePlan::Blend { capture: true, .. } => {
@@ -954,7 +974,7 @@ impl PlaylistNode {
                 Ok(true)
             }
             Err(error) if probe => {
-                self.fail_entry(self.current_entry, format!("render: {error}"));
+                self.fail_planned_entry(format!("render: {error}"));
                 Ok(false)
             }
             Err(error) => Err(error),
@@ -1093,7 +1113,7 @@ impl PlaylistNode {
                 );
                 match sampled {
                     Ok(()) => self.probe_current(ctx, incoming),
-                    Err(error) => self.fail_entry(self.current_entry, format!("render: {error}")),
+                    Err(error) => self.fail_planned_entry(format!("render: {error}")),
                 }
             }
             let held = self.held.words(offset, words);
