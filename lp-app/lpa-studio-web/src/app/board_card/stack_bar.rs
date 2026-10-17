@@ -5,8 +5,8 @@
 //! the name is the thing itself; the state follows only when it is not
 //! normal; the action sits flush at the end. The name is the row's value
 //! and keeps its width: where the row is short of room the state gives
-//! way first — cut at its end, then gone — before the name is cut
-//! ([`aside_style`]). While the row works, the
+//! way first — cut at its end, then gone ([`aside_style`]) — then the
+//! card's kind words, together ([`kind_need`]), before the name is cut. While the row works, the
 //! conic spinner takes the icon's place and the work's words are its state
 //! ([`row_words`]), with the iridescent fill along its foot
 //! ([`WorkFoot`](super::bar_work::WorkFoot)).
@@ -34,6 +34,7 @@ use lpa_studio_core::{BarWorkState, OfferPath, UiAction, UiBarMark, UiStackBar, 
 use super::bar_details::BarDetails;
 use super::bar_work::work_state_name;
 use super::card_action::{CardAction, CardActionLook, OfferAction};
+use super::text_width::{at_percent, text_tenths};
 use crate::base::{
     PopoverPlacement, StudioIcon, StudioIconName, action_icon_name, conic_spinner_class,
 };
@@ -170,6 +171,84 @@ const WHOLE_ASIDE_CHARS: usize = 8;
 
 /// The least of a longer state worth showing, its ellipsis included.
 const ASIDE_MIN_CH: usize = 6;
+
+/// The card width, in px, below which the rows' kind words give way so
+/// every row keeps its value whole beside its end: the widest row's icon,
+/// kind, value and end, guessed from their letters ([`super::text_width`]),
+/// with a margin. The card sets it (`--ux-kind-need`), and the kind column
+/// steps to nothing below it on every row at once, so the values still
+/// line up (style.css `.ux-board-bar-kind`). `None` with no row that has
+/// a kind word.
+pub(crate) fn kind_need(bars: &[UiStackBar]) -> Option<usize> {
+    bars.iter()
+        .filter(|bar| bar.kind.is_some())
+        .map(|bar| {
+            let (name, _) = row_words(bar);
+            let value = at_percent(text_tenths(&name), ROW_TYPE_PERCENT);
+            ROW_LEAD_TENTHS + value + row_end_tenths(bar) + ROW_MARGIN_TENTHS
+        })
+        .max()
+        .map(|tenths| tenths.div_ceil(10))
+}
+
+/// What a row draws after its words, in tenths of a px: the trigger's
+/// right padding, then its button(s) — the work's way out while it works —
+/// or the section that opens its details, or the chevron; and its mark.
+fn row_end_tenths(bar: &UiStackBar) -> usize {
+    let section = |word: &str, icon: bool| {
+        SECTION_PADDING_TENTHS
+            + at_percent(text_tenths(word), BUTTON_TYPE_PERCENT)
+            + if icon { SECTION_ICON_TENTHS } else { 0 }
+    };
+    let buttons: Vec<(&str, bool)> = match bar.work.as_ref().map(|work| (&work.state, work)) {
+        Some((BarWorkState::Running, work)) => work
+            .cancel
+            .as_ref()
+            .map(|_| ("Cancel", false))
+            .into_iter()
+            .collect(),
+        Some((BarWorkState::Failed { retry: Some(retry) }, _)) => {
+            vec![(retry.word.as_str(), retry.icon.is_some())]
+        }
+        Some((BarWorkState::Failed { retry: None } | BarWorkState::Done, _)) => Vec::new(),
+        None => [bar.action.as_ref(), bar.way_out.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(|action| (action.word.as_str(), action.icon.is_some()))
+            .collect(),
+    };
+    let end = match (buttons.is_empty(), opens_details(bar)) {
+        (false, _) => buttons
+            .iter()
+            .map(|(word, icon)| section(word, *icon))
+            .sum(),
+        (true, Some(word)) => section(word, false),
+        (true, None) => SMALL_ICON_TENTHS,
+    };
+    let mark = match bar.mark.is_some() && bar.work.is_none() {
+        true => SMALL_ICON_TENTHS,
+        false => 0,
+    };
+    TRIGGER_RIGHT_TENTHS + end + mark
+}
+
+/// A row's 11.5 px against the primary's type.
+const ROW_TYPE_PERCENT: usize = 86;
+/// A row button's 11 px extrabold against the primary's type.
+const BUTTON_TYPE_PERCENT: usize = 88;
+/// The trigger's left padding (10 px), the icon (12) and its gap (6), the
+/// kind column (56) and its gap (6).
+const ROW_LEAD_TENTHS: usize = 900;
+/// The trigger's right padding.
+const TRIGGER_RIGHT_TENTHS: usize = 100;
+/// A flush section's padding (11 px each side) and its leading hairline.
+const SECTION_PADDING_TENTHS: usize = 230;
+/// A flush section's icon (11 px) and its gap (4 px).
+const SECTION_ICON_TENTHS: usize = 150;
+/// The chevron or the mark (12 px) and its gap (6 px).
+const SMALL_ICON_TENTHS: usize = 180;
+/// A few px over, so a guess never costs a value its last letter.
+const ROW_MARGIN_TENTHS: usize = 40;
 
 /// The word of the row's own end section that opens its details
 /// ("Review"), while the row carries no work.
@@ -363,11 +442,13 @@ const TRIGGER_OPEN_CLASS: &str = "tw:flex tw:h-full tw:w-full tw:min-w-0 tw:curs
 const ICON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-subtle-foreground";
 const ICON_TONED_CLASS: &str = "tw:inline-flex tw:flex-none";
 /// The kind: a fixed column (56 px) so the names line up down the card,
-/// muted — it teaches, it isn't news.
+/// muted — it teaches, it isn't news. On a card too narrow for every
+/// row's value beside its button, the column steps to nothing on every
+/// row at once ([`kind_need`], style.css `.ux-board-bar-kind`).
 const KIND_CLASS: &str =
-    "tw:w-14 tw:flex-none tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
+    "ux-board-bar-kind tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
 /// …in a toned row: the row's own colour, quieter.
-const KIND_TONED_CLASS: &str = "tw:w-14 tw:flex-none tw:font-medium tw:opacity-70";
+const KIND_TONED_CLASS: &str = "ux-board-bar-kind tw:font-medium tw:opacity-70";
 /// The name and the state: one 28 px line that the state wraps off when
 /// it can't fit beside the whole name (style.css).
 const WORDS_CLASS: &str = "ux-board-bar-words";
@@ -506,6 +587,45 @@ mod tests {
         }
     }
 
+    /// The kind words give way on a card too narrow for a row's value
+    /// beside its button: "v2026.10.03-1" with Reinstall needs more than a
+    /// 245 px card (four to a row) and less than a 325 px one; a row with
+    /// only its chevron fits. The Link row has no kind word to give.
+    #[test]
+    fn the_kind_words_give_way_where_a_value_needs_the_room() {
+        let mut crashing = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.03-1",
+        );
+        crashing.aside = Some("crashing".to_string());
+        crashing.action = Some(lpa_studio_core::UiCardAction {
+            offer: lpa_studio_core::OfferPath::parse("devices/new-1/reinstall-firmware")
+                .expect("a path"),
+            word: "Reinstall".to_string(),
+            icon: Some("retry".to_string()),
+            draw: lpa_studio_core::UiActionDraw::Press,
+            args: lpa_studio_core::OfferArgs::new(),
+            refused: None,
+            verb_alone: None,
+        });
+        let need = kind_need(std::slice::from_ref(&crashing)).expect("a kind");
+        assert!((245..325).contains(&need), "{need}");
+        let hardware = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Hardware,
+            "chip",
+            "XIAO ESP32-C6",
+        );
+        let quiet = kind_need(std::slice::from_ref(&hardware)).expect("a kind");
+        assert!(quiet < 245, "{quiet}");
+        assert_eq!(
+            kind_need(&[crashing.clone(), hardware]),
+            Some(need),
+            "the widest row"
+        );
+        assert_eq!(kind_need(&[link_row(None)]), None);
+    }
+
     /// While a row works its name stays and the work's words are its
     /// state; on the Link row they are the whole line.
     #[test]
@@ -625,7 +745,10 @@ mod tests {
         }
         assert!(TRIGGER_CLASS.contains("tw:h-full"));
         assert!(TRIGGER_OPEN_CLASS.contains("tw:h-full"));
-        assert!(KIND_CLASS.contains("tw:w-14") && KIND_TONED_CLASS.contains("tw:w-14"));
+        assert!(
+            KIND_CLASS.contains("ux-board-bar-kind")
+                && KIND_TONED_CLASS.contains("ux-board-bar-kind")
+        );
     }
 
     /// The rows' hairlines: every row carries the full-bleed top border,

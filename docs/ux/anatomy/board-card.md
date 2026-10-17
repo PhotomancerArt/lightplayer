@@ -219,13 +219,15 @@ kind (`USB`, `Wi‑Fi`, `Bluetooth`, `lightplayer.app`), as a version
 number is.
 
 Short of room, a row gives way in one order: its state first (cut at its
-end, then gone), then, on a narrow card, its kind word (the icon stays),
-and its name only when it alone is wider than the row:
+end, then gone), then the card's kind words (on every row at once, so the
+values still line up; the icons stay), and its name only when it alone is
+wider than the row. The kind words go on a card too narrow for its widest
+row's value whole beside that row's button (four to a row, a phone's two):
 
 ```text
 ▲ Firmware  v2026.10.03-1  crashing  │ Reinstall │   wide
 ▲ Firmware  v2026.10.03-1            │ Reinstall │   the state gone   # was: v crashing
-▲ v2026.10.03-1                      │ Reinstall │   a narrow card
+▲ v2026.10.03-1          crashing    │ Reinstall │   too narrow for it with its kind word
 ```
 
 ## Each row
@@ -379,7 +381,7 @@ R6  the tone is the icon's alone; the sentences stay plain         (director's c
 R7  offline, another way reaches it: the Link row names that way  (director's call, pending Yona's veto)
 R8  a project's name in running text is quoted                     (director's call, pending Yona's veto)
 R9  a row's value keeps its width; its state gives way first: cut, then gone   (director's review)
-    (on a narrow card the kind word gives way next, its icon staying: pending review)
+    (then the card's kind words, together, where a value needs their room: pending review)
 R10 one update, one number: the surface reads the working row's percent       (director's review)
 R11 no dead ends: a fix that isn't offered says why and what to do instead    (director's review)
 R12 a narrow name bar keeps the name's twelve characters; the primary says its verb alone   (director's review)

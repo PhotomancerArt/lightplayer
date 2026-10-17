@@ -992,15 +992,24 @@ label:has(> input:not(:disabled)) {
     white-space: nowrap;
 }
 
-/* A narrow card (a phone's two-column grid) is short of room in every row:
-   the kind word gives way so a row's value keeps its room beside its
-   action (the kind's icon still says what the row is about), and the
-   primary's section pads less, so the board's name keeps more of itself. */
-@container board-card (max-width: 239px) {
-    .ux-board-bar [data-bar-kind] {
-        display: none;
-    }
+/* The kind word: a fixed 56px column, so the values line up down the card.
+   On a card narrower than `--ux-kind-need` — the width its widest row
+   needs for its value whole beside its button, which the card sets from
+   its words — the column steps to nothing on every row at once (the
+   kind's icon still says what the row is about). A step, never a
+   squeeze, the same arithmetic as `.ux-label-tail`. */
+.ux-board-bar-kind {
+    flex: none;
+    overflow: hidden;
+    white-space: nowrap;
+    width: clamp(0px, calc((100cqw - var(--ux-kind-need, 0px)) * 1000), 56px);
+    /* Gone, it takes one of its two gaps (the trigger's 6px) with it. */
+    margin-inline-end: clamp(-6px, calc((100cqw - var(--ux-kind-need, 0px)) * 1000), 0px);
+}
 
+/* A narrow card (a phone's two-column grid): the primary's section pads
+   less, so the board's name keeps more of itself. */
+@container board-card (max-width: 239px) {
     [data-name-bar] .ux-row-flush {
         padding-inline: 10px;
     }

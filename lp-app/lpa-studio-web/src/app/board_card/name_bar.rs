@@ -23,6 +23,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiCardAction, UiNameBar, UiPrimary};
 
 use super::card_action::{CardAction, CardActionLook, narrow_tail};
+use super::text_width::{GLYPH_TENTHS, at_percent, text_tenths};
 use crate::base::conic_spinner_class;
 
 /// The name bar. See the module doc.
@@ -85,7 +86,10 @@ fn WorkingPrimary(label: String) -> Element {
 /// (the surface's sentence names the object).
 fn primary_need(title: &str, action: &UiCardAction) -> Option<usize> {
     narrow_tail(action, CardActionLook::Primary)?;
-    let name = text_tenths(title).min(NAME_RESERVE_CHARS * GLYPH_TENTHS) * NAME_SCALE_PERCENT / 100;
+    let name = at_percent(
+        text_tenths(title).min(NAME_RESERVE_CHARS * GLYPH_TENTHS),
+        NAME_SCALE_PERCENT,
+    );
     let icon = match action.icon {
         Some(_) => PRIMARY_ICON_TENTHS,
         None => 0,
@@ -95,23 +99,8 @@ fn primary_need(title: &str, action: &UiCardAction) -> Option<usize> {
     Some(need.div_ceil(10))
 }
 
-/// About how wide `text` is at the primary's 12.5 px extrabold, in tenths
-/// of a px: narrow letters, wide ones, capitals and the rest.
-fn text_tenths(text: &str) -> usize {
-    text.chars()
-        .map(|glyph| match glyph {
-            'i' | 'j' | 'l' | 'r' | 't' | 'f' | 'I' | ' ' | '.' | ',' | '-' | '\'' => 40,
-            'm' | 'w' | 'M' | 'W' => 105,
-            'A'..='Z' => 85,
-            _ => GLYPH_TENTHS,
-        })
-        .sum()
-}
-
 /// The name's reserve: about twelve characters.
 const NAME_RESERVE_CHARS: usize = 12;
-/// An ordinary letter at 12.5 px extrabold, in tenths of a px.
-const GLYPH_TENTHS: usize = 75;
 /// The name's 13.5 px bold against the primary's type.
 const NAME_SCALE_PERCENT: usize = 106;
 /// The bar's left padding (11 px) and its gap (8 px).

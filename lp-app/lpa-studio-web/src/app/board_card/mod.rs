@@ -86,6 +86,7 @@ pub(crate) mod other_version_form;
 pub(crate) mod restore_from_file_button;
 pub(crate) mod stack_bar;
 pub(crate) mod status_corner;
+pub(crate) mod text_width;
 
 pub(crate) use board_card::BoardCard;
 #[cfg(any(test, feature = "stories"))]
