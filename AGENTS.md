@@ -1287,6 +1287,15 @@ also fails a hand-written row added back to `docs/defects/README.md`; delete
 that row. Recurring classes in `just defects-index --by-class` are
 architecture signals — surface them when you see one repeat.
 
+## Studio UX
+
+UI work starts at `docs/ux/README.md`. Name the principles your change
+touches and read only those, then read the component's anatomy under
+`docs/ux/anatomy/`. A new component gets its anatomy drawn (in ASCII, whole
+then part by part) and reviewed before it is built. A feel-gate note becomes
+a bad → do pair under its principle, in the PR that fixes it. `docs/style/`
+holds the product's words (`language.md`) and its visual style (`ui.md`).
+
 ## Studio UI visual baselines
 
 Story baselines are **CI-canonical** and live **outside this repo**, in the

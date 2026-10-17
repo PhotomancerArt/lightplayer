@@ -1,5 +1,8 @@
 # Studio UI Style
 
+The principles behind these words and looks, with examples, are in
+`docs/ux/README.md`.
+
 Studio UI should be shaped around what the user is doing, not around the
 internal shape of the data.
 
