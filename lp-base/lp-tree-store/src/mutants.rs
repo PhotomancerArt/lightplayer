@@ -62,10 +62,13 @@ pub enum Mutant {
     /// Mount never falls back to reading every record: a closure the fast
     /// pass could not complete is no store.
     NoFullScan,
+    /// `format` erases its two sectors but leaves every other header as it
+    /// reads (no kill): an earlier store's sectors stay trusted.
+    FormatKeepsHeaders,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 14] = [
+    pub const ALL: [Mutant; 15] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -80,6 +83,7 @@ impl Mutant {
         Mutant::TrustTailOnce,
         Mutant::NewestByHeaders,
         Mutant::NoFullScan,
+        Mutant::FormatKeepsHeaders,
     ];
 
     pub fn name(self) -> &'static str {
@@ -98,6 +102,7 @@ impl Mutant {
             Mutant::TrustTailOnce => "trust_tail_once",
             Mutant::NewestByHeaders => "newest_by_headers",
             Mutant::NoFullScan => "no_full_scan",
+            Mutant::FormatKeepsHeaders => "format_keeps_headers",
         }
     }
 

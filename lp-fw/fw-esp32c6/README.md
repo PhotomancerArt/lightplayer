@@ -262,8 +262,9 @@ it, because they all go through `base_fs`.
   - `[FS] tree store mounted (<n> sectors, <free> free, root <seq>)` — `fs: mounted`;
   - `[FS] tree store formatted (…)` — a partition with no store (blank,
     littlefs, an interrupted first format), when the legacy probe holds
-    nothing — `fs: formatted`; the format erases every sector (≈ 3.7 s on
-    silicon at 176 sectors, D4);
+    nothing — `fs: formatted`; the format is lazy: it erases sectors 0
+    and 1 and kills every other header (it erased all 176, ≈ 3.7–3.9 s on
+    silicon, until 2026-10-16);
   - `[FS] tree store refused: a newer or damaged store header — files kept
     (<why>); using memory FS, access locked` — `fs: refused`: nothing
     written, the device store locked, Bluetooth off; read the files with

@@ -100,7 +100,8 @@ fn a_cut_anywhere_in_a_first_format_is_no_store() {
                 .unwrap();
             st.flash().ops_since_plan()
         };
-        assert!(ops > u64::from(SECTORS) * 2, "{ops} ops");
+        // Lazy: two erases, whatever the flash held.
+        assert_eq!(erases(&probe), 2, "start {si}");
         for k in 0..ops {
             for tear in TearModel::NAMED {
                 for seed in 0..3u64 {
@@ -137,6 +138,94 @@ fn a_cut_anywhere_in_a_first_format_is_no_store() {
         runs > 1000 && no_store > runs / 2,
         "{runs} runs, {no_store} NoStore"
     );
+}
+
+/// A format over a store with files and many roots (each with a higher
+/// sequence than the root `format` writes): two sectors erased, every other
+/// header killed, so the mount sees the empty store and nothing of the old
+/// one, the old roots included; writing goes on over the killed sectors.
+#[test]
+fn a_format_over_a_store_kills_every_old_header() {
+    let (c, f) = files_store();
+    let old_seq = mount(f.clone(), &c).summary().root_seq;
+    assert!(old_seq > 1);
+    let mut f = f;
+    f.reset_stats();
+    let st = TreeStore::format(&mut f, SoftSha256, c.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
+    assert_eq!(st.summary().root_seq, 1);
+    drop(st);
+    assert_eq!(erases(&f), 2);
+    for s in 2..SECTORS {
+        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+        f.peek(s * 4096, &mut h);
+        assert!(
+            h == [0u8; 24] || h == [0xFF; 24],
+            "sector {s} header {h:02x?}"
+        );
+    }
+    let mut st = mount(f, &c);
+    assert!(snapshot(&mut st).is_empty());
+    assert_eq!(st.summary().root_seq, 1);
+    for i in 0..40u64 {
+        st.put("/after.json", &text(i, 3000)).unwrap();
+    }
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.list("/").unwrap(), ["/after.json"]);
+    assert_eq!(st.get("/after.json").unwrap().unwrap(), text(39, 3000));
+}
+
+/// A format erases littlefs's superblock pair (blocks 0 and 1), so neither a
+/// littlefs core nor the host's probe can find the old files.
+#[test]
+fn a_format_erases_the_littlefs_superblocks() {
+    let mut f = littlefs_shaped();
+    TreeStore::format(&mut f, SoftSha256, cfg())
+        .map_err(|(e, ..)| e)
+        .unwrap();
+    for block in 0..2u32 {
+        let mut b = [0u8; 4096];
+        f.peek(block * 4096, &mut b);
+        assert!(
+            !b.windows(8).any(|w| w == b"littlefs"),
+            "block {block} still names littlefs"
+        );
+    }
+}
+
+/// A cut anywhere in a format over a store with files, then a second
+/// format: the store is empty and takes writes. (What the cut leaves before
+/// that is the old store, `Damaged` or `NoStore` — a firmware formats only
+/// on `NoStore`, so it never runs this — but never a newer format:
+/// `format_extension_tests`.)
+#[test]
+fn a_cut_format_over_a_store_formats_again() {
+    let (c, f) = files_store();
+    let mut probe = f.clone();
+    probe.set_plan(FaultPlan::none());
+    TreeStore::format(&mut probe, SoftSha256, c.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
+    let ops = probe.ops_since_plan();
+    for k in 0..ops {
+        for tear in TearModel::NAMED {
+            for seed in 0..3u64 {
+                let mut g = f.clone();
+                g.set_plan(FaultPlan::cut(k, tear, seed << 16 | k));
+                assert!(TreeStore::format(&mut g, SoftSha256, c.clone()).is_err());
+                g.power_cycle(FaultPlan::none());
+                let ctx = || std::format!("cut {k}/{ops} {tear:?} seed {seed}");
+                let mut st = match TreeStore::format(g, SoftSha256, c.clone()) {
+                    Ok(st) => st,
+                    Err((e, ..)) => panic!("{}: reformat: {e:?}", ctx()),
+                };
+                st.put("/x.json", b"{}").unwrap();
+                let mut st = mount(st.into_flash(), &c);
+                assert_eq!(st.list("/").unwrap(), ["/x.json"], "{}", ctx());
+            }
+        }
+    }
 }
 
 /// The firmware's boot: mount by value, and on `NoStore` format by value
@@ -194,6 +283,11 @@ fn geom() -> NorGeometry {
 
 fn cfg() -> StoreConfig {
     StoreConfig::default()
+}
+
+/// Erases the simulator counted.
+fn erases(f: &NorFlashSim) -> u64 {
+    f.stats().erases_total()
 }
 
 /// The mount's error, or `Ok` when it mounted.

@@ -1,0 +1,340 @@
+# Studio UX
+
+How Studio shows things. Read this before building or reviewing any UI.
+
+Each principle is one rule, a do and a bad. The bad lines are real: each one
+shipped, or nearly did, and the comment says where it was caught. Start from
+the index, pick the principles your change touches, and read only those.
+
+```text
+docs/ux/README.md             the principles (this file)
+docs/ux/anatomy/<thing>.md    one component, drawn whole, then part by part
+docs/ux/studies/<topic>/      deep dives: rendered good/bad pages
+```
+
+Notation:
+
+```text
+│ … │          a surface: a card, a bar, a row
+│ Send │       a button, flush in its bar
+◆ ↔ ○ ▲ ■      icons: project, link, access, firmware, hardware
+◌              working (spinner)
+━━━━────       progress
+(dim)          drawn stale
+← red          the tone the line takes (ui.md's status families)
+# card 10-14   where the bad was caught: a feel gate, a spike round, a review
+```
+
+## Index
+
+```text
+P1   teach what it is              any label, row, button
+P2   say it once                   a fact or problem shown in two places
+P3   stay in place                 anything with states
+P4   quiet when good, loud when bad  status, indicators, numbers
+P5   details on demand             anything longer than a label
+P6   label voice                   any words
+P7   no dead ends                  disabled controls, errors, empty states
+P8   local consistency             rows, lists, cards, pages
+P9   useful structure              lines, boxes, sections, icons
+P10  coherence over css ease       borders, dividers, progress, popups
+P11  their words, not ours         any words
+P12  the button explains           buttons
+P13  old looks old                 offline, cached, last-known
+P14  never colour alone            tones, marks
+P15  numbers read naturally        numbers, times, sizes
+P16  one treatment per meaning     icons, colours, words that mean something
+P17  one way per kind of data      times, sizes, versions, names, status
+```
+
+P1–P10, P16, P17: Yona. P11–P15: the director's, accepted 10-16.
+
+---
+
+## P1. teach what it is
+
+Say what a thing is. A few values explain themselves (`v1.2.3`, `USB`).
+Most don't: give them their kind, as an icon and a word.
+
+```text
+do:   ◆ Project   studio
+do:   ▶ Simulated · off
+bad:  ◆ studio                         # shipped: a bare name, of what?
+bad:  Playing studio                   # spike r1: "confusing, though I know what you're getting at"
+bad:  In this tab · off                # card 10-14: "does that mean it's emulated?"
+bad:  Nothing on it yet                # card 10-14: it has firmware; the project is what's missing
+```
+
+study: board-card-words (once round 2 converges) ·
+app: `lpa-studio-core/…/board_card/project_bar.rs`
+
+## P2. say it once
+
+One fact, one place. One problem, one place: its row turns red and says
+what's wrong, and nothing else on the screen repeats it.
+
+```text
+do:   ▲ Firmware  v2026.10.08-9   crashing │ Reinstall │    ← red
+      (the corner and the name bar stay quiet)
+
+bad:  │ XIAO ESP32-C6       │ Updating · 42%  │   # shipped: the button says it
+      │ ◌ Updating · 42%  ━━━━━━────────      │   # …and the row says it again
+bad:  XIAO ESP32-S3 Plus (sim) · Simulated · off · Simulated XIAO …   # shipped: 3× on one card
+bad:  You can edit · anyone can edit                                  # shipped: twice in one row
+```
+
+app: `lpa-studio-core/…/board_card/status_corner.rs`, `primary_action.rs`
+
+## P3. stay in place
+
+Everything keeps its place in every state: kind, name, state, action.
+A state never moves in front of the name, and the name never moves out.
+Pixels too: a live number doesn't push the layout around.
+
+```text
+do:   ◆ Project   studio           out of date │ Send latest │
+do:   ▲ Firmware  v2026.07.02 (pre-OTA)   │ Update to v2026.10.16-1 │
+
+bad:  ◆ Out of date                studio     # shipped: the name moved to the right
+bad:  Old LightPlayer firmware                # spike r1: a word in front of the firmware
+```
+
+app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
+
+## P4. quiet when good, loud when bad
+
+Normal says nothing. Trouble can't be missed. Don't label the usual
+state, or anything nobody can act on.
+
+```text
+do:   (the corner is empty while the picture is live)
+do:   ▲ Firmware  v2026.10.16-1
+do:   ▲ Firmware  v2026.10.08-9   crashing │ Reinstall │    ← red
+
+bad:  ● 899 fps                       # shipped: the corner, for us
+bad:  Live                            # spike r1: "means nothing to me… that should be the default"
+bad:  Firmware up to date             # spike r1: the version already says it
+```
+
+## P5. details on demand
+
+The surface answers three questions: what is it, is it ok, what's next.
+Everything else is one step in, in the row's details.
+
+```text
+do:   ◆ Project   studio   error                          ← red
+      └ details:  orbit.shader:12  'tme' is not declared
+
+bad:  ◆ studio has a problem · a shader didn't compile     # spike r1
+bad:  Needs 2026.09.30, which Studio can't get             # shipped: too long for a row
+bad:  This board's file store has a newer or damaged header; its files
+      are kept — read them with `lp-cli hardware tree extract`.   # main 10-15: a paragraph on a card
+```
+
+app: `lpa-studio-web/…/board_card/bar_details.rs` (the detail card)
+
+## P6. label voice
+
+Labels, not sentences, in the words other software already uses. No
+pronouns, no chat, no explaining. A sentence goes in the details, if anywhere.
+
+```text
+do:   Confirmation required · Data lost · Not connected · Disabled
+      Inactive · Awaiting input · Update available · Interrupted
+
+bad:  Update needs your OK            # spike r1: "so ai-slop"
+bad:  Its files are gone              # card 10-14
+bad:  Needs your answer               # shipped: answer to what?
+bad:  The board isn't online.         # shipped: say "Offline"
+```
+
+## P7. no dead ends
+
+Never leave someone with nothing to do. A control that can't be pressed is
+replaced by the step that works, or says why. A problem offers its fix and
+a way out.
+
+```text
+do:   │ XIAO ESP32-C6        │ + Add a project │      # the next step that works
+do:   ▲ Firmware  data lost  │ Restore │ Reset │      # the fix, and a way out
+
+bad:  │ XIAO ESP32-C6        │ Connect         │  (grey)      # card 10-14: "confusing"
+bad:  Its files need restoring                        # card 10-14: "what if I just want to reset it?"
+bad:  Not known yet                                   # card 10-14: what isn't known?
+```
+
+app: `lpa-studio-core/…/board_card/primary_action.rs`
+
+## P8. local consistency
+
+Siblings share one shape: rows in a card, cards on a page, pages in the
+app. Find the pattern, name it, reuse it. A one-off needs a reason.
+
+```text
+do:   ◆ Project   studio
+      ↔ USB · connected
+      ○ Access    edit · USB
+      ▲ Firmware  v2026.10.16-1
+      ■ Hardware  XIAO ESP32-C6
+
+bad:  studio                     # shipped: a name alone
+      USB · live                 #          a link and a state
+      You can edit · USB         #          a sentence
+      2026.10.08                 #          a value alone
+      XIAO ESP32-C6              #          five rows, four grammars
+```
+
+The card's bars share one shape in code (icon · summary · aside · tone ·
+action). Their words had no shared grammar until the anatomy gave them one:
+[board card](anatomy/board-card.md).
+
+## P9. useful structure
+
+Every line, box, icon and word is there to say something. If you can't
+answer "why is that there?", remove it. Never put a box inside a box.
+
+```text
+do:   ┌──────────────────────┐        bad:  ┌──────────────────────┐
+      │ Porch lamp           │              │ ┌ Board ───────────┐ │
+      ├──────────────────────┤              │ │ ┌ Info ────────┐ │ │
+      │ ◆ Project   studio   │              │ │ │ ◆ studio     │ │ │
+      │ ↔ USB · connected    │              │ │ └──────────────┘ │ │
+      └──────────────────────┘              │ └──────────────────┘ │
+                                            └──────────────────────┘
+```
+
+`›` at a row's end is structure with a reason: the row opens its details.
+
+## P10. coherence over css ease
+
+Draw what the design means, not what CSS made easy. A line that divides a
+box crosses the whole box. Things that belong together share one outline:
+a button and the popup it opens are one shape (the detail card).
+
+```text
+do:   │ Porch lamp            │ Connect │     # the action is a section of the bar;
+      └───────────────────────┴─────────┘     # its line runs edge to edge
+bad:  │ Porch lamp        ( Connect )   │   # a chip floating in the bar
+
+do:   │ ◌ Updating · 42%                   │
+      │━━━━━━━━━━━━━━──────────────────────│  # the progress stays in its row
+bad:  │ ◌ Updating · 42%                   │
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  # card 10-14: the bar escaped its row
+```
+
+app: `lpa-studio-web/src/base/detail_popover.rs`
+
+---
+
+## P11. their words, not ours
+
+Name things the way the person sees them, never the way the code does.
+Internal words stay in debug surfaces.
+
+```text
+do:   ▲ Firmware  v2026.10.16-1
+
+bad:  fw-esp32c6 c688c990b           # shipped: a build label
+bad:  Pre-hello firmware             # shipped: our protocol history
+bad:  Updating · 1 of 2 · 42%        # shipped: core, then engine; one number will do
+bad:  Files waiting                  # shipped: the mechanism, not the state
+```
+
+## P12. the button explains
+
+A button says its verb, and its object when that isn't obvious. Let it
+carry the meaning so the line doesn't have to.
+
+```text
+do:   ▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # newer, without saying "old"
+
+bad:  │ Install │                         # shipped: install what?
+bad:  Old firmware · install the latest   # spike r1: the button already says it
+```
+
+## P13. old looks old
+
+A stale fact keeps its place, drawn stale. Show the last thing known, not
+"unknown". Say how old once, in one place.
+
+```text
+do:   ↔ Offline · 2 h
+      ◆ Project   studio          (dim)
+      ○ Access    edit            (dim)
+
+bad:  Project not known                 # shipped: it was known two hours ago
+bad:  Was playing studio · last seen    # spike r1: "last seen" on every row
+```
+
+## P14. never colour alone
+
+Colour says how bad. A word or a shape says what. Pair every tone with one.
+
+```text
+do:   ▲ Firmware  v2026.10.08-9   crashing │ Reinstall │   ← red: the word says what
+
+bad:  ↔ USB · connected  ☁ (lit)   vs   ☁ (dim)   # shipped: only colour tells them apart
+```
+
+## P15. numbers read naturally
+
+Pick the unit that makes the number easy to read, and use one format
+everywhere.
+
+```text
+do:   2 h · 3 d · 2 weeks · 42% · 3.2 MB
+
+bad:  2 h ago  ·  Offline · 2 h      # shipped: one time, two formats, one card
+```
+
+P17 gives each kind of number its one component.
+
+## P16. one treatment per meaning
+
+A meaning gets one icon, one colour, one word, everywhere in the app.
+Reuse what exists. Never borrow a colour, icon or word that already means
+something else.
+
+```text
+do:   ▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone: the button carries it
+do:   ↔ USB · not responding      │ Retry │   ← orange           # orange: a device needs you
+
+bad:  ○ You can edit · anyone can edit         ← yellow   # shipped: yellow means an unsaved edit
+bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue means live
+```
+
+app: `lpa-studio-core/src/core/status.rs` (`UiStatusKind`) ·
+`lpa-studio-web/src/base/icon.rs` (`StudioIconName`) ·
+`docs/style/ui.md` (the status families) · `docs/style/language.md` (the verbs)
+
+## P17. one way per kind of data
+
+Each kind of data has one type and one component that draws it, used
+everywhere and shown in one story: times, sizes, percentages, versions,
+project names, board names, status.
+
+```text
+do:   age_words(5_400)      → "2 h ago"       # one rule for every surface that names an age
+      duration_words(5_400) → "2 h"
+
+bad:  format_bytes · human_bytes · size · byte_size     # shipped: four size formatters;
+                                                        #   1536 B reads "1 KB" in one, "1.5 KB" in three
+bad:  12 s ago · last frame · 12 s ago · last heard 12 s ago · quiet — last heard 12 s ago
+                                                        # shipped: one age, four phrasings
+```
+
+app: `lpa-studio-core/…/devices/age_words.rs` (the model to copy) ·
+story: data kinds (to build: one story, every kind, every case)
+
+---
+
+## Keeping it alive
+
+```text
+before    UI work starts here: name the principles it touches, read the anatomy
+plan      a UI plan draws its anatomy first, in ASCII, reviewed before code
+review    a feel-gate note becomes a bad → do pair here, in the PR that fixes it
+new       no principle fits? add one, marked proposed; Yona approves it
+study     a converged spike becomes a study, linked from its principles
+data      a new kind of data gets its type, its component and its story (P17)
+```
