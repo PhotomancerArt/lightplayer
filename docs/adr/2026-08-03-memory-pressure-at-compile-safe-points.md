@@ -270,5 +270,6 @@ The largest free block after the compile grows for basic (137,376 →
 - The pinned boot test now asserts one `High` broadcast before the first
   frame's compile and a lit first frame; the playlist-switch tests hold two
   frames where they held three.
-- On silicon the C6's first light loses the black frame (see the A8 PR for
-  the CX1 numbers).
+- On silicon the C6's first light loses the black frame: CX1, littlefs,
+  `projects/test/basic`, 10 power-on boots each, 708 → 635 ms with a host
+  connecting during the boot and 695 → 632 ms with none (PR #1165).
