@@ -5,7 +5,9 @@ use dioxus::html::geometry::WheelDelta;
 use dioxus::html::input_data::MouseButton;
 use dioxus::html::{Key as WebKey, Modifiers};
 use dioxus::prelude::*;
-use lab_mapping_model::{Button, Editor, Key, Mods, Vec2};
+use lab_mapping_model::{Button, GraphInput, Key, Mods, Vec2};
+
+use crate::graph_editor::GraphEditor;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
@@ -65,25 +67,27 @@ fn key(evt: &KeyboardEvent) -> Option<Key> {
     })
 }
 
-pub fn key_down(ed: &mut Signal<Editor>, evt: KeyboardEvent) {
-    let m = mods(evt.modifiers());
+pub fn key_down(ed: &GraphEditor, evt: KeyboardEvent) {
+    let mods = mods(evt.modifiers());
     match key(&evt) {
-        Some(k) => {
-            if ed.write().key_down(k, m) {
+        Some(key) => {
+            if ed.input(GraphInput::KeyDown { key, mods }) {
                 evt.prevent_default();
             }
         }
         // ⌘, ⌥, ⇧ on their own: the hint bar changes while they are held.
-        None => ed.write().modifiers(m),
+        None => {
+            ed.input(GraphInput::Modifiers(mods));
+        }
     }
 }
 
-pub fn key_up(ed: &mut Signal<Editor>, evt: KeyboardEvent) {
-    let m = mods(evt.modifiers());
+pub fn key_up(ed: &GraphEditor, evt: KeyboardEvent) {
+    let mods = mods(evt.modifiers());
     match key(&evt) {
-        Some(k) => ed.write().key_up(k, m),
-        None => ed.write().modifiers(m),
-    }
+        Some(key) => ed.input(GraphInput::KeyUp { key, mods }),
+        None => ed.input(GraphInput::Modifiers(mods)),
+    };
 }
 
 /// The window's `mousemove` and `mouseup` listeners for one canvas. They
@@ -111,14 +115,14 @@ impl Drop for WindowListeners {
 /// Listen for `mousemove` and `mouseup` on the window while the canvas is
 /// mounted. A drag follows the pointer anywhere; a release outside the
 /// window is noticed on the first move back (no button held).
-pub fn follow_window(ed: Signal<Editor>) -> Option<WindowListeners> {
+pub fn follow_window(ed: GraphEditor) -> Option<WindowListeners> {
     let window = web_sys::window()?;
     let runtime = Runtime::current();
     let scope = current_scope_id();
 
     let on_move = {
         let runtime = runtime.clone();
-        let mut ed = ed;
+        let ed = ed.clone();
         Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |evt: web_sys::MouseEvent| {
             let Some((at, inside)) = canvas_point(&evt) else {
                 return;
@@ -128,22 +132,20 @@ pub fn follow_window(ed: Signal<Editor>) -> Option<WindowListeners> {
                 let dragging = ed.peek().dragging();
                 if dragging && evt.buttons() == 0 {
                     // Released somewhere we could not hear it.
-                    let mut e = ed.write();
-                    e.pointer_move(at, m);
-                    e.pointer_up(at, m);
+                    ed.input(GraphInput::PointerMove { at, mods: m });
+                    ed.input(GraphInput::PointerUp { at, mods: m });
                 } else if dragging || inside {
-                    let mut e = ed.write();
-                    e.pointer_move(at, m);
-                    let edge = crate::edge_layer::hit(&e, at);
-                    e.set_hovered_edge(edge);
+                    ed.input(GraphInput::PointerMove { at, mods: m });
+                    let edge = crate::edge_layer::hit(&ed.peek(), at);
+                    ed.input(GraphInput::HoveredEdge(edge));
                 } else if ed.peek().pointer.is_some() {
-                    ed.write().pointer_leave();
+                    ed.input(GraphInput::PointerLeave);
                 }
             });
         })
     };
     let on_up = {
-        let mut ed = ed;
+        let ed = ed.clone();
         Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |evt: web_sys::MouseEvent| {
             let Some((at, _)) = canvas_point(&evt) else {
                 return;
@@ -151,7 +153,7 @@ pub fn follow_window(ed: Signal<Editor>) -> Option<WindowListeners> {
             let m = window_mods(&evt);
             runtime.in_scope(scope, || {
                 if ed.peek().dragging() {
-                    ed.write().pointer_up(at, m);
+                    ed.input(GraphInput::PointerUp { at, mods: m });
                 }
             });
         })
@@ -175,7 +177,7 @@ fn canvas_point(evt: &web_sys::MouseEvent) -> Option<(Vec2, bool)> {
 fn relative(client_x: f64, client_y: f64) -> Option<(Vec2, bool)> {
     let el = web_sys::window()?
         .document()?
-        .query_selector(".canvas")
+        .query_selector(".graph .canvas")
         .ok()??;
     let r = el.get_bounding_client_rect();
     let x = client_x - r.left();

@@ -20,7 +20,7 @@ pub fn OutputFace(
     h: f64,
     detail: DetailLevel,
     zoom: f64,
-    frame: Memo<BoardFrame>,
+    frame: ReadSignal<BoardFrame>,
 ) -> Element {
     let font = card_font();
     let full = detail == DetailLevel::Full;
@@ -106,7 +106,13 @@ fn run_class(e: Emphasis) -> &'static str {
 /// Every port's pixels, as the board shows them now. Its own component, so
 /// a tick of the board redraws only this canvas.
 #[component]
-fn OutputPixels(face: UiOutputFace, w: f64, h: f64, zoom: f64, frame: Memo<BoardFrame>) -> Element {
+fn OutputPixels(
+    face: UiOutputFace,
+    w: f64,
+    h: f64,
+    zoom: f64,
+    frame: ReadSignal<BoardFrame>,
+) -> Element {
     let id = use_hook(|| canvas_id("pixels"));
     // Read here, so a new frame draws again; the drawing reads the latest.
     let _ = frame.read();

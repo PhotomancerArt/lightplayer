@@ -23,21 +23,24 @@
 //! Both put the same keyed cards in the same world layer, so switching
 //! eases every card to its new place while the world's own transform eases
 //! from the camera to the stack's, and the edges fade for the move.
+//!
+//! The colours are the host's: it hands in the board's frame. The lab
+//! simulates one (`board_clock.rs`); Studio builds one from the board's
+//! own output frames.
 
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Camera, Editor, LayoutKind, NodeId, Rect, UiCursor, Vec2};
+use lab_mapping_model::{BoardFrame, Camera, GraphInput, LayoutKind, NodeId, Rect, UiCursor, Vec2};
 
 use crate::dots_layer::DotsLayer;
 use crate::edge_layer;
+use crate::graph_editor::GraphEditor;
 use crate::input;
 use crate::overlay::{CursorNote, Menu, Overlay};
 use crate::view::View;
 use crate::world_layer::WorldLayer;
 
-/// How often the board's clock ticks while its pixels move, in ms.
-const TICK_MS: u32 = 33;
 /// How long a relayout's cards take to ease to their new places (the CSS
 /// transition on `.node`), plus a frame: edges fade out for it.
 const SETTLE_MS: u32 = 200;
@@ -62,23 +65,34 @@ fn stack_camera(scroll_top: f64) -> Camera {
 }
 
 #[component]
-pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
-    let mut ed = ed;
+pub fn Canvas(ed: GraphEditor, view: View, frame: ReadSignal<BoardFrame>) -> Element {
     // Moves and releases come from the whole window, so a drag keeps going
     // when the pointer leaves the canvas (or the window) and finishes right
     // when it comes back. The listeners go when this canvas does.
-    use_hook(move || std::rc::Rc::new(input::follow_window(ed)));
+    use_hook({
+        let ed = ed.clone();
+        move || std::rc::Rc::new(input::follow_window(ed))
+    });
 
     // Layout, in the view: what there is (core's), laid out (lab-layout's),
     // handed back to the editor as a fact. The input is compared, so this
     // runs only when it changes, and handing the placement back changes no
     // input, so it can't loop.
-    let layout_input = use_memo(move || ed.read().layout_input());
-    let layout = use_memo(move || ed.read().layout());
+    let layout_input = use_memo({
+        let ed = ed.clone();
+        move || ed.read().layout_input()
+    });
+    let layout = use_memo({
+        let ed = ed.clone();
+        move || ed.read().layout()
+    });
     // The stack's column, in world units, from the canvas's width.
-    let stack_width = use_memo(move || {
-        let w = ed.read().viewport.x;
-        ((w - GUTTER_PX - STACK_RIGHT_PX) / STACK_ZOOM).max(20.0)
+    let stack_width = use_memo({
+        let ed = ed.clone();
+        move || {
+            let w = ed.read().viewport.x;
+            ((w - GUTTER_PX - STACK_RIGHT_PX) / STACK_ZOOM).max(20.0)
+        }
     });
     let placement = use_memo(move || match layout() {
         LayoutKind::Canvas => lab_layout::canvas_layout(&layout_input.read()),
@@ -90,103 +104,83 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
     let mut placed_for = use_signal(|| None::<LayoutKind>);
     let mut settling = use_signal(|| false);
     let mut settles = use_signal(|| 0_u64);
-    use_effect(move || {
-        let p = placement.read();
-        let now = layout();
-        ed.write().set_placement(&p);
-        // A switch: the canvas frames everything again; the stack starts at
-        // its top. The world's transform eases between them.
-        let was = *placed_for.peek();
-        if was.is_some_and(|w| w != now) {
-            match now {
-                LayoutKind::Canvas => ed.write().fit(),
-                LayoutKind::Stack => {
-                    set_scroll_top(0.0);
-                    scroll_top.set(0.0);
+    use_effect({
+        let ed = ed.clone();
+        move || {
+            let p = placement.read().clone();
+            let now = layout();
+            ed.input(GraphInput::Placement(p));
+            // A switch: the canvas frames everything again; the stack starts at
+            // its top. The world's transform eases between them.
+            let was = *placed_for.peek();
+            if was.is_some_and(|w| w != now) {
+                match now {
+                    LayoutKind::Canvas => {
+                        ed.input(GraphInput::Fit);
+                    }
+                    LayoutKind::Stack => {
+                        set_scroll_top(0.0);
+                        scroll_top.set(0.0);
+                    }
                 }
+                switching.set(true);
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(SWITCH_MS).await;
+                    switching.set(false);
+                });
             }
-            switching.set(true);
+            placed_for.set(Some(now));
+            // Edges fade while the cards ease to their new places.
+            let n = *settles.peek() + 1;
+            settles.set(n);
+            settling.set(true);
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(SWITCH_MS).await;
-                switching.set(false);
+                gloo_timers::future::TimeoutFuture::new(SETTLE_MS).await;
+                if *settles.peek() == n {
+                    settling.set(false);
+                }
             });
         }
-        placed_for.set(Some(now));
-        // Edges fade while the cards ease to their new places.
-        let n = *settles.peek() + 1;
-        settles.set(n);
-        settling.set(true);
-        spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(SETTLE_MS).await;
-            if *settles.peek() == n {
-                settling.set(false);
-            }
-        });
-    });
-
-    // The board's clock. It only advances while the pixels move, so a
-    // still board costs no redraws.
-    let mut now = use_signal(|| 0.0_f64);
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(TICK_MS).await;
-            if ed.peek().board_animates() {
-                now.set(seconds());
-            }
-        }
-    });
-    // What the board shows depends on the project, where its fixtures were
-    // placed, the selection and a drawing in progress — not on the pointer
-    // or the camera — so it is worked out again only when one of those, or
-    // the clock, moves. Handing over a placement keeps the revision, so it
-    // is counted apart.
-    let board_key = use_memo(move || {
-        let e = ed.read();
-        let draft = e
-            .drawing()
-            .then(|| (e.pointer, e.path_draft.clone(), e.camera));
-        (
-            e.project.revision(),
-            e.project.placements(),
-            e.selection.clone(),
-            draft,
-        )
-    });
-    let frame = use_memo(move || {
-        board_key.read();
-        let t = now();
-        ed.peek().board_frame(t)
     });
 
     // In the stack the editor's camera follows the scroll.
-    use_effect(move || {
-        let want = stack_camera(scroll_top());
-        let e = ed.read();
-        if e.layout() == LayoutKind::Stack && e.camera != want {
-            drop(e);
-            ed.write().camera = want;
+    use_effect({
+        let ed = ed.clone();
+        move || {
+            let want = stack_camera(scroll_top());
+            let e = ed.read();
+            if e.layout() == LayoutKind::Stack && e.camera != want {
+                drop(e);
+                ed.input(GraphInput::Camera(want));
+            }
         }
     });
     // In the stack, bring the card the selection is in into view.
-    let focus = use_memo(move || ed.read().focus_node());
-    use_effect(move || {
-        // Again when the column changes width: the cards move.
-        let _ = stack_width();
-        let Some(id) = focus() else { return };
-        if layout() != LayoutKind::Stack {
-            return;
-        }
-        let Some(r) = rects.peek().get(&id).copied() else {
-            return;
-        };
-        let cam = stack_camera(*scroll_top.peek());
-        let (top, bottom) = (cam.to_screen(r.min).y, cam.to_screen(r.max).y);
-        let h = ed.peek().viewport.y;
-        // In the upper part of the screen, clear of a sheet below.
-        if top < 0.0 || bottom > h * 0.55 {
-            let y = (*scroll_top.peek() + top - 24.0).max(0.0);
-            set_scroll_top(y);
-            scroll_top.set(y);
+    let focus = use_memo({
+        let ed = ed.clone();
+        move || ed.read().focus_node()
+    });
+    use_effect({
+        let ed = ed.clone();
+        move || {
+            // Again when the column changes width: the cards move.
+            let _ = stack_width();
+            let Some(id) = focus() else { return };
+            if layout() != LayoutKind::Stack {
+                return;
+            }
+            let Some(r) = rects.peek().get(&id).copied() else {
+                return;
+            };
+            let cam = stack_camera(*scroll_top.peek());
+            let (top, bottom) = (cam.to_screen(r.min).y, cam.to_screen(r.max).y);
+            let h = ed.peek().viewport.y;
+            // In the upper part of the screen, clear of a sheet below.
+            if top < 0.0 || bottom > h * 0.55 {
+                let y = (*scroll_top.peek() + top - 24.0).max(0.0);
+                set_scroll_top(y);
+                scroll_top.set(y);
+            }
         }
     });
 
@@ -212,25 +206,28 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
     let overlay = view.overlay.read().clone();
     let menu = view.menu.read().clone();
 
+    let (on_resize, on_down, on_double, on_wheel) =
+        (ed.clone(), ed.clone(), ed.clone(), ed.clone());
     rsx! {
         div {
             class: "canvas",
             style: "cursor: {cursor}",
             onresize: move |evt| {
                 if let Ok(size) = evt.get_content_box_size() {
-                    ed.write().resize(Vec2::new(size.width, size.height));
+                    on_resize.input(GraphInput::Resize(Vec2::new(size.width, size.height)));
                 }
             },
             oncontextmenu: move |evt| evt.prevent_default(),
             onmousedown: move |evt| {
-                if let (Some(b), Some(at)) = (input::button(&evt), input::client_point(&evt)) {
+                if let (Some(button), Some(at)) = (input::button(&evt), input::client_point(&evt)) {
                     evt.prevent_default();
-                    ed.write().pointer_down(at, b, input::mods(evt.modifiers()));
+                    let mods = input::mods(evt.modifiers());
+                    on_down.input(GraphInput::PointerDown { at, button, mods });
                 }
             },
             ondoubleclick: move |evt| {
                 if let Some(at) = input::client_point(&evt)
-                    && ed.write().double_click(at, input::mods(evt.modifiers()))
+                    && on_double.input(GraphInput::DoubleClick { at, mods: input::mods(evt.modifiers()) })
                 {
                     evt.prevent_default();
                 }
@@ -241,9 +238,9 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
                     return;
                 }
                 evt.prevent_default();
-                let d = input::wheel_delta(&evt);
+                let delta = input::wheel_delta(&evt);
                 if let Some(at) = input::wheel_client_point(&evt) {
-                    ed.write().wheel(at, d, input::mods(evt.modifiers()));
+                    on_wheel.input(GraphInput::Wheel { at, delta, mods: input::mods(evt.modifiers()) });
                 }
             },
             if !stack {
@@ -262,12 +259,12 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
                     switching: switching(),
                     revision,
                     frame,
-                    ed,
+                    ed: ed.clone(),
                 }
             }
             Overlay { nodes, rects, overlay, edges, settling: settling(), camera, viewport }
             if let Some(menu) = menu {
-                Menu { menu, viewport, ed }
+                Menu { menu, viewport, ed: ed.clone() }
             }
             if let Some(note) = note {
                 CursorNote { note }
@@ -290,7 +287,7 @@ fn set_scroll_top(y: f64) {
 fn scroller() -> Option<web_sys::Element> {
     web_sys::window()?
         .document()?
-        .query_selector(".scroller")
+        .query_selector(".graph .scroller")
         .ok()?
 }
 
@@ -319,11 +316,4 @@ fn cursor_css(c: UiCursor) -> &'static str {
         UiCursor::ResizeY => "ns-resize",
         UiCursor::ResizeXY => "nwse-resize",
     }
-}
-
-/// Seconds since the page started: the board's clock.
-fn seconds() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map_or(0.0, |p| p.now() / 1000.0)
 }

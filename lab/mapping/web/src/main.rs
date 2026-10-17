@@ -1,29 +1,22 @@
-//! The mapping design lab's page. It forwards input to the model
-//! (`lab-mapping-model`), lays the nodes out (`lab-layout`), and draws the
-//! view tree the model emits (`Editor::view_tree`) — no editor logic and
-//! no detail decisions live here.
+//! The mapping design lab's page: the library's canvas and panels
+//! (`lib.rs`) around the lab's own editor, with the lab's toolbar, its
+//! project picker and its simulated board. It owns the editor outright, so
+//! every input the components say is applied to it at once.
 //!
 //! The project picker opens the lab's own desk, or one of the real
 //! projects baked in by `lab-mapping-files` (the PLAYFUL choker, the zook
 //! dome, the radiance dome), and fits the view to it.
 
-mod canvas_container;
-mod dense_canvas;
-mod dots_layer;
-mod edge_layer;
-mod faces;
-mod input;
-mod lamp_cells;
-mod node_card;
-mod overlay;
-mod panels;
-mod text_measure;
-mod view;
-mod world_layer;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{Editor, LayoutKind, Notice, Project, SizeClass, Tool};
+use lab_mapping_model::{Editor, GraphInput, LayoutKind, Notice, Project, SizeClass, Tool};
+use lab_mapping_web::{
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, TreePane, input, use_simulated_frame,
+    use_view,
+};
 
 const LAB_CSS: &str = include_str!("lab.css");
 
@@ -33,9 +26,12 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut ed = use_signal(|| Editor::new(Project::seed()));
+    let tick = use_signal(|| 0_u64);
+    let ed =
+        use_hook(|| GraphEditor::owned(Rc::new(RefCell::new(Editor::new(Project::seed()))), tick));
     let mut project = use_signal(|| DESK.to_string());
-    let view = view::use_view(ed);
+    let view = use_view(ed.clone());
+    let frame = use_simulated_frame(ed.clone());
     let toolbar = view.toolbar.read().clone();
     let tool = toolbar.tool;
     let move_draw = toolbar.move_draw;
@@ -44,15 +40,23 @@ fn App() -> Element {
     // Page-local view state: the md tree drawer, the sm sheet.
     let mut tree_open = use_signal(|| false);
     let mut sheet = use_signal(|| Sheet::Half);
-    let has_selection = use_memo(move || !ed.read().selection.is_empty());
+    let has_selection = use_memo({
+        let ed = ed.clone();
+        move || !ed.read().selection.is_empty()
+    });
     // The layout you chose last time, in this browser.
-    use_hook(move || {
-        if let Some(kind) = remembered_layout() {
-            ed.write().set_layout(Some(kind));
+    use_hook({
+        let ed = ed.clone();
+        move || {
+            if let Some(kind) = remembered_layout() {
+                ed.input(GraphInput::SetLayout(Some(kind)));
+            }
         }
     });
+    let e = || ed.clone();
+    let (on_resize, on_down, on_up, on_pick) = (e(), e(), e(), e());
     let lab_class = format!(
-        "lab size-{}{}",
+        "lab graph size-{}{}",
         class.word(),
         if toolbar.forced_size_class.is_some() {
             " forced"
@@ -63,6 +67,7 @@ fn App() -> Element {
 
     rsx! {
         style { {LAB_CSS} }
+        style { {GRAPH_CSS} }
         div {
             class: "{lab_class}",
             tabindex: "0",
@@ -74,14 +79,14 @@ fn App() -> Element {
                     let width = web_sys::window()
                         .and_then(|w| w.inner_width().ok()?.as_f64())
                         .unwrap_or(size.width);
-                    ed.write().report_size_class(SizeClass::of_width(width));
+                    on_resize.input(GraphInput::SizeClass(SizeClass::of_width(width)));
                 }
             },
             onmounted: move |evt| async move {
                 let _ = evt.set_focus(true).await;
             },
-            onkeydown: move |evt| input::key_down(&mut ed, evt),
-            onkeyup: move |evt| input::key_up(&mut ed, evt),
+            onkeydown: move |evt| input::key_down(&on_down, evt),
+            onkeyup: move |evt| input::key_up(&on_up, evt),
             header { class: "top",
                 span { class: "brand", "Mapping lab" }
                 label { class: "fixture-picker",
@@ -91,7 +96,7 @@ fn App() -> Element {
                         value: "{project}",
                         onchange: move |evt| {
                             let key = evt.value();
-                            open_project(&mut ed, &key);
+                            open_project(&on_pick, &key);
                             project.set(key);
                         },
                         option { value: DESK, "desk" }
@@ -107,9 +112,12 @@ fn App() -> Element {
                         tabindex: "-1",
                         title: if move_draw { "On: drag moves and pins, P and O draw. Off: select and patch only." } else { "Off: select and patch only. Turn on to move, draw and reshape." },
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| {
-                            let on = ed.read().move_draw;
-                            ed.write().set_move_draw(!on);
+                        onclick: {
+                            let ed = e();
+                            move |_| {
+                                let on = ed.peek().move_draw;
+                                ed.input(GraphInput::MoveDraw(!on));
+                            }
                         },
                         span { class: "toggle-box", if move_draw { "✓" } else { "" } }
                         " Move & draw "
@@ -117,23 +125,33 @@ fn App() -> Element {
                     }
                 }
                 div { class: "tools",
-                    ToolButton { ed, tool: Tool::Select, key_label: "V", current: tool, enabled: true }
-                    ToolButton { ed, tool: Tool::Path, key_label: "P", current: tool, enabled: move_draw }
-                    ToolButton { ed, tool: Tool::Circle, key_label: "O", current: tool, enabled: move_draw }
+                    ToolButton { ed: e(), tool: Tool::Select, key_label: "V", current: tool, enabled: true }
+                    ToolButton { ed: e(), tool: Tool::Path, key_label: "P", current: tool, enabled: move_draw }
+                    ToolButton { ed: e(), tool: Tool::Circle, key_label: "O", current: tool, enabled: move_draw }
                 }
                 div { class: "tools",
                     button {
                         tabindex: "-1",
                         disabled: !can_undo,
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().undo(),
+                        onclick: {
+                            let ed = e();
+                            move |_| {
+                                ed.input(GraphInput::Undo);
+                            }
+                        },
                         "Undo " kbd { "⌘Z" }
                     }
                     button {
                         tabindex: "-1",
                         disabled: !can_redo,
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().redo(),
+                        onclick: {
+                            let ed = e();
+                            move |_| {
+                                ed.input(GraphInput::Redo);
+                            }
+                        },
                         "Redo " kbd { "⇧⌘Z" }
                     }
                 }
@@ -145,9 +163,12 @@ fn App() -> Element {
                             tabindex: "-1",
                             title: "The layout: a canvas you pan and zoom, or one column in tree order",
                             onmousedown: move |evt| evt.prevent_default(),
-                            onclick: move |_| {
-                                ed.write().set_layout(Some(kind));
-                                remember_layout(kind);
+                            onclick: {
+                                let ed = e();
+                                move |_| {
+                                    ed.input(GraphInput::SetLayout(Some(kind)));
+                                    remember_layout(kind);
+                                }
                             },
                             "{word}"
                         }
@@ -162,28 +183,28 @@ fn App() -> Element {
                         "Tree"
                     }
                 }
-                DebugMenu { ed, pinning: toolbar.pinning, forced: toolbar.forced_size_class }
+                DebugMenu { ed: e(), pinning: toolbar.pinning, forced: toolbar.forced_size_class }
             }
             match class {
                 SizeClass::Lg => rsx! {
-                    aside { class: "tree", panels::TreePane { ed, tree: view.tree } }
-                    main { class: "canvas-wrap", canvas_container::Canvas { ed, view } }
-                    aside { class: "inspector", panels::Inspector { ed, inspector: view.inspector } }
+                    aside { class: "tree", TreePane { ed: e(), tree: view.tree } }
+                    main { class: "canvas-wrap", Canvas { ed: e(), view, frame } }
+                    aside { class: "inspector", Inspector { ed: e(), inspector: view.inspector } }
                 },
                 SizeClass::Md => rsx! {
                     main { class: "canvas-wrap",
-                        canvas_container::Canvas { ed, view }
+                        Canvas { ed: e(), view, frame }
                         if tree_open() {
-                            aside { class: "drawer drawer-left tree", panels::TreePane { ed, tree: view.tree } }
+                            aside { class: "drawer drawer-left tree", TreePane { ed: e(), tree: view.tree } }
                         }
                         if has_selection() {
-                            aside { class: "drawer drawer-right inspector", panels::Inspector { ed, inspector: view.inspector } }
+                            aside { class: "drawer drawer-right inspector", Inspector { ed: e(), inspector: view.inspector } }
                         }
                     }
                 },
                 SizeClass::Sm => rsx! {
                     main { class: "canvas-wrap",
-                        canvas_container::Canvas { ed, view }
+                        Canvas { ed: e(), view, frame }
                         if has_selection() {
                             div { class: "sheet sheet-{sheet().word()}",
                                 button {
@@ -195,7 +216,7 @@ fn App() -> Element {
                                     span { class: "sheet-grip" }
                                 }
                                 div { class: "sheet-body inspector",
-                                    panels::Inspector { ed, inspector: view.inspector }
+                                    Inspector { ed: e(), inspector: view.inspector }
                                 }
                             }
                         }
@@ -203,7 +224,7 @@ fn App() -> Element {
                 },
             }
             footer { class: if class == SizeClass::Sm { "hints compact" } else { "hints" },
-                panels::HintBar { hints: view.hints }
+                HintBar { hints: view.hints }
             }
         }
     }
@@ -214,7 +235,7 @@ const DESK: &str = "desk";
 
 /// Open a project in the editor and fit the view to it. A project that
 /// won't open leaves the current one and says why.
-fn open_project(ed: &mut Signal<Editor>, key: &str) {
+fn open_project(ed: &GraphEditor, key: &str) {
     let project = if key == DESK {
         Ok(Project::seed())
     } else {
@@ -232,27 +253,27 @@ fn open_project(ed: &mut Signal<Editor>, key: &str) {
             e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
-            ed.set(e);
+            *ed.editor().borrow_mut() = e;
         }
         Err(why) => {
-            ed.write().notice = Some(Notice::refused(
+            ed.editor().borrow_mut().notice = Some(Notice::refused(
                 format!("Couldn't open {key}"),
                 why,
                 "pick another project; this one is unchanged",
             ));
         }
     }
+    ed.changed();
 }
 
 #[component]
 fn ToolButton(
-    ed: Signal<Editor>,
+    ed: GraphEditor,
     tool: Tool,
     key_label: &'static str,
     current: Tool,
     enabled: bool,
 ) -> Element {
-    let mut ed = ed;
     let class = if tool == current { "tool on" } else { "tool" };
     rsx! {
         button {
@@ -260,7 +281,9 @@ fn ToolButton(
             tabindex: "-1",
             disabled: !enabled,
             onmousedown: move |evt| evt.prevent_default(),
-            onclick: move |_| ed.write().set_tool(tool),
+            onclick: move |_| {
+                ed.input(GraphInput::Tool(tool));
+            },
             "{tool.word()} "
             kbd { "{key_label}" }
         }
@@ -318,8 +341,8 @@ fn remember_layout(kind: LayoutKind) {
 /// Debug, at the toolbar's right end: switches for things being tried,
 /// out of the way (D64). Open or shut is the page's own state.
 #[component]
-fn DebugMenu(ed: Signal<Editor>, pinning: bool, forced: Option<SizeClass>) -> Element {
-    let mut ed = ed;
+fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Element {
+    let pin = ed.clone();
     let mut open = use_signal(|| false);
     rsx! {
         div { class: "debug",
@@ -337,21 +360,30 @@ fn DebugMenu(ed: Signal<Editor>, pinning: bool, forced: Option<SizeClass>) -> El
                         tabindex: "-1",
                         title: "On: dragging a node pins it, U unpins it. Off: the layout places every node.",
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().set_pinning(!pinning),
+                        onclick: move |_| {
+                            pin.input(GraphInput::Pinning(!pinning));
+                        },
                         span { class: "toggle-box", if pinning { "✓" } else { "" } }
                         " Pinning"
                     }
                     div { class: "debug-row",
                         span { class: "debug-label", "Size" }
                         for (class, word) in [(None, "Auto"), (Some(SizeClass::Sm), "sm"), (Some(SizeClass::Md), "md"), (Some(SizeClass::Lg), "lg")] {
-                            button {
-                                key: "{word}",
-                                class: if forced == class { "tool on" } else { "tool" },
-                                tabindex: "-1",
-                                title: "Draw as if the screen were this size",
-                                onmousedown: move |evt| evt.prevent_default(),
-                                onclick: move |_| ed.write().force_size_class(class),
-                                "{word}"
+                            {
+                                let ed = ed.clone();
+                                rsx! {
+                                    button {
+                                        key: "{word}",
+                                        class: if forced == class { "tool on" } else { "tool" },
+                                        tabindex: "-1",
+                                        title: "Draw as if the screen were this size",
+                                        onmousedown: move |evt| evt.prevent_default(),
+                                        onclick: move |_| {
+                                            ed.input(GraphInput::ForceSizeClass(class));
+                                        },
+                                        "{word}"
+                                    }
+                                }
                             }
                         }
                     }

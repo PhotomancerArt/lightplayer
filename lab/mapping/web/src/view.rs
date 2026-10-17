@@ -6,9 +6,11 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, HintBar, Notice, UiCanvasEdge, UiCanvasNode, UiCursor, UiCursorNote, UiInspector,
-    UiMenu, UiOverlay, UiToolbar, UiTree,
+    HintBar, Notice, UiCanvasEdge, UiCanvasNode, UiCursor, UiCursorNote, UiInspector, UiMenu,
+    UiOverlay, UiToolbar, UiTree,
 };
+
+use crate::graph_editor::GraphEditor;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct View {
@@ -23,38 +25,76 @@ pub struct View {
     pub cursor: Memo<(UiCursor, Option<UiCursorNote>)>,
 }
 
-pub fn use_view(ed: Signal<Editor>) -> View {
-    let nodes_key = use_memo(move || ed.read().view_nodes_key());
-    let edges_key = use_memo(move || ed.read().view_edges_key());
-    let panels_key = use_memo(move || ed.read().view_panels_key());
+pub fn use_view(ed: GraphEditor) -> View {
+    // Each memo holds its own handle on the editor.
+    let e = || ed.clone();
+    let nodes_key = use_memo({
+        let ed = e();
+        move || ed.read().view_nodes_key()
+    });
+    let edges_key = use_memo({
+        let ed = e();
+        move || ed.read().view_edges_key()
+    });
+    let panels_key = use_memo({
+        let ed = e();
+        move || ed.read().view_panels_key()
+    });
     View {
-        nodes: use_memo(move || {
-            nodes_key.read();
-            ed.peek().view_nodes()
+        nodes: use_memo({
+            let ed = e();
+            move || {
+                nodes_key.read();
+                ed.peek().view_nodes()
+            }
         }),
-        edges: use_memo(move || {
-            edges_key.read();
-            ed.peek().view_edges()
+        edges: use_memo({
+            let ed = e();
+            move || {
+                edges_key.read();
+                ed.peek().view_edges()
+            }
         }),
-        inspector: use_memo(move || {
-            panels_key.read();
-            ed.peek().view_inspector()
+        inspector: use_memo({
+            let ed = e();
+            move || {
+                panels_key.read();
+                ed.peek().view_inspector()
+            }
         }),
-        tree: use_memo(move || {
-            panels_key.read();
-            ed.peek().view_tree_pane()
+        tree: use_memo({
+            let ed = e();
+            move || {
+                panels_key.read();
+                ed.peek().view_tree_pane()
+            }
         }),
-        overlay: use_memo(move || ed.read().view_overlay()),
-        hints: use_memo(move || {
-            let e = ed.read();
-            (e.hint_bar(), e.notice.clone())
+        overlay: use_memo({
+            let ed = e();
+            move || ed.read().view_overlay()
         }),
-        toolbar: use_memo(move || ed.read().view_toolbar()),
-        menu: use_memo(move || ed.read().view_menu()),
-        cursor: use_memo(move || {
-            let e = ed.read();
-            let note = e.view_cursor_note();
-            (e.view_cursor(), note)
+        hints: use_memo({
+            let ed = e();
+            move || {
+                let e = ed.read();
+                (e.hint_bar(), e.notice.clone())
+            }
+        }),
+        toolbar: use_memo({
+            let ed = e();
+            move || ed.read().view_toolbar()
+        }),
+        menu: use_memo({
+            let ed = e();
+            move || ed.read().view_menu()
+        }),
+        cursor: use_memo({
+            let ed = e();
+            move || {
+                let e = ed.read();
+                let note = e.view_cursor_note();
+                (e.view_cursor(), note)
+            }
         }),
     }
 }

@@ -12,12 +12,13 @@ use lab_arrows::Arrow;
 use lab_mapping_model::ux::area::FRAME_TITLE_PX;
 use lab_mapping_model::ux::handle::HANDLE_PX;
 use lab_mapping_model::{
-    Camera, Editor, Emphasis, FrameKind, NodeId, OutlineKind, Rect, UiCanvasEdge, UiCanvasNode,
+    Camera, Emphasis, FrameKind, GraphInput, NodeId, OutlineKind, Rect, UiCanvasEdge, UiCanvasNode,
     UiCursorNote, UiMenu, UiOverlay, UiShape, Vec2,
 };
 
 use crate::edge_layer::EdgeLayer;
 use crate::faces::lamp_radius_px;
+use crate::graph_editor::GraphEditor;
 
 #[component]
 pub fn Overlay(
@@ -130,8 +131,8 @@ pub fn Overlay(
 /// The right-click list: what you can do here, then everything under the
 /// cursor. It takes its own clicks, so none reach the canvas under it.
 #[component]
-pub fn Menu(menu: UiMenu, viewport: Vec2, ed: Signal<Editor>) -> Element {
-    let mut ed = ed;
+pub fn Menu(menu: UiMenu, viewport: Vec2, ed: GraphEditor) -> Element {
+    let leave = ed.clone();
     rsx! {
         div {
             class: "menu",
@@ -141,27 +142,45 @@ pub fn Menu(menu: UiMenu, viewport: Vec2, ed: Signal<Editor>) -> Element {
                 evt.stop_propagation();
             },
             onwheel: move |evt| evt.stop_propagation(),
-            onmouseleave: move |_| ed.write().menu_hover(None),
+            onmouseleave: move |_| {
+                leave.input(GraphInput::MenuHover(None));
+            },
             for (i, a) in menu.actions.into_iter().enumerate() {
-                div {
-                    key: "a{i}",
-                    class: "menu-item menu-action",
-                    onclick: move |_| ed.write().menu_act(i),
-                    span { "{a.label}" }
-                    kbd { "{a.keys}" }
+                {
+                    let ed = ed.clone();
+                    rsx! {
+                        div {
+                            key: "a{i}",
+                            class: "menu-item menu-action",
+                            onclick: move |_| {
+                                ed.input(GraphInput::MenuAct(i));
+                            },
+                            span { "{a.label}" }
+                            kbd { "{a.keys}" }
+                        }
+                    }
                 }
             }
             if !menu.items.is_empty() {
                 div { class: "menu-title", "Under the cursor" }
             }
             for (i, it) in menu.items.into_iter().enumerate() {
-                div {
-                    key: "{i}",
-                    class: if it.hovered { "menu-item on" } else { "menu-item" },
-                    style: "padding-left: {10 + it.depth * 14}px",
-                    onmouseenter: move |_| ed.write().menu_hover(Some(i)),
-                    onclick: move |evt| ed.write().menu_choose(i, evt.modifiers().shift()),
-                    "{it.label}"
+                {
+                    let (enter, choose) = (ed.clone(), ed.clone());
+                    rsx! {
+                        div {
+                            key: "{i}",
+                            class: if it.hovered { "menu-item on" } else { "menu-item" },
+                            style: "padding-left: {10 + it.depth * 14}px",
+                            onmouseenter: move |_| {
+                                enter.input(GraphInput::MenuHover(Some(i)));
+                            },
+                            onclick: move |evt| {
+                                choose.input(GraphInput::MenuChoose { item: i, shift: evt.modifiers().shift() });
+                            },
+                            "{it.label}"
+                        }
+                    }
                 }
             }
             div { class: "menu-foot", kbd { "⇧" } " adds · " kbd { "Esc" } " closes" }

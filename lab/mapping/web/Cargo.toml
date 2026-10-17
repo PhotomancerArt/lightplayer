@@ -6,7 +6,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Mapping design lab: the canvas page (Dioxus web) over lab-mapping-model"
+description = "Mapping design lab: the canvas (Dioxus web components over lab-mapping-model) and the lab's page"
+
+# The library is the canvas and its panels, which any host mounts (the lab's
+# page, Studio's Graph tab); the bin is the lab's own page around it.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "lab-mapping-web"
+path = "src/main.rs"
 
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }

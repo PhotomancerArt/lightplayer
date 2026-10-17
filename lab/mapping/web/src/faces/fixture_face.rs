@@ -15,12 +15,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lab_mapping_model::{
-    BoardFrame, Editor, Emphasis, FixtureLook, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape,
-    UiWire, Vec2,
+    BoardFrame, Emphasis, FixtureLook, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape, UiWire,
+    Vec2,
 };
 
 use crate::dense_canvas::{Raster, Stamp, canvas_id, put_when_mounted};
 use crate::faces::{emphasis_alpha, emphasis_class, lamp_radius_px, rgb};
+use crate::graph_editor::GraphEditor;
 use crate::lamp_cells::CellMap;
 
 #[component]
@@ -35,8 +36,8 @@ pub fn FixtureFace(
     /// revision: the lamps, read by id, move when either does.
     origin: Vec2,
     revision: u64,
-    frame: Memo<BoardFrame>,
-    ed: Signal<Editor>,
+    frame: ReadSignal<BoardFrame>,
+    ed: GraphEditor,
 ) -> Element {
     // Its units on screen: the camera's zoom times how much bigger than its
     // box it is drawn.
@@ -74,6 +75,9 @@ pub fn FixtureFace(
             }
         }
         FixtureLamps { fixture: face.fixture.clone(), look: face.look, w, h, zoom, origin, revision, dimmed, frame, ed }
+        if let Some(why) = face.not_shown.as_ref() {
+            div { class: "not-shown", style: "font-size: {12.0 / zoom}px; padding: {10.0 / zoom}px", "{why}" }
+        }
     }
 }
 
@@ -172,8 +176,8 @@ fn FixtureLamps(
     origin: Vec2,
     revision: u64,
     dimmed: Vec<ObjectId>,
-    frame: Memo<BoardFrame>,
-    ed: Signal<Editor>,
+    frame: ReadSignal<BoardFrame>,
+    ed: GraphEditor,
 ) -> Element {
     let id = use_hook(|| canvas_id("lamps"));
     // The live view's cells, kept while the layout and zoom stay put.

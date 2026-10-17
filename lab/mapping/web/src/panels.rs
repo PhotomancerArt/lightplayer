@@ -4,13 +4,14 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind,
+    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind,
     PropValue, UiInspector, UiItem, UiTree,
 };
 
+use crate::graph_editor::GraphEditor;
+
 #[component]
-pub fn TreePane(ed: Signal<Editor>, tree: Memo<UiTree>) -> Element {
-    let mut ed = ed;
+pub fn TreePane(ed: GraphEditor, tree: Memo<UiTree>) -> Element {
     let tree = tree.read().clone();
     rsx! {
         div { class: "pane-title", "{tree.title}" }
@@ -20,6 +21,7 @@ pub fn TreePane(ed: Signal<Editor>, tree: Memo<UiTree>) -> Element {
         for row in tree.rows.into_iter() {
             {
                 let t = row.target.clone();
+                let ed = ed.clone();
                 let mut class = String::from("row");
                 if row.selected {
                     class.push_str(" row-selected");
@@ -45,9 +47,9 @@ pub fn TreePane(ed: Signal<Editor>, tree: Memo<UiTree>) -> Element {
                         onmousedown: move |evt| evt.prevent_default(),
                         onclick: move |evt| {
                             if evt.modifiers().shift() {
-                                ed.write().toggle_select(t.clone());
+                                ed.input(GraphInput::ToggleSelect(t.clone()));
                             } else {
-                                ed.write().select(vec![t.clone()]);
+                                ed.input(GraphInput::Select(vec![t.clone()]));
                             }
                         },
                         title: "{row.detail}",
@@ -60,22 +62,28 @@ pub fn TreePane(ed: Signal<Editor>, tree: Memo<UiTree>) -> Element {
 }
 
 #[component]
-pub fn Inspector(ed: Signal<Editor>, inspector: Memo<UiInspector>) -> Element {
-    let mut ed = ed;
+pub fn Inspector(ed: GraphEditor, inspector: Memo<UiInspector>) -> Element {
     let inspector = inspector.read().clone();
     rsx! {
         div { class: "crumbs",
             for (i, c) in inspector.crumbs.into_iter().enumerate() {
-                span { key: "c{i}", class: "crumb-step",
-                    if i > 0 {
-                        span { class: "crumb-sep", "›" }
-                    }
-                    button {
-                        class: "crumb",
-                        tabindex: "-1",
-                        onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().select(c.target.iter().cloned().collect()),
-                        "{c.label}"
+                {
+                    let ed = ed.clone();
+                    rsx! {
+                        span { key: "c{i}", class: "crumb-step",
+                            if i > 0 {
+                                span { class: "crumb-sep", "›" }
+                            }
+                            button {
+                                class: "crumb",
+                                tabindex: "-1",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Select(c.target.iter().cloned().collect()));
+                                },
+                                "{c.label}"
+                            }
+                        }
                     }
                 }
             }
@@ -92,7 +100,7 @@ pub fn Inspector(ed: Signal<Editor>, inspector: Memo<UiInspector>) -> Element {
                     div { class: "section-title", "{title}" }
                 }
                 for (j, item) in section.items.into_iter().enumerate() {
-                    InspectorItem { key: "{j}", ed, item }
+                    InspectorItem { key: "{j}", ed: ed.clone(), item }
                 }
             }
         }
@@ -101,7 +109,7 @@ pub fn Inspector(ed: Signal<Editor>, inspector: Memo<UiInspector>) -> Element {
 
 /// One line of the inspector, as core gives it.
 #[component]
-fn InspectorItem(ed: Signal<Editor>, item: UiItem) -> Element {
+fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
     match item {
         UiItem::Fact(text) => rsx! { div { class: "fact", "{text}" } },
         UiItem::Rule(text) => rsx! { div { class: "fact patch-rule", "{text}" } },
@@ -125,14 +133,13 @@ fn InspectorItem(ed: Signal<Editor>, item: UiItem) -> Element {
                 }
             }
         },
-        UiItem::Prop { prop, locked } => rsx! { PropRow { ed, prop, locked } },
+        UiItem::Prop { prop, locked } => rsx! { PropRow { ed: ed.clone(), prop, locked } },
     }
 }
 
 /// One property, laid out from its descriptor alone.
 #[component]
-fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
-    let mut ed = ed;
+fn PropRow(ed: GraphEditor, prop: Prop, locked: bool) -> Element {
     let id = prop.desc.id;
     let value = prop.value.describe();
     let mixed = prop.value.is_mixed();
@@ -144,13 +151,16 @@ fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
                 _ => 1.0,
             };
             let is_count = matches!(prop.desc.kind, PropKind::Count { .. });
+            let (down, typed, up) = (ed.clone(), ed.clone(), ed.clone());
             rsx! {
                 div { class: "num",
                     button {
                         tabindex: "-1",
                         disabled: locked,
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().edit_selection_prop(id, PropEdit::Nudge(-1)),
+                        onclick: move |_| {
+                            down.input(GraphInput::EditProp { id, edit: PropEdit::Nudge(-1) });
+                        },
                         "−"
                     }
                     input {
@@ -164,7 +174,7 @@ fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
                         onchange: move |evt| {
                             if let Ok(v) = evt.value().parse::<f64>() {
                                 let edit = if is_count { PropEdit::SetCount(v.round() as i64) } else { PropEdit::SetNumber(v) };
-                                ed.write().edit_selection_prop(id, edit);
+                                typed.input(GraphInput::EditProp { id, edit });
                             }
                         },
                     }
@@ -172,7 +182,9 @@ fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
                         tabindex: "-1",
                         disabled: locked,
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().edit_selection_prop(id, PropEdit::Nudge(1)),
+                        onclick: move |_| {
+                            up.input(GraphInput::EditProp { id, edit: PropEdit::Nudge(1) });
+                        },
                         "+"
                     }
                     if prop.desc.nudge {
@@ -195,7 +207,9 @@ fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
                     class: if on { "flag on" } else { "flag" },
                     tabindex: "-1",
                     onmousedown: move |evt| evt.prevent_default(),
-                    onclick: move |_| ed.write().edit_selection_prop(id, PropEdit::SetFlag(!on)),
+                    onclick: move |_| {
+                        ed.input(GraphInput::EditProp { id, edit: PropEdit::SetFlag(!on) });
+                    },
                     "{label}"
                 }
             }

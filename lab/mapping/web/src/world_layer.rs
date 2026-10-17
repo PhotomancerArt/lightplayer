@@ -6,10 +6,11 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, Camera, Editor, NodeId, Rect, UiCanvasNode, Vec2};
+use lab_mapping_model::{BoardFrame, Camera, NodeId, Rect, UiCanvasNode, Vec2};
 
 use crate::canvas_container::STACK_TOP_PX;
 use crate::dense_canvas::zoom_step;
+use crate::graph_editor::GraphEditor;
 use crate::node_card::NodeCard;
 
 /// Cards this far (screen pixels) outside the view stay mounted, so a short
@@ -27,8 +28,8 @@ pub fn WorldLayer(
     /// Switching layouts: the world's own transform eases too.
     switching: bool,
     revision: u64,
-    frame: Memo<BoardFrame>,
-    ed: Signal<Editor>,
+    frame: ReadSignal<BoardFrame>,
+    ed: GraphEditor,
 ) -> Element {
     let rects = rects.read();
     let zoom = zoom_step(camera.scale);
@@ -64,7 +65,7 @@ pub fn WorldLayer(
     rsx! {
         div { class: "{class}", style: "{style}",
             for (node, rect) in shown {
-                NodeCard { key: "{node.id}", node, rect, zoom, revision, frame, ed }
+                NodeCard { key: "{node.id}", node, rect, zoom, revision, frame, ed: ed.clone() }
             }
         }
     }

@@ -9,11 +9,10 @@
 //! one size. A relayout eases each node to its new place (`lab.css`).
 
 use dioxus::prelude::*;
-use lab_mapping_model::{
-    BoardFrame, DetailLevel, Editor, FrameKind, Rect, UiCanvasNode, UiNodeFace, Vec2,
-};
+use lab_mapping_model::{BoardFrame, DetailLevel, FrameKind, Rect, UiCanvasNode, UiNodeFace, Vec2};
 
 use crate::faces::{FixtureFace, OutputFace, PlainFace, SourceFace, emphasis_class};
+use crate::graph_editor::GraphEditor;
 
 #[component]
 pub fn NodeCard(
@@ -21,8 +20,8 @@ pub fn NodeCard(
     rect: Rect,
     zoom: f64,
     revision: u64,
-    frame: Memo<BoardFrame>,
-    ed: Signal<Editor>,
+    frame: ReadSignal<BoardFrame>,
+    ed: GraphEditor,
 ) -> Element {
     let (w, h) = (rect.width(), rect.height());
     let frame_class = match node.frame {
@@ -59,7 +58,7 @@ pub fn NodeCard(
                                 origin: Vec2::new(rect.min.x, rect.min.y),
                                 revision,
                                 frame,
-                                ed,
+                                ed: ed.clone(),
                             }
                         },
                         UiNodeFace::Output(face) => rsx! {
