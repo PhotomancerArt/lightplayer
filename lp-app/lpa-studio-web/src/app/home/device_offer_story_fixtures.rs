@@ -520,6 +520,9 @@ pub(crate) fn StoryBoardCard(
     #[props(default)]
     take_over: Option<lpa_studio_core::UiTakeOver>,
     #[props(default)] update: Option<lpa_studio_core::UiDeviceUpdate>,
+    /// The project a running push is sending, by name.
+    #[props(default)]
+    sending: Option<String>,
     #[props(default)] update_facts: UpdateOfferFacts,
     /// The board's files across a layout change (its verbs in
     /// `extra_offers`).
@@ -665,6 +668,7 @@ pub(crate) fn StoryBoardCard(
         wifi_connect: wifi_connect.as_ref(),
         take_over: take_over.as_ref(),
         update: update.as_ref(),
+        sending: sending.as_deref(),
         layout: layout.as_ref(),
         plays: &plays,
         sharing,

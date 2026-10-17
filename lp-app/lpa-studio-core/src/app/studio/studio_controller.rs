@@ -204,6 +204,10 @@ pub struct StudioController {
     /// each ended (`devices/<board>/take-over`;
     /// `studio_controller/take_over_flow.rs`).
     take_overs: crate::TakeOvers,
+    /// The project each board's last push sent, by name, as the push
+    /// staged it: the card's surface names it while that push runs
+    /// (`DeviceRosterView.sending`).
+    sending: std::collections::BTreeMap<crate::DeviceId, String>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -528,6 +532,7 @@ impl StudioController {
             board_hold_book: None,
             board_hold_flow: Default::default(),
             take_overs: crate::TakeOvers::default(),
+            sending: std::collections::BTreeMap::new(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -2316,6 +2321,20 @@ impl StudioController {
             .take_overs
             .devices()
             .filter_map(|device| Some((device, self.take_overs.view(device)?)))
+            .collect();
+        // A name only while that board's push runs: a finished push's name
+        // is no news.
+        view.sending = view
+            .roster
+            .devices
+            .iter()
+            .filter(|device| {
+                device
+                    .activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.kind == crate::DeviceActivityKind::Push)
+            })
+            .filter_map(|device| Some((device.id, self.sending.get(&device.id)?.clone())))
             .collect();
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
@@ -6650,8 +6669,14 @@ impl StudioController {
             }));
         }
         let (staged, migration_notice) = self.prepare_push(&op.source).await;
-        if let Err(reason) = &staged {
-            log::warn!("nothing to push to {:?}: {reason}", op.device);
+        match &staged {
+            Ok(payload) => {
+                self.sending.insert(op.device, payload.label.clone());
+            }
+            Err(reason) => {
+                self.sending.remove(&op.device);
+                log::warn!("nothing to push to {:?}: {reason}", op.device);
+            }
         }
         self.devices.effects_mut().stage_push(op.device, staged);
         self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::Push {

@@ -43,7 +43,7 @@
 use lpa_devices::view::{FirmwareFace, PendingLinkView};
 use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 
-use super::bar_work::{bar_work, board_pick, update_work_words};
+use super::bar_work::{bar_work, board_pick, running_work, update_work};
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{danger, facts, notice, verbs, without_empty};
 use super::project_bar::data_lost;
@@ -304,10 +304,10 @@ fn firmware_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
         .update
         .filter(|update| update.kind == UpdateRowKind::Progress)?;
     let progress = update.progress?;
-    let (words, percent) = update_work_words(&update.standing)?;
+    let (verb, percent) = update_work(&update.standing)?;
     Some(UiBarWork {
         other_device: progress.other_device,
-        ..UiBarWork::running(words, percent.or(progress.percent))
+        ..running_work(verb, percent)
     })
 }
 

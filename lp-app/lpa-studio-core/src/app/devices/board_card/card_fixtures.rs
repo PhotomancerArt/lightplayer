@@ -53,6 +53,8 @@ pub(crate) struct CardFixture {
     /// A take-over of the board from another tab, under way or failed.
     pub take_over: Option<UiTakeOver>,
     pub update: Option<UiDeviceUpdate>,
+    /// The project a push is sending, by name.
+    pub sending: Option<String>,
     /// The update standing the offers are published from.
     pub update_facts: UpdateOfferFacts,
     pub layout: Option<UiDeviceLayout>,
@@ -106,6 +108,7 @@ impl CardFixture {
             wifi_connect: None,
             take_over: None,
             update: None,
+            sending: None,
             update_facts: UpdateOfferFacts::default(),
             layout: None,
             plays: BoardPlays::Running {
@@ -167,6 +170,15 @@ impl CardFixture {
         fixture
     }
 
+    /// The same board, its link open and silent: the model projects Retry.
+    pub fn not_answering() -> Self {
+        let mut fixture = Self::ready();
+        fixture.view.status = DeviceStatus::NotResponding;
+        fixture.view.state_label = "Not responding".to_string();
+        fixture.view.escapes = vec![Escape::Retry, Escape::Disconnect, Escape::Forget];
+        fixture
+    }
+
     /// The same board with `activity` running.
     pub fn with_activity(mut self, activity: ActivityView) -> Self {
         self.view.status = DeviceStatus::Busy;
@@ -215,6 +227,7 @@ impl CardFixture {
             wifi_connect: self.wifi_connect.as_ref(),
             take_over: self.take_over.as_ref(),
             update: self.update.as_ref(),
+            sending: self.sending.as_deref(),
             layout: self.layout.as_ref(),
             plays: &self.plays,
             sharing: self.sharing,

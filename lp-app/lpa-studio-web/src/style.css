@@ -744,6 +744,155 @@ label:has(> input:not(:disabled)) {
     transform: translateY(-50%);
 }
 
+/* The surface (`board_surface.rs`, round 3's concept B): over the picture
+   and under the corner, the state's icon in a circle in the state's tone,
+   then one or two plain sentences, centred, and the work's progress. The
+   tone is the icon's alone; the sentences stay plain. A picture under it
+   takes the cover's one dim (`.ux-board-picture-covered`) and the scrim. */
+.ux-board-surface {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    padding: 8px 18px;
+    text-align: center;
+}
+
+.ux-board-surface-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(7, 8, 10, 0.55);
+}
+
+.ux-board-picture-covered {
+    opacity: 0.22;
+    filter: saturate(0.6);
+}
+
+.ux-board-surface-inner {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ux-board-surface-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 50%;
+    background: var(--studio-color-surface-raised);
+    color: var(--studio-color-text-muted);
+}
+
+.ux-board-surface-icon[data-tone="attention"] {
+    border-color: var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+    color: var(--studio-status-attention-text);
+}
+
+/* Stripes mark a failure (ui.md), in the icon's circle as on a row. */
+.ux-board-surface-icon[data-tone="error"] {
+    border-color: var(--studio-status-error-border);
+    background-color: var(--studio-status-error-bg);
+    background-image: var(--studio-status-error-stripes);
+    color: var(--studio-status-error-text);
+}
+
+.ux-board-surface-icon .ux-board-spinner {
+    width: 15px;
+    height: 15px;
+}
+
+.ux-board-surface-first {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--studio-color-text-strong);
+    text-wrap: pretty;
+}
+
+.ux-board-surface-second {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--studio-color-text-muted);
+    text-wrap: pretty;
+}
+
+.ux-board-surface-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+}
+
+.ux-board-surface-track {
+    position: relative;
+    flex: 1;
+    max-width: 190px;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.ux-board-surface-fill {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    border-radius: 2px;
+}
+
+.ux-board-surface-percent {
+    font: 700 11px var(--studio-font-mono);
+    color: var(--studio-color-text-strong);
+}
+
+/* The narrow card (a phone's two-column grid, a 108px picture): the same
+   notice, smaller, so its longest sentences still fit ("Studio couldn't
+   reach this board over Wi‑Fi." with its retry). */
+@container board-card (max-width: 239px) {
+    .ux-board-surface {
+        padding: 6px 8px;
+    }
+
+    .ux-board-surface-inner {
+        gap: 3px;
+    }
+
+    .ux-board-surface-icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    .ux-board-surface-icon svg {
+        width: 11px;
+        height: 11px;
+    }
+
+    .ux-board-surface-icon .ux-board-spinner {
+        width: 11px;
+        height: 11px;
+    }
+
+    .ux-board-surface-first {
+        font-size: 11.5px;
+        line-height: 1.25;
+    }
+
+    .ux-board-surface-second {
+        font-size: 10.5px;
+        line-height: 1.25;
+    }
+}
+
 /* The status corner: a notch cut out of the picture's top-right corner, in
    the card's own ground, its two inner corners rounded off by a radial
    mask so the picture curves around it. */
@@ -798,6 +947,74 @@ label:has(> input:not(:disabled)) {
 .ux-board-bar .ux-board-spinner {
     width: 11px;
     height: 11px;
+}
+
+/* A row's name and its state (`stack_bar.rs`). The name is the row's
+   value and keeps its width; the state takes what is left. One 28px line
+   that wraps and clips: a state that can't fit its least beside the whole
+   name wraps to the hidden second line, so it is cut, then gone, before
+   the name is cut — and a name wider than the row alone is cut at its
+   end. The state takes the free space first (its grow is the larger), so
+   it sits at the row's end at its whole width once it fits. */
+.ux-board-bar-words {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    column-gap: 6px;
+    min-width: 0;
+    height: 28px;
+    overflow: hidden;
+    line-height: 28px;
+}
+
+.ux-board-bar-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A longer state: cut at its end, down to `--ux-aside-min`. */
+.ux-board-bar-aside {
+    flex: 1000 1 var(--ux-aside-min);
+    min-width: var(--ux-aside-min);
+    max-width: max-content;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A short state ("crashing"): whole, or wrapped off. */
+.ux-board-bar-aside-whole {
+    flex: none;
+    white-space: nowrap;
+}
+
+/* A narrow card (a phone's two-column grid): the primary's section pads
+   less, so the board's name keeps more of itself. The rows keep their kind
+   words, as every card in the grid does (P8): a value still too long
+   beside its button is cut at its end, and its details hold it whole. */
+@container board-card (max-width: 239px) {
+    [data-name-bar] .ux-row-flush {
+        padding-inline: 10px;
+    }
+}
+
+/* The end of the primary's word (" firmware" of "Update firmware",
+   `name_bar.rs`): gone, leaving the verb, on a card narrower than
+   `--ux-primary-need` — the width the whole word needs beside the board's
+   name at about twelve characters, which the name bar sets from its
+   words. A step, never a squeeze: the difference times a large number,
+   clamped, is either nothing or the whole tail. The text stays for a
+   screen reader. */
+.ux-label-tail {
+    display: inline-block;
+    overflow: hidden;
+    white-space: pre;
+    vertical-align: bottom;
+    max-width: clamp(0px, calc((100cqw - var(--ux-primary-need, 0px)) * 1000), 20em);
 }
 
 /* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the

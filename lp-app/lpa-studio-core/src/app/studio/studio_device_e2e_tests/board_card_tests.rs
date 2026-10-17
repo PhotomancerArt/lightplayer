@@ -320,6 +320,8 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
     drop(handle);
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
+    // Past the push's few green seconds: the row's own tone.
+    bench.clock.set(bench.clock.get() + crate::DONE_SHOWS_SECS);
 
     let bar = card_of(&bench, id).bar(crate::BarLayer::Project).clone();
     assert_eq!(bar.summary, slug, "the name stays in place");
@@ -368,6 +370,8 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
             at_head: true,
         }
     );
+    // Past the second push's green seconds.
+    bench.clock.set(bench.clock.get() + crate::DONE_SHOWS_SECS);
     let bar = card_of(&bench, id).bar(crate::BarLayer::Project).clone();
     assert_eq!(bar.summary, slug);
     assert_eq!(bar.tone, crate::UiStatusKind::Neutral);
@@ -400,12 +404,28 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
             .is_some_and(|card| card.status == crate::DeviceStatus::NotResponding)
     });
     let id = bench.view().devices[0].id;
-    let bar = card_of(&bench, id).bar(crate::BarLayer::Connection).clone();
+    let card = card_of(&bench, id);
+    let bar = card.bar(crate::BarLayer::Connection).clone();
     assert_eq!(bar.summary, "USB · not responding");
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
     let retry = bar.action.expect("Retry");
     assert_eq!(retry.word, "Retry");
     assert_eq!(retry.offer, bench.device_verb(id, "retry"));
+    assert_eq!(card.surface.state, crate::SurfaceState::NotAnswering);
+    assert_eq!(
+        card.surface
+            .notice
+            .as_ref()
+            .map(|notice| notice.first.as_str()),
+        Some("This board stopped responding over USB.")
+    );
+    let primary = primary_offer(&card);
+    assert_eq!(primary.word, "Retry");
+    assert_eq!(primary.offer, retry.offer, "the row's Retry, repeated");
     assert_eq!(
         card_of(&bench, id).status.mark,
         crate::CornerMark::Fine,
@@ -493,9 +513,13 @@ fn the_layout_question_raises_the_firmware_details_and_continue_runs_by_path() {
     update(&mut bench, target);
     let panel = layout_panel(&mut bench, &tasks, target);
 
-    let bar = card_of(&bench, target)
-        .bar(crate::BarLayer::Firmware)
-        .clone();
+    let card = card_of(&bench, target);
+    assert_eq!(
+        card.surface.state,
+        crate::SurfaceState::ConfirmationRequired,
+        "the flash waits for the answer: the surface asks, not \"installing\""
+    );
+    let bar = card.bar(crate::BarLayer::Firmware).clone();
     assert!(bar.details.raised, "the question rises on its own");
     assert!(
         bar.details
@@ -510,7 +534,11 @@ fn the_layout_question_raises_the_firmware_details_and_continue_runs_by_path() {
         "a flash waiting for its answer is not working"
     );
     assert_eq!(bar.aside.as_deref(), Some(crate::CONFIRMATION_REQUIRED));
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
     assert_eq!(bar.opens_details, Some("Review"), "no dead end: Review");
     assert_eq!(
         bar.details
@@ -588,14 +616,25 @@ fn a_board_holding_its_files_offers_finish_update_as_the_firmware_action() {
             .is_some_and(|layout| layout.finish_update.is_some())
     });
 
-    let bar = card_of(&bench, target)
-        .bar(crate::BarLayer::Firmware)
-        .clone();
+    let card = card_of(&bench, target);
+    let bar = card.bar(crate::BarLayer::Firmware).clone();
     assert_eq!(bar.aside.as_deref(), Some(crate::UPDATE_INTERRUPTED));
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
     let finish = bar.action.clone().expect("Resume");
     assert_eq!(finish.word, "Resume");
     assert_eq!(finish.offer, bench.device_verb(target, "finish-update"));
+    // The surface says it, and its primary is the same Resume.
+    assert_eq!(card.surface.state, crate::SurfaceState::UpdateInterrupted);
+    let primary = primary_offer(&card);
+    assert_eq!(primary.word, "Resume update");
+    assert_eq!(
+        primary.offer, finish.offer,
+        "the row's own button, repeated"
+    );
     // The interrupted flash's failure is said first; the waiting files'
     // line is the row's own notice after it.
     assert!(
@@ -634,17 +673,26 @@ fn a_formatted_boards_project_row_restores_its_data() {
             .is_some_and(|layout| layout.restore.is_some())
     });
 
-    let bar = card_of(&bench, target)
-        .bar(crate::BarLayer::Project)
-        .clone();
+    let card = card_of(&bench, target);
+    let bar = card.bar(crate::BarLayer::Project).clone();
     assert_eq!(
         (bar.summary.as_str(), bar.aside.as_deref()),
         (crate::PROJECT_NONE, Some(crate::DATA_LOST))
     );
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
     let restore = bar.action.clone().expect("Restore");
     assert_eq!(restore.word, "Restore");
     assert_eq!(restore.offer, bench.device_verb(target, RESTORE_FILES));
+    assert_eq!(card.surface.state, crate::SurfaceState::DataLost);
+    assert_eq!(
+        primary_offer(&card).offer,
+        restore.offer,
+        "the primary is the row's Restore"
+    );
     let reset = bar.way_out.clone().expect("Reset beside it");
     assert_eq!(reset.word, "Reset");
     assert_eq!(reset.offer, bench.device_verb(target, crate::START_FRESH));
@@ -772,7 +820,12 @@ fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_
     let card = card_of(&bench, id);
     let firmware = card.bar(crate::BarLayer::Firmware);
     assert_eq!(firmware.aside.as_deref(), Some(crate::DATA_UNREADABLE));
-    assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        firmware.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
+    assert_eq!(card.surface.state, crate::SurfaceState::DataUnreadable);
     assert_eq!(firmware.action, None, "no click here is safe");
     assert_eq!(
         firmware
@@ -831,7 +884,12 @@ fn a_littlefs_board_on_a_tree_store_says_its_files_need_newer_firmware() {
     let card = card_of(&bench, id);
     let firmware = card.bar(crate::BarLayer::Firmware);
     assert_eq!(firmware.aside.as_deref(), Some(crate::UPDATE_REQUIRED));
-    assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        firmware.tone,
+        crate::UiStatusKind::Neutral,
+        "the surface says it; the row goes quiet"
+    );
+    assert_eq!(card.surface.state, crate::SurfaceState::UpdateRequired);
     assert_eq!(firmware.action, None);
     let line = crate::app::devices::device_layout_view::TREE_STORE_HELD_LINE;
     assert_eq!(
@@ -886,6 +944,79 @@ fn a_running_sim_with_no_project_offers_add_a_project() {
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(sim, "push"));
     every_card_action_is_offered(&mut bench);
+}
+
+/// The dead end of 2026-10-17 (the desk's fixture C6 on lightplayer.app): a
+/// LightPlayer on an older wire, on USB, seen here for the first time (its
+/// hello is unreadable, so it names no MAC and stays a new board). Its
+/// card says what it is and what the button does, never a black top and no
+/// button; the Project row says "not known", never a false "none"; the
+/// primary is Update firmware — Routine, since the update keeps the
+/// project and the files — and pressing it by path with a board, as the
+/// agent may, starts the flash. (A board Studio remembers, whose board
+/// resolves, gets the one-click `update-firmware` instead:
+/// `primary_action`'s and `board_surface`'s own tests.)
+#[test]
+fn an_older_lightplayers_card_updates_its_firmware_by_path() {
+    const HELLO_PROTO_32: &str =
+        include_str!("../../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_hello_json(HELLO_PROTO_32),
+    )));
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-older-1");
+    bench.run_until(
+        &tasks,
+        "the board to read as an older LightPlayer",
+        |bench| {
+            bench.view().pending.first().is_some_and(|pending| {
+                matches!(
+                    pending.firmware_face,
+                    lpa_devices::view::FirmwareFace::OlderLightPlayer { .. }
+                )
+            })
+        },
+    );
+    let id = bench.view().pending[0].device;
+    let card = card_of(&bench, id);
+    assert_eq!(card.surface.state, crate::SurfaceState::OldFirmware);
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board is running old firmware.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Update the firmware to connect and edit.")
+    );
+    assert_eq!(
+        card.bar(crate::BarLayer::Project).summary,
+        crate::PROJECT_UNKNOWN,
+        "it plays something this Studio cannot read"
+    );
+    let update = primary_offer(&card);
+    assert_eq!(update.word, "Update firmware");
+    assert_eq!(update.offer.to_string(), "devices/new-1/flash");
+    assert!(
+        bench.offered(&update.offer).consequence().is_routine(),
+        "it keeps the project and the files: one click, the agent may press it"
+    );
+    every_card_action_is_offered(&mut bench);
+
+    let board = crate::flash_offer(Some("esp32c6")).candidates[0]
+        .board_id
+        .clone();
+    bench
+        .press(
+            &update.offer,
+            OfferArgs::new().with(crate::FLASH_BOARD_PARAM, board),
+        )
+        .expect("Update firmware starts the flash");
+    bench.run_until(&tasks, "the flash to run", |bench| {
+        bench.view().devices.iter().any(|card| {
+            card.activity
+                .as_ref()
+                .is_some_and(|work| work.kind == crate::DeviceActivityKind::Flash)
+        })
+    });
 }
 
 /// The card the home view publishes for `device`.
