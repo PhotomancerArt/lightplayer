@@ -63,6 +63,9 @@ Ratios are emulated ÷ silicon. Medians on both sides.
 | first light, c40, fresh | `k12n` split | 681 ms | — | 611 | **614 ms** | 0.90 |
 | first light, playful-choker-tryout | `k12n` split | 706 ms | — | 623 | **626 ms** | 0.89 |
 | first light, basic on a used store | `k12n` split | 690 ms | — | 632 | **635 ms** | 0.92 |
+| first light, basic on `used-176` | `k12n` split | 689 ms | — | 628 | **630 ms** | 0.91 |
+| first light, basic on `panel-128in176` | `k12n` split | 722 ms | — | 641 | **644 ms** | 0.89 |
+| first light, basic on `panel-176` | `k12n` split | 738 ms | — | 658 | **662 ms** | 0.90 |
 | push c40 (132 files) and load | `55422b0e8` | 3,273 ms | 1,145 | — | **2,827 ms** | 0.86 |
 | save, round trip | `55422b0e8` | 235.8 ms | 77.1 | — | **171.6 ms** | 0.73 |
 | save less a read of the same document | `55422b0e8` | 185.2 ms | 40.2 | — | **95.1 ms** | 0.51 |
@@ -130,10 +133,16 @@ records' own images.
 - **First light** (0.89–0.92). The boot path writes no flash on these boots,
   so `t4` adds ~3 ms to `t3`; the gap is `t3`'s known one-signed CPU residual
   (radio 65 against 84–87 ms, `frame1`, `lit`).
-- **Not run:** the `panel-176` store's first light (the emulated boot lit
-  nothing in 64 frames after the basic push, at `t3` as at `t4`; the silicon
-  case lit at 738 ms — a separate difference, not flash); block erase and
-  status-write times (no silicon figure).
+- **Not run:** block erase and status-write times (no silicon figure).
+- **Amended 2026-10-17, after merge:** this report first said the
+  `panel-176` store's emulated boot lit nothing. That was the test, not the
+  emulator: `emu_first_light` cut the power before the board had made the
+  pushed project its startup project, so boot fell back to the store's own
+  broken `/projects/a`
+  (`docs/defects/2026-10-17-emu-first-light-cut-the-power-before-the-startup-project-was-saved.md`).
+  With the test fixed, the three pre-written stores light at 0.89–0.91 of
+  CX1, the same CPU residual as the fresh store, and their `fs` part
+  (62, 44, 30 ms) is within 2 ms of silicon's (64, 45, 29).
 
 **Checked for overlap:** `2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`
 is a guest that retires 1.3 billion instructions building a graphics stage —

@@ -39,11 +39,14 @@ pub fn facts_from_ota_manifest(manifest: &OtaManifest) -> Option<HostBuildFacts>
             len: u32::try_from(len).ok()?,
         })
     };
-    Some(HostBuildFacts::from_parts(
-        identity_of(manifest),
-        piece(&manifest.core.sha256, manifest.core.length)?,
-        piece(&manifest.engine.sha256, manifest.engine.length)?,
-    ))
+    Some(
+        HostBuildFacts::from_parts(
+            identity_of(manifest),
+            piece(&manifest.core.sha256, manifest.core.length)?,
+            piece(&manifest.engine.sha256, manifest.engine.length)?,
+        )
+        .with_tree_store(manifest.requires.fs_tree),
+    )
 }
 
 /// The store's latest release for `target`, by its facts.

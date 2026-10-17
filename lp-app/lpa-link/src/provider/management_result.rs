@@ -87,6 +87,9 @@ pub struct LinkLayoutInspection {
     /// The package's merged image length: whether the firmware write itself
     /// reaches the legacy filesystem.
     pub target_image_len: u32,
+    /// The filesystem the package's image mounts (its manifest core lists
+    /// `fs.tree`, or not) — what "the board's files are current" means.
+    pub target_fs: super::fs_kind::FsKind,
     /// The package's embedded manifest core (its JSON, as found in its
     /// images: `layout_migration::embedded_manifest`), or `None` when it
     /// carries none. Whether that firmware reads a tree store on the board

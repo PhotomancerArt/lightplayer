@@ -6,7 +6,9 @@
 # AND its OTA directory (ota-manifest.json, core.bin, engine.bin, core.z,
 # engine.z) with the one packer. <out> gets:
 #
-#   merged.bin   the whole chip (the emulator's --rom-up-flash seed)
+#   merged.bin   the whole chip (the emulator's --rom-up-flash seed), behind
+#                our own bootloader; merged-idf.bin the same app.bin behind
+#                the ESP-IDF one (`LP_BOOT_DOOR=idf` in the OTA tests)
 #   split.json   the split tool's account of it
 #   package/     the USB package (manifest.json + the merged image)
 #   ota/         the OTA directory `--ota-offer` reads
@@ -38,5 +40,5 @@ test -f "$parts_dir/ota-manifest.json" || {
     exit 1
 }
 cp -R "$parts_dir" "$out/ota"
-cp "$split_dir/merged.bin" "$split_dir/split.json" "$split_dir/core.bin" "$split_dir/engine.bin" "$out/"
+cp "$split_dir/merged.bin" "$split_dir/merged-idf.bin" "$split_dir/merged-lp.bin" "$split_dir/split.json" "$split_dir/core.bin" "$split_dir/engine.bin" "$out/"
 echo "build-image: $out ($(jq -r '.buildId' "$out/split.json"), features $features)"

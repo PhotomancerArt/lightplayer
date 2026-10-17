@@ -173,10 +173,11 @@ impl UpdateTarget for SplitUpdateTarget {
         len: u32,
         build_hash: u32,
     ) -> Result<(), FlashFault> {
-        // A board with a tree store (D8: an `fs-tree` board; or, since
-        // 2026-10-16, a littlefs board holding one): a core that would not
-        // mount the store could format it on its first boot — refuse it
-        // here, before the record that boots it, and say why.
+        // A board with a tree store (every C6 since the cutover): a core
+        // that would not mount the store could format it on its first boot —
+        // refuse it here, before the record that boots it, and say why. The
+        // core's own bytes decide (its tree-store mark): its engine, which
+        // carries the manifest, is not on flash yet.
         if super::cores_must_read_tree_store() {
             let flash = &mut self.flash;
             let verdict =

@@ -3,7 +3,6 @@ target = "riscv32imac-unknown-none-elf"
 
 [target.riscv32imac-unknown-none-elf]
 rustflags = [
-  "-C", "link-arg=-Tloader.x",
   "-C", "panic=abort",
   "-C", "link-arg=--gc-sections",
 ]

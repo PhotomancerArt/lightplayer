@@ -121,6 +121,7 @@ mod tests {
             commit: "a".repeat(40),
             wire_proto: 40,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },

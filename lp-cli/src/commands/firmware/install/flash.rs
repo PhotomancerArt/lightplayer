@@ -201,7 +201,12 @@ fn decide_for(inspection: &LinkLayoutInspection) -> Result<LayoutDecision, LinkE
         .as_deref()
         .and_then(lpa_link::chip_id_from_reported)
         == Some("esp32c6");
-    let classified = LayoutProbe::replay(target.clone(), chip_is_c6, &inspection.reads);
+    let classified = LayoutProbe::replay_for(
+        target.clone(),
+        inspection.target_fs,
+        chip_is_c6,
+        &inspection.reads,
+    );
     if let Some(device) = &classified.device_table {
         eprintln!(
             "  board: {} → package: {}",

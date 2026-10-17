@@ -83,7 +83,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             .ok_or(StoreError::TooLarge)?;
         let mut buf = vec![0u8; logical];
         self.log.note(buf.len());
-        match lp_deflate::inflate(deflated, &mut buf, 0) {
+        match lp_deflate::inflate_with(deflated, &mut buf, 0, &mut crate::blob_codec::heap_tables())
+        {
             Ok(n) if n == logical => {}
             _ => return Err(StoreError::Corrupt("chunk does not inflate to its length")),
         }

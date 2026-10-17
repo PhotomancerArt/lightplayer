@@ -1,7 +1,8 @@
-//! The tree store's flash on the C6 (`fs-tree`): `lpfs` from the flashed
-//! partition table, written through the word-alignment shim
-//! (`fw_esp32_common::aligned_nor_flash`, plan D10) over esp-storage, and
-//! **read through the flash cache** (the mount study's C7).
+//! The tree store's flash on the C6 (every flash-backed build since the
+//! tree-store cutover): `lpfs` from the flashed partition table, written
+//! through the word-alignment shim (`fw_esp32_common::aligned_nor_flash`,
+//! plan D10) over esp-storage, and **read through the flash cache** (the
+//! mount study's C7).
 //!
 //! **Writes.** esp-storage on the C6 is built with `panic-unaligned-buffer`
 //! and without `bytewise-read`: an offset or length that is not a multiple
@@ -21,7 +22,8 @@
 //! **top** of the loader's old scratch window (`0x4260_0000..0x4280_0000`,
 //! unused once the core runs): the core is linked below `0x4240_0000` and
 //! the engine from it, and the two together never exceed the app partition
-//! (3.25 MB), which ends below the window's first page — no MMU entry here is
+//! (3.4375 MB since the tree-store cutover's table), which ends below the
+//! window's first page — no MMU entry here is
 //! one either of them uses. The core's own hash maps its scratch pages
 //! just below the engine (`ota/engine_window.rs`): disjoint.
 //!
@@ -31,15 +33,37 @@
 //! by line, never the whole cache (that would throw away the running code:
 //! ~1,024 line fills). Nothing else reads or writes `lpfs` while the store
 //! owns it, and no ISR touches it.
+//!
+//! **littlefs, by its magic only.** littlefs left this firmware with the
+//! cutover (plan `lp2025/2026-10-16-0848-tree-store-adoption`, AD5): nothing
+//! here mounts it. A board whose files are still in littlefs is recognised by
+//! the superblock's name alone ([`littlefs_found`]) and HELD — never
+//! formatted (AD3) — until the USB migration moves them
+//! (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`).
 
 use esp_storage::FlashStorage;
 use fw_esp32_common::aligned_nor_flash::AlignedNorFlash;
+use fw_esp32_common::tree_fs::littlefs_superblock_at;
 use lp_tree_store::{ReadWindow, WindowedFlash};
 
 use crate::flash_layout::PartitionExtent;
 
 /// The store's sector: the C6 flash's erase sector.
 const SECTOR_SIZE: u32 = 4096;
+
+/// Where the 2026-10 repartition's 176-sector littlefs `lpfs` starts — the
+/// table every board fielded before the cutover carries
+/// (`lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv`). A
+/// **historical fact**, never a mirror of `partitions.csv`.
+///
+/// Today's `lpfs` (`0x380000`) is that filesystem's blocks 48–175, so a
+/// board flashed with the tree table by a path that skipped the migration
+/// finds no store at `0x380000` and must not format over them. Its
+/// superblock survives such a flash only while `app.bin` ends below this
+/// offset (`lp-fw-split headroom` reports the margin as "legacy overlap").
+/// The pre-repartition littlefs at `0x310000` is not probed any more: every
+/// image since the 2026-10 repartition writes over it.
+pub const LITTLEFS_V2_OFFSET: u32 = 0x0035_0000;
 
 /// The partition through the alignment shim (the writes, and the reads when
 /// no window could be mapped).
@@ -62,23 +86,19 @@ pub fn tree_flash(flash: FlashStorage<'static>, partition: PartitionExtent) -> T
     WindowedFlash::new(part, window)
 }
 
-/// Is a pre-repartition LightPlayer filesystem waiting at the legacy offset
-/// (probed read-only; Q5: kept, so littlefs stays linked)? Asked only when
-/// the store found no store on `lpfs`.
-pub fn legacy_lpfs_present(flash: &mut TreeFlash) -> bool {
-    // The size measurement's build (`measure_no_legacy_probe`, never
-    // shipped): no probe, so LTO drops littlefs.
-    #[cfg(feature = "measure_no_legacy_probe")]
-    {
-        let _ = flash;
-        false
-    }
-    #[cfg(not(feature = "measure_no_legacy_probe"))]
-    {
-        let part = flash.flash_mut();
-        let lpfs_offset = part.offset();
-        crate::flash_storage::legacy_lpfs_present_at(part.part_mut(), lpfs_offset)
-    }
+/// Are this board's files still in littlefs? A littlefs superblock (its
+/// name at byte 8 of block 0 or 1) at the start of `lpfs` itself — a
+/// littlefs core ran on this table — or at [`LITTLEFS_V2_OFFSET`], a
+/// fielded board flashed past its migration. Read-only, at most four 8-byte
+/// reads; asked only when the store found no store on `lpfs`. littlefs is
+/// not linked: whether the files are whole is the USB migration's question
+/// (it mounts them on the host), and holding costs nothing if they are not.
+pub fn littlefs_found(flash: &mut TreeFlash) -> bool {
+    let part = flash.flash_mut();
+    let lpfs = part.offset();
+    let part = part.part_mut();
+    littlefs_superblock_at(part, lpfs)
+        || (lpfs != LITTLEFS_V2_OFFSET && littlefs_superblock_at(part, LITTLEFS_V2_OFFSET))
 }
 
 const SPI0: usize = 0x6000_2000;

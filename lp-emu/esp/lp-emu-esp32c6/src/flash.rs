@@ -15,7 +15,7 @@
 //! exactly as it did before the move.
 
 pub use lp_emu_esp_common::engine::spi_flash::{
-    BLOCK_LEN, FlashBacking, FlashCensus, FlashHandle, FlashImage, PAGE_LEN, SECTOR_LEN,
+    BLOCK_LEN, FlashBacking, FlashCensus, FlashHandle, FlashImage, FlashPart, PAGE_LEN, SECTOR_LEN,
 };
 
 /// The first byte of an ESP image header. A chip whose reset vector starts
@@ -50,15 +50,25 @@ pub const PHY_INIT_OFFSET: u32 = 0x0000_f000;
 pub const PHY_INIT_LEN: u32 = 0x0000_1000;
 
 /// The `factory` partition (`partitions.csv`), where a flashed app image
-/// starts, and how long it may be.
+/// starts, and how long it may be. `0x370000` since the tree-store cutover
+/// (it was `0x340000` from the 2026-10 repartition: [`LEGACY_V2_LPFS_OFFSET`]).
 pub const FACTORY_OFFSET: u32 = 0x0001_0000;
-pub const FACTORY_LEN: u32 = 0x0034_0000;
+pub const FACTORY_LEN: u32 = 0x0037_0000;
 
-/// The `lpfs` partition (`partitions.csv`). The firmware reads it from the
-/// flashed table at boot (`fw-esp32c6/src/flash_storage.rs`), so a direct
-/// load stages [`c6_partition_table_bytes`] for it to find.
-pub const LPFS_OFFSET: u32 = 0x0035_0000;
-pub const LPFS_LEN: u32 = 0x000B_0000;
+/// The `lpfs` partition (`partitions.csv`): the tree store's 128 sectors at
+/// the end of the chip, since the tree-store cutover. The firmware reads it
+/// from the flashed table at boot (`fw-esp32c6/src/flash_layout.rs`), so a
+/// direct load stages [`c6_partition_table_bytes`] for it to find.
+pub const LPFS_OFFSET: u32 = 0x0038_0000;
+pub const LPFS_LEN: u32 = 0x0008_0000;
+
+/// Where every board fielded before the tree-store cutover keeps its files:
+/// a 176-block littlefs at `0x350000` (the 2026-10 repartition's table,
+/// frozen at `lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv`).
+/// A **historical** board fact — what a "fielded board" in a test carries —
+/// never a mirror of `partitions.csv`.
+pub const LEGACY_V2_LPFS_OFFSET: u32 = 0x0035_0000;
+pub const LEGACY_V2_LPFS_LEN: u32 = 0x000B_0000;
 
 /// The length of a compiled partition table: rows, the MD5 row, then `0xff`
 /// to here (ESP-IDF's `PARTITION_TABLE_MAX_LEN`, and what espflash writes).
@@ -82,17 +92,35 @@ pub const PARTITION_TABLE_LEN: usize = 0xC00;
 /// [`PARTITION_TABLE_LEN`]. The firmware's `esp-bootloader-esp-idf` verifies
 /// that MD5, so it has to be right.
 pub fn c6_partition_table_bytes() -> [u8; PARTITION_TABLE_LEN] {
+    table_bytes(FACTORY_LEN, LPFS_OFFSET, LPFS_LEN)
+}
+
+/// The table every board fielded before the tree-store cutover carries (the
+/// 2026-10 repartition's: `factory` to `0x350000`, a 176-block littlefs
+/// `lpfs` at [`LEGACY_V2_LPFS_OFFSET`]), compiled the same way. Staged by a
+/// test that boots a pinned littlefs image as a board in a house would run
+/// it: a direct load keeps a table the chip already holds
+/// ([`holds_partition_table`]).
+pub fn legacy_v2_partition_table_bytes() -> [u8; PARTITION_TABLE_LEN] {
+    table_bytes(
+        LEGACY_V2_LPFS_OFFSET - FACTORY_OFFSET,
+        LEGACY_V2_LPFS_OFFSET,
+        LEGACY_V2_LPFS_LEN,
+    )
+}
+
+fn table_bytes(factory_len: u32, lpfs_offset: u32, lpfs_len: u32) -> [u8; PARTITION_TABLE_LEN] {
     // (label, type, subtype, offset, len)
-    const ROWS: [(&str, u8, u8, u32, u32); 5] = [
+    let rows: [(&str, u8, u8, u32, u32); 5] = [
         ("nvs", 0x01, 0x02, NVS_OFFSET, NVS_LEN),
         ("bootctl", 0x01, 0x06, BOOTCTL_OFFSET, BOOTCTL_LEN),
         ("phy_init", 0x01, 0x01, PHY_INIT_OFFSET, PHY_INIT_LEN),
-        ("factory", 0x00, 0x00, FACTORY_OFFSET, FACTORY_LEN),
-        ("lpfs", 0x01, 0x82, LPFS_OFFSET, LPFS_LEN),
+        ("factory", 0x00, 0x00, FACTORY_OFFSET, factory_len),
+        ("lpfs", 0x01, 0x82, lpfs_offset, lpfs_len),
     ];
     let mut out = [0xffu8; PARTITION_TABLE_LEN];
     let mut at = 0usize;
-    for (label, kind, subtype, offset, len) in ROWS {
+    for (label, kind, subtype, offset, len) in rows {
         let row = &mut out[at..at + 32];
         row[0] = 0xAA;
         row[1] = 0x50;

@@ -9,6 +9,10 @@ const MMU_VALID: u32 = 1 << 9;
 /// The cached flash window every entry maps into.
 pub const WINDOW: core::ops::Range<u32> = 0x4200_0000..0x4300_0000;
 
+/// MMU entries on the C6.
+#[cfg(feature = "bootloader")]
+const ENTRIES: u32 = 256;
+
 /// log2 of the page size the IDF bootloader chose (`mmu_power_ctrl[4:3]`:
 /// 64 KiB >> mode; 32 KiB on the 4 MB C6 this ships on).
 pub fn page_shift() -> u32 {
@@ -27,5 +31,17 @@ pub fn map(vaddr: u32, paddr: u32, page_shift: u32) {
             MMU_ITEM_CONTENT as *mut u32,
             (paddr >> page_shift) | MMU_VALID,
         );
+    }
+}
+
+/// Mark every entry invalid (content 0, as the IDF and the ROM write it).
+#[cfg(feature = "bootloader")]
+pub fn unmap_all() {
+    for entry in 0..ENTRIES {
+        // SAFETY: SPI0's MMU registers; nothing runs from the window.
+        unsafe {
+            core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, entry);
+            core::ptr::write_volatile(MMU_ITEM_CONTENT as *mut u32, 0);
+        }
     }
 }

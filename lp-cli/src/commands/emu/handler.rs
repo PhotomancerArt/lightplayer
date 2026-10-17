@@ -267,6 +267,12 @@ fn run(args: RunArgs) -> Result<()> {
             .flash_holds_image(true);
     }
 
+    // The flash part: its JEDEC id and status register 2 at power-on.
+    if let Some(text) = &args.flash_part {
+        let part = lp_emu_esp32c6::flash::FlashPart::parse(text).map_err(|e| anyhow::anyhow!(e))?;
+        builder = builder.flash_part(part);
+    }
+
     // The eFuse identity. `run` serves one board, so the default — the desk
     // board's MAC — is the right one; `serve` gives every board its own,
     // because a registry of N boards that all answer with one MAC is one

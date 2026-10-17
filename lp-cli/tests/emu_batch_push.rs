@@ -7,38 +7,33 @@
 //! the product's own `WireLinkPort` under an `lpa-client` `LpClient`), and
 //! the host's side of the conversation is the real push primitive,
 //! `LpClient::deploy_project_files` — the call `lp-cli upload` and `dev`
-//! make. Two claims, both about the shipped firmware, which runs littlefs
-//! and so answers `BeginBatch` with `atomic: false`:
+//! make. Two claims, both about the shipped firmware, which mounts the tree
+//! store (since the tree-store cutover) and so answers `BeginBatch` with
+//! `atomic: true`:
 //!
 //! 1. **A batched, deflated upload lands byte for byte.** The upload sends
 //!    `StopAllProjects`, `BeginBatch`, the writes (the files that shrink go
-//!    as `WriteChunkDeflated`), `LoadProject` — and no `CommitBatch`, since
-//!    the board said it has no transactions. The board's `HashPackage` of
-//!    the project equals the hash the host computes over the same files with
+//!    as `WriteChunkDeflated`), `LoadProject` (inside the batch: the load's
+//!    own writes join it) and `CommitBatch`, the one ending that lands them.
+//!    The board's `HashPackage` of the project
+//!    equals the hash the host computes over the same files with
 //!    `lpc_history::hash_package`, which can only be true if the board
 //!    inflated every deflated chunk to the bytes that were sent.
-//! 2. **A cut link leaves nothing held.** A second push is started by hand
-//!    (stop, begin, some writes including a multi-chunk deflated file), the
-//!    USB cable is detached through the emulator's control channel while a
-//!    chunk is in flight, and a new client attaches. The board answers its
-//!    hello, holds no batch (a commit says "no batch is open", a begin
-//!    answers `atomic: false`), takes a plain write, and a full upload then
-//!    completes with the matching hash. On this firmware what landed before
-//!    the cut stays: the cable comes out half-way through the second chunk
-//!    of the shader, and the board is left with a shader cut to its first
-//!    chunk (2,590 B of 4,378) — neither the old project nor the new one,
-//!    which is exactly what the atomic variant must not be.
+//! 2. **A cut link leaves the OLD project, byte for byte, and nothing
+//!    held.** A second push is started by hand (stop, begin, some writes
+//!    including a multi-chunk deflated file), the USB cable is detached
+//!    through the emulator's control channel while a chunk is in flight,
+//!    and a new client attaches. The board answers its hello; the server
+//!    dropped the batch the old session owned (`take_reset_links`), so the
+//!    store never committed a byte of version 2: the project hashes as
+//!    version 1 and its shader is version 1's. A commit says "no batch is
+//!    open", a begin and an abort answer `atomic: true`, a plain write is
+//!    taken, and a full upload then completes with the matching hash.
 //!
-//! **The atomic variant becomes a scenario once milestone M5 lands.** A board
-//! on the `fs-tree` firmware answers `atomic: true`; there a drop in the
-//! middle of the batch must leave the OLD project, byte for byte (its
-//! `HashPackage` equal to the pre-push hash), and the server's
-//! `take_reset_links` hook drops the batch the old session owned. That cannot
-//! run here: this image has no transactions, so the batch-owner path of
-//! `lpa-server`'s `BatchState` (covered by `lpa-server/tests/batch_state.rs`
-//! and `push_boundary.rs` against a transactional filesystem) is not
-//! reachable through the real firmware. M5's scenario is claim 2 with the
-//! last assertion inverted.
+//! Before the cutover this ran on littlefs (`atomic: false`), and claim 2's
+//! last assertion was the inverse: what landed before the cut stayed, a
+//! project half-way between the two versions. That firmware is the pinned
+//! fielded image now; the two-slot push it runs is `lpa-client`'s own tests.
 //!
 //! It lives in lp-cli because nothing under `lp-emu/` may depend on a
 //! product crate (the MIT fence). `#[ignore]`d and run by `just test-emu-c6`'s
@@ -83,7 +78,7 @@ const PROJECT: &str = "batch-push";
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
-fn a_batched_deflated_upload_lands_byte_for_byte_on_a_board_without_batches() {
+fn a_batched_deflated_upload_lands_byte_for_byte_in_one_committed_batch() {
     let Some(elf) = image() else { return };
     let mut board = Board::new(&elf);
     let files = project_files("projects/test/basic");
@@ -115,7 +110,7 @@ fn a_batched_deflated_upload_lands_byte_for_byte_on_a_board_without_batches() {
     }
 
     // What went over the wire is the primitive's plan, answered by a board
-    // that has no transactions.
+    // whose filesystem has transactions.
     let kinds: Vec<&str> = board.sent.iter().map(kind).collect();
     let begin = kinds
         .iter()
@@ -130,6 +125,14 @@ fn a_batched_deflated_upload_lands_byte_for_byte_on_a_board_without_batches() {
         .iter()
         .position(|k| *k == "load")
         .expect("the upload loaded the project");
+    let commit = kinds
+        .iter()
+        .position(|k| *k == "commit")
+        .expect("an atomic board's batch is committed");
+    assert!(
+        begin < load && load < commit,
+        "the load runs inside the batch (its own writes join it) and the commit ends it: {kinds:?}"
+    );
     assert!(
         kinds[..load]
             .iter()
@@ -152,14 +155,10 @@ fn a_batched_deflated_upload_lands_byte_for_byte_on_a_board_without_batches() {
         plain >= 1,
         "the project has files too small to deflate, sent as they are: {kinds:?}"
     );
-    assert!(
-        !kinds.contains(&"commit"),
-        "a board that answered atomic: false is never sent a commit: {kinds:?}"
-    );
     assert_eq!(
         board.batch_answers,
-        [(BatchOp::Begin, false, None)],
-        "the board's one batch answer: no transactions, no error"
+        [(BatchOp::Begin, true, None), (BatchOp::Commit, true, None)],
+        "the board's batch answers: a transaction begun and committed, no error"
     );
     let sent_bytes: usize = board.sent.iter().map(wire_data_len).sum();
     let logical_bytes: usize = files.iter().map(|(_, bytes)| bytes.len()).sum();
@@ -177,7 +176,7 @@ fn a_batched_deflated_upload_lands_byte_for_byte_on_a_board_without_batches() {
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
-fn a_link_cut_mid_push_leaves_the_board_answering_with_no_batch_and_the_next_push_completes() {
+fn a_link_cut_mid_push_leaves_the_old_project_and_no_batch_and_the_next_push_completes() {
     let Some(elf) = image() else { return };
     let mut board = Board::new(&elf);
     let v1 = project_files("projects/test/basic");
@@ -236,7 +235,7 @@ fn a_link_cut_mid_push_leaves_the_board_answering_with_no_batch_and_the_next_pus
             .expect("begin")
             .value
             .msg;
-        assert_eq!(batch_answer(&begun), (BatchOp::Begin, false, None));
+        assert_eq!(batch_answer(&begun), (BatchOp::Begin, true, None));
         for request in file_requests(PROJECT, "clock.json", &file(&v1, "clock.json"), true)
             .into_iter()
             .chain(shader_requests[..1].iter().cloned())
@@ -271,14 +270,12 @@ fn a_link_cut_mid_push_leaves_the_board_answering_with_no_batch_and_the_next_pus
         let hello = block_on(client.hello()).expect("the board answers a new client after the cut");
         assert_eq!(hello.value.proto, lpc_wire::WIRE_PROTO_VERSION);
 
-        // On littlefs what landed before the cut stays: the board holds
-        // neither version, a project half-way between the two. (The atomic
-        // variant — M5 — must hold hash_v1.)
+        // The batch the old session owned was dropped with it: nothing of
+        // version 2 was committed, so the board holds version 1, whole.
         let after_cut = block_on(client.hash_package(PROJECT)).expect("hash").value;
-        assert_ne!(after_cut, hash_v2, "the cut push did not complete");
-        assert_ne!(
+        assert_eq!(
             after_cut, hash_v1,
-            "littlefs applied the writes before the cut, so the copy is not version 1 any more"
+            "the store committed part of a batch whose link was cut"
         );
         let shader_now = block_on(
             client.send_request(ClientRequest::Filesystem(FsRequest::Read {
@@ -294,10 +291,10 @@ fn a_link_cut_mid_push_leaves_the_board_answering_with_no_batch_and_the_next_pus
             WireServerMsgBody::Filesystem(FsResponse::Read { data, .. }) => data.map(|d| d.len()),
             other => panic!("not a read answer: {other:?}"),
         };
-        assert!(
-            shader_len != Some(file(&v1, "shader.glsl").len())
-                && shader_len != Some(file(&v2, "shader.glsl").len()),
-            "the shader is the front of version 2 that landed before the cut: {shader_len:?}"
+        assert_eq!(
+            shader_len,
+            Some(file(&v1, "shader.glsl").len()),
+            "the shader is version 1's, whole"
         );
         eprintln!(
             "emu_batch_push: lp-emu:esp32c6:t1, after the cut the board's copy hashes \
@@ -315,19 +312,19 @@ fn a_link_cut_mid_push_leaves_the_board_answering_with_no_batch_and_the_next_pus
                 .msg;
         assert_eq!(
             batch_answer(&committed),
-            (BatchOp::Commit, false, Some("no batch is open".to_string()))
+            (BatchOp::Commit, true, Some("no batch is open".to_string()))
         );
         let begun = block_on(client.send_request(ClientRequest::Filesystem(FsRequest::BeginBatch)))
             .expect("begin")
             .value
             .msg;
-        assert_eq!(batch_answer(&begun), (BatchOp::Begin, false, None));
+        assert_eq!(batch_answer(&begun), (BatchOp::Begin, true, None));
         let aborted =
             block_on(client.send_request(ClientRequest::Filesystem(FsRequest::AbortBatch)))
                 .expect("abort")
                 .value
                 .msg;
-        assert_eq!(batch_answer(&aborted), (BatchOp::Abort, false, None));
+        assert_eq!(batch_answer(&aborted), (BatchOp::Abort, true, None));
         let probe = ClientRequest::Filesystem(FsRequest::Write {
             path: "/projects/batch-push-probe/note.txt".as_path_buf(),
             data: b"after the cut".to_vec(),

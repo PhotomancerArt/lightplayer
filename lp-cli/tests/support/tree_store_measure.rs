@@ -8,7 +8,6 @@
 #![allow(dead_code, reason = "each test file uses part of this")]
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp32c6::flash::{LPFS_LEN, LPFS_OFFSET};
 
 /// One `[heap]` line.
 #[derive(Clone, Copy, Debug, Default)]
@@ -98,14 +97,13 @@ impl FlashCount {
 }
 
 /// Start counting `lpfs` commands (call once, before the first
-/// [`flash_count`]).
+/// [`flash_count`]): the chip's own `lpfs` row — the tree table's, or a
+/// fielded littlefs board's (`0x350000`).
 pub fn watch(host: &EmuLinkHost<C6Board>) {
-    host.board
-        .machine
-        .flash()
-        .lock()
-        .unwrap()
-        .watch_flash_ops(LPFS_OFFSET..LPFS_OFFSET + LPFS_LEN, false);
+    let flash = host.board.machine.flash();
+    let mut flash = flash.lock().unwrap();
+    let range = lp_emu_esp32c6::flash_cut_spec::lpfs_range(flash.bytes());
+    flash.watch_flash_ops(range, false);
 }
 
 pub fn flash_count(host: &EmuLinkHost<C6Board>) -> FlashCount {

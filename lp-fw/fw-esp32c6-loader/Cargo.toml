@@ -12,6 +12,12 @@ publish = false
 # workspace clippy never see it.
 [workspace]
 
+[features]
+# LightPlayer's own second-stage bootloader: the same boot policy, built to be
+# loaded by the mask ROM from flash 0x0 (`bootloader.x`, the `prologue`).
+# Off: the factory loader the ESP-IDF bootloader starts (`loader.x`).
+bootloader = []
+
 [dependencies]
 # The boot-record format and the layout: one definition, shared with the core.
 lp-bootctl = { path = "../../lp-base/lp-bootctl" }

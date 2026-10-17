@@ -1669,6 +1669,7 @@ impl Board {
         self.events.push_back(LinkEvent::Frame(ServerFrame::hello(
             request_id,
             HelloFacts {
+                tree_store: false,
                 proto: lpc_wire::WIRE_PROTO_VERSION,
                 identity: Self::mac(),
                 firmware: Some(format!("fw-esp32c6 {version}")),
@@ -1983,6 +1984,7 @@ fn index_entry(version: &str, build: Option<&ModelBuild>, wire: u32) -> ReleaseI
         commit,
         wire_proto: wire,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -2032,6 +2034,7 @@ fn ota_manifest(build: &ModelBuild) -> OtaManifest {
         commit: format!("{commit12}{}", "0".repeat(28)),
         wire_proto: 36,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },

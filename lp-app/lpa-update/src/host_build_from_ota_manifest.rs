@@ -60,7 +60,11 @@ impl HostBuild {
             layout: manifest.requires.layout,
             min_loader: manifest.requires.loader,
         };
-        Self::from_parts(identity, core, engine, core_z, engine_z)
+        // The facts a release was announced with (its `requires.fsTree`
+        // among them) are the facts the loaded build states: a Studio checks
+        // the one against the other before it serves its own build.
+        Ok(Self::from_parts(identity, core, engine, core_z, engine_z)?
+            .with_tree_store(manifest.requires.fs_tree))
     }
 }
 
@@ -133,6 +137,22 @@ pub(crate) mod tests {
         assert_eq!(files_to_read(&m).len(), 4);
     }
 
+    /// A tree-store release loads as a build whose facts say so: Studio's
+    /// own build is checked against the facts its `ota-manifest.json`
+    /// announced, and a tree build that dropped `requires.fsTree` was "not
+    /// the build its manifest says" — every over-the-air update from a
+    /// tree-store Studio ended before it began (`MissingEngine`).
+    #[test]
+    fn a_tree_store_release_loads_with_its_requirement() {
+        let (mut manifest, files) = release(false);
+        manifest.requires.fs_tree = true;
+        let build = HostBuild::from_ota_manifest(&manifest, |n| files.get(n).cloned()).unwrap();
+        assert!(build.facts().needs_tree_store);
+        manifest.requires.fs_tree = false;
+        let build = HostBuild::from_ota_manifest(&manifest, |n| files.get(n).cloned()).unwrap();
+        assert!(!build.facts().needs_tree_store);
+    }
+
     #[test]
     fn an_unknown_encoding_is_skipped() {
         let (mut m, files) = release(false);
@@ -199,6 +219,7 @@ pub(crate) mod tests {
             commit: "abc1234567890123456789012345678901234567".into(),
             wire_proto: 37,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },

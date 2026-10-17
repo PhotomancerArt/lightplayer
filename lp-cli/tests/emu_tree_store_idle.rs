@@ -39,7 +39,7 @@ const CYCLES_PER_US: u64 = 160;
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; run by hand (see the module docs)"]
 fn quiet_ticks_clean_up_while_the_project_plays() {
-    let Some(elf) = elf("emu_tree_store_idle", &FwImage::FS_TREE_HEAP_PEAK) else {
+    let Some(elf) = elf("emu_tree_store_idle", &FwImage::SHIPPED_HEAP_PEAK) else {
         return;
     };
     let mut host = board(&elf, Vec::new(), 0x1D1E_0001);
