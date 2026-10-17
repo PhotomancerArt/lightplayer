@@ -43,6 +43,7 @@ mod deflate_plan;
 mod dir_node;
 mod dir_rebuild;
 mod flash;
+mod format_reservations;
 mod gc_copy;
 mod gc_mark;
 mod gc_victim;
@@ -113,6 +114,7 @@ pub use blob_codec::MAX_LOGICAL_CHUNK;
 #[cfg(feature = "deflate-plan")]
 pub use deflate_plan::{DEFAULT_DEFLATE_LEVEL, PlannedChunk, plan_deflated_chunks};
 pub use flash::Flash;
+pub use format_reservations::*;
 #[cfg(feature = "host-deflate")]
 pub use host_deflate::{HostChunk, host_deflate_chunks};
 #[cfg(feature = "inspect")]

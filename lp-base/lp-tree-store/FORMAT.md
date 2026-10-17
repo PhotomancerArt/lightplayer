@@ -184,7 +184,9 @@ information an older reader may lose (an index, a hint, a cache) and that
 no known kind refers to. A kind or codec that a known record refers to — a
 new chunk codec, a new node kind — needs an incompat flag. Kind values 0
 and 255 are never assigned. The race prototype (version 1) used kind 5 and
-codec 2; nothing in version 3 gives them a meaning.
+codec 2; nothing in version 3 gives them a meaning. **Kinds 6 and 7 are
+reserved** for the index checkpoint (below): version 3 writes neither and
+reads both as unknown records.
 
 The same id may be on flash more than once (a GC copy whose original was
 not yet erased; a record re-written after a cut). Copies are byte-identical
@@ -285,7 +287,9 @@ sequence of entries
 back to back, the last ending exactly at `L` (no entries is the empty
 tail). A tail that does not parse that way — half an entry, a length
 running past `L` — makes the root fail to decode (it is not a candidate).
-**Version 3 defines no tags and writes an empty tail.**
+**Version 3 defines no tags and writes an empty tail.** Tag 1 is
+**reserved** for the index checkpoint's top (below); tag 0 and 255 are
+never assigned.
 
 Every tag is **skippable**: a reader ignores a tag it does not know. There
 is no "must understand" tag — information an older reader must not ignore
@@ -295,6 +299,114 @@ only something that stays correct when it vanishes after an older writer's
 commit (a hint, a cache, a counter that can be rebuilt), and a newer reader
 must treat a missing tag as "not known". The root's id covers the whole
 payload, tail included.
+
+### Reserved: the index checkpoint (kinds 6 and 7, root tag 1)
+
+**Not part of version 3's writer**: no version-3 core writes these, and
+every version-3 reader skips them (unknown kinds, an unknown tag). They are
+allocated, with their layout, so that a later core can add a bounded mount
+for big partitions (thousands of sectors) as an additive change — the
+shape decided while nothing is fielded, so no two efforts hand out the same
+numbers. The layout is read **in place** on flash (never loaded whole) and
+updated by small sorted runs, so its RAM stays small and its writes stay
+near the live set's changes whatever the partition's size.
+
+The record numbers follow "Ids" and the location convention ("Limits at
+scale": `sector u16 ‖ offset u16`, the record header's offset in its
+sector).
+
+**Index chunk** (kind 6, codec 0; id = `id(6, payload)`):
+
+```
+0   2     count c ≥ 1
+2   14c   entries: id u64 ‖ sector u16 ‖ offset u16 ‖ len u16
+```
+
+One entry per indexed record: where its header is, and `len` = the
+record's **total** length (`16 + L`), so one read fetches header and
+payload. Entries are sorted by id, strictly ascending, and a chunk holds
+whole entries only (no entry spans two chunks): `⌊(R − 18) / 14⌋` per
+chunk, 71 at `R` = 1,024.
+
+**Index fence or top** (kind 7, codec 0; id = `id(7, payload)`). Byte 0 is
+`flags+level`: bit 7 set = the **top**, clear = a **fence**; bits 0–6 = a
+fence's level `L`.
+
+A fence of level `L` (one node of a run's search tree):
+
+```
+0   1     flags+level   bit 7 clear; bits 0–6 = L
+1   2     count k ≥ 1
+3   20k   refs: first id u64 ‖ child id u64 ‖ sector u16 ‖ offset u16
+```
+
+Its children are index chunks (`L` = 0) or fences of level `L − 1`; each
+ref's `first id` is the smallest entry id under that child; refs are sorted
+by `first id`, strictly ascending, and the children cover disjoint,
+ascending id ranges.
+
+The top (one per checkpoint; the root names it):
+
+```
+0     1     flags+level   0x80
+1     8     covered root seq u64     the commit the index describes
+9     1     head kinds h             2 in version 3 (cold, hot), in head-kind order
+10    6h    per head kind: watermark sector seq u32 ‖ head end u16
+…     1     run count r ≥ 1          newest first
+…           per run: entry count u32 ‖ level u8 ‖ count k u16 ‖ k refs (20 B each, as a fence's)
+…     2     sector rows n            0, or N
+…     4n    per sector s: end u16 ‖ live u16
+```
+
+A run is a sorted set of entries; its refs are its fence of level `level`
+(level 0: they name chunks directly). The newest run wins for an id in two
+runs. A writer keeps the top within one record by merging runs (a base run
+plus a few small delta runs is the expected shape) and adds a fence level
+to a run whose refs outgrow it.
+
+The **watermarks** are, per head kind, the newest sector of that kind and
+its records' end when the index was taken. The optional **sector rows** are
+each sector's records' end and live bytes at that moment (`0` for one not
+written); they let a writer resume and admit writes without a mark.
+
+**Root tail tag 1** = the top: `top id u64 ‖ sector u16 ‖ offset u16` (12
+bytes).
+
+**Using one — every piece verified on use:**
+
+- A chunk, fence or top counts only if the header at its ref's location
+  names its kind and its id and its CRC holds. Anything that does not —
+  and a missing tag, or trusted sector seqs spanning `2³¹` or more — means
+  **there is no index**: mount as without it.
+- An entry is used only if its sector is trusted and either that sector's
+  seq is older (wrapping) than its head kind's watermark, or it is the
+  watermark sector itself and the entry's offset is below the recorded
+  head end. Every other sector, and each watermark sector from its
+  recorded end, is **rolled forward** by its record header chain; the
+  log-order invariant (I4, "What a writer guarantees") makes that
+  complete. A sector row is used under the same condition.
+- A read through an entry checks the header's id and the record's CRC (as
+  every read does), so a stale entry reads as damage and is looked up
+  again by scanning, never as another record's bytes.
+- The root is found by I5 (roots only in hot sectors, in log order), not
+  through the index.
+- Dedup and GC wait for a mark that proves the index complete for the
+  committed closure.
+
+**Cut and rollback safety, by the existing rules:** chunks, fences and the
+top are written and read back before the root that names them (I1), so a
+cut before that root leaves them garbage; a writer that does not know the
+index (version 3, or a rolled-back core) drops tag 1 at its next commit and
+never copies kinds 6 and 7, so the index simply vanishes; its erases give
+sectors new seqs, which the watermarks catch.
+
+**The prototype is not this layout.** `claude/tree-store-checkpoint-prototype`
+(never merged, never fielded) wrote kind 6 as one byte stream chained across
+chunks with entries straddling them, and tag 1 naming its first chunk: it
+must be loaded whole, is rewritten whole at every checkpoint and does not
+scale past a few hundred sectors. If it is ever built, it adopts this
+layout. A reader of this layout rejects a prototype image's tag (its
+location holds no kind-7 top) and mounts without an index.
 
 ## Ids
 
@@ -308,6 +420,8 @@ as a u64; the value 0 is replaced by 1. Tags:
 | 3 | Multi | the payload (a Merkle hash of its children, the flags byte included) |
 | 4 | Root | the payload |
 | 5 | reserved | never written (v1's RAM path table hashed paths with it; that table is gone) |
+| 6 | reserved: index chunk (kind 6) | the payload; not written by version 3 |
+| 7 | reserved: index fence or top (kind 7) | the payload; not written by version 3 |
 
 A file's node id is its one Blob's id (a file of at most `R − 16` stored
 bytes, or one chunk) or its top Multi's id. Ids are 64 bits and **not**

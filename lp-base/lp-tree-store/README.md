@@ -723,8 +723,13 @@ written with checkpoints): used 70.6 → 31.8 ms, c40 29.7 → 31.4, empty
 7.8 → 8.4, full 108 ms (fell back); emulated used 28.4 → 18.1 ms. Its costs: `12L + 2S` bytes written per checkpoint (12 KB for the
 full store), mount RAM up to ~29 KB on the used store (the checkpoint's
 entries plus the recent records, against the 16 KB budget — unoptimized),
-and a format allocation (kind 6, tag 1) that must be decided before
-FORMAT.md freezes. The alternative, a per-sector summary written when a
+and a format allocation (kind 6, tag 1) that had to be decided before
+FORMAT.md froze. **Decided (2026-10-16, the 8 MB screen):** kinds 6 and 7
+and root tag 1 are reserved for an index checkpoint in a different, scalable
+layout (FORMAT.md "Reserved: the index checkpoint": sorted 14-byte entries,
+whole entries per chunk, fenced runs read in place, per-head-kind
+watermarks). The prototype's stream schema is loaded and rewritten whole and
+does not scale; if it is ever built it adopts that layout. The alternative, a per-sector summary written when a
 sector closes (JFFS2's erase-block summary), would turn the `R` header
 reads into `S` reads of `12R` bytes in all (the soak image ≈ 31 ms against 56
 by the formula) for ~3 % more bytes written and no RAM, but stays `O(R)`:
