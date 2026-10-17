@@ -9328,6 +9328,11 @@ impl ProjectController {
         Some(self.sync.as_ref()?.frames_seen())
     }
 
+    /// A node's tree path, as `editor.json` keys it.
+    pub(crate) fn graph_node_address(&self, node: NodeId) -> Option<String> {
+        Some(self.node_by_runtime_id(node)?.address().to_string())
+    }
+
     /// The node whose definition lives in `artifact`.
     pub(crate) fn graph_node_for_def(&self, artifact: &ArtifactLocation) -> Option<NodeId> {
         self.def_artifacts

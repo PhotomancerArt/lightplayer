@@ -15,6 +15,14 @@
 //! again from the files, keeping the camera and whatever of the selection
 //! still exists.
 //!
+//! **Saving.** After an edit (not mid-drag, not mid-drawing) the lab's
+//! writer says which of the project's files changed, in today's formats,
+//! and each is written as an ordinary asset edit — the same path the Map
+//! view's edits take — so Studio's dirty state, Save and the push to the
+//! board work unchanged. The written files are then the baseline the next
+//! save compares against. Undo is the Graph's own (the lab's project
+//! snapshots); what it puts back is saved the same way.
+//!
 //! **Colours.** [`GraphController::view`] carries the board's frame, built
 //! from the frames the board published (`graph_frame.rs`) and kept until
 //! a new frame or a new project arrives.
@@ -27,6 +35,7 @@ use lab_mapping_files::{Opened, ProductProject};
 use lab_mapping_model::{BoardFrame, Editor, NodeId};
 
 use crate::StudioServerClient;
+use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
 use crate::app::graph::graph_source::{GraphSource, location};
 use crate::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
@@ -49,6 +58,11 @@ pub struct GraphController {
     /// The project's revision when the files were last compared.
     checked: Option<crate::app::graph::GraphFilesKey>,
     generation: u64,
+    /// The editor's project revision its files last said (opened or
+    /// written): another one is an edit to save.
+    saved: u64,
+    /// The selection the board last breathed, while it breathes one.
+    pulsed: Option<Vec<lab_mapping_model::Target>>,
     frame: RefCell<Option<(FrameKey, Rc<BoardFrame>)>>,
 }
 
@@ -58,8 +72,8 @@ struct GraphOpened {
     files: ProductProject,
     /// Every path the open asked for, and what it said.
     read: BTreeMap<String, Option<String>>,
-    /// The lab's output nodes, as Studio's nodes.
-    outputs: BTreeMap<NodeId, lpc_model::NodeId>,
+    /// The lab's nodes, as Studio's.
+    nodes: BTreeMap<NodeId, lpc_model::NodeId>,
 }
 
 /// What the board's frame was built from: the board's frame count and
@@ -112,7 +126,7 @@ impl GraphController {
         }
         let frame = Rc::new(graph_frame::board_frame(
             &editor.project,
-            &opened.outputs,
+            &opened.nodes,
             |node| project.graph_output_frame(node),
         ));
         *kept = Some((key, frame.clone()));
@@ -125,7 +139,7 @@ impl GraphController {
     pub async fn settle(
         &mut self,
         project: &mut ProjectController,
-        server: Option<&mut StudioServerClient>,
+        mut server: Option<&mut StudioServerClient>,
         wanted: bool,
     ) -> bool {
         let Some(key) = project.graph_files_key() else {
@@ -134,18 +148,23 @@ impl GraphController {
             self.close();
             return had;
         };
+        let mut changed = false;
+        if let Some(server) = server.as_deref_mut() {
+            changed |= self.save(project, server).await;
+            self.highlight(project, server, wanted).await;
+        }
         if !wanted {
-            return false;
+            return changed;
         }
         if self.absent_root.as_deref() != Some(key.root.as_str()) {
             self.close();
             self.absent_root = Some(key.root.clone());
         }
         if self.checked.as_ref() == Some(&key) && self.state.is_some() {
-            return false;
+            return changed;
         }
         let Some(server) = server else {
-            return false;
+            return changed;
         };
         let first = self.state.is_none();
         if first {
@@ -161,12 +180,142 @@ impl GraphController {
             });
             if same {
                 self.checked = Some(key);
-                return first;
+                return first || changed;
             }
         }
         self.open(project, server).await;
         self.checked = Some(key);
         true
+    }
+
+    /// Publish the Graph's verbs (`project/graph/…`), once it is open.
+    pub fn publish_offers(&self, offers: &mut crate::UiOfferTree) {
+        if matches!(self.state, Some(UiGraphState::Open { .. })) {
+            crate::app::graph::publish_graph_offers(offers, &self.handle.editor().borrow());
+        }
+    }
+
+    /// Press a verb from its offer, as its key does it.
+    pub fn press(&mut self, verb: lab_mapping_model::GraphVerb) -> bool {
+        let used = self.handle.editor().borrow_mut().press(verb);
+        self.generation += 1;
+        used
+    }
+
+    /// Write what the editor changed to the project's files. Returns
+    /// whether the Graph's view changed (a notice).
+    async fn save(
+        &mut self,
+        project: &mut ProjectController,
+        server: &mut StudioServerClient,
+    ) -> bool {
+        let (saved, revision) = {
+            let Some(opened) = self.opened.as_ref() else {
+                return false;
+            };
+            let e = self.handle.editor().borrow();
+            if e.dragging() || e.drawing() || e.project.revision() == self.saved {
+                return false;
+            }
+            (opened.files.save(&e.project), e.project.revision())
+        };
+        self.saved = revision;
+        let saved = match saved {
+            Ok(saved) => saved,
+            Err(why) => {
+                self.refuse_save(why.to_string());
+                return true;
+            }
+        };
+        for (path, text) in &saved.writes {
+            let written = project
+                .apply_asset_body(server, location(path), text.clone().into_bytes())
+                .await;
+            if let Err(why) = written {
+                self.refuse_save(format!("{path}: {why}"));
+                return true;
+            }
+        }
+        // Pins: editor.json's `canvas` surface.
+        let paths = [EDITOR_JSON.to_string()];
+        self.fetch(project, server, &paths).await;
+        let meta = GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten();
+        let pins = match self.opened.as_ref() {
+            Some(opened) => with_pins(
+                meta.as_deref(),
+                &self.handle.editor().borrow().project,
+                |id| address_of(project, &opened.nodes, id),
+            ),
+            None => None,
+        };
+        if let Some(text) = pins {
+            let written = project
+                .apply_asset_body(server, location(EDITOR_JSON), text.into_bytes())
+                .await;
+            if let Err(why) = written {
+                self.refuse_save(format!("{EDITOR_JSON}: {why}"));
+                return true;
+            }
+            self.absent.remove(EDITOR_JSON);
+        }
+        // What was written is what the next save compares against.
+        let source = GraphSource::new(project, &self.absent);
+        if let Ok(reopened) = Opened::open(&source)
+            && source.misses().is_empty()
+            && let Some(opened) = self.opened.as_mut()
+        {
+            opened.files = reopened.files;
+            let mut read = source.into_read();
+            read.insert(
+                EDITOR_JSON.to_string(),
+                GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
+            );
+            opened.read = read;
+        }
+        false
+    }
+
+    /// Show the selection on the board while the Graph is the place, and
+    /// stop when it isn't or nothing is selected — the Patch view's pulse,
+    /// through the same `highlight` slots.
+    async fn highlight(
+        &mut self,
+        project: &mut ProjectController,
+        server: &mut StudioServerClient,
+        wanted: bool,
+    ) {
+        let selection = match (&self.opened, wanted) {
+            (Some(_), true) => self.handle.editor().borrow().selection.clone(),
+            _ => Vec::new(),
+        };
+        let want = (!selection.is_empty()).then_some(selection);
+        if self.pulsed == want {
+            return;
+        }
+        let op = match (&self.opened, &want) {
+            (Some(opened), Some(selection)) => crate::app::graph::graph_highlight::highlight_of(
+                &self.handle.editor().borrow().project,
+                &opened.nodes,
+                selection,
+            ),
+            _ => crate::PatchPulseOp {
+                subjects: Vec::new(),
+            },
+        };
+        // A pulse that didn't land is tried again with the next change.
+        if project.apply_patch_pulse(server, op).await.is_ok() {
+            self.pulsed = want;
+        }
+    }
+
+    /// Say on the canvas that a save didn't happen.
+    fn refuse_save(&mut self, why: String) {
+        self.handle.editor().borrow_mut().notice = Some(lab_mapping_model::Notice::refused(
+            "Couldn't save the Graph's edit",
+            why,
+            "the edit is still on the Graph; undo it, or try again",
+        ));
+        self.generation += 1;
     }
 
     /// Read the project's files into a new editor.
@@ -184,7 +333,19 @@ impl GraphController {
                 continue;
             }
             match result {
-                Ok(opened) => self.adopt(project, opened, read),
+                Ok(mut opened) => {
+                    let mut read = read;
+                    // editor.json's `canvas` surface: where pinned nodes sit.
+                    let paths = [EDITOR_JSON.to_string()];
+                    self.fetch(project, server, &paths).await;
+                    let meta = GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten();
+                    let nodes = node_map(project, &opened.files);
+                    apply_pins(&mut opened.project, meta.as_deref(), |id| {
+                        address_of(project, &nodes, id)
+                    });
+                    read.insert(EDITOR_JSON.to_string(), meta);
+                    self.adopt(opened, read, nodes)
+                }
                 Err(why) => {
                     self.opened = None;
                     self.state = Some(UiGraphState::Refused {
@@ -202,20 +363,10 @@ impl GraphController {
     /// Make the opened project the editor's, keeping the view.
     fn adopt(
         &mut self,
-        project: &ProjectController,
         opened: Opened,
         read: BTreeMap<String, Option<String>>,
+        nodes: BTreeMap<NodeId, lpc_model::NodeId>,
     ) {
-        let outputs = opened
-            .project
-            .outputs()
-            .iter()
-            .filter_map(|n| {
-                let file = opened.files.nodes.get(&n.id)?;
-                let node = project.graph_node_for_def(&location(&file.path))?;
-                Some((n.id.clone(), node))
-            })
-            .collect();
         let first = self.opened.is_none();
         let Opened {
             project: lab,
@@ -237,12 +388,9 @@ impl GraphController {
                 e.camera = editor.camera;
             }
             *editor = e;
+            self.saved = editor.project.revision();
         }
-        self.opened = Some(GraphOpened {
-            files,
-            read,
-            outputs,
-        });
+        self.opened = Some(GraphOpened { files, read, nodes });
         self.state = Some(UiGraphState::Open { live: false });
         self.generation += 1;
         *self.frame.borrow_mut() = None;
@@ -276,6 +424,31 @@ impl GraphController {
         self.absent.clear();
         self.absent_root = None;
         self.checked = None;
+        self.pulsed = None;
         *self.frame.borrow_mut() = None;
     }
+}
+
+/// The lab's nodes, as Studio's: each by the file its definition lives in.
+fn node_map(
+    project: &ProjectController,
+    files: &ProductProject,
+) -> BTreeMap<NodeId, lpc_model::NodeId> {
+    files
+        .nodes
+        .iter()
+        .filter_map(|(id, file)| {
+            let node = project.graph_node_for_def(&location(&file.path))?;
+            Some((id.clone(), node))
+        })
+        .collect()
+}
+
+/// A lab node as `editor.json` keys it: its tree path.
+fn address_of(
+    project: &ProjectController,
+    nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
+    id: &NodeId,
+) -> Option<String> {
+    project.graph_node_address(*nodes.get(id)?)
 }

@@ -3260,6 +3260,11 @@ impl StudioController {
         // pane layout exists only for an open project
         let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
         self.publish_device_offers(&mut offers);
+        // The Graph's verbs, while it is the page (`project/graph/…`).
+        let graph = self.graph.view(&self.project);
+        if self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph) {
+            self.graph.publish_offers(&mut offers);
+        }
         offers.set_focus(self.offer_focus(false));
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
@@ -3316,7 +3321,7 @@ impl StudioController {
             .with_dirty(dirty)
             .with_app_agent(app_agent)
             .with_offers(offers)
-            .with_graph(self.graph.view(&self.project))
+            .with_graph(graph)
     }
 
     /// The app chat's view with the agent's activity on it (roadmap M8):
@@ -4592,6 +4597,12 @@ impl StudioController {
             if action.op_as::<PatchPulseOp>().is_some() {
                 let op = action.into_op::<PatchPulseOp>()?;
                 return self.execute_patch_pulse_op(op).await;
+            }
+            if action.op_as::<crate::app::graph::GraphOp>().is_some() {
+                let op = action.into_op::<crate::app::graph::GraphOp>()?;
+                self.graph.press(op.verb);
+                self.mark_dirty();
+                return Ok(crate::core::notice::UiNotices::new());
             }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;

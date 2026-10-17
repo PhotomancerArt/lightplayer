@@ -62,9 +62,13 @@ impl GraphHandle {
             let mut e = self.editor.borrow_mut();
             let revision = e.project.revision();
             let selection: Vec<Target> = e.selection.clone();
+            let busy = e.dragging() || e.drawing();
             let used = e.input(input);
             let note = GraphNote {
-                edited: e.project.revision() != revision,
+                // A drag or a drawing that just ended is an edit to save,
+                // even when its last move changed nothing more.
+                edited: e.project.revision() != revision
+                    || (busy && !(e.dragging() || e.drawing())),
                 selected: e.selection != selection,
             };
             (used, note)

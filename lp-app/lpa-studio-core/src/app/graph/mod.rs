@@ -10,11 +10,15 @@
 //! so pointer input never waits on the actor; colours come from the
 //! board's own published frames ([`graph_frame`]).
 
+mod graph_canvas_meta;
 mod graph_controller;
 mod graph_files_key;
 mod graph_frame;
 mod graph_handle;
+pub(crate) mod graph_highlight;
 mod graph_note;
+mod graph_offers;
+mod graph_op;
 mod graph_source;
 mod ui_graph_view;
 
@@ -22,4 +26,6 @@ pub use graph_controller::GraphController;
 pub use graph_files_key::GraphFilesKey;
 pub use graph_handle::GraphHandle;
 pub use graph_note::GraphNote;
+pub use graph_offers::{GRAPH_GROUP, graph_verb_path, publish_graph_offers};
+pub use graph_op::GraphOp;
 pub use ui_graph_view::{UiGraphFrame, UiGraphState, UiGraphView};

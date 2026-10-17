@@ -1,21 +1,24 @@
 //! The Graph tab on a running project, end to end: the actor opens the
 //! project's own files on the lab's model while the Graph is the place,
 //! the page's handle reads the same editor, and the colours are the
-//! board's own published frames (plan
-//! `lp2025/2026-10-17-0202-mapping-lab-into-studio`, M1).
+//! board's own published frames; an edit pressed by its offer's path saves
+//! through Studio's asset edits, and the selection breathes or chases on
+//! the board through its `highlight` slots (plan
+//! `lp2025/2026-10-17-0202-mapping-lab-into-studio`, M1–M3).
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use lab_mapping_model::{GraphInput, NodeId, Target, UiNodeFace};
+use lab_mapping_model::{GraphInput, GraphVerb, NodeId, Rgb, Target, UiNodeFace};
 
-use crate::app::graph::{GraphHandle, UiGraphState};
+use crate::app::graph::{GraphHandle, UiGraphState, graph_verb_path};
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive, project_action};
 use crate::app::studio::studio_face_e2e_tests::example_e2e_server;
 use crate::{
-    ProjectOp, StudioActor, StudioCommand, StudioController, StudioServerClient, UiPage, UiPlace,
-    UiProjectView, UiStudioView,
+    ArtifactLocation, OfferArgs, ProjectOp, StudioActor, StudioCommand, StudioController,
+    StudioServerClient, UiPage, UiPlace, UiProjectView, UiStudioView,
 };
 
 /// The choker opens on the Graph as the lab opens it: its five nodes,
@@ -128,6 +131,149 @@ fn a_grid_fixture_opens_as_its_box() {
     );
 }
 
+/// An edit pressed on the Graph by its offer's path saves through Studio's
+/// own asset edit: the choker's mapping is the project's pending edit, in
+/// today's format with an id on every object, and the product's own
+/// resolver reads it back with the lamp the edit added.
+#[test]
+fn an_edit_on_the_graph_saves_through_the_asset_path() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_component();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Component(first)]));
+    graph.batch();
+    graph.press(GraphVerb::More);
+    graph.refresh();
+    assert_eq!(graph.handle.editor().borrow().project.lamp_count(), 74);
+    let content = graph
+        .actor
+        .controller_mut_for_test()
+        .project_for_test()
+        .asset_content_cached(&ArtifactLocation::file("/playful.map2d.json"))
+        .expect("the mapping is Studio's to show");
+    assert!(content.dirty, "the edit is the project's pending edit");
+    let text = content.text().expect("text").to_string();
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(doc["format"], 3, "the lowest format that holds ids");
+    let objects = doc["objects"].as_array().unwrap();
+    assert!(objects.iter().all(|o| o.get("id").is_some()));
+    let product = lpc_mapping::Map2dDoc::from_json(&text).expect("the product reads it");
+    let resolved = lpc_mapping::resolve(&product).expect("and resolves it");
+    assert_eq!(resolved.lamps.len(), 74);
+    // Saved once: the next reads write nothing more, and the Graph keeps
+    // its editor (its own edit is no change made elsewhere).
+    graph.refresh();
+    assert_eq!(graph.handle.editor().borrow().project.lamp_count(), 74);
+    assert!(graph.handle.editor().borrow().can_undo());
+}
+
+/// Undo on the Graph is the Graph's own, and what it puts back is saved
+/// the same way: the mapping is as it was opened.
+#[test]
+fn undo_on_the_graph_saves_what_it_puts_back() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_component();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Component(first)]));
+    graph.press(GraphVerb::More);
+    graph.refresh();
+    graph.press(GraphVerb::Undo);
+    graph.refresh();
+    let text = graph
+        .actor
+        .controller_mut_for_test()
+        .project_for_test()
+        .asset_content_cached(&ArtifactLocation::file("/playful.map2d.json"))
+        .and_then(|c| c.text().map(str::to_string))
+        .expect("the mapping");
+    let product = lpc_mapping::Map2dDoc::from_json(&text).expect("the product reads it");
+    assert_eq!(lpc_mapping::resolve(&product).unwrap().lamps.len(), 73);
+}
+
+/// A selected object chases on the board: its first lamp's pixel is the
+/// chase's blue head, its last the red tail — read back from the board's
+/// own frame. Deselecting stops it.
+#[test]
+fn a_selected_object_chases_on_the_board() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_component();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Component(first)]));
+    graph.batch();
+    let (head, tail) = graph.first_object_pixels();
+    let view = graph.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert_eq!(pixels[head], Rgb::new(0, 0, 255), "the chase's blue head");
+    assert_eq!(pixels[tail], Rgb::new(255, 0, 0), "the chase's red tail");
+
+    graph.handle.input(GraphInput::Select(Vec::new()));
+    graph.batch();
+    let view = graph.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert_ne!(
+        (pixels[head], pixels[tail]),
+        (Rgb::new(0, 0, 255), Rgb::new(255, 0, 0)),
+        "deselected, the board shows its pattern again"
+    );
+}
+
+/// A selected port breathes on the board, every pixel of it one grey.
+#[test]
+fn a_selected_port_breathes_on_the_board() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    graph.handle.input(GraphInput::Select(vec![Target::Port {
+        output: NodeId::new("output"),
+        key: "0".to_string(),
+    }]));
+    graph.batch();
+    let view = graph.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert!(
+        pixels.iter().all(|p| p.r == p.g && p.g == p.b),
+        "{pixels:?}"
+    );
+}
+
+/// Leaving the Graph stops the board's highlight, as leaving Patch does.
+#[test]
+fn leaving_the_graph_stops_the_highlight() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_component();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Component(first)]));
+    graph.batch();
+    let (head, tail) = graph.first_object_pixels();
+    graph
+        .tx
+        .send(StudioCommand::Place(UiPlace::new(UiPage::Project {
+            uid: "prj".to_string(),
+            view: UiProjectView::Nodes,
+        })));
+    graph.batch();
+    graph.refresh();
+    // Back to look: the board's frame no longer chases.
+    let view = graph.go_to_graph();
+    let _ = view;
+    graph.handle.input(GraphInput::Select(Vec::new()));
+    let view = graph.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert_ne!(pixels[head], Rgb::new(0, 0, 255));
+    assert_ne!(pixels[tail], Rgb::new(255, 0, 0));
+}
+
 /// A studio actor on a running catalog project, and the Graph's handle.
 struct Graph {
     actor: StudioActor<fn(core::time::Duration) -> core::future::Ready<()>>,
@@ -184,6 +330,36 @@ impl Graph {
 
     fn view(&self) -> UiStudioView {
         self.last.clone().expect("a snapshot")
+    }
+
+    /// Press the Graph's verb by its offer's path, as a click does.
+    fn press(&mut self, verb: GraphVerb) {
+        actor_clicks(&mut self.actor, &self.tx).press(graph_verb_path(verb), OfferArgs::default());
+        if let Some(next) = self.view.try_recv() {
+            self.last = Some(next);
+        }
+    }
+
+    /// The choker's first drawn component.
+    fn first_component(&self) -> lab_mapping_model::ComponentId {
+        self.handle
+            .editor()
+            .borrow()
+            .project
+            .fixture(&NodeId::new("fixture"))
+            .unwrap()
+            .components[0]
+            .id
+            .clone()
+    }
+
+    /// The pixels the choker's first object's first and last lamps land
+    /// on: its one port takes every lamp in order (auto), so lamp `i` of the
+    /// first object is pixel `i`.
+    fn first_object_pixels(&self) -> (usize, usize) {
+        let e = self.handle.editor().borrow();
+        let (_, o) = &e.project.placed_objects()[0];
+        (0, o.lamps.len() - 1)
     }
 
     /// Say the page is the Graph, and let the actor open it.
