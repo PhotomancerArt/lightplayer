@@ -151,7 +151,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   | `trust_tail_once` | double | 4 (`remount_failed`) |
   | `newest_by_headers` | sweep | 701 (`read_error`, `remount_failed`) |
   | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
-  | `format_keeps_headers` | fuzz (`format_after_failed`) | 70 |
+  | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
 
   The unmutated store: 0 failures in all seven drivers (6,115 cases).
   A2 dropped one it had built, `mount_trusts_blobs`, with the check it
