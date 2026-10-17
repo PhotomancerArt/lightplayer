@@ -92,7 +92,7 @@ pub fn log(tag: &str) {
     let mut in_dram2 = (0usize, 0usize);
     let mut elsewhere = (0usize, 0usize);
     for &(addr, size) in &live[..len] {
-        let bucket = if DRAM2_SEG.contains(&addr) {
+        let bucket = if in_boot_stage(addr) {
             &mut in_dram2
         } else if radio.contains(&addr) {
             &mut in_radio
@@ -104,7 +104,7 @@ pub fn log(tag: &str) {
     }
     log::info!(
         "[radio-dma] {tag}: {len} live C blocks ({untracked} untracked) · HEAP_RADIO {} ({} B) · \
-         main {} ({} B) · dram2_seg {} ({} B){}",
+         main {} ({} B) · boot stages {} ({} B){}",
         in_radio.0,
         in_radio.1,
         elsewhere.0,
@@ -114,21 +114,28 @@ pub fn log(tag: &str) {
         if in_dram2.0 == 0 {
             ""
         } else {
-            " — IN THE BOOTLOADER'S REGION"
+            " — IN A BOOT STAGE'S REGION (dram2_seg or the loader's RAM)"
         }
     );
     let first = !LISTED.swap(true, Ordering::Relaxed);
     for &(addr, size) in &live[..len] {
-        let flagged = DRAM2_SEG.contains(&addr);
+        let flagged = in_boot_stage(addr);
         if first || flagged {
             log::info!(
                 "[radio-dma]   {addr:#010x}..{:#010x} {size} B{}",
                 addr + size,
-                if flagged { " DRAM2_SEG" } else { "" }
+                if flagged { " BOOT STAGE" } else { "" }
             );
         }
     }
     if first {
         crate::heap_map::log(tag);
     }
+}
+
+/// Whether `addr` is in RAM a boot stage runs in after a warm reset:
+/// `dram2_seg` (the IDF bootloader) or the split loader's RAM.
+fn in_boot_stage(addr: usize) -> bool {
+    let loader = lp_bootctl::BOOT_STAGE_RAM;
+    DRAM2_SEG.contains(&addr) || (loader.start as usize..loader.end as usize).contains(&addr)
 }

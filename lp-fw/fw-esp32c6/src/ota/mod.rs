@@ -134,9 +134,13 @@ pub fn cores_must_read_tree_store() -> bool {
 pub const INCOMPLETE_BOOTS_TO_CORE_ONLY: u32 = 4;
 
 /// The chip reset an update ends with (`esp_hal`'s software reset, which
-/// the loader reads as warm).
+/// the loader reads as warm), with the radio quiet first like every other
+/// reset the firmware makes (`restart`): an update over Bluetooth, the LAN
+/// or the relay ends with the radio busy, and the loader then runs in RAM
+/// the app's heap held
+/// (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
 pub fn reset_now() -> ! {
-    esp_hal::system::software_reset()
+    crate::board::esp32c6::restart::restart()
 }
 
 /// This boot's reset, as the loader classified it.
