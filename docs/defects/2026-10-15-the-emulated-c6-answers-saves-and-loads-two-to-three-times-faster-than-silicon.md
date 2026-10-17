@@ -1,5 +1,5 @@
 ---
-status: open           # found on CX1; mechanism not yet named
+status: open           # found on CX1; flash share closed by `t4` (2026-10-17), the request/tick path remains
 found: 2026-10-15      # hardware-walk (the tree store's M7 perf sitting on CX1)
 area: lp-emu/esp/lp-emu-esp32c6 (t1 timing) against fw-esp32c6 request and load paths
 class: emulator-fidelity
@@ -50,3 +50,27 @@ instruction count.
 **Until fixed.** Quote emulated request and load times only relative to
 another emulated figure (image against image), never as a silicon estimate.
 The silicon figures are in the M7 report.
+
+**Narrowed, 2026-10-17: the flash share is closed, the rest is not flash.**
+The `t4` time grade (`docs/reports/2026-10-17-c6-flash-timing-emulator.md`)
+times the flash interface, and was run on this table's own `fs-tree` firmware
+(`55422b0e8`, rebuilt with `heap_peak_diag`):
+
+| operation | silicon | `t1` | `t4` | `t4` ÷ silicon |
+|---|---:|---:|---:|---:|
+| save, round trip | 235.8 ms | 77.1 | 171.6 | 0.73 |
+| save less a read of the same document | 185.2 ms | 40.2 | 95.1 | 0.51 |
+| 4 KiB append | 199.4 ms | 78.4 | 173.1 | 0.87 |
+| read the largest c40 file | 54.7 ms | 36.6 | 75.9 | **1.39** |
+| whole-project load | 233.8 ms | 73.5 | 159.1 | 0.68 |
+| push c40 and load | 3,273 ms | 1,145 | 2,827 | 0.86 |
+
+The remaining gap has **both signs**, and a read — which writes nothing — is
+now 1.4× *slower* than silicon. So it is not the flash: every round trip is
+quantized by the server's tick and carried by the emulated link, and those
+line up differently with a request than silicon's USB and frame loop do. The
+flash's own share of a save is in (`t4` − `t3` is +20 ms on `c20bf9a40`'s
+save: its 89 programs, their transfers, the reads' fills). What is left is the
+request path's timing against the frame loop, which `t4` does not model and
+this entry now names. The mount, which has no link in it, lands within ~5 %
+(the sibling defect, closed). The rule above stands.

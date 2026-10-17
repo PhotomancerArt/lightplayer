@@ -23,7 +23,12 @@
 //! Q18: the one-entry directory cache is built only if the c40 load or the
 //! per-chunk appends cost more than 1.5x littlefs's emulated time.
 //!
-//! Emulated: `lp-emu:esp32c6:t1+net=lan`. Never hardware-validated, never a
+//! `LP_EMU_GRADE=t4` times the flash too (`lp-emu:esp32c6:t4`): its figures
+//! include program and erase busy time, and the silicon estimate column is
+//! then a cross-check, not an addition. A different firmware than this
+//! tree's: `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO_FS_TREE_HEAP_PEAK_DIAG=<elf>`.
+//!
+//! Emulated: `lp-emu:esp32c6:t1+net=lan` by default. Never hardware-validated, never a
 //! gate. `#[ignore]`d; `LP_TREE_PERF_FS=fs-tree|littlefs` runs one image.
 
 #[path = "support/editor_reads.rs"]

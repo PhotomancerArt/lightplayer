@@ -19,10 +19,15 @@
 //! lights is a broken boot, not a slow one.
 //!
 //! Emulated: `lp-emu:esp32c6:<grade>` (`LP_FIRST_LIGHT_GRADE`: `t1`, `t2`,
-//! the default, or `t3`), ROM-up. Never hardware-validated: the silicon
+//! the default, `t3` or `t4`), ROM-up. Never hardware-validated: the silicon
 //! figures are `docs/reports/2026-10-16-c6-time-to-first-light.md`'s.
 //! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there;
 //! `LP_FIRST_LIGHT_IMAGES=littlefs` (or `fs-tree`) runs one image only.
+//! For a like-for-like reading of a silicon sitting: `LP_FIRST_LIGHT_MERGED`
+//! (`label=merged.bin,…`) boots that sitting's own chips instead of this
+//! tree's, `LP_FIRST_LIGHT_CASES` (`none`, `basic`, `c40`, `project:<dir>`)
+//! picks the projects, and `LP_FIRST_LIGHT_LPFS` (`label=lpfs.bin,…`) also
+//! runs each case on a chip whose `lpfs` starts as that store.
 //! `#[ignore]`d: it needs both split builds (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).
 
