@@ -25,6 +25,7 @@
 //
 // Commands:
 //   status                    the phone, Android, Chrome, battery, screen
+//   setup                     grant Chrome its Bluetooth permissions (once)
 //   pair <code>               pair wireless debugging (the code on the phone)
 //   connect                   find the paired phone by mDNS and connect
 //   awake                     screen on, stays on, keyguard dismissed
@@ -159,29 +160,53 @@ export function awake(serial = pickPhone()) {
   return now;
 }
 
-/// Forward Chrome's DevTools socket to a free Mac port (reusing a forward
-/// that is already there) and return `{ port, browserWsUrl, browser }`.
-/// Chrome must be running for its socket to exist, so this starts it.
-export async function cdp(serial = pickPhone()) {
-  let port = adb(["forward", "--list"])
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/))
-    .find(([s, , remote]) => s === serial && remote === DEVTOOLS_SOCKET)?.[1]
-    ?.replace("tcp:", "");
-  if (!port) {
-    if (!shell(serial, `pidof ${CHROME} || true`)) {
-      shell(serial, `am start -n ${CHROME}/com.google.android.apps.chrome.Main`);
-    }
-    port = adb(["forward", "tcp:0", DEVTOOLS_SOCKET], { serial }).trim();
-  }
-  let version = null;
-  for (let attempt = 0; attempt < 20 && !version; attempt++) {
+/// The runtime permissions Chrome's Web Bluetooth needs on Android 12+
+/// ("Nearby devices", and location for older scans). Without them the
+/// chooser opens empty and says "Chrome needs permission to scan". A test
+/// phone grants them once, by adb, so no walk ever meets that sheet.
+const CHROME_PERMISSIONS = ["BLUETOOTH_SCAN", "BLUETOOTH_CONNECT", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"];
+
+/// One-time phone setup an agent can do by itself: Chrome's Bluetooth
+/// permissions. (Developer options, the debugging prompt and the screen lock
+/// are the person's; see the README.)
+export function setup(serial = pickPhone()) {
+  for (const permission of CHROME_PERMISSIONS) shell(serial, `pm grant ${CHROME} android.permission.${permission}`);
+  return { granted: CHROME_PERMISSIONS.map((p) => `${CHROME} ${p}`) };
+}
+
+async function devtoolsVersion(port, attempts) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      version = await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })).json();
+      return await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })).json();
     } catch {
-      // Chrome's socket appears a moment after its process does.
+      // Chrome's socket appears a while after its process does: over 10 s on
+      // the Pixel's cold start (2026-10-17).
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
+  }
+  return null;
+}
+
+/// Bring Chrome to the front (starting it if it is not running), forward its
+/// DevTools socket to a Mac port, and return `{ port, browserWsUrl,
+/// browser }`. A forward left from an earlier Chrome process answers
+/// nothing, so one that does not answer is replaced.
+///
+/// The front matters: a phone draws one app, and Chrome in the background
+/// renders nothing — a CDP screenshot then hangs, and Studio's frame feed
+/// stops.
+export async function cdp(serial = pickPhone()) {
+  shell(serial, `am start -n ${CHROME}/com.google.android.apps.chrome.Main`);
+  const existing = adb(["forward", "--list"])
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .find(([s, , remote]) => s === serial && remote === DEVTOOLS_SOCKET)?.[1];
+  let port = existing?.replace("tcp:", "");
+  let version = port ? await devtoolsVersion(port, 4) : null;
+  if (!version) {
+    if (existing) adb(["forward", "--remove", existing], { serial });
+    port = adb(["forward", "tcp:0", DEVTOOLS_SOCKET], { serial }).trim();
+    version = await devtoolsVersion(port, 60);
   }
   if (!version) throw new Error(`Chrome's DevTools did not answer on 127.0.0.1:${port} (is Chrome past its first-run screens?)`);
   // Android Chrome names its browser socket without a host the Mac can use.
@@ -230,6 +255,7 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const run = {
     status: () => status(),
+    setup: () => setup(),
     pair: () => pair(rest[0] ?? usage()),
     connect: () => connect(),
     awake: () => awake(),
@@ -244,7 +270,7 @@ async function main() {
 }
 
 function usage() {
-  console.error("usage: phone status | pair <code> | connect | awake | cdp | serve <port> | open <url> | shot <file.png> | snoop <dir>");
+  console.error("usage: phone status | setup | pair <code> | connect | awake | cdp | serve <port> | open <url> | shot <file.png> | snoop <dir>");
   process.exit(2);
 }
 

@@ -24,7 +24,14 @@ On the phone:
 5. Wireless debugging › **Pair device with pairing code**, then on the Mac:
    `just phone pair <the six digits>`.
 
-On the Mac: `brew install --cask android-platform-tools`.
+On the Mac: `brew install --cask android-platform-tools`, then `just phone
+setup` — it grants Chrome the phone's "Nearby devices" and location
+permissions by adb. Without them the Bluetooth chooser opens empty and says
+"Chrome needs permission to scan for nearby devices".
+
+USB debugging approved once is enough for Wi‑Fi too: with Wireless debugging
+on, `adb connect <ip>:<port>` (`just phone connect` finds it by mDNS) worked
+with no pairing code (2026-10-17).
 
 ## How it works
 
@@ -43,6 +50,21 @@ On the Mac: `brew install --cask android-platform-tools`.
   Enable the snoop log before the session you want in it.
 - **`just phone shot <png>`** is the whole screen, system UI and choosers
   included — what CDP's page screenshot cannot see.
+
+## What the first sitting found (2026-10-17)
+
+- **The phone is a Pixel 8a on Android 14 with Chrome 122** (a refurbished
+  phone's factory Chrome). It has no Web Serial; updating Chrome is a Play
+  Store tap on the phone.
+- **Android Chrome's chooser ids are the boards' Bluetooth addresses**: the
+  C6's base MAC with its top two bits set. So the walk picks the leased board
+  by MAC, whatever project name it advertises.
+- **Chrome's DevTools socket takes over 10 s to appear on a cold start**, and
+  Chrome in the background renders nothing (a CDP screenshot hangs): `phone
+  cdp` brings Chrome to the front every time and waits up to 30 s.
+- **Every connect from the phone panics the C6** (open defect
+  `docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`),
+  so the walk stops at `identify` until that is fixed.
 
 ## The walk
 

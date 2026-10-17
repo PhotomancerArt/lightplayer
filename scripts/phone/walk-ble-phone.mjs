@@ -32,9 +32,8 @@
 //
 // Flags:
 //   --board <slug|mark|MAC>   the desk C6 to lease (default fixture-c6)
-//   --name <LP-…>             the advertised name to pick (default: the
-//                             board's own `LP-<last four MAC hex>`; a board
-//                             with a project loaded advertises `LP-<project>`)
+//   --name <LP-…>             pick the advertiser by name instead (default: by
+//                             the board's Bluetooth address, from its MAC)
 //   --studio <url>            the Studio to open (default https://lightplayer.app/)
 //   --serve-release           serve this checkout's release bundle and use it
 //   --snoop                   pull the phone's Bluetooth packet log after
@@ -93,7 +92,14 @@ async function main() {
   const mac = info.mac.toLowerCase();
   const macHex = mac.replace(/:/g, "");
   boardCmd("take", BOARD, "--as", HOLDER, "--for", "the phone Bluetooth walk", "--pid", String(process.pid));
-  const name = opt("--name", `LP-${macHex.slice(-4)}`);
+  // Android Chrome's chooser ids ARE the board's Bluetooth address: the base
+  // MAC with its top two bits set (a random static address,
+  // `fw-esp32c6/src/ble/advertising.rs`). So the walk picks the leased board
+  // by its MAC, whatever project name it advertises; `--name` overrides.
+  const bleAddress = [(parseInt(macHex.slice(0, 2), 16) | 0xc0).toString(16).padStart(2, "0"), ...mac.split(":").slice(1)]
+    .join(":")
+    .toUpperCase();
+  const name = opt("--name", null);
 
   // The Studio, on the phone's own localhost when it is local.
   const bundle = args.includes("--serve-release")
@@ -113,11 +119,11 @@ async function main() {
 
   console.log("\nTHE BLUETOOTH WALK ON A PHONE");
   console.log(`  phone   ${device.model}, Android ${device.android}, ${browser} (${serial}), battery ${device.battery}`);
-  console.log(`  board   ${info.mark} ${info.slug} ${info.mac}, advertising ${JSON.stringify(name)} (leased as ${JSON.stringify(HOLDER)})`);
+  console.log(`  board   ${info.mark} ${info.slug} ${info.mac}, Bluetooth ${name ? JSON.stringify(name) : bleAddress} (leased as ${JSON.stringify(HOLDER)})`);
   console.log(`  studio  ${studio}\n`);
 
   const driver = await StudioDriver.attach({ browserWsUrl });
-  const report = { phone: device, browser, board: { slug: info.slug, mark: info.mark, mac: info.mac, name }, studio, steps: [] };
+  const report = { phone: device, browser, board: { slug: info.slug, mark: info.mark, mac: info.mac, bleAddress, name }, studio, steps: [] };
   const shot = async (stepName) => {
     const file = path.join(shots, `phone-${report.steps.length + 1}-${stepName}.png`);
     try {
@@ -164,13 +170,22 @@ async function main() {
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: STUDIO_LOAD_DEADLINE_MS, what: "Studio to finish loading" });
     console.log(`  studio is up — page visibility: ${await driver.tabVisible()}\n`);
 
-    await step("add", `Connect a board › Bluetooth, and pick ${name} in the phone's own chooser`, async () => {
-      const picked = await driver.connectBluetooth({ name, timeoutMs: 60_000 });
+    await step("add", `Connect a board › Bluetooth, and pick ${name ?? bleAddress} in the phone's own chooser`, async () => {
+      const picked = await driver.connectBluetooth(name ? { name, timeoutMs: 60_000 } : { id: bleAddress, timeoutMs: 60_000 });
       report.chooser = picked;
       return `picked ${picked.name}; the chooser offered ${picked.seen.map((d) => d.name).join(", ")}`;
     });
 
     await step("identify", "the card is the leased board (by MAC), ready, with Bluetooth locked on over itself", async () => {
+      // A connection that fails after the pick says so only on the console
+      // (defect 2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6):
+      // name it, rather than waiting out the whole deadline for a card.
+      try {
+        await driver.waitCard({ board: mac, timeoutMs: 45_000 });
+      } catch (error) {
+        const said = driver.consoleLines().filter((line) => /grant request failed|bluetooth|gatt/i.test(line) && !line.startsWith("[debug]"));
+        throw new Error(`${error.message.split("\n")[0]}; the page said: ${said.slice(-3).join(" | ") || "nothing about Bluetooth"}`);
+      }
       const face = await driver.boardRuns({ board: mac, timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") throw new Error(`${info.slug} has no project loaded; load one (over USB) and walk again`);
       await driver.openBar("connection", { board: mac, timeoutMs: STEP_DEADLINE_MS });
