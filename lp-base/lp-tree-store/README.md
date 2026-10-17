@@ -142,7 +142,11 @@ change has to be readable, or cleanly refused, by the core before it.
   **collect** one sector holding at least `idle_min_garbage` of garbage
   while fewer than `idle_free_percent` of the sectors are free; or, near
   full (fewer than `reserve + idle_pack_free` free), **pack**: GC's own next
-  victim, a pass at a time while passes shrink the waste. A step that finds
+  victim, a pass at a time while passes shrink the waste. A pass rewrites
+  most of the store, so a new one starts only once the waste has grown a
+  sector's capacity past what the last packing left (RAM: a mount forgets
+  it, so the first quiet after a mount packs once), and a write does not
+  restart a pass under way. A step that finds
   nothing **settles** the store: later steps return at once, with no mark,
   until the next write. Never inside a transaction. A cut anywhere in a
   step leaves the state it had (a step changes no file).
@@ -409,9 +413,16 @@ then incompressible 4 KiB files and a panel save each until `NoSpace` —
 priced by a silicon model (an erase 19 ms, a program 0.5 ms per 256 B, a
 read 0.42 µs per byte; a host estimate, never a silicon claim): back to
 back, 6 of the 95 writes cost over 1 s, the worst 3.9 s (CX1 measured
-3.78 s); with idle steps (until settled) between writes, none before the
-last one (which takes the store's last room, 2.5 s), at 756 erases against
-770 — each idle step at most 62 ms.
+3.78 s); with up to 40 idle steps between writes (CX1's 20 s of quiet),
+none, the last included (worst 57 ms), at 523 erases against 770 — each
+idle step at most 62 ms. Near full, 300 panel saves with the store left to
+settle before each cost 39 erases against the write path's 93 (at 93
+files; one settling of 342 erases after the mount): before a new pass
+waited for a sector of new waste, every save bought a whole re-pack, 50,913
+erases. A day of churn (a re-push, 10 saves, 1,440 panel saves) with the
+quiet between them leaves a mount 45 KB over 66 trusted sectors to read
+instead of 217 KB over 176 (~19 ms against ~91 by the model's read rate),
+at the same 270 erases.
 
 **Mutants** (feature `mutants`, `mutants.rs`): sixteen switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
