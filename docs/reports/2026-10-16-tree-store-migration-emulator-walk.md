@@ -5,6 +5,12 @@
 - **Configuration:** `lp-emu:esp32c6:t1`, ROM-up, at branch commit
   `b2c28a01a` (images built from it). Emulated, not hardware-validated; the
   silicon run is `2026-10-16-tree-store-migration-cx1.md`.
+- **Re-run after merging main** (#1150, the littlefs core holding a tree
+  store; #1154, fast mount) at `3c6c43471`: the five `lp-cli` tests and
+  every Studio walk below pass again. One test fix came of it: the cutover's
+  image is now written up to a 4 KiB sector (trimmed to its last non-erased
+  byte it ended mid-word and espflash's stub lost its tail, the split ADR's
+  §9 rule).
 - **The fielded board:** `ReferenceImage::FIELDED_LITTLEFS` (`3fc9aa987`,
   littlefs on the 176-sector table) and a fixture filesystem at `0x350000`.
 - **The target:** the `fs-tree` split image on the tree table
