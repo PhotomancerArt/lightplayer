@@ -65,10 +65,14 @@ pub enum Mutant {
     /// `format` erases its two sectors but leaves every other header as it
     /// reads (no kill): an earlier store's sectors stay trusted.
     FormatKeepsHeaders,
+    /// Mount's whole reading reuses the id index its fast reading built,
+    /// instead of indexing what it trusts itself (it may trust less of a
+    /// sector: a newer copy that does not check).
+    MountIndexKeptAcrossReadings,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 15] = [
+    pub const ALL: [Mutant; 16] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -84,6 +88,7 @@ impl Mutant {
         Mutant::NewestByHeaders,
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
+        Mutant::MountIndexKeptAcrossReadings,
     ];
 
     pub fn name(self) -> &'static str {
@@ -103,6 +108,7 @@ impl Mutant {
             Mutant::NewestByHeaders => "newest_by_headers",
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
+            Mutant::MountIndexKeptAcrossReadings => "mount_index_kept_across_readings",
         }
     }
 

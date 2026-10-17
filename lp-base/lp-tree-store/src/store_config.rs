@@ -21,6 +21,13 @@ pub struct StoreConfig {
     /// RAM a transaction may hold as not-yet-written directory changes
     /// (paths and entries) before it writes them as pending directories.
     pub txn_delta_max: u32,
+    /// Most RAM mount's whole id → location index may take, in bytes (12 B
+    /// a record on flash, garbage included; `mount_index.rs`). Above it the
+    /// mount drops the index and finds each tree level by scanning sector
+    /// headers instead — the same answer, more reads. 0: never index. A
+    /// per-board dial: the C6's ~48 KB keeps it inside the transient RAM a
+    /// boot can spare; a board with PSRAM may raise it.
+    pub mount_index_max: u32,
 }
 
 impl Default for StoreConfig {
@@ -30,6 +37,7 @@ impl Default for StoreConfig {
             gc_policy: GcPolicy::CostBenefit,
             reserve: 3,
             txn_delta_max: 2048,
+            mount_index_max: 48 * 1024,
         }
     }
 }

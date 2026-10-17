@@ -32,6 +32,7 @@ use alloc::vec::Vec;
 
 use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
+use crate::mount_index::MountIndex;
 use crate::mount_verdict::FormatResidue;
 use crate::mount_walk::{Walked, index_closure};
 use crate::object_hasher::ObjectHasher;
@@ -178,6 +179,17 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut roots = RootCandidates::default();
         let mut scan_closed = alloc::vec![false; closed.len()];
         let mut filter = SectorFilter::new(self.log.sector_count);
+        // Each reading builds its own: the whole one may trust less of a
+        // sector than the fast one did (`mount_index.rs`).
+        #[cfg(feature = "mutants")]
+        let kept = if full && mutant!(MountIndexKeptAcrossReadings) {
+            self.fast_index.take()
+        } else {
+            None
+        };
+        #[cfg(not(feature = "mutants"))]
+        let kept = None;
+        let mut index = kept.or_else(|| MountIndex::new(self.cfg.mount_index_max));
         for s in valid.iter().map(|&s| u32::from(s)) {
             // `newest` leaves out a closed newest sector: checked as closed.
             let settle = newest.contains(&Some(s));
@@ -188,6 +200,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 &mut roots,
                 residue,
                 &mut filter,
+                &mut index,
                 check,
                 settle,
             )?;
@@ -195,7 +208,22 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             scan_closed[s as usize] = scan.closed;
         }
         self.max_root_seq = roots.max_seq;
-        self.log.note(filter.ram_bytes());
+        if let Some(ix) = &mut index {
+            // Each sector's place in sector-sequence order: of two copies,
+            // the later one is adopted.
+            let mut rank = alloc::vec![0u16; closed.len()];
+            for (r, &s) in valid.iter().enumerate() {
+                rank[s as usize] = r as u16;
+            }
+            ix.sort(&rank);
+        }
+        stat!(
+            self.stats.mount_indexed = index.is_some();
+            self.stats.mount_index_bytes = index.as_ref().map_or(0, MountIndex::ram_bytes);
+        );
+        self.log.note(
+            filter.ram_bytes() + index.as_ref().map_or(0, MountIndex::ram_bytes) + closed.len() * 2,
+        );
         #[cfg(test)]
         crate::mount_cost_tests::PASS1
             .with(|p| p.set((self.log.counters.read_calls, self.log.counters.bytes_read)));
@@ -206,7 +234,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         // step back I1 allows is the whole reading's.
         let tries = if full { 2 } else { 1 };
         for c in roots.best.iter().flatten().take(tries) {
-            match index_closure(&mut self.log, *c, valid, &filter) {
+            match index_closure(&mut self.log, *c, valid, &filter, index.as_ref()) {
                 Ok(w) => {
                     for (c, s) in closed.iter_mut().zip(scan_closed) {
                         *c |= s;
@@ -216,6 +244,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 Err(StoreError::Corrupt(_)) => continue,
                 Err(e) => return Err(e),
             }
+        }
+        #[cfg(feature = "mutants")]
+        if !full {
+            self.fast_index = index;
         }
         Ok(None)
     }

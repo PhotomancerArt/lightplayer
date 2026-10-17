@@ -53,6 +53,7 @@ mod host_deflate;
 mod image_inspect;
 #[cfg(feature = "lpfs")]
 mod lp_fs_tree;
+mod mount_index;
 mod mount_summary;
 mod mount_verdict;
 mod mount_walk;

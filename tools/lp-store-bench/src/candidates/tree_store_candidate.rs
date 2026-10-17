@@ -36,6 +36,9 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
             "txn_delta_max" => c.txn_delta_max = num()?,
+            // 0 = mount's level walk (no whole id index); small = the index
+            // dropped part-way through pass 1.
+            "mount_index_max" => c.mount_index_max = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,

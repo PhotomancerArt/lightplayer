@@ -87,6 +87,44 @@ pub fn mount(flash: NorFlashSim, cfg: &StoreConfig) -> Store {
     }
 }
 
+/// What a mount adopted: every index entry (id, sector, offset), each
+/// sector's live bytes and the committed root's id.
+pub fn adopted(st: &Store) -> (Vec<(u64, u32, u32)>, Vec<u16>, Option<u64>) {
+    let ix = &st.log.index;
+    let entries = (0..ix.len())
+        .map(|i| (ix.id_at(i).0, ix.loc_at(i).sector, ix.loc_at(i).offset))
+        .collect();
+    (
+        entries,
+        st.log.sectors.live.clone(),
+        st.committed.as_ref().map(|c| c.id.0),
+    )
+}
+
+/// Mount `flash` (settled: a mount has run on it since its last cut) both
+/// ways — through mount's whole id index and by level scans with none — and
+/// require both to adopt the same records at the same places
+/// (`mount_index.rs`: two mount paths, one answer).
+pub fn assert_walks_agree(flash: &NorFlashSim, cfg: &StoreConfig, what: &dyn Fn() -> String) {
+    let with = |mount_index_max| {
+        let c = StoreConfig {
+            mount_index_max,
+            ..cfg.clone()
+        };
+        let st = mount(flash.clone(), &c);
+        assert_eq!(st.stats().mount_indexed, mount_index_max > 0, "{}", what());
+        adopted(&st)
+    };
+    let max = cfg
+        .mount_index_max
+        .max(StoreConfig::default().mount_index_max);
+    assert!(
+        with(max) == with(0),
+        "{}: the two mount walks disagree",
+        what()
+    );
+}
+
 /// A formatted flash.
 pub fn formatted(geom: NorGeometry, cfg: &StoreConfig) -> NorFlashSim {
     match TreeStore::format(NorFlashSim::new(geom), SoftSha256, cfg.clone()) {
@@ -155,6 +193,8 @@ pub fn sweep_from(
                     assert!(cut_result.is_err(), "{}: step survived its cut", ctx());
                 }
                 f.power_cycle(FaultPlan::none());
+                let f = mount(f, cfg).into_flash();
+                assert_walks_agree(&f, cfg, &ctx);
                 let mut st = mount(f, cfg);
                 let mut got = snapshot(&mut st);
                 if got == new {

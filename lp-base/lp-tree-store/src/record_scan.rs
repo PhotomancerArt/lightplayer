@@ -16,11 +16,13 @@
 //!   record it adopts whole, and a CRC that fails there sends mount back to
 //!   the checked reading of every sector (`store_mount.rs`).
 //!
-//! Nothing is indexed here (that would cost RAM for every record on flash,
-//! garbage included): the pass finds where each sector's trusted records
-//! end, keeps the roots, two at most (I1 falls back one step and no
-//! further), and adds every record's id to the sector's filter
-//! (`sector_filter.rs`) for the walk.
+//! The pass finds where each sector's trusted records end, keeps the roots,
+//! two at most (I1 falls back one step and no further), and adds every
+//! trusted record to mount's whole index (`mount_index.rs`, while it fits
+//! its RAM cap) and its id to the sector's filter (`sector_filter.rs`, what
+//! the walk scans by when the index did not fit). Only a record before the
+//! sector's trusted end is indexed: exactly the records the level walk would
+//! find.
 //!
 //! **Settling a head's tail.** A CRC that passed is a fact about one read,
 //! not about the cells: a program torn inside a 4-byte word can leave its
@@ -41,6 +43,7 @@
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
+use crate::mount_index::MountIndex;
 use crate::mount_verdict::FormatResidue;
 use crate::object_id::ObjectId;
 use crate::ram_index::RecordLoc;
@@ -106,13 +109,15 @@ pub struct ScannedSector {
 /// otherwise only the header chain is walked and only roots are read whole
 /// (a cold sector, above). `settle` (with `check`): `s` is the newest
 /// sector of its kind, and its tail is settled (above); a tail that does not
-/// read back as settled closes the sector.
+/// read back as settled closes the sector. Every trusted record goes into
+/// `index` while it fits (one that does not drops it: `None`).
 pub fn scan_sector<F: Flash>(
     log: &mut RecordLog<F>,
     s: u32,
     roots: &mut RootCandidates,
     residue: &mut FormatResidue,
     filter: &mut SectorFilter,
+    index: &mut Option<MountIndex>,
     check: bool,
     settle: bool,
 ) -> Result<ScannedSector, StoreError<F::Error>> {
@@ -183,6 +188,11 @@ pub fn scan_sector<F: Flash>(
             }
         }
         last = Some(h);
+        if let (Some(r), Some(ix)) = (record, index.as_mut())
+            && !ix.push(r.id, loc)
+        {
+            *index = None;
+        }
         off += total;
         out.end = off;
     }

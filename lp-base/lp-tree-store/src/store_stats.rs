@@ -40,6 +40,12 @@ pub struct TreeStoreStats {
     /// Whether the last mount read every record whole (its fast pass adopted
     /// no root, or the sector seqs may have wrapped: `store_mount.rs`).
     pub mount_read_every_record: bool,
+    /// Whether the last mount's adopted reading found the tree through its
+    /// whole id index (`mount_index.rs`), not by level scans (the index did
+    /// not fit `mount_index_max`, or it is 0).
+    pub mount_indexed: bool,
+    /// RAM the last mount's whole id index held (0 when it had none).
+    pub mount_index_bytes: usize,
     pub sectors_opened: u64,
     pub erases: u64,
     /// Read-backs that did not match what was written (record, erase or

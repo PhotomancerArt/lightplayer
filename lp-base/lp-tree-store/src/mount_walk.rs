@@ -28,16 +28,25 @@
 //! A directory too big for one record is a flagged multi: its entries are
 //! read once every chunk under it is indexed, a level or two later.
 //!
+//! **With mount's whole index** (`mount_index.rs`: pass 1 kept every record
+//! it read, while that fit its RAM cap) a level's ids are found by lookup,
+//! not by a scan: each closure record's header is read once where the index
+//! says the adopted copy is, and visited there. The same copies, the same
+//! levels, the same deferral of directory multis — only the finding differs,
+//! so both ways index the same closure (the tests below compare them).
+//!
 //! Cost: per level, the headers of the sectors that may hold its ids
 //! (stopping once every wanted id is found), plus each closure record's
-//! payload once; RAM: the live index plus the two widest adjacent levels
-//! (16 B per id, and 4 B per id of the level being scanned).
+//! payload once — with the whole index, one header read per closure record
+//! instead of the scans; RAM: the live index plus the two widest adjacent
+//! levels (16 B per id, and 4 B per id of the level being scanned).
 
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
 use crate::gc_mark::{MarkRole, VisitOut, push_dir_node_entries, visit, visit_header};
 use crate::heap_sort::heap_sort_by;
+use crate::mount_index::MountIndex;
 use crate::multi_node::{multi_child, parse_multi};
 use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
@@ -69,11 +78,14 @@ pub struct Walked {
 /// Index the closure of `root` into `log.index` (which it replaces).
 /// `sectors` lists the trusted sectors in ascending sector seq; each one's `log.sectors.end` is where its trusted
 /// records end.
+/// `index`: mount's whole id index, when pass 1 kept one (found by lookup;
+/// else by scans over `sectors` with `filter`).
 pub fn index_closure<F: Flash>(
     log: &mut RecordLog<F>,
     root: RootCandidate,
     sectors: &[u16],
     filter: &SectorFilter,
+    index: Option<&MountIndex>,
 ) -> R<Walked, F> {
     log.index = RamIndex::default();
     let mut out = Walked {
@@ -126,7 +138,10 @@ pub fn index_closure<F: Flash>(
                 + deferred_cap * size_of::<ObjectId>()
                 + found.dir_bytes.capacity(),
         );
-        locate(log, &level, sectors, filter, &mut found, &mut out.live)?;
+        match index {
+            Some(ix) => locate_indexed(log, &level, ix, &mut found, &mut out.live)?,
+            None => locate(log, &level, sectors, filter, &mut found, &mut out.live)?,
+        }
         peak = peak.max(
             log.index.ram_bytes()
                 + (level.capacity() + found.stack.capacity()) * size_of::<(ObjectId, MarkRole)>()
@@ -209,6 +224,32 @@ fn locate<F: Flash>(
     }
     if missing > 0 {
         return Err(StoreError::Corrupt("missing record"));
+    }
+    log.index.merge_sorted(
+        want.iter()
+            .zip(at)
+            .map(|(w, a)| (w.0, RecordLoc::unpack(a)))
+            .rev(),
+        want.len(),
+    );
+    Ok(())
+}
+
+/// [`locate`] by mount's whole index: each id of `want` (sorted by id, none
+/// indexed yet) is visited where the index says its adopted copy is.
+fn locate_indexed<F: Flash>(
+    log: &mut RecordLog<F>,
+    want: &[(ObjectId, MarkRole)],
+    index: &MountIndex,
+    found: &mut VisitOut<'_>,
+    live: &mut [u16],
+) -> R<(), F> {
+    let mut at = Vec::with_capacity(want.len());
+    for &(id, role) in want {
+        let loc = index.get(id).ok_or(StoreError::Corrupt("missing record"))?;
+        let h = visit(log, id, role, loc, found)?;
+        add_live(live, loc, h.total_len());
+        at.push(loc.pack());
     }
     log.index.merge_sorted(
         want.iter()
@@ -320,12 +361,19 @@ mod tests {
         let to = (0..16).find(|&s| f.sector_is_blank(s)).unwrap();
         copy_sector_newer(&mut f, from, to);
 
-        let mut st = mount(f, &c);
-        for (id, offset) in moved {
-            let loc = st.log.index.get(crate::ObjectId(id)).unwrap();
-            assert_eq!((loc.sector, loc.offset), (to, offset));
+        for index_max in [c.mount_index_max, 0] {
+            let c = StoreConfig {
+                mount_index_max: index_max,
+                ..c.clone()
+            };
+            let mut st = mount(f.clone(), &c);
+            assert_eq!(st.stats().mount_indexed, index_max > 0);
+            for &(id, offset) in &moved {
+                let loc = st.log.index.get(crate::ObjectId(id)).unwrap();
+                assert_eq!((loc.sector, loc.offset), (to, offset));
+            }
+            assert_eq!(snapshot(&mut st), want);
         }
-        assert_eq!(snapshot(&mut st), want);
     }
 
     /// A newer copy that does not check, over an older one that does: the
@@ -385,6 +433,32 @@ mod tests {
         let mut st = mount(f, &c);
         assert!(st.stats().mount_read_every_record, "the fast pass gave up");
         assert_eq!(snapshot(&mut st), want);
+    }
+
+    /// Both mount walks — by the whole id index and by level scans — adopt
+    /// the same records on every store a board holds (empty, c40, written
+    /// out, panel-heavy, full), and an index that outgrows its cap part-way
+    /// through pass 1 is dropped and the level walk mounts the same state.
+    #[test]
+    fn both_walks_adopt_the_same_records() {
+        let c = StoreConfig::default();
+        for (name, f) in crate::mount_cost_tests::scenarios(48) {
+            let f = mount(f, &c).into_flash();
+            crate::test_support::assert_walks_agree(&f, &c, &|| format!("{name}"));
+            let mut st = mount(f, &c);
+            assert!(st.stats().mount_indexed, "{name}");
+            let want = snapshot(&mut st);
+            // A cap the records on flash pass part-way through pass 1.
+            let small = StoreConfig {
+                mount_index_max: 12 * 40,
+                ..c.clone()
+            };
+            let mut st = mount(st.into_flash(), &small);
+            if name != "empty" {
+                assert!(!st.stats().mount_indexed, "{name}: fits 40 entries");
+            }
+            assert_eq!(snapshot(&mut st), want, "{name}");
+        }
     }
 
     fn index_and_live(st: &Store) -> (Vec<(u64, u32, u32)>, Vec<u16>) {
