@@ -36,6 +36,25 @@ pub struct RingSet {
 }
 
 impl RingSet {
+    /// The outer ring's lamps: its own `counts` entry when it has one,
+    /// else `outer_lamps`.
+    pub fn outer_ring_lamps(&self) -> u32 {
+        self.counts
+            .first()
+            .copied()
+            .filter(|c| *c > 0)
+            .unwrap_or(self.outer_lamps)
+    }
+
+    /// Give the outer ring `n` lamps: `outer_lamps`, and its own `counts`
+    /// entry when it has one (that entry is what the product reads).
+    pub fn set_outer_ring_lamps(&mut self, n: u32) {
+        self.outer_lamps = n;
+        if let Some(c) = self.counts.first_mut().filter(|c| **c > 0) {
+            *c = n;
+        }
+    }
+
     /// Each ring's radius, outer first.
     pub fn radii(&self) -> Vec<f64> {
         let n = self.rings.max(1);

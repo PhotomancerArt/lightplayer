@@ -174,10 +174,11 @@ impl Project {
                     (PITCH, PropRaw::Number(g.pitch)),
                     (SNAKE, PropRaw::Flag(g.routing == Routing::Snake)),
                 ],
-                // The outer ring's lamps; the inner rings' follow by
-                // circumference, as in the product.
+                // The outer ring's lamps (its own count when it has one);
+                // an inner ring without its own follows by circumference,
+                // as in the product.
                 Some(ComponentKind::RingSet(r)) => vec![
-                    (LAMPS, PropRaw::Count(r.outer_lamps as i64)),
+                    (LAMPS, PropRaw::Count(r.outer_ring_lamps() as i64)),
                     (RINGS, PropRaw::Count(r.rings as i64)),
                     (RADIUS, PropRaw::Number(r.radius)),
                     (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
@@ -271,7 +272,7 @@ impl Project {
                         _ => return false,
                     },
                     (Some(ComponentKind::RingSet(r)), _, new) => match (prop_id, new) {
-                        ("lamps", PropRaw::Count(n)) => r.outer_lamps = n as u32,
+                        ("lamps", PropRaw::Count(n)) => r.set_outer_ring_lamps(n as u32),
                         ("rings", PropRaw::Count(n)) => r.rings = n as u32,
                         ("radius", PropRaw::Number(v)) => r.radius = v,
                         ("ccw", PropRaw::Flag(v)) => r.reversed = v,

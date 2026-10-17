@@ -298,6 +298,24 @@ fn edited_whole_shapes_still_fit() {
     });
 }
 
+/// The plasma pattern's disc with one more lamp on its outer ring: the
+/// ring has a count of its own, so that is what the edit writes.
+#[test]
+fn an_edited_pattern_disc_still_fits() {
+    edited_still_fits(&pattern("plasma"), |p| {
+        let disc = p.fixture(&NodeId::new("fixture")).unwrap().components[1]
+            .id
+            .clone();
+        assert!(p.edit_prop(
+            &lab_mapping_model::Target::Component(disc),
+            "lamps",
+            lab_mapping_model::PropEdit::Nudge(1),
+            2.0
+        ));
+        assert_eq!(p.lamp_count(), 242);
+    });
+}
+
 fn edited_still_fits(dir: &Path, edit: impl Fn(&mut Project)) {
     let copy = scratch_copy(dir, "edited");
     let opened = open(&copy);
