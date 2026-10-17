@@ -91,8 +91,9 @@ fn perf_mount_commit_read_and_load() {
         }
     }
     println!(
-        "\nperf — configuration=lp-emu:esp32c6:t1+net=lan, unsplit, emulated µs are CPU only \
-         (flash commands take no emulated time)"
+        "\nperf — configuration={}+net=lan (LP_EMU_GRADE), unsplit; below t4 emulated µs are \
+         CPU only (flash commands take no emulated time), at t4 they include the flash's",
+        grade().configuration()
     );
     println!(
         "| image | operation | emulated µs | programs | program bytes | erases | SPI1 reads | silicon estimate ms (flash only) |"
@@ -136,6 +137,13 @@ fn measure(label: &str, elf: &std::path::Path) -> Vec<String> {
     let before = flash_count(&host);
     boot(&mut host);
     mount_row(&host, &mut rows, label, "mount, c40", before);
+
+    // The save's baseline, as the board walk takes it: a read of the same
+    // document (the round trip with no commit in it).
+    let op = repeat(&mut host, 5, |client, _| {
+        block_on(client.fs_read(LpPath::new("/projects/demo/docs/doc-000.json"))).map(drop)
+    });
+    rows.push(op.row(label, "read doc-000 (1.7 KB; the save's baseline), each"));
 
     // Commit: a save, five times.
     let doc = c40
