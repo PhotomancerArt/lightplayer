@@ -9,7 +9,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::blob_codec::{DEFLATE_PREFIX, MAX_LOGICAL_CHUNK};
+use crate::blob_codec::{DEFLATE_PREFIX, MAX_LOGICAL_CHUNK, decode_blob_into};
 use crate::flash::Flash;
 use crate::gc_mark::MarkRole;
 use crate::multi_node::{encode_multi, multi_fanout};
@@ -91,7 +91,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if expected.is_some_and(|e| e != id) {
             return Err(StoreError::Corrupt("chunk id"));
         }
-        if !self.same_logical(id, &buf)? {
+        if self.log.index.contains(id) && !self.holds(id, RecordKind::Blob, &[&buf])? {
             return Err(StoreError::Corrupt(ID_COLLISION));
         }
         let coded = DEFLATE_PREFIX + deflated.len();
@@ -277,8 +277,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         id: ObjectId,
         parts: &[&[u8]],
     ) -> Res<(), F> {
-        if let Some(loc) = self.log.index.get(id) {
-            if !self.same_record(loc, id, kind, codec, parts)? {
+        if self.log.index.contains(id) {
+            // A new deflated chunk was compared by `deflated_inner`, which
+            // holds its logical bytes.
+            if codec == ChunkCodec::Stored && !self.holds(id, kind, parts)? {
                 return Err(StoreError::Corrupt(ID_COLLISION));
             }
             stat!(self.stats.dedup_hits += 1);
@@ -292,53 +294,24 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         Ok(())
     }
 
-    /// Whether the record at `loc` (indexed as `id`) holds what `kind`,
-    /// `codec` and `parts` would write: a dedup hit compares bytes before it
-    /// reuses a record (FORMAT.md "Ids": ids are 64 bits and not
-    /// cryptographic, so a crafted collision must not alias two files). A
-    /// deflated chunk on either side compares logical bytes — a stored and
-    /// a deflated copy of one chunk share an id — and a new deflated chunk
-    /// was compared by its caller (`deflated_inner`, which holds its
-    /// logical bytes). One read of the record per hit.
-    fn same_record(
-        &mut self,
-        loc: crate::ram_index::RecordLoc,
-        id: ObjectId,
-        kind: RecordKind,
-        codec: ChunkCodec,
-        parts: &[&[u8]],
-    ) -> Res<bool, F> {
-        let h = self.log.header_at(loc)?;
-        if h.kind != kind {
-            return Ok(false);
-        }
-        if codec == ChunkCodec::Deflate {
-            return Ok(true);
-        }
-        let len: usize = parts.iter().map(|p| p.len()).sum();
-        if h.codec == ChunkCodec::Deflate {
-            let mut have = Vec::new();
-            read_node_into(&mut self.log, id, &mut have)?;
-            self.log.note(have.capacity());
-            return Ok(have.len() == len && parts.concat() == have);
-        }
-        if usize::from(h.len) != len {
-            return Ok(false);
-        }
-        let at = self.log.addr(loc.sector, loc.offset + HDR);
-        self.log.verify(at, &[], parts)
-    }
-
-    /// A host-deflated chunk whose id is indexed: whether the record there
-    /// decodes to the same `logical` bytes (see [`Self::same_record`]).
-    fn same_logical(&mut self, id: ObjectId, logical: &[u8]) -> Res<bool, F> {
-        if !self.log.index.contains(id) {
-            return Ok(true);
-        }
-        let mut have = Vec::new();
-        read_node_into(&mut self.log, id, &mut have)?;
-        self.log.note(have.capacity());
-        Ok(have == logical)
+    /// Whether the record indexed as `id` is a `kind` record whose logical
+    /// bytes are `parts` (decoded when it is a deflated chunk: a stored and
+    /// a deflated copy of one chunk share an id). A dedup hit asks this
+    /// before it reuses a record (FORMAT.md "Ids": ids are 64 bits and not
+    /// cryptographic, so a crafted collision must not alias two files): one
+    /// read of the record per hit.
+    fn holds(&mut self, id: ObjectId, kind: RecordKind, parts: &[&[u8]]) -> Res<bool, F> {
+        let (h, payload) = self.log.read_record(id)?;
+        let mut decoded = Vec::new();
+        let have: &[u8] = if h.codec == ChunkCodec::Deflate {
+            decode_blob_into(h.codec, &payload, &mut decoded)
+                .ok_or(StoreError::Corrupt("chunk does not decode"))?;
+            self.log.note(decoded.capacity());
+            &decoded
+        } else {
+            &payload
+        };
+        Ok(h.kind == kind && have == parts.concat())
     }
 
     // ---- what a write will append (before it appends anything) ----------

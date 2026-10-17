@@ -84,16 +84,14 @@ impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
         i.store.file_node(p).map_err(store_err)
     }
 
-    /// Scrub `old` (the node `secret_node` saw at `p`) unless `p` still
-    /// names it; inside a batch, once the batch commits.
-    fn scrub_replaced(&self, p: &str, old: Option<ObjectId>) -> Result<(), FsError> {
+    /// Scrub `old` (the node `secret_node` saw before a write or a delete);
+    /// inside a batch, once the batch commits. A rewrite of the same bytes
+    /// leaves `old` live, and the scrub then erases nothing.
+    fn scrub_replaced(&self, old: Option<ObjectId>) -> Result<(), FsError> {
         let Some(old) = old else {
             return Ok(());
         };
         let mut i = self.inner.borrow_mut();
-        if i.store.file_node(p).map_err(store_err)? == Some(old) {
-            return Ok(());
-        }
         if i.store.in_transaction() {
             i.scrub_after_batch.push(old);
             return Ok(());
@@ -229,7 +227,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        self.scrub_replaced(&p, old)
+        self.scrub_replaced(old)
     }
 
     fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
@@ -250,7 +248,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        self.scrub_replaced(&p, old)
+        self.scrub_replaced(old)
     }
 
     fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
@@ -331,7 +329,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
             return Err(not_found(&p));
         }
         self.record(&p, FsEventKind::Delete);
-        self.scrub_replaced(&p, old)
+        self.scrub_replaced(old)
     }
 
     fn delete_dir(&self, path: &LpPath) -> Result<(), FsError> {
@@ -351,9 +349,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         }
         let mut secrets = Vec::new();
         for f in &gone {
-            if let Some(old) = self.secret_node(f)? {
-                secrets.push((f.clone(), old));
-            }
+            secrets.push(self.secret_node(f)?);
         }
         self.inner
             .borrow_mut()
@@ -363,8 +359,8 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         for f in gone {
             self.record(&f, FsEventKind::Delete);
         }
-        for (f, old) in secrets {
-            self.scrub_replaced(&f, Some(old))?;
+        for old in secrets {
+            self.scrub_replaced(old)?;
         }
         Ok(())
     }
@@ -449,7 +445,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        self.scrub_replaced(&p, old)
+        self.scrub_replaced(old)
     }
 
     fn current_version(&self) -> FsVersion {

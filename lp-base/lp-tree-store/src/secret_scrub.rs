@@ -42,12 +42,14 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             .map(|l| l.id)
             .collect();
         ids.push(old);
-        let mut sectors: Vec<u32> = ids
-            .iter()
-            .filter_map(|&id| self.log.index.get(id).map(|l| l.sector))
-            .collect();
-        sectors.sort_unstable();
-        sectors.dedup();
+        let mut sectors: Vec<u32> = Vec::new();
+        for &id in &ids {
+            if let Some(l) = self.log.index.get(id)
+                && !sectors.contains(&l.sector)
+            {
+                sectors.push(l.sector);
+            }
+        }
         let lens = self.mark_and_prune(true)?;
         let pass_from = self.log.next_sector_seq;
         for s in sectors {
