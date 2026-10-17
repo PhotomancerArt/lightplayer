@@ -85,10 +85,57 @@ pub fn same(a: &Value, b: &Value) -> bool {
 
 /// The product's pretty layout: two-space indent, one trailing newline
 /// (what `NodeDef::write_json` writes).
+///
+/// The layout is serde_json's pretty one, but the key order is this
+/// crate's: every object's `kind` comes first (the product's node reader
+/// reads its tag before anything else), then the rest in sorted order —
+/// serde_json's own map order, which this crate never changes (its
+/// `preserve_order` feature would flip it for every crate in Studio's
+/// build).
 pub fn pretty(v: &Value) -> String {
-    let mut text = serde_json::to_string_pretty(v).unwrap_or_default();
+    let mut text = String::new();
+    write_pretty(v, 0, &mut text);
     text.push('\n');
     text
+}
+
+fn write_pretty(v: &Value, depth: usize, out: &mut String) {
+    let indent = |out: &mut String, depth: usize| out.push_str(&"  ".repeat(depth));
+    match v {
+        Value::Object(map) if map.is_empty() => out.push_str("{}"),
+        Value::Object(map) => {
+            out.push_str("{\n");
+            let kind = map.get_key_value("kind");
+            let rest = map.iter().filter(|(k, _)| k.as_str() != "kind");
+            for (i, (k, v)) in kind.into_iter().chain(rest).enumerate() {
+                if i > 0 {
+                    out.push_str(",\n");
+                }
+                indent(out, depth + 1);
+                out.push_str(&serde_json::to_string(k).unwrap_or_default());
+                out.push_str(": ");
+                write_pretty(v, depth + 1, out);
+            }
+            out.push('\n');
+            indent(out, depth);
+            out.push('}');
+        }
+        Value::Array(items) if items.is_empty() => out.push_str("[]"),
+        Value::Array(items) => {
+            out.push_str("[\n");
+            for (i, v) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(",\n");
+                }
+                indent(out, depth + 1);
+                write_pretty(v, depth + 1, out);
+            }
+            out.push('\n');
+            indent(out, depth);
+            out.push(']');
+        }
+        scalar => out.push_str(&serde_json::to_string(scalar).unwrap_or_default()),
+    }
 }
 
 /// Set `key` on an object, or remove it for `None`.

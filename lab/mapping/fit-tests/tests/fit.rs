@@ -231,11 +231,13 @@ fn written_files_read_the_same_in_the_product(dir: &Path) {
     for (path, text) in &saved.writes {
         let original = read(&dir.join(path));
         if path.ends_with(".map2d.json") {
-            assert_eq!(
-                Map2dDoc::from_json(text).unwrap(),
-                Map2dDoc::from_json(&original).unwrap(),
-                "{path}"
-            );
+            // A written mapping gives every object an id: the very ids the
+            // product mints for a document with none (`ensure_object_ids`),
+            // at the lowest format that holds them.
+            let mut expected = Map2dDoc::from_json(&original).unwrap();
+            lpc_mapping::ensure_object_ids(&mut expected);
+            expected.format = expected.required_format();
+            assert_eq!(Map2dDoc::from_json(text).unwrap(), expected, "{path}");
         } else if path.ends_with(".patch.json") {
             assert_eq!(
                 PatchDoc::from_json(text).unwrap(),

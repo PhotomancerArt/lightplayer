@@ -13,7 +13,13 @@ description = "Mapping design lab: opens and saves real LightPlayer projects in 
 # proves they agree with the product.
 [dependencies]
 lab-mapping-model = { path = "../model" }
-serde_json = { workspace = true, features = ["std", "preserve_order"] }
+# Never `preserve_order`: Studio builds this crate (the Graph tab), and cargo
+# unifies features per build, so it would flip serde_json's map order for
+# every crate in Studio — and the committed schema corpus (see lpa-upgrade's
+# `json::JsonNode`). A file this crate writes is a file that changed; its
+# keys come out in serde_json's sorted order, which every product reader
+# reads the same.
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 lab-layout = { path = "../layout" }
