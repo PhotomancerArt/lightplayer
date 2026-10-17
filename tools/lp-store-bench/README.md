@@ -127,7 +127,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s sixteen mutants, through one fixed set
+  store, then each of `lp-tree-store`'s seventeen mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
   walk with one sector worn on erases and one on programs — and `idle`, the
   long walk with every third step up to 16 idle steps, cut like the rest),
@@ -135,7 +135,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
   `calibrated_mid_word`. A catch is a failure kind the unmutated store does
   not show in that driver; pass = every mutant caught. Last run (idle
-  cleanup over A2's fast mount, 2026-10-16, lp-nor-sim simulator):
+  cleanup over A2's fast mount, 2026-10-16; the mount study's rows added with it; lp-nor-sim simulator):
 
   | mutant | caught by | failures |
   |---|---|---|
@@ -154,6 +154,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   | `newest_by_headers` | sweep | 701 (`read_error`, `remount_failed`) |
   | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
   | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
+  | `mount_index_takes_untrusted` | fuzz (`shadowed_copy`) | 82 |
   | `idle_forgets_heads` | idle (`panic`: a program over a killed header) | 2 |
 
   The unmutated store: 0 failures in all eight drivers (7,095 cases).
