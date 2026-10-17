@@ -176,7 +176,7 @@ impl AgentTranscriptMirror {
             }
             AgentEvent::MaxTurnsReached { turns } => {
                 self.push_notice(format!(
-                    "Turn limit reached ({turns} model turns) — the agent stopped to wait for you."
+                    "Turn limit reached ({turns} model turns). The agent is waiting for you."
                 ));
             }
             AgentEvent::Truncated {
@@ -213,7 +213,7 @@ impl AgentTranscriptMirror {
         }
         // General invariant: however the run ended (abort, provider error,
         // truncation), no tool row may stay pulsing "running" forever.
-        self.resolve_unfinished_tool_rows("interrupted — the run ended before this call finished");
+        self.resolve_unfinished_tool_rows("interrupted: the run ended before this step finished");
         match error {
             // `ProviderError` events usually set the error status already;
             // this covers failure paths that end the run without one.
@@ -339,7 +339,7 @@ fn truncation_notice(stop_reason: &StopReason, dropped_tool_call: bool) -> Strin
              — try again or ask for something smaller."
             .to_string(),
         (StopReason::Other(reason), true) => format!(
-            "Run stopped early (provider reported {reason:?}) — the unfinished edit was discarded."
+            "The run stopped early ({reason:?}), and its unfinished edit was discarded."
         ),
         (StopReason::Other(reason), false) => {
             format!("Run stopped early (provider reported {reason:?}).")

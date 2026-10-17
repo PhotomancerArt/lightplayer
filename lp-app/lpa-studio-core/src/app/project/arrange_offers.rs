@@ -248,7 +248,7 @@ fn set_offer(
         })
     });
     let param = |name: &str, label: &str, now: f64| {
-        OfferParam::text(name, label, format!("{now} now; left blank, it stays")).optional()
+        OfferParam::text(name, label, format!("{now} now. Leave blank to keep it.")).optional()
     };
     UiOffer::with_params(
         at.child(ARRANGE_SET_VERB),

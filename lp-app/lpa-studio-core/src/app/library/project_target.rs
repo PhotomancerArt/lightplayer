@@ -80,7 +80,7 @@ impl ProjectTarget {
         (
             Self::Desktop,
             Some(format!(
-                "no hardware profile is checked in for {} — the sim runs as Desktop",
+                "{} has no hardware profile yet, so the sim will run as Desktop",
                 self.board_id()
             )),
         )

@@ -362,7 +362,7 @@ impl AgentController {
         let app = &mut self.app;
         if app.running {
             app.mirror
-                .push_notice("A run is already in progress — stop it first.");
+                .push_notice("A run is already in progress. Stop it first.");
             return Ok(());
         }
         let mut session = match app.runtime.borrow_mut().take() {
@@ -449,7 +449,7 @@ impl AgentController {
             })
             .ok_or_else(|| "no agent session for this shader".to_string())?;
         if session.running {
-            return Err("a run is in flight — stop it before reverting".to_string());
+            return Err("a run is in progress: stop it before reverting".to_string());
         }
         session
             .edit_record(turn)
@@ -477,7 +477,7 @@ impl AgentController {
             let parked = session.runtime.borrow();
             let agent = parked
                 .as_ref()
-                .ok_or_else(|| "nothing to export yet — send a message first".to_string())?;
+                .ok_or_else(|| "nothing to export yet: send a message first".to_string())?;
             crate::app::agent::agent_debug_export::debug_dump_json(
                 artifact.file_path().as_str(),
                 config,
@@ -504,7 +504,7 @@ impl AgentController {
         if let Some(session) = self.session_for_mut(runtime, artifact) {
             session.bridge.borrow_mut().source = source.to_string();
             session.push_notice(format!(
-                "Reverted to turn {turn} — that edit's source is staged again (Save keeps it)."
+                "Reverted to turn {turn}. Save to keep it."
             ));
         }
     }
@@ -542,7 +542,7 @@ impl AgentController {
             .entry(key.clone())
             .or_insert_with(|| AgentChatSession::new(key.clone(), artifact.clone()));
         if entry.running {
-            entry.push_notice("A run is already in progress — stop it first.");
+            entry.push_notice("A run is already in progress. Stop it first.");
             return Ok(());
         }
 

@@ -373,7 +373,7 @@ fn history_with_thumbs() -> Element {
 fn history_reverted() -> Element {
     let mut turns = idle_transcript();
     turns.push(UiAgentTurn::Notice {
-        text: "Reverted to turn 1 — that edit's source is staged again (Save keeps it)."
+        text: "Reverted to turn 1. Save to keep it."
             .to_string(),
         level: UiNoticeLevel::Info,
     });

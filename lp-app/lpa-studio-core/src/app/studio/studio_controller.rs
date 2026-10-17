@@ -6538,7 +6538,7 @@ impl StudioController {
             // programming error or a hand-made action — refused with the
             // reason rather than silently started as Desktop.
             return Err(UiError::UnsupportedAction(format!(
-                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+                "{target_id} has no hardware profile yet, so it can't be started here"
             )));
         }
         let kind = match op.backing {
