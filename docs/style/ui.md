@@ -246,26 +246,35 @@ decision is `docs/adr/2026-10-08-the-board-card-and-one-home-page.md`.
 
 From the top:
 
-- **The picture.** The board's lights. Nothing covers it: no overlay, no
-  badge, no progress, no button.
-- **The status corner,** cut out of the picture's corner, not laid over it,
-  and quiet unless it has something to say: nothing while the board is live
-  and well (the moving picture says live), nothing on a stale picture (the
-  picture dims; the Link row says since when), "Editing" while the editor
-  holds the picture, and a notice's icon only while the connected panel
-  covers the rows that would say it. With nothing to say it is a quiet ⋯:
-  it opens its own details — every notice, the picture's frame rate, age
-  and source as facts, and the board's terminal.
+- **The surface.** The card's top is its main surface, and it is never
+  black (Yona, 2026-10-17: "the primary surface should always give the
+  most important information"). While the board is well it is the board's
+  lights, and nothing covers them. Otherwise it is the notice (round 3's
+  concept B: `spikes/board-card-surface/index.html` on the branch
+  `claude/spike-card-surface`): the state's icon in a
+  30 px circle in the state's tone, then one or two plain sentences,
+  centred, and the work's bar and percent under them (or the spinner in the
+  icon's place). The tone is the icon's alone: the sentences stay plain. A
+  picture under it dims, fully covered, with one dim — the cover's, never a
+  stale picture's own dim as well. There are no buttons on the surface: it
+  explains, and the primary gives the thing to do. On the narrow card the
+  same notice is smaller, so its longest words still fit.
+- **The status corner,** cut out of the picture's corner, not laid over it:
+  a quiet ⋯ in every state. It opens its own details — every notice, the
+  picture's frame rate, age and source as facts, and the board's terminal.
+  What needs you is the surface's to say, and so is the editor holding the
+  board.
 - **The name bar.** The board's name, its group or owner under it, and one
-  primary action. The action is a plain, flush section of the bar with an
-  icon leading the word: the link's icon before Connect, a lock before
-  Unlock, ✓ before Done, + before Add a project, the firmware mark before
-  Install firmware. The spectrum ring lights it on hover, like any action.
-  **The primary is never a greyed verb:** a board with nothing on it offers
-  the next step (Add a project); while the board is being reached or
-  identified the primary is the conic spinner alone; and when nothing can
-  be pressed there is no primary at all — the row that is busy or away
-  says why, once.
+  primary action: the most likely thing the person wants to do, even when
+  it repeats a row's own button. The action is a plain, flush section of
+  the bar with an icon leading its verb and object: the link's icon before
+  Connect, a lock before Unlock, ✓ before Done, + before Add a project, the
+  firmware mark before Update firmware and Install firmware. The spectrum
+  ring lights it on hover, like any action. **The primary is never a
+  greyed verb:** a board with nothing on it offers the next step (Add a
+  project); while the board is being reached or identified the primary is
+  the conic spinner alone; and when nothing can be pressed there is no
+  primary at all — the surface says why.
 - **The rows,** always in this order: project · link · access · firmware ·
   hardware. Each is one line in one grammar (`docs/ux/anatomy/board-card.md`):
   **icon · kind · name · state · action**. The icon is the kind's own in
@@ -291,10 +300,13 @@ The rules:
   cloud's alone: an update on offer is untinted, and its button carries
   it. In a toned row the kind takes the row's colour, quieter. The rest of
   the card stays neutral.
-- **"Someone has it" is orange.** The Link row says **Open in another
-  tab**, **Taken by another tab** or **Someone else connected** in the
-  orange (Attention) family, and nothing else tints for it. A take-over
-  under way is the row's work, and one that failed is striped with Retry.
+- **The rows go quiet** while the surface says their problem: the row keeps
+  its state word and its own button, and loses its orange or red. The
+  surface is the card's one loud place.
+- **"Someone has it" is orange,** on the surface's icon. The Link row says
+  **Open in another tab**, **Taken by another tab** or **Someone else
+  connected**, quietly. A take-over under way is the row's work, and one
+  that failed carries Retry.
 - **Old looks old.** An offline board's rows keep the last thing known,
   dimmed, their words unchanged; only the Link row says since when.
 - **A bar's action sits flush at its end,** as a section of the bar, not a
@@ -306,7 +318,8 @@ The rules:
   shape says the fact, not its colour alone. A fact a mark carries is not
   repeated in words on the row.
 - **Every row names its subject,** with its kind word: `Project none`,
-  `Firmware unknown`, never a bare "Not known yet". A stand-in's Link row
+  `Project not known`, `Firmware unknown`, never a bare "Not known yet"
+  and never a false "none". A stand-in's Link row
   says what it is, and only it: "Simulated · running", "Emulated · off".
 - **Details open as Studio's detail card, merged with the bar that opened
   it** (the merged-outline popover). Every fact the bar's summary leaves
@@ -320,7 +333,8 @@ The rules:
   and no pixel of the fill leaves the card. When it's done, the row is green
   for a few seconds; when it fails, the row is striped, says only that it
   failed ("send failed"), and offers Retry, the reason the first thing in
-  its details. The picture and the corner don't change.
+  its details. The corner doesn't change; the surface says the work over
+  the dimmed picture, with its bar and percent.
 - **Connected, the bars become the panel.** Connect turns the card's bars
   into the board's panel, drawn with Studio's existing panel widgets: as
   many controls as fit at the card's height, then All controls. Done turns
