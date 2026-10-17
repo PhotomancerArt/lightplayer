@@ -72,6 +72,7 @@ mod record_kind;
 mod record_log;
 mod record_scan;
 mod root_record;
+mod secret_scrub;
 mod sector_filter;
 mod sector_header;
 mod sector_table;

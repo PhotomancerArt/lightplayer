@@ -527,6 +527,44 @@ Should a core that predates the feature write after one that made
 snapshots (a failed trial's rollback), the snapshots stay files to it and
 survive; that is more than the trial rule asks.
 
+### Secret files
+
+A write-only file — an access file or the network file, whatever
+`lpc_access::is_write_only_file_path` matches — never leaves the device.
+Content addressing opens two side doors to its bytes; these rules, on
+whoever writes and serves a store, close them:
+
+- **Never expose a write-only file's id.** An id is 64 bits of SHA-256 of
+  the file's bytes, and the network file's layout is public JSON: given
+  its id, anyone can test guesses at a Wi-Fi password offline. So no wire
+  answer, listing, sync, diff or etag carries the id of a write-only file,
+  nor the id of a directory node that holds one (a Merkle diff over that
+  directory is the same oracle). At this freeze (2026-10-16) no wire
+  message carries any store id: ids leave `lp-tree-store` only through
+  `lp-cli hardware tree inspect` of a raw image, which is physical access;
+  the canonical package hash refuses a prefix that would cover a
+  write-only file and the changes walk drops them
+  (`lpa_server::file_sync`); no answer says whether a write was
+  deduplicated, and free space is reported only in whole sectors, at boot
+  (no oracle for a ~100 B file). A later
+  etag, sync or snapshot-diff API must keep this.
+- **Collect a replaced secret promptly.** A replaced or deleted file's
+  records stay on flash as garbage until GC erases their sector — on a
+  store far from full, perhaps never — so a dump of the partition would
+  hold every old password. A writer that replaces or deletes a write-only
+  file collects the sectors holding the old version's records right after
+  the commit (inside a transaction, after it commits): a mark, then GC's
+  own copy-then-erase of each such sector (I2), a head renewed
+  (`TreeStore::scrub`; `LpFsTree::with_secret_paths`, which the firmware
+  turns on for its write-only files). A record still live elsewhere (the
+  same bytes in another file) keeps its sector. Best effort: with no free
+  sector to copy into, the rest waits for GC, and a cut mid-scrub leaves
+  what ordinary GC's cut would. It does not reach older directory records
+  that name the old file's id (a 64-bit fingerprint, not the bytes) until
+  GC does; whoever holds a dump of an unencrypted flash holds the current
+  secret in the clear anyway.
+- A snapshot never holds a write-only file ("The snapshot namespace").
+
 ## Finding the committed state (mount)
 
 1. Read all `N` sector headers, each classified per "Sector". Any
