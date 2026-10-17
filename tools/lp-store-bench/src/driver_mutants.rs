@@ -263,19 +263,21 @@ fn run_set(name: &str) -> MutantResult {
         add_failure(&mut t, s.failures, &s.kinds, s.first_failure.as_ref());
         drivers.push(t);
     }
-    // 7. Wear: two sectors wear out (one on erases, one on programs).
+    // 7. Wear: two sectors wear out (one on erases, one on programs), each
+    // at its fourth erase counting the one a format gave every sector
+    // before the format went lazy (2026-10-16): three erases after it.
     drivers.push(long(
         "wear",
         vec![
             WearSpec {
                 sector: 3,
-                after_erases: 4,
+                after_erases: 3,
                 erase: true,
                 seed: 5,
             },
             WearSpec {
                 sector: 8,
-                after_erases: 4,
+                after_erases: 3,
                 erase: false,
                 seed: 6,
             },

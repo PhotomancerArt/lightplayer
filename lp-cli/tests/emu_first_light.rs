@@ -21,7 +21,8 @@
 //! Emulated: `lp-emu:esp32c6:<grade>` (`LP_FIRST_LIGHT_GRADE`: `t1`, `t2`,
 //! the default, or `t3`), ROM-up. Never hardware-validated: the silicon
 //! figures are `docs/reports/2026-10-16-c6-time-to-first-light.md`'s.
-//! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there.
+//! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there;
+//! `LP_FIRST_LIGHT_IMAGES=littlefs` (or `fs-tree`) runs one image only.
 //! `#[ignore]`d: it needs both split builds (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).
 
@@ -58,10 +59,16 @@ fn time_to_first_light_on_the_emulated_c6() {
     };
     let grade_name = format!("{grade:?}").to_lowercase();
     let mut rows = Vec::new();
+    // `LP_FIRST_LIGHT_IMAGES` (`littlefs`, `fs-tree`, comma-joined; unset:
+    // both) runs only those, for a quicker loop on one image.
+    let images = std::env::var("LP_FIRST_LIGHT_IMAGES").unwrap_or_default();
     for (label, image) in [
         ("littlefs", FwImage::SHIPPED),
         ("fs-tree", FwImage::FS_TREE),
     ] {
+        if !images.is_empty() && !images.split(',').any(|want| want == label) {
+            continue;
+        }
         let split = match split_image(&image) {
             Ok(split) => split,
             Err(reason) => {

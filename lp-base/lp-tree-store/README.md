@@ -209,8 +209,8 @@ switches below; no product build turns it on).
 
 `TreeStore::mount(flash, hasher, cfg)` (never panics; `Err((error, flash,
 hasher))` when there is no complete root, the error saying what is there —
-below), `TreeStore::format(flash, hasher, cfg)` (by value, like `mount`, and
-returning the mounted empty store: a firmware that mounts and, on `NoStore`,
+below), `TreeStore::format(flash, hasher, cfg)` (lazy, below; by value, like
+`mount`, and returning the mounted empty store: a firmware that mounts and, on `NoStore`,
 formats what the mount handed back links **one** `TreeStore<F, H>`; a
 `&mut` format beside a by-value mount linked the whole store twice, +8 KB;
 tests pass `&mut flash`, since `Flash` is implemented for `&mut F`),
@@ -244,14 +244,28 @@ first `format` at every operation under every named tear model, over blank,
 littlefs-shaped and garbage flash: every cut mounts as `NoStore`, and a
 second format works.
 
-**`format`'s sector walk lives in one place**: `RecordLog::kill_and_erase`
-(kill the header, erase, read back as erased) over every sector, then an
-empty directory and a root. It erases and verifies all of them (≈ 176 ×
-21 ms ≈ 3.7 s on a C6 partition, each erase inside esp-storage's critical
-section). A lazy or incremental format — kill the headers, erase on a
-sector's first open (`open_sector` already erases and verifies a sector
-that was not erased this session) — is an adoption-round requirement
-(plan `2026-10-08-2339-tree-store-firmware-and-emulator`, D4), not built.
+**`format` is lazy** (FORMAT.md "Formatting"): it erases two sectors, not
+all of them. Sectors 0 and 1 — littlefs's superblock pair, so neither a
+littlefs core nor the host's probe finds the old files again — are killed,
+erased and read back, and the two heads open there. Every other sector
+whose header does not read erased gets its header killed (24 zero bytes,
+read back; a kill that does not take is an erase), so no earlier store's
+sector is trusted again — its roots, whatever their sequence, included —
+and a kill a cut left weak is finished. The rest are erased when they are
+first opened, which `open_sector` does after any mount anyway (a mount
+never marks a sector erased). On a 176-sector C6 partition that is two
+erases (~40 ms) and 176 header reads, against 176 erases (≈ 3.7–3.9 s, each
+inside esp-storage's critical section) before.
+
+A cut anywhere in a format over flash with no store on it reads `NoStore`
+(or, once the root landed, the empty store), and a second format works
+(`a_cut_anywhere_in_a_first_format_is_no_store`, every named tear model,
+over blank, littlefs-shaped and garbage flash). A cut in a format over a
+store with files can leave the old store, `Damaged` or `NoStore` — a
+firmware formats only on `NoStore`, so it never runs one — and a second
+format then gives the empty store
+(`a_cut_format_over_a_store_formats_again`); no cut ever reads as a newer
+format (`a_torn_kill_erase_or_header_program_never_reads_as_newer`).
 
 ## Inspecting an image: `lp-cli hardware tree`
 
@@ -366,7 +380,7 @@ not — a commit past `u64::MAX` mounts as the one before it, pinned by
 (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
 commits, not reachable in practice).
 
-**Mutants** (feature `mutants`, `mutants.rs`): fourteen switches, each
+**Mutants** (feature `mutants`, `mutants.rs`): fifteen switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
@@ -376,7 +390,8 @@ untrusted; open a sector without the erase read-back; trust the newest
 sectors' last programs on one read (no settle); and the two checks the fast
 mount stands on: read the newest sector of each kind by its headers, as a
 cold one (`newest_by_headers`), and never fall back to the whole reading
-(`no_full_scan`). `lp-store-bench
+(`no_full_scan`); format leaving the headers it does not erase (no kill).
+`lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).
 

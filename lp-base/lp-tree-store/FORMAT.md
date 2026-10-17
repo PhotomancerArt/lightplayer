@@ -116,6 +116,14 @@ Writing and killing:
 - Before every erase, a writer programs the header to **24 zero bytes**
   ("kill"). A torn erase can then never leave an old valid header in front
   of weak bits.
+- **Formatting** need not erase every sector. A writer that makes an empty
+  store kills (24 zero bytes, read back) the header of every sector it
+  does not erase and that does not read all `0xFF`, before it writes the
+  store's first record: then no earlier store's sector — its roots, of any
+  sequence, included — is trusted again, and a kill a power cut left weak
+  is finished. It erases sectors 0 and 1 (a littlefs partition's
+  superblock pair) so the partition no longer reads as littlefs. Every
+  other sector is erased (killed first, as above) when it is first opened.
 - Head kind says which write head opened the sector: **hot** sectors hold
   `…/.lp/panel.json` files, the hot directory and roots; **cold** sectors
   hold everything else. GC copies a sector's live records to a sector of

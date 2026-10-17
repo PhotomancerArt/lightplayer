@@ -40,6 +40,10 @@ pub(crate) type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
 /// Deepest path (components) the store accepts and mount follows.
 pub const MAX_DEPTH: usize = 32;
 
+/// Sectors `format` erases: 0 and 1, littlefs's superblock pair (FORMAT.md
+/// "Formatting").
+const LAZY_FORMAT_ERASES: u32 = 2;
+
 /// The committed root.
 #[derive(Clone, Debug)]
 pub(crate) struct Committed {
@@ -90,17 +94,22 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
-    /// Kill and erase every sector (retiring any that will not erase),
-    /// commit an empty tree, and mount it: the store `mount` returns for
-    /// this flash. Works on any flash content. Takes the flash and the
+    /// Make an empty store on any flash content, and mount it: the store
+    /// `mount` returns for this flash. **Lazy** (FORMAT.md "Formatting"):
+    /// it erases two sectors, not all of them — sectors 0 and 1 (littlefs's
+    /// superblock pair, so nothing reads the partition as littlefs again;
+    /// the two heads open there) — and kills the header of every other
+    /// sector that does not read erased (24 zero bytes, no erase), so no
+    /// earlier store's sector is trusted again. Every other sector is
+    /// erased when it is first opened, as after any mount. A cut anywhere
+    /// leaves a flash that mounts as [`StoreError::NoStore`] (when the flash
+    /// had no store) or the empty store. Takes the flash and the
     /// hasher **by value**, as `mount` does, so a firmware that mounts, and
     /// on [`StoreError::NoStore`] formats what the mount handed back, links
     /// one `TreeStore<F, H>` (a `&mut` format beside a by-value mount
     /// linked the whole store twice). A failure hands the flash and the
     /// hasher back.
     ///
-    /// The sector walk (kill, erase, erase-verify) is `RecordLog`'s
-    /// `kill_and_erase`, the one place a lazy format would change.
     pub fn format(
         flash: F,
         hasher: H,
@@ -371,11 +380,23 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         }
     }
 
-    /// Format's body: every sector killed and erased, then an empty
-    /// directory and a root naming it.
+    /// Format's body: sectors 0 and 1 killed and erased; every other
+    /// header that does not read erased killed (and read back as zeros: a
+    /// kill that does not take is an erase, as `open_sector` would do);
+    /// then an empty directory and a root naming it.
     fn format_walk(&mut self) -> Res<(), F> {
         for s in 0..self.log.sector_count {
-            self.log.kill_and_erase(s)?;
+            if s < LAZY_FORMAT_ERASES {
+                self.log.kill_and_erase(s)?;
+                continue;
+            }
+            if mutant!(FormatKeepsHeaders) || self.log.header_reads(s, 0xFF)? {
+                continue;
+            }
+            self.log.kill_header(s)?;
+            if !self.log.header_reads(s, 0)? {
+                self.log.kill_and_erase(s)?;
+            }
         }
         let empty = self.write_dir_bytes(HeadKind::Cold, &EMPTY_DIR)?;
         self.work = WorkDirs {
