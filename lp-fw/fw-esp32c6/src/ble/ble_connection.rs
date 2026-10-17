@@ -10,10 +10,10 @@
 //! a connection whose MTU cannot carry even a handshake frame is refused and
 //! disconnected. A central that subscribes while the MTU is still the
 //! Bluetooth minimum (Android Chrome reconnecting, which can exchange the MTU
-//! after its CCCD write) gets up to a second for the exchange before its link
-//! opens (`fw_esp32_common::radio_link::mtu_grace`). The session's handshake
-//! then runs as ordinary traffic, and the mux owes the link its hello when
-//! that session comes up — not at subscribe.
+//! after its CCCD write) gets up to two seconds for the exchange before its
+//! link opens (`fw_esp32_common::radio_link::mtu_grace`). The session's
+//! handshake then runs as ordinary traffic, and the mux owes the link its
+//! hello when that session comes up — not at subscribe.
 //!
 //! One task, one `select` loop, four things it waits on:
 //!

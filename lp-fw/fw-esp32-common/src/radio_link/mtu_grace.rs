@@ -23,7 +23,14 @@ pub const BLE_MIN_ATT_MTU: u16 = 23;
 
 /// How long a central that subscribed at [`BLE_MIN_ATT_MTU`] has to raise the
 /// MTU before its link opens anyway.
-pub const MTU_GRACE_US: Micros = 1_000_000;
+///
+/// The desk's Pixel 8a (Android 14, Chrome 155) exchanged it ~1 s after its
+/// CCCD write, behind its own connection-parameter request (2026-10-17), so
+/// twice that. Studio gives a Bluetooth link 5 s from GATT open to the
+/// board's hello (`lpa_link`'s `DEFAULT_READY_DEADLINE`), which the grace, the
+/// handshake and the hello fit inside even for a central that never
+/// exchanges.
+pub const MTU_GRACE_US: Micros = 2_000_000;
 
 /// How often the board looks at the MTU during the grace.
 pub const MTU_POLL_US: Micros = 50_000;
@@ -101,5 +108,13 @@ mod tests {
     #[test]
     fn the_grace_is_far_inside_the_subscribe_and_login_deadline() {
         assert!(MTU_GRACE_US * 5 <= super::super::LOGIN_DEADLINE_MS * 1_000);
+    }
+
+    #[test]
+    fn the_grace_leaves_studio_room_for_the_handshake_and_hello() {
+        // lpa_link's DEFAULT_READY_DEADLINE (an app crate firmware cannot
+        // depend on): 5 s from GATT open to the board's hello.
+        const STUDIO_READY_DEADLINE_US: Micros = 5_000_000;
+        assert!(MTU_GRACE_US * 2 <= STUDIO_READY_DEADLINE_US);
     }
 }
