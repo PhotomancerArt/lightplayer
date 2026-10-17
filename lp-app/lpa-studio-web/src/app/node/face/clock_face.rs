@@ -128,7 +128,7 @@ pub fn ClockFace(
                                         IconActionButton {
                                             icon: StudioIconName::Revert,
                                             label: "Clear transport overrides",
-                                            title: "Clear this transport's debug overrides \u{2014} session only",
+                                            title: "Clear this transport's debug overrides",
                                             tone: IconMenuTone::Attention,
                                             on_press: move |_| {
                                                 if let Some(handler) = on_action {

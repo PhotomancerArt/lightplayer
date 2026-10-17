@@ -110,7 +110,7 @@ pub fn FixturePatchRow(patch: UiFixturePatch) -> Element {
             }
             if !patch.single_output {
                 span { class: "tw:font-mono tw:text-[0.6rem] tw:text-status-attention-foreground",
-                    "this fixture drives more than one output — the pixels below are the first wire's"
+                    "This fixture drives more than one output. The pixels below are the first wire's."
                 }
             }
         }
@@ -325,7 +325,7 @@ fn cell_title(cell: &UiPatchCell) -> String {
     }
     if cell.contested {
         title.push_str(
-            "\nsome of these channels are claimed by another strand too — the engine darkens them",
+            "\nAnother strand uses some of these channels too, so they are left dark.",
         );
     }
     title
