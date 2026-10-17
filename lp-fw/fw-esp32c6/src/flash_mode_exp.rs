@@ -167,6 +167,9 @@ fn jedec() -> u32 {
 
 #[cfg(feature = "heap_peak_diag")]
 fn bench(tag: &str) {
+    if option_env!("LP_FLASH_BENCH") == Some("0") {
+        return;
+    }
     // 256 KiB of distinct 32-byte lines (8 x the 32 KiB cache): line fills.
     let base = 0x4208_0000usize;
     let t0 = esp_hal::time::Instant::now();

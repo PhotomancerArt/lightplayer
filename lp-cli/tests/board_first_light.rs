@@ -203,6 +203,12 @@ async fn prepare(case: &str, conn: CliConnection, churn: usize) -> CliConnection
                 }
             }
         }
+        p if p.starts_with("project:") => {
+            client
+                .replace_and_load_project("first-light", &project_files(&p["project:".len()..]))
+                .await
+                .expect("push project");
+        }
         other => panic!("unknown case {other:?}"),
     }
     // Let the board settle (its `/lightplayer.json` rewrite after a load).
