@@ -770,6 +770,7 @@ else
     set +e
     "$cli" emu run \
         "${boot_args[@]}" \
+        ${flash_part_args[@]+"${flash_part_args[@]}"} \
         --host-link \
         --upload "$PROJECT" \
         --time-grade t3 \

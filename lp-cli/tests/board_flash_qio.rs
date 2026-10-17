@@ -15,7 +15,8 @@
 //! 3. **Warm resets** (`LP_QIO_WARM_BOOTS`, default 0): the board asked to
 //!    restart over its link (`ClientRequest::Reboot`: the firmware's own
 //!    `LP_SW_HPSYS` reset, the one an update ends with), the files read back
-//!    after each.
+//!    after each. The port need not drop on that reset; the boot's
+//!    `[RECOVERY] boot: cause=` line says it was not power.
 //! 4. The files deleted.
 //!
 //! **It erases the board's filesystem when `LP_QIO_MERGED` is set.** Lease
@@ -246,8 +247,8 @@ impl Sitting {
         if warm {
             let conn = conn.expect("a link to ask the restart on");
             let mut client = LpClient::new(conn.client_io());
-            // The answer may or may not beat the reset; the port going away
-            // and coming back is the evidence.
+            // The answer may or may not beat the reset; the boot's own
+            // reset-cause line is the evidence.
             let _ = tokio::time::timeout(
                 Duration::from_secs(3),
                 client.send_request(ClientRequest::Reboot),
@@ -261,17 +262,33 @@ impl Sitting {
             }
             power = Some(self.desk.power_cycle_async(epoch));
         }
-        let until = Instant::now() + Duration::from_secs(30);
-        while watch.times().back.is_none() && Instant::now() < until {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+        if warm {
+            // The board's own reset need not take the USB port away (the
+            // link sees the peer restart instead), so there is no port edge
+            // to wait for: give it the boot's time, then open the link.
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        } else {
+            let until = Instant::now() + Duration::from_secs(30);
+            while watch.times().back.is_none() && Instant::now() < until {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            assert!(
+                watch.times().back.is_some(),
+                "{what}: the port never came back"
+            );
         }
-        assert!(
-            watch.times().back.is_some(),
-            "{what}: the port never came back"
-        );
-        let conn = connect(&self.port, &boot)
-            .await
-            .unwrap_or_else(|e| panic!("{what}: {e}"));
+        let mut tries = 0;
+        let conn = loop {
+            match connect(&self.port, &boot).await {
+                Ok(conn) => break conn,
+                Err(e) if tries < 5 => {
+                    tries += 1;
+                    eprintln!("{what}: connect: {e}; again");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                Err(e) => panic!("{what}: {e}"),
+            }
+        };
         if let Some(power) = power {
             while power.lock().unwrap().is_none() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -311,6 +328,15 @@ impl Sitting {
         }
         if !warm && first_light.is_none() {
             self.failures.push(format!("{what}: no first light line"));
+        }
+        // A warm boot must be one: a reset the board made, not power.
+        if warm
+            && !reset
+                .as_deref()
+                .is_some_and(|l| !l.contains("cause=power-on"))
+        {
+            self.failures
+                .push(format!("{what}: not a warm reset: {reset:?}"));
         }
         eprintln!(
             "{what}: {} | {}",
