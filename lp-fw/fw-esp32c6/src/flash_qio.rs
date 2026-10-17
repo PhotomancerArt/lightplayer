@@ -15,7 +15,7 @@
 //! the project load:
 //!
 //! 1. **Read the part, write nothing.** `RDID` and status register 2 (command
-//!    `0x35`), with the instruction cache suspended. The part must be on
+//!    `0x35`, the ROM's `esp_rom_spiflash_read_user_cmd`). The part must be on
 //!    `fw_esp32_common::flash_qio::QIO_PARTS` and its QE bit must already be
 //!    set; otherwise the core stays in DIO and says why. **No status register
 //!    is ever written here.** That is why this does not call the ROM's
@@ -43,10 +43,11 @@
 //! part's QE bit was set before this core existed. An update core that fails
 //! here fails its trial, and the loader gives the previous core back.
 //!
-//! The two RAM functions are all of it that runs with the cache suspended.
-//! They call only mask-ROM code, their helpers are `#[inline(always)]`, and
-//! nothing in them reads `.rodata` — checked with `rust-nm` and `objdump` on
-//! the linked image, not trusted to the attribute.
+//! [`switch_to_qio`] is all of it that runs with the cache suspended, from
+//! RAM (~330 B). It calls only mask-ROM code, its helpers are
+//! `#[inline(always)]`, and nothing in it reads `.rodata` — checked with
+//! `rust-nm` and `objdump` on the linked image, not trusted to the
+//! attribute.
 
 use core::mem::MaybeUninit;
 use core::ptr::{read_volatile, write_volatile};
@@ -123,21 +124,18 @@ pub fn enter() {
     log::info!("[flash] DIO: {why} (jedec {jedec:06x}, sr2 {sr2:02x})");
 }
 
-/// The part's JEDEC id and status register 2, read with the cache suspended.
-#[esp_hal::ram]
+/// The part's JEDEC id and status register 2, from flash with interrupts
+/// off — the way esp-storage's own `RDID` size probe runs on every boot. Two
+/// reads; neither changes anything in the part.
 fn read_part() -> (u32, u32) {
-    unsafe {
-        let autoload = Cache_Suspend_ICache();
-        wr(SPI1 + CMD, CMD_RDID);
-        while rd(SPI1 + CMD) & CMD_RDID != 0 {}
-        let jedec = rd(SPI1 + W0) & 0x00ff_ffff;
-        let mut sr2 = 0;
-        if esp_rom_spiflash_read_user_cmd(&mut sr2, 0x35) != 0 {
-            sr2 = 0;
-        }
-        Cache_Resume_ICache(autoload);
-        (jedec, sr2)
+    wr(SPI1 + CMD, CMD_RDID);
+    while rd(SPI1 + CMD) & CMD_RDID != 0 {}
+    let jedec = rd(SPI1 + W0) & 0x00ff_ffff;
+    let mut sr2 = 0;
+    if unsafe { esp_rom_spiflash_read_user_cmd(&mut sr2, 0x35) } != 0 {
+        sr2 = 0;
     }
+    (jedec, sr2)
 }
 
 /// QIO, checked, with the cache suspended; on any doubt every register the
