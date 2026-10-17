@@ -2,9 +2,11 @@
 // THE MIGRATION WALK (C6 repartition, P08; `just walk-migration-emu <scenario>`).
 //
 // Real Studio, in headless Chrome, updating an emulated ESP32-C6 that is a
-// "fielded board": the current firmware on the frozen pre-2026-10 partition
-// table, its files in a 240-block littlefs at 0x310000 — the board every
-// shipped C6 is today. Studio's own Update (the board card's
+// "fielded board". The W scenarios are the 2026-10 repartition's: a board on
+// the frozen pre-2026-10 partition table, its files in a 240-block littlefs
+// at 0x310000; since the tree-store cutover's default switch (A7) they move
+// straight into the tree store at 0x380000. The T scenarios (below) are the
+// cutover's own, from the 176-sector littlefs every C6 ran until it. Studio's own Update (the board card's
 // `update-firmware` offer) runs the layout migration through esptool-js,
 // over the `?emu=` virtual serial port, into the emulated mask ROM's
 // download console.
@@ -29,6 +31,28 @@
 //       fixture chip is put into it through the page, and its chip and
 //       console are read back out of the page (`/__walk/*` on this
 //       script's own server)
+//
+// THE TREE-STORE CUTOVER (plan lp2025/2026-10-16-0848-tree-store-adoption,
+// A6, on the default build since A7). The fielded board runs littlefs on the
+// 176-sector table (the pinned `FIELDED_LITTLEFS` image, `1d5840a76` — the
+// last littlefs main — its files at 0x350000 with a c40-sized project), and
+// the Studio bundle carries the shipped split image, the tree store on the
+// tree table (`LP_FW_IMAGE=split just studio-firmware-package-esp32c6`):
+//
+//   T1  Update → the question → Continue → every file in the tree store at
+//       0x380000; the board boots it, as itself (a c40-sized littlefs takes
+//       nearly every block, so this is the retired order)
+//   T7a the walk's files only (room to stage): cable pulled while the tree
+//       store's sectors are written, before the firmware switch — the
+//       board comes back as itself, its littlefs mounted, every file there
+//   T7b …then Update again moves them
+//   T8  a crowded littlefs (no room to stage): cable pulled while the store
+//       is written (retired: the old filesystem already erased) — the board
+//       boots nothing, its files only in this browser's backup; the card's
+//       way back (Install) asks to put them back and does, into the tree
+//       store
+//   T9  a tree image flashed without the migration: the tree core HOLDS the
+//       littlefs it finds at 0x350000; Finish update moves it
 //
 // Every claim keys off the BOARD's words or the CHIP's bytes, never a Studio
 // string another component could satisfy (walk-no-board's binding rule):
@@ -88,7 +112,47 @@ const SCENARIOS = {
   W7a: { fixture: "legacy", describe: "cable pulled mid filesystem write: formatted, backup in this browser" },
   W7b: { fixture: null, describe: "a new Chrome on the same profile restores the backup" },
   W12: { fixture: "legacy", tab: true, describe: "W1 with the board a Worker in the page (?emu=tab, no door)" },
+  T1: { fixture: "fielded", tree: true, describe: "cutover: Update → the question → Continue → files in the tree store" },
+  T7a: { fixture: "fielded-small", tree: true, describe: "cutover: cable pulled while the store is staged: the old board, whole" },
+  T7b: { fixture: null, tree: true, describe: "cutover: …then Update again moves the files" },
+  T8: { fixture: "crowded", tree: true, describe: "cutover, retired order: cable pulled mid store write, then the way back restores the backup into the tree store" },
+  T9: { fixture: "tree-bypassed", tree: true, describe: "cutover: a tree image flashed without the migration holds the littlefs; Finish update moves it" },
 };
+
+/// The pinned fielded littlefs image (`ReferenceImage::FIELDED_LITTLEFS`,
+/// `lp-emu-esp32c6`'s test support): its merged chip image, built beside
+/// the reference ELF the first time it is asked for.
+const FIELDED_REF = path.join(ROOT, "target/emu-ref/1d5840a76-esp32c6+server+radio");
+function fieldedMerged() {
+  const merged = path.join(FIELDED_REF, "merged.bin");
+  if (!existsSync(merged)) {
+    const elf = path.join(FIELDED_REF, "fw-esp32c6");
+    if (!existsSync(elf)) run("scripts/emu/build-reference-image.sh", ["esp32c6,server,radio", "1d5840a76", "none"]);
+    run("scripts/emu/build-merged-image.sh", [elf, merged]);
+  }
+  return merged;
+}
+
+/// A c40-sized project (the store's real corpus is 132 documents, 216 KB):
+/// `projects/test/basic` plus 124 JSON-like documents, deterministic.
+function c40Files(files) {
+  copyDir(path.join(ROOT, "projects/test/basic"), "/projects/c40", files);
+  const words = ['"kind": ', '"shader"', ", ", '"speed": ', "0.25", "{\n  ", "\n}", '"palette"', "[1, 2, 3]", '"phase": ', '"uniform"', '"color": '];
+  let r = 0xc40;
+  const next = () => {
+    r = (r * 1103515245 + 12345) % 2147483648;
+    return r;
+  };
+  for (let i = 0; i < 124; i += 1) {
+    const len = 600 + (next() % 2301);
+    let doc = "";
+    while (doc.length < len) {
+      doc += words[next() % words.length];
+      if (next() % 5 === 0) doc += String(next() % 1000);
+    }
+    files.push([`/projects/c40/docs/doc${String(i).padStart(3, "0")}.json`, Buffer.from(doc)]);
+  }
+}
 
 function args() {
   const argv = process.argv.slice(2);
@@ -171,7 +235,7 @@ function noise(len, seed) {
 
 /// The board's files (plan Q4): two projects, the stamped XIAO C6 manifest,
 /// the identity, an access file with one browser key, a > 1-block file.
-function fixtureTree(dir, overFull) {
+function fixtureTree(dir, overFull, kind = null) {
   rmSync(dir, { recursive: true, force: true });
   const files = [];
   copyDir(path.join(ROOT, "projects/test/basic"), "/projects/basic", files);
@@ -181,6 +245,10 @@ function fixtureTree(dir, overFull) {
   files.push(["/.lp/access.json", Buffer.from(fixtureAccessJson())]);
   files.push(["/notes/long.txt", noise(9000, 1)]);
   if (overFull) files.push(["/projects/big/blob.bin", noise(720 * 1024, 2)]);
+  if (kind === "fielded" || kind === "tree-bypassed") c40Files(files);
+  // A littlefs with a block taken by every 1.5 KB file: no free blocks
+  // left in the tree region to stage into, so the retired order.
+  if (kind === "crowded") for (let i = 0; i < 135; i += 1) files.push([`/projects/p/f${String(i).padStart(3, "0")}.bin`, noise(1500, 100 + i)]);
   for (const [file, bytes] of files) {
     const at = path.join(dir, file);
     mkdirSync(path.dirname(at), { recursive: true });
@@ -200,12 +268,28 @@ function run(cmd, cmdArgs) {
 /// (legacy unless `current`), the files at that table's lpfs.
 function buildFixture(kind, out) {
   const tree = path.join(out, "fixture-tree");
-  fixtureTree(tree, kind === "overfull");
-  const merged = path.join(FIRMWARE, "esp32c6-4mb/fw-esp32c6-merged.bin");
+  fixtureTree(tree, kind === "overfull", kind);
+  const served = path.join(FIRMWARE, "esp32c6-4mb/fw-esp32c6-merged.bin");
+  const cutover = ["fielded", "fielded-small", "crowded", "tree-bypassed"].includes(kind);
+  const merged = cutover ? fieldedMerged() : served;
   const chip = path.join(out, "fixture.bin");
   const cliArgs = ["hardware", "lpfs", "fixture", "--merged", merged, "--tree", tree, "--out", chip];
-  if (kind === "current") cliArgs.push("--table", path.join(ROOT, "lp-fw/fw-esp32c6/partitions.csv"));
+  if (kind === "current") cliArgs.push("--table", path.join(ROOT, "lp-fw/fw-esp32c6/partitions.csv"), "--fs", "tree");
+  if (cutover) cliArgs.push("--table", path.join(ROOT, "lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv"));
   console.log("  " + run(LP_CLI, cliArgs).trim());
+  if (kind === "tree-bypassed") {
+    // The served tree image (and its tree table) written over 0x0 of the
+    // fielded board with no migration: the littlefs stays at 0x350000,
+    // nothing of a store at 0x380000.
+    const bytes = readFileSync(chip);
+    writeFileSync(path.join(out, "fixture-before-bypass.bin"), bytes);
+    const image = readFileSync(served);
+    let end = image.length;
+    while (end > 0 && image[end - 1] === 0xff) end -= 1;
+    image.subarray(0, end).copy(bytes, 0);
+    writeFileSync(chip, bytes);
+    console.log("  …then the tree image written over 0x0 with no migration (a bypassed flash)");
+  }
   if (kind === "bypassed") {
     // `esptool write_flash 0x0 <merged.bin>` onto the fielded board: the new
     // image (and its new table at 0x8000) over the old, nothing else — the
@@ -218,6 +302,16 @@ function buildFixture(kind, out) {
     console.log("  …then the new image written over 0x0 with no migration (a bypassed flash)");
   }
   return chip;
+}
+
+/// The tree scenarios need the bundle's C6 package to mount the tree store
+/// (every C6 package since the default switch); an older littlefs bundle
+/// would plain-flash a board these walks expect to migrate.
+function assertTreeBundle() {
+  const manifest = JSON.parse(readFileSync(path.join(FIRMWARE, "esp32c6-4mb/manifest.json"), "utf8"));
+  if (!(manifest.core?.features ?? []).includes("fs.tree")) {
+    throw new Error("the served C6 package does not mount the tree store: `LP_FW_IMAGE=split just studio-firmware-package-esp32c6`, then `just studio-web-story-build`");
+  }
 }
 
 /// `lp-cli hardware lpfs report --image <chip> --json`: the files a chip holds.
@@ -410,11 +504,20 @@ async function pressMaybeArmed(driver, { board, verb, bar }) {
 /// step it is on (`board_card/bar_work.rs`), so the walk reads which ones it
 /// showed, in order. Read off every card's firmware bar — a board that came
 /// back from a pulled cable can be a new card until it says who it is.
-const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"];
+/// Since the board card's words round 2 (#1159, 2026-10-16) the Firmware row
+/// says a USB update as ONE verb with its percent ("installing · 40%",
+/// `bar_work.rs`), not each step: `ROW_WORD` is that verb, seen as a label.
+/// The step labels stay for a card that still names them; the cable cuts key
+/// off esptool-js's own `Writing at` lines on the board's terminal, never
+/// these.
+const ROW_WORD = "installing";
+const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…", ROW_WORD];
 /// Page-side: every card's firmware bar, as its line reads (its work's
 /// words while it carries work).
 const FIRMWARE_LINES = `[...document.querySelectorAll('[data-board-card] [data-bar="firmware"] button[aria-label="Firmware details"]')].map((el) => (el.textContent || '').replace(/\\s+/g, ' ').trim())`;
 const STEPS_NOW = `(() => { const lines = ${FIRMWARE_LINES}; return ${JSON.stringify(STEP_LABELS)}.filter((l) => lines.some((t) => t.includes(l))); })()`;
+/// Page-side: a Firmware row carries running work (`data-bar-work`).
+const ROW_WORKING = `Boolean(document.querySelector('[data-board-card] [data-bar="firmware"][data-bar-work="running"]'))`;
 /// Page-side: the firmware bars' lines, joined — a diagnostic.
 const FIRMWARE_LINE = `${FIRMWARE_LINES}.filter(Boolean).join(' | ')`;
 
@@ -512,8 +615,8 @@ async function awaitInstalled(driver) {
   // The activity ends when the firmware bar stops naming a step; whether it
   // succeeded is read after (a terminal line can say "failed" mid-run —
   // esptool-js's own connect retries do).
-  await driver.waitFor(`${STEPS_NOW}.length > 0`, { timeoutMs: STEP_MS, what: "the update to start" });
-  for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
+  await driver.waitFor(`${STEPS_NOW}.length > 0 || ${ROW_WORKING}`, { timeoutMs: STEP_MS, what: "the update to start" });
+  for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0 && !${ROW_WORKING}`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
   // The activity's OUTCOME line is the last thing it writes (after the
   // board-manifest stamp), on the board's terminal in the status corner's
   // details; give it its moment.
@@ -734,7 +837,9 @@ async function main() {
   let fixtureChip = path.join(out, "fixture.bin");
   if (!continuing) fixtureChip = buildFixture(spec.fixture, out);
   const beforeBypass = path.join(out, "fixture-before-bypass.bin");
-  const fixtureReport = report(spec.fixture === "bypassed" ? beforeBypass : fixtureChip);
+  const bypassed = spec.fixture === "bypassed" || spec.fixture === "tree-bypassed";
+  if (spec.tree) assertTreeBundle();
+  const fixtureReport = report(bypassed ? beforeBypass : fixtureChip);
   console.log(`  fixture: ${fixtureReport.layout} — ${fixtureReport.fileCount} files, ${fixtureReport.totalBytes} B`);
 
   if (spec.tab) BOARD = "tab-c6";
@@ -806,12 +911,15 @@ async function main() {
     // said so far land before marking where the update's words begin.
     await new Promise((r) => setTimeout(r, 5_000));
     const before = await consoleText();
-    if (scenario === "W9") {
+    if (scenario === "W9" || scenario === "T9") {
       const said = await consoleText();
+      // Its boot line, or (the tree core's boot words can go out before the
+      // host is on the link) the hello's own `fs`.
+      const heldFs = framedValues(said, "fs").map(fsState).includes("legacy_held");
       step(
         "the board held its files",
-        said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found"),
-        (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
+        said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found") || heldFs,
+        heldFs ? "hello fs: legacy_held" : (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
       );
       // A held board's device store waits with its files: it keeps Bluetooth
       // off (it must not be more open than that store), and Studio neither
@@ -931,6 +1039,48 @@ async function main() {
             const text = await awaitInstalled(driver);
             await shot("installed");
             step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
+          } else if (scenario === "T7a" || scenario === "T8") {
+            // The tree store's sectors (0x380000 on): esptool-js's own
+            // `Writing at 0x38…` lines on the board's terminal. Staged
+            // (T7a), they come before the firmware; retired (T8a), after
+            // the old region's erase.
+            const board = await liveBoard(driver);
+            await narrateFirmwareBar(driver, driver.boardSaid(/Writing at 0x3[89a-f][0-9a-f]{4}(?![0-9a-f])/, { board, timeoutMs: MIGRATION_MS })).catch((error) => {
+              throw new Error(`the moment to pull the cable never came (${error.message})`);
+            });
+            await shot("before-pull");
+            const reading = await driver.evaluate(FIRMWARE_LINE);
+            step("cable pulled while the tree store was written", (await pullCable(driver)) === "pulled", reading);
+            await driver.attach(BOARD);
+            await connect(driver).catch(() => {});
+            await sleep(15_000);
+            verdict.afterPull = { card: await driver.evaluate(CARDS_NOW), board: (await consoleText()).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
+            await shot("after-pull");
+            if (scenario === "T7a") {
+              await waitFirmwareVerb(driver, ["update-firmware"], { timeoutMs: STEP_MS, what: "the old board back, offering its update" });
+            } else {
+              let way = await findFirmwareVerb(driver, ["restore-files", "update-firmware"]);
+              if (!way) {
+                for (const board of await driver.cardPaths()) {
+                  if (await driver.offered("flash", { board })) {
+                    way = { board, verb: "flash", bar: null };
+                    break;
+                  }
+                }
+              }
+              step("the card offers a way back", Boolean(way), way ? `\`${way.verb}\` on ${way.board}` : JSON.stringify(verdict.afterPull.card).slice(0, 300));
+              // The board's files are only in this browser's backup now: the
+              // way back inspects it, finds nothing to move, and asks to put
+              // the backup back — into the tree store.
+              await pressMaybeArmed(driver, way);
+              const again = await awaitQuestion(driver);
+              await shot("question-again");
+              step("asked to put the files back", again.includes("Put this board's files back"), "");
+              await pressContinue(driver);
+              const text = await awaitInstalled(driver);
+              await shot("installed");
+              step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
+            }
           } else if (scenario === "W7a") {
             // The firmware bar names the step, not its address; the board's
             // terminal carries esptool-js's own lines: the filesystem body
@@ -1075,7 +1225,57 @@ async function main() {
     verdict.files = files;
     const bytes = readFileSync(chip);
     const legacySuperblock = bytes.subarray(0x310008, 0x310010).toString() === "littlefs";
+    const v2Superblock = [0x350008, 0x351008].some((at) => bytes.subarray(at, at + 8).toString() === "littlefs");
     switch (scenario) {
+      case "T1":
+      case "T7b":
+      case "T8":
+      case "T9": {
+        // A held board's key add lands after the move (see W9); a new file
+        // the board writes itself (`/.lp/status-light.json`) is not a loss.
+        const studiosAfterHeld = scenario === "T9" && files.missing.length === 0
+          && files.changed.length > 0 && files.changed.every((p) => p === "/.lp/access.json");
+        step(
+          studiosAfterHeld ? "every file in the tree store, byte for byte (but /.lp/access.json: Studio's key add after the move)" : "every file in the tree store, byte for byte",
+          files.same || studiosAfterHeld,
+          JSON.stringify(files),
+        );
+        step("the chip is on the tree table", /0x380000/.test(after.layout), after.layout);
+        step("the old littlefs is retired", !v2Superblock, "");
+        step(
+          "no older core left in boot record 1 (AD4)",
+          bytes.subarray(0x17000, 0x18000).every((b) => b === 0xff),
+          bytes.subarray(0x17000, 0x17004).toString("hex"),
+        );
+        // A staged store's sectors are a few short writes before the
+        // firmware: the card may still say "Flashing firmware…" through
+        // them, so "Moving files…" is not required (recorded either way).
+        step(
+          "the card named each step",
+          ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Checking the files…"].every((s) => cardSteps.includes(s))
+            || (questionSeen && cardSteps.includes(ROW_WORD)),
+          cardSteps.join(" → "),
+        );
+        step(
+          "the board mounted its tree store, as itself",
+          said.includes("[FS] tree store mounted (") && !said.includes("tree store formatted")
+            && verdict.console.fs.at(-1) === "mounted" && verdict.console.deviceUid.includes(UID),
+          JSON.stringify(verdict.console),
+        );
+        break;
+      }
+      case "T7a": {
+        step("every file still on the old board", files.same, JSON.stringify(files));
+        step("the chip is still on the 176-sector table", /0x350000/.test(after.layout), after.layout);
+        step(
+          "the board came back as itself, its littlefs mounted",
+          said.includes("Flash filesystem mounted") && !said.includes("Formatted and mounted fresh")
+            && verdict.console.fs.at(-1) === "mounted",
+          JSON.stringify(verdict.console),
+        );
+        break;
+      }
+
       case "W1":
       case "W5":
       case "W12":
@@ -1095,7 +1295,7 @@ async function main() {
           files.same || studiosAfterHeld,
           JSON.stringify(files),
         );
-        step("the chip is on the new layout", /0x350000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
+        step("the chip is on the new layout", /0x380000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
         step("old superblock retired", !legacySuperblock, "");
         // The card named the update's steps as they happened (G1 walk,
         // 2026-10-03: it said "Flashing firmware…" from the first read to
@@ -1103,7 +1303,8 @@ async function main() {
         // second pass still shows every step, in this order.
         step(
           "the card named each step",
-          inOrder(cardSteps, ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"]),
+          inOrder(cardSteps, ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"])
+            || (questionSeen && cardSteps.includes(ROW_WORD)),
           cardSteps.join(" → "),
         );
         step(
@@ -1124,12 +1325,12 @@ async function main() {
           files.missing.length === 0 && files.extra.length === 0 && files.changed.every((p) => studios.has(p)),
           JSON.stringify(files),
         );
-        step("the chip is still on the new layout", /0x350000/.test(after.layout), after.layout);
+        step("the chip is still on the new layout", /0x380000/.test(after.layout), after.layout);
         break;
       }
       case "W3":
       case "W4": {
-        step("the card read the board before it answered", cardSteps.includes("Reading the board…"), cardSteps.join(" → "));
+        step("the card read the board before it answered", cardSteps.includes("Reading the board…") || cardSteps.includes(ROW_WORD), cardSteps.join(" → "));
         // Against the chip as the update found it (after the connect's own
         // access-file write): a refusal or a cancel writes NOTHING.
         const fixture = readFileSync(path.join(out, `as-found-${scenario}.bin`));

@@ -39,6 +39,14 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = [
     "std",
 ], optional = true }
 lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
+# The tree store a C6 moves to (`layout_migration`'s tree packer, reader and
+# probe): the host deflater (`host-deflate`, which brings `soft-sha` — a
+# browser has no SHA accelerator) and the read-only sector classifier
+# (`inspect`). `no_std` + alloc, so the browser build links it unchanged.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = [
+    "host-deflate",
+    "inspect",
+], optional = true }
 js-sys = { version = "0.3", optional = true }
 # Verifies the MD5 the ROM/stub sends after a raw flash read. Host-only:
 # the browser path gets its checksum from esptool-js.
@@ -101,8 +109,14 @@ default = []
 # repartition): the pure planner, the re-pack, the backup archive
 # (`layout_migration`). Every provider that flashes an ESP32 implies it.
 # `lpc-model` for the firmware's embedded manifest (does an image read the
-# tree store?); every provider that implies this feature already links it.
-layout-migration = ["dep:littlefs-rust", "dep:lpc-model", "dep:serde_json", "dep:zip"]
+# tree store?); `lp-tree-store` for the cutover's packer, reader and probe.
+layout-migration = [
+    "dep:littlefs-rust",
+    "dep:lp-tree-store",
+    "dep:lpc-model",
+    "dep:serde_json",
+    "dep:zip",
+]
 browser-serial-esp32 = [
     "device-link",
     "device-session",

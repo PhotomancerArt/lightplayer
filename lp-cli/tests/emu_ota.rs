@@ -40,9 +40,10 @@ const NONCE: u32 = 0x07A0_0001;
 const PAD: u8 = 18;
 /// The engine-less board's sector to erase: the engine header's.
 const SECTOR: usize = 0x1000;
-/// Everything below `lpfs` (0x350000 in the C6 table): what a refusal must
+/// Everything below `lpfs` (0x380000 in the C6 table since the tree-store
+/// cutover): what a refusal must
 /// leave byte-identical.
-const BELOW_LPFS: usize = 0x35_0000;
+const BELOW_LPFS: usize = 0x38_0000;
 /// Steps (250 µs of emulated time each) a whole update may take.
 const UPDATE_STEPS: u64 = 1_600_000;
 

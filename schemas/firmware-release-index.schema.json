@@ -43,6 +43,10 @@
     "Requires": {
       "description": "What a board must have to take a build over the air. Only a prediction:\nthe board decides.",
       "properties": {
+        "fsTree": {
+          "description": "The build mounts the tree store (its manifest core lists `fs.tree`):\nthe board must already be on it — its hello's build lists `fs.tree` —\nor a littlefs board's files move over USB first (the tree-store\ncutover, ADR `2026-10-16-c6-tree-store-cutover-migration.md`).\nAdditive (format 1): absent reads `false`, which every manifest\nwritten before the field is — none of those builds mounts the tree\nstore — and a littlefs build writes nothing, so its bytes do not\nchange.",
+          "type": "boolean"
+        },
         "layout": {
           "description": "The flash layout; the board's must be **equal** (M4's code table:\n`1` = layout 1).",
           "format": "uint16",

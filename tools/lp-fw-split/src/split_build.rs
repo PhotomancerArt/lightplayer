@@ -69,6 +69,10 @@ pub const BUILD_ID_SYMBOL: &str = "LP_BUILD_ID";
 pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
 /// The emulator seam descriptor table (`fw_esp32_common::seam_table!`).
 pub const SEAM_TABLE_SYMBOL: &str = "LP_SEAM_TABLE";
+/// The tree-store mark (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`):
+/// what a tree-store board's update guard reads in a core it is sent, so it
+/// must be in the core ([`check_core_tree_mark`]).
+pub const CORE_FS_TREE_MARK_SYMBOL: &str = "LP_CORE_FS_TREE_MARK";
 /// The core's `.bss` bounds (esp-hal `ld/sections/rwdata.x`; riscv-rt zeroes
 /// `__sbss..__ebss`, their aliases, before Rust runs).
 pub const BSS_START_SYMBOL: &str = "_bss_start";
@@ -214,6 +218,8 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     for s in &segments {
         eprintln!("{}", s.line());
     }
+    let mark = check_core_tree_mark(&p2_elf, &core)?;
+    eprintln!("    core.bin: {mark}");
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 
@@ -309,7 +315,49 @@ pub fn core_roots(graph: &SectionGraph, elf: &[u8]) -> Result<Vec<usize>> {
     if let Some(table) = elf_symbol::find_opt(elf, SEAM_TABLE_SYMBOL)? {
         named.push((SEAM_TABLE_SYMBOL, table.vaddr));
     }
+    if let Some(mark) = elf_symbol::find_opt(elf, CORE_FS_TREE_MARK_SYMBOL)? {
+        named.push((CORE_FS_TREE_MARK_SYMBOL, mark.vaddr));
+    }
     roots_at(graph, &named)
+}
+
+/// The core must say what it mounts in its own bytes: an image whose
+/// manifest lists `fs.tree` carries the tree-store mark in `core.bin`, and
+/// one whose manifest does not, does not. A tree-store board's update guard
+/// reads only the core (its engine, which holds the manifest, is written
+/// after the core boots on trial), so a tree core without the mark is
+/// refused by every board it is sent to, its own kind included
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+pub fn check_core_tree_mark(elf: &[u8], core: &[u8]) -> Result<&'static str> {
+    let lists_tree = manifest_lists_fs_tree(elf);
+    let mark = lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes();
+    let carries = core.windows(mark.len()).any(|w| w == mark);
+    match (lists_tree, carries) {
+        (true, true) => Ok("carries the tree-store mark (its manifest lists fs.tree)"),
+        (false, false) => Ok("no tree-store mark (its manifest lists no fs.tree)"),
+        (true, false) => bail!(
+            "the manifest lists fs.tree but core.bin carries no tree-store mark \
+             (`{CORE_FS_TREE_MARK_SYMBOL}`): every tree-store board would refuse this core"
+        ),
+        (false, true) => bail!(
+            "core.bin carries the tree-store mark but the manifest lists no fs.tree: \
+             the hosts and the boards would disagree on what it mounts"
+        ),
+    }
+}
+
+/// Does the image's manifest core list `fs.tree`?
+fn manifest_lists_fs_tree(elf: &[u8]) -> bool {
+    let Some(json) = lpc_model::manifest::find_manifest_core(elf) else {
+        return false;
+    };
+    let Ok(core) = serde_json::from_slice::<serde_json::Value>(json) else {
+        return false;
+    };
+    let tree = lpc_model::LpFeature::FsTree.wire_name();
+    core.get("features")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(tree)))
 }
 
 /// The input sections holding each named address.
@@ -387,6 +435,28 @@ pub fn factory_extent(partitions: &Path) -> Result<(u32, u32)> {
 mod tests {
     use super::*;
     use crate::section_graph::Node;
+
+    #[test]
+    fn a_tree_manifest_needs_the_mark_in_the_core_and_only_then() {
+        let manifest = |features: &str| {
+            let mut elf = vec![0x11u8; 256];
+            elf.extend_from_slice(lpc_model::manifest::MANIFEST_BLOB_BEGIN.as_bytes());
+            elf.extend_from_slice(format!(r#"{{"features":[{features}]}}"#).as_bytes());
+            elf.extend_from_slice(lpc_model::manifest::MANIFEST_BLOB_END.as_bytes());
+            elf
+        };
+        let tree = manifest(r#""gfx.lpvm","fs.tree""#);
+        let plain = manifest(r#""gfx.lpvm""#);
+        let mut marked = vec![0x13u8; 300];
+        marked.extend_from_slice(lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes());
+        let unmarked = vec![0x13u8; 300];
+
+        assert!(check_core_tree_mark(&tree, &marked).is_ok());
+        assert!(check_core_tree_mark(&plain, &unmarked).is_ok());
+        let err = check_core_tree_mark(&tree, &unmarked).unwrap_err();
+        assert!(err.to_string().contains("would refuse this core"), "{err}");
+        assert!(check_core_tree_mark(&plain, &marked).is_err());
+    }
 
     #[test]
     fn the_seam_table_is_a_root_beside_the_digest_and_the_build_id() {

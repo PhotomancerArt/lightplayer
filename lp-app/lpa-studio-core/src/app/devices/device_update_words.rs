@@ -238,6 +238,26 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             None,
             "Ready",
         ),
+        UpdateStanding::NeedsFilesMoved { link, to, .. } => words(
+            NeedsYou,
+            "Files move to a new filesystem".to_string(),
+            match link {
+                UpdateLink::Usb => format!(
+                    "{} keeps this board's files in a new filesystem. Update moves them there \
+                     over this cable — backed up first, every file kept.",
+                    to.short()
+                ),
+                _ => format!(
+                    "{} keeps this board's files in a new filesystem, and only a USB cable can \
+                     move them. Connect it by USB to update; after that it updates over {} \
+                     again.",
+                    to.short(),
+                    link.word()
+                ),
+            },
+            None,
+            "Ready",
+        ),
         UpdateStanding::KeepsCrashing { board, .. } => words(
             NeedsYou,
             format!("{} keeps crashing", board.short()),

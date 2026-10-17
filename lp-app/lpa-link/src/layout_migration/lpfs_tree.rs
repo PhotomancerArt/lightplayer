@@ -137,6 +137,70 @@ impl LpfsTree {
     }
 }
 
+/// Every block a mounted littlefs `image` of `geometry` uses: the blocks a
+/// mount, a traversal (`fs_size`) and a read of every directory and file
+/// touch. An over-estimate is safe — what it is for (a migration staging a
+/// tree store in the blocks littlefs does NOT use, so the old filesystem
+/// stays whole until the new one is complete) only ever writes outside it.
+pub fn used_blocks(
+    image: &[u8],
+    geometry: LpfsGeometry,
+) -> Result<std::collections::BTreeSet<u32>, LpfsTreeError> {
+    if image.len() != geometry.len() as usize {
+        return Err(LpfsTreeError::WrongSize {
+            expected: geometry.len(),
+            actual: image.len() as u32,
+        });
+    }
+    let storage = ReadRecorder {
+        image,
+        read: Default::default(),
+    };
+    let fs = Filesystem::mount(storage, geometry.config())
+        .map_err(|(error, _)| LpfsTreeError::Unmountable(error.to_string()))?;
+    fs.fs_size()
+        .map_err(|error| LpfsTreeError::Unmountable(error.to_string()))?;
+    let mut tree = LpfsTree::default();
+    walk(&fs, "", &mut tree)?;
+    let storage = fs
+        .unmount()
+        .map_err(|error| LpfsTreeError::Unmountable(error.to_string()))?;
+    Ok(storage.read)
+}
+
+/// A read-only littlefs storage over borrowed bytes that remembers every
+/// block it was asked to read.
+struct ReadRecorder<'a> {
+    image: &'a [u8],
+    read: std::collections::BTreeSet<u32>,
+}
+
+impl littlefs_rust::Storage for ReadRecorder<'_> {
+    fn read(
+        &mut self,
+        block: u32,
+        offset: u32,
+        buf: &mut [u8],
+    ) -> Result<(), littlefs_rust::Error> {
+        let start = (block * LPFS_BLOCK_SIZE + offset) as usize;
+        let bytes = self
+            .image
+            .get(start..start + buf.len())
+            .ok_or(littlefs_rust::Error::Io)?;
+        buf.copy_from_slice(bytes);
+        self.read.insert(block);
+        Ok(())
+    }
+
+    fn write(&mut self, _: u32, _: u32, _: &[u8]) -> Result<(), littlefs_rust::Error> {
+        Err(littlefs_rust::Error::Io)
+    }
+
+    fn erase(&mut self, _: u32) -> Result<(), littlefs_rust::Error> {
+        Err(littlefs_rust::Error::Io)
+    }
+}
+
 /// A littlefs `RamStorage` holding a copy of `image`.
 pub(crate) fn storage_from_bytes(image: &[u8], block_count: u32) -> RamStorage {
     use littlefs_rust::Storage;
@@ -152,7 +216,11 @@ pub(crate) fn storage_from_bytes(image: &[u8], block_count: u32) -> RamStorage {
     storage
 }
 
-fn walk(fs: &Filesystem<RamStorage>, dir: &str, tree: &mut LpfsTree) -> Result<(), LpfsTreeError> {
+fn walk<S: littlefs_rust::Storage>(
+    fs: &Filesystem<S>,
+    dir: &str,
+    tree: &mut LpfsTree,
+) -> Result<(), LpfsTreeError> {
     let unreadable = |path: &str, error: littlefs_rust::Error| LpfsTreeError::Unreadable {
         path: format!("/{path}"),
         error: error.to_string(),
@@ -215,6 +283,34 @@ mod tests {
         assert_eq!(back.device_uid().as_deref(), Some("dev01"));
         assert_eq!(back.file_count(), 4);
         assert_eq!(back.total_bytes(), 2 + 9000 + 15);
+    }
+
+    #[test]
+    fn used_blocks_cover_every_block_a_full_read_needs() {
+        let mut tree = LpfsTree::from_files([
+            ("/projects/basic/project.json".to_string(), b"{}".to_vec()),
+            ("/hardware.json".to_string(), vec![1u8; 9000]),
+            ("/big.bin".to_string(), vec![3u8; 40_000]),
+        ]);
+        tree.add_dir("/projects/empty");
+        let image = write_tree_image(&tree, geometry(64)).unwrap();
+        let used = used_blocks(&image, geometry(64)).unwrap();
+        assert!(
+            used.contains(&0) && used.contains(&1),
+            "the superblock pair"
+        );
+        // Erase every block NOT listed: the filesystem still mounts and
+        // reads back whole — the claim a staged migration rests on.
+        let mut pruned = image.clone();
+        for block in 0..64u32 {
+            if !used.contains(&block) {
+                let at = (block * 4096) as usize;
+                pruned[at..at + 4096].fill(0x00);
+            }
+        }
+        let (back, _) = LpfsTree::from_image(&pruned, geometry(64)).unwrap();
+        assert_eq!(back, tree);
+        assert!(used.len() < 64);
     }
 
     #[test]

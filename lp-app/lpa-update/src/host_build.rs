@@ -113,6 +113,10 @@ pub struct HostBuild {
     pub engine: HostPiece,
     chip_code: u16,
     build_id_field: [u8; BUILD_ID_LEN],
+    /// The build mounts the tree store (its release's `requires.fsTree`);
+    /// carried into [`HostBuild::facts`], which must equal the facts the
+    /// build was announced with.
+    needs_tree_store: bool,
 }
 
 impl HostBuild {
@@ -143,6 +147,7 @@ impl HostBuild {
             engine,
             chip_code,
             build_id_field,
+            needs_tree_store: false,
         })
     }
 
@@ -185,6 +190,7 @@ impl HostBuild {
             engine,
             chip_code,
             build_id_field,
+            needs_tree_store: false,
         })
     }
 
@@ -216,6 +222,14 @@ impl HostBuild {
             piece(&self.core),
             piece(&self.engine),
         )
+        .with_tree_store(self.needs_tree_store)
+    }
+
+    /// This build, as one that does (or does not) mount the tree store.
+    #[must_use]
+    pub fn with_tree_store(mut self, needs_tree_store: bool) -> Self {
+        self.needs_tree_store = needs_tree_store;
+        self
     }
 
     /// The offer of this build (`O`, flags 0: v1 defines no offer flag).

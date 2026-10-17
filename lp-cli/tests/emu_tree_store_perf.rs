@@ -26,7 +26,7 @@
 //! `LP_EMU_GRADE=t4` times the flash too (`lp-emu:esp32c6:t4`): its figures
 //! include program and erase busy time, and the silicon estimate column is
 //! then a cross-check, not an addition. A different firmware than this
-//! tree's: `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO_FS_TREE_HEAP_PEAK_DIAG=<elf>`.
+//! tree's: `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO_HEAP_PEAK_DIAG=<elf>`.
 //!
 //! Emulated: `lp-emu:esp32c6:t1+net=lan` by default. Never hardware-validated, never a
 //! gate. `#[ignore]`d; `LP_TREE_PERF_FS=fs-tree|littlefs` runs one image.
@@ -40,7 +40,7 @@ mod tree_store_measure;
 
 use editor_reads::block_on;
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp32c6::test_support::FwImage;
+use lp_emu_esp32c6::test_support::{FwImage, ReferenceImage};
 use lpa_client::LpClient;
 use lpfs::LpPath;
 use tree_store_board::*;
@@ -82,13 +82,19 @@ fn perf_mount_commit_read_and_load() {
         .filter(|s| !s.is_empty());
     let mut rows = Vec::new();
     for (label, image) in [
-        ("fs-tree", FwImage::FS_TREE_HEAP_PEAK),
-        ("littlefs", FwImage::SHIPPED_HEAP_PEAK),
+        ("fs-tree", None),
+        ("littlefs", Some(ReferenceImage::FIELDED_LITTLEFS_HEAP_PEAK)),
     ] {
         if only.as_deref().is_some_and(|o| o != label) {
             continue;
         }
-        let Some(elf) = elf("emu_tree_store_perf", &image) else {
+        // The tree store is the shipped image since the cutover; littlefs is
+        // the pinned fielded image, booted on its own table (`fielded_chip`).
+        let found = match &image {
+            None => elf("emu_tree_store_perf", &FwImage::SHIPPED_HEAP_PEAK),
+            Some(fielded) => fielded_elf("emu_tree_store_perf", fielded),
+        };
+        let Some(elf) = found else {
             return;
         };
         for line in measure(label, &elf) {
@@ -114,7 +120,7 @@ fn measure(label: &str, elf: &std::path::Path) -> Vec<String> {
     let c40 = c40_files();
 
     // Mount, empty: format on the first boot, mount on the second.
-    let host = board(elf, Vec::new(), 0x9E7F_0001);
+    let host = board(elf, blank_for(label), 0x9E7F_0001);
     let host = boot_counted(host, &mut rows, label, "first boot (format)");
     let mut host = power_cycle(host, 0x9E7F_0002);
     watch(&host);

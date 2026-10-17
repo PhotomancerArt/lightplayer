@@ -168,3 +168,31 @@ before any tree core is released (AD4).
   leaves `lpfs` byte-identical across a power cycle; the USB probe refuses
   the shipped image and takes the `fs-tree` one by their own manifests — and
   `emu_split_scenarios.rs` S11, the rollback itself.
+
+## Amendment (2026-10-17): the default switch — the guard reads the core's mark, and littlefs is found by its magic
+
+With the tree-store cutover's default switch (plan
+`lp2025/2026-10-16-0848-tree-store-adoption`, A7; held with A6 for the
+cutover gate), every C6 build is an `fs-tree` build, so two parts of this
+decision change shape:
+
+- **D8's guard reads the core, not the manifest.** The manifest blob is
+  linked into the engine, which an update writes after the core has booted on
+  trial, so the guard as decided refused every core — a tree board could take
+  no update over the air at all
+  (`docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md`,
+  closed by A7). A core that mounts the store now carries
+  `LP_CORE_FS_TREE_MARK` (`lpc_model::manifest::CORE_FS_TREE_MARK`), a core
+  root of the split link; `lp-fw-split` fails a build whose manifest lists
+  `fs.tree` without it; the guard scans the core for it (held masked). The
+  verdicts are `KeepsTheStore`, `WouldFormat` (no mark) and `Unreadable`.
+- **D1's "no store" verdict holds on littlefs.** Where it formatted a
+  partition holding littlefs (and held only a pre-repartition filesystem the
+  legacy probe mounted read-only), a tree core now holds whenever a littlefs
+  superblock's name is in `lpfs` itself or at `0x350000` (a fielded board
+  that skipped the migration), and never mounts littlefs to ask: littlefs is
+  not linked into the C6 any more (AD5). The pre-repartition `0x310000` is
+  not probed. The boot word stays `[FS] legacy-layout filesystem found — not
+  formatting …` and the hello `fs: legacy_held` — no new `FsBootState`, so no
+  wire bump. See `2026-10-16-c6-tree-store-cutover-migration.md`'s
+  amendment of the same date.

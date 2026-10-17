@@ -168,6 +168,11 @@ fn lease_board(port: &str, holder: Option<&str>, version: &str) -> Result<bool> 
         "leasing the board needs to know who you are: --as \"<your session name>\" (or \
          BOARD_HOLDER)",
     )?;
+    // A caller that already holds the board keeps its lease: no take over
+    // it, and no drop when the install is done.
+    if board_bench::held_by(port, holder) {
+        return Ok(false);
+    }
     board_bench::take(
         port,
         holder,
