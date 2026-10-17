@@ -19,7 +19,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::UiProjectHistory;
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::age_words;
 
 use crate::app::home::package_card::platform_now_secs;
 use crate::app::share::relationship::ProjectRelationship;
@@ -58,7 +58,7 @@ pub fn HistoryList(
                     span { class: "{HISTORY_KIND_CLASS} tw:text-dim-foreground", "{entry.kind.word()}" }
                     span { class: "{HISTORY_WHAT_CLASS} tw:text-subtle-foreground", "{entry.label}" }
                     span { class: "tw:flex-none tw:text-[9.5px] tw:text-dim-foreground",
-                        "{time_ago(now, entry.at)}"
+                        "{age_words(now - entry.at)}"
                     }
                 }
             }

@@ -167,7 +167,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 
     /// What the closed sectors hold that no write can use: everything not
     /// live in the written sectors but the heads (garbage and unused tails).
-    fn waste(&self) -> u64 {
+    pub(crate) fn waste(&self) -> u64 {
         let cap = self.log.sector_capacity();
         (0..self.log.sector_count)
             .filter(|&s| {

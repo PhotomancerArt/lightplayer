@@ -5,8 +5,9 @@ Shown on the home page and the Boards tab. Built in core
 (`lpa-studio-core/…/board_card/`), drawn by the web
 (`lpa-studio-web/…/board_card/`).
 
-Status: **proposed** (round 2 of the card's words). Where a line changes
-what ships today, its comment says `today:`.
+Status: **shipped** (round 2 of the card's words, 2026-10-16, PR #1159;
+plan `lp2025/2026-10-16-1844-card-words-round-2`). Where a line changed
+what shipped before, its comment says `was:`. ◆ is the layers icon (O2).
 
 ## Whole
 
@@ -74,31 +75,32 @@ number is.
 ### Project ◆: what the board plays
 
 ```text
-◆ Project   studio                                   # today: studio
+◆ Project   studio                                   # was: studio, with no kind word
 ◆ Project   studio         2 boards
 ◆ Project   none                                     # primary: + Add a project
 ◌ Project   studio         sending · 40%             # bar along the foot
-◆ Project   studio         out of date │ Send latest │      # no tone (P16). today: Out of date · studio, orange
+◆ Project   studio         out of date │ Send latest │      # no tone (P16). was: Out of date · studio, orange
 ◆ Project   studio         error                     ← red   # details: the error
-◆ Project   hidden                                   # locked. today: Project not known
-◆ Project   studio                         (dim)     # offline. today: Project not known
+◆ Project   none           data lost  │ Restore │ Reset │   ← orange   # O3. was: on the Firmware row, "Its files are gone"
+◆ Project   hidden                                   # locked. was: Project not known
+◆ Project   studio                         (dim)     # offline. was: Project not known
 ◌ Project                                            # the board hasn't said yet
 ```
 
 ### Link ↔: how Studio reaches the board
 
-Today's words stay, apart from four lines.
+The words before round 2 stayed, apart from four lines.
 
 ```text
-↔ USB · connected                    # today: USB · live
+↔ USB · connected                    # was: USB · live
 ↔ USB · not connected
 ◌ USB · connecting
 ◌ USB · reconnecting
-↔ USB · not responding     │ Retry │   ← orange   # today: yellow, an unsaved edit's colour
-↔ USB · connection failed  │ Retry │   ← red      # today: Couldn't connect
+↔ USB · not responding     │ Retry │   ← orange   # was: yellow, an unsaved edit's colour
+↔ USB · connection failed  │ Retry │   ← red      # was: Couldn't connect
 ↔ Wi‑Fi · connected   ☁              # ☁ lit: lightplayer.app reaches it too
 ↔ Bluetooth · connected
-↔ lightplayer.app · connected        # today: Wi‑Fi via lightplayer.app · live
+↔ lightplayer.app · connected        # was: Wi‑Fi via lightplayer.app · live
 ↔ Offline · 2 h
 ↔ Open in another tab · editor open  ← orange
 ↔ Taken by another tab               ← orange
@@ -110,34 +112,37 @@ Today's words stay, apart from four lines.
 ### Access ○: what you can do
 
 ```text
-○ Access    edit · USB                     # today: You can edit · USB
-○ Access    edit · password                # today: You can edit · Workshop key
-○ Access    edit · no password             # quiet: open is the default. today: yellow, "anyone can edit"
-○ Access    play only        │ Unlock │    # today: You can play · anyone can play
+○ Access    edit · USB                     # was: You can edit · USB
+○ Access    edit · password                # was: You can edit · Workshop key
+○ Access    edit · no password             # quiet: open is the default. was: yellow, "anyone can edit"
+○ Access    play only        │ Unlock │    # was: You can play · anyone can play
 ○ Access    locked                         # primary: Unlock
-◌ Access    checking                       # today: Access not known
-○ Access    edit                   (dim)   # offline. today: Access not known · when it's back
-○ Access    USB only · no password │ Set password │   ← orange   # today: No password here · set one over USB, yellow
+◌ Access    checking                       # was: Access not known
+○ Access    edit                   (dim)   # offline. was: Access not known · when it's back
+○ Access    USB only · no password             ← orange   # was: No password here · set one over USB, yellow
+                                               # no core offer sets a board's password: the fix is in the details
 ```
 
 ### Firmware ▲: what runs the board
 
 ```text
-▲ Firmware  v2026.10.16-1                              # today: fw-esp32c6 c688c990b
+▲ Firmware  v2026.10.16-1                              # was: fw-esp32c6 c688c990b
 ▲ Firmware  dev c688c99                                # a local build
-▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone (P16). today: blue, the live family
-▲ Firmware  v2026.10.02-1 (pre-OTA) │ Update to v2026.10.16-1 │   # over USB, once
-▲ Firmware  unknown (pre-2026.07)   │ Install v2026.10.16-1 │     # today: Pre-hello firmware
+▲ Firmware  v2026.10.08-9   │ Update │                  # no tone (P16). was: blue, the live family
+▲ Firmware  v2026.10.02-1 (pre-OTA) │ Update │           # over USB, once (the USB icon on the button)
+▲ Firmware  unknown (pre-2026.07)   │ Install │          # was: Pre-hello firmware; no button when the primary is Install firmware
+            # "Update to v2026.10.16-1" does not fit beside the version at the card's width:
+            # the button says the verb, and the version it brings is the details' Newest
 ▲ Firmware  none                                       # primary: Install firmware
-◌ Firmware  v2026.10.08-9   updating · 42%             # today: Updating · 1 of 2 · 42%
+◌ Firmware  v2026.10.08-9   updating · 42%             # was: Updating · 1 of 2 · 42%
 ◌ Firmware  v2026.10.08-9   backing up · 12% │ Cancel │
-◌ Firmware  installing · 30%                           # today: Flashing firmware…
+◌ Firmware  installing · 30%                           # was: Flashing firmware…
 ▲ Firmware  v2026.10.08-9   crashing     │ Reinstall │   ← red
-▲ Firmware  v2026.09.30-2   incomplete   │ Install v2026.10.16-1 │   ← orange
-▲ Firmware  v2026.10.08-9   confirmation required │ Review │   ← orange   # today: Needs your answer
-▲ Firmware  v2026.10.16-1   data lost    │ Restore │ Reset │   ← orange   # today: Its files are gone
-▲ Firmware  v2026.10.08-9   update interrupted │ Resume │   ← orange      # today: Files waiting
-▲ Firmware  data unreadable                            ← orange           # shipped 10-15
+▲ Firmware  v2026.09.30-2   incomplete   │ Install │   ← orange
+▲ Firmware  v2026.10.08-9   confirmation required │ Review │   ← orange   # was: Needs your answer
+▲ Firmware  v2026.10.08-9   update interrupted │ Resume │   ← orange      # was: Files waiting
+▲ Firmware  v2026.10.16-1   data unreadable           ← orange           # shipped 10-15
+▲ Firmware  v2026.10.16-1   update required           ← orange           # its files wait for a firmware that reads their store
 ▲ Firmware  v2026.10.08-9                      (dim)   # offline
 ```
 
@@ -145,24 +150,25 @@ Today's words stay, apart from four lines.
 
 ```text
 ■ Hardware  XIAO ESP32-C6
-■ Hardware  ESP32-C6       model not set         # today: ESP32-C6
-■ Hardware  unknown                              # today: Board not known
-◌ Hardware  identifying                          # today: chip unknown
+■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
+■ Hardware  unknown                              # was: Board not known
+◌ Hardware  identifying                          # was: chip unknown
 ■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the Link row (P2)
 ```
 
 ### Corner: the picture's state
 
 ```text
-(nothing)                     live, all well                  # today: ● 899 fps
+(nothing)                     live, all well                  # was: ● 899 fps
+                              # a quiet ⋯ stays, so the details (the terminal) are one press away
 ╭─────────╮
 │ editing │                   the editor holds it; the picture dims
 ╰─────────╯
 ╭───╮
 │ ! │                         a problem, only while the panel covers the rows (P2)
 ╰───╯
-(picture dimmed)              stale; the Link row says since when (P13)   # today: 2 h ago
-(no picture)                  running nothing                  # today: the last project's picture
+(picture dimmed)              stale; the Link row says since when (P13)   # was: 2 h ago
+(no picture)                  running nothing                  # was: the last project's picture
 ```
 
 ### Name bar and primary
@@ -172,19 +178,20 @@ Today's words stay, apart from four lines.
 │ Porch lamp            │ ✓ Done              │   connected
 │ Porch lamp            │ ◌                   │   connecting: the Link row says how
 │ Porch lamp            │ + Add a project     │   nothing on it
-│ Porch lamp            │ ▲ Install firmware  │   # today: Install
+│ Porch lamp            │ ▲ Install firmware  │   # was: Install
 │ Porch lamp            │ ○ Unlock            │
 │ Porch lamp            │ ▶ Power on          │   simulated, off
-│ Porch lamp                                  │   nothing to press: no button   # today: Updating · 42%
-│ XIAO ESP32-C6                               │   a new board's name   # today: XIAO ESP32-C6 · Oct 11
+│ Porch lamp                                  │   nothing to press: no button   # was: Updating · 42%
+│ XIAO ESP32-C6                               │   a new board's name   # was: XIAO ESP32-C6 · Oct 11
 ```
 
-## Open
+## Decided (Yona, 2026-10-16: "all leans")
 
 ```text
-O1  sending: "Sending ◆ Playful Choker" (Yona's) or "◌ Project  Playful Choker  sending · 40%" (P3)?
-O2  the project's icon: ◆ is a stand-in.
-O3  data lost / data unreadable: the Firmware row, or the Project row?
-O4  an open board (no password): quiet, or orange? (today's yellow is wrong either way, P16)
-O5  a new board's name: drop "· Oct 11"?
+O1  sending stays in place: ◌ Project  Playful Choker  sending · 40%
+O2  the project's icon is layers (three stacked chevrons), wherever Studio marks a project
+O3  data lost moves to the Project row: Project  none  data lost  │ Restore │ Reset │
+    (data unreadable stays on the Firmware row: it is the firmware that refused the store)
+O4  an open board is quiet: Access  edit · no password
+O5  a new board's name has no date; two boards of one model get a number ("XIAO ESP32-C6 2")
 ```

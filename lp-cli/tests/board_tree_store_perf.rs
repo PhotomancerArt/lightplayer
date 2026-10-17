@@ -21,7 +21,10 @@
 //! Env: `LP_SOAK_DIR` (records), `LP_PERF_LABEL` (the image: `fs-tree` or
 //! `littlefs`), `LP_PERF_ERASE=1` (erase first; default on),
 //! `LP_PERF_BOOT_ONLY=1` (the first boot and the empty mounts, then stop),
-//! `BOARD_HOLDER`.
+//! `LP_PERF_FILL_PAUSE_MS=<ms>` (quiet time between the near-full fill's
+//! writes, the link polled meanwhile: what lets a board clean up on quiet
+//! ticks; default 0, back to back) from the fill's file
+//! `LP_PERF_FILL_PAUSE_FROM=<n>` on (default 0), `BOARD_HOLDER`.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -345,7 +348,22 @@ async fn perf() {
     let mut written = 0usize;
     let mut fill_rtt = Vec::new();
     let mut stopped = String::new();
+    let fill_pause = std::env::var("LP_PERF_FILL_PAUSE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let pause_from = std::env::var("LP_PERF_FILL_PAUSE_FROM")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
     for i in 0..FILL_FILES {
+        if fill_pause > 0 && i >= pause_from {
+            let until = Instant::now() + Duration::from_millis(fill_pause);
+            while Instant::now() < until {
+                let _ = client.project_list_loaded().await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
         let fill: Vec<u8> = (0..4_096u32)
             .map(|j| ((j + i as u32 * 7_919).wrapping_mul(2_654_435_761) >> 24) as u8)
             .collect();
@@ -368,7 +386,9 @@ async fn perf() {
         what: format!("new 4 KiB file (incompressible), each, filling to full ({written} files)"),
         samples: fill_rtt,
         baseline: Some(("read of a 4 KiB file".into(), read_4k_m)),
-        note: format!("stopped by: {stopped}"),
+        note: format!(
+            "stopped by: {stopped}; {fill_pause} ms quiet before each write from file {pause_from}"
+        ),
     });
     drop(client);
     for i in 0..3 {

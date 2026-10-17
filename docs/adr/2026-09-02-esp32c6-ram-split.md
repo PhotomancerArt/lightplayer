@@ -235,6 +235,87 @@ override of esp-hal's `stack.x`, as `build.rs` already overrides
 `rodata.x`) would let the main heap region absorb the 56 KB it frees,
 contiguous with the rest, and win the largest block back with interest.
 
+## Amendment (2026-10-16): the freed stack room becomes heap, and the stack is gated
+
+Moving the radio code to flash (#1092, 65.8 KB) and the compiler's lookup
+tables out of `.data` (#1110, 5.8 KB) left the main stack, still the residual
+of main RAM, at **119,960 B** in the split image (figure build, main
+`c97473d8f`; 120,160 B at `f3a77691e`). The flagship needs about 36 KB of it.
+RAM research Q3 (Yona's go, 2026-10-16) asked for those bytes as heap, with
+the stack held at the worst measured peak plus a margin.
+
+**Decision.**
+
+1. **The margin rule.** The main stack is the deepest measured peak + 12 KiB,
+   rounded up to 4 KiB. The 12 KiB is what the stack had over meteor's peak
+   from 2026-09-24 to 2026-10-09.
+2. **The gate.** `lp-cli/tests/emu_stack_peak.rs` (CI, `Emulator C6 lp-cli
+   (x64)`) boots the shipped split image on `lp-emu:esp32c6:t1`, loads meteor
+   and edits its shader ten times, loads the PLAYFUL choker tryout, and fails
+   in words unless the stack exceeds each peak by 12 KiB. Statics that grow
+   now fail CI. They no longer shrink the stack in silence
+   (`docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.md`, fixed).
+3. **The new split.** `HEAP_MAIN` takes 306,808 B of main RAM, up from
+   236,000 B (`HEAP_MAIN_SIZE` = 306,808 − `HEAP_RADIO_SIZE`). The main stack
+   is 49,152 B (the shipped build, with its longer version string, has
+   49,144 B). Heap total **372,344 B**, up from 301,536 B. `HEAP_RADIO`
+   (49,152 B) and `HEAP_DRAM2` (65,536 B) are unchanged, and so is the region
+   order: main, `dram2_seg`, radio.
+
+**The peaks.** The census ran every catalog project. On the emulator, at main
+`f3a77691e`: meteor peaks at 35,752 B, the same after ten edits. The choker
+tryout peaks at 33,852 B. The other 18 patterns and the peaches peak at
+32,252 B, and the other projects at 30,652–31,004 B. Studio-style editor reads
+with 20 edits (`emu_frag_reads`) and ten edits over the emulated LAN, joined,
+both peak at 30,636 B. The update session (core-only) peaks at 13,864–14,056 B
+on silicon. fyeah-sign (emulated WDT reset) and small-dome (heap OOM on main)
+gave no peak.
+
+On silicon (CX1, ESP32-C6 rev v0.2, boot auto-load, 5 min, release
+2026.10.16-8): meteor 35,752 B, the tryout 31,612 B, the choker 29,112 B. A
+Bluetooth editing session (Studio over the CDP central, Edit pressed) did not
+raise the choker's mark, and neither did a Wi‑Fi join. On main `c97473d8f`
+meteor reads 35,736 B on the emulator, a 13,216 B margin.
+
+**What it bought** (CX1, interleaved A B A B, A = release 2026.10.16-8,
+B = this change at `29e568028`, before `HEAP_MAIN` moved 200 B for the
+statics main had added since; fps is the median of 5 s heartbeats; free and
+largest are the minimum over 5 min):
+
+| | A: free min / largest min | B: free min / largest min | fps A / B |
+|---|---|---|---|
+| choker | 81,236 / 58,624 B | 152,252 / 66,608 B | 32.67–32.68 / 32.69–32.72 |
+| meteor | 75,492 / 49,560 B | 146,508 / 65,536 B | 30.97–31.06 / 30.68–30.75 |
+| tryout | 63,788 / 35,248 B | 134,964 / 65,528 B | 35.60 / 35.78 |
+| choker, Bluetooth editor open | 61,144 / 21,976 B | 132,160 / 65,528 B | 30.72 / 30.88 |
+
+With Bluetooth and the editor open, the release refuses the Edit press's
+package hash (`fs gate: … largest block 21984 B; a 27091 B file needs 27603
+B`). B serves it, and the editor opens on both. On B there were no faults and
+no resets in any run: 10 warm resets, 3 power cycles, an update over the air
+from B to the release and from the release to B (`UpToDate`), and a real power
+cut 16 s into the latter, mid-core, after which the update resumed at 946,176 B
+and finished.
+
+On the emulator, B lets two projects run that main could not: small-dome now
+loads and renders, and the tryout survives Studio's editor sync and ten edits.
+
+**What it costs.** First fit tries the main region first, and it is now 70 KB
+bigger, so placements move. `dram2_seg` stays whole longer, and the largest
+block is 64 KiB or more in every silicon run above. In `emu_edit_frag` (the
+choker, 24 growing edits over USB, emulated), the largest block after each
+edit was 14,456 / 29,500 / 38,976 B (min / median / max) on main. With this
+change it is 65,528 / 65,528 / 65,536 B, and free after the edits is 145,396 /
+147,972 B (min / median), up from about 74.6 / 77.6 KB. One placement got worse.
+On the emulator, a dome-scale read that main's heap refused cleanly is now
+admitted and resets the board halfway through
+(`docs/defects/2026-10-16-a-read-the-read-cost-admits-resets-a-dome-scale-c6-mid-read.md`,
+open; zook-dome, 1,500 lamps, outside the C6's design target). The estimate
+behind the admission is what is wrong, and it belongs to admission work (M3).
+
+**Revisit** when the gate fails. The 12 KiB stays. Take the bytes back from
+`HEAP_MAIN`, or make the deep path shallower.
+
 ## Alternatives Considered
 
 - **Grow the stack by shrinking the heap alone (no dram2).** Loses

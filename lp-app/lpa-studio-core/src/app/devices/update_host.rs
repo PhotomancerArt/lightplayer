@@ -1513,7 +1513,12 @@ impl HostState {
             .names
             .as_ref()
             .map(|names| names.board.short())
-            .or_else(|| run.facts.as_ref().and_then(|f| f.version.clone()))
+            .or_else(|| {
+                run.facts
+                    .as_ref()
+                    .and_then(|f| f.version.as_deref())
+                    .map(crate::firmware_version)
+            })
             .unwrap_or_else(|| "its firmware".to_string());
         match outcome {
             UpdateOutcomeFacts::UpToDate => {

@@ -1,10 +1,13 @@
 //! [`StatusCorner`]: the status corner, a 24 px notch cut out of the
-//! picture's top-right corner (not laid over it): the mark — a blue dot when
-//! all is fine, the worst notice's status icon in its family, nothing on a
-//! board Studio is not watching — then the reading ("58 fps", "5 h ago").
+//! picture's top-right corner (not laid over it), quiet unless it has
+//! something to say (`docs/ux/anatomy/board-card.md`, "Corner"): nothing
+//! while the board is live and well (P4: the moving picture says live),
+//! "Editing" while the editor holds the picture, and a notice's icon only
+//! while the connected panel covers the rows that would say it (P2). With
+//! nothing to say it is a quiet ⋯, so its details are still one press away.
 //!
 //! It is the trigger of the corner's own details ([`BarDetails`]): every
-//! notice, how the board is running, the picture's words, and the board's
+//! notice, how the board is running, the picture's facts, and the board's
 //! terminal. `data-board-corner` names the mark, so a walk reads the
 //! board's words from the details it opens.
 
@@ -67,9 +70,8 @@ pub fn StatusCorner(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn CornerMarkIcon(mark: CornerMark) -> Element {
     match mark {
-        CornerMark::Fine => rsx! {
-            span { class: FINE_DOT_CLASS, aria_hidden: "true" }
-        },
+        // All is well: nothing to say (P4).
+        CornerMark::Fine => rsx! {},
         CornerMark::Notice(kind) => match tone_icon(kind) {
             Some(icon) => rsx! {
                 span { class: notice_class(kind), aria_hidden: "true",
@@ -85,9 +87,8 @@ fn CornerMarkIcon(mark: CornerMark) -> Element {
 /// Whether `mark` draws anything.
 fn draws_a_mark(mark: CornerMark) -> bool {
     match mark {
-        CornerMark::Fine => true,
         CornerMark::Notice(kind) => tone_icon(kind).is_some(),
-        CornerMark::Quiet | CornerMark::Blank => false,
+        CornerMark::Fine | CornerMark::Quiet | CornerMark::Blank => false,
     }
 }
 
@@ -124,21 +125,10 @@ fn notice_class(kind: UiStatusKind) -> &'static str {
     }
 }
 
-/// The reading: the live blue beside the fine dot ("58 fps"), else quiet
-/// (a picture's age, a frame rate beside a notice).
-fn reading_class(mark: CornerMark) -> &'static str {
-    match mark {
-        CornerMark::Fine => {
-            "tw:font-mono tw:text-[10.5px] tw:font-bold tw:leading-none tw:text-status-live-foreground"
-        }
-        CornerMark::Notice(_) | CornerMark::Quiet | CornerMark::Blank => {
-            "tw:text-[10.5px] tw:font-semibold tw:leading-none tw:text-subtle-foreground"
-        }
-    }
+/// The reading ("Editing"): quiet words, one line.
+fn reading_class(_mark: CornerMark) -> &'static str {
+    "tw:text-[10.5px] tw:font-semibold tw:leading-none tw:text-subtle-foreground"
 }
-
-/// All is fine: the blue dot, glowing softly.
-const FINE_DOT_CLASS: &str = "tw:mx-0.5 tw:inline-block tw:h-2 tw:w-2 tw:flex-none tw:rounded-full tw:bg-status-live-foreground tw:shadow-[0_0_6px_rgba(156,200,238,0.6)]";
 
 /// The corner's button: the notch's 24 px, its mark and reading; the
 /// notch's own shape is `.ux-board-corner` (style.css).
@@ -151,13 +141,15 @@ const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-6 tw:min-w-6 tw:cursor-poi
 mod tests {
     use super::*;
 
-    /// Fine is the blue dot, a notice its family's icon, and a board Studio
-    /// is not watching (or a new one) shows no mark; every mark has its
-    /// hook word.
+    /// A notice is its family's icon; all well, a board Studio is not
+    /// watching and a new one draw no mark (P4: the corner is quiet unless
+    /// it has something to say); every mark has its hook word.
     #[test]
-    fn the_mark_is_the_dot_the_notice_or_nothing() {
-        assert!(draws_a_mark(CornerMark::Fine));
-        assert!(FINE_DOT_CLASS.contains("tw:bg-status-live-foreground"));
+    fn the_mark_is_the_notice_or_nothing() {
+        assert!(
+            !draws_a_mark(CornerMark::Fine),
+            "live and well says nothing"
+        );
         for kind in [
             UiStatusKind::Warning,
             UiStatusKind::Attention,

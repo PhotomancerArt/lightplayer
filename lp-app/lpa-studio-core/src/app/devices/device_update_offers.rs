@@ -568,19 +568,12 @@ fn date_line(choice: &InstallChoice) -> Option<String> {
         return Some(day);
     }
     let (date, _) = choice.version.version.split_once('-')?;
-    month_day(&date.replace('.', "-"))
+    month_day(date)
 }
 
-/// `2026-10-07` as `Oct 7`.
+/// `2026-10-07` (or `2026.10.07`) as `Oct 7`.
 fn month_day(date: &str) -> Option<String> {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let mut parts = date.split('-');
-    let (_year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
-    let month: usize = month.parse().ok()?;
-    let day: u32 = day.parse().ok()?;
-    Some(format!("{} {day}", MONTHS.get(month.checked_sub(1)?)?))
+    crate::CalendarDate::parse_iso(date).map(|date| date.words())
 }
 
 /// The one warning a choice's line carries, most lasting first.
@@ -848,7 +841,7 @@ mod tests {
             to: y(),
         });
         let set = update_offers(&ready_view(), &facts, &prefix());
-        assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert_eq!(set.offers[0].label(), "Install v2026.10.05-2");
         assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         let facts = over_the_air(UpdateStanding::Available {
             board: x(),
@@ -1018,7 +1011,7 @@ mod tests {
                 | Row::KeepsCrashing
                 | Row::RolledBack
                 | Row::Newer => Some("Other version…"),
-                Row::CantGetVersion => Some("Install 2026.10.05-2"),
+                Row::CantGetVersion => Some("Install v2026.10.05-2"),
                 Row::BackingUp
                 | Row::Updating
                 | Row::Finishing
@@ -1239,7 +1232,7 @@ mod tests {
         assert_eq!(copy.title, "Install an older version?");
         assert_eq!(
             copy.message,
-            "2026.10.05-1 is older than what this board runs, and an older version may not \
+            "v2026.10.05-1 is older than what this board runs, and an older version may not \
              read the board's project."
         );
         assert_eq!(copy.confirm_label, "install");
@@ -1254,7 +1247,7 @@ mod tests {
         // An older version in an older language: both sentences.
         let copy = lasting(&press(&other, "2026.10.03-4"));
         assert!(
-            copy.message.starts_with("2026.10.03-4 is older"),
+            copy.message.starts_with("v2026.10.03-4 is older"),
             "{}",
             copy.message
         );
@@ -1342,7 +1335,7 @@ mod tests {
         assert_eq!(copy.title, "Install another build?");
         assert_eq!(
             copy.message,
-            "2026.10.07-4 can't be compared with what this board runs (dev build 5eb70a7), so \
+            "v2026.10.07-4 can't be compared with what this board runs (dev build 5eb70a7), so \
              it may not read the board's project."
         );
         assert_eq!(
@@ -1469,7 +1462,7 @@ mod tests {
             (vec![("install-firmware".to_string(), false)], false, false)
         );
         let set = update_offers(&offline.view, &facts, &prefix());
-        assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert_eq!(set.offers[0].label(), "Install v2026.10.05-2");
         assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         assert_eq!(
             bound_intent(&set.offers[0], &OfferArgs::new()),
@@ -1481,7 +1474,7 @@ mod tests {
 
         // With the index: the same button opens the list, Y preselected.
         let install = install_of(&fixture(UpdateFixtureRow::CantGetVersion));
-        assert_eq!(install.label(), "Install 2026.10.05-2");
+        assert_eq!(install.label(), "Install v2026.10.05-2");
         assert_eq!(choice_param(&install).1.as_deref(), Some("2026.10.05-2"));
     }
 

@@ -111,8 +111,8 @@ The board card's verbs:
   board it reaches the board first, then shows the panel, in one press. On
   a board another tab holds, Connect takes it over.
 - **Add a project** — the primary of a board running no project (there is
-  firmware on it, and nothing to show yet): the project pick. The project
-  bar, which says **No project**, does not repeat it.
+  firmware on it, and nothing to show yet): the project pick. The Project
+  row, which says **none**, does not repeat it.
 - **Done** — close it; the card shows its facts again. It is the
   connected card's primary, and the editor's docked card's.
 - **Edit** — open the board's project in the editor. It's the project
@@ -124,64 +124,81 @@ The board card's verbs:
   play page: **All controls · 2 more** when the page has controls the card
   leaves out.
 - **Unlock** — enter a password for a locked board.
-- **Install** — put Lightplayer on a blank board.
-- **Start fresh** — on a board whose files are gone: let them go and leave
-  the board empty for a new project. Nothing on the board changes.
-- **Update** — the firmware bar's action when a newer version exists
-  ("when it's back" if the board is offline).
+- **Install firmware** — put Lightplayer on a blank board (the name bar's
+  primary). On the Firmware row, beside a version, the verb is **Install**:
+  the row already says it is firmware.
+- **Restore** and **Reset** — on a board whose data was lost: put the
+  backup back, or let it go (once "Start fresh") and leave the board empty
+  for a new project. Nothing on the board changes for Reset.
+- **Update** — the Firmware row's action when a newer version exists. The
+  version it brings is the details' "Newest": "Update to v2026.10.16-1"
+  does not fit beside the board's own version at the card's width.
+- **Resume** — finish an update that stopped half-way.
+- **Review** — open a confirmation the details ask for.
 
-**A primary is never a greyed verb.** When there is nothing to press, the
-primary says why in its own word: **Connecting…**, **Updating · 42%**,
-**Offline · 2 weeks**, **Identifying…**, **Busy in the other tab**,
-**Asking the other tab…**. Never a disabled "Connect" with the reason in a
-tooltip. And a reason shown under a disabled button is the reason alone
-("No project"), never "this cannot be done right now: …".
+**No dead ends, and no repeats.** When nothing can be pressed there is no
+primary at all — never a greyed verb, and never a row's words said again on
+the name bar: the busy, away or waiting row says why, once. While the board
+is being reached or identified the primary is the spinner alone. And a
+reason shown under a disabled button is the reason alone ("No project"),
+never "this cannot be done right now: …".
 
-While Connect works, the connection bar carries it: **Connecting…** (the
-primary reads the same), **Reconnecting…** when the connected
-board's link dropped and Studio is holding on for it, and **Couldn't
-connect**, striped, with Retry, when it failed (the reason is in the
-details; a board that never answered is "The board didn't answer in
-time"). "Couldn't connect" goes once the board is reached another way. A
-chooser closed with nothing picked is not a failure: the card is back at
-Connect. Connect on a second board hands over: the first card shows its
-facts at once.
+While Connect works, the Link row carries it, naming the link: **USB ·
+connecting**, **USB · reconnecting** when the connected board's link
+dropped and Studio is holding on for it, and **USB · connection failed**,
+red and striped, with Retry, when it failed (the reason is in the details;
+a board that never answered is "The board didn't answer in time"). The
+failure goes once the board is reached another way. A chooser closed with
+nothing picked is not a failure: the card is back at Connect. Connect on a
+second board hands over: the first card shows its facts at once.
 
-What each bar says:
+Every row reads **icon · kind · name · state · action**
+(`docs/ux/anatomy/board-card.md`): the kind is a muted word ("Project",
+"Access", "Firmware", "Hardware"), the name is the thing itself and stays
+in place in every state, and the state is said only when it is not normal.
+The Link row has no kind word: the link's name is its kind.
 
-| Bar | Says | Examples |
+| Row | Name · state | Examples |
 |---|---|---|
-| Project | what the board plays, and how many boards share it | `Holiday Eaves · 3 boards`, `No project`, `Project not known`, `Out of date` |
-| Connection | the link and its state | `USB · live`, `Bluetooth · connected`, `Wi‑Fi via lightplayer.app · live`, `Offline · 2 weeks`, `Simulated · running`, `Emulated · off`, `Sean is editing` |
-| Access | what you can do, and with which key | `You can edit · USB`, `You can edit · in this tab`, `You can edit · your account key`, `You can play`, `Locked`, `Access not known · when it's back` |
-| Firmware | the version alone, whatever it is | `2026.10.08-9`, `dev 5eb70a7`, `Firmware not known`, `Its files are gone` |
-| Hardware | the board model | `XIAO ESP32-C6`, `Emulated XIAO ESP32-C6` with `in this tab` beside it, `Board not known` |
+| Project | what the board plays, and how it stands | `studio`, `studio · 2 boards`, `none`, `studio · sending · 40%`, `studio · out of date` (Send latest), `studio · error`, `hidden`, `none · data lost` (Restore, Reset) |
+| Link | the link and how it stands | `USB · connected`, `Bluetooth · connected`, `lightplayer.app · connected`, `USB · connecting`, `USB · not responding`, `USB · connection failed`, `Offline · 2 weeks`, `Simulated · running`, `Emulated · off`, `Open in another tab` |
+| Access | the tier, and how it is held | `edit · USB`, `edit · password`, `edit · no password`, `play only` (Unlock), `locked`, `checking`, `USB only · no password`, `edit` (a stand-in) |
+| Firmware | the version, Studio's one way | `v2026.10.16-1`, `dev c688c99`, `v2026.10.02-1 (pre-OTA)`, `unknown (pre-2026.07)`, `none`, `v2026.10.08-9 · updating · 42%`, `· crashing` (Reinstall), `· incomplete` (Install), `· confirmation required` (Review), `· update interrupted` (Resume), `· data unreadable` |
+| Hardware | the board model | `XIAO ESP32-C6`, `ESP32-C6 · model not set`, `unknown`, `identifying` |
 
-A board reached through lightplayer.app names that link in full, **Wi‑Fi
-via lightplayer.app**, with the cloud icon. A board reached directly that
-is also reachable through lightplayer.app shows the cloud icon alone at the
-connection bar's end, no words: lit while lightplayer.app can reach it, its
-label and hover "Also reachable through lightplayer.app". A board reached
-only directly shows nothing. Neither appears until the board has said
-whether its Cloud relay is on.
+A version is always Studio's one firmware version: a release as its tag
+(`v2026.10.16-1`), a local build `dev c688c99`, never the build's target
+prefix (`fw-esp32c6 …`: the details' "Build"). An update reads one number
+for the whole of it, never "1 of 2".
 
-**Every bar names its subject.** "No project" where the board said it runs
-none (there is firmware on it: never "Nothing on it yet"); **Project not
-known**, **Access not known**, **Firmware not known**, **Board not known**
-only where Studio has genuinely heard nothing. Never a bare "Not known yet".
+A board reached through lightplayer.app names that link, **lightplayer.app**,
+with the cloud icon. A board reached directly that is also reachable
+through lightplayer.app shows the cloud icon alone at the Link row's end,
+no words: filled while lightplayer.app can reach it, struck through while
+Cloud relay is on and it can't, its label and hover "Also reachable through
+lightplayer.app". A board reached only directly shows nothing. Neither
+appears until the board has said whether its Cloud relay is on.
 
-**A stand-in says what it is.** A simulated board's connection bar reads
+**Every row names its subject**, with its kind word: `Project none` where
+the board said it runs nothing (there is firmware on it: never "Nothing on
+it yet"), `unknown` only where Studio has genuinely heard nothing. Never a
+bare "Not known yet". **Old looks old:** an offline board's rows keep the
+last thing known, dimmed, and only the Link row says since when.
+
+**A stand-in says what it is, once.** A simulated board's Link row reads
 **Simulated · running** or **Simulated · off**; a board emulated in this
-tab, **Emulated · running** or **Emulated · off**. Its hardware bar says the
-same word before the board (**Simulated XIAO ESP32-C6**, "in this tab"
-beside it), and its access is known whether it runs or not: **You can edit
-· in this tab**.
+tab, **Emulated · running** or **Emulated · off**. Its Hardware row names
+the model alone, and its access is known whether it runs or not:
+**edit**.
 
-**A board's files are gone** only when Studio has evidence it had some (a
+**A board's data is lost** only when Studio has evidence it had some (a
 backup in this browser, or this browser saw it run a project). A freshly
-installed board never says so. When it is real, the firmware bar says **Its
-files are gone**, and the notice says what to do: Restore files, Restore
-from a backup file…, or Start fresh.
+installed board never says so. When it is real, the Project row says
+**none · data lost**, with Restore and Reset beside it, and the details
+hold Restore from a backup file… and Download backup.
+
+A new board is named after its model ("XIAO ESP32-C6"), with no date; a
+second of the same model gets a number ("XIAO ESP32-C6 2").
 
 **Cloud connected** names a board that talks to lightplayer.app through
 the relay; it's a property of the board, not of the link in use. A board
@@ -202,7 +219,7 @@ When another person or tab holds a board, say who:
 **Connect is the take-over** on a board another tab holds: there is no
 separate button on the card. Its tint says what it closes over there (the
 error tint when that tab has the editor open). While that tab is flashing,
-updating or pushing there is nothing to press, and the primary's word is
-**Busy in the other tab** (the work on its hover: "Busy in the other tab:
-Updating · 42%"). A tab that doesn't answer in 5 s is "That tab didn't
-answer", with Retry.
+updating or pushing there is nothing to press: no primary at all, and the
+Link row's state says what that tab is busy with. While the take-over runs
+the primary is the spinner alone. A tab that doesn't answer in 5 s is
+"That tab didn't answer", with Retry.

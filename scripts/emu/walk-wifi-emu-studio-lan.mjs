@@ -108,8 +108,8 @@ const WORDS = {
   connectOverWifi: "Connect over Wi‑Fi",
   busy: "Busy with another connection — try again",
   unreachable: (host) => `Couldn't reach the board at ${host}. Is it on this network?`,
-  // The connection bar's line on a LAN link ("Wi‑Fi · connected" or
-  // "· live"), and its details' Address: what the plan line names.
+  // The Link row on a LAN link ("Wi‑Fi · connected"), and its details'
+  // Address: what the plan line names.
   wifiLine: (address) => `Wi‑Fi · …, Address ${address}`,
 };
 

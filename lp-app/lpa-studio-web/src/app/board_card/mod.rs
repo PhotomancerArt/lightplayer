@@ -15,8 +15,8 @@
 //! | [`BoardPicture`](board_picture::BoardPicture) | the board's lights, dimmed when last known, or the update's light strip |
 //! | [`StatusCorner`](status_corner::StatusCorner) | the notch cut out of the picture: the mark and the reading; it opens the corner's details |
 //! | [`NameBar`](name_bar::NameBar) | the name, its place, the one primary as a flush section |
-//! | [`StackBar`](stack_bar::StackBar) | one 28 px bar: icon, summary, aside (one trigger for its details), its action outside the trigger |
-//! | [`BarWork`](bar_work::BarWork) | a bar's work: spinner and words with the iridescent foot, green when done, striped when failed |
+//! | [`StackBar`](stack_bar::StackBar) | one 28 px row in the card's grammar — icon · kind · name · state (one trigger for its details), its action outside the trigger; while it works, the spinner in the icon's place and the work's words as its state |
+//! | [`WorkFoot`](bar_work::WorkFoot) | a row's running work: the iridescent fill along its foot |
 //! | [`BarDetails`](bar_details::BarDetails) | a bar's (or the corner's) details: the merged detail card, its sections, panels and danger zone |
 //! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, the Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other version, restore from file |
 //! | [`CardAction`] | one action from the offer it presses, in the card's word and icon |
@@ -83,6 +83,6 @@ pub(crate) mod status_corner;
 pub(crate) use board_card::BoardCard;
 #[cfg(any(test, feature = "stories"))]
 pub(crate) use board_card::CardPart;
-#[cfg(any(test, feature = "stories"))]
+#[cfg(feature = "stories")]
 pub(crate) use card_action::CardPreviews;
 pub(crate) use card_action::{CardAction, CardActionLook, OfferAction};

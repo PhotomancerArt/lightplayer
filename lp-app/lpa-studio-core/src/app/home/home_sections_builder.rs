@@ -587,6 +587,7 @@ mod tests {
             },
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,

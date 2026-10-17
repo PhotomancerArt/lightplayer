@@ -80,6 +80,7 @@ mod snapshot_namespace;
 mod space_estimate;
 mod store_config;
 mod store_error;
+mod store_idle;
 mod store_mount;
 mod store_space;
 #[cfg(feature = "stats")]
@@ -99,6 +100,8 @@ mod dedup_collision_tests;
 mod edge_gc_tests;
 #[cfg(test)]
 mod format_extension_tests;
+#[cfg(test)]
+mod idle_gc_tests;
 #[cfg(test)]
 mod log_order_check;
 #[cfg(all(test, feature = "lpfs"))]

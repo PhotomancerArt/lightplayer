@@ -153,6 +153,10 @@ enum Cmd {
         /// pause there). 0 = one piece.
         #[arg(long, default_value_t = 0)]
         piece_steps: u64,
+        /// Idle time: every third step is up to this many idle steps
+        /// (`collect_step`) instead of a write. 0 = none.
+        #[arg(long, default_value_t = 0)]
+        idle_steps: u64,
         /// Where paused walks keep their checkpoints (resumed when present).
         #[arg(long)]
         checkpoint_dir: Option<PathBuf>,
@@ -408,6 +412,7 @@ fn main() {
             first_seed,
             edit_mix,
             piece_steps,
+            idle_steps,
             checkpoint_dir,
             until,
         } => {
@@ -432,6 +437,7 @@ fn main() {
                         wear: vec![],
                         edit_mix,
                         piece_steps,
+                        idle_steps,
                     })
                     .collect();
                 use rayon::prelude::*;

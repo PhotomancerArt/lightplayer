@@ -6855,7 +6855,6 @@ impl StudioController {
         if unnamed.is_empty() {
             return Vec::new();
         }
-        let now = (self.now_secs)();
         let cards = self.device_roster_view().roster.devices;
         // Names minted earlier in THIS pass, which no card wears yet.
         let mut minted: Vec<String> = Vec::new();
@@ -6863,7 +6862,7 @@ impl StudioController {
         for record in unnamed {
             let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
             taken.extend(minted.iter().cloned());
-            let Some(name) = crate::app::devices::auto_record_name(&record, now, &taken) else {
+            let Some(name) = crate::app::devices::auto_record_name(&record, &taken) else {
                 continue;
             };
             minted.push(name.clone());
@@ -6923,7 +6922,7 @@ impl StudioController {
         );
         Some(crate::DeviceAction::SetName {
             device: *device,
-            name: crate::app::devices::derive_flash_name(&board_display, (self.now_secs)(), &taken),
+            name: crate::app::devices::derive_flash_name(&board_display, &taken),
         })
     }
 
@@ -10123,17 +10122,9 @@ fn clock_fallback_random() -> [u8; 16] {
 /// [`StudioController::set_local_stamp`]). Howard Hinnant's civil-from-days.
 fn utc_slug_stamp(now_secs: f64) -> String {
     let secs = now_secs as i64;
-    let days = secs.div_euclid(86_400);
     let seconds_of_day = secs.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let crate::CalendarDate { year, month, day } =
+        crate::CalendarDate::from_days(secs.div_euclid(86_400));
     format!(
         "{year:04}-{month:02}-{day:02}-{:02}{:02}",
         seconds_of_day / 3_600,

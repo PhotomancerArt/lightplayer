@@ -45,7 +45,7 @@ use crate::app::module::module_fixtures::{
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5): live (\"58 fps\" beside the blue dot, Connect as the primary, Edit on the project bar), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), connecting (the connection bar working: spinner, \"Identifying…\", the iridescent sweep along its foot, Cancel; the primary says \"Identifying…\" too, never a greyed Connect), offline with its last picture (dimmed, its age \"5 h ago\" in the corner, \"Offline · 2 weeks\" in its connection bar, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated XIAO ESP32-C6\", in this tab), a board reached through lightplayer.app (\"Wi‑Fi via lightplayer.app · live\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", the primary saying the same words) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
+    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md): live (the corner quiet, Connect as the primary, Edit on the Project row), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), identifying (the Hardware row working: the spinner in its icon's place, \"identifying\", the iridescent sweep along its foot, Cancel; the primary the spinner alone, never a greyed Connect), offline with its last picture (dimmed, the corner quiet, \"Offline · 2 weeks\" on its Link row and the other rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated · running\" on its Link row, the model alone on its Hardware row), a board reached through lightplayer.app (\"lightplayer.app · connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", the primary saying the same words) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -130,10 +130,67 @@ fn board_card_every_state() -> Element {
     }
 }
 
+// --- Row states ---------------------------------------------------------------
+
+#[story(
+    description = "Round 2's row states the other stories do not show, each in the row's own grammar (icon · kind · name · state · action): a shader error (Project · aurora-drift · error, red and striped, the fault in its details), play only (Access · play only, Unlock flush at its end), USB only (Access · USB only · no password, orange, no button: no core offer sets a board's password, so the details say what to do), and a board known only by its chip (Hardware · ESP32-C6 · model not set)."
+)]
+fn board_card_row_states() -> Element {
+    let mut faulted = porch();
+    faulted.status = DeviceStatus::Degraded;
+    faulted.degraded = Some("Degraded: orbit.shader:12: 'tme' is not declared".to_string());
+    let mut chip_only = porch();
+    chip_only.board_id = None;
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "a shader error",
+                StoryBoardCard {
+                    card: faulted,
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "play only",
+                StoryBoardCard {
+                    card: over_network(porch()),
+                    link: Some(UiLinkKind::Bluetooth),
+                    access: Some(play_only_access()),
+                    feed: live_feed(),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "USB only, no password",
+                StoryBoardCard {
+                    card: over_network(porch()),
+                    link: Some(UiLinkKind::Bluetooth),
+                    access: Some(UiDeviceAccess {
+                        over_bluetooth: true,
+                        waiting: Some(lpa_studio_core::UiAccessWait::NoPassword),
+                        ..UiDeviceAccess::default()
+                    }),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "model not set",
+                StoryBoardCard {
+                    card: chip_only,
+                    feed: live_feed(),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
 // --- Work with no percent ---------------------------------------------------
 
 #[story(
-    description = "Work with no percent on a bar (\"Identifying…\"), the iridescent sweep along its foot, at the two ends of its pass. A capture freezes every animation, so a sweep would only ever be seen at its first frame, at the bar's left edge; these park it as it is entering (the fill reaching 20 % of the bar's width past the card's left edge) and leaving (reaching 20 % past its right edge), with a third card at the first frame for comparison. The fill lives in a track the bar's width and is clipped to it: no pixel of it may land outside the card, and the card's border, its rounded corner and the status corner's notch stay whole. (Yona found it on lightplayer.app, 2026-10-10: the fill ran past the card's right edge into the page.) The picture, the name bar and the other bars are the connecting card's, unchanged."
+    description = "Work with no percent on a row (the Hardware row's \"identifying\"), the iridescent sweep along its foot, at the two ends of its pass. A capture freezes every animation, so a sweep would only ever be seen at its first frame, at the bar's left edge; these park it as it is entering (the fill reaching 20 % of the bar's width past the card's left edge) and leaving (reaching 20 % past its right edge), with a third card at the first frame for comparison. The fill lives in a track the bar's width and is clipped to it: no pixel of it may land outside the card, and the card's border, its rounded corner and the status corner's notch stay whole. (Yona found it on lightplayer.app, 2026-10-10: the fill ran past the card's right edge into the page.) The picture, the name bar and the other bars are the connecting card's, unchanged."
 )]
 fn board_card_sweep_stays_inside_the_card() -> Element {
     rsx! {
@@ -187,7 +244,7 @@ fn board_card_held_by_another_tab() -> Element {
 }
 
 #[story(
-    description = "Connect on a board another tab holds, while it runs and when it fails. ASKING: the connection bar is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary says the same words, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: the bar is striped with \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, which presses the same take-over; Connect is a press again. The picture and the status corner do not change for work."
+    description = "Connect on a board another tab holds, while it runs and when it fails. ASKING: the Link row is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary the spinner alone, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: the bar is striped with \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, which presses the same take-over; Connect is a press again. The picture and the status corner do not change for work."
 )]
 fn board_card_taking_over() -> Element {
     rsx! {
@@ -212,7 +269,7 @@ fn board_card_taking_over() -> Element {
 }
 
 #[story(
-    description = "The tab that let go because another tab asked. Its card stays: \"Taken by another tab\" in orange on the connection bar, the picture it saved on the way out (dimmed, with its age), and Connect, which takes the board back the same way. Nothing reopens by itself."
+    description = "The tab that let go because another tab asked. Its card stays: \"Taken by another tab\" in orange on the connection bar, the picture it saved on the way out (dimmed; its age in the corner's details), and Connect, which takes the board back the same way. Nothing reopens by itself."
 )]
 fn board_card_taken_from_this_tab() -> Element {
     rsx! {
@@ -343,7 +400,7 @@ fn board_card_connected_play_only() -> Element {
 }
 
 #[story(
-    description = "Connect pressed: the board's session is opening (or the board is being reached first). The connection bar is the work — the spinner and \"Connecting…\", the iridescent sweep along its foot — and the primary says \"Connecting…\" (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
+    description = "Connect pressed: the board's session is opening (or the board is being reached first). The Link row is the work — the spinner and \"USB · connecting\", the iridescent sweep along its foot — and the primary is the spinner alone (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
 )]
 fn board_card_connecting() -> Element {
     rsx! {
@@ -363,7 +420,7 @@ fn board_card_connecting() -> Element {
 }
 
 #[story(
-    description = "The last Connect did not open: the connection bar is striped with \"Couldn't connect\" and Retry (Connect again), the reason in the bar's details. The card is otherwise the board's facts, Connect its primary."
+    description = "The last Connect did not open: the Link row is red and striped, \"USB · connection failed\" with Retry (Connect again), the reason the first thing in its details. The card is otherwise the board's facts, Connect its primary."
 )]
 fn board_card_connect_failed() -> Element {
     rsx! {
@@ -453,7 +510,7 @@ fn board_card_hardware_details_open() -> Element {
 }
 
 #[story(
-    description = "The status corner's details, open from the notch: how the board is running (its state, its frame rate, the picture's words) and the board's terminal, flush in the card — what it said, typed and in order, the heartbeat collapsed."
+    description = "The status corner's details, open from the notch: how the board is running (its state, and the picture's facts: frame rate, last frame, where it comes from) and the board's terminal, flush in the card — what it said, typed and in order, the heartbeat collapsed."
 )]
 fn board_card_corner_details_open() -> Element {
     rsx! {
@@ -838,6 +895,7 @@ pub(crate) fn held_by_another_tab(level: HoldLevel, taken_from_here: bool) -> De
         status: DeviceStatus::Attached,
         state_label: "Attached — not listening".to_string(),
         freshness_label: None,
+        heard_age_ms: None,
         firmware_face: DeviceFirmwareFace::Unknown,
         remembered_firmware: Some("fw-esp32c6 2026.10.05-2".to_string()),
         loaded_project: DeviceLoadedProject::Unknown,
@@ -929,6 +987,7 @@ pub(crate) fn porch() -> DeviceView {
         state_label: "Ready".to_string(),
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: Some("last heard 1 s ago".to_string()),
+        heard_age_ms: Some(1000),
         identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -991,6 +1050,7 @@ pub(crate) fn offline() -> DeviceView {
         status: DeviceStatus::Offline,
         state_label: "Offline".to_string(),
         freshness_label: None,
+        heard_age_ms: None,
         firmware_face: DeviceFirmwareFace::Unknown,
         remembered_firmware: Some("fw-esp32c6 2026.10.05-2".to_string()),
         loaded_project: DeviceLoadedProject::Unknown,
