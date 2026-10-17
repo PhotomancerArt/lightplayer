@@ -351,7 +351,11 @@ fn structural_mutations_bump_the_epoch() {
 /// within a single frame.
 #[test]
 fn cached_and_uncached_resolution_agree_frame_for_frame() {
-    fn run(force_uncached: bool, retain_payloads: bool) -> Vec<(Option<f32>, Option<f32>)> {
+    fn run(
+        force_uncached: bool,
+        retain_payloads: bool,
+        payload_cap: Option<usize>,
+    ) -> Vec<(Option<f32>, Option<f32>)> {
         let mut harness = EngineTestBuilder::new()
             .shader("a", output("outputs[0]", 3.0))
             .shader("b", output("outputs[0]", 4.0))
@@ -369,6 +373,7 @@ fn cached_and_uncached_resolution_agree_frame_for_frame() {
             .engine
             .resolver_mut()
             .set_retain_payloads(retain_payloads);
+        harness.engine.resolver_mut().set_payload_cap(payload_cap);
 
         let out = harness.node("out");
         let mut observed = Vec::new();
@@ -418,9 +423,12 @@ fn cached_and_uncached_resolution_agree_frame_for_frame() {
         observed
     }
 
-    let cached = run(false, true);
-    let uncached = run(true, true);
-    let decisions_only = run(false, false);
+    let cached = run(false, true, None);
+    let uncached = run(true, true, None);
+    let decisions_only = run(false, false, None);
+    // A cap no payload fits under: every insert goes through the size check
+    // and is refused, so each read recomputes, as with payloads off.
+    let capped = run(false, true, Some(0));
     assert_eq!(
         cached, uncached,
         "persisting resolution changed what the engine resolves to"
@@ -428,6 +436,10 @@ fn cached_and_uncached_resolution_agree_frame_for_frame() {
     assert_eq!(
         cached, decisions_only,
         "dropping the payload caches changed what the engine resolves to"
+    );
+    assert_eq!(
+        cached, capped,
+        "capping the payload cache by size changed what the engine resolves to"
     );
     // Guard against the test passing because nothing ever changed.
     assert!(
