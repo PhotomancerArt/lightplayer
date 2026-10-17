@@ -298,6 +298,30 @@ impl CacheMmu {
         }
     }
 
+    /// Mark for a refill every valid page holding a byte of `[vaddr, vaddr
+    /// + size)` — what the guest's range invalidate (`Cache_Invalidate_Addr`,
+    /// EXTMEM's `cache_sync_*`) asks of a real cache: the next read of those
+    /// lines comes from flash. (This model refills the whole page.)
+    pub fn invalidate_vaddr_range(&mut self, vaddr: u32, size: u32) {
+        let (base, len) = self.window();
+        let start = vaddr.max(base);
+        let end = vaddr.saturating_add(size.max(1)).min(base + len);
+        if start >= end {
+            return;
+        }
+        let page_len = self.page_len();
+        let mut at = start - (start - base) % page_len;
+        while at < end {
+            if let Some(index) = self.entry_index(at)
+                && self.entries[index as usize] & VALID != 0
+                && !self.dirty.contains(&index)
+            {
+                self.dirty.push(index);
+            }
+            at += page_len;
+        }
+    }
+
     pub fn has_dirty(&self) -> bool {
         !self.dirty.is_empty()
     }

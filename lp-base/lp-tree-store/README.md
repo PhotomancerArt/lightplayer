@@ -100,6 +100,18 @@ change has to be readable, or cleanly refused, by the core before it.
   whose sector seqs may have wrapped. Its resident RAM is the live set's,
   whatever the garbage on flash; its transient RAM is that plus the whole
   index, capped by `mount_index_max`.
+- **Reads may go through a cache** (`read_window.rs`, the mount study's
+  C7). On the C6, `lpfs` is mapped by the MMU and read as memory: a 32-byte
+  line fill the first time a line is touched instead of a ROM read call
+  (~14 µs) per read. `WindowedFlash` is the store's `Flash` over such a
+  window and holds one rule: after every program and every erase, the range
+  written is invalidated before the store reads again (a stale line read
+  back as erased would make a resume, a settle or a verify trust a tail
+  that is not blank). Nothing about the format changes; the window is the
+  platform's (`fw-esp32c6`'s `tree_flash.rs`). `SimLineCache` models the
+  C6's cache for the host (stale lines served until invalidated); the
+  mutant `reads_without_invalidate` drops the rule and `lp-store-bench`'s
+  drivers, run over the model, catch it.
 - **Mount settles each head's tail** before anything trusts it. A program
   torn inside a 4-byte word can leave its one missing clear weak, so a
   record reads whole on some reads and fails its CRC on others; only the
@@ -490,7 +502,7 @@ quiet between them leaves a mount 45 KB over 66 trusted sectors to read
 instead of 217 KB over 176 (~19 ms against ~91 by the model's read rate),
 at the same 270 erases.
 
-**Mutants** (feature `mutants`, `mutants.rs`): nineteen switches, each
+**Mutants** (feature `mutants`, `mutants.rs`): twenty switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
@@ -501,7 +513,8 @@ sectors' last programs on one read (no settle); and the two checks the fast
 mount stands on: read the newest sector of each kind by its headers, as a
 cold one (`newest_by_headers`), and never fall back to the whole reading
 (`no_full_scan`); format leaving the headers it does not erase (no kill); the
-mount's id index taking records it does not trust; an idle step
+mount's id index taking records it does not trust; reading through the cache
+without invalidating what a program or erase changed; an idle step
 forgetting a write head; idle steps keeping their mark (and victim) across
 writes; an idle step erasing its victim before every live record in it has
 a copy.
