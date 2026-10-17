@@ -51,6 +51,15 @@ v3_flash_size := "4mb"
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
 c6_flash_size := "4mb"
+
+# The C6's second-stage bootloader: espflash 3.3.0's bundled one rebuilt with
+# its log level NONE (lp-fw/bootloaders/README.md; `just build-c6-bootloader`
+# rebuilds it in Docker). Every `espflash flash`/`save-image --merge` for this
+# chip passes it as `--bootloader`. CANONICAL SOURCE:
+# lp-fw/builds/esp32c6-4mb.json (`bootloader`); this var, lp-fw-split's
+# default and the crate's runner are mirrors, and `cargo test -p lp-cli`
+# fails if one drifts.
+c6_bootloader := "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -1643,7 +1652,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    args=(--chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
     case "{{ monitor }}" in
       monitor) args+=(--monitor) ;;
       no-monitor) ;;
@@ -1668,7 +1677,7 @@ flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (b
     set -e
     if [[ $verdict -eq 4 ]]; then
       merged="target/riscv32imac-unknown-none-elf/{{ fw_esp32c6_profile }}/fw-esp32c6-merged-for-migrate.bin"
-      espflash save-image --chip esp32c6 --merge --partition-table lp-fw/fw-esp32c6/partitions.csv \
+      espflash save-image --chip esp32c6 --merge --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv \
         --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "$merged"
       cargo run -q -p lp-cli -- hardware lpfs migrate --port "$port" --merged "$merged" --yes
       exit 0
@@ -2194,6 +2203,19 @@ fwtest-button-esp32s3 port="":
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Rebuild the C6's second-stage bootloader from ESP-IDF source in Docker (a
+# pinned `espressif/idf` image; nothing installed on the host, nothing
+# downloaded inside) and check it against the committed
+# lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin byte for byte.
+# `variant=stock` rebuilds espflash 3.3.0's bundled bootloader instead and
+# checks it against that — the proof the recipe is the stock bootloader with
+# one setting changed. The first run pulls the image (~4 GB on disk).
+#
+#   just build-c6-bootloader
+#   just build-c6-bootloader stock
+build-c6-bootloader variant="quiet":
+    scripts/bootloader/build-c6-bootloader.sh --variant {{ variant }} --check
 
 # Build the ESP32-C6 SPLIT image — the product image: the loader, the boot
 # records, the core and the engine, laid out inside `factory` — with
@@ -4990,7 +5012,7 @@ fixture-fw variant port="":
     just install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,"$feature"
     cd - >/dev/null
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    args=(--chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
     # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32c6)"
     args+=(--port "$resolved_port")
@@ -5288,7 +5310,7 @@ demo-esp32c6-host project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
@@ -5306,7 +5328,7 @@ demo-esp32c6-host-naga project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Same as demo-esp32c6-check, but builds the explicit Naga frontend.
@@ -5317,7 +5339,7 @@ demo-esp32c6-check-naga example="basic": install-rv32-target
 demo-esp32c6-standalone: build-fw-esp32c6
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
@@ -5375,7 +5397,7 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
     cd ../..
-    espflash flash --chip esp32c6 --port "$port" --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
+    espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --port "$port" --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
     sleep 1
     args=(hardware calibrate esp32c6 --board "{{ board }}" --port "serial:$port")
     if [[ -n "{{ label }}" ]]; then

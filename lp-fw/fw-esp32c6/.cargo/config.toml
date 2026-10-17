@@ -12,7 +12,7 @@
 # 4mb matches partitions.csv (0x350000 + 0xB0000 = 0x400000) and
 # lp-fw/builds/esp32c6-4mb.json; `flash_size_mirrors_agree_with_the_defs` in
 # lp-cli fails if this drifts from the def.
-runner    = "espflash flash --chip esp32c6 --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
+runner    = "espflash flash --chip esp32c6 --bootloader ../bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
 rustflags = [
   "-C", "link-arg=-Tlinkall.x",
   # Abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier): panic=abort +

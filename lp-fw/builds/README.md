@@ -60,12 +60,14 @@ Three names, never confused: the **target** (`esp32c6-4mb`), the
   entry. Do not rename a shipped id.
 - Changing `flashSizeMb` without changing `partitionsCsv` (or vice versa) is a
   boot-loop; they are one decision.
-- The packager refuses an image whose **bootloader segments** are not the
-  ones `lpa_devices::bootloader::bootloader_code_ranges` names for the chip.
-  Studio recognizes a board hung in its bootloader by the ROM's `Saved PC`
-  against that table, so a bootloader change (an espflash upgrade, a
-  `--bootloader` override) must update the table — and the copy in
-  `scripts/c6-lp-ana-i2c.py` — from the new bootloader's image header. See
+- The packager refuses an image whose **bootloader** is not one
+  `lpa_devices::bootloader::known_bootloaders` names for the chip (by its
+  code segments). Studio recognizes a board hung in its bootloader by the
+  ROM's `Saved PC` against that table, so a bootloader change (an espflash
+  upgrade, a new `bootloader` file) must add the new one's image header to
+  the table — and, if the detection ranges move, the copy in
+  `scripts/c6-lp-ana-i2c.py`. The C6 def names
+  `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin`. See
   `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
 - Xtensa builds need Espressif's fork on PATH. `lp-cli` runs cargo in the
   crate directory so the crate's `rust-toolchain.toml` selects the channel,

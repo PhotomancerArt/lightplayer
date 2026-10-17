@@ -27,7 +27,9 @@ pub struct BuildOptions {
     pub out: PathBuf,
     /// Cargo features for fw-esp32c6 (its defaults are always on).
     pub features: String,
-    /// A build def's bootloader override.
+    /// The second-stage bootloader to merge. [`BuildOptions::new`] sets the
+    /// shipped one ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges
+    /// the one espflash bundles.
     pub bootloader: Option<PathBuf>,
     /// The partition table the image is flashed with.
     pub partitions: PathBuf,
@@ -39,11 +41,12 @@ pub struct BuildOptions {
 impl BuildOptions {
     pub fn new(repo: PathBuf, out: PathBuf) -> Self {
         let partitions = repo.join("lp-fw/fw-esp32c6/partitions.csv");
+        let bootloader = Some(repo.join(crate::merged_image::C6_BOOTLOADER));
         Self {
             repo,
             out,
             features: "esp32c6,server".into(),
-            bootloader: None,
+            bootloader,
             partitions,
             target: None,
         }

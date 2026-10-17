@@ -4,8 +4,10 @@
 //! bootloader agrees with it.
 //!
 //! - **The ROM-up boot.** The whole merged image in the chip, the hart at
-//!   the mask ROM's reset vector, nothing placed: the ROM loads espflash
-//!   3.3.0's IDF bootloader, which loads the loader as its app; the loader
+//!   the mask ROM's reset vector, nothing placed: the ROM loads the IDF
+//!   bootloader the image carries (espflash 3.3.0's, rebuilt quiet:
+//!   `lp-fw/bootloaders/README.md`), which loads the loader as its app and
+//!   says nothing doing it; the loader
 //!   reads the boot records, maps the core and copies its RAM segments; the
 //!   core starts the radios and links and opens the engine. Asserted on the
 //!   board's own words — the loader's ROM print, the core's first line, the
@@ -53,7 +55,7 @@ const ENGINE_LINE: &str = "[INIT] fw-esp32 initialized, starting server loop... 
 const CORE_FIRST: &str = "[INIT] Initializing board";
 
 /// The cache MMU page the layout is aligned to, and the one espflash
-/// 3.3.0's bundled bootloader picks on a 4 MB C6.
+/// 3.3.0's bundled bootloader (and its quiet rebuild) picks on a 4 MB C6.
 const PAGE: u32 = 0x8000;
 
 #[test]
@@ -83,9 +85,21 @@ fn the_split_image_boots_from_the_reset_vector_to_the_engine() {
     );
 
     let rom_console = m.uart0().text();
+    // The quiet bootloader: between the ROM handing it the CPU (`entry`) and
+    // the loader's first line, UART0 carries nothing at all. The stock one
+    // printed ~22 lines there, ~145 ms of every boot at 115,200 baud.
+    let entry = rom_console
+        .find("entry 0x")
+        .unwrap_or_else(|| panic!("the ROM started the bootloader:\n{rom_console}"));
+    let loader = rom_console
+        .find("[LOADER]")
+        .unwrap_or_else(|| panic!("the bootloader started the loader:\n{rom_console}"));
+    let between = rom_console[entry..loader]
+        .split_once('\n')
+        .map_or("", |(_, rest)| rest);
     assert!(
-        rom_console.contains("Loaded app from partition at offset 0x10000"),
-        "the bootloader loaded the loader as its app:\n{rom_console}"
+        between.trim().is_empty(),
+        "the bootloader printed between the ROM's entry and the loader:\n{between}"
     );
     assert!(
         rom_console.contains("[LOADER] core @0x18000 (proven)"),
