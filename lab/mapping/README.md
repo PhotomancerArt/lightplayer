@@ -118,8 +118,12 @@ A 2D canvas with selection, and the start of the whole node graph on it
   are cards with one row per port. Frames are see-through: a click inside
   one selects what's in it, and the frame itself is picked by its title or
   border. A fixture's empty inside picks the fixture too, behind anything
-  drawn in it (a drag from there still draws a selection box). An output card is not a frame: click it to select it, click again
-  for the port under the cursor, and again for the pixel (D47).
+  drawn in it (a drag from there still draws a selection box). An output card is not a frame: its **spans** (each object's run of
+  pixels on a port) are its objects, so a click on a span selects the
+  object, as a click on it in its fixture would, and hovering either side
+  outlines both. Click again for the pixel under the cursor (D47); Esc
+  climbs to its port. The card's title selects the output. A press on a
+  span never drags the drawing.
 - **Layout runs in the page** (D63), from `lab-layout`, by role: controls
   (a clock, a power button) in a row on top, then shaders, fixtures and
   outputs in columns that follow the flow, each output level with what
@@ -169,7 +173,7 @@ A 2D canvas with selection, and the start of the whole node graph on it
   level with the port rows it lands on. Its channel's name is always on
   it in a small box, and nothing more; edges touching the selection are
   lit, the rest quieter. Where a fixture's objects land shows on the
-  output instead, as each object's run of pixels, lit while the object is
+  output instead, as each object's span, lit while the object is
   hovered or selected. Hovering an edge (the page hit-tests it and tells
   core) lights it and says what it carries in full; it never selects. In
   the stack only the selection's edges show, in the gutter (below).
