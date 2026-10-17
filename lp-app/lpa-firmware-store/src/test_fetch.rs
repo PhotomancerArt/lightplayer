@@ -107,6 +107,7 @@ pub fn release_fixture() -> ReleaseFixture {
         commit: "103285d5d05e0c2223260f7a3ccf69eb32cf40cc".into(),
         wire_proto: 36,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },

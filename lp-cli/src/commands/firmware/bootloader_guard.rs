@@ -72,7 +72,15 @@ const C6_APP_RAM_END: u32 = 0x4086_e610;
 /// SRAM except the first (lowest), which is the bootloader's DRAM data and
 /// never executes — must be exactly one known bootloader's. Chips without a
 /// table are not checked. Returns the matching bootloader's name.
+///
+/// LightPlayer's own second stage (`LPLB` at 0x0) is not an IDF bootloader
+/// and has no wedge to detect: it must be a whole, well-formed image the ROM
+/// will load, entirely inside the loader's RAM.
 pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<Option<&'static str>> {
+    if chip == "esp32c6" && lp_bootctl::find_bootloader_version(image) > 0 {
+        check_lightplayer_bootloader(image)?;
+        return Ok(Some(LIGHTPLAYER_BOOTLOADER));
+    }
     let known = lpa_devices::bootloader::known_bootloaders(chip);
     if known.is_empty() {
         return Ok(None);
@@ -115,6 +123,34 @@ pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<Opti
     );
 }
 
+/// What the packager names our second stage.
+const LIGHTPLAYER_BOOTLOADER: &str =
+    "LightPlayer's own second stage (fw-esp32c6-loader, bootloader flavour)";
+
+/// Our second stage: the ROM's checks (checksum, appended hash) pass, it
+/// ends before the partition table, and every segment is RAM inside the
+/// loader's `0x4085_0000..0x4086_0000`.
+fn check_lightplayer_bootloader(image: &[u8]) -> Result<()> {
+    const STAGE_RAM: Range<u32> = 0x4085_0000..0x4086_0000;
+    let head = &image[..image
+        .len()
+        .min(lp_fw_split::bootloader_image::BOOTLOADER_MAX_LEN)];
+    let segments = lp_fw_split::bootloader_image::check(head).map_err(|e| {
+        anyhow::anyhow!("LightPlayer's bootloader at 0x0 is not a whole image: {e}")
+    })?;
+    for (addr, len) in segments {
+        if addr < STAGE_RAM.start || addr + len > STAGE_RAM.end {
+            bail!(
+                "LightPlayer's bootloader loads 0x{addr:08x}+0x{len:x}, outside its RAM \
+                 0x{:08x}..0x{:08x}",
+                STAGE_RAM.start,
+                STAGE_RAM.end
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +174,42 @@ mod tests {
         (0x4086_e610, 0x2d68),
         (0x4087_5720, 0x1800),
     ];
+
+    /// Our second stage, as lp-fw-split writes it: accepted by its `LPLB`
+    /// word and its ROM checks; one that loads outside the loader's RAM, or
+    /// whose checksum is wrong, is refused.
+    #[test]
+    fn our_second_stage_is_accepted_on_its_own_terms() {
+        use lp_fw_split::bootloader_image::{RamSegment, image};
+        let word = lp_bootctl::bootloader_identity::bootloader_identity(1);
+        let good = image(
+            0x4085_0008,
+            &[RamSegment {
+                addr: 0x4085_0000,
+                bytes: [&word[..], &[0x6f, 0, 0, 0]].concat(),
+            }],
+        )
+        .unwrap();
+        assert!(
+            check_bootloader_segments("esp32c6", &good)
+                .unwrap()
+                .is_some()
+        );
+
+        let mut corrupt = good.clone();
+        corrupt[0x24] ^= 1;
+        assert!(check_bootloader_segments("esp32c6", &corrupt).is_err());
+
+        let outside = image(
+            0x4084_0000,
+            &[RamSegment {
+                addr: 0x4084_0000,
+                bytes: [&word[..], &[0x6f, 0, 0, 0]].concat(),
+            }],
+        )
+        .unwrap();
+        assert!(check_bootloader_segments("esp32c6", &outside).is_err());
+    }
 
     #[test]
     fn parses_the_segment_table() {

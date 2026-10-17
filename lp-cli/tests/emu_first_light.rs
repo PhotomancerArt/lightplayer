@@ -2,8 +2,14 @@
 //! `lp2025/2026-10-16-0848-tree-store-adoption`, A1): power-on to the first
 //! lit LED frame, and its parts, from a ROM-up boot of the SPLIT image — the
 //! mask ROM, the IDF bootloader, the loader, the core and the engine — for
-//! the shipped image (littlefs) and the `fs-tree` image, each with no
-//! project, `projects/test/basic` and a c40-sized project.
+//! the shipped image (the tree store since the cutover), with no project,
+//! `projects/test/basic` and a c40-sized project.
+//!
+//! The littlefs leg (A1 ran both) is gone with littlefs from this tree: no
+//! split littlefs image is built from it any more, and a pinned plain one
+//! would not be the same boot (no loader, no core hash). The littlefs
+//! figures are A1's, and the before/after on silicon is the cutover's CX1
+//! run (the release littlefs split image against this one).
 //!
 //! **A report, never a gate** (AGENTS.md: never gate on emulated time). Each
 //! case prints two readings of the same boot:
@@ -22,13 +28,12 @@
 //! the default, `t3` or `t4`), ROM-up. Never hardware-validated: the silicon
 //! figures are `docs/reports/2026-10-16-c6-time-to-first-light.md`'s.
 //! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there;
-//! `LP_FIRST_LIGHT_IMAGES=littlefs` (or `fs-tree`) runs one image only.
 //! For a like-for-like reading of a silicon sitting: `LP_FIRST_LIGHT_MERGED`
 //! (`label=merged.bin,…`) boots that sitting's own chips instead of this
 //! tree's, `LP_FIRST_LIGHT_CASES` (`none`, `basic`, `c40`, `project:<dir>`)
 //! picks the projects, and `LP_FIRST_LIGHT_LPFS` (`label=lpfs.bin,…`) also
 //! runs each case on a chip whose `lpfs` starts as that store.
-//! `#[ignore]`d: it needs both split builds (`LP_EMU_BUILD_FW=1`, or
+//! `#[ignore]`d: it needs the split build (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).
 
 #[path = "support/editor_reads.rs"]
@@ -55,7 +60,7 @@ const LINE_BUDGET_US: u64 = 30_000_000;
 const BOOTS: usize = 2;
 
 #[test]
-#[ignore = "needs both split fw-esp32c6 builds; a report, not a gate (module docs)"]
+#[ignore = "needs the split fw-esp32c6 build; a report, not a gate (module docs)"]
 fn time_to_first_light_on_the_emulated_c6() {
     let grade = std::env::var("LP_FIRST_LIGHT_GRADE")
         .ok()
@@ -65,9 +70,6 @@ fn time_to_first_light_on_the_emulated_c6() {
         });
     let grade_name = format!("{grade:?}").to_lowercase();
     let mut rows = Vec::new();
-    // `LP_FIRST_LIGHT_IMAGES` (`littlefs`, `fs-tree`, comma-joined; unset:
-    // both) runs only those, for a quicker loop on one image.
-    let images = std::env::var("LP_FIRST_LIGHT_IMAGES").unwrap_or_default();
     // `LP_FIRST_LIGHT_MERGED` (`label=merged.bin`, comma-joined) boots those
     // chips instead of this tree's split builds — a silicon sitting's own
     // images, for a like-for-like reading. ROM-up needs no ELF.
@@ -84,12 +86,9 @@ fn time_to_first_light_on_the_emulated_c6() {
             ));
         }
     }
-    for (label, image) in [
-        ("littlefs", FwImage::SHIPPED),
-        ("fs-tree", FwImage::FS_TREE),
-    ] {
-        if !chips.is_empty() || (!images.is_empty() && !images.split(',').any(|want| want == label))
-        {
+    // The label stays `fs-tree`, so the JSON rows read as A1's tree rows did.
+    for (label, image) in [("fs-tree", FwImage::SHIPPED)] {
+        if !chips.is_empty() {
             continue;
         }
         let split = match split_image(&image) {

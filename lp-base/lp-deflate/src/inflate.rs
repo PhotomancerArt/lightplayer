@@ -6,7 +6,43 @@
 use crate::Error;
 use crate::bits::Bits;
 use crate::huffman::Huff;
-use crate::tables::{DIST_BASE, DIST_EXTRA, LEN_BASE, LEN_EXTRA, fixed_tables};
+use crate::tables::{DIST_BASE, DIST_EXTRA, LEN_BASE, LEN_EXTRA, fill_fixed};
+
+/// The decoder's Huffman tables (≈ 3.8 KiB): the literal/length code, the
+/// distance code, and the code-length code a dynamic block describes them
+/// with, rebuilt in place for every Huffman block.
+///
+/// [`inflate`] keeps them on its own stack frame. A caller deep in a call
+/// chain with little stack to spare owns them instead and passes them to
+/// [`inflate_with`] — on the heap, say: the tree store does, because it
+/// inflates a file from inside a project load, where a C6's main stack has
+/// no 3.8 KiB to spare (`lp-cli/tests/emu_stack_peak.rs`).
+///
+/// **All-zero bytes are a valid `Tables`** (it holds integer arrays only, and
+/// every table is rebuilt before it is read), so a caller may allocate one
+/// zeroed (`Box::new_zeroed`) without building it on the stack first.
+pub struct Tables {
+    lit: Huff<288>,
+    dist: Huff<30>,
+    code_lengths: Huff<19>,
+}
+
+impl Tables {
+    /// Empty tables, ready for [`inflate_with`].
+    pub const fn new() -> Self {
+        Tables {
+            lit: Huff::empty(),
+            dist: Huff::empty(),
+            code_lengths: Huff::empty(),
+        }
+    }
+}
+
+impl Default for Tables {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Decodes the raw deflate stream `src` into `buf[start..]`.
 ///
@@ -20,6 +56,17 @@ use crate::tables::{DIST_BASE, DIST_EXTRA, LEN_BASE, LEN_EXTRA, fixed_tables};
 /// Never panics: a malformed `src`, an output that would overflow `buf`, or
 /// a distance reaching before `buf`'s start all come back as an [`Error`].
 pub fn inflate(src: &[u8], buf: &mut [u8], start: usize) -> Result<usize, Error> {
+    inflate_with(src, buf, start, &mut Tables::new())
+}
+
+/// [`inflate`], building its Huffman tables in `tables` (the caller's
+/// storage, reused across calls) instead of on its own stack frame.
+pub fn inflate_with(
+    src: &[u8],
+    buf: &mut [u8],
+    start: usize,
+    tables: &mut Tables,
+) -> Result<usize, Error> {
     let mut bits = Bits::new(src);
     let mut out = start;
     loop {
@@ -27,12 +74,12 @@ pub fn inflate(src: &[u8], buf: &mut [u8], start: usize) -> Result<usize, Error>
         match bits.take(2)? {
             0 => out = stored_block(&mut bits, buf, out)?,
             1 => {
-                let (lit, dist) = fixed_tables();
-                out = codes(&mut bits, buf, out, &lit, &dist)?;
+                fill_fixed(&mut tables.lit, &mut tables.dist);
+                out = codes(&mut bits, buf, out, &tables.lit, &tables.dist)?;
             }
             2 => {
-                let (lit, dist) = dynamic_tables(&mut bits)?;
-                out = codes(&mut bits, buf, out, &lit, &dist)?;
+                dynamic_tables(&mut bits, tables)?;
+                out = codes(&mut bits, buf, out, &tables.lit, &tables.dist)?;
             }
             _ => return Err(Error::Corrupt),
         }
@@ -62,7 +109,7 @@ fn stored_block(bits: &mut Bits, buf: &mut [u8], mut out: usize) -> Result<usize
 /// §3.2.7): a third, small Huffman code describes the two real tables'
 /// lengths, run-length encoded (repeat the previous length, or a run of
 /// zeros).
-fn dynamic_tables(bits: &mut Bits) -> Result<(Huff<288>, Huff<30>), Error> {
+fn dynamic_tables(bits: &mut Bits, tables: &mut Tables) -> Result<(), Error> {
     const ORDER: [usize; 19] = [
         16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
     ];
@@ -76,7 +123,8 @@ fn dynamic_tables(bits: &mut Bits) -> Result<(Huff<288>, Huff<30>), Error> {
     for &i in &ORDER[..ncode] {
         cl[i] = bits.take(3)? as u8;
     }
-    let clh: Huff<19> = Huff::new(&cl)?;
+    tables.code_lengths.build(&cl)?;
+    let clh = &tables.code_lengths;
     let mut lens = [0u8; 316];
     let mut i = 0;
     while i < nlen + ndist {
@@ -109,10 +157,9 @@ fn dynamic_tables(bits: &mut Bits) -> Result<(Huff<288>, Huff<30>), Error> {
         // missing one is corrupt rather than merely incomplete.
         return Err(Error::Corrupt);
     }
-    Ok((
-        Huff::new(&lens[..nlen])?,
-        Huff::new(&lens[nlen..nlen + ndist])?,
-    ))
+    tables.lit.build(&lens[..nlen])?;
+    tables.dist.build(&lens[nlen..nlen + ndist])?;
+    Ok(())
 }
 
 /// The literal/length/distance loop both Huffman block kinds share (RFC 1951

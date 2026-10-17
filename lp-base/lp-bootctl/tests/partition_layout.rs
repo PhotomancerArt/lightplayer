@@ -30,13 +30,15 @@ const COMMON_LOW_REGION: &[(&str, u32)] =
 /// image stays valid only if its partition stays put. The expected offset is
 /// per-board because the S3's 8 MB floor placed it differently.
 ///
-/// The C6's moved ONCE, deliberately (2026-10, `0x310000` → `0x350000`), and
-/// only because Studio's Update firmware and `lp-cli hardware lpfs migrate`
-/// carry every fielded board's files across
-/// (`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`). Changing a
-/// row here again needs a migration of its own, not just a new number.
+/// The C6's moved TWICE, deliberately, each time because Studio's Update
+/// firmware and `lp-cli hardware lpfs migrate` carry every fielded board's
+/// files across: the 2026-10 repartition (`0x310000` → `0x350000`,
+/// `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`) and the
+/// tree-store cutover (`0x350000` → `0x380000`, 128 sectors,
+/// `docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`). Changing a row
+/// here again needs a migration of its own, not just a new number.
 const LPFS_OFFSETS: &[(&str, u32, u32)] = &[
-    ("esp32c6", 0x350000, 0x40_0000),
+    ("esp32c6", 0x380000, 0x40_0000),
     ("esp32s3", 0x610000, 0x80_0000),
 ];
 

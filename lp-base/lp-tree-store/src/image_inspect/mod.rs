@@ -26,7 +26,7 @@ pub use image_report::{
     RecordReport, RecordStatus, RootOutcome, RootReport, SectorReport, SectorSizeFrom, SectorState,
     TreeEntryReport,
 };
-pub use image_scan::detect_sector_size;
+pub use image_scan::{detect_sector_size, scan_sector};
 pub use store_image::{ImageError, StoreImage};
 
 #[cfg(test)]

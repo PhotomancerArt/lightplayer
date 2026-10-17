@@ -1,14 +1,17 @@
-//! The boot mount of an `fs-tree` board's filesystem: the tree store's
-//! verdict, and what the board does with it (plan
-//! `2026-10-08-2339-tree-store-firmware-and-emulator`, D1 and D2). The twin
-//! of `lp_fs::LpFsFlash::init_guarded` for the littlefs build, generic over
-//! the chip's flash and hasher (both injected: this crate holds no chip
-//! fact).
+//! The boot mount of a tree-store board's filesystem (the C6 since the
+//! tree-store cutover): the store's verdict, and what the board does with it
+//! (plan `2026-10-08-2339-tree-store-firmware-and-emulator`, D1 and D2). The
+//! twin of `lp_fs::LpFsFlash::init_guarded` for the littlefs chips, generic
+//! over the chip's flash and hasher (both injected: this crate holds no chip
+//! fact). littlefs itself is never mounted here: a board whose files are
+//! still in littlefs is recognised by its superblock's name alone
+//! ([`littlefs_superblock_at`], plan `2026-10-16-0848-tree-store-adoption`,
+//! AD5).
 //!
 //! | mount says | the board |
 //! |---|---|
 //! | mounted | serves it ([`TreeFsInit::Mounted`]) |
-//! | `NoStore` (blank, littlefs, foreign, an interrupted first format) | asks `may_format` (on the C6: is a pre-repartition filesystem waiting?) — `Format`: formats and serves it ([`TreeFsInit::Formatted`]); `Hold`: writes nothing ([`TreeFsInit::Held`]) |
+//! | `NoStore` (blank, littlefs, foreign, an interrupted first format) | asks `may_format` (on the C6: is a littlefs superblock there, or where a board that skipped the migration keeps one?) — `Format`: formats and serves it ([`TreeFsInit::Formatted`]); `Hold`: writes nothing ([`TreeFsInit::Held`]) |
 //! | anything else (`Damaged`, `Unsupported`, a flash that would not read) | **refuses**: writes nothing, keeps the files for `lp-cli hardware tree extract` ([`TreeFsInit::Refused`]) |
 //!
 //! It never formats a store it refused. The caller serves a RAM filesystem
@@ -19,11 +22,60 @@
 
 use core::fmt::Debug;
 
+use embedded_storage::nor_flash::ReadNorFlash;
 use lp_tree_store::{
     Flash, LpFsTree, MountSummary, ObjectHasher, StoreConfig, StoreError, TreeStore,
 };
 
 pub use crate::lp_fs::FormatVerdict;
+
+/// The tree-store mark, in this core's own bytes
+/// ([`lpc_model::manifest::CORE_FS_TREE_MARK`]): what another board's update
+/// guard reads before it lets this core boot over a tree store
+/// (`crate::fs_tree_core_guard`). The mount names it (`black_box`), so a
+/// build that mounts the store links it; `lp-fw-split` makes it a core root
+/// by name and fails a build whose manifest lists `fs.tree` without it.
+#[unsafe(no_mangle)]
+#[used]
+pub static LP_CORE_FS_TREE_MARK: [u8; MARK_LEN] = mark_bytes();
+
+const MARK_LEN: usize = lpc_model::manifest::CORE_FS_TREE_MARK.len();
+
+const fn mark_bytes() -> [u8; MARK_LEN] {
+    let src = lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes();
+    let mut out = [0u8; MARK_LEN];
+    let mut i = 0;
+    while i < MARK_LEN {
+        out[i] = src[i];
+        i += 1;
+    }
+    out
+}
+
+/// littlefs's superblock name: `littlefs` at byte 8 of block 0 or 1 of its
+/// region (littlefs v2: the revision count, the superblock entry's tag, its
+/// name).
+pub const LITTLEFS_MAGIC: &[u8; 8] = b"littlefs";
+/// littlefs's block on the ESP32 family: the flash's erase sector.
+pub const LITTLEFS_BLOCK: u32 = 4096;
+
+/// Does a littlefs superblock start at `region` on `part` — its name at byte
+/// 8 of block 0 or 1? Two 8-byte reads, word-aligned (esp-storage's rule);
+/// a read that fails is not a superblock. Says nothing about whether the
+/// files under it are whole: a tree-store board that finds one HOLDS (never
+/// formats) and leaves the files to the USB migration, which mounts them on
+/// the host. littlefs is not linked for this.
+pub fn littlefs_superblock_at<N: ReadNorFlash>(part: &mut N, region: u32) -> bool {
+    #[repr(C, align(4))]
+    struct Name([u8; 8]);
+    [0, LITTLEFS_BLOCK].iter().any(|&block| {
+        let mut name = Name([0; 8]);
+        region
+            .checked_add(block + 8)
+            .is_some_and(|at| part.read(at, &mut name.0).is_ok())
+            && &name.0 == LITTLEFS_MAGIC
+    })
+}
 
 /// How [`init_tree_guarded`] came out.
 pub enum TreeFsInit<F: Flash, H: ObjectHasher> {
@@ -60,6 +112,8 @@ where
     F::Error: Debug,
     H: ObjectHasher + 'static,
 {
+    // The mount is what links the mark: a core that mounts the store says so.
+    core::hint::black_box(&LP_CORE_FS_TREE_MARK);
     let (mut flash, hasher) = match TreeStore::mount(flash, hasher, cfg.clone()) {
         Ok(st) => {
             let s = st.summary();
@@ -154,6 +208,51 @@ mod tests {
         };
         assert_eq!(fs.read_file(LpPath::new("/a.json")).unwrap(), b"{\"a\":1}");
         assert!(s.root_seq >= 2);
+    }
+
+    /// AD5: a littlefs the firmware's own geometry formatted is recognised
+    /// by its superblock's name, in block 0 or 1 of the region asked about,
+    /// and nothing else is — a blank part, a tree store, a read past the
+    /// part's end.
+    #[test]
+    fn a_littlefs_superblock_is_found_by_its_name_alone() {
+        use embedded_storage::nor_flash::NorFlash;
+        use littlefs_rust::{Config, Filesystem, RamStorage};
+
+        let mut ram = RamStorage::new(LITTLEFS_BLOCK, 8);
+        let mut config = Config::new(LITTLEFS_BLOCK, 8);
+        config.cache_size = 512;
+        config.lookahead_size = 64;
+        Filesystem::format(&mut ram, &config).unwrap();
+
+        let mut f = blank();
+        assert!(!littlefs_superblock_at(&mut f, 0), "erased flash");
+        let at = 4 * 4096;
+        f.write(at, &ram.data()[..2 * LITTLEFS_BLOCK as usize])
+            .unwrap();
+        assert!(littlefs_superblock_at(&mut f, at));
+        assert!(!littlefs_superblock_at(&mut f, 0), "another region");
+        // Only block 1 carrying the name (block 0 mid-erase) still counts.
+        let mut g = blank();
+        g.write(at + 4096, &ram.data()[4096..8192]).unwrap();
+        assert!(littlefs_superblock_at(&mut g, at));
+        assert!(
+            !littlefs_superblock_at(&mut f, SECTORS * 4096 - 4096),
+            "a block 1 past the part's end"
+        );
+
+        let mut t = with_a_file();
+        assert!(!littlefs_superblock_at(&mut t, 0), "a tree store");
+    }
+
+    /// The mark another board's update guard reads is linked whole, and is
+    /// the model's constant.
+    #[test]
+    fn the_core_mark_is_the_models() {
+        assert_eq!(
+            &LP_CORE_FS_TREE_MARK[..],
+            lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes()
+        );
     }
 
     #[test]

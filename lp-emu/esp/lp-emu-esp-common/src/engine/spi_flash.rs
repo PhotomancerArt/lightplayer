@@ -52,9 +52,15 @@
 //! capacity `0x15` = 2 MiB), so the only thing this model changes about the
 //! ROM's idea of the part is its size — which is what the second-stage
 //! bootloader changes on silicon, from the flash-size field of the image
-//! header. Those two bytes are the same structure in the classic ESP32's ROM;
-//! if a part ever turns out to default to a different manufacturer, this is
-//! where a parameter goes.
+//! header. Those two bytes are the same structure in the classic ESP32's ROM.
+//!
+//! They are the **default** part ([`FlashPart::ROM_DEFAULT`]), and a run can
+//! name another ([`FlashPart`], `--flash-part`): the two parts read on the
+//! desk's C6 boards, whose status register 2 powers on with the factory's QE
+//! bit set. That is what a core's QIO switch reads before it moves the read
+//! path to four lines (`fw-esp32c6`'s `flash_qio`), so a run on the default
+//! part walks the switch's "stays DIO" path and a run on a desk part walks
+//! the switch itself.
 //!
 //! # Persistence
 //!
@@ -135,6 +141,13 @@ pub struct FlashImage {
     pub block_erases: u64,
     pub write_enables: u64,
     pub status_reads: u64,
+    /// Every status-register write (`WRSR`), any controller, the 16-bit
+    /// value it wrote, in order. esp-storage's unlock writes one on a boot
+    /// that writes flash (keeping QE, clearing the protection bits); a core's
+    /// QIO switch must add none, and the gate that says so reads this.
+    pub status_written: Vec<u16>,
+    /// The part's identity and power-on status ([`FlashPart`]).
+    part: FlashPart,
     /// The power-cut plan and the powered-off latch
     /// ([`flash_cut`](super::flash_cut)). Inert unless a plan is armed.
     cutter: FlashCutter,
@@ -145,6 +158,60 @@ pub struct FlashImage {
     /// The in-range op census
     /// ([`flash_op_census`](super::flash_op_census)), when one was asked for.
     census: Option<FlashOpCensus>,
+}
+
+/// The part on the board, as far as a guest can ask it: the JEDEC
+/// manufacturer and memory-type bytes (the capacity byte is always the
+/// image's own size, [`FlashImage::jedec_id`]) and status register 2 as the
+/// part powers on — the non-volatile bits a factory set, such as QE.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlashPart {
+    pub manufacturer: u8,
+    pub memory_type: u8,
+    /// Status register 2 at power-on (bits 8..15 of the 16-bit status).
+    pub status2: u8,
+}
+
+impl FlashPart {
+    /// The mask ROM's own default chip (Winbond `0xef`, type `0x40`), status
+    /// clear. Every run that names no part.
+    pub const ROM_DEFAULT: Self = Self {
+        manufacturer: 0xef,
+        memory_type: 0x40,
+        status2: 0,
+    };
+    /// CX1's part, read on silicon 2026-10-17: JEDEC `46 40 16` (XMC's
+    /// second manufacturer code), SR2 `0x02` (QE set at the factory).
+    pub const CX1: Self = Self {
+        manufacturer: 0x46,
+        memory_type: 0x40,
+        status2: 0x02,
+    };
+    /// A Seeed XIAO ESP32-C6's part (CX2), read on silicon 2026-10-17: JEDEC
+    /// `20 40 16` (XMC), SR2 `0x02` (QE set at the factory).
+    pub const XIAO_C6: Self = Self {
+        manufacturer: 0x20,
+        memory_type: 0x40,
+        status2: 0x02,
+    };
+
+    /// `rom-default`, `cx1` or `xiao-c6`.
+    pub fn parse(name: &str) -> Result<Self, String> {
+        match name {
+            "rom-default" => Ok(Self::ROM_DEFAULT),
+            "cx1" => Ok(Self::CX1),
+            "xiao-c6" => Ok(Self::XIAO_C6),
+            other => Err(format!(
+                "unknown flash part `{other}`: expected rom-default, cx1 or xiao-c6"
+            )),
+        }
+    }
+}
+
+impl Default for FlashPart {
+    fn default() -> Self {
+        Self::ROM_DEFAULT
+    }
 }
 
 /// A flash image several owners hold: the flash controller executes commands
@@ -165,6 +232,8 @@ impl FlashImage {
             block_erases: 0,
             write_enables: 0,
             status_reads: 0,
+            status_written: Vec::new(),
+            part: FlashPart::ROM_DEFAULT,
             cutter: FlashCutter::default(),
             weak: FlashWeakBits::default(),
             census: None,
@@ -247,13 +316,27 @@ impl FlashImage {
     /// byte 0 manufacturer, byte 1 memory type, byte 2 capacity as
     /// `log2(bytes)`.
     ///
-    /// `0x0016_40ef` for a 4 MiB part. The manufacturer and type are the
-    /// ROM's own default chip; the capacity is this image's real size, so a
+    /// `0x0016_40ef` for a 4 MiB part on the default part. The manufacturer
+    /// and type are the [`FlashPart`]'s (the ROM's own default chip unless a
+    /// run named another); the capacity is this image's real size, so a
     /// `--flash` of another size is reported honestly rather than pretended
     /// about.
     pub fn jedec_id(&self) -> u32 {
         let capacity = u32::from(self.len().trailing_zeros() as u8);
-        0x0000_40ef | (capacity << 16)
+        u32::from(self.part.manufacturer)
+            | (u32::from(self.part.memory_type) << 8)
+            | (capacity << 16)
+    }
+
+    /// The part on the board.
+    pub fn part(&self) -> FlashPart {
+        self.part
+    }
+
+    /// Name the part. Before the controllers are built: their status latch
+    /// powers on from it ([`FlashEngine::new`]).
+    pub fn set_part(&mut self, part: FlashPart) {
+        self.part = part;
     }
 
     /// `len` bytes at `addr`, or `None` if the range leaves the chip.
@@ -750,12 +833,14 @@ struct EngineTiming {
 }
 
 impl FlashEngine {
-    /// An engine over `flash`, with a clear status register: nothing is in
-    /// progress and the write-enable latch is down.
+    /// An engine over `flash`, its status register as the part powers on:
+    /// nothing in progress, the write-enable latch down, and status register
+    /// 2 the part's own ([`FlashPart::status2`]).
     pub fn new(flash: FlashHandle) -> Self {
+        let status = u16::from(flash.lock().unwrap().part.status2) << 8;
         Self {
             flash,
-            status: 0,
+            status,
             timing: None,
             busy_until: 0,
             busy_command_noted: false,
@@ -904,6 +989,7 @@ impl FlashEngine {
                 FlashOutcome::Status(self.status | wip)
             }
             FlashOp::WriteStatus(value) => {
+                self.flash.lock().unwrap().status_written.push(value);
                 let enabled = self.status & SR_WEL != 0;
                 self.status = value & !SR_WIP;
                 self.status &= !SR_WEL;
@@ -1196,6 +1282,24 @@ mod tests {
         assert_eq!(1u32 << capacity, f.len());
         // The ROM's own default part, for comparison: 2 MiB, capacity 0x15.
         assert_eq!(FlashImage::blank(2 * 1024 * 1024).jedec_id(), 0x0015_40ef);
+    }
+
+    #[test]
+    fn a_named_part_answers_its_own_id_and_powers_on_with_its_status() {
+        let mut f = FlashImage::blank(CHIP_LEN);
+        f.set_part(FlashPart::CX1);
+        assert_eq!(f.jedec_id(), 0x0016_4046);
+        f.set_part(FlashPart::XIAO_C6);
+        assert_eq!(f.jedec_id(), 0x0016_4020);
+        let flash: FlashHandle = Arc::new(Mutex::new(f));
+        let engine = FlashEngine::new(flash.clone());
+        assert_eq!(engine.status(), 0x0200, "QE (SR2 bit 1) set, WIP/WEL clear");
+        assert!(flash.lock().unwrap().status_written.is_empty());
+        assert_eq!(FlashPart::parse("cx1"), Ok(FlashPart::CX1));
+        assert_eq!(FlashPart::parse("xiao-c6"), Ok(FlashPart::XIAO_C6));
+        assert_eq!(FlashPart::parse("rom-default"), Ok(FlashPart::ROM_DEFAULT));
+        assert!(FlashPart::parse("w25q").is_err());
+        assert_eq!(FlashPart::default(), FlashPart::ROM_DEFAULT);
     }
 
     #[test]

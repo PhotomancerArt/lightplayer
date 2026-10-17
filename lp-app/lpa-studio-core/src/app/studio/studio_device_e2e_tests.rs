@@ -9423,7 +9423,9 @@ fn a_board_that_formatted_offers_its_restore_and_its_update() {
     );
 
     // It runs a project here, then loses power and boots formatted again,
-    // empty.
+    // empty. (Push is offered once the card settles; on a slow runner that
+    // can come a tick after its Update.)
+    bench.wait_for_verb(&tasks, target, "push");
     bench.push_gesture(target, bundled_example());
     bench.run_until(&tasks, "the board to run what was pushed", |bench| {
         bench.view().devices.first().is_some_and(|card| {

@@ -50,8 +50,9 @@ impl FlashWindow {
             return false;
         }
         let src = (SCRATCH + (at - self.base)) as *const u8;
+        let done = copy_words(src, dest, len);
         // SAFETY: `src..src+len` is mapped flash; the caller owns `dest`.
-        for i in 0..len as usize {
+        for i in done..len as usize {
             unsafe { dest.add(i).write_volatile(src.add(i).read_volatile()) };
         }
         true
@@ -63,4 +64,27 @@ impl FlashWindow {
         // SAFETY: a local buffer.
         unsafe { self.copy(at, w.as_mut_ptr(), 4) }.then(|| u32::from_le_bytes(w))
     }
+}
+
+/// The bootloader flavour copies word-wise where both ends allow it (the
+/// core's RAM segments always do): a quarter of the bus reads, on the crystal
+/// clock that stage runs at. Bytes done.
+#[cfg(feature = "bootloader")]
+fn copy_words(src: *const u8, dest: *mut u8, len: u32) -> usize {
+    if (src as usize | dest as usize) % 4 != 0 {
+        return 0;
+    }
+    let words = len as usize / 4;
+    let (s, d) = (src as *const u32, dest as *mut u32);
+    for i in 0..words {
+        // SAFETY: as `FlashWindow::copy`, word-aligned.
+        unsafe { d.add(i).write_volatile(s.add(i).read_volatile()) };
+    }
+    words * 4
+}
+
+/// The factory flavour keeps the byte loop it shipped with.
+#[cfg(not(feature = "bootloader"))]
+fn copy_words(_: *const u8, _: *mut u8, _: u32) -> usize {
+    0
 }

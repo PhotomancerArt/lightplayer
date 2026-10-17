@@ -23,6 +23,11 @@
 //!   offer draws both disabled.
 //! - **Recent:** the first [`RECENT_CHOICES`], plus this Studio's own and
 //!   the board's own; the rest are found by typing in the offer's box.
+//! - **No tree-store build for a littlefs board.** A build whose
+//!   `requires.fsTree` is set mounts the tree store; a board whose hello
+//!   does not list `fs.tree` holds littlefs, and over the air that core
+//!   would meet files it cannot read. Such a build is never listed for it —
+//!   its files move over USB first (the card's own update offers that).
 
 use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
@@ -119,6 +124,9 @@ pub struct InstallChoiceInputs<'a> {
     pub link: UpdateLink,
     /// This Studio's wire protocol version (`lpc_wire::WIRE_PROTO_VERSION`).
     pub studio_wire_proto: u32,
+    /// The board's filesystem is the tree store (its hello lists
+    /// `fs.tree`).
+    pub board_tree_store: bool,
 }
 
 /// The release index for `target`, when the store listed that target's.
@@ -181,6 +189,9 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
             ..Found::of_build(file, false)
         });
     }
+    if !inputs.board_tree_store {
+        found.retain(|f| !f.needs_tree_store);
+    }
     found.sort_by(|a, b| {
         b.from_file
             .cmp(&a.from_file)
@@ -221,6 +232,7 @@ struct Found {
     from_file: bool,
     wire_proto: Option<u32>,
     published_at: Option<String>,
+    needs_tree_store: bool,
 }
 
 impl Found {
@@ -231,6 +243,7 @@ impl Found {
             from_file: false,
             wire_proto: Some(entry.wire_proto),
             published_at: entry.published_at.clone(),
+            needs_tree_store: entry.requires.fs_tree,
         }
     }
 
@@ -244,6 +257,7 @@ impl Found {
             from_file: false,
             wire_proto: Some(build.identity.wire_proto),
             published_at: None,
+            needs_tree_store: build.needs_tree_store,
         }
     }
 }
@@ -538,12 +552,36 @@ mod tests {
         assert!(!choices[1].is_pickable());
     }
 
+    /// AD3: a release (or this Studio's build) that mounts the tree store is
+    /// not a choice for a board on littlefs; for a board on the store it is.
+    #[test]
+    fn a_tree_store_build_is_never_a_choice_for_a_littlefs_board() {
+        let mut releases = releases(&["2026.10.20-1", "2026.10.06-10"]);
+        let mut entries = releases.index.releases.clone();
+        entries[0].requires.fs_tree = true;
+        releases.index =
+            ReleaseIndex::newest_first(&TargetName::parse("esp32c6-4mb").unwrap(), entries);
+        let board = UpdateVersion::new("2026.10.03-1");
+        let tree_own = studio_y().with_tree_store(true);
+        let mut on_littlefs = inputs(&board, None, Some(&releases));
+        on_littlefs.own = Some(&tree_own);
+        let choices = install_choices(&on_littlefs);
+        assert_eq!(versions(&choices), ["2026.10.06-10"]);
+        assert!(choices.iter().all(|c| !c.own));
+        let mut on_store = on_littlefs;
+        on_store.board_tree_store = true;
+        let choices = install_choices(&on_store);
+        assert!(versions(&choices).contains(&"2026.10.20-1"));
+        assert!(choices.iter().any(|c| c.own));
+    }
+
     fn inputs<'a>(
         board: &'a UpdateVersion,
         refused: Option<&'a UpdateVersion>,
         releases: Option<&'a StoreReleases>,
     ) -> InstallChoiceInputs<'a> {
         InstallChoiceInputs {
+            board_tree_store: false,
             board,
             target: "esp32c6-4mb",
             refused,
@@ -573,6 +611,7 @@ mod tests {
                 },
                 wire_proto: PROTO,
                 requires: Requires {
+                    fs_tree: false,
                     layout: 1,
                     loader: 1,
                 },

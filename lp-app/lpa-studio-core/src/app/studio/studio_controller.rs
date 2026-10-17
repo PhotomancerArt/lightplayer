@@ -1833,6 +1833,9 @@ impl StudioController {
                 store_releases: None,
                 store_lookups: None,
                 file_build: None,
+                // An automatic start waits for the hello: an unknown board
+                // is never started on its own.
+                board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1929,6 +1932,7 @@ impl StudioController {
             store_releases: self.update_build_facts.store_releases(),
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
+            board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -10328,6 +10332,26 @@ struct AgentStartProbe {
     journal: u64,
     /// What a push press sends, by name.
     push_project: Option<String>,
+}
+
+/// Whether the board's last hello listed `fs.tree` (its filesystem is the
+/// tree store) and did not hold its files for a migration: what lets a
+/// tree-store build go to it over the air. A held board's files are in an
+/// older littlefs that a core placed high in its app partition could write
+/// over; they move over USB first. A littlefs core holding a tree store
+/// (`TreeStoreHeld`, A5) is on the store: a core that reads it is what it
+/// needs.
+fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
+    use lpa_devices::wire::BoardFs;
+    // `None`: the board sent no hello — a core-only board waiting for its
+    // engine answers only on the update channel. The person's own offers do
+    // not hold it back (since the tree-store cutover such a board is almost
+    // always a tree board, and a tree core on a littlefs one holds its files
+    // for the USB migration, AD3); an automatic start waits for the hello.
+    let hello = evidence.classification.hello()?;
+    Some(
+        (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
+    )
 }
 
 /// The board a device press is aimed at, when it is one that changes what

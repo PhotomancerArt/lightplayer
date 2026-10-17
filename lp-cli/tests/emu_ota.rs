@@ -40,9 +40,10 @@ const NONCE: u32 = 0x07A0_0001;
 const PAD: u8 = 18;
 /// The engine-less board's sector to erase: the engine header's.
 const SECTOR: usize = 0x1000;
-/// Everything below `lpfs` (0x350000 in the C6 table): what a refusal must
+/// Everything below `lpfs` (0x380000 in the C6 table since the tree-store
+/// cutover): what a refusal must
 /// leave byte-identical.
-const BELOW_LPFS: usize = 0x35_0000;
+const BELOW_LPFS: usize = 0x38_0000;
 /// Steps (250 µs of emulated time each) a whole update may take.
 const UPDATE_STEPS: u64 = 1_600_000;
 
@@ -799,7 +800,7 @@ struct Image {
 
 impl Image {
     fn merged(&self) -> Vec<u8> {
-        std::fs::read(self.dir.join("merged.bin")).expect("merged.bin")
+        std::fs::read(self.dir.join(merged_name())).expect(merged_name())
     }
 
     fn engine(&self) -> Vec<u8> {
@@ -888,12 +889,25 @@ fn with_store(img: &Image) -> Vec<u8> {
     )
 }
 
+/// The merged image to boot: `merged.bin` (the build's own door — our
+/// bootloader, by default), or with `LP_BOOT_DOOR=idf` the same `app.bin`
+/// behind the ESP-IDF bootloader (`merged-idf.bin`), the door every board
+/// flashed before the cutover still boots through. The recipe runs the
+/// scenarios once per door.
+fn merged_name() -> &'static str {
+    match std::env::var("LP_BOOT_DOOR").as_deref() {
+        Ok("idf") => "merged-idf.bin",
+        Ok("lp") | Ok("") | Err(_) => "merged.bin",
+        Ok(other) => panic!("LP_BOOT_DOOR={other}: expected idf or lp"),
+    }
+}
+
 /// Boot `img` once with `lp-cli emu run --host-link <extra>` over a flash
 /// file and return the flash as it was left.
 fn seeded(img: &Image, extra: &[&str], exit_on: &str) -> Vec<u8> {
     let tmp = tempfile::tempdir().unwrap();
     let flash = tmp.path().join("chip.bin");
-    std::fs::copy(img.dir.join("merged.bin"), &flash).unwrap();
+    std::fs::copy(img.dir.join(merged_name()), &flash).unwrap();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
         .current_dir(repo)

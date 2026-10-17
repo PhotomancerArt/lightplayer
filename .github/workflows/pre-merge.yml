@@ -649,15 +649,16 @@ jobs:
               - '.github/workflows/pre-merge.yml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
+              - 'lp-fw/fw-esp32c6/src/tree_flash.rs'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
               - 'lp-fw/builds/esp32c6-4mb.json'
-              - 'lp-fw/fw-esp32c6/src/flash_storage.rs'
-              - 'lp-fw/fw-esp32c6/src/legacy_layout.rs'
               - 'lp-fw/fw-esp32-common/src/lp_fs.rs'
               - 'lp-fw/fw-esp32-common/src/hardware/manifest_loader.rs'
               - 'lp-core/lpc-wire/src/server/fs_boot_state.rs'
               - 'lp-app/lpa-link/src/layout_migration/**'
               - 'lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv'
+              - 'lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv'
+              - 'lp-app/lpa-link/src/provider/fs_kind.rs'
               - 'lp-app/lpa-link/src/provider/partition_table.rs'
               - 'lp-app/lpa-link/src/provider/flash_plan.rs'
               - 'lp-app/lpa-link/src/provider/flash_region.rs'
@@ -2889,8 +2890,10 @@ jobs:
     # Measured on PR #997 (2026-10-06): ~1 min setup, ~6 min release lp-cli
     # test tree, ~1 min firmware, ~4.3 min frag reads + LED seam + split boot
     # (the split build included) — ~12 min. 30 is ~2.5x; re-measure before
-    # tightening.
-    timeout-minutes: 30
+    # tightening. The tree-store cutover's default switch (2026-10-17) added a
+    # pinned reference image (the fielded littlefs board,
+    # `ReferenceImage::FIELDED_LITTLEFS`) built cold in its own worktree: 40.
+    timeout-minutes: 40
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
@@ -2906,10 +2909,14 @@ jobs:
           sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
+      # fetch-depth: 0 for the pinned fielded littlefs image
+      # (`emu_littlefs_on_tree_store.rs`), which build-reference-image.sh
+      # builds at its commit in a detached worktree — as emu-c6 does.
       - name: Checkout lp2025
         uses: actions/checkout@v4
         with:
           path: lp2025
+          fetch-depth: 0
 
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
@@ -2986,7 +2993,10 @@ jobs:
     # 5m23s release lp-cli test tree, 1m17s fw-esp32c6, 28m40s for the four
     # scenarios (W10's migration alone ~13 min) — 1.8x the M2 Max's 16 min.
     # 60 is headroom for a cold cache; re-measure before tightening.
-    timeout-minutes: 60
+    # The tree-store cutover (A6, 2026-10-16) added five scenarios — 12m17s on
+    # the M2 Max, so ~22 min here — plus a split fs-tree build on the tree
+    # table and the pinned fielded image's build on a cold cache: 100.
+    timeout-minutes: 100
     needs: detect-changes
     if: needs.detect-changes.outputs.c6_layout == 'true'
     env:
