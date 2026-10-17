@@ -346,6 +346,12 @@ fn object_bounds(o: &Object) -> Rect {
             let r = Vec2::new(*radius, *radius);
             vec![*center - r, *center + r]
         }
+        ObjectShape::Rings { center, radii } => {
+            let outer = radii.iter().copied().fold(0.0, f64::max);
+            let r = Vec2::new(outer, outer);
+            vec![*center - r, *center + r]
+        }
+        ObjectShape::Filled { outline } => outline.clone(),
     };
     Rect::around(shape.into_iter().chain(o.lamps.iter().map(|l| l.pos)))
         .unwrap_or(Rect::new(Vec2::default(), Vec2::default()))

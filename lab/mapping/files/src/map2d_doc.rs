@@ -2,13 +2,13 @@
 //! canvas and its objects, in wiring order. A copy of the shapes in
 //! `lpc-mapping`'s `map2d_doc.rs`, not an import (the fence).
 //!
-//! The lab reads the shapes it models into components — a path (points,
-//! count, `reversed`, `gaps`), a polygon, a repeat of either, and a ring
-//! with one ring of lamps from 12 o'clock (one ring of a lab circle) — and
-//! refuses the rest (grids, filled polygons, multi-ring rings) with a
-//! reason, rather than opening a fixture with lamps missing.
-//! [`unsupported_shape`] names what a document holds that the lab can't,
-//! so its fixture can open as its box alone.
+//! The lab reads every shape the product has into a component: a path
+//! (points, count, `reversed`, `gaps`), a polygon, a repeat, a ring of one
+//! ring from 12 o'clock (one ring of a lab circle), and, whole (plan M4), a
+//! grid, a ring of several rings (a ring set) and a filled polygon. A shape
+//! it has never heard of is refused with a reason, rather than opening a
+//! fixture with lamps missing: [`unsupported_shape`] names it, so its
+//! fixture can open as its box alone.
 //!
 //! Every object keeps its JSON. Writing one back starts from it and changes
 //! only what the lab changed, so a field the lab knows nothing about
@@ -21,6 +21,9 @@
 //! other than `on` 4).
 
 use lab_mapping_model::domain::component::Ring;
+use lab_mapping_model::domain::filled_polygon::FilledPolygon;
+use lab_mapping_model::domain::grid::{Grid, Routing, StartCorner};
+use lab_mapping_model::domain::ring_set::RingSet;
 use lab_mapping_model::{ComponentKind, Vec2};
 use serde_json::{Map, Value};
 
@@ -96,8 +99,8 @@ impl Map2dDoc {
     }
 }
 
-/// What in a document the lab can't hold yet, in a word or two (`grid`,
-/// `filled polygon`, `ring of several rings`): the first such shape, or
+/// What in a document the lab can't hold, in a word or two (a shape the
+/// product grew that this copy doesn't know): the first such shape, or
 /// `None` when it can hold every one. A document that isn't a mapping at
 /// all is not this question's: [`Map2dDoc::parse`] says what's wrong.
 pub fn unsupported_shape(text: &str) -> Option<String> {
@@ -112,12 +115,8 @@ pub fn unsupported_shape(text: &str) -> Option<String> {
 fn unsupported_in(shape: &Value) -> Option<String> {
     let (tag, s) = tagged(shape).ok()?;
     match tag {
-        "path" | "polygon" => None,
+        "path" | "polygon" | "ring" | "grid" | "filled_polygon" => None,
         "repeat" => s.get("shape").and_then(unsupported_in),
-        "ring" => ring_of(s)
-            .is_err()
-            .then(|| "ring of several rings".to_string()),
-        "filled_polygon" => Some("filled polygon".into()),
         other => Some(other.replace('_', " ")),
     }
 }
@@ -165,9 +164,130 @@ fn kind_of(shape: &Value) -> Result<ComponentKind, String> {
                 count: count(s)?,
             })
         }
-        "ring" => ring_of(s),
+        "ring" => ring_of(s).or_else(|_| ring_set_of(s)),
+        "grid" => grid_of(s),
+        "filled_polygon" => Ok(ComponentKind::Filled(FilledPolygon {
+            points: points(s)?,
+            pitch: s.get("pitch").and_then(f32_of).ok_or("no pitch")?,
+            angle_deg: s.get("angle_deg").and_then(f32_of).unwrap_or(0.0),
+            offset: s
+                .get("origin")
+                .and_then(read_point)
+                .map_or(Vec2::default(), |(x, y)| Vec2::new(x, y)),
+            routing: routing_of(s)?,
+            start_corner: corner_of(s)?,
+        })),
         other => Err(format!("the lab can't open {other} shapes yet")),
     }
+}
+
+/// A product grid, whole.
+fn grid_of(s: &Value) -> Result<ComponentKind, String> {
+    let (x, y) = s
+        .get("origin")
+        .and_then(read_point)
+        .ok_or("a grid has no origin")?;
+    Ok(ComponentKind::Grid(Grid {
+        origin: Vec2::new(x, y),
+        cols: s.get("cols").and_then(u32_of).ok_or("a grid has no cols")?,
+        rows: s.get("rows").and_then(u32_of).ok_or("a grid has no rows")?,
+        pitch: s
+            .get("pitch")
+            .and_then(f32_of)
+            .ok_or("a grid has no pitch")?,
+        routing: routing_of(s)?,
+        start_corner: corner_of(s)?,
+    }))
+}
+
+/// A product ring the lab's circle can't say (several rings on one strand,
+/// counts of their own, lamp 0 away from 12 o'clock): a ring set, whole.
+fn ring_set_of(s: &Value) -> Result<ComponentKind, String> {
+    let (x, y) = s
+        .get("center")
+        .and_then(read_point)
+        .ok_or("a ring has no center")?;
+    let inner_first = match s.get("order").and_then(Value::as_str) {
+        None | Some("outer_first") => false,
+        Some("inner_first") => true,
+        Some(other) => {
+            return Err(format!(
+                "a ring's order is outer_first or inner_first, not {other}"
+            ));
+        }
+    };
+    Ok(ComponentKind::RingSet(RingSet {
+        center: Vec2::new(x, y),
+        radius: s
+            .get("radius")
+            .and_then(f32_of)
+            .ok_or("a ring has no radius")?,
+        outer_lamps: s
+            .get("outer_count")
+            .and_then(u32_of)
+            .ok_or("a ring has no outer_count")?,
+        rings: s.get("rings").and_then(u32_of).unwrap_or(1),
+        counts: s
+            .get("counts")
+            .and_then(Value::as_array)
+            .map(|c| c.iter().filter_map(u32_of).collect())
+            .unwrap_or_default(),
+        inner_first,
+        start_angle_deg: s.get("start_angle_deg").and_then(f32_of).unwrap_or(-90.0),
+        reversed: s.get("dir").and_then(Value::as_str) == Some("ccw"),
+    }))
+}
+
+fn routing_of(s: &Value) -> Result<Routing, String> {
+    match s.get("routing").and_then(Value::as_str) {
+        None | Some("snake") => Ok(Routing::Snake),
+        Some("raster") => Ok(Routing::Raster),
+        Some(other) => Err(format!("routing is snake or raster, not {other}")),
+    }
+}
+
+fn corner_of(s: &Value) -> Result<StartCorner, String> {
+    match s.get("start_corner").and_then(Value::as_str) {
+        None | Some("tl") => Ok(StartCorner::TopLeft),
+        Some("tr") => Ok(StartCorner::TopRight),
+        Some("bl") => Ok(StartCorner::BottomLeft),
+        Some("br") => Ok(StartCorner::BottomRight),
+        Some(other) => Err(format!("start_corner is tl, tr, bl or br, not {other}")),
+    }
+}
+
+fn routing_word(r: Routing) -> &'static str {
+    match r {
+        Routing::Snake => "snake",
+        Routing::Raster => "raster",
+    }
+}
+
+fn corner_word(c: StartCorner) -> &'static str {
+    match c {
+        StartCorner::TopLeft => "tl",
+        StartCorner::TopRight => "tr",
+        StartCorner::BottomLeft => "bl",
+        StartCorner::BottomRight => "br",
+    }
+}
+
+/// Write a lattice's routing and start corner: kept when the shape had
+/// them, written when they aren't the default (the product's grid always
+/// carries both; its newer shapes leave defaults off).
+fn set_lattice(s: &mut Map<String, Value>, routing: Routing, corner: StartCorner) {
+    let had = s.contains_key("routing");
+    set(
+        s,
+        "routing",
+        (had || routing != Routing::Snake).then(|| routing_word(routing).into()),
+    );
+    let had = s.contains_key("start_corner");
+    set(
+        s,
+        "start_corner",
+        (had || corner != StartCorner::TopLeft).then(|| corner_word(corner).into()),
+    );
 }
 
 /// A product ring the lab can hold: one ring of lamps, lamp 0 at
@@ -293,6 +413,96 @@ pub fn shape_of(old: Option<&Value>, kind: &ComponentKind, ring: usize) -> Resul
                 (had || r.reversed).then(|| if r.reversed { "ccw" } else { "cw" }.into()),
             );
             ("ring", s)
+        }
+        ComponentKind::Grid(g) => {
+            let mut s = old_inner("grid");
+            let old_origin = s.get("origin").cloned();
+            s.insert(
+                "origin".into(),
+                point_f32(old_origin.as_ref(), g.origin.x, g.origin.y),
+            );
+            s.insert("cols".into(), g.cols.into());
+            s.insert("rows".into(), g.rows.into());
+            let old_pitch = s.get("pitch").cloned();
+            s.insert("pitch".into(), num_f32(old_pitch.as_ref(), g.pitch));
+            set_lattice(&mut s, g.routing, g.start_corner);
+            ("grid", s)
+        }
+        ComponentKind::RingSet(r) => {
+            let mut s = old_inner("ring");
+            let old_center = s.get("center").cloned();
+            s.insert(
+                "center".into(),
+                point_f32(old_center.as_ref(), r.center.x, r.center.y),
+            );
+            let old_radius = s.get("radius").cloned();
+            s.insert("radius".into(), num_f32(old_radius.as_ref(), r.radius));
+            s.insert("outer_count".into(), r.outer_lamps.into());
+            let had = s.contains_key("rings");
+            set(
+                &mut s,
+                "rings",
+                (had || r.rings != 1).then(|| r.rings.into()),
+            );
+            let had = s.contains_key("counts");
+            set(
+                &mut s,
+                "counts",
+                (had || !r.counts.is_empty()).then(|| r.counts.clone().into()),
+            );
+            let had = s.contains_key("order");
+            set(
+                &mut s,
+                "order",
+                (had || r.inner_first).then(|| {
+                    if r.inner_first {
+                        "inner_first"
+                    } else {
+                        "outer_first"
+                    }
+                    .into()
+                }),
+            );
+            let old_start = s.get("start_angle_deg").cloned();
+            set(
+                &mut s,
+                "start_angle_deg",
+                (old_start.is_some() || r.start_angle_deg != -90.0)
+                    .then(|| num_f32(old_start.as_ref(), r.start_angle_deg)),
+            );
+            let had = s.contains_key("dir");
+            set(
+                &mut s,
+                "dir",
+                (had || r.reversed).then(|| if r.reversed { "ccw" } else { "cw" }.into()),
+            );
+            ("ring", s)
+        }
+        ComponentKind::Filled(f) => {
+            let mut s = old_inner("filled_polygon");
+            let old_points = s.get("points").cloned();
+            s.insert(
+                "points".into(),
+                points_f32(old_points.as_ref(), f.points.iter().map(|p| (p.x, p.y))),
+            );
+            let old_pitch = s.get("pitch").cloned();
+            s.insert("pitch".into(), num_f32(old_pitch.as_ref(), f.pitch));
+            let old_angle = s.get("angle_deg").cloned();
+            set(
+                &mut s,
+                "angle_deg",
+                (old_angle.is_some() || f.angle_deg != 0.0)
+                    .then(|| num_f32(old_angle.as_ref(), f.angle_deg)),
+            );
+            let old_origin = s.get("origin").cloned();
+            set(
+                &mut s,
+                "origin",
+                (old_origin.is_some() || f.offset != Vec2::default())
+                    .then(|| point_f32(old_origin.as_ref(), f.offset.x, f.offset.y)),
+            );
+            set_lattice(&mut s, f.routing, f.start_corner);
+            ("filled_polygon", s)
         }
         ComponentKind::Group { .. } => return Err("a group is not one shape".into()),
     };

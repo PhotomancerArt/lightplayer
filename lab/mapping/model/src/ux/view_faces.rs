@@ -89,10 +89,12 @@ impl Editor {
                 ui_object(o, emphasis, frame)
             })
             .collect();
-        let not_shown = p
-            .fixture(id)
-            .and_then(|f| f.unsupported.as_ref())
-            .map(|what| format!("This fixture's {what} isn't on the Graph yet — use Map"));
+        let not_shown = p.fixture(id).and_then(|f| f.unsupported.as_ref()).map(|u| {
+            format!(
+                "The Graph can't show {} yet. Edit it in {}.",
+                u.what, u.edit_in
+            )
+        });
         let working = cx.open.contains(id)
             || self.selection.contains(&Target::Node(id.clone()))
             || self.tool != Tool::Select;
@@ -213,15 +215,7 @@ impl Editor {
 /// fixture's own by `origin`.
 pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, frame: Frame) -> UiObject {
     let local = |v: Vec2| frame.to_local(v);
-    let shape = match &o.shape {
-        ObjectShape::Polyline { points } => {
-            UiShape::Polyline(points.iter().map(|p| local(*p)).collect())
-        }
-        ObjectShape::Ring { center, radius } => UiShape::Ring {
-            center: local(*center),
-            radius: radius / frame.scale,
-        },
-    };
+    let shape = ui_shape(&o.shape, local, |r| r / frame.scale);
     // Only the first two lamps matter here: where the data enters, and
     // which way a ring runs.
     let lamps: Vec<Vec2> = o.lamps.iter().take(2).map(|l| local(l.pos)).collect();
@@ -234,13 +228,40 @@ pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, frame: Frame) -> UiObjec
     }
 }
 
+/// A drawn shape as the page draws it: `point` moves a point, `length` a
+/// radius, into the face's (or the screen's) units.
+pub(crate) fn ui_shape(
+    shape: &ObjectShape,
+    point: impl Fn(Vec2) -> Vec2,
+    length: impl Fn(f64) -> f64,
+) -> UiShape {
+    match shape {
+        ObjectShape::Polyline { points } => {
+            UiShape::Polyline(points.iter().map(|p| point(*p)).collect())
+        }
+        ObjectShape::Ring { center, radius } => UiShape::Ring {
+            center: point(*center),
+            radius: length(*radius),
+        },
+        ObjectShape::Rings { center, radii } => UiShape::Rings {
+            center: point(*center),
+            radii: radii.iter().map(|r| length(*r)).collect(),
+        },
+        ObjectShape::Filled { outline } => {
+            UiShape::Outline(outline.iter().map(|p| point(*p)).collect())
+        }
+    }
+}
+
 /// Where a small arrow shows which way the data runs: halfway along a
 /// path, just after the top on a ring (between its first two lamps). A
 /// point and a unit direction.
 pub(crate) fn direction_arrow(shape: &UiShape, lamps: &[Vec2]) -> Option<(Vec2, Vec2)> {
     let (at, dir) = match shape {
         UiShape::Polyline(points) => along_polyline(points, polyline_length(points) / 2.0)?,
-        UiShape::Ring { .. } => match lamps {
+        // A ring's, a ring set's and a lattice's: between the first two
+        // lamps.
+        UiShape::Ring { .. } | UiShape::Rings { .. } | UiShape::Outline(_) => match lamps {
             [first, second, ..] => (first.lerp(*second, 0.5), *second - *first),
             _ => return None,
         },

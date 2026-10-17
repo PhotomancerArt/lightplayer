@@ -33,11 +33,21 @@ pub struct Fixture {
     /// The visual channel whose render product it samples (the product's
     /// `bindings.input.source`).
     pub reads: Channel,
-    /// What in its drawing the lab can't hold yet (`grid`, `filled
-    /// polygon`, `ring of several rings`), when it holds one. Such a
-    /// fixture opens as its box alone: nothing is drawn in it, nothing can
-    /// be drawn into it or resized, and its files are never written.
-    pub unsupported: Option<String>,
+    /// What about it the lab can't hold yet, when there is something.
+    /// Such a fixture opens as its box alone: nothing is drawn in it,
+    /// nothing can be drawn into it or resized, and its files are never
+    /// written. The rest of the project opens round it (plan M4).
+    pub unsupported: Option<Unsupported>,
+}
+
+/// Why a fixture opens as its box alone, and where it can be edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unsupported {
+    /// What the lab can't hold, as a noun phrase for a sentence: "its
+    /// point-list mapping", "a patch row that places part of an object".
+    pub what: String,
+    /// The view that edits it, by the name the user sees it under.
+    pub edit_in: String,
 }
 
 impl Fixture {

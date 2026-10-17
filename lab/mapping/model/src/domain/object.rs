@@ -50,6 +50,38 @@ pub enum ObjectShape {
         center: Vec2,
         radius: f64,
     },
+    /// A ring set's rings, outer first: one object, several circles.
+    Rings {
+        center: Vec2,
+        radii: Vec<f64>,
+    },
+    /// A closed outline whose inside is the object too: a grid's box, a
+    /// filled polygon's outline.
+    Filled {
+        outline: Vec<Vec2>,
+    },
+}
+
+impl ObjectShape {
+    /// The shape turned by `turn`: a repeat's copy.
+    pub fn turned(&self, turn: &Rotation) -> ObjectShape {
+        match self {
+            ObjectShape::Polyline { points } => ObjectShape::Polyline {
+                points: points.iter().map(|p| turn.apply(*p)).collect(),
+            },
+            ObjectShape::Ring { center, radius } => ObjectShape::Ring {
+                center: turn.apply(*center),
+                radius: *radius,
+            },
+            ObjectShape::Rings { center, radii } => ObjectShape::Rings {
+                center: turn.apply(*center),
+                radii: radii.clone(),
+            },
+            ObjectShape::Filled { outline } => ObjectShape::Filled {
+                outline: outline.iter().map(|p| turn.apply(*p)).collect(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +99,9 @@ pub fn objects_of(component: &Component) -> Vec<Object> {
 /// it: a path or a polygon is its own object.
 pub const PATH_KEY: &str = "path";
 pub const POLYGON_KEY: &str = "polygon";
+pub const GRID_KEY: &str = "grid";
+pub const RINGS_KEY: &str = "rings";
+pub const FILLED_KEY: &str = "filled";
 
 fn objects_of_kind(id: &ComponentId, kind: &ComponentKind) -> Vec<Object> {
     match kind {
@@ -130,21 +165,35 @@ fn objects_of_kind(id: &ComponentId, kind: &ComponentKind) -> Vec<Object> {
                                 pos: turn.apply(l.pos),
                             })
                             .collect(),
-                        shape: match &o.shape {
-                            ObjectShape::Polyline { points } => ObjectShape::Polyline {
-                                points: points.iter().map(|p| turn.apply(*p)).collect(),
-                            },
-                            ObjectShape::Ring { center, radius } => ObjectShape::Ring {
-                                center: turn.apply(*center),
-                                radius: *radius,
-                            },
-                        },
+                        shape: o.shape.turned(&turn),
                     });
                 }
             }
             out
         }
         ComponentKind::Group { .. } => Vec::new(),
+        ComponentKind::Grid(grid) => vec![Object {
+            id: ObjectId::new(id, GRID_KEY),
+            lamps: lamps_at(resolve::grid_lamps(grid)),
+            shape: ObjectShape::Filled {
+                outline: grid.outline(),
+            },
+        }],
+        ComponentKind::RingSet(set) => vec![Object {
+            id: ObjectId::new(id, RINGS_KEY),
+            lamps: lamps_at(resolve::ring_set_lamps(set)),
+            shape: ObjectShape::Rings {
+                center: set.center,
+                radii: set.radii(),
+            },
+        }],
+        ComponentKind::Filled(filled) => vec![Object {
+            id: ObjectId::new(id, FILLED_KEY),
+            lamps: lamps_at(resolve::filled_polygon_lamps(filled)),
+            shape: ObjectShape::Filled {
+                outline: filled.points.clone(),
+            },
+        }],
     }
 }
 

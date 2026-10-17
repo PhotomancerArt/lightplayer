@@ -473,6 +473,14 @@ impl Project {
                     points: points.iter().map(|p| screen(*p)).collect(),
                     pad: PATH_PAD_PX,
                 }),
+                ObjectShape::Rings { center, radii } => Some(Area::hull(
+                    &[screen(*center)],
+                    radii.iter().copied().fold(0.0, f64::max) * camera.scale + CIRCLE_PAD_PX,
+                )),
+                ObjectShape::Filled { outline } => Some(Area::hull(
+                    &outline.iter().map(|p| screen(*p)).collect::<Vec<_>>(),
+                    PATH_PAD_PX,
+                )),
             },
             Target::Component(id) => {
                 let c = self.component(id)?;
@@ -505,6 +513,18 @@ impl Project {
                                     ring.extend(ring.first().copied());
                                     ring
                                 }
+                                ObjectShape::Rings { center, radii } => {
+                                    let outer = radii.iter().copied().fold(0.0, f64::max);
+                                    let mut ring =
+                                        ring_points(screen(*center), outer * camera.scale);
+                                    ring.extend(ring.first().copied());
+                                    ring
+                                }
+                                ObjectShape::Filled { outline } => outline
+                                    .iter()
+                                    .chain(outline.first())
+                                    .map(|p| screen(*p))
+                                    .collect(),
                             })
                             .collect(),
                         pad: PATH_PAD_PX,
@@ -514,13 +534,31 @@ impl Project {
                             * camera.scale;
                         Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))
                     }
+                    // A whole object (plan M4): its object's area, inside
+                    // and all.
+                    ComponentKind::Grid(_)
+                    | ComponentKind::RingSet(_)
+                    | ComponentKind::Filled(_) => {
+                        let o = self.objects_of(id).next()?;
+                        self.area(camera, &Target::Object(o.id.clone()))
+                    }
                     ComponentKind::Group { .. } => {
                         let mut points: Vec<Vec2> =
                             self.lamps_under(t).into_iter().map(screen).collect();
                         // Circles inside a group count by their whole disc.
                         for o in self.objects_under(id) {
-                            if let ObjectShape::Ring { center, radius } = o.shape {
-                                points.extend(ring_points(screen(center), radius * camera.scale));
+                            match &o.shape {
+                                ObjectShape::Ring { center, radius } => points
+                                    .extend(ring_points(screen(*center), radius * camera.scale)),
+                                ObjectShape::Rings { center, radii } => {
+                                    let outer = radii.iter().copied().fold(0.0, f64::max);
+                                    points
+                                        .extend(ring_points(screen(*center), outer * camera.scale))
+                                }
+                                ObjectShape::Filled { outline } => {
+                                    points.extend(outline.iter().map(|p| screen(*p)))
+                                }
+                                ObjectShape::Polyline { .. } => {}
                             }
                         }
                         (!points.is_empty()).then(|| Area::hull(&points, GROUP_PAD_PX))

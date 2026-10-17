@@ -5,7 +5,7 @@
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
-use crate::ux::ui::{OutlineKind, UiDraftObject, UiHandle, UiOutline, UiOverlay, UiShape};
+use crate::ux::ui::{OutlineKind, UiDraftObject, UiHandle, UiOutline, UiOverlay};
 use crate::ux::view_faces::direction_arrow;
 
 impl Editor {
@@ -78,19 +78,11 @@ impl Editor {
                 objects
                     .iter()
                     .map(|o| {
-                        let shape = match &o.shape {
-                            crate::domain::object::ObjectShape::Polyline { points } => {
-                                UiShape::Polyline(
-                                    points.iter().map(|q| cam.to_screen(*q)).collect(),
-                                )
-                            }
-                            crate::domain::object::ObjectShape::Ring { center, radius } => {
-                                UiShape::Ring {
-                                    center: cam.to_screen(*center),
-                                    radius: radius * cam.scale,
-                                }
-                            }
-                        };
+                        let shape = crate::ux::view_faces::ui_shape(
+                            &o.shape,
+                            |q| cam.to_screen(q),
+                            |r| r * cam.scale,
+                        );
                         let lamps: Vec<(Vec2, bool)> = o
                             .lamps
                             .iter()

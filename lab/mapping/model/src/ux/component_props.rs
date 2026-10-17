@@ -8,6 +8,7 @@
 
 use crate::domain::component::{ComponentKind, Ring};
 use crate::domain::fixture::Fixture;
+use crate::domain::grid::Routing;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
@@ -79,6 +80,59 @@ pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     reshapes: false,
 };
 
+pub const COLUMNS: PropDesc = PropDesc {
+    id: "columns",
+    label: "Columns",
+    kind: PropKind::Count { min: 1 },
+    nudge: false,
+    reshapes: true,
+};
+pub const ROWS: PropDesc = PropDesc {
+    id: "rows",
+    label: "Rows",
+    kind: PropKind::Count { min: 1 },
+    nudge: false,
+    reshapes: true,
+};
+/// Lamp to lamp, in a grid or a filled polygon.
+pub const PITCH: PropDesc = PropDesc {
+    id: "pitch",
+    label: "Spacing",
+    kind: PropKind::Number {
+        min: 0.1,
+        step: 0.5,
+    },
+    nudge: false,
+    reshapes: true,
+};
+/// A lattice's rows run back and forth (on) or all the same way (off).
+pub const SNAKE: PropDesc = PropDesc {
+    id: "snake",
+    label: "Snake",
+    kind: PropKind::Flag,
+    nudge: false,
+    reshapes: false,
+};
+/// A ring set wires its inner ring first.
+pub const INNER_FIRST: PropDesc = PropDesc {
+    id: "inner-first",
+    label: "Inner ring first",
+    kind: PropKind::Flag,
+    nudge: false,
+    reshapes: false,
+};
+/// A filled polygon's lattice, turned inside its outline.
+pub const ANGLE: PropDesc = PropDesc {
+    id: "angle",
+    label: "Angle",
+    kind: PropKind::Number {
+        min: -360.0,
+        step: 5.0,
+    },
+    nudge: false,
+    reshapes: true,
+};
+
 impl Project {
     /// The properties of one target, with its values, in display order.
     pub fn props_of(&self, t: &Target) -> Vec<(PropDesc, PropRaw)> {
@@ -113,6 +167,27 @@ impl Project {
                         COUNTER_CLOCKWISE,
                         PropRaw::Flag(!rings.is_empty() && rings.iter().all(|r| r.reversed)),
                     ),
+                ],
+                Some(ComponentKind::Grid(g)) => vec![
+                    (COLUMNS, PropRaw::Count(g.cols as i64)),
+                    (ROWS, PropRaw::Count(g.rows as i64)),
+                    (PITCH, PropRaw::Number(g.pitch)),
+                    (SNAKE, PropRaw::Flag(g.routing == Routing::Snake)),
+                ],
+                // The outer ring's lamps; the inner rings' follow by
+                // circumference, as in the product.
+                Some(ComponentKind::RingSet(r)) => vec![
+                    (LAMPS, PropRaw::Count(r.outer_lamps as i64)),
+                    (RINGS, PropRaw::Count(r.rings as i64)),
+                    (RADIUS, PropRaw::Number(r.radius)),
+                    (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
+                    (INNER_FIRST, PropRaw::Flag(r.inner_first)),
+                ],
+                // Its lamp count is however many cells the outline holds.
+                Some(ComponentKind::Filled(f)) => vec![
+                    (PITCH, PropRaw::Number(f.pitch)),
+                    (ANGLE, PropRaw::Number(f.angle_deg)),
+                    (SNAKE, PropRaw::Flag(f.routing == Routing::Snake)),
                 ],
                 _ => Vec::new(),
             },
@@ -188,6 +263,27 @@ impl Project {
                     (Some(ComponentKind::Circle { rings, .. }), "ccw", PropRaw::Flag(v)) => {
                         rings.iter_mut().for_each(|r| r.reversed = v)
                     }
+                    (Some(ComponentKind::Grid(g)), _, new) => match (prop_id, new) {
+                        ("columns", PropRaw::Count(n)) => g.cols = n as u32,
+                        ("rows", PropRaw::Count(n)) => g.rows = n as u32,
+                        ("pitch", PropRaw::Number(v)) => g.pitch = v,
+                        ("snake", PropRaw::Flag(v)) => g.routing = routing(v),
+                        _ => return false,
+                    },
+                    (Some(ComponentKind::RingSet(r)), _, new) => match (prop_id, new) {
+                        ("lamps", PropRaw::Count(n)) => r.outer_lamps = n as u32,
+                        ("rings", PropRaw::Count(n)) => r.rings = n as u32,
+                        ("radius", PropRaw::Number(v)) => r.radius = v,
+                        ("ccw", PropRaw::Flag(v)) => r.reversed = v,
+                        ("inner-first", PropRaw::Flag(v)) => r.inner_first = v,
+                        _ => return false,
+                    },
+                    (Some(ComponentKind::Filled(f)), _, new) => match (prop_id, new) {
+                        ("pitch", PropRaw::Number(v)) => f.pitch = v,
+                        ("angle", PropRaw::Number(v)) => f.angle_deg = v,
+                        ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
+                        _ => return false,
+                    },
                     _ => return false,
                 }
             }
@@ -232,6 +328,14 @@ impl Project {
             ComponentKind::Circle { rings, .. } => rings.iter_mut().find(|r| r.key == key),
             _ => None,
         }
+    }
+}
+
+fn routing(snake: bool) -> Routing {
+    if snake {
+        Routing::Snake
+    } else {
+        Routing::Raster
     }
 }
 
