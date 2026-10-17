@@ -18,10 +18,10 @@ use lpa_devices::view::{ActivityView, DeviceView, LoadedProject};
 use super::board_card_input::BoardCardInput;
 use super::held_board::{HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE};
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
-use crate::app::devices::age_words::age_words;
 use crate::app::devices::device_card_feed_view::{DeviceCardFeedView, FeedLiveness};
 use crate::app::devices::device_firmware_face::firmware_face_preview_sentence;
 use crate::app::devices::ui_link_kind::UiLinkKind;
+use crate::core::data_kinds::age_words;
 
 /// The picture's words on a board nothing has unlocked: it is locked, and
 /// Unlock (the card's primary) is the way in.

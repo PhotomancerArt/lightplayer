@@ -471,13 +471,13 @@ mod tests {
     fn up_to_date() {
         let words = says(
             &UpdateStanding::UpToDate { version: y() },
-            "2026.10.05-2 · up to date",
-            "2026.10.05-2, the same as this Studio.",
+            "v2026.10.05-2 · up to date",
+            "v2026.10.05-2, the same as this Studio.",
             None,
             "Ready",
         );
         assert_eq!(words.kind, UpdateRowKind::Information);
-        assert_eq!(words.version.text, "2026.10.05-2");
+        assert_eq!(words.version.text, "v2026.10.05-2");
         assert_eq!(words.version.commit.as_deref(), Some("626a1b8"));
     }
 
@@ -488,13 +488,13 @@ mod tests {
                 board: x(),
                 to: y(),
             },
-            "2026.10.03-1 → 2026.10.05-2 available",
-            "Update available: 2026.10.03-1 → 2026.10.05-2.",
+            "v2026.10.03-1 → v2026.10.05-2 available",
+            "Update available: v2026.10.03-1 → v2026.10.05-2.",
             None,
             "Ready",
         );
         assert_eq!(
-            words.version.text, "2026.10.03-1",
+            words.version.text, "v2026.10.03-1",
             "the header names the board's"
         );
         // A dev board.
@@ -503,8 +503,8 @@ mod tests {
                 board: UpdateVersion::new("5eb70a7c2"),
                 to: y(),
             },
-            "dev 5eb70a7 · Studio has 2026.10.05-2",
-            "This board runs dev build 5eb70a7; this Studio has 2026.10.05-2.",
+            "dev 5eb70a7 · Studio has v2026.10.05-2",
+            "This board runs dev build 5eb70a7; this Studio has v2026.10.05-2.",
             None,
             "Ready",
         );
@@ -548,7 +548,7 @@ mod tests {
                 },
                 "Updating · 1 of 2 · 40%",
                 &format!(
-                    "Updating to 2026.10.05-2 over {word}: the new firmware first. Keep the board \
+                    "Updating to v2026.10.05-2 over {word}: the new firmware first. Keep the board \
                      powered."
                 ),
                 Some(UpdateLight::DarkYellow),
@@ -603,7 +603,7 @@ mod tests {
                 running: true,
             },
             "Restoring · 35%",
-            "Restoring firmware 2026.10.03-1… 35%. Part of it was missing; this Studio had a copy.",
+            "Restoring firmware v2026.10.03-1… 35%. Part of it was missing; this Studio had a copy.",
             Some(UpdateLight::DarkYellow),
             "Restoring firmware",
         );
@@ -615,7 +615,7 @@ mod tests {
                 running: false,
             },
             "Restoring",
-            "Restoring firmware 2026.10.03-1… Part of it was missing; this Studio had a copy.",
+            "Restoring firmware v2026.10.03-1… Part of it was missing; this Studio had a copy.",
             Some(UpdateLight::DarkYellow),
             "Restoring firmware",
         );
@@ -630,7 +630,7 @@ mod tests {
                 percent: Some(40),
             },
             "Another device is updating it · 40%",
-            "Another device is updating this board to 2026.10.05-2… 40%. If it stops, this \
+            "Another device is updating this board to v2026.10.05-2… 40%. If it stops, this \
              Studio finishes it.",
             Some(UpdateLight::DarkYellow),
             "Updating",
@@ -659,8 +659,8 @@ mod tests {
     fn keeps_crashing() {
         says(
             &UpdateStanding::KeepsCrashing { board: y() },
-            "2026.10.05-2 keeps crashing",
-            "2026.10.05-2 keeps crashing on this board, so it stopped trying. Reinstall it, or \
+            "v2026.10.05-2 keeps crashing",
+            "v2026.10.05-2 keeps crashing on this board, so it stopped trying. Reinstall it, or \
              install another version.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
@@ -672,9 +672,9 @@ mod tests {
         let v = UpdateVersion::new("2026.09.28-4");
         says(
             &UpdateStanding::CantGetVersion { board: v, own: y() },
-            "Needs 2026.09.28-4, which Studio can't get",
-            "This board needs 2026.09.28-4 to start, and this Studio can't get it. Connect to the \
-             internet, or install 2026.10.05-2 instead.",
+            "Needs v2026.09.28-4, which Studio can't get",
+            "This board needs v2026.09.28-4 to start, and this Studio can't get it. Connect to the \
+             internet, or install v2026.10.05-2 instead.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
         );
@@ -685,7 +685,7 @@ mod tests {
             },
             "Needs dev 5eb70a7, which Studio can't get",
             "This board needs dev build 5eb70a7 to start, and this Studio can't get it. Connect \
-             to the internet, or install 2026.10.05-2 instead.",
+             to the internet, or install v2026.10.05-2 instead.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
         );
@@ -698,8 +698,8 @@ mod tests {
                 board: x(),
                 refused: y(),
             },
-            "Back on 2026.10.03-1 · the update didn't start",
-            "The update to 2026.10.05-2 didn't start, so the board went back to 2026.10.03-1.",
+            "Back on v2026.10.03-1 · the update didn't start",
+            "The update to v2026.10.05-2 didn't start, so the board went back to v2026.10.03-1.",
             None,
             "Ready",
         );
@@ -712,8 +712,8 @@ mod tests {
                 board: UpdateVersion::new("2026.10.07-4"),
                 own: y(),
             },
-            "2026.10.07-4 · newer than this Studio",
-            "2026.10.07-4 is newer than this Studio (2026.10.05-2). Reload Studio to catch up.",
+            "v2026.10.07-4 · newer than this Studio",
+            "v2026.10.07-4 is newer than this Studio (v2026.10.05-2). Reload Studio to catch up.",
             None,
             "Ready",
         );
@@ -726,8 +726,8 @@ mod tests {
                 board: x(),
                 to: y(),
             },
-            "2026.10.03-1 → 2026.10.05-2 available",
-            "Update available: 2026.10.03-1 → 2026.10.05-2. Installing it needs the author \
+            "v2026.10.03-1 → v2026.10.05-2 available",
+            "Update available: v2026.10.03-1 → v2026.10.05-2. Installing it needs the author \
              password.",
             None,
             "Ready",
@@ -753,32 +753,32 @@ mod tests {
             (
                 "2026.10.05-2",
                 "2026.10.05-2",
-                "2026.10.05-2",
-                "2026.10.05-2 · up to date",
+                "v2026.10.05-2",
+                "v2026.10.05-2 · up to date",
             ),
             (
                 "2026.10.03-1",
                 "2026.10.05-2",
-                "2026.10.03-1",
-                "2026.10.03-1 → 2026.10.05-2 available",
+                "v2026.10.03-1",
+                "v2026.10.03-1 → v2026.10.05-2 available",
             ),
             (
                 "2026.10.07-4",
                 "2026.10.05-2",
-                "2026.10.07-4",
-                "2026.10.07-4 · newer than this Studio",
+                "v2026.10.07-4",
+                "v2026.10.07-4 · newer than this Studio",
             ),
             (
                 "5eb70a7c2",
                 "2026.10.05-2",
                 "dev 5eb70a7",
-                "dev 5eb70a7 · Studio has 2026.10.05-2",
+                "dev 5eb70a7 · Studio has v2026.10.05-2",
             ),
             (
                 "5eb70a7-dirty-142233PT",
                 "2026.10.05-2",
                 "dev 5eb70a7 (modified)",
-                "dev 5eb70a7 (modified) · Studio has 2026.10.05-2",
+                "dev 5eb70a7 (modified) · Studio has v2026.10.05-2",
             ),
             (
                 "5eb70a7c2",
@@ -795,14 +795,14 @@ mod tests {
             (
                 "2026.10.03-1",
                 "626a1b851",
-                "2026.10.03-1",
-                "2026.10.03-1 · this Studio is dev 626a1b8",
+                "v2026.10.03-1",
+                "v2026.10.03-1 · this Studio is dev 626a1b8",
             ),
             (
                 "2026.12.31-146",
                 "2026.12.31-147",
-                "2026.12.31-146",
-                "2026.12.31-146 → 2026.12.31-147 available",
+                "v2026.12.31-146",
+                "v2026.12.31-146 → v2026.12.31-147 available",
             ),
         ];
         let view = ready_view();
@@ -832,7 +832,7 @@ mod tests {
         };
         let up = session(&UpdateStanding::UpToDate { version: y() });
         assert_eq!(up.run_word, None, "the popover's own \"running\" stands");
-        assert_eq!(up.stat_line, "esp32c6 · 2026.10.05-2 · 60:55:f9:0a:0b:0c");
+        assert_eq!(up.stat_line, "esp32c6 · v2026.10.05-2 · 60:55:f9:0a:0b:0c");
 
         let available = session(&UpdateStanding::Available {
             board: x(),
@@ -847,7 +847,7 @@ mod tests {
         );
         assert_eq!(
             available.stat_line,
-            "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.03-1 → v2026.10.05-2 · 60:55:f9:0a:0b:0c"
         );
 
         let updating = session(&UpdateStanding::Updating {
@@ -865,7 +865,7 @@ mod tests {
         );
         assert_eq!(
             updating.stat_line,
-            "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.03-1 → v2026.10.05-2 · 60:55:f9:0a:0b:0c"
         );
 
         let crashing = session(&UpdateStanding::KeepsCrashing { board: y() });
@@ -878,7 +878,7 @@ mod tests {
         );
         assert_eq!(
             crashing.stat_line,
-            "esp32c6 · 2026.10.05-2 keeps crashing · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.05-2 keeps crashing · 60:55:f9:0a:0b:0c"
         );
     }
 

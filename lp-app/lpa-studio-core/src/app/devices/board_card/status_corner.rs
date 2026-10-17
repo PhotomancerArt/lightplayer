@@ -16,8 +16,8 @@ use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
-use crate::app::devices::age_words::age_words;
 use crate::app::devices::device_card_feed_view::FeedLiveness;
+use crate::core::data_kinds::age_words;
 use crate::{RichLine, RichObjectView, RichSection, RichWeight, UiStatusKind};
 
 /// A board's status corner, read off its finished bars.

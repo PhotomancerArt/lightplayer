@@ -44,7 +44,7 @@ pub fn activity_words(activity: &ActivityView) -> String {
         false => activity.label.clone(),
     };
     if let Some(percent) = activity.percent {
-        text.push_str(&format!(" · {}%", u32::from(percent).min(100)));
+        text.push_str(&format!(" · {}", crate::percent(u32::from(percent))));
     }
     text
 }

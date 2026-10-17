@@ -22,7 +22,7 @@ use super::device_flash::{FirmwareVerb, firmware_verb};
 use super::device_layout_step::LayoutStaging;
 use super::device_start_fresh_op::DeviceStartFreshOp;
 use super::devices_op::DevicesOp;
-use crate::{ActionConfirmation, OfferPath, UiAction, UiOffer, UiOfferTree};
+use crate::{ActionConfirmation, OfferPath, UiAction, UiOffer, UiOfferTree, byte_size, date_words};
 
 /// `devices/<board>/continue-update`: the question's Continue.
 pub const CONTINUE_UPDATE: &str = "continue-update";
@@ -363,7 +363,7 @@ pub fn device_layout_view(
             Some(entry) => format!(
                 "This board's files are gone. This browser kept a backup from {}: Restore files \
                  puts them back. Or Start fresh, and the board waits for a new project.",
-                date(entry.captured_at_epoch_seconds)
+                date_words(entry.captured_at_epoch_seconds)
             ),
             None => "This board's files are gone. Restore them from a backup file if you have \
                      one. Or Start fresh, and the board waits for a new project."
@@ -389,7 +389,7 @@ pub fn device_layout_view(
                 .with_summary(format!(
                     "Write the firmware and put the files backed up on {} back on this board. \
                      It replaces what is on the board now.",
-                    date(entry.captured_at_epoch_seconds)
+                    date_words(entry.captured_at_epoch_seconds)
                 ))
                 // Lasting (D7): it writes over the board's filesystem.
                 .lasting(ActionConfirmation::new(
@@ -397,7 +397,7 @@ pub fn device_layout_view(
                     format!(
                         "Whatever is on the board now is replaced by the files backed up on {}. \
                          The backup stays in this browser.",
-                        date(entry.captured_at_epoch_seconds)
+                        date_words(entry.captured_at_epoch_seconds)
                     ),
                     "restore",
                 )),
@@ -462,7 +462,7 @@ fn question_panel(
                         "Studio saved a backup of this board's {files} files ({}) in this \
                          browser, and now rewrites the board. It takes about a minute. Keep it \
                          plugged in.",
-                        size(*bytes)
+                        byte_size(*bytes)
                     ),
                     tight.then(|| {
                         "The board will be nearly full afterwards: less than a quarter of its \
@@ -475,7 +475,7 @@ fn question_panel(
                     format!(
                         "This update rewrites the board and moves its {files} files ({}). It \
                          takes about a minute. Keep it plugged in.",
-                        size(*bytes)
+                        byte_size(*bytes)
                     ),
                     Some(
                         "This browser could not keep a backup. Download it first — then \
@@ -507,8 +507,8 @@ fn question_panel(
             body: format!(
                 "Studio puts back the {files} files ({}) it saved from this board on {}, \
                  replacing what is on it now. It takes about a minute. Keep it plugged in.",
-                size(*bytes),
-                date(*captured_at as f64)
+                byte_size(*bytes),
+                date_words(*captured_at as f64)
             ),
             warning: None,
             download,
@@ -526,31 +526,6 @@ fn question_panel(
             cancel,
         },
     }
-}
-
-/// `"1.5 KB"`, `"704 KB"`.
-fn size(bytes: u64) -> String {
-    if bytes < 10 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} KB", bytes / 1024)
-    }
-}
-
-/// `"Oct 1"` (UTC) from epoch seconds.
-fn date(epoch_secs: f64) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let days = (epoch_secs as i64).div_euclid(86_400);
-    let z = days + 719_468;
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!("{} {day}", MONTHS[(month - 1) as usize])
 }
 
 #[cfg(test)]
@@ -603,13 +578,6 @@ mod tests {
             !body.contains("704 KB"),
             "never a byte room the test did not use: {body}"
         );
-    }
-
-    #[test]
-    fn dates_and_sizes_read_naturally() {
-        assert_eq!(date(1_800_000_000.0), "Jan 15");
-        assert_eq!(size(1536), "1.5 KB");
-        assert_eq!(size(720_896), "704 KB");
     }
 
     /// The backup is offered on the boot that formatted AND on any later

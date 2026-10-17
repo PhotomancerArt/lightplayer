@@ -323,11 +323,13 @@ pub fn blocked_erase_action(device: DeviceId, reason: &str) -> UiAction {
     DevicesOp::action_for(Action::Erase { device }).disabled(reason)
 }
 
-/// The auto-derived device name: `"<board display_name> · <Mon D>"`, with
-/// the ` 2`, ` 3` collision suffix against names already on the roster.
-/// (Yona's ruling: date + type, no naming step; rename later via `SetName`.)
-pub fn derive_flash_name(board_display: &str, epoch_secs: f64, taken: &[String]) -> String {
-    let base = format!("{board_display} · {}", month_day_label(epoch_secs));
+/// The auto-derived device name: the board's display name ("XIAO
+/// ESP32-C6"), with the ` 2`, ` 3` collision suffix against names already
+/// on the roster. No naming step; rename later via `SetName`. (Yona's O5,
+/// 2026-10-16: no date — "· Oct 11" read as a time; two boards of one model
+/// get a number.)
+pub fn derive_flash_name(board_display: &str, taken: &[String]) -> String {
+    let base = board_display.to_string();
     if !taken.iter().any(|name| name == &base) {
         return base;
     }
@@ -356,33 +358,6 @@ pub fn taken_device_titles(devices: &[DeviceView], naming: DeviceId) -> Vec<Stri
         .filter(|device| device.id != naming)
         .map(|device| device.title.clone())
         .collect()
-}
-
-/// "Aug 30" from epoch seconds (UTC). A tiny civil-date conversion beats a
-/// chrono dependency for one label; the algorithm is the standard
-/// days-from-epoch one (Howard Hinnant's `civil_from_days`).
-fn month_day_label(epoch_secs: f64) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let days = (epoch_secs.max(0.0) as i64) / 86_400;
-    let (_, month, day) = civil_from_days(days);
-    format!("{} {day}", MONTHS[(month - 1) as usize])
-}
-
-/// (year, month 1-12, day 1-31) from days since 1970-01-01.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = if month <= 2 { year + 1 } else { year };
-    (year, month, day)
 }
 
 #[cfg(test)]
@@ -458,22 +433,21 @@ mod tests {
         );
     }
 
+    /// O5: a new board is named after its model, with no date; a second of
+    /// the same model gets a number.
     #[test]
-    fn derived_names_stamp_the_date_and_dodge_collisions() {
-        // 2026-08-30 12:00 UTC (20_695 days + noon).
-        let at = 1_788_091_200.0;
+    fn derived_names_are_the_model_and_dodge_collisions() {
         assert_eq!(
-            derive_flash_name("Seeed XIAO ESP32-C6", at, &[]),
-            "Seeed XIAO ESP32-C6 · Aug 30"
+            derive_flash_name("Seeed XIAO ESP32-C6", &[]),
+            "Seeed XIAO ESP32-C6"
         );
-
         let taken = vec![
-            "Seeed XIAO ESP32-C6 · Aug 30".to_string(),
-            "Seeed XIAO ESP32-C6 · Aug 30 2".to_string(),
+            "Seeed XIAO ESP32-C6".to_string(),
+            "Seeed XIAO ESP32-C6 2".to_string(),
         ];
         assert_eq!(
-            derive_flash_name("Seeed XIAO ESP32-C6", at, &taken),
-            "Seeed XIAO ESP32-C6 · Aug 30 3"
+            derive_flash_name("Seeed XIAO ESP32-C6", &taken),
+            "Seeed XIAO ESP32-C6 3"
         );
     }
 
@@ -481,8 +455,7 @@ mod tests {
     /// back: the card's own title is not a collision.
     #[test]
     fn naming_a_card_again_is_a_fixed_point() {
-        let at = 1_788_091_200.0;
-        let base = "Seeed XIAO ESP32-C6 · Aug 30".to_string();
+        let base = "Seeed XIAO ESP32-C6".to_string();
         let mut named = running_view(None, None, FirmwareFace::Unknown);
         named.title = base.clone();
         let mut neighbour = running_view(None, None, FirmwareFace::Unknown);
@@ -492,26 +465,16 @@ mod tests {
 
         let taken = taken_device_titles(&cards, named.id);
         assert_eq!(taken, vec!["Porch sign".to_string()]);
-        let again = derive_flash_name("Seeed XIAO ESP32-C6", at, &taken);
+        let again = derive_flash_name("Seeed XIAO ESP32-C6", &taken);
         assert_eq!(again, base, "a card never collides with itself");
         assert_eq!(
             derive_flash_name(
                 "Seeed XIAO ESP32-C6",
-                at,
                 &taken_device_titles(&cards, DeviceId(9))
             ),
-            "Seeed XIAO ESP32-C6 · Aug 30 2",
+            "Seeed XIAO ESP32-C6 2",
             "another card still dodges it"
         );
-    }
-
-    #[test]
-    fn the_civil_date_conversion_is_correct_at_the_edges() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        // 2000-02-29 (leap): 11_016 days after epoch.
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-        // 2026-12-31.
-        assert_eq!(civil_from_days(20_818), (2026, 12, 31));
     }
 
     /// The re-flash verb never guesses: the registered board wins, a lone

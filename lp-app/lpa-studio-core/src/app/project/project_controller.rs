@@ -1893,7 +1893,7 @@ impl ProjectController {
             .map(|node| node.label().to_string())
             .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string());
         let detail = match entry.body_len() {
-            Some(len) => asset_body_size_display(len),
+            Some(len) => crate::byte_size(len as u64),
             None => "deleted".to_string(),
         };
         let phase = if entry.summary.failed > 0 {
@@ -9079,8 +9079,8 @@ impl ProjectController {
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
             let reason = format!(
-                "asset too large to send (limit {} KB)",
-                MAX_ASSET_BODY_BYTES / 1024
+                "asset too large to send (limit {})",
+                crate::byte_size(MAX_ASSET_BODY_BYTES as u64)
             );
             let notice = format!(
                 "Edit on {} was not sent: {reason}",
@@ -10011,15 +10011,6 @@ fn asset_edit_keys(
     }
 }
 
-/// Human-readable byte size for an asset body row ("824 B", "3.2 KB").
-fn asset_body_size_display(len: usize) -> String {
-    if len < 1024 {
-        format!("{len} B")
-    } else {
-        format!("{:.1} KB", len as f64 / 1024.0)
-    }
-}
-
 /// Human-readable slot path for a change-list entry: the path display, or
 /// the root's name for root-path edits (an empty path renders nothing).
 fn slot_path_display(address: &ProjectSlotAddress) -> String {
@@ -10524,7 +10515,7 @@ fn project_editor_stats(
         }
         stats.push(UiMetric::new("Buffers", runtime.runtime_buffer_count));
         if let Some(free_bytes) = runtime.free_bytes {
-            stats.push(UiMetric::new("Memory free", format_bytes(free_bytes)));
+            stats.push(UiMetric::new("Memory free", crate::byte_size(free_bytes)));
         }
     }
     stats
@@ -10536,14 +10527,6 @@ fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
         ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 {
-        format!("{} KB", bytes / 1024)
-    } else {
-        format!("{bytes} B")
     }
 }
 

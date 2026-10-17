@@ -3432,11 +3432,10 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
             .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
         "{card:?}"
     );
-    // Auto-name: "<board display_name> · <Mon D>" (bench clock = epoch
-    // second 1000 = Jan 1), no naming step anywhere.
+    // Auto-name: the board's display name (O5: no date), no naming step
+    // anywhere.
     assert_eq!(
-        card.title,
-        format!("{} · Jan 1", choice.title),
+        card.title, choice.title,
         "the derived name is the card's title"
     );
 
@@ -4383,7 +4382,7 @@ const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
 /// back to the saved record and reach Ready, the board's later frames must
 /// land on it (on main they landed on the neighbour as `IdentityConflict`s,
 /// and the card never reached Ready), and the auto-name must be written ONCE
-/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" (a dated name, before O5) every settle for as
 /// long as the page was open, because each `SetName` aimed at the C6's id
 /// renamed the neighbour instead.
 #[test]
@@ -4437,7 +4436,7 @@ fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
     let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
     assert_eq!(desk.state_label, "Ready", "{desk:?}");
     assert!(
-        desk.title.ends_with(&month_day_of(&bench)),
+        !desk.title.is_empty() && !desk.title.ends_with(" 2"),
         "named once, without a collision suffix: {:?}",
         desk.title
     );
@@ -4550,12 +4549,6 @@ fn journal_lines(bench: &DeviceBench) -> Vec<String> {
         .entries()
         .map(|entry| format!("{entry:?}"))
         .collect()
-}
-
-/// The "<Mon D>" the auto-name ends with on the bench's clock.
-fn month_day_of(bench: &DeviceBench) -> String {
-    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
-    derived.trim_start_matches("x · ").to_string()
 }
 
 // ---------------------------------------------------------------------
@@ -6275,7 +6268,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
     );
     assert_eq!(
         bench.view().devices[0].title,
-        format!("{} · Jan 1", users.title),
+        users.title,
         "named after the user's board"
     );
     let card = app_cards(&mut bench).remove(0);

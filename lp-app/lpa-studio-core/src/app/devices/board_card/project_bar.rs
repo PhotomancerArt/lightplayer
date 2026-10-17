@@ -42,10 +42,10 @@ use super::ui_bar_work::BarWorkState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
-use crate::app::devices::age_words::age_words;
 use crate::app::devices::board_plays::BoardPlays;
 use crate::app::devices::connect_offer::{NO_PROJECT, PROJECT_NOT_KNOWN};
 use crate::app::devices::device_push_offer::PUSH_SOURCE_PARAM;
+use crate::core::data_kinds::age_words;
 use crate::{OfferArgs, RichLine, UiStatusKind};
 
 /// The words a degraded board's fault leads with, which the bar drops.

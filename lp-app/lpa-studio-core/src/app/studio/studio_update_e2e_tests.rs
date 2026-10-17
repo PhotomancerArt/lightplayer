@@ -126,11 +126,11 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     bench.run_until("the backup let go on the new version", |bench| {
         !bench.held(&x())
     });
-    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over USB"));
-    assert!(bench.said("backup of 2026.10.05-1 already here · no read-back"));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over USB"));
+    assert!(bench.said("backup of v2026.10.05-1 already here · no read-back"));
     assert!(!bench.said("backing up current firmware from the board"));
     assert!(bench.said_starting("board reset · reconnected in "));
-    assert!(bench.said_starting("core 25 KB in "));
+    assert!(bench.said_starting("core 24 KB in "));
     assert!(matches!(
         bench.standing(device),
         UpdateStanding::UpToDate { .. }
@@ -194,7 +194,7 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
     bench.assert_runs(&y());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(over_bluetooth, "the card said Bluetooth");
-    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over Bluetooth"));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over Bluetooth"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -237,7 +237,7 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
     bench.assert_runs(&y_late());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(over_wifi, "the card said Wi‑Fi");
-    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
+    assert!(bench.said("update v2026.10.09-1 → v2026.10.09-2 over Wi\u{2011}Fi"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -284,7 +284,7 @@ fn an_update_through_the_relay_comes_back_by_itself_across_each_reset_and_ends_o
     bench.assert_runs(&y_late());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(through_relay, "the card's update rode the relay");
-    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
+    assert!(bench.said("update v2026.10.09-1 → v2026.10.09-2 over Wi\u{2011}Fi"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -454,7 +454,7 @@ fn update_x_to_y_with_no_cached_backup_reads_it_back_keeps_and_pins_it() {
     });
     assert!(bench.cached(&x()), "the backup stays in the cache");
     assert!(bench.said("backing up current firmware from the board"));
-    assert!(bench.said_starting("backup 33 KB in "));
+    assert!(bench.said_starting("backup 32 KB in "));
 }
 
 /// The link drops mid-core and stays away past the update's gap: the
@@ -490,7 +490,7 @@ fn a_link_drop_mid_core_finishes_on_reconnect_with_no_click() {
     bench.assert_runs(&y());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert_eq!(bench.presses, presses, "no click");
-    assert!(bench.said("board is half-way to 2026.10.06-1 · finishing it"));
+    assert!(bench.said("board is half-way to v2026.10.06-1 · finishing it"));
 }
 
 /// A board that lost its engine, plugged in (a pending link: a core-only
@@ -527,7 +527,7 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     bench.assert_runs(&x());
     assert_eq!(bench.presses, 0, "no click");
     assert!(!bench.board().saw(b'L'), "no login");
-    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+    assert!(bench.said("board is missing its v2026.10.05-1 engine · restoring it"));
 }
 
 /// The same engine-less board on the LAN (OTA M8): core-only serves its
@@ -568,7 +568,7 @@ fn an_engineless_board_on_wifi_is_restored_on_connect_from_the_cache() {
     });
     bench.assert_runs(&x());
     assert_eq!(bench.presses, 0, "no click");
-    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+    assert!(bench.said("board is missing its v2026.10.05-1 engine · restoring it"));
 }
 
 /// The same board with its engine nowhere (no cache, no store): E13's row,
@@ -581,7 +581,7 @@ fn an_engineless_board_whose_engine_is_nowhere_ends_on_e13_and_does_not_loop() {
     bench.run_until("the restore to miss", |bench| {
         bench.any_outcome() == Some(UpdateOutcomeFacts::MissingEngine { offline: true })
     });
-    assert!(bench.said("no copy of 2026.10.05-1 here, and the release store is unreachable"));
+    assert!(bench.said("no copy of v2026.10.05-1 here, and the release store is unreachable"));
     bench.steps(4_000);
 
     assert_eq!(bench.update_starts, 1, "one restore, no loop");
@@ -817,7 +817,7 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
     bench.clock.set(bench.clock.get() + crate::DONE_SHOWS_SECS);
     let after = firmware_bar(&bench, device);
     assert_eq!(after.work, None);
-    assert_eq!(after.summary, "2026.10.06-1", "the version alone");
+    assert_eq!(after.summary, "v2026.10.06-1", "the version alone");
     assert_eq!(after.tone, crate::UiStatusKind::Neutral);
 }
 
@@ -873,7 +873,7 @@ fn reinstall_on_a_crashing_board_writes_its_engine_once() {
         boots + 1,
         "written once, reset once"
     );
-    assert!(bench.said("writing 2026.10.05-1 again over USB"));
+    assert!(bench.said("writing v2026.10.05-1 again over USB"));
 }
 
 /// E13 on a known board, then "Install Y": the board waits for an engine
@@ -974,7 +974,7 @@ fn other_version_installs_a_newer_release_at_one_press_and_an_older_one_armed() 
     assert_eq!(copy.title, "Install an older version?");
     assert!(
         copy.message
-            .contains("2026.10.05-1 is older than what this board runs")
+            .contains("v2026.10.05-1 is older than what this board runs")
             && copy
                 .message
                 .contains("It also speaks an older language than this Studio"),

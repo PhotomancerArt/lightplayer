@@ -57,10 +57,10 @@ use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiBarMark, UiStackBar};
-use crate::app::devices::age_words::age_words;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::devices::wifi_connects::UiWifiConnect;
 use crate::app::network::WifiTone;
+use crate::core::data_kinds::age_words;
 use crate::{ActionConsequence, RichLine, UiStatusKind};
 
 /// The busy notice's words: another device holds the board's one network

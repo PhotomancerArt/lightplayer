@@ -47,9 +47,9 @@ use super::held_board::held_primary;
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use crate::app::devices::age_words::duration_words;
 use crate::app::devices::connect_offer::NO_PROJECT;
 use crate::app::devices::ui_link_kind::UiLinkKind;
+use crate::core::data_kinds::duration_words;
 use crate::{ActionEnablement, OfferPath, UiOffer};
 
 /// The primary's word, and the connection bar's work, while a Connect is

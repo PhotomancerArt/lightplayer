@@ -237,7 +237,7 @@ fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
             call_turn(
                 "r1",
                 lpa_agent::READ_TOOL_NAME,
-                json!({ "name": "XIAO ESP32-C6 \u{b7} Jan 1", "what": "device" }),
+                json!({ "name": "XIAO ESP32-C6", "what": "device" }),
             ),
             act_turn(
                 "p1",

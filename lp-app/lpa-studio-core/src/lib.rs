@@ -18,6 +18,11 @@ pub mod app;
 pub mod controller;
 pub mod core;
 
+pub use self::core::data_kinds::{
+    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_words, byte_size,
+    date_words, duration_words, firmware_label_version, firmware_version, percent, percent_of,
+    pre_ota_version,
+};
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
@@ -97,10 +102,7 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
-pub use app::devices::{
-    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
-    duration_words,
-};
+pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,

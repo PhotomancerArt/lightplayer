@@ -681,7 +681,7 @@ mod tests {
     fn a_crashing_board_offers_reinstall() {
         let mut fixture = story(UpdateFixtureRow::KeepsCrashing);
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "2026.10.03-1 keeps crashing");
+        assert_eq!(bar.summary, "v2026.10.03-1 keeps crashing");
         assert_eq!(bar.tone, UiStatusKind::Attention);
         let reinstall = bar.action.clone().expect("Reinstall");
         assert_eq!(reinstall.word, "Reinstall");
@@ -712,7 +712,7 @@ mod tests {
         let bar = firmware_bar(&fixture.input());
         assert_eq!(bar.tone, UiStatusKind::Attention);
         let install = bar.action.expect("Install <own>");
-        assert_eq!(install.word, "Install 2026.10.05-2");
+        assert_eq!(install.word, "Install v2026.10.05-2");
         assert!(install.offer.to_string().ends_with("/install-firmware"));
 
         let mut listed = story(UpdateFixtureRow::CantGetVersion);
@@ -743,7 +743,7 @@ mod tests {
     fn the_update_line_sets_the_version_apart() {
         let mut fixture = story(UpdateFixtureRow::Available);
         let bar = firmware_bar(&fixture.input());
-        assert_eq!(bar.summary, "2026.10.03-1");
+        assert_eq!(bar.summary, "v2026.10.03-1");
         assert!(!bar.summary.contains('→'));
         assert!(!bar.summary.contains("a0:f2"));
         assert_eq!(bar.tone, UiStatusKind::Live, "blue: an update is offered");
@@ -751,8 +751,8 @@ mod tests {
         assert_eq!(update.word, "Update");
         assert_eq!(update.draw, UiActionDraw::Press);
         assert!(update.offer.to_string().ends_with("/update-firmware"));
-        assert_eq!(line(&bar, "Newest").as_deref(), Some("2026.10.05-2"));
-        assert_eq!(line(&bar, "Version").as_deref(), Some("2026.10.03-1"));
+        assert_eq!(line(&bar, "Newest").as_deref(), Some("v2026.10.05-2"));
+        assert_eq!(line(&bar, "Version").as_deref(), Some("v2026.10.03-1"));
         assert_eq!(line(&bar, "Commit").as_deref(), Some("a41c9e2"));
         assert!(
             line(&bar, "Build").is_some_and(|build| build.starts_with("2026.10.03-1+")),
