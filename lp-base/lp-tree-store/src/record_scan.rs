@@ -147,6 +147,19 @@ pub fn scan_sector<F: Flash>(
             HeaderRead::Unknown { len } => (len, None),
             HeaderRead::Record(r) => (r.len, Some(r)),
         };
+        #[cfg(feature = "mutants")]
+        if let (Some(r), Some(ix), true) =
+            (record, index.as_mut(), mutant!(MountIndexTakesUntrusted))
+            && !ix.push(
+                r.id,
+                RecordLoc {
+                    sector: s,
+                    offset: off,
+                },
+            )
+        {
+            *index = None;
+        }
         let root = record.filter(|r| r.kind == RecordKind::Root);
         let total = RECORD_HEADER_LEN + u32::from(len);
         if off + total > size {

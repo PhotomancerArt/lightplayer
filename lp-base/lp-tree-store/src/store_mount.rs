@@ -181,15 +181,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut filter = SectorFilter::new(self.log.sector_count);
         // Each reading builds its own: the whole one may trust less of a
         // sector than the fast one did (`mount_index.rs`).
-        #[cfg(feature = "mutants")]
-        let kept = if full && mutant!(MountIndexKeptAcrossReadings) {
-            self.fast_index.take()
-        } else {
-            None
-        };
-        #[cfg(not(feature = "mutants"))]
-        let kept = None;
-        let mut index = kept.or_else(|| MountIndex::new(self.cfg.mount_index_max));
+        let mut index = MountIndex::new(self.cfg.mount_index_max);
         for s in valid.iter().map(|&s| u32::from(s)) {
             // `newest` leaves out a closed newest sector: checked as closed.
             let settle = newest.contains(&Some(s));
@@ -235,10 +227,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 Err(StoreError::Corrupt(_)) => continue,
                 Err(e) => return Err(e),
             }
-        }
-        #[cfg(feature = "mutants")]
-        if !full {
-            self.fast_index = index;
         }
         Ok(None)
     }

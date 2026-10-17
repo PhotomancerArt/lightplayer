@@ -91,10 +91,6 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// `mutants`: a flush that computes ids and writes nothing.
     #[cfg(feature = "mutants")]
     pub(crate) dry: bool,
-    /// `mutants`: the fast reading's mount index, for a whole reading that
-    /// wrongly reuses it.
-    #[cfg(feature = "mutants")]
-    pub(crate) fast_index: Option<crate::mount_index::MountIndex>,
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
@@ -381,8 +377,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             refused: None,
             #[cfg(feature = "mutants")]
             dry: false,
-            #[cfg(feature = "mutants")]
-            fast_index: None,
         }
     }
 
