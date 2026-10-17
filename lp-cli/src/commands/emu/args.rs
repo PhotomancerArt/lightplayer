@@ -64,6 +64,10 @@ pub enum Grade {
     /// The kernel-measured class costs, plus the flash cache's fills and the
     /// APB's wait states.
     T3,
+    /// `t3`, plus the flash interface's time: SPI transfers at the SCK and
+    /// line widths the registers give, the part's write-in-progress busy
+    /// time for programs and erases, and register-derived cache fills.
+    T4,
 }
 
 /// A run's pace (`lp_emu_esp_common::seam::net::lan_pace`): whether the

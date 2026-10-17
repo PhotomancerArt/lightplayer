@@ -728,6 +728,64 @@ pub fn seed_rom_flash_chip(bus: &mut SocBus, chip_size: u32) -> Option<(u32, u32
     Some((chip, chip_size))
 }
 
+/// The flash interface as the second-stage bootloader leaves it, for an
+/// image header's flash mode — what a direct load sets at `t4`, the grade
+/// whose time follows these registers ([`crate::flash_timing`]). At `t1`–`t3`
+/// a direct load leaves them at reset, as it always has: their instruction
+/// counts are pinned, and the ROM's read path branches on `ctrl`.
+///
+/// MEASURED: each row is what a `--trace SPI0,SPI1,PCR` of a ROM-up boot
+/// shows the mask ROM and espflash's bundled IDF bootloader (v5.1-beta1)
+/// leaving, with the header patched to that mode and re-sealed. The header's
+/// *speed* moves nothing here: for 20, 40 and 80 MHz alike the bootloader
+/// leaves `mspi_clk_conf = 0x500` and `clock = 0x8000_0000` — an 80 MHz SCK
+/// once the CPU is on the PLL (`sysclk_conf = 0x2801_0200`, also the
+/// bootloader's).
+///
+/// `mode` is the header's byte 2 (0 QIO, 1 QOUT, 2 DIO, 3 DOUT); anything else
+/// is DIO, espflash's default. Returns the mode it set.
+pub fn seed_flash_interface(bus: &mut SocBus, mode: u8) -> u8 {
+    // (SPI0 ctrl, SPI1 ctrl, SPI0 user1, SPI0 user2)
+    let (spi0_ctrl, spi1_ctrl, user1, user2, mode) = match mode {
+        0 => (0x012c_200c, 0x016c_200c, 0x7c00_0043, 0x7000_00eb, 0),
+        1 => (0x0030_2000, 0x0070_2000, 0x5c00_0047, 0x7000_006b, 1),
+        3 => (0x0020_6000, 0x0060_6000, 0x5c00_0047, 0x7000_003b, 3),
+        _ => (0x00ac_200c, 0x00ec_200c, 0x6c00_0041, 0x7000_00bb, 2),
+    };
+    const CLOCK_EQU_SYSCLK: u32 = 0x8000_0000;
+    if let Some(i) = bus.peripheral_index("PCR") {
+        bus.with_peripheral::<crate::periph::pcr::Pcr, _>(i, |pcr, _| {
+            pcr.poke(crate::periph::pcr::MSPI_CLK_CONF, 0x0000_0500);
+            pcr.poke(crate::periph::pcr::SYSCLK_CONF, 0x2801_0200);
+        });
+    }
+    if let Some(i) = bus.peripheral_index("SPI0") {
+        bus.with_peripheral::<crate::periph::spi0::Spi0, _>(i, |spi0, _| {
+            spi0.poke(0x008, spi0_ctrl);
+            spi0.poke(0x014, CLOCK_EQU_SYSCLK);
+            spi0.poke(0x018, 0x7000_00c0);
+            spi0.poke(0x01c, user1);
+            spi0.poke(0x020, user2);
+        });
+    }
+    if let Some(i) = bus.peripheral_index("SPI1") {
+        bus.with_peripheral::<crate::periph::spi1::Spi1, _>(i, |spi1, _| {
+            spi1.poke(crate::periph::spi1::CTRL, spi1_ctrl);
+            spi1.poke(crate::periph::spi1::CLOCK, CLOCK_EQU_SYSCLK);
+        });
+    }
+    mode
+}
+
+/// The flash mode byte of the image header at the start of `flash` (the
+/// second-stage bootloader's, which is the one it configures itself from),
+/// or `None` when no image header is there.
+pub fn header_flash_mode(flash: &FlashHandle) -> Option<u8> {
+    let flash = flash.lock().unwrap();
+    let head = flash.peek(0, 4)?;
+    (head[0] == 0xe9).then_some(head[2])
+}
+
 /// `TIMG0.wdtconfig0` as the second-stage bootloader leaves it: flash-boot
 /// protection **off**.
 ///

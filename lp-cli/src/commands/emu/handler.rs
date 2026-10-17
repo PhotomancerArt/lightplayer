@@ -33,6 +33,7 @@ impl Grade {
             Grade::T1 => TimeGrade::T1,
             Grade::T2 => TimeGrade::T2,
             Grade::T3 => TimeGrade::T3,
+            Grade::T4 => TimeGrade::T4,
         }
     }
 }

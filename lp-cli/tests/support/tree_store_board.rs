@@ -99,7 +99,7 @@ pub fn board(elf: &Path, flash: Vec<u8>, nonce: u32) -> EmuLinkHost<C6Board> {
         .app(AppSource::Path(elf.to_path_buf()))
         .flash(backing)
         .strict(false)
-        .time_grade(TimeGrade::T1)
+        .time_grade(grade())
         .usb_host(UsbHost::Attached { draining: true })
         .usb_sj_queue_source()
         // The power-on snapshot a power cycle (and a cut) restores.
@@ -107,6 +107,18 @@ pub fn board(elf: &Path, flash: Vec<u8>, nonce: u32) -> EmuLinkHost<C6Board> {
         .build()
         .expect("the image builds a machine");
     EmuLinkHost::new(C6Board::new(machine).expect("a hosted board"), nonce, true)
+}
+
+/// The time grade the tree-store boards run at: `LP_EMU_GRADE` (`t1`, the
+/// default, through `t4`). `t4` is the one whose flash commands take time;
+/// every walk CI runs stays at `t1`.
+pub fn grade() -> TimeGrade {
+    std::env::var("LP_EMU_GRADE")
+        .ok()
+        .filter(|g| !g.is_empty())
+        .map_or(TimeGrade::T1, |g| {
+            TimeGrade::parse(&g).expect("LP_EMU_GRADE is t1, t2, t3 or t4")
+        })
 }
 
 /// Step `host` to its hello; the hello's line. Panics with the console if it

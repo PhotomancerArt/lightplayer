@@ -563,6 +563,45 @@ class = "wire"
 grade = "modeled"
 because = "the same UART0 model as t1 and t2: the bytes are the guest's, a live socket's arrival times are the host's"
 
+[[configuration]]
+name = "lp-emu:esp32c6:t4"
+description = "t3, plus the flash interface's time (lp-emu-esp32c6/src/flash_timing.rs): every SPI1 transfer keeps `cmd` busy for its wire time at the SCK (PCR's MSPI clock divided by the controller's own `clock`) and the line widths and phase lengths its registers give; a page program or an erase holds the part's write-in-progress bit for CX1's busy times (NorTiming::CX1) while the guest's own ROM loop polls it with interrupts masked as on silicon; a cache line fill costs what SPI0's registers say a 32-byte read costs (338 cycles at the shipped DIO/80 MHz, which is t3's constant); and EXTMEM's range invalidates drop the lines they name. A direct load leaves the flash interface as the IDF bootloader does for the header's mode. Memory is identical to t1–t3 by construction; the interleaving is not."
+chip = "esp32c6"
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+records_pins = true
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the same allocator and the same RAM model as t1–t3: a flash command's time answers in cycles, never in bytes"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "no transcript grades it: t4 is t3's calibrated cycle model plus a flash interface whose constants are silicon figures from CX1 (JEDEC 0x464016) — the 338-cycle DIO line fill and its 80 MHz SCK (t3 calibration; the 2026-10-17 DIO/QIO sitting measured 2,167 ns DIO and 1,315 ns QIO), the sector erase from the tree store's first-boot format, the 32-byte program fitted to flash-tears' ft-timing page time — and its predictions are compared with the tree store's silicon mount, save, load and first-light records in docs/reports/2026-10-17-c6-flash-timing-emulator.md, inside about 15 % where the report says so and outside it where it says why. Block erase and status-write busy times are estimates or unmodelled. FRAME RATE UNDER LINK LOAD IS NOT GRADED HERE EITHER: t4 changes nothing about t3's cold-code-path caveat. Never gate on its microseconds"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "direct load prints no ROM or bootloader banner; the time grade changes nothing about that"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the same host model as t1–t3"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the same pin observation as t1–t3, from the same fabric and the same decoder; what a time grade moves is the frame count in a fixed wall of emulated time, which is reported as timing"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the same UART0 model as t1–t3"
+
 # ---------------------------------------------------------------------------
 # The classic ESP32 on our own machine (M5).
 #

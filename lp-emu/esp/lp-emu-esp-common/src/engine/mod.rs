@@ -36,6 +36,7 @@
 pub mod flash_cut;
 pub mod flash_op_census;
 pub mod flash_weak_bits;
+pub mod nor_timing;
 pub mod sha;
 pub mod spi_flash;
 pub mod timg;

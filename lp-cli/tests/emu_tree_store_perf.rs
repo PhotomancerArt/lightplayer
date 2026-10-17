@@ -23,7 +23,12 @@
 //! Q18: the one-entry directory cache is built only if the c40 load or the
 //! per-chunk appends cost more than 1.5x littlefs's emulated time.
 //!
-//! Emulated: `lp-emu:esp32c6:t1+net=lan`. Never hardware-validated, never a
+//! `LP_EMU_GRADE=t4` times the flash too (`lp-emu:esp32c6:t4`): its figures
+//! include program and erase busy time, and the silicon estimate column is
+//! then a cross-check, not an addition. A different firmware than this
+//! tree's: `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO_HEAP_PEAK_DIAG=<elf>`.
+//!
+//! Emulated: `lp-emu:esp32c6:t1+net=lan` by default. Never hardware-validated, never a
 //! gate. `#[ignore]`d; `LP_TREE_PERF_FS=fs-tree|littlefs` runs one image.
 
 #[path = "support/editor_reads.rs"]
@@ -97,8 +102,9 @@ fn perf_mount_commit_read_and_load() {
         }
     }
     println!(
-        "\nperf — configuration=lp-emu:esp32c6:t1+net=lan, unsplit, emulated µs are CPU only \
-         (flash commands take no emulated time)"
+        "\nperf — configuration={}+net=lan (LP_EMU_GRADE), unsplit; below t4 emulated µs are \
+         CPU only (flash commands take no emulated time), at t4 they include the flash's",
+        grade().configuration()
     );
     println!(
         "| image | operation | emulated µs | programs | program bytes | erases | SPI1 reads | silicon estimate ms (flash only) |"
@@ -142,6 +148,13 @@ fn measure(label: &str, elf: &std::path::Path) -> Vec<String> {
     let before = flash_count(&host);
     boot(&mut host);
     mount_row(&host, &mut rows, label, "mount, c40", before);
+
+    // The save's baseline, as the board walk takes it: a read of the same
+    // document (the round trip with no commit in it).
+    let op = repeat(&mut host, 5, |client, _| {
+        block_on(client.fs_read(LpPath::new("/projects/demo/docs/doc-000.json"))).map(drop)
+    });
+    rows.push(op.row(label, "read doc-000 (1.7 KB; the save's baseline), each"));
 
     // Commit: a save, five times.
     let doc = c40

@@ -19,10 +19,13 @@
 //! esp-emu's one synthetic controller standing in for SPI0 *and* SPI1); the
 //! ROM-up boot is M7's, and this is the block it will program.
 
+use std::sync::Arc;
+
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
 use crate::cache::{CacheHandle, ITEM_CONTENT, ITEM_INDEX, POWER_CTRL};
+use crate::flash_timing::{FlashClocks, Spi0Word};
 use crate::regs;
 
 /// `cmd` +0x000. Same layout as SPI1's: every bit above `mst_st`/`slv_st` is
@@ -41,6 +44,9 @@ pub struct Spi0 {
     /// Every `cmd` trigger written here, once each, so a run that leans on
     /// SPI0 moving bytes says so instead of quietly reading zeros.
     refused: Vec<u32>,
+    /// `t4`: where this block publishes the words a cache line fill's cost
+    /// is made of ([`crate::flash_timing`]). `None` at every other grade.
+    clocks: Option<Arc<FlashClocks>>,
 }
 
 impl core::fmt::Debug for Spi0 {
@@ -67,6 +73,31 @@ impl Spi0 {
             regs,
             mmu,
             refused: Vec::new(),
+            clocks: None,
+        }
+    }
+
+    /// Set a register without a guest write — what a direct load does in the
+    /// bootloader's place ([`crate::loader::seed_flash_interface`]).
+    pub fn poke(&mut self, off: u32, value: u32) {
+        self.regs.poke(off, value);
+        if let (Some(clocks), Some(word)) = (&self.clocks, Spi0Word::at(off)) {
+            clocks.set_spi0(word, value);
+        }
+    }
+
+    /// Publish this block's fill-relevant words into `clocks` now and on
+    /// every write to one of them (`t4`).
+    pub fn set_flash_clocks(&mut self, clocks: Arc<FlashClocks>) {
+        self.clocks = Some(clocks);
+        self.publish_all();
+    }
+
+    fn publish_all(&self) {
+        if let Some(clocks) = &self.clocks {
+            for word in Spi0Word::ALL {
+                clocks.set_spi0(word, self.regs.stored(word.offset()));
+            }
         }
     }
 
@@ -177,7 +208,12 @@ impl Peripheral for Spi0 {
                     .unwrap()
                     .set_page_mode(((word >> 3) & 3) as u8);
             }
-            _ => self.regs.write(off, width, value, cx),
+            _ => {
+                self.regs.write(off, width, value, cx);
+                if let (Some(clocks), Some(word)) = (&self.clocks, Spi0Word::at(off)) {
+                    clocks.set_spi0(word, self.regs.stored(word.offset()));
+                }
+            }
         }
     }
 
@@ -191,6 +227,7 @@ impl Peripheral for Spi0 {
 
     fn load_state(&mut self, bytes: &[u8]) {
         self.regs.load_state(bytes);
+        self.publish_all();
     }
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
