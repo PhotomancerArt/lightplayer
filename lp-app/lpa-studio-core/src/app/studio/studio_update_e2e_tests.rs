@@ -768,7 +768,11 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
         matches!(bench.standing(device), UpdateStanding::Available { .. })
     });
     let bar = firmware_bar(&bench, device);
-    assert_eq!(bar.tone, crate::UiStatusKind::Live);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the button carries it"
+    );
     let update = bar.action.expect("Update");
     assert_eq!(update.word, "Update");
     assert_eq!(
@@ -794,13 +798,16 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
         }
     }
     assert!(
-        said.iter().any(|words| words.starts_with("Backing up")),
+        said.iter().any(|words| words.starts_with("backing up")),
         "{said:?}"
     );
     assert!(
-        said.iter()
-            .any(|words| words.starts_with("Updating · 1 of 2")),
+        said.iter().any(|words| words.starts_with("updating · ")),
         "{said:?}"
+    );
+    assert!(
+        said.iter().all(|words| !words.contains("of 2")),
+        "one number, never 1 of 2: {said:?}"
     );
     assert!(
         said.iter().all(|words| !words.contains("USB")),
@@ -834,7 +841,12 @@ fn a_crashing_boards_firmware_bar_reinstalls_by_path() {
         matches!(bench.standing(device), UpdateStanding::KeepsCrashing { .. })
     });
     let bar = firmware_bar(&bench, device);
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Error,
+        "crashing is broken: red"
+    );
+    assert_eq!(bar.aside.as_deref(), Some("crashing"));
     let reinstall = bar.action.expect("Reinstall");
     assert_eq!(reinstall.word, "Reinstall");
     assert_eq!(

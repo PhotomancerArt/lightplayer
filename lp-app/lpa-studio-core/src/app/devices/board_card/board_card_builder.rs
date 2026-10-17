@@ -12,33 +12,40 @@ use super::access_bar::{access_bar, pending_access_bar};
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
 use super::connection_bar::{connection_bar, pending_connection_bar};
+use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
 use super::primary_action::{pending_primary, primary_action};
 use super::project_bar::{edit_action, pending_project_bar, project_bar};
-use super::status_corner::status_corner;
+use super::status_corner::{layer_title, status_corner};
+use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_board_card::{UiBoardCard, UiBoardPresence};
 use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
+use super::ui_stack_bar::UiStackBar;
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
 
 /// A board's card, built from `input`.
 pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
-    let bars = vec![
+    let bars: Vec<UiStackBar> = vec![
         project_bar(input),
         connection_bar(input),
         access_bar(input),
         firmware_bar(input),
         hardware_bar(input),
-    ];
+    ]
+    .into_iter()
+    .map(with_failure_notice)
+    .collect();
     let running_work = bars
         .iter()
         .filter_map(|bar| bar.work.as_ref())
         .find(|work| work.state == super::ui_bar_work::BarWorkState::Running);
+    let panel = connected_panel(input);
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -49,17 +56,42 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
             false => UiBoardPresence::Online,
         },
         picture: board_picture(input),
-        status: status_corner(input, &bars),
+        status: status_corner(input, &bars, panel.is_some()),
         name_bar: UiNameBar {
             title: input.view.title.clone(),
             place: None,
             primary: primary_action(input, running_work),
         },
         bars,
-        panel: connected_panel(input),
+        panel,
     };
     debug_assert_offered(&card, input.offers);
     card
+}
+
+/// A row whose work failed says why in its details, first: its notice is
+/// the failure, with the row's Retry, and the status corner reads it from
+/// there like any notice. The row itself says only that it failed ("send
+/// failed", "USB · connection failed"), never the sentence (P5).
+fn with_failure_notice(mut bar: UiStackBar) -> UiStackBar {
+    if let Some(UiBarWork {
+        state: BarWorkState::Failed { retry },
+        words,
+        detail,
+        ..
+    }) = &bar.work
+    {
+        bar.details.sections.insert(
+            0,
+            notice(
+                layer_title(bar.layer),
+                UiStatusKind::Error,
+                detail.clone().unwrap_or_else(|| words.clone()),
+                retry.clone(),
+            ),
+        );
+    }
+    bar
 }
 
 /// The board's panel on its card: the controller's picks, while the session
@@ -121,12 +153,12 @@ pub fn pending_board_card(
         name_bar: UiNameBar {
             title: pending.title.clone(),
             place: None,
-            primary: Some(pending_primary(pending, board, offers, link)),
+            primary: pending_primary(pending, board, offers),
         },
         bars: vec![
-            pending_project_bar(),
+            pending_project_bar(pending),
             pending_connection_bar(pending, link),
-            pending_access_bar(),
+            pending_access_bar(pending),
             pending_firmware_bar(pending),
             pending_hardware_bar(pending, board, offers),
         ],
@@ -240,7 +272,10 @@ mod tests {
         );
         assert_eq!(card.bars.len(), 5, "the bars are still built");
         assert_eq!(
-            card.name_bar.primary.as_ref().map(|primary| primary.word()),
+            card.name_bar
+                .primary
+                .as_ref()
+                .and_then(|primary| primary.word()),
             Some("Done")
         );
         assert!(card.offer_paths().contains(&&edit.offer));
@@ -306,11 +341,11 @@ mod tests {
             assert_eq!(card.picture.source, PictureSource::Saved);
             assert!(card.picture.dim);
             assert!(card.picture.frame.is_some());
-            assert_eq!(card.status.reading.as_deref(), Some("5 min ago"));
-            assert_eq!(
+            assert_eq!(card.status.reading, None, "the picture dims (P4)");
+            assert_ne!(
                 card.status.mark,
                 CornerMark::Notice(UiStatusKind::Attention),
-                "someone has it: orange"
+                "the Link row says someone has it, once (P2)"
             );
             let running = card.status.details.sections.last().expect("running");
             let lines: Vec<(&str, &str)> = running
@@ -322,11 +357,15 @@ mod tests {
                 lines,
                 [
                     ("State", "Open in another tab"),
+                    ("Last frame", "5 min ago"),
                     ("Picture", "The last picture another tab saved.")
                 ]
             );
             assert_eq!(
-                card.name_bar.primary.as_ref().map(|primary| primary.word()),
+                card.name_bar
+                    .primary
+                    .as_ref()
+                    .and_then(|primary| primary.word()),
                 Some("Connect")
             );
             assert_eq!(
@@ -360,8 +399,11 @@ mod tests {
             [UiDetailPanel::Terminal { lines, dropped: 0 }] if lines.is_empty()
         ));
         assert_eq!(
-            card.name_bar.primary.as_ref().map(|primary| primary.word()),
-            Some("Identifying…"),
+            card.name_bar
+                .primary
+                .as_ref()
+                .and_then(|primary| primary.word()),
+            None,
             "how far it has got, not a greyed Connect"
         );
         assert_eq!(card.panel, None);

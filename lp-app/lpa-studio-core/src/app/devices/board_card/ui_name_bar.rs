@@ -1,7 +1,9 @@
 //! [`UiNameBar`]: the board's name and its one primary action — Connect,
-//! Done, Add a project, Unlock, Install or Power on — a flush section of
-//! the bar with an icon leading the word; or, when nothing can be pressed,
-//! why, in the primary's own word.
+//! Done, Add a project, Unlock, Install firmware or Power on — a flush
+//! section of the bar with an icon leading the word; the spinner alone
+//! while the board is being reached or identified; or nothing at all when
+//! nothing can be pressed (`docs/ux/anatomy/board-card.md`, "Name bar and
+//! primary"). The row that is busy, away or waiting says why, once (P2).
 
 use super::ui_card_action::UiCardAction;
 
@@ -13,8 +15,9 @@ pub struct UiNameBar {
     /// Its group or owner, under the name; `None` until the account keeps
     /// boards (Q16).
     pub place: Option<String>,
-    /// The one primary action; `None` only where a session holds the board
-    /// and Done is not offered.
+    /// The one primary; `None` when nothing can be pressed (the board is
+    /// busy, away with no way in, busy in another tab, has nothing to send,
+    /// or has not said yet): no button, never a greyed verb (P7).
     pub primary: Option<UiPrimary>,
 }
 
@@ -23,34 +26,25 @@ pub struct UiNameBar {
 pub enum UiPrimary {
     /// An offer to press.
     Offer(UiCardAction),
-    /// Nothing to press: the primary says why in its own word —
-    /// "Connecting…", "Updating · 42%", "Offline · 2 weeks",
-    /// "Identifying…". Never a greyed verb with the reason in a tooltip.
-    /// `reason` is the whole of why, for the hover; most often the word
-    /// itself.
-    Unavailable {
-        word: String,
-        icon: String,
-        reason: String,
-    },
+    /// The board is being reached or identified: the spinner alone, no
+    /// words — the Link row (or the Hardware row) says how. `label` is the
+    /// spinner's accessible name ("Connecting", "Identifying").
+    Working { label: String },
 }
 
 impl UiPrimary {
-    /// A primary that says `words` (its word and its reason), with `icon`.
-    pub fn says(words: impl Into<String>, icon: impl Into<String>) -> Self {
-        let words = words.into();
-        Self::Unavailable {
-            reason: words.clone(),
-            word: words,
-            icon: icon.into(),
+    /// The spinner, named `label` for a screen reader.
+    pub fn working(label: impl Into<String>) -> Self {
+        Self::Working {
+            label: label.into(),
         }
     }
 
-    /// The word on the primary, either way.
-    pub fn word(&self) -> &str {
+    /// The word on the primary: the offer's, or none for the spinner.
+    pub fn word(&self) -> Option<&str> {
         match self {
-            UiPrimary::Offer(action) => &action.word,
-            UiPrimary::Unavailable { word, .. } => word,
+            UiPrimary::Offer(action) => Some(&action.word),
+            UiPrimary::Working { .. } => None,
         }
     }
 }

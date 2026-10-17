@@ -603,7 +603,10 @@ fn a_failed_connect_clears_once_the_board_is_reached_another_way() {
             .clone()
             .map(|work| work.words)
     };
-    assert_eq!(words(&bench).as_deref(), Some(crate::COULDNT_CONNECT));
+    assert_eq!(
+        words(&bench).as_deref(),
+        Some("Bluetooth · connection failed")
+    );
 
     // Back in range: a fresh link, and the board ready on it.
     present.set(true);
@@ -613,7 +616,10 @@ fn a_failed_connect_clears_once_the_board_is_reached_another_way() {
     tick_until(&mut bench, &tasks, "the failure to go", |bench| {
         bench.controller.connect_failure().is_none()
     });
-    assert_ne!(words(&bench).as_deref(), Some(crate::COULDNT_CONNECT));
+    assert!(
+        !words(&bench).is_some_and(|words| words.ends_with(crate::CONNECTION_FAILED)),
+        "the failure is gone"
+    );
 }
 
 /// A board reached over Bluetooth that comes back locked: the hold lets go
@@ -756,7 +762,10 @@ fn the_connected_card_carries_the_panel() {
     assert_eq!(edit.offer, bench.device_verb(id, "edit"));
     assert_eq!(edit.icon.as_deref(), Some("edit"));
     assert_eq!(
-        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        card.name_bar
+            .primary
+            .as_ref()
+            .and_then(|primary| primary.word()),
         Some("Done")
     );
     assert_eq!(card.bars.len(), 5, "the bars are still built");
@@ -1101,10 +1110,13 @@ fn a_dropped_link_reads_reconnecting_on_the_card() {
         .work
         .clone()
         .expect("the session's work");
-    assert_eq!(work.words, crate::RECONNECTING);
+    assert_eq!(work.words, format!("USB · {}", crate::RECONNECTING));
     assert_eq!(work.state, crate::BarWorkState::Running);
     assert_eq!(
-        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        card.name_bar
+            .primary
+            .as_ref()
+            .and_then(|primary| primary.word()),
         Some("Done")
     );
     assert_eq!(card.panel, None, "the panel waits for the board");
@@ -1128,7 +1140,10 @@ fn a_dropped_link_reads_reconnecting_on_the_card() {
         "back to its facts"
     );
     assert_eq!(
-        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        card.name_bar
+            .primary
+            .as_ref()
+            .and_then(|primary| primary.word()),
         Some("Connect")
     );
 }
@@ -1223,16 +1238,21 @@ fn a_failed_connect_says_so_on_the_card_in_plain_words() {
         .bar(crate::BarLayer::Connection)
         .clone();
     let work = bar.work.expect("the failure");
-    assert_eq!(work.words, crate::COULDNT_CONNECT);
+    assert!(
+        work.words.ends_with(crate::CONNECTION_FAILED),
+        "{}",
+        work.words
+    );
     assert!(matches!(work.state, crate::BarWorkState::Failed { .. }));
     let reason = bar
         .details
-        .sections
-        .iter()
-        .flat_map(|section| section.lines.iter())
-        .find(|line| line.label == crate::COULDNT_CONNECT)
-        .map(|line| line.value.clone());
-    assert_eq!(reason.as_deref(), Some(failure.reason.as_str()));
+        .notice()
+        .and_then(|notice| notice.sentence.clone());
+    assert_eq!(
+        reason.as_deref(),
+        Some(failure.reason.as_str()),
+        "the reason is the row's notice, in its details"
+    );
 }
 
 // ---------------------------------------------------------------------

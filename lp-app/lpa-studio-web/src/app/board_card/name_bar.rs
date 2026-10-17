@@ -6,20 +6,18 @@
 //! The bar carries `data-name-bar`, the walks' hook for the primary (an
 //! empty board's Add a project is pressed there).
 //!
-//! An unavailable primary ([`UiPrimary::Unavailable`]) is the same section,
-//! disabled, its word the reason itself ("Connecting…", "Updating · 42%",
-//! "Offline · 2 weeks"), never a greyed verb: "why can't I?" is answered
-//! where it is asked. The whole reason is its hover, and its hidden text
-//! when it says more than the word. It presses nothing, so it is not an
-//! action.
+//! While the board is being reached or identified the primary is Studio's
+//! conic spinner alone in the same section ([`UiPrimary::Working`]), its
+//! label the accessible name: the Link row (or the Hardware row) says how.
+//! When nothing can be pressed there is no section at all — never a greyed
+//! verb, and never a row's words said again here (P2, P7). The spinner
+//! presses nothing, so it is not an action.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNameBar, UiPrimary};
 
 use super::card_action::{CardAction, CardActionLook};
-use crate::base::{StudioIcon, action_icon_name};
-use crate::core::ActionButtonVariant;
-use crate::core::action::action_variant_class;
+use crate::base::conic_spinner_class;
 
 /// The name bar. See the module doc.
 #[component]
@@ -29,8 +27,8 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
         Some(UiPrimary::Offer(action)) => rsx! {
             CardAction { action, look: CardActionLook::Primary, on_action }
         },
-        Some(UiPrimary::Unavailable { word, icon, reason }) => rsx! {
-            UnavailablePrimary { word, icon, reason }
+        Some(UiPrimary::Working { label }) => rsx! {
+            WorkingPrimary { label }
         },
         None => rsx! {},
     };
@@ -47,28 +45,19 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
     }
 }
 
-/// The primary it would be, disabled, saying why.
+/// The spinner alone, in the primary's section: the board is being
+/// reached or identified.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UnavailablePrimary(word: String, icon: String, reason: String) -> Element {
-    let icon = action_icon_name(Some(icon.as_str()));
+fn WorkingPrimary(label: String) -> Element {
     rsx! {
-        div { class: PRIMARY_SLOT_CLASS,
-            button {
-                class: action_variant_class(ActionButtonVariant::RowPrimary, false),
-                r#type: "button",
-                disabled: true,
-                title: "{reason}",
-                if let Some(icon) = icon {
-                    span { class: "tw:inline-flex tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
-                        StudioIcon { name: icon, size: 12 }
-                    }
-                }
-                span { class: "tw:inline-flex", "{word}" }
-            }
-            if reason != word {
-                span { class: "tw:sr-only", "{reason}" }
-            }
+        div {
+            class: WORKING_CLASS,
+            role: "status",
+            aria_label: "{label}",
+            title: "{label}",
+            "data-primary-working": "true",
+            span { class: "{conic_spinner_class()} ux-board-spinner", aria_hidden: "true" }
         }
     }
 }
@@ -88,8 +77,10 @@ const TITLE_CLASS: &str = "tw:m-0 tw:min-w-0 tw:truncate tw:text-[13.5px] tw:fon
 const PLACE_CLASS: &str =
     "tw:m-0 tw:min-w-0 tw:truncate tw:text-[11.5px] tw:leading-tight tw:text-subtle-foreground";
 
-/// The unavailable primary's slot: the row's height, as a pressable one's.
-const PRIMARY_SLOT_CLASS: &str = "tw:grid tw:min-w-0 tw:flex-none tw:self-stretch";
+/// The spinner's section: the row's height and the primary's own leading
+/// hairline, flush to the card's edge, quiet (no wash, no ring: nothing to
+/// press).
+const WORKING_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:self-stretch tw:border-0 tw:border-l tw:border-solid tw:border-border tw:px-[18px]";
 
 #[cfg(test)]
 mod tests {
@@ -108,12 +99,30 @@ mod tests {
     /// clips; and the primary's look is the ringed flush section.
     #[test]
     fn nothing_around_the_primary_verb_clips_its_glow() {
-        for class in [NAME_BAR_CLASS, NAME_BLOCK_CLASS, PRIMARY_SLOT_CLASS] {
+        use crate::core::ActionButtonVariant;
+        use crate::core::action::action_variant_class;
+        for class in [NAME_BAR_CLASS, NAME_BLOCK_CLASS, WORKING_CLASS] {
             assert!(!class.contains("overflow"), "{class}");
         }
         let primary = action_variant_class(ActionButtonVariant::RowPrimary, false);
         assert!(primary.contains("ux-ir-ring"), "{primary}");
         assert!(!primary.contains("ux-spectrum-cta"), "{primary}");
-        assert!(PRIMARY_SLOT_CLASS.contains("tw:self-stretch"));
+        assert!(WORKING_CLASS.contains("tw:self-stretch"));
+    }
+
+    /// Connecting or identifying: the spinner alone, named for a screen
+    /// reader, no words and no button.
+    #[test]
+    fn a_working_primary_is_the_spinner_alone() {
+        let html = super::super::card_test_fixtures::render(working, ());
+        assert!(html.contains("data-primary-working"), "{html}");
+        assert!(html.contains("aria-label=\"Connecting\""), "{html}");
+        assert!(!html.contains("<button"), "nothing to press: {html}");
+    }
+
+    fn working() -> Element {
+        rsx! {
+            WorkingPrimary { label: "Connecting".to_string() }
+        }
     }
 }

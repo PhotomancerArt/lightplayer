@@ -698,6 +698,7 @@ mod tests {
             state_label: "Blank flash — needs firmware".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: chip.map(str::to_string),
             board_id: None,

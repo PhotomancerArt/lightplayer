@@ -1,40 +1,40 @@
-//! The name bar's one primary action (`plan.md`, "The primary action"; the
-//! connected plan's P4 table; the connected feel gate's first round).
+//! The name bar's one primary action (`docs/ux/anatomy/board-card.md`,
+//! "Name bar and primary"; the connected plan's P4 table).
 //!
 //! In order, first match wins:
 //!
 //! | Board | Primary | Offer | Icon |
 //! |---|---|---|---|
-//! | Connecting (the session opening, or a Connect held for the board) | "Connecting…" | — | the link's |
+//! | Connecting (the session opening, or a Connect held for the board) | the spinner alone ("USB · connecting" is the Link row's) | — | — |
 //! | The session is on it (its card, or the editor's docked card) | Done | `done` | check |
-//! | Busy | the work's own words: "Updating · 42%" | — | the link's |
+//! | Busy | nothing (the busy row says it) | — | — |
 //! | Another tab holds it | Connect (it is the take-over) | `take-over` | the held link's |
-//! | …and is busy with it | "Busy in the other tab" | — | the same |
-//! | …a take-over is under way | its words: "Asking the other tab…" | — | the same |
-//! | Needs firmware, `flash` offered | Install (the board pick) | `flash` | firmware |
+//! | …and is busy with it | nothing (the Link row says it) | — | — |
+//! | …a take-over is under way | the spinner alone | — | — |
+//! | Needs firmware, `flash` offered | Install firmware (the board pick) | `flash` | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
 //! | Attached (the port is there, closed) | Connect | `connect` | the link's |
 //! | Offline stand-in (a sim, an in-tab board) | Power on | `reconnect` | play |
 //! | Offline, reachable | Connect: Wi‑Fi first, then the cloud, then the cable | `connect` | wifi / cloud / the link's, by the road |
-//! | Offline, nothing reaches it | "Offline · 2 weeks" | — | the last link's |
+//! | Offline, nothing reaches it | nothing ("Offline · 2 weeks" is the Link row's) | — | — |
 //! | Ready, running, granted at any tier | Connect | `connect` | the link's |
 //! | Ready, running no project | Add a project (the project pick) | `push` | add |
-//! | …with nothing to push (`push` not offered, or refused) | "No project" (`connect`'s reason) | — | the link's |
-//! | Ready, not said what it runs | "Project not known" (`connect`'s reason) | — | the link's |
+//! | …with nothing to push, or not said what it runs | nothing (the Project row says it) | — | — |
 //!
-//! **A primary is never a greyed verb.** One that cannot be pressed says
-//! why in its own word, the way "Connecting…" does, never a disabled
-//! "Connect" with the reason in a tooltip ([`UiPrimary::Unavailable`]: its
-//! word is the reason). And with nothing on the board to connect to, the
-//! primary is the next useful step: Add a project, the same `push` the
-//! project bar would carry, which then does not repeat it.
+//! **No dead ends, and no repeats** (P2, P7). When nothing can be pressed
+//! there is no button at all — never a greyed verb, and never the row's
+//! words said again on the name bar: the busy, away or waiting row says
+//! why, once. While the board is being reached or identified, the primary
+//! is the spinner alone ([`UiPrimary::Working`]). With nothing on the board
+//! to connect to, the primary is the next useful step: Add a project, the
+//! same `push` the Project row would carry, which then does not repeat it.
 //!
-//! A new board's primary is [`pending_primary`]: Install once it has
-//! settled on needing firmware, else how far it has got ("Identifying…").
+//! A new board's primary is [`pending_primary`]: Install firmware once it
+//! has settled on needing firmware, else the spinner while it identifies.
 //!
 //! Connect means one thing (the board card ADR, §4): this board's panel,
 //! here, on its card, reaching the board first when it must. Edit is the
-//! project bar's action ([`super::project_bar::edit_action`]), and while the
+//! Project row's action ([`super::project_bar::edit_action`]), and while the
 //! board is connected, the panel's All controls row's.
 
 use lpa_devices::device::DeviceStatus;
@@ -47,30 +47,29 @@ use super::held_board::held_primary;
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use crate::app::devices::connect_offer::NO_PROJECT;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::core::data_kinds::duration_words;
 use crate::{ActionEnablement, OfferPath, UiOffer};
 
-/// The primary's word, and the connection bar's work, while a Connect is
-/// under way.
-pub const CONNECTING: &str = "Connecting\u{2026}";
+/// The Link row's state while a Connect is under way ("USB · connecting");
+/// the primary is the spinner alone then.
+pub const CONNECTING: &str = "connecting";
 
 /// The primary of a ready board that runs no project: the next step.
 pub const ADD_A_PROJECT: &str = "Add a project";
 
-/// A board's primary. `work` is the running work's bar, for Busy's words.
+/// A board's primary; `None` when nothing can be pressed.
 pub(crate) fn primary_action(
     input: &BoardCardInput<'_>,
-    work: Option<&UiBarWork>,
+    _work: Option<&UiBarWork>,
 ) -> Option<UiPrimary> {
     let view = input.view;
     let link = input.link_kind();
     let icon = link_icon(link);
     // No Cancel while connecting (Q10): the open is bounded by the device
-    // request deadline, a held Connect by its grace.
+    // request deadline, a held Connect by its grace. The Link row says how.
     if *input.connection == BoardConnection::Connecting {
-        return Some(UiPrimary::says(CONNECTING, icon));
+        return Some(UiPrimary::working("Connecting"));
     }
     // The session is on the board: on its card, or docked in the editor.
     if input.editor_holds_it {
@@ -78,14 +77,14 @@ pub(crate) fn primary_action(
             .offer("done")
             .map(|done| offer(UiCardAction::press(done, "Done").with_icon("check")));
     }
-    if let Some(activity) = &view.activity {
-        let words = work.map_or_else(|| activity.label.clone(), |work| work.words.clone());
-        return Some(UiPrimary::says(words, icon));
+    // Busy: the row doing the work says it (P2).
+    if view.activity.is_some() {
+        return None;
     }
     // A board another tab holds is neither attached nor offline from here:
     // Connect is the take-over.
     if let Some(primary) = held_primary(input) {
-        return Some(primary);
+        return primary;
     }
     if view.needs_firmware()
         && let Some(flash) = input.offer("flash")
@@ -109,27 +108,19 @@ pub(crate) fn primary_action(
         ));
     }
     if view.status == DeviceStatus::Offline {
-        return Some(offline_primary(input, link));
+        return offline_primary(input, link);
     }
     // Ready: with nothing on the board, the next step; else Connect,
     // granted at any tier.
     if let Some(add) = add_a_project(input) {
         return Some(offer(add));
     }
-    if let Some(connect) = input.offer("connect") {
-        return Some(match &connect.action.meta().enablement {
-            ActionEnablement::Enabled => {
-                offer(UiCardAction::press(connect, "Connect").with_icon(icon))
-            }
-            // Its reason is the word: "No project", "Project not known".
-            ActionEnablement::Disabled { reason } => UiPrimary::says(reason.clone(), icon),
-        });
-    }
-    let words = match view.loaded_project {
-        LoadedProject::Empty => NO_PROJECT.to_string(),
-        LoadedProject::Unknown | LoadedProject::Running { .. } => view.state_label.clone(),
-    };
-    Some(UiPrimary::says(words, icon))
+    // Connect, when it can be pressed; a Connect that waits ("No project",
+    // "Project not known") is no button: the Project row says why.
+    input
+        .offer("connect")
+        .filter(|connect| connect.action.meta().enablement == ActionEnablement::Enabled)
+        .map(|connect| offer(UiCardAction::press(connect, "Connect").with_icon(icon)))
 }
 
 /// Add a project: the primary of a ready, idle board that runs no project
@@ -154,15 +145,20 @@ pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> 
 /// An offline board's primary: a stand-in powers on; a board Studio can
 /// reach connects, reaching it over Wi‑Fi first, then through
 /// lightplayer.app, then by its cable (`connect`, whose icon is the road it
-/// takes); with none of those, it says how long it has been away.
-fn offline_primary(input: &BoardCardInput<'_>, link: UiLinkKind) -> UiPrimary {
+/// takes); with none of those, nothing — the Link row says how long it has
+/// been away.
+fn offline_primary(input: &BoardCardInput<'_>, link: UiLinkKind) -> Option<UiPrimary> {
     if input.stand_in()
         && let Some(reconnect) = input.offer("reconnect")
     {
-        return offer(UiCardAction::press(reconnect, "Power on").with_icon("play"));
+        return Some(offer(
+            UiCardAction::press(reconnect, "Power on").with_icon("play"),
+        ));
     }
     if let Some(connect) = input.offer("connect") {
-        return offer(UiCardAction::press(connect, "Connect").with_icon(connect.icon.clone()));
+        return Some(offer(
+            UiCardAction::press(connect, "Connect").with_icon(connect.icon.clone()),
+        ));
     }
     // A board with no registry row has no session to open; its roads' own
     // offers still reach it.
@@ -172,13 +168,10 @@ fn offline_primary(input: &BoardCardInput<'_>, link: UiLinkKind) -> UiPrimary {
         ("reconnect", link_icon(link)),
     ] {
         if let Some(found) = input.offer(verb) {
-            return offer(UiCardAction::press(found, "Connect").with_icon(icon));
+            return Some(offer(UiCardAction::press(found, "Connect").with_icon(icon)));
         }
     }
-    UiPrimary::says(
-        offline_words(input.last_seen_at, input.now),
-        link_icon(link),
-    )
+    None
 }
 
 /// "Offline · 2 weeks", from the registry's last sighting; "Offline" when
@@ -190,27 +183,28 @@ pub(crate) fn offline_words(last_seen_at: Option<f64>, now: f64) -> String {
     }
 }
 
-/// A new board's primary: Install once it settled on needing firmware
-/// (the board pick, filtered by the chip its boot banner named), else how
-/// far it has got ("Identifying…").
+/// A new board's primary: Install firmware once it settled on needing
+/// firmware (the board pick, filtered by the chip its boot banner named),
+/// else the spinner alone while it identifies (the Hardware row says
+/// "identifying").
 pub(crate) fn pending_primary(
     pending: &PendingLinkView,
     board: &OfferPath,
     offers: &[UiOffer],
-    link: UiLinkKind,
-) -> UiPrimary {
+) -> Option<UiPrimary> {
     if let Some(flash) = offer_at(offers, board, "flash") {
-        return offer(install(flash).drawn(UiActionDraw::BoardPick {
+        return Some(offer(install(flash).drawn(UiActionDraw::BoardPick {
             chip: pending.detected_chip.clone(),
             chip_from_banner: pending.detected_chip.is_some(),
-        }));
+        })));
     }
-    UiPrimary::says(pending.state_label.clone(), link_icon(link))
+    (!pending.needs_firmware()).then(|| UiPrimary::working("Identifying"))
 }
 
-/// Install: the `flash` offer, in the card's word.
+/// Install firmware: the `flash` offer, in the card's words (P12: install
+/// what?).
 fn install(flash: &UiOffer) -> UiCardAction {
-    UiCardAction::press(flash, "Install").with_icon("firmware")
+    UiCardAction::press(flash, "Install firmware").with_icon("firmware")
 }
 
 fn offer(action: UiCardAction) -> UiPrimary {
@@ -237,12 +231,8 @@ pub(crate) mod tests {
             fixture.connection = BoardConnection::Connecting;
             assert_eq!(
                 primary_action(&fixture.input(), None),
-                Some(UiPrimary::Unavailable {
-                    word: CONNECTING.to_string(),
-                    icon: "bluetooth".to_string(),
-                    reason: CONNECTING.to_string(),
-                }),
-                "session on it: {session_on_it}"
+                Some(UiPrimary::working("Connecting")),
+                "the spinner alone; session on it: {session_on_it}"
             );
             assert!(
                 fixture
@@ -275,29 +265,16 @@ pub(crate) mod tests {
         assert_eq!(path(&offered(&mut held)), "done");
     }
 
-    /// Never a greyed Connect: the work's own words are the primary's.
+    /// P2: a busy board has no button — the row doing the work says it,
+    /// once.
     #[test]
-    fn a_busy_board_says_what_it_is_doing() {
+    fn a_busy_board_has_no_primary() {
         let mut fixture = CardFixture::ready().with_activity(activity(
             ActivityKind::Update,
             "Updating firmware",
             Some(42),
         ));
-        let work = UiBarWork {
-            words: "Updating · 42%".to_string(),
-            percent: Some(42),
-            state: super::super::ui_bar_work::BarWorkState::Running,
-            cancel: None,
-            other_device: false,
-        };
-        assert_eq!(
-            primary_action(&fixture.input(), Some(&work)),
-            Some(UiPrimary::Unavailable {
-                word: "Updating · 42%".to_string(),
-                icon: "usb".to_string(),
-                reason: "Updating · 42%".to_string(),
-            })
-        );
+        assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
     #[test]
@@ -309,7 +286,7 @@ pub(crate) mod tests {
         fixture.view.can_remove_project = false;
         fixture.view.status = DeviceStatus::NeedsAttention;
         let action = offered(&mut fixture);
-        assert_eq!(action.word, "Install");
+        assert_eq!(action.word, "Install firmware");
         assert_eq!(action.icon.as_deref(), Some("firmware"));
         assert_eq!(path(&action), "flash");
         assert_eq!(
@@ -381,19 +358,17 @@ pub(crate) mod tests {
         assert_eq!(path(&action), "reconnect");
     }
 
+    /// Offline with no way in: no button; the Link row says how long it
+    /// has been away.
     #[test]
-    fn an_offline_board_nothing_reaches_says_how_long_it_has_been_away() {
+    fn an_offline_board_nothing_reaches_has_no_primary() {
         let mut fixture = CardFixture::offline().over(UiLinkKind::Bluetooth);
         fixture.view.escapes = vec![Escape::Forget];
         fixture.last_seen_at = Some(fixture.now - 15.0 * 86_400.0);
+        assert_eq!(primary_action(&fixture.input(), None), None);
         assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::says("Offline · 2 weeks", "bluetooth"))
-        );
-        fixture.last_seen_at = None;
-        assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::says("Offline", "bluetooth"))
+            offline_words(fixture.last_seen_at, fixture.now),
+            "Offline · 2 weeks"
         );
     }
 
@@ -439,30 +414,25 @@ pub(crate) mod tests {
         ));
     }
 
-    /// With nothing to push (no `push`, or `push` refused) the primary
-    /// says why Connect waits, in its own word.
+    /// With nothing to push (no `push`, or `push` refused) there is no
+    /// button: the Project row says "none".
     #[test]
-    fn a_ready_board_with_nothing_to_add_says_no_project() {
+    fn a_ready_board_with_nothing_to_add_has_no_primary() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.view.can_remove_project = false;
         fixture.without_offer("push");
-        assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::says(NO_PROJECT, "usb"))
-        );
+        assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
-    /// A ready board that has not said what it runs: the subject is named.
+    /// A ready board that has not said what it runs: no button while the
+    /// Project row waits.
     #[test]
-    fn a_ready_board_that_has_not_said_says_project_not_known() {
+    fn a_ready_board_that_has_not_said_has_no_primary() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Unknown;
         fixture.view.can_remove_project = false;
-        assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::says("Project not known", "usb"))
-        );
+        assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
     #[test]
@@ -479,12 +449,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_new_board_says_how_far_it_has_got_until_it_needs_firmware() {
+    fn a_new_board_spins_until_it_needs_firmware() {
         let mut pending = pending_view();
         let board = super::super::card_fixtures::board();
         assert_eq!(
-            pending_primary(&pending, &board, &[], UiLinkKind::Usb),
-            UiPrimary::says("Identifying…", "usb")
+            pending_primary(&pending, &board, &[]),
+            Some(UiPrimary::working("Identifying"))
         );
         pending.firmware_face = FirmwareFace::Blank;
         let offers = crate::pending_link_offers(
@@ -492,11 +462,10 @@ pub(crate) mod tests {
             &board,
             crate::app::devices::device_reset_reach::ResetReach::Lines,
         );
-        let UiPrimary::Offer(action) = pending_primary(&pending, &board, &offers, UiLinkKind::Usb)
-        else {
-            panic!("Install once it settles");
+        let Some(UiPrimary::Offer(action)) = pending_primary(&pending, &board, &offers) else {
+            panic!("Install firmware once it settles");
         };
-        assert_eq!(action.word, "Install");
+        assert_eq!(action.word, "Install firmware");
         assert_eq!(path(&action), "flash");
     }
 
@@ -536,21 +505,16 @@ pub(crate) mod tests {
         assert_eq!(path(&offered(&mut offline)), "take-over");
     }
 
+    /// Busy in the other tab: no button; the Link row says it.
     #[test]
-    fn a_board_the_holder_is_busy_with_says_so() {
+    fn a_board_the_holder_is_busy_with_has_no_primary() {
         let mut fixture = CardFixture::held(HoldLevel::Busy("Updating \u{b7} 42%".to_string()));
-        assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::Unavailable {
-                word: "Busy in the other tab".to_string(),
-                icon: "usb".to_string(),
-                reason: "Busy in the other tab: Updating \u{b7} 42%".to_string(),
-            })
-        );
+        assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
+    /// A take-over under way is the board being reached: the spinner alone.
     #[test]
-    fn a_take_over_under_way_says_its_words() {
+    fn a_take_over_under_way_spins() {
         for words in ["Asking the other tab\u{2026}", "Opening\u{2026}"] {
             let mut fixture = CardFixture::held(HoldLevel::Watching);
             fixture.take_over = Some(UiTakeOver {
@@ -559,7 +523,7 @@ pub(crate) mod tests {
             });
             assert_eq!(
                 primary_action(&fixture.input(), None),
-                Some(UiPrimary::says(words, "usb"))
+                Some(UiPrimary::working(words))
             );
         }
     }
@@ -587,15 +551,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_held_board_with_nobody_to_ask_still_says_why_it_cannot_connect() {
+    fn a_held_board_with_nobody_to_ask_has_no_primary() {
         // The controller offers `take-over` only with a hold edge; without
-        // one the card has nothing to press, and says who has the board.
+        // one the card has nothing to press, and the Link row says who has
+        // the board.
         let mut fixture = CardFixture::held(HoldLevel::Watching);
         fixture.without_offer("take-over");
-        assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::says("Open in another tab", "usb"))
-        );
+        assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
     #[test]

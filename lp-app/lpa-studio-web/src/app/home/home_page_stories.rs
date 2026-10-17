@@ -344,6 +344,7 @@ fn roster(boards: &[Board]) -> DeviceRosterView {
                     id: DeviceId(6),
                     title: "Truck".to_string(),
                     freshness_label: Some("last heard 1 day ago".to_string()),
+                    heard_age_ms: Some(86400000),
                     identity_label: Some("dev000000000truck01".to_string()),
                     ..base.roster.devices[4].clone()
                 };
