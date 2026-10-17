@@ -6,9 +6,12 @@
 //! ([`super::primary_action`] presses the offer each state names). The
 //! second sentence is the primary's button said aloud — its verb and
 //! object, then what it gets you — and it is said only while that button
-//! is the primary: a board the editor holds has Done there instead, and a
+//! is the primary: a board the editor holds has Done there instead, a
 //! button its link refuses gives its reason in that place ("Firmware
-//! updates need USB."). The icon is the row's whose state it is, in the
+//! updates need USB."), and a fix that isn't offered here says why and
+//! what to do instead ([`missing_fix`]: "Connect over USB or Bluetooth to
+//! install it.", "Studio doesn't have firmware for this board."). No
+//! dead ends (P7). The icon is the row's whose state it is, in the
 //! state's tone; the sentences stay plain. Read off the same facts the rows
 //! read ([`BoardCardInput`]), never off their words.
 //!
@@ -28,7 +31,7 @@
 //! | Identifying | chip · working | "Identifying this board." + the spinner | — |
 //! | A take-over that failed | link · error | "Studio couldn't move this board to this tab." "Connect here to try again." | Connect here |
 //! | Taken by another tab | link · attention | "Another tab took this board." "Connect here to move it back to this tab." | Connect here |
-//! | Busy in another tab | link · attention | "This board is busy in another tab." | — |
+//! | Busy in another tab | link · attention | "This board is busy in another tab." "Connect here when it's done." | — |
 //! | Open in another tab | link · attention | "This board is open in another tab." "Connect here to move it to this tab." | Connect here |
 //! | Someone else holds its network slot | link · attention | "Someone else is connected to this board." "Retry when they're done." | Retry |
 //! | A Wi‑Fi connect failed | wifi · error | "Studio couldn't reach this board over Wi‑Fi." "Make sure this computer is on the same Wi‑Fi, then retry." | Retry |
@@ -42,7 +45,7 @@
 //! | Its file store refused | firmware · attention | "This board's firmware can't read its files." "The files are kept on the board." | — |
 //! | Its files were lost | project · attention | "This board's files were lost." "Restore them from a backup, or reset the board." | Restore (else Reset) |
 //! | A move of its files stopped half-way | firmware · attention | "This board's firmware update was interrupted." "Resume the update to finish it." | Resume update |
-//! | A send, update, install, erase or removal failed | the row's · error | "Studio couldn't send the project to this board." "Retry to send it again." | Retry, when the row has it |
+//! | A send, update, install, erase or removal failed, while the row offers it again | the row's · error | "Studio couldn't send the project to this board." "Retry to send it again." | Retry (else the board's own state says what's next) |
 //! | Keeps crashing | firmware · error | "This board's firmware keeps crashing." "Reinstall the firmware to fix it." | Reinstall firmware |
 //! | Needs a version Studio can't get | firmware · attention | "This board needs a firmware version Studio can't get." "Install the firmware to use it." | Install firmware |
 //! | Only its core runs | firmware · attention | "Part of this board's firmware is missing." "Install the firmware to use it." | Install firmware |
@@ -70,7 +73,7 @@ use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{FirmwareFace, LoadedProject, PendingLinkView};
 use lpa_devices::{ActivityKind, HoldLevel, UpdateBoardState};
 
-use super::bar_work::failed_kind;
+use super::bar_work::{failed_kind, retry};
 use super::board_card_input::{BoardCardInput, link_icon};
 use super::board_connection::BoardConnection;
 use super::board_picture::board_picture;
@@ -84,6 +87,7 @@ use super::ui_card_action::UiCardAction;
 use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use crate::app::devices::board_plays::BoardPlays;
+use crate::app::devices::device_update_route::UpdateLink;
 use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
 use crate::app::devices::ui_link_kind::UiLinkKind;
@@ -168,7 +172,9 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     if input.offer("finish-update").is_some() {
         return UpdateInterrupted;
     }
-    if let Some(kind) = failed_kind(input) {
+    // Work that failed, while its row offers the verb again; once it no
+    // longer does, the board's own state says what to do next (P7).
+    if let Some(kind) = failed_kind(input).filter(|kind| retry(input, *kind).is_some()) {
         return match kind {
             ActivityKind::Push => SendFailed,
             ActivityKind::Update => UpdateFailed,
@@ -231,11 +237,15 @@ pub(crate) fn board_surface(
     primary: Option<&UiPrimary>,
     action: Option<&UiCardAction>,
 ) -> UiBoardSurface {
-    let notice = words(input, state).map(|words| words.notice(primary, action));
+    let missing = action
+        .is_none()
+        .then(|| missing_fix(input, state))
+        .flatten();
+    let notice = words(input, state).map(|words| words.notice(primary, action, missing));
     UiBoardSurface {
         state,
         picture: under(notice.is_some(), picture),
-        progress: progress(input, state, bars),
+        progress: progress(state, bars),
         notice,
     }
 }
@@ -258,7 +268,7 @@ pub(crate) fn pending_surface(
         state,
         picture: SurfacePicture::None,
         progress: (state == SurfaceState::Identifying).then_some(SurfaceProgress::Spinner),
-        notice: Some(words.notice(primary, action)),
+        notice: Some(words.notice(primary, action, None)),
     }
 }
 
@@ -396,13 +406,10 @@ fn under(notice: bool, picture: &UiBoardPicture) -> SurfacePicture {
     }
 }
 
-/// The progress of the work `state` reports: the running work's percent
-/// on its row, else the spinner.
-fn progress(
-    input: &BoardCardInput<'_>,
-    state: SurfaceState,
-    bars: &[UiStackBar],
-) -> Option<SurfaceProgress> {
+/// The progress of the work `state` reports: the percent of the running
+/// work on its row — the one number that row's words say and its foot
+/// draws ([`super::bar_work::running_work`]) — else the spinner.
+fn progress(state: SurfaceState, bars: &[UiStackBar]) -> Option<SurfaceProgress> {
     use SurfaceState::*;
     let layer = match state {
         Connecting | Reconnecting | MovingHere | Identifying => {
@@ -417,8 +424,7 @@ fn progress(
         .find(|bar| bar.layer == layer)
         .and_then(|bar| bar.work.as_ref())
         .filter(|work| work.state == BarWorkState::Running)
-        .and_then(|work| work.percent)
-        .or_else(|| input.view.activity.as_ref().and_then(|work| work.percent));
+        .and_then(|work| work.percent);
     Some(match percent {
         Some(percent) => SurfaceProgress::Percent(percent.min(100)),
         None => SurfaceProgress::Spinner,
@@ -462,19 +468,26 @@ impl Words {
         self
     }
 
-    /// The notice, its second sentence decided: a button's words only
-    /// while `action` is the primary; its refusal, when the link refuses
-    /// it; else none.
-    fn notice(self, primary: Option<&UiPrimary>, action: Option<&UiCardAction>) -> UiSurfaceNotice {
+    /// The notice, its second sentence decided (P7, no dead ends): a fact
+    /// always; the button's words only while `action` is the primary; the
+    /// refusal when the link refuses `action`; and `missing` — why the fix
+    /// isn't offered here, and what to do instead — when there is no
+    /// `action` to press.
+    fn notice(
+        self,
+        primary: Option<&UiPrimary>,
+        action: Option<&UiCardAction>,
+        missing: Option<String>,
+    ) -> UiSurfaceNotice {
         let pressed = |action: &UiCardAction| matches!(primary, Some(UiPrimary::Offer(shown)) if shown.offer == action.offer);
-        let second = match self.second {
-            Some(Second::Fact(fact)) => Some(fact),
-            Some(Second::Button(said)) => match action {
-                Some(action) if action.refused.is_some() => action.refused.as_deref().map(sentence),
-                Some(action) if pressed(action) => Some(said),
-                _ => None,
-            },
-            None => None,
+        let second = match (self.second, action) {
+            (Some(Second::Fact(fact)), _) => Some(fact),
+            (_, Some(action)) if action.refused.is_some() => {
+                action.refused.as_deref().map(sentence)
+            }
+            (Some(Second::Button(said)), Some(action)) if pressed(action) => Some(said),
+            (Some(Second::Button(_)), None) => missing,
+            _ => None,
         };
         UiSurfaceNotice {
             icon: self.icon,
@@ -557,7 +570,10 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
         .then_press("Connect here to try again."),
         TakenByAnotherTab => Words::new(held_icon, Attention, "Another tab took this board.")
             .then_press("Connect here to move it back to this tab."),
-        AnotherTabBusy => Words::new(held_icon, Attention, "This board is busy in another tab."),
+        // Nothing to press until that tab's work ends (its take-over waits
+        // for it): the next step, said as a fact.
+        AnotherTabBusy => Words::new(held_icon, Attention, "This board is busy in another tab.")
+            .then_fact("Connect here when it's done."),
         AnotherTab => Words::new(held_icon, Attention, "This board is open in another tab.")
             .then_press("Connect here to move it to this tab."),
         SomeoneElse => Words::new(
@@ -639,12 +655,14 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
             "Installing the firmware on this board didn't finish.",
         )
         .then_press("Retry to install it."),
-        EraseFailed => Words::new("firmware", Error, "Erasing this board didn't finish."),
+        EraseFailed => Words::new("firmware", Error, "Erasing this board didn't finish.")
+            .then_press("Retry to erase it."),
         RemoveFailed => Words::new(
             "project",
             Error,
             "Removing the project from this board didn't finish.",
-        ),
+        )
+        .then_press("Retry to remove it."),
         DataLost => Words::new("project", Attention, "This board's files were lost.")
             .then_press("Restore them from a backup, or reset the board."),
         ProjectError => Words::new("project", Error, "This board's project has an error.")
@@ -660,6 +678,40 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
             format!("This board's picture is too large to show {}.", way(link)),
         ),
         state => firmware_words(state),
+    })
+}
+
+/// Why the firmware fix `state` names isn't offered on this card, and what
+/// to do instead, said in the button's place (P7: no dead ends): over a
+/// link this board can't update over yet, the link that can; a version
+/// Studio can't get, the internet; else this Studio has no firmware that
+/// fits. `None` for a state that is not about what runs the board.
+fn missing_fix(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<String> {
+    use SurfaceState::*;
+    let verb = match state {
+        Crashing => "reinstall",
+        OldFirmware | UpdateRequired => "update",
+        CantGetVersion | Incomplete | PreHelloFirmware | NoFirmware | DownloadMode | Silent => {
+            "install"
+        }
+        _ => return None,
+    };
+    Some(match input.update.map(|update| &update.standing) {
+        Some(UpdateStanding::NotOverWifiYet {
+            link: UpdateLink::Relay,
+            ..
+        }) => format!("Connect nearby to {verb} it."),
+        Some(UpdateStanding::NotOverWifiYet { .. }) => {
+            format!("Connect over USB or Bluetooth to {verb} it.")
+        }
+        Some(UpdateStanding::NoWirelessBuild { .. }) => format!("Connect over USB to {verb} it."),
+        Some(UpdateStanding::CantGetVersion { .. }) => {
+            "Connect this computer to the internet to get it.".to_string()
+        }
+        _ if state == UpdateRequired => {
+            "Studio doesn't have firmware new enough to read them.".to_string()
+        }
+        _ => "Studio doesn't have firmware for this board.".to_string(),
     })
 }
 
@@ -756,6 +808,7 @@ mod tests {
     use super::*;
     use crate::app::devices::activity_ends::ActivityEnd;
     use crate::app::devices::device_card_feed_view::FeedLiveness;
+    use crate::app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow};
     use crate::app::devices::take_over_state::UiTakeOver;
     use crate::app::devices::wifi_connects::UiWifiConnect;
 
@@ -781,8 +834,130 @@ mod tests {
             panic!("a primary: {:?}", card.name_bar.primary);
         };
         assert_eq!(primary.word, "Update firmware");
+        assert_eq!(
+            primary.verb_alone.as_deref(),
+            Some("Update"),
+            "a narrow name bar says the verb alone"
+        );
         assert!(primary.offer.to_string().ends_with("/update-firmware"));
         assert_eq!(primary.refused, None);
+    }
+
+    /// One update has one number (round 2: the new firmware is the first
+    /// half, its last part the second): the surface's percent is the one
+    /// the Firmware row's work carries and its words say, for every update
+    /// story — never the step's own.
+    #[test]
+    fn the_surface_and_the_firmware_row_say_one_number() {
+        let mut said = Vec::new();
+        for row in UpdateFixtureRow::ALL {
+            let mut fixture = update_story(row, false);
+            let card = board_card(&fixture.input());
+            let Some(SurfaceProgress::Percent(percent)) = card.surface.progress else {
+                continue;
+            };
+            let work = card
+                .bars
+                .iter()
+                .find(|bar| bar.layer == BarLayer::Firmware)
+                .and_then(|bar| bar.work.clone())
+                .expect("the Firmware row works");
+            assert_eq!(work.percent, Some(percent), "{row:?}");
+            assert!(
+                work.words.ends_with(&format!(" · {percent}%")),
+                "{row:?}: {}",
+                work.words
+            );
+            said.push((row, percent));
+        }
+        // The new firmware at 40 % is the whole update at 20 %; its last
+        // part at 70 % is 85 %.
+        assert!(said.contains(&(UpdateFixtureRow::Updating, 20)), "{said:?}");
+        assert!(
+            said.contains(&(UpdateFixtureRow::Finishing, 85)),
+            "{said:?}"
+        );
+    }
+
+    /// A version Studio can't get (P7): Install firmware is the primary
+    /// whether Studio's own build is one press, or the row's details list
+    /// the versions (with the store's index) — then its press installs
+    /// the one the list picks, this Studio's own.
+    #[test]
+    fn a_version_studio_cant_get_is_installed_from_the_primary() {
+        for offline in [true, false] {
+            let mut fixture = update_story(UpdateFixtureRow::CantGetVersion, offline);
+            let card = board_card(&fixture.input());
+            assert_eq!(card.surface.state, SurfaceState::CantGetVersion);
+            assert_eq!(
+                card.surface.notice.and_then(|notice| notice.second),
+                Some("Install the firmware to use it.".to_string())
+            );
+            let Some(UiPrimary::Offer(primary)) = card.name_bar.primary else {
+                panic!("a primary: {:?}", card.name_bar.primary);
+            };
+            assert_eq!(primary.word, "Install firmware");
+            assert_eq!(primary.verb_alone.as_deref(), Some("Install"));
+            assert!(primary.offer.to_string().ends_with("/install-firmware"));
+            let offers = fixture.offers();
+            let install = offers
+                .iter()
+                .find(|offer| offer.path == primary.offer)
+                .expect("offered");
+            assert_eq!(
+                install.params().is_empty(),
+                offline,
+                "one press without the index, the list with it"
+            );
+            assert!(
+                install.press(&primary.args).is_ok(),
+                "the press binds the version the list picks"
+            );
+        }
+    }
+
+    /// An update that found no copy of the engine failed, and its Retry is
+    /// gone (the board needs a version Studio can't get): the surface says
+    /// the board's own state and its next step, never a failure with
+    /// nothing to press (P7).
+    #[test]
+    fn failed_work_with_no_retry_hands_over_to_the_boards_own_state() {
+        let mut fixture = update_story(UpdateFixtureRow::CantGetVersion, true);
+        fixture.view.last_outcome = Some(OutcomeView {
+            summary: "This Studio couldn't get v2026.09.28-4".to_string(),
+            ok: false,
+        });
+        fixture.ended = Some(ActivityEnd {
+            kind: ActivityKind::Update,
+            ok: false,
+            at: fixture.now - 30.0,
+        });
+        let card = board_card(&fixture.input());
+        assert_eq!(card.surface.state, SurfaceState::CantGetVersion);
+        assert!(matches!(
+            card.name_bar.primary,
+            Some(UiPrimary::Offer(ref primary)) if primary.word == "Install firmware"
+        ));
+    }
+
+    /// When a state's fix isn't offered here, its second sentence says why
+    /// and what to do instead (P7): a core-only board over Wi‑Fi that
+    /// updates over USB or Bluetooth first.
+    #[test]
+    fn a_fix_that_isnt_offered_says_why() {
+        let mut fixture =
+            update_story(UpdateFixtureRow::NotOverWifiYet, false).over(UiLinkKind::Wifi);
+        fixture.view.firmware_face = FirmwareFace::CoreOnly {
+            version: Some("2026.10.08-9".to_string()),
+            state: UpdateBoardState::NeedsEngine,
+        };
+        let card = board_card(&fixture.input());
+        assert_eq!(card.surface.state, SurfaceState::Incomplete);
+        assert_eq!(card.name_bar.primary, None, "nothing to press here");
+        assert_eq!(
+            card.surface.notice.and_then(|notice| notice.second),
+            Some("Connect over USB or Bluetooth to install it.".to_string())
+        );
     }
 
     #[test]
@@ -1102,7 +1277,7 @@ mod tests {
             CardFixture::held(HoldLevel::Busy("Updating \u{b7} 42%".to_string())),
             AnotherTabBusy,
             "This board is busy in another tab.",
-            None,
+            Some("Connect here when it's done."),
             None,
         ));
         rows.push((
@@ -1204,15 +1379,15 @@ mod tests {
             failed(ActivityKind::Erase),
             EraseFailed,
             "Erasing this board didn't finish.",
-            None,
-            None,
+            Some("Retry to erase it."),
+            Some("Retry"),
         ));
         rows.push((
             failed(ActivityKind::RemoveProject),
             RemoveFailed,
             "Removing the project from this board didn't finish.",
-            None,
-            None,
+            Some("Retry to remove it."),
+            Some("Retry"),
         ));
 
         rows.push((
@@ -1254,14 +1429,14 @@ mod tests {
             core_only(UpdateBoardState::NeedsEngine),
             Incomplete,
             "Part of this board's firmware is missing.",
-            None,
+            Some("Studio doesn't have firmware for this board."),
             None,
         ));
         rows.push((
             core_only(UpdateBoardState::EngineCrashing),
             Crashing,
             "This board's firmware keeps crashing.",
-            None,
+            Some("Studio doesn't have firmware for this board."),
             None,
         ));
 
@@ -1352,6 +1527,25 @@ mod tests {
         fixture.view.can_receive_project = false;
         fixture.view.can_remove_project = false;
         fixture.plays = BoardPlays::Unknown;
+        fixture
+    }
+
+    /// `row`'s update story on the ready board: its words and the offers
+    /// its standing publishes. `offline`: this Studio could not read the
+    /// store's release index.
+    fn update_story(row: UpdateFixtureRow, offline: bool) -> CardFixture {
+        let mut fixture = CardFixture::ready();
+        let mut update = UpdateFixture::new(row, fixture.view.clone());
+        if offline {
+            update = update.offline();
+        }
+        fixture.view = update.view.clone();
+        if fixture.view.activity.is_some() {
+            fixture.view.status = DeviceStatus::Busy;
+            fixture.view.can_receive_project = false;
+        }
+        fixture.update = update.words();
+        fixture.update_facts = update.offer_facts();
         fixture
     }
 

@@ -15,19 +15,19 @@
 //! | The session on the board (connected, reconnecting, in the editor) | Done | `done` | check |
 //! | Updating, installing, erasing, sending, removing, identifying | nothing (the surface and the busy row say it) | — | — |
 //! | Open in another tab, taken by another tab, a take-over that failed | Connect here | `take-over` | the held link's |
-//! | Busy in another tab | nothing | — | — |
+//! | Busy in another tab | nothing (the surface: Connect here when it's done) | — | — |
 //! | Someone else connected, a Wi‑Fi connect failed | Retry | `connect-wifi` / `connect-relay` | retry |
 //! | The last Connect failed | Retry | `connect` | retry |
 //! | Not answering | Retry | `retry` | retry |
 //! | A stand-in, off | Power on | `reconnect` | play |
 //! | Offline: Wi‑Fi first, then lightplayer.app, then its cable | Connect | `connect`, else the road's own offer | wifi / cloud / the link's |
 //! | Offline, nothing reaches it | nothing | — | — |
-//! | A send, an update or an install failed | Retry (the row's) | `push` / `update-firmware` / `flash` | retry |
+//! | A send, an update, an install, an erase or a removal failed, while its verb is offered again | Retry (the row's) | `push` / `update-firmware` / `flash` / `erase` / `remove-project` | retry |
 //! | Its files wait for newer firmware | Update firmware | `update-firmware` | firmware |
 //! | Its files were lost | Restore, else Reset | `restore-files`, else `start-fresh` | upload / add |
 //! | A move of its files stopped half-way | Resume update | `finish-update` | download |
 //! | Keeps crashing | Reinstall firmware | `reinstall-firmware` | firmware |
-//! | Needs a version Studio can't get, or only its core runs | Install firmware | `install-firmware` (Studio's own) | firmware |
+//! | Needs a version Studio can't get, or only its core runs | Install firmware | `install-firmware`: Studio's own at one press, or the version its list picks | firmware |
 //! | An older LightPlayer | Update firmware | `update-firmware`, else `flash` (the board pick) | firmware |
 //! | From before the hello, no LightPlayer, download mode, says nothing | Install firmware | `flash` (the board pick) | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
@@ -35,17 +35,23 @@
 //! | A shader error | Edit project | `edit` (its lock on a play-only link) | edit |
 //! | Runs no project | Add a project (the project pick) | `push` | add |
 //! | All well, or its picture too large | Connect, granted at any tier | `connect` | the link's |
-//! | The layout question open, its store refused, an erase or a removal failed | nothing (its row and details hold the answer) | — | — |
+//! | The layout question open, its store refused | nothing (its row and details hold the answer) | — | — |
 //!
 //! **No dead ends** (P7). When nothing can be pressed there is no button
 //! at all — never a greyed verb: an offer its link refuses is no primary,
 //! and the surface says the refusal in the button's place ("Firmware
-//! updates need USB."). A Connect that waits ("No project", "Project not
-//! known") is no button either: the Project row says why.
+//! updates need USB."); a fix that isn't offered here is said the same
+//! way, why and what to do instead ("Connect over USB or Bluetooth to
+//! install it."). Work that failed hands over to the board's own state
+//! once its verb is no longer offered. A Connect that waits ("No
+//! project", "Project not known") is no button either: the Project row
+//! says why.
 //!
 //! The primary says its verb and its object ("Update firmware"); a row's
 //! own button says the verb alone ("Update"), because the row already
-//! names its object (P12).
+//! names its object (P12). A name bar too narrow for the board's name
+//! beside the whole word says the verb alone too ([`UiCardAction::verb_alone`]):
+//! the surface's sentence names the object.
 //!
 //! A new board's primary is [`pending_primary`]: Install firmware once it
 //! has settled on needing firmware (Update firmware on an older
@@ -126,8 +132,7 @@ pub(crate) fn state_action(
         AllWell | PictureTooLarge => press("connect", "Connect", icon),
         Connected | InTheEditor | Reconnecting => input.offer("done").map(done_action),
         Connecting | MovingHere | Updating | Installing | Erasing | Sending | Removing
-        | Identifying | AnotherTabBusy | ConfirmationRequired | DataUnreadable | EraseFailed
-        | RemoveFailed => None,
+        | Identifying | AnotherTabBusy | ConfirmationRequired | DataUnreadable => None,
         AnotherTab | TakenByAnotherTab | MoveFailed => {
             press("take-over", CONNECT_HERE, link_icon(input.held_link()))
         }
@@ -151,18 +156,25 @@ pub(crate) fn state_action(
         SendFailed => retry(input, ActivityKind::Push),
         UpdateFailed => retry(input, ActivityKind::Update),
         InstallFailed => retry(input, ActivityKind::Flash),
+        EraseFailed => retry(input, ActivityKind::Erase),
+        RemoveFailed => retry(input, ActivityKind::RemoveProject),
         UpdateRequired => update_firmware(input),
         DataLost => input
             .offer("restore-files")
             .filter(|_| view.firmware_blocked.is_none())
             .map(|restore| UiCardAction::press(restore, "Restore").with_icon("upload"))
             .or_else(|| press("start-fresh", "Reset", "add")),
-        UpdateInterrupted => press("finish-update", "Resume update", "download")
-            .filter(|_| view.firmware_blocked.is_none()),
-        Crashing => press("reinstall-firmware", "Reinstall firmware", "firmware"),
+        UpdateInterrupted => {
+            press("finish-update", RESUME_UPDATE, "download").map(|resume| UiCardAction {
+                refused: resume.refused.or_else(|| view.firmware_blocked.clone()),
+                ..resume
+            })
+        }
+        Crashing => press("reinstall-firmware", REINSTALL_FIRMWARE, "firmware"),
+        // Studio's own build: one press, or — where the row's details list
+        // the versions — the version that list picks for the person.
         CantGetVersion | Incomplete => input
             .offer("install-firmware")
-            .filter(|install| install.params().is_empty())
             .map(|install| UiCardAction::press(install, INSTALL_FIRMWARE).with_icon("firmware")),
         OldFirmware => update_firmware(input).or_else(|| {
             input.offer("flash").map(|flash| UiCardAction {
@@ -186,7 +198,7 @@ pub(crate) fn state_action(
         }),
         ProjectError => edit_action(input)
             .map(|edit| UiCardAction {
-                word: "Edit project".to_string(),
+                word: EDIT_PROJECT.to_string(),
                 ..edit
             })
             .or_else(|| press("connect", "Connect", icon)),
@@ -194,9 +206,28 @@ pub(crate) fn state_action(
     }
 }
 
-/// The primary's words on the firmware verbs: verb and object (P12).
+/// The primary's words that name their object (P12): verb and object.
 const UPDATE_FIRMWARE: &str = "Update firmware";
 const INSTALL_FIRMWARE: &str = "Install firmware";
+const REINSTALL_FIRMWARE: &str = "Reinstall firmware";
+const RESUME_UPDATE: &str = "Resume update";
+const EDIT_PROJECT: &str = "Edit project";
+
+/// The verb alone of a primary that names its object: what a name bar too
+/// narrow for the board's name (about twelve characters) beside the whole
+/// word says instead. The surface's sentence already names the object.
+fn verb_alone(word: &str) -> Option<&'static str> {
+    Some(match word {
+        UPDATE_FIRMWARE => "Update",
+        INSTALL_FIRMWARE => "Install",
+        REINSTALL_FIRMWARE => "Reinstall",
+        RESUME_UPDATE => "Resume",
+        EDIT_PROJECT => "Edit",
+        ADD_A_PROJECT => "Add",
+        CONNECT_HERE => "Connect",
+        _ => return None,
+    })
+}
 
 /// Update firmware: `update-firmware`, one press, or the board pick when
 /// the board must be picked.
@@ -217,20 +248,21 @@ fn done_action(done: &UiOffer) -> UiCardAction {
 /// Add a project: the primary of a ready, idle board that runs no project
 /// — `push` with the project pick, as the project bar would draw it (the
 /// bar then does not repeat it). `None` when the board runs something or
-/// has not said, and when `push` is not offered or is refused (the primary
-/// then says "No project").
+/// has not said, and when `push` is not offered. Refused, it is no
+/// primary, and the surface says the refusal in the button's place.
 pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     let view = input.view;
     let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     if !ready || !input.idle() || view.loaded_project != LoadedProject::Empty {
         return None;
     }
-    let action = UiCardAction::press(input.offer("push")?, ADD_A_PROJECT)
-        .with_icon("add")
-        .drawn(UiActionDraw::ProjectPick {
-            board_id: view.board_id.clone(),
-        });
-    action.refused.is_none().then_some(action)
+    Some(
+        UiCardAction::press(input.offer("push")?, ADD_A_PROJECT)
+            .with_icon("add")
+            .drawn(UiActionDraw::ProjectPick {
+                board_id: view.board_id.clone(),
+            }),
+    )
 }
 
 /// "Offline · 2 hours ago", from the registry's last sighting, in the
@@ -284,8 +316,13 @@ fn install(flash: &UiOffer) -> UiCardAction {
     UiCardAction::press(flash, INSTALL_FIRMWARE).with_icon("firmware")
 }
 
+/// The primary pressing `action`, with its verb alone for a narrow name
+/// bar.
 fn offer(action: UiCardAction) -> UiPrimary {
-    UiPrimary::Offer(action)
+    UiPrimary::Offer(match verb_alone(&action.word) {
+        Some(verb) => action.with_verb_alone(verb),
+        None => action,
+    })
 }
 
 #[cfg(test)]
