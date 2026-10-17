@@ -35,7 +35,9 @@
 //! required), `LP_MIGRATE_LP_CLI` (an `lp-cli` copied out of `target/`,
 //! which the desk's hourly clean deletes), `LP_MIGRATE_SETUP=1`,
 //! `LP_MIGRATE_BOOTS` (power-on boots a side), `BOARD_HOLDER` (the lease's
-//! holder; required).
+//! holder; required), `LP_MIGRATE_SLUG` + `LP_MIGRATE_MAC` (another board
+//! than CX1; one not tagged `sacrificial` also needs `LP_MIGRATE_ERASE_OK`
+//! = its slug).
 //!
 //! `#[ignore]`d: it needs the desk, CX1 leased, and today's littlefs
 //! release flashed (`lp-cli firmware install --release latest`).
@@ -69,8 +71,7 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_BIN_EXE_lp-cli")));
     std::fs::create_dir_all(&dir).unwrap();
-    let desk = Desk::cx1(&holder);
-    desk.check().expect("the lease");
+    let desk = desk_for(&holder);
     let port = desk.port_wait(Duration::from_secs(10)).expect("CX1's port");
     let epoch = Instant::now();
     let console = Console::new(epoch);
@@ -227,6 +228,43 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
     );
     assert_eq!(after_hashes, before_hashes, "every project's HashPackage");
     eprintln!("after: {} files, hashes {after_hashes:?}", after.len());
+}
+
+/// The board: CX1, or the one `LP_MIGRATE_SLUG` + `LP_MIGRATE_MAC` name.
+/// A board the registry does not tag `sacrificial` is driven only when
+/// `LP_MIGRATE_ERASE_OK` names its slug too (the sitting saved its flash
+/// first), and then only by its MAC and under our lease.
+fn desk_for(holder: &str) -> Desk {
+    let Ok(slug) = std::env::var("LP_MIGRATE_SLUG") else {
+        let desk = Desk::cx1(holder);
+        desk.check().expect("the lease");
+        return desk;
+    };
+    let desk = Desk {
+        mac: std::env::var("LP_MIGRATE_MAC").expect("LP_MIGRATE_MAC with LP_MIGRATE_SLUG"),
+        slug,
+        holder: holder.to_string(),
+    };
+    if std::env::var("LP_MIGRATE_ERASE_OK").as_deref() == Ok(desk.slug.as_str()) {
+        let info = desk.show().unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            info["mac"]
+                .as_str()
+                .is_some_and(|m| m.eq_ignore_ascii_case(&desk.mac)),
+            "REFUSED: {} is not {}",
+            desk.slug,
+            desk.mac
+        );
+        assert_eq!(
+            info["lease"]["holder"].as_str(),
+            Some(desk.holder.as_str()),
+            "REFUSED: {} is not leased by us",
+            desk.slug
+        );
+    } else {
+        desk.check().expect("the lease");
+    }
+    desk
 }
 
 /// Power-on boots a side (`LP_MIGRATE_BOOTS`, default 1).

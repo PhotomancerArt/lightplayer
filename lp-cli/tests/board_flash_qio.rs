@@ -27,6 +27,8 @@
 //! hash), `LP_QIO_EXPECT` (`QIO` or `DIO`: what every `[flash]` line must
 //! say). A board the registry does not tag `sacrificial` also needs
 //! `LP_QIO_ERASE_OK=<its slug>`: the sitting saved its flash first.
+//! `LP_QIO_PROJECT=keep` skips the `basic` push: first light on the
+//! project the board already loads.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -157,8 +159,9 @@ async fn sitting() {
     let (mut conn, first) = s.boot(None, "first boot", false).await;
     rows.insert("first boot".into(), serde_json::json!([first]));
 
-    // 1. First light on `basic`.
-    {
+    // 1. First light on `basic` — or, `LP_QIO_PROJECT=keep`, on whatever
+    // the board already holds and loads (a migrated board's own files).
+    if std::env::var("LP_QIO_PROJECT").as_deref() != Ok("keep") {
         let mut client = LpClient::new(conn.client_io());
         client
             .replace_and_load_project("first-light", &project_files("projects/test/basic"))
