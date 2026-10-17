@@ -178,6 +178,14 @@ fn time_to_first_light_on_the_emulated_c6() {
                     let mut client = LpClient::new(&mut host).with_request_ids_from(1_000);
                     block_on(client.replace_and_load_project("first-light", files))
                         .unwrap_or_else(|e| panic!("{label}/{project}: upload: {e}"));
+                    // The board makes a load its startup project only once
+                    // the project has survived its first frames
+                    // (`persist_startup_project`); cut the power before that
+                    // and the boot falls back to the lexically first project
+                    // — on a store holding another one (`panel-176`'s
+                    // `/projects/a`), not this one. Silicon's
+                    // `board_first_light` settles for the same reason.
+                    line(&mut host, "startup_project set to first-light");
                 }
                 for boot in 0..BOOTS {
                     host = power_cycle(host, 0x7EE1_0100 + boot as u32);
