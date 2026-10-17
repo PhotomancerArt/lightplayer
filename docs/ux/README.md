@@ -21,7 +21,7 @@ Notation:
 ◌              working (spinner)
 ━━━━────       progress
 (dim)          drawn stale
-← red          the tone the line takes: red, orange, blue
+← red          the tone the line takes (ui.md's status families)
 # card 10-14   where the bad was caught: a feel gate, a spike round, a review
 ```
 
@@ -43,9 +43,11 @@ P12  the button explains           buttons
 P13  old looks old                 offline, cached, last-known
 P14  never colour alone            tones, marks
 P15  numbers read naturally        numbers, times, sizes
+P16  one treatment per meaning     icons, colours, words that mean something
+P17  one way per kind of data      times, sizes, versions, names, status
 ```
 
-P1–P10 are Yona's. P11–P15 are proposed.
+P1–P10, P16, P17: Yona. P11–P15: the director's, accepted 10-16.
 
 ---
 
@@ -224,7 +226,7 @@ app: `lpa-studio-web/src/base/detail_popover.rs`
 
 ---
 
-## P11. their words, not ours  (proposed)
+## P11. their words, not ours
 
 Name things the way the person sees them, never the way the code does.
 Internal words stay in debug surfaces.
@@ -238,7 +240,7 @@ bad:  Updating · 1 of 2 · 42%        # shipped: core, then engine; one number 
 bad:  Files waiting                  # shipped: the mechanism, not the state
 ```
 
-## P12. the button explains  (proposed)
+## P12. the button explains
 
 A button says its verb, and its object when that isn't obvious. Let it
 carry the meaning so the line doesn't have to.
@@ -250,7 +252,7 @@ bad:  │ Install │                         # shipped: install what?
 bad:  Old firmware · install the latest   # spike r1: the button already says it
 ```
 
-## P13. old looks old  (proposed)
+## P13. old looks old
 
 A stale fact keeps its place, drawn stale. Show the last thing known, not
 "unknown". Say how old once, in one place.
@@ -264,7 +266,7 @@ bad:  Project not known                 # shipped: it was known two hours ago
 bad:  Was playing studio · last seen    # spike r1: "last seen" on every row
 ```
 
-## P14. never colour alone  (proposed)
+## P14. never colour alone
 
 Colour says how bad. A word or a shape says what. Pair every tone with one.
 
@@ -274,7 +276,7 @@ do:   ▲ Firmware  v2026.10.08-9   crashing │ Reinstall │   ← red: the wo
 bad:  ↔ USB · connected  ☁ (lit)   vs   ☁ (dim)   # shipped: only colour tells them apart
 ```
 
-## P15. numbers read naturally  (proposed)
+## P15. numbers read naturally
 
 Pick the unit that makes the number easy to read, and use one format
 everywhere.
@@ -284,6 +286,45 @@ do:   2 h · 3 d · 2 weeks · 42% · 3.2 MB
 
 bad:  2 h ago  ·  Offline · 2 h      # shipped: one time, two formats, one card
 ```
+
+P17 gives each kind of number its one component.
+
+## P16. one treatment per meaning
+
+A meaning gets one icon, one colour, one word, everywhere in the app.
+Reuse what exists. Never borrow a colour, icon or word that already means
+something else.
+
+```text
+do:   ▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone: the button carries it
+do:   ↔ USB · not responding      │ Retry │   ← orange           # orange: a device needs you
+
+bad:  ○ You can edit · anyone can edit         ← yellow   # shipped: yellow means an unsaved edit
+bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue means live
+```
+
+app: `lpa-studio-core/src/core/status.rs` (`UiStatusKind`) ·
+`lpa-studio-web/src/base/icon.rs` (`StudioIconName`) ·
+`docs/style/ui.md` (the status families) · `docs/style/language.md` (the verbs)
+
+## P17. one way per kind of data
+
+Each kind of data has one type and one component that draws it, used
+everywhere and shown in one story: times, sizes, percentages, versions,
+project names, board names, status.
+
+```text
+do:   age_words(5_400)      → "2 h ago"       # one rule for every surface that names an age
+      duration_words(5_400) → "2 h"
+
+bad:  format_bytes · human_bytes · size · byte_size     # shipped: four size formatters;
+                                                        #   1536 B reads "1 KB" in one, "1.5 KB" in three
+bad:  12 s ago · last frame · 12 s ago · last heard 12 s ago · quiet — last heard 12 s ago
+                                                        # shipped: one age, four phrasings
+```
+
+app: `lpa-studio-core/…/devices/age_words.rs` (the model to copy) ·
+story: data kinds (to build: one story, every kind, every case)
 
 ---
 
@@ -295,4 +336,5 @@ plan      a UI plan draws its anatomy first, in ASCII, reviewed before code
 review    a feel-gate note becomes a bad → do pair here, in the PR that fixes it
 new       no principle fits? add one, marked proposed; Yona approves it
 study     a converged spike becomes a study, linked from its principles
+data      a new kind of data gets its type, its component and its story (P17)
 ```

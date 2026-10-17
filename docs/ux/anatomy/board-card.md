@@ -59,7 +59,8 @@ Connected, the rows become the board's panel and the primary becomes Done:
 
 ```text
 ›          no action: the row opens its details (everything the row leaves out)
-tone       none · blue: something newer is ready · orange: needs you · red: broken
+tone       none · orange: needs you · red (striped): broken · blue: live, the lit ☁ only
+           (ui.md's status families; the card adds none, P16)
 working    ◌ takes the icon's place; progress runs along the row's foot ━━━━────
 stale      the row dims; its words don't change
 ```
@@ -77,7 +78,7 @@ number is.
 ◆ Project   studio         2 boards
 ◆ Project   none                                     # primary: + Add a project
 ◌ Project   studio         sending · 40%             # bar along the foot
-◆ Project   studio         out of date │ Send latest │   ← blue   # today: Out of date · studio
+◆ Project   studio         out of date │ Send latest │      # no tone (P16). today: Out of date · studio, orange
 ◆ Project   studio         error                     ← red   # details: the error
 ◆ Project   hidden                                   # locked. today: Project not known
 ◆ Project   studio                         (dim)     # offline. today: Project not known
@@ -93,7 +94,7 @@ Today's words stay, apart from four lines.
 ↔ USB · not connected
 ◌ USB · connecting
 ◌ USB · reconnecting
-↔ USB · not responding     │ Retry │   ← orange
+↔ USB · not responding     │ Retry │   ← orange   # today: yellow, an unsaved edit's colour
 ↔ USB · connection failed  │ Retry │   ← red      # today: Couldn't connect
 ↔ Wi‑Fi · connected   ☁              # ☁ lit: lightplayer.app reaches it too
 ↔ Bluetooth · connected
@@ -111,12 +112,12 @@ Today's words stay, apart from four lines.
 ```text
 ○ Access    edit · USB                     # today: You can edit · USB
 ○ Access    edit · password                # today: You can edit · Workshop key
-○ Access    edit · no password             # quiet: open is the default. today: orange, "anyone can edit"
+○ Access    edit · no password             # quiet: open is the default. today: yellow, "anyone can edit"
 ○ Access    play only        │ Unlock │    # today: You can play · anyone can play
 ○ Access    locked                         # primary: Unlock
 ◌ Access    checking                       # today: Access not known
 ○ Access    edit                   (dim)   # offline. today: Access not known · when it's back
-○ Access    USB only · no password │ Set password │   ← orange   # today: No password here · set one over USB
+○ Access    USB only · no password │ Set password │   ← orange   # today: No password here · set one over USB, yellow
 ```
 
 ### Firmware ▲: what runs the board
@@ -124,8 +125,8 @@ Today's words stay, apart from four lines.
 ```text
 ▲ Firmware  v2026.10.16-1                              # today: fw-esp32c6 c688c990b
 ▲ Firmware  dev c688c99                                # a local build
-▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   ← blue
-▲ Firmware  v2026.10.02-1 (pre-OTA) │ Update to v2026.10.16-1 │   ← blue   # over USB, once
+▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone (P16). today: blue, the live family
+▲ Firmware  v2026.10.02-1 (pre-OTA) │ Update to v2026.10.16-1 │   # over USB, once
 ▲ Firmware  unknown (pre-2026.07)   │ Install v2026.10.16-1 │     # today: Pre-hello firmware
 ▲ Firmware  none                                       # primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating · 42%             # today: Updating · 1 of 2 · 42%
@@ -184,6 +185,6 @@ Today's words stay, apart from four lines.
 O1  sending: "Sending ◆ Playful Choker" (Yona's) or "◌ Project  Playful Choker  sending · 40%" (P3)?
 O2  the project's icon: ◆ is a stand-in.
 O3  data lost / data unreadable: the Firmware row, or the Project row?
-O4  an open board (no password): quiet, or orange as today?
+O4  an open board (no password): quiet, or orange? (today's yellow is wrong either way, P16)
 O5  a new board's name: drop "· Oct 11"?
 ```
