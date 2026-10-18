@@ -961,7 +961,9 @@ does not model. The full reasoning, in Yona's words, is
   with any quoted number, the way trace provenance does
   (`configuration=lp-emu:esp32c6:t1`); an open fidelity defect for a
   measurement's class is a reason to distrust it. Emulated *time* is exact and
-  deterministic — never gate on host wall-clock from an emulated run.
+  deterministic — never gate on host wall-clock from an emulated run, and
+  never gate on emulated time either, with **one** exception: the C6's
+  first-light ratchet (below, under "The walk").
 
 (Two riders to the parity rule — a mandatory-filed-defect escape hatch, and
 the fidelity-defect registry as the "reason to believe the emulator is wrong" —
@@ -1753,12 +1755,26 @@ used to be run to check that a render still renders.
 
 Three rules before you use a number from it:
 
-- **Never gate on emulated microseconds** (plan PD9, vision D13). Time is a
-  graded ladder and no rung is a promise: `t1` counts one cycle per
-  instruction, `t2` uses a per-class model, and neither is graded by a
-  transcript. Memory figures transfer; clocks do not. A replay *reports* a
-  timing difference with its ratio and *fails* on a memory one, which is the
-  same rule in code.
+- **Never gate on emulated microseconds** (plan PD9, vision D13) — **with
+  one deliberate exception, t4 first light.** Time is a graded ladder and no
+  rung is a promise: `t1` counts one cycle per instruction, `t2` uses a
+  per-class model, `t3`/`t4` add the cache and the flash interface, and none
+  is graded by a transcript. Memory figures transfer; clocks do not. A replay
+  *reports* a timing difference with its ratio and *fails* on a memory one,
+  which is the same rule in code. The exception: CI's `C6 first light` job
+  boots the split image ROM-up through our bootloader on `t4` (basic project,
+  saved Wi-Fi network) and gates `[perf] first light` — > 500 ms red,
+  > 400 ms a warning, more than +5 ms over
+  `scripts/first-light-record/esp32c6.json` red **until Yona blesses it**
+  (`just bless-first-light` + the PR label `first-light-blessed`; an agent
+  never blesses a rise, and `just apply-ci-figures` refuses one), a drop
+  ratchets the record down through CI's figure patch, and an emulator-only
+  change re-records it with a note. It is the exception because `t4` read
+  373 ms against CX1's 378 (#1177) and is deterministic. `just
+  first-light-cx1` is the periodic silicon cross-check. See
+  `docs/first-light-ratchet.md` and the emulator-first ADR's 2026-10-18
+  amendment. No other emulated duration may become a gate without the same
+  decision from Yona.
 - **A claim needs a transcript.** Every class of `lp-emu:esp32c6:*` is graded
   `modeled` in `validate.toml`, each with a reason; byte-equality with silicon
   on one payload is evidence written into that reason, not a promotion. Record
