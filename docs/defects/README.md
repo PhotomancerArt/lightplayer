@@ -198,6 +198,11 @@ genuinely fits none of these, and define it here in one line.
   above it; nothing host-side can see it, only a device run of the exact
   construct. The fix is a shape the compiler handles and a device test
   that holds the shape.
+- **`foreign-task-starvation`** — a vendor task scheduled above every
+  thread of ours (a radio blob's) does a long CPU burst, and our critical
+  path stalls for its length with nothing of ours on the stack to show
+  why; the cost moves with whatever that task happens to overlap. The fix
+  is to schedule the burst, not to speed up the path it fell on.
 - **`unclassified`** — an open defect whose mechanism is not known yet;
   reclassify it when the cause is found.
 - **`contract-gap`** — content is authored against a guarantee one tier

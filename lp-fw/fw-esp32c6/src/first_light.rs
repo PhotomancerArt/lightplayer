@@ -132,8 +132,9 @@ pub fn on_served() {
 /// Whether this boot's first light is decided: a frame lit, or
 /// [`UNLIT_FRAMES`] went by without one — on every boot, power-on or not.
 /// The work held back until after first light waits for this (a split
-/// image's core hash, `ota::core_hash_step`).
-#[cfg(lp_split)]
+/// image's core hash, `ota::core_hash_step`; the station's first join,
+/// `net::station_task`).
+#[cfg(any(lp_split, lp_net))]
 pub fn decided() -> bool {
     DONE.load(Relaxed)
 }

@@ -35,6 +35,12 @@ pub const CX1_SLUG: &str = "c6-expendable";
 /// CX1's MAC, as the registry and its USB serial number give it.
 pub const CX1_MAC: &str = "14:C1:9F:E6:54:90";
 
+/// CX2, the XIAO C6 with a button on D0 (not sacrificial: measured, never
+/// erased).
+pub const CX2_SLUG: &str = "c6-button";
+/// CX2's MAC.
+pub const CX2_MAC: &str = "E4:B3:23:AE:80:98";
+
 /// The desk's board, as the registry names it, and who holds it.
 pub struct Desk {
     pub slug: String,
@@ -105,6 +111,16 @@ impl Desk {
         }
     }
 
+    /// CX2 (`c6-button`): leased and checked by MAC, but not sacrificial —
+    /// a caller that would erase it must use [`Self::check`], which refuses.
+    pub fn cx2(holder: &str) -> Self {
+        Self {
+            slug: CX2_SLUG.to_string(),
+            mac: CX2_MAC.to_string(),
+            holder: holder.to_string(),
+        }
+    }
+
     /// `board show <slug> --json`.
     pub fn show(&self) -> Result<serde_json::Value, String> {
         let out = Command::new("board")
@@ -124,6 +140,7 @@ impl Desk {
     /// Refuse unless the registry names this board sacrificial, with the
     /// allocated MAC, leased by us.
     pub fn check(&self) -> Result<(), String> {
+        self.check_leased()?;
         let info = self.show()?;
         let tags: Vec<String> = info["tags"]
             .as_array()
@@ -139,6 +156,13 @@ impl Desk {
                 self.slug
             ));
         }
+        Ok(())
+    }
+
+    /// Refuse unless the registry gives this board its allocated MAC and we
+    /// hold its lease (for a run that does not erase it).
+    pub fn check_leased(&self) -> Result<(), String> {
+        let info = self.show()?;
         let mac = info["mac"].as_str().unwrap_or_default();
         if !mac.eq_ignore_ascii_case(&self.mac) {
             return Err(format!(
