@@ -118,6 +118,7 @@ pub(crate) struct SelectionAt<'a> {
 }
 
 impl<'a> SelectionAt<'a> {
+    #[cfg(test)]
     pub(crate) const NONE: SelectionAt<'static> = SelectionAt {
         selection: None,
         time_seconds: 0.0,

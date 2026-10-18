@@ -290,8 +290,10 @@ impl GraphController {
     }
 
     /// Show the selection on the board while the Graph is the place, and
-    /// stop when it isn't or nothing is selected — the Patch view's pulse,
-    /// through the same `highlight` slots.
+    /// stop when it isn't or nothing is selected: each fixture's
+    /// `selection` slot for what is selected in fixtures (the lab's rules,
+    /// plan M4b), and the outputs' `highlight` slots — the Patch view's
+    /// pulse — for outputs, ports and pixels.
     async fn highlight(
         &mut self,
         project: &mut ProjectController,
@@ -306,18 +308,39 @@ impl GraphController {
         if self.pulsed == want {
             return;
         }
-        let op = match (&self.opened, &want) {
-            (Some(opened), Some(selection)) => crate::app::graph::graph_highlight::highlight_of(
-                &self.handle.editor().borrow().project,
-                &opened.nodes,
-                selection,
+        use crate::app::graph::graph_highlight::{board_selection, highlight_of};
+        let (fixtures, op) = match (&self.opened, &want) {
+            (Some(opened), Some(selection)) => {
+                let editor = self.handle.editor().borrow();
+                let p = &editor.project;
+                // The lab's own rules when every fixture's firmware has the
+                // `selection` slot (plan M4b); M3's `highlight` otherwise.
+                let has_slot = p.fixtures().iter().all(|n| {
+                    opened
+                        .nodes
+                        .get(&n.id)
+                        .is_some_and(|node| project.graph_fixture_has_selection(*node))
+                });
+                if has_slot {
+                    let b = board_selection(p, &opened.nodes, selection);
+                    (b.fixtures, b.outputs)
+                } else {
+                    (Vec::new(), highlight_of(p, &opened.nodes, selection))
+                }
+            }
+            _ => (
+                Vec::new(),
+                crate::PatchPulseOp {
+                    subjects: Vec::new(),
+                },
             ),
-            _ => crate::PatchPulseOp {
-                subjects: Vec::new(),
-            },
         };
-        // A pulse that didn't land is tried again with the next change.
-        if project.apply_patch_pulse(server, op).await.is_ok() {
+        // What didn't land is tried again with the next change.
+        let fixtures_landed = project
+            .apply_fixture_selection(server, fixtures)
+            .await
+            .is_ok();
+        if project.apply_patch_pulse(server, op).await.is_ok() && fixtures_landed {
             self.pulsed = want;
         }
     }

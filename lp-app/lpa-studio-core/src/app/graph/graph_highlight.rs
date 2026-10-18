@@ -17,6 +17,13 @@
 //! lab resolves lamps in the product's order, `lab-mapping-fit-tests`),
 //! which core maps through the board's own placements; an output, a port
 //! or a pixel counts on the output's wire.
+//!
+//! **On a board whose fixtures have the `selection` slot** (plan M4b) the
+//! fixture side is the lab's own rules ([`board_selection`]): each fixture
+//! is told what to do to its own lamps — every object under the selection
+//! chases, a lamp breathes, every other lamp in every fixture dims — and
+//! only an output, a port or a pixel goes through `highlight`. A board
+//! without the slot keeps [`highlight_of`].
 
 use std::collections::BTreeMap;
 
@@ -122,4 +129,108 @@ fn breath(lamps: PatchPulseLamps) -> PatchPulseSubject {
         lamps,
         language: PatchPulseLanguage::Breath,
     }
+}
+
+/// What the board shows for `selection` on firmware whose fixtures have the
+/// `selection` slot: each fixture's text (in its own lamp numbering, the
+/// engine's `fixture_selection.rs`), and the outputs' pulse for what is
+/// selected on the output side.
+pub(crate) struct BoardSelection {
+    pub fixtures: Vec<(lpc_model::NodeId, String)>,
+    pub outputs: PatchPulseOp,
+}
+
+pub(crate) fn board_selection(
+    project: &Project,
+    nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
+    selection: &[Target],
+) -> BoardSelection {
+    let placed = project.placed();
+    // Per fixture: the objects that chase and the lamps that breathe.
+    let mut chases: BTreeMap<NodeId, Vec<(u32, u32)>> = BTreeMap::new();
+    let mut breaths: BTreeMap<NodeId, Vec<u32>> = BTreeMap::new();
+    let mut output_side: Vec<Target> = Vec::new();
+    let mut fixture_side = false;
+    for t in selection {
+        match t {
+            Target::Node(id) if project.output(id).is_some() => output_side.push(t.clone()),
+            Target::Port { .. } | Target::Pixel { .. } => output_side.push(t.clone()),
+            Target::Lamp { object, index } => {
+                fixture_side = true;
+                if let Some(i) = placed.index_of(object) {
+                    let (fixture, _) = &placed.list[i];
+                    if let Some(start) = placed.fixture_lamps(fixture).map(|r| r.start) {
+                        let first = (placed.first_lamp(i) - start) as u32;
+                        breaths
+                            .entry(fixture.clone())
+                            .or_default()
+                            .push(first + index);
+                    }
+                }
+            }
+            Target::Node(_) | Target::Component(_) | Target::Object(_) => {
+                fixture_side = true;
+                for (i, (fixture, o)) in placed.list.iter().enumerate() {
+                    let under = match t {
+                        Target::Node(id) => fixture == id,
+                        _ => project.chain(&project.object_target(&o.id)).contains(t),
+                    };
+                    if !under {
+                        continue;
+                    }
+                    let Some(start) = placed.fixture_lamps(fixture).map(|r| r.start) else {
+                        continue;
+                    };
+                    let first = (placed.first_lamp(i) - start) as u32;
+                    let span = (first, o.lamps.len() as u32);
+                    let list = chases.entry(fixture.clone()).or_default();
+                    if span.1 > 0 && !list.contains(&span) {
+                        list.push(span);
+                    }
+                }
+            }
+        }
+    }
+    let fixtures = if fixture_side {
+        project
+            .fixtures()
+            .iter()
+            .filter_map(|n| {
+                let node = *nodes.get(&n.id)?;
+                let mut parts = Vec::new();
+                if let Some(spans) = chases.get(&n.id) {
+                    parts.push(format!("chase:{}", spans_text(spans)));
+                }
+                if let Some(lamps) = breaths.get(&n.id) {
+                    let spans: Vec<(u32, u32)> = lamps.iter().map(|l| (*l, 1)).collect();
+                    parts.push(format!("breath:{}", spans_text(&spans)));
+                }
+                if parts.is_empty() {
+                    parts.push("dim".to_string());
+                }
+                Some((node, parts.join(";")))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    BoardSelection {
+        fixtures,
+        outputs: highlight_of(project, nodes, &output_side),
+    }
+}
+
+/// `(first, lamps)` spans as the slot writes them: `0-11,24-30`.
+fn spans_text(spans: &[(u32, u32)]) -> String {
+    spans
+        .iter()
+        .map(|(first, n)| {
+            if *n == 1 {
+                first.to_string()
+            } else {
+                format!("{first}-{}", first + n - 1)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }

@@ -678,7 +678,8 @@ impl NodeRuntime for FixtureNode {
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         let selection: Option<alloc::string::String> = try_read_def_value(ctx, "selection")?;
-        self.selection.update(selection.as_deref().unwrap_or_default());
+        self.selection
+            .update(selection.as_deref().unwrap_or_default());
         // The two-sided space declaration (vision D3/D14). Absent reads —
         // a runtime fixture with no def behind it — leave the loaded
         // declaration standing rather than resetting it, the same rule the
