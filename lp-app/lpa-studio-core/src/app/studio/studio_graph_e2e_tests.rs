@@ -349,6 +349,39 @@ fn a_shaders_picture_follows_the_selection_over_a_device_link() {
     assert_eq!(face.render_size, Some((104, 28)));
 }
 
+/// With the board's own fixture rules (plan M4b, the `selection` slot):
+/// a selected fixture chases EVERY object in it, each from its own blue
+/// head to its own red tail — what the outputs' single-object chase could
+/// never say — and its lamps reach the wire that way.
+#[test]
+fn a_selected_fixture_chases_every_object_in_it() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Node(NodeId::new(
+            "fixture",
+        ))]));
+    graph.batch();
+    let view = graph.refresh();
+    let frame = view.graph.expect("the Graph's slice").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    // The choker auto-flows in object order: wire lamp = fixture lamp.
+    let e = graph.handle.editor().borrow();
+    let mut start = 0usize;
+    for (_, o) in e.project.placed_objects() {
+        let n = o.lamps.len();
+        assert_eq!(pixels[start], Rgb::new(0, 0, 255), "{} starts blue", o.id);
+        assert_eq!(
+            pixels[start + n - 1],
+            Rgb::new(255, 0, 0),
+            "{} ends red",
+            o.id
+        );
+        start += n;
+    }
+}
+
 /// A studio actor on a running catalog project, and the Graph's handle.
 struct Graph {
     actor: StudioActor<fn(core::time::Duration) -> core::future::Ready<()>>,

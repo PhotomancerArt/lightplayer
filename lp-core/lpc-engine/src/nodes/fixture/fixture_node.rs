@@ -16,6 +16,7 @@ use lpc_model::{
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::direct_channels::DirectChannels;
+use crate::nodes::fixture::fixture_selection::{FixtureSelection, SelectionAt};
 use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
@@ -199,6 +200,10 @@ pub struct FixtureNode {
     /// Render time of the last frame, for the release rate limit. Supplied by
     /// the render context — the core never reads a clock.
     power_last_time_seconds: Option<f32>,
+    /// What an editor's selection does to its lamps (the `selection` Debug
+    /// slot, `fixture_selection.rs`), parsed when its text changes.
+    /// `None` while nothing is selected: one pointer per fixture.
+    selection: Option<alloc::boxed::Box<FixtureSelection>>,
     /// Does this fixture's strip order mean something? (vision D3 — the
     /// single authored space question.) True puts 1D in this fixture's
     /// authored coordinate set. Synced from the def each tick; an absent
@@ -248,6 +253,7 @@ impl FixtureNode {
             power_scale_q16: power_limit::UNITY_SCALE_Q16,
             power_estimate_ma: 0,
             power_last_time_seconds: None,
+            selection: None,
             strip_order_meaningful: true,
             wire_reversed: false,
             consume_policy: ConsumerPolicy::AUTO,
@@ -672,6 +678,11 @@ impl NodeRuntime for FixtureNode {
         let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
+        let selection: Option<alloc::string::String> = try_read_def_value(ctx, "selection")?;
+        FixtureSelection::update_in(
+            &mut self.selection,
+            selection.as_deref().unwrap_or_default(),
+        );
         // The two-sided space declaration (vision D3/D14). Absent reads —
         // a runtime fixture with no def behind it — leave the loaded
         // declaration standing rather than resetting it, the same rule the
@@ -1144,7 +1155,19 @@ impl ControlNode for FixtureNode {
             PowerPass::unlimited()
         };
         let now_seconds = ctx.time_seconds();
-        let layout = self.render_control_inner(request, target, settings, ctx, &mut power)?;
+        // Held aside for the frame, so the lamp writes can read it while the
+        // render borrows the node.
+        let selection = self.selection.take();
+        let result = self.render_control_inner(
+            request,
+            target,
+            settings,
+            ctx,
+            &mut power,
+            SelectionAt::new(selection.as_deref(), now_seconds),
+        );
+        self.selection = selection;
+        let layout = result?;
         self.update_power_limit(settings.power, &power, now_seconds);
         Ok(layout)
     }
@@ -1207,6 +1230,7 @@ impl FixtureNode {
         settings: FixtureRenderSettings,
         ctx: &mut ControlRenderContext<'_>,
         power: &mut PowerPass,
+        selection: SelectionAt<'_>,
     ) -> Result<ControlLayout, NodeError> {
         let Some(visual_product) = self.last_visual_product else {
             // Unlit render: no resolvable visual input (fresh fixture,
@@ -1233,6 +1257,7 @@ impl FixtureNode {
                 settings.brightness,
                 settings.gamma_correction,
                 power,
+                selection,
             );
         };
         // Ask the product what space it lives in, then pick which of our own
@@ -1270,6 +1295,7 @@ impl FixtureNode {
                 scope,
                 ctx,
                 power,
+                selection,
             );
         }
         if request_space == VisualSpace::OneD {
@@ -1326,6 +1352,7 @@ impl FixtureNode {
                 settings.brightness,
                 settings.gamma_correction,
                 power,
+                selection,
             );
         }
         let mapping_entries = &self
@@ -1374,6 +1401,7 @@ impl FixtureNode {
             settings.brightness,
             settings.gamma_correction,
             power,
+            selection,
         )
     }
 
@@ -1740,6 +1768,7 @@ fn render_direct_fixture_control(
     scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
     power: &mut PowerPass,
+    selection: SelectionAt<'_>,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -1820,6 +1849,7 @@ fn render_direct_fixture_control(
             space,
             scope,
             ctx,
+            selection,
         )?,
         DirectChannels::Explicit(list) => stream_direct_lamps(
             list.iter().copied(),
@@ -1834,6 +1864,7 @@ fn render_direct_fixture_control(
             space,
             scope,
             ctx,
+            selection,
         )?,
     };
 
@@ -1858,6 +1889,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
     space: VisualSpace,
     scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
+    selection: SelectionAt<'_>,
 ) -> Result<usize, NodeError> {
     let time_seconds = ctx.time_seconds();
     let mut written_samples = 0usize;
@@ -1871,6 +1903,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
             settings,
             power,
             &mut written_samples,
+            selection,
         );
         Ok(())
     };
@@ -1907,6 +1940,7 @@ fn write_direct_lamps(
     settings: &FixtureRenderSettings,
     power: &mut PowerPass,
     written_samples: &mut usize,
+    selection: SelectionAt<'_>,
 ) {
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     // The samples drive the zip. `Zip` pulls its LEFT side first, so with
@@ -1939,6 +1973,7 @@ fn write_direct_lamps(
         let r = power.channel(r);
         let g = power.channel(g);
         let b = power.channel(b);
+        let [r, g, b] = selection.apply(channel, [r, g, b]);
         let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
         target.write(base, &ordered);
         *written_samples = (*written_samples).max(base + 3);
@@ -2293,6 +2328,7 @@ fn render_fixture_control_target(
     brightness_u8: u8,
     gamma_correction: bool,
     power: &mut PowerPass,
+    selection: SelectionAt<'_>,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -2363,6 +2399,7 @@ fn render_fixture_control_target(
         let r = power.channel(r);
         let g = power.channel(g);
         let b = power.channel(b);
+        let [r, g, b] = selection.apply(channel_idx as u32, [r, g, b]);
 
         let ordered = ordered_rgb_u16(color_order, r, g, b);
         target.write(base, &ordered);
@@ -4665,6 +4702,7 @@ mod tests {
             brightness_u8,
             gamma_correction,
             &mut power,
+            SelectionAt::NONE,
         )
         .unwrap();
         ([samples[0], samples[1], samples[2]], power)

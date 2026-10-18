@@ -439,6 +439,7 @@ impl FixtureBuilder {
                     OptionSlot::some(ValueSlot::new(enabled))
                 }),
             power: OptionSlot::none(),
+            selection: ValueSlot::new(String::new()),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Fixture(config));

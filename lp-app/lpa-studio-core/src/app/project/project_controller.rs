@@ -119,6 +119,9 @@ pub struct ProjectController {
     /// must sweep. Session bookkeeping only: the slot itself is Debug
     /// state and dies with the project either way.
     pulsed_outputs: BTreeSet<lpc_model::NodeId>,
+    /// Fixtures whose `selection` Debug slot the Graph last wrote
+    /// ([`Self::apply_fixture_selection`]), to sweep when it changes.
+    selected_fixtures: BTreeSet<lpc_model::NodeId>,
     /// Passive ticks left at the tightened verdict-chase interval. Set after
     /// an accepted asset-body apply so the node's compile verdict (error or
     /// clean) is pulled promptly instead of waiting a full device cadence;
@@ -470,6 +473,7 @@ impl ProjectController {
             edit_buffer: BTreeMap::new(),
             asset_edit_buffer: BTreeMap::new(),
             pulsed_outputs: BTreeSet::new(),
+            selected_fixtures: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
             project_fs_root: None,
@@ -6652,6 +6656,63 @@ impl ProjectController {
         }
         self.pulsed_outputs = written;
         Ok(run)
+    }
+
+    /// Write each fixture's `selection` Debug slot (the mapping lab's
+    /// fixture overrides on the board, plan M4b) and clear the ones the last
+    /// write set and this one doesn't. Like [`Self::apply_patch_pulse`]: one
+    /// selection, never a trail; ordinary Debug-slot overlay edits, so they
+    /// reach whatever runs the engine and are never saved.
+    pub(crate) async fn apply_fixture_selection(
+        &mut self,
+        server: &mut StudioServerClient,
+        writes: Vec<(NodeId, String)>,
+    ) -> Result<(), UiError> {
+        let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
+        let stale: Vec<NodeId> = self
+            .selected_fixtures
+            .iter()
+            .filter(|node| !written.contains(node))
+            .copied()
+            .collect();
+        for node in stale {
+            if let Some(address) = self.fixture_selection_address(node) {
+                self.apply_slot_edit(server, SlotEditOp::Clear { address })
+                    .await?;
+            }
+        }
+        for (node, text) in writes {
+            if let Some(address) = self.fixture_selection_address(node) {
+                self.apply_slot_edit(
+                    server,
+                    SlotEditOp::SetValue {
+                        address,
+                        value: LpValue::String(text),
+                    },
+                )
+                .await?;
+            }
+        }
+        self.selected_fixtures = written;
+        Ok(())
+    }
+
+    /// Whether a fixture's firmware has the `selection` Debug slot (the
+    /// board said so in its shapes); a board that doesn't shows the
+    /// selection through the outputs' `highlight` instead.
+    pub(crate) fn graph_fixture_has_selection(&self, node: NodeId) -> bool {
+        self.node_by_runtime_id(node)
+            .is_some_and(|n| n.has_slot_root_field("selection"))
+    }
+
+    /// The `selection` Debug slot's address on one fixture node.
+    fn fixture_selection_address(&self, node: NodeId) -> Option<ProjectSlotAddress> {
+        let controller = self.node_by_runtime_id(node)?;
+        Some(ProjectSlotAddress::new(
+            controller.address().clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("selection").ok()?,
+        ))
     }
 
     /// The `highlight` Debug slot's address on one output node, when the
