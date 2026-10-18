@@ -72,7 +72,18 @@ pub struct UiObject {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiShape {
     Polyline(Vec<Vec2>),
-    Ring { center: Vec2, radius: f64 },
+    Ring {
+        center: Vec2,
+        radius: f64,
+    },
+    /// A ring set's rings, outer first: one object.
+    Rings {
+        center: Vec2,
+        radii: Vec<f64>,
+    },
+    /// A closed outline whose inside is the object: a grid's box, a filled
+    /// polygon's outline.
+    Outline(Vec<Vec2>),
 }
 
 /// A stretch of a fixture's wiring.

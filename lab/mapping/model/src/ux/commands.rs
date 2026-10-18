@@ -382,13 +382,19 @@ impl crate::Project {
     }
 }
 
-/// A path and a ring have a direction of their own; a polygon (as in the
+/// A path, a ring and a ring set have a direction of their own; a polygon (as in the
 /// product) and a group don't; a repeat has its shape's.
 fn kind_has_direction(kind: &ComponentKind) -> bool {
     match kind {
-        ComponentKind::Path { .. } | ComponentKind::Circle { .. } => true,
+        ComponentKind::Path { .. } | ComponentKind::Circle { .. } | ComponentKind::RingSet(_) => {
+            true
+        }
         ComponentKind::Repeat { shape, .. } => kind_has_direction(shape),
-        ComponentKind::Polygon { .. } | ComponentKind::Group { .. } => false,
+        // A lattice's wiring is its start corner and routing, not a flag.
+        ComponentKind::Polygon { .. }
+        | ComponentKind::Group { .. }
+        | ComponentKind::Grid(_)
+        | ComponentKind::Filled(_) => false,
     }
 }
 
@@ -400,8 +406,12 @@ fn reverse_kind(kind: &mut ComponentKind) {
         ComponentKind::Circle { rings, .. } => {
             rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
         }
+        ComponentKind::RingSet(set) => set.reversed = !set.reversed,
         ComponentKind::Repeat { shape, .. } => reverse_kind(shape),
-        ComponentKind::Polygon { .. } | ComponentKind::Group { .. } => {}
+        ComponentKind::Polygon { .. }
+        | ComponentKind::Group { .. }
+        | ComponentKind::Grid(_)
+        | ComponentKind::Filled(_) => {}
     }
 }
 

@@ -31,7 +31,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
     Channel, ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind,
-    ObjectId, OtherNode, Output, PatchRule, Pattern, Port, Project, RenderSource, Vec2,
+    ObjectId, OtherNode, Output, PatchRule, Pattern, Port, Project, RenderSource, Unsupported,
+    Vec2,
 };
 use serde_json::Value;
 
@@ -102,6 +103,11 @@ pub struct MapObjectFile {
 pub struct PatchFile {
     pub path: String,
     pub doc: PatchDoc,
+    /// Rows written as a plain lamp range (`"range": {start, count}`) that
+    /// cover one whole object, by that object: the lab places it as the
+    /// object, and writes the row back as the same range while the object
+    /// still covers exactly those lamps, so an unedited save changes nothing.
+    pub ranges: BTreeMap<ObjectId, (u32, Option<u32>)>,
 }
 
 impl Opened {
@@ -135,10 +141,28 @@ impl Opened {
             taken_nodes: BTreeSet::new(),
         };
         *project.nodes_mut() = reader.module("module.json", &root, None)?;
-        // Rules, now that every output is known.
+        // Rules, now that every output is known. A patch with a row the
+        // lab can't place leaves its fixture as its box alone, and the rest
+        // of the project opens round it (plan M4).
         for (fixture, path, doc) in patches {
-            let rules = rules_of(&project, &files, &fixture, Some(&doc))
-                .map_err(|what| FilesError::new(&path, what))?;
+            let rules = match rules_of(&project, &files, &fixture, Some(&doc)) {
+                Ok((rules, ranges)) => {
+                    if let Some(patch) =
+                        files.nodes.get_mut(&fixture).and_then(|f| f.patch.as_mut())
+                    {
+                        patch.ranges = ranges;
+                    }
+                    rules
+                }
+                Err(RulesRefusal::Unsupported(why)) => {
+                    if let Some(f) = project.fixture_mut(&fixture) {
+                        f.components.clear();
+                        f.unsupported = Some(why);
+                    }
+                    continue;
+                }
+                Err(RulesRefusal::Broken(what)) => return Err(FilesError::new(&path, what)),
+            };
             if let Some(f) = project.fixture_mut(&fixture) {
                 f.rules = rules;
             }
@@ -151,8 +175,10 @@ impl Opened {
             .map(|n| n.id.clone())
             .collect();
         for fixture in unpatched {
-            let rules = rules_of(&project, &files, &fixture, None)
-                .map_err(|what| FilesError::new("", what))?;
+            let (rules, _) = rules_of(&project, &files, &fixture, None).map_err(|r| match r {
+                RulesRefusal::Unsupported(why) => FilesError::new("", why.what),
+                RulesRefusal::Broken(what) => FilesError::new("", what),
+            })?;
             if let Some(f) = project.fixture_mut(&fixture) {
                 f.rules = rules;
             }
@@ -271,11 +297,22 @@ impl Reader<'_> {
         file: &mut NodeFile,
     ) -> Result<Fixture, FilesError> {
         let mapping = value.get("mapping");
+        // A fixture mapped some other way (the product's older inline point
+        // lists, or none yet): its box alone, edited in Nodes.
         if mapping.and_then(|m| m.get("kind")).and_then(Value::as_str) != Some("Map2d") {
-            return Err(FilesError::new(
-                path,
-                "the lab opens fixtures mapped with a map2d document only",
-            ));
+            let what = match mapping.and_then(|m| m.get("kind")).and_then(Value::as_str) {
+                Some("PathPoints") => "its point-list mapping".to_string(),
+                None | Some("Unset") => "a fixture with no mapping".to_string(),
+                Some(other) => format!("its {other} mapping"),
+            };
+            let mut fixture = Fixture::square();
+            fixture.unsupported = Some(Unsupported {
+                what,
+                edit_in: "Nodes".into(),
+            });
+            fixture.color_order = color_order_of(value);
+            fixture.reads = Channel::new(fixture_reads(value));
+            return Ok(fixture);
         }
         let source = mapping
             .and_then(|m| m.get("source"))
@@ -287,7 +324,10 @@ impl Reader<'_> {
         // and its files are kept as they are (no map, no patch read).
         if let Some(what) = unsupported_shape(&text) {
             let mut fixture = Fixture::new(canvas_size(&text));
-            fixture.unsupported = Some(what);
+            fixture.unsupported = Some(Unsupported {
+                what: format!("its {what} shape"),
+                edit_in: "Map".into(),
+            });
             fixture.color_order = color_order_of(value);
             fixture.reads = Channel::new(fixture_reads(value));
             return Ok(fixture);
@@ -364,6 +404,7 @@ impl Reader<'_> {
             self.patches
                 .push((id.clone(), patch_path.clone(), doc.clone()));
             file.patch = Some(PatchFile {
+                ranges: BTreeMap::new(),
                 path: patch_path,
                 doc,
             });
@@ -442,15 +483,39 @@ fn output_of(value: &Value) -> Output {
     }
 }
 
-/// A fixture's rules from its patch (or its lack of one).
+/// Why a fixture's patch didn't become rules.
+pub(crate) enum RulesRefusal {
+    /// A row the lab can't place yet: the fixture opens as its box.
+    Unsupported(Unsupported),
+    /// A patch that doesn't hold together: the project doesn't open.
+    Broken(String),
+}
+
+impl From<String> for RulesRefusal {
+    fn from(what: String) -> Self {
+        RulesRefusal::Broken(what)
+    }
+}
+
+impl From<&str> for RulesRefusal {
+    fn from(what: &str) -> Self {
+        RulesRefusal::Broken(what.to_string())
+    }
+}
+
+/// A fixture's rules from its patch (or its lack of one), and the rows
+/// that were plain lamp ranges covering one whole object
+/// ([`PatchFile::ranges`]).
 pub(crate) fn rules_of(
     project: &Project,
     files: &ProductProject,
     fixture: &NodeId,
     patch: Option<&PatchDoc>,
-) -> Result<Vec<PatchRule>, String> {
+) -> Result<(Vec<PatchRule>, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
     let default = default_output(project, files, fixture);
     let mut rules = Vec::new();
+    let mut ranges = BTreeMap::new();
+    let spans = object_lamp_ranges(project, fixture);
     let manual = patch.is_some_and(|d| d.manual);
     for (i, e) in patch
         .map(|d| d.entries.as_slice())
@@ -458,13 +523,32 @@ pub(crate) fn rules_of(
         .iter()
         .enumerate()
     {
-        let PatchSource::Path { path, range: None } = &e.source else {
-            return Err(format!(
-                "row {i} places part of an object or a plain lamp range; the lab places whole objects only"
-            ));
+        let part = || {
+            RulesRefusal::Unsupported(Unsupported {
+                what: format!("patch row {} (it places part of an object)", i + 1),
+                edit_in: "Patch".into(),
+            })
         };
-        let object = object_of(project, files, fixture, &path.id, &path.instances)
-            .ok_or_else(|| format!("row {i}: {} names no object the lab opened", path.text()))?;
+        let object = match &e.source {
+            PatchSource::Path { path, range: None } => {
+                object_of(project, files, fixture, &path.id, &path.instances).ok_or_else(|| {
+                    format!("row {i}: {} names no object the lab opened", path.text())
+                })?
+            }
+            // A plain range is the object it covers, when it covers one
+            // whole object exactly.
+            PatchSource::Range(start, count) => {
+                let total: u32 = spans.iter().map(|(_, _, n)| n).sum();
+                let end = count.map_or(total, |c| start + c);
+                let (object, _, _) = spans
+                    .iter()
+                    .find(|(_, s, n)| s == start && s + n == end)
+                    .ok_or_else(part)?;
+                ranges.insert(object.clone(), (*start, *count));
+                object.clone()
+            }
+            PatchSource::Path { .. } => return Err(part()),
+        };
         let output = match &e.output {
             Some(name) => project
                 .attach_order()
@@ -502,11 +586,32 @@ pub(crate) fn rules_of(
     if !manual && let Some(output) = default {
         rules.push(PatchRule::Auto { output });
     }
-    Ok(rules)
+    Ok((rules, ranges))
+}
+
+/// Each of a fixture's objects, with where its lamps start in the
+/// fixture's own numbering and how many it has, in wiring order.
+pub(crate) fn object_lamp_ranges(project: &Project, fixture: &NodeId) -> Vec<(ObjectId, u32, u32)> {
+    fn walk(list: &[Component], start: &mut u32, out: &mut Vec<(ObjectId, u32, u32)>) {
+        for c in list {
+            for o in lab_mapping_model::domain::object::objects_of(c) {
+                let n = o.lamps.len() as u32;
+                out.push((o.id, *start, n));
+                *start += n;
+            }
+            walk(c.children(), start, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(f) = project.fixture(fixture) {
+        walk(&f.components, &mut 0, &mut out);
+    }
+    out
 }
 
 /// The object a patch path names: `/door` (a path, a polygon, a
-/// one-ring circle), `/sector/2` (a copy of a repeat).
+/// one-ring circle, a grid, a ring set, a filled polygon), `/sector/2` (a
+/// copy of a repeat).
 fn object_of(
     project: &Project,
     files: &ProductProject,
@@ -525,6 +630,9 @@ fn object_of(
             lab_mapping_model::domain::object::POLYGON_KEY.to_string()
         }
         (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => rings[0].key.clone(),
+        (ComponentKind::Grid(_), []) => lab_mapping_model::domain::object::GRID_KEY.to_string(),
+        (ComponentKind::RingSet(_), []) => lab_mapping_model::domain::object::RINGS_KEY.to_string(),
+        (ComponentKind::Filled(_), []) => lab_mapping_model::domain::object::FILLED_KEY.to_string(),
         (ComponentKind::Repeat { shape, count, .. }, [k])
             if *k < *count && !matches!(**shape, ComponentKind::Repeat { .. }) =>
         {

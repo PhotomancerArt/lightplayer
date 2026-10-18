@@ -51,6 +51,9 @@ struct Counters {
     circle: u32,
     repeat: u32,
     group: u32,
+    grid: u32,
+    rings: u32,
+    filled: u32,
     module: u32,
     fixture: u32,
     output: u32,
@@ -69,6 +72,9 @@ impl Project {
                 circle: 1,
                 repeat: 1,
                 group: 1,
+                grid: 1,
+                rings: 1,
+                filled: 1,
                 module: 1,
                 fixture: 1,
                 output: 1,
@@ -85,7 +91,7 @@ impl Project {
     /// Mint an id for a new component of this kind and wrap it. An id
     /// already in the project (one opened from a file, say) is skipped.
     pub fn mint(&mut self, kind: ComponentKind) -> Component {
-        let word = kind.word();
+        let word = kind.id_word();
         loop {
             let counter = match kind {
                 ComponentKind::Path { .. } => &mut self.counters.path,
@@ -93,6 +99,9 @@ impl Project {
                 ComponentKind::Circle { .. } => &mut self.counters.circle,
                 ComponentKind::Repeat { .. } => &mut self.counters.repeat,
                 ComponentKind::Group { .. } => &mut self.counters.group,
+                ComponentKind::Grid(_) => &mut self.counters.grid,
+                ComponentKind::RingSet(_) => &mut self.counters.rings,
+                ComponentKind::Filled(_) => &mut self.counters.filled,
             };
             let id = ComponentId::new(format!("{word}{counter}"));
             *counter += 1;
@@ -487,6 +496,13 @@ pub(crate) fn placed(mut o: Object, frame: Frame) -> Object {
         ObjectShape::Ring { center, radius } => ObjectShape::Ring {
             center: frame.to_world(center),
             radius: frame.len_world(radius),
+        },
+        ObjectShape::Rings { center, radii } => ObjectShape::Rings {
+            center: frame.to_world(center),
+            radii: radii.into_iter().map(|r| frame.len_world(r)).collect(),
+        },
+        ObjectShape::Filled { outline } => ObjectShape::Filled {
+            outline: outline.into_iter().map(|p| frame.to_world(p)).collect(),
         },
     };
     o

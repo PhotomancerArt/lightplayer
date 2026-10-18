@@ -25,6 +25,7 @@ use lab_mapping_web::{
 use lpa_studio_core::app::graph::{GraphHandle, UiGraphState, UiGraphView, graph_verb_path};
 use lpa_studio_core::{OfferPath, UiAction, UiOffer};
 
+use crate::base::{InlineButtonTone, inline_text_button_class};
 use crate::core::offer::offers_context::use_verbs_of;
 
 /// The Graph's editor, its view parts and the board's frame: built once
@@ -98,6 +99,10 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
 pub fn GraphCenter(
     page: GraphPage,
     state: Option<UiGraphState>,
+    /// The Map view's address, the way forward when the Graph can't open
+    /// the project (docs/ux P7). `None` off a lens.
+    #[props(default)]
+    map_href: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let body = match state {
@@ -106,9 +111,18 @@ pub fn GraphCenter(
         },
         Some(UiGraphState::Refused { why }) => rsx! {
             div { class: "tw:m-auto tw:grid tw:max-w-md tw:gap-2 tw:text-center tw:text-sm tw:text-muted-foreground",
-                div { class: "tw:font-semibold tw:text-strong-foreground", "The Graph can't open this project yet" }
-                div { "{why}" }
-                div { "Map and Patch still open it." }
+                div { class: "tw:font-semibold tw:text-strong-foreground", "The Graph can't open this project" }
+                div { "Open it in Map to see and edit its mapping." }
+                if let Some(href) = map_href {
+                    div {
+                        a {
+                            class: inline_text_button_class(InlineButtonTone::Action, false),
+                            href: "{href}",
+                            "Open in Map"
+                        }
+                    }
+                }
+                div { class: "tw:text-xs tw:text-subtle-foreground", "{why}" }
             }
         },
         Some(UiGraphState::Open { live }) => rsx! {

@@ -106,11 +106,35 @@ fn the_pages_input_is_cores_editor() {
     );
 }
 
-/// A catalog pattern's grid fixture opens as its box on the Graph, saying
-/// why, and the rest of the project opens around it.
+/// A catalog pattern's grid and its ring of eight rings open whole on the
+/// Graph (plan M4): every lamp the product resolves, nothing held back.
 #[test]
-fn a_grid_fixture_opens_as_its_box() {
+fn a_patterns_grid_and_rings_open_whole() {
     let mut graph = Graph::new("catalog/plasma");
+    let view = graph.go_to_graph();
+    assert!(matches!(
+        view.graph.map(|g| g.state),
+        Some(UiGraphState::Open { .. })
+    ));
+    let e = graph.handle.editor().borrow();
+    let face = e
+        .view_nodes()
+        .into_iter()
+        .find(|n| n.id == NodeId::new("fixture"))
+        .and_then(|n| n.face);
+    let Some(UiNodeFace::Fixture(face)) = face else {
+        panic!("the fixture's face");
+    };
+    assert_eq!(face.not_shown, None);
+    assert_eq!(e.project.lamp_count(), 241);
+}
+
+/// A fixture mapped with the product's older point lists opens as its box,
+/// saying where to edit it, and the project opens round it: the Graph
+/// refuses the fixture, never the project (plan M4).
+#[test]
+fn a_point_list_fixture_opens_as_its_box() {
+    let mut graph = Graph::new("catalog/fiber-headband");
     let view = graph.go_to_graph();
     assert!(matches!(
         view.graph.map(|g| g.state),
@@ -127,7 +151,7 @@ fn a_grid_fixture_opens_as_its_box() {
     };
     assert_eq!(
         face.not_shown.as_deref(),
-        Some("This fixture's grid isn't on the Graph yet — use Map")
+        Some("The Graph can't show its point-list mapping yet. Edit it in Nodes.")
     );
 }
 

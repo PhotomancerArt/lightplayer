@@ -135,10 +135,24 @@ fn project_facts(p: &Project) -> Vec<String> {
         .iter()
         .map(|u| u.lamps.len())
         .sum();
-    vec![
+    let boxes = p
+        .fixtures()
+        .iter()
+        .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_some()))
+        .count();
+    let mut facts = vec![
         plural(p.fixtures().len(), "fixture"),
         plural(p.outputs().len(), "output"),
         format!("{} lamps", p.lamp_count()),
+    ];
+    // A fixture opened as its box alone: its lamps aren't counted here.
+    if boxes > 0 {
+        facts.push(format!(
+            "{} not shown, its lamps not counted",
+            plural(boxes, "fixture")
+        ));
+    }
+    facts.extend([
         if unpatched == 0 {
             "every lamp patched to a port".into()
         } else {
@@ -149,7 +163,8 @@ fn project_facts(p: &Project) -> Vec<String> {
         } else {
             format!("{outside} lamps outside their fixture's box — never lit")
         },
-    ]
+    ]);
+    facts
 }
 
 /// Where a drawn thing's lamps land: one line per span, its pixels on its

@@ -292,24 +292,49 @@ fn the_desk_saves_as_a_new_project() {
     assert_eq!(wire(&again), wire(&desk));
 }
 
-/// A catalog pattern's grid fixture opens as its box alone: the rest of
-/// the project opens around it, the fixture says it holds a grid, and an
-/// unedited save writes nothing (its files are never touched).
+/// A grid and a ring of several rings open whole (plan M4): the plasma
+/// pattern's fixture is a one-lamp grid and an eight-ring disc on one
+/// strand, every lamp where the product puts it. An unedited save writes
+/// nothing; an edit to the grid rewrites only its numbers, and the disc's
+/// object is written back as it was.
 #[test]
-fn a_grid_opens_as_its_box_alone() {
+fn a_grid_and_a_ring_set_open_whole() {
     let root = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../catalog/patterns/plasma"
     );
     let o = Opened::open(&DirFiles::new(root)).unwrap();
     let fixture = o.project.fixture(&NodeId::new("fixture")).unwrap();
-    assert_eq!(fixture.unsupported.as_deref(), Some("grid"));
-    assert!(fixture.components.is_empty());
-    assert!(fixture.rules.is_empty());
-    assert!(o.project.output(&NodeId::new("output")).is_some());
+    assert_eq!(fixture.unsupported, None);
+    let kinds: Vec<&str> = fixture.components.iter().map(|c| c.kind_word()).collect();
+    assert_eq!(kinds, ["grid", "rings"]);
+    // 1 + (60 + 48 + 40 + 32 + 24 + 16 + 12 + 8).
+    assert_eq!(o.project.lamp_count(), 241);
     let saved = o.files.save(&o.project).unwrap();
     assert!(saved.writes.is_empty(), "{:?}", saved.writes);
-    assert!(saved.removed.is_empty());
+
+    let mut p = o.project.clone();
+    let grid = fixture.components[0].id.clone();
+    assert!(p.edit_prop(
+        &Target::Component(grid),
+        "columns",
+        lab_mapping_model::PropEdit::SetCount(3),
+        2.0
+    ));
+    assert_eq!(p.lamp_count(), 243);
+    let saved = o.files.save(&p).unwrap();
+    let paths: Vec<&str> = saved.writes.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, ["fixture.map2d.json"]);
+    let written: serde_json::Value = serde_json::from_str(&saved.writes[0].1).unwrap();
+    let original: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{root}/fixture.map2d.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(written["objects"][0]["shape"]["grid"]["cols"], 3);
+    assert_eq!(
+        written["objects"][1]["shape"], original["objects"][1]["shape"],
+        "the disc is written back as it was"
+    );
 }
 
 fn open(e: &Embedded) -> Opened {

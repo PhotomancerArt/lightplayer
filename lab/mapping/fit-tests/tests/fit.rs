@@ -14,10 +14,10 @@
 //!    headless from the same files and ticked (its published fragments,
 //!    with the product's reverse-then-rotate arithmetic).
 //!
-//! The projects: the PLAYFUL choker and the zook dome (catalog), the
-//! radiance dome (generated, placeholder counts), and — beyond the brief,
-//! because it has modules, exports, two named outputs and both quirks —
-//! the small dome.
+//! The projects: every project in `catalog/projects/`, every pattern in
+//! `catalog/patterns/` and every test project in `projects/test/` (plan
+//! M4: the Graph opens everything Map opens), and the radiance dome
+//! (generated, placeholder counts).
 //!
 //! ```bash
 //! cargo test -p lab-mapping-fit-tests
@@ -25,11 +25,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use lab_mapping_files::{DirFiles, Opened};
 use lab_mapping_model::{ComponentKind, NodeId, NodeKind, ObjectId, PatchRule, Project};
-use lpc_engine::{EngineServices, ProjectLoader};
+use lpc_engine::{ButtonService, EngineServices, ProjectLoader, RadioService};
+use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_mapping::{Map2dDoc, PatchDoc, object_instance_spans, resolve};
 use lpc_model::{NodeDef, SlotShapeRegistry, TreePath};
 use lpfs::LpFsStd;
@@ -38,6 +40,22 @@ use lpfs::LpFsStd;
 
 macro_rules! fit {
     ($project:ident, $dir:expr) => {
+        fit!($project, $dir, wire);
+    };
+    // `no_wire, "why"`: a project the engine never places a lamp for, so
+    // the third proof has nothing to compare (the reason is the record).
+    ($project:ident, $dir:expr, no_wire, $why:literal) => {
+        fit!(@files_and_lamps $project, $dir);
+    };
+    ($project:ident, $dir:expr, wire) => {
+        fit!(@files_and_lamps $project, $dir, {
+            #[test]
+            fn every_output_carries_the_same_lamps() {
+                super::every_output_carries_the_same_lamps(&$dir);
+            }
+        });
+    };
+    (@files_and_lamps $project:ident, $dir:expr $(, { $($wire:tt)* })?) => {
         mod $project {
             use super::*;
 
@@ -56,18 +74,83 @@ macro_rules! fit {
                 super::lamps_are_the_products(&$dir);
             }
 
-            #[test]
-            fn every_output_carries_the_same_lamps() {
-                super::every_output_carries_the_same_lamps(&$dir);
-            }
+            $($($wire)*)?
         }
     };
 }
 
-fit!(playful_choker, catalog("playful-choker"));
-fit!(zook_dome, catalog("zook-dome"));
 fit!(radiance_dome, radiance());
+fit!(whole_shapes, lab_project("whole-shapes"));
+
+// catalog/projects/
+fit!(fiber_headband, catalog("fiber-headband"));
+fit!(fyeah_sign, catalog("fyeah-sign"));
+fit!(logo_sign, catalog("logo-sign"));
+fit!(peach_1d, catalog("peach-1d"));
+fit!(peach_2d, catalog("peach-2d"));
+fit!(playful_choker, catalog("playful-choker"));
+fit!(playful_choker_tryout, catalog("playful-choker-tryout"));
+fit!(rocaille, catalog("rocaille"));
 fit!(small_dome, catalog("small-dome"));
+fit!(zook_dome, catalog("zook-dome"));
+
+// catalog/patterns/
+fit!(pattern_aurora, pattern("aurora"));
+fit!(pattern_color_wipe, pattern("color-wipe"));
+fit!(pattern_comet, pattern("comet"));
+fit!(pattern_fire2012, pattern("fire2012"));
+fit!(pattern_fireflies, pattern("fireflies"));
+fit!(pattern_heartbeat, pattern("heartbeat"));
+fit!(pattern_linear_gradient, pattern("linear-gradient"));
+fit!(pattern_meteor, pattern("meteor"));
+fit!(pattern_noise_hard, pattern("noise-hard"));
+fit!(pattern_noise_soft, pattern("noise-soft"));
+fit!(pattern_palette_waves, pattern("palette-waves"));
+fit!(pattern_plasma, pattern("plasma"));
+fit!(pattern_plasma_duo, pattern("plasma-duo"));
+fit!(pattern_pulse, pattern("pulse"));
+fit!(pattern_radial_gradient, pattern("radial-gradient"));
+fit!(pattern_ripples, pattern("ripples"));
+fit!(pattern_scanner, pattern("scanner"));
+fit!(pattern_spiral, pattern("spiral"));
+fit!(pattern_twinkle, pattern("twinkle"));
+fit!(pattern_veins, pattern("veins"));
+
+// projects/test/
+fit!(test_basic, test_project("basic"));
+fit!(test_basic_2n, test_project("basic-2n"));
+fit!(test_basic_2n_half, test_project("basic-2n-half"));
+fit!(test_basic_4n, test_project("basic-4n"));
+fit!(test_basic2, test_project("basic2"));
+fit!(test_button, test_project("button"));
+fit!(test_button_playlist, test_project("button-playlist"));
+fit!(test_button_sign, test_project("button-sign"));
+fit!(test_events, test_project("events"));
+fit!(test_fast, test_project("fast"));
+fit!(
+    test_fault_demo,
+    test_project("fault-demo"),
+    no_wire,
+    "its shader faults every frame on purpose: the output shows the fault, never the lamps"
+);
+fit!(test_five_wire, test_project("five-wire"));
+fit!(test_fluid, test_project("fluid"));
+fit!(test_fyeah_button, test_project("fyeah-button"));
+fit!(test_fyeah_sign, test_project("fyeah-sign"));
+fit!(test_penta_strands_v3, test_project("penta-strands-v3"));
+fit!(test_perf_baseline, test_project("perf/baseline"));
+fit!(test_perf_fastmath, test_project("perf/fastmath"));
+fit!(test_quad_equal100_v3, test_project("quad-equal100-v3"));
+fit!(test_quad_gamma_full, test_project("quad-gamma-full"));
+fit!(test_quad_gamma_v3, test_project("quad-gamma-v3"));
+fit!(test_quad_strips, test_project("quad-strips"));
+fit!(test_quad_strips_1fix, test_project("quad-strips-1fix"));
+fit!(test_quad_strips_v3, test_project("quad-strips-v3"));
+fit!(test_quad_wire_oracle, test_project("quad-wire-oracle"));
+fit!(test_quad60_v3, test_project("quad60-v3"));
+fit!(test_shader_oracle, test_project("shader-oracle"));
+fit!(test_shader_oracle_f32, test_project("shader-oracle-f32"));
+fit!(test_zook_dome_1500, test_project("zook-dome-1500"));
 
 /// The radiance dome loads in the product as specified: 275 panels × 80
 /// lamps = 22,000 lamps, 10 outputs × 32 ports, every panel patched once.
@@ -178,6 +261,61 @@ fn an_edited_radiance_dome_still_fits() {
     });
 }
 
+/// The whole shapes, each edited from the inspector: the grid one column
+/// wider and its routing flipped, the filled polygon's lattice finer and
+/// turned, the ring set given more lamps and one more ring.
+#[test]
+fn edited_whole_shapes_still_fit() {
+    edited_still_fits(&lab_project("whole-shapes"), |p| {
+        let ids: Vec<_> = p
+            .fixture(&NodeId::new("fixture"))
+            .unwrap()
+            .components
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        let edits: [(&str, lab_mapping_model::PropEdit); 7] = [
+            ("columns", lab_mapping_model::PropEdit::SetCount(6)),
+            ("snake", lab_mapping_model::PropEdit::SetFlag(true)),
+            ("pitch", lab_mapping_model::PropEdit::SetNumber(3.0)),
+            ("angle", lab_mapping_model::PropEdit::SetNumber(-20.0)),
+            ("lamps", lab_mapping_model::PropEdit::SetCount(36)),
+            ("rings", lab_mapping_model::PropEdit::SetCount(4)),
+            ("inner-first", lab_mapping_model::PropEdit::SetFlag(false)),
+        ];
+        let owner = [0, 0, 1, 1, 2, 2, 2];
+        for ((prop, edit), i) in edits.into_iter().zip(owner) {
+            assert!(
+                p.edit_prop(
+                    &lab_mapping_model::Target::Component(ids[i].clone()),
+                    prop,
+                    edit,
+                    2.0
+                ),
+                "{prop}"
+            );
+        }
+    });
+}
+
+/// The plasma pattern's disc with one more lamp on its outer ring: the
+/// ring has a count of its own, so that is what the edit writes.
+#[test]
+fn an_edited_pattern_disc_still_fits() {
+    edited_still_fits(&pattern("plasma"), |p| {
+        let disc = p.fixture(&NodeId::new("fixture")).unwrap().components[1]
+            .id
+            .clone();
+        assert!(p.edit_prop(
+            &lab_mapping_model::Target::Component(disc),
+            "lamps",
+            lab_mapping_model::PropEdit::Nudge(1),
+            2.0
+        ));
+        assert_eq!(p.lamp_count(), 242);
+    });
+}
+
 fn edited_still_fits(dir: &Path, edit: impl Fn(&mut Project)) {
     let copy = scratch_copy(dir, "edited");
     let opened = open(&copy);
@@ -265,6 +403,12 @@ fn lamps_are_the_products(dir: &Path) {
     let p = &opened.project;
     let mut fixtures = 0;
     for n in p.fixtures() {
+        // A fixture the lab opens as its box alone has no lamps to compare
+        // (`the_fixtures_the_graph_cant_show_yet` names them).
+        if n.fixture().is_some_and(|f| f.unsupported.is_some()) {
+            fixtures += 1;
+            continue;
+        }
         let map = opened.files.nodes[&n.id].map.as_ref().unwrap();
         let doc = Map2dDoc::from_json(&read(&dir.join(&map.path))).unwrap();
         let product = resolve(&doc).unwrap();
@@ -320,6 +464,60 @@ fn lamps_are_the_products(dir: &Path) {
 
 /// A fixture's objects in wiring order, in its own coordinates, each with
 /// the product path that names it.
+/// The fixtures the Graph opens as their box alone, and why: those mapped
+/// with the product's older inline point lists instead of a map2d document
+/// (Map can't open them either). Every other fixture in every project
+/// opens whole (plan M4), and a project here still opens round the box.
+#[test]
+fn the_fixtures_the_graph_cant_show_yet() {
+    let mut boxes = Vec::new();
+    for dir in every_project() {
+        let opened = open(&dir);
+        for n in opened.project.fixtures() {
+            if let Some(u) = n.fixture().and_then(|f| f.unsupported.as_ref()) {
+                let name = dir.strip_prefix(workspace()).unwrap().display().to_string();
+                boxes.push(format!("{name} {}: {} ({})", n.name, u.what, u.edit_in));
+            }
+        }
+    }
+    assert_eq!(
+        boxes,
+        [
+            "catalog/projects/fiber-headband fixture: its point-list mapping (Nodes)",
+            "projects/test/five-wire fixture: its point-list mapping (Nodes)",
+            "projects/test/penta-strands-v3 fixture: its point-list mapping (Nodes)",
+        ]
+    );
+}
+
+/// Every project the oracle reads, in path order.
+fn every_project() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for root in ["catalog/projects", "catalog/patterns", "projects/test"] {
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(workspace().join(root))
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_dir())
+            .collect();
+        dirs.sort();
+        for d in dirs {
+            if d.join("project.json").exists() {
+                out.push(d);
+            } else {
+                // A folder of projects (perf/baseline, perf/fastmath).
+                let mut inner: Vec<PathBuf> = std::fs::read_dir(&d)
+                    .unwrap()
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.join("project.json").exists())
+                    .collect();
+                inner.sort();
+                out.extend(inner);
+            }
+        }
+    }
+    out
+}
+
 fn lab_objects(p: &Project, fixture: &NodeId) -> Vec<(String, lab_mapping_model::Object)> {
     let f = p.fixture(fixture).unwrap();
     let mut out = Vec::new();
@@ -343,7 +541,20 @@ type Wire = BTreeMap<String, BTreeMap<u32, (String, u32)>>;
 fn every_output_carries_the_same_lamps(dir: &Path) {
     let opened = open(dir);
     let lab = lab_wire(&opened);
-    let engine = engine_wire(dir);
+    // The lamps of a fixture the lab opens as its box alone aren't the
+    // lab's to place; every other lamp on every wire still is.
+    let boxes: Vec<String> = opened
+        .project
+        .fixtures()
+        .iter()
+        .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_some()))
+        .map(|n| tree_key(&opened, &n.id))
+        .collect();
+    let mut engine = engine_wire(dir);
+    for lamps in engine.values_mut() {
+        lamps.retain(|_, (fixture, _)| !boxes.contains(fixture));
+    }
+    engine.retain(|_, lamps| !lamps.is_empty());
     assert_eq!(
         lab.keys().collect::<Vec<_>>(),
         engine.keys().collect::<Vec<_>>(),
@@ -412,15 +623,25 @@ fn tree_key(opened: &Opened, id: &NodeId) -> String {
 /// by lamp.
 fn engine_wire(dir: &Path) -> Wire {
     let fs = LpFsStd::new(dir.to_path_buf());
-    let services = EngineServices::new(TreePath::parse("/fit.show").unwrap());
+    let mut services = EngineServices::new(TreePath::parse("/fit.show").unwrap());
+    // Virtual buttons and radios, so a project that has them (a sign with a
+    // remote) loads and ticks headless.
+    let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
+        HwRegistry::new(default_esp32c6_hardware_manifest()),
+    )));
+    let buttons: Rc<dyn ButtonService> = hardware.clone();
+    let radios: Rc<dyn RadioService> = hardware;
+    services.set_button_service(Some(buttons));
+    services.set_radio_service(Some(radios));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("the product loads it");
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
     let (mut engine, registry) = rt.into_parts();
+    // A frame a node faults in (a remote with no partner) is read anyway.
     for _ in 0..3 {
-        engine.tick(&registry, 16).expect("tick");
+        let _ = engine.tick(&registry, 16);
     }
     let tree = engine.tree();
     let key = |path: &TreePath| -> String {
@@ -461,6 +682,18 @@ fn workspace() -> PathBuf {
 
 fn catalog(name: &str) -> PathBuf {
     workspace().join("catalog/projects").join(name)
+}
+
+fn pattern(name: &str) -> PathBuf {
+    workspace().join("catalog/patterns").join(name)
+}
+
+fn test_project(name: &str) -> PathBuf {
+    workspace().join("projects/test").join(name)
+}
+
+fn lab_project(name: &str) -> PathBuf {
+    workspace().join("lab/mapping/projects").join(name)
 }
 
 fn radiance() -> PathBuf {
