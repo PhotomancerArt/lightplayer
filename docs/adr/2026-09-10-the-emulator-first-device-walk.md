@@ -135,7 +135,10 @@ reasons that hold for this reading and no other yet:
 - **It is deterministic.** Two power-on boots of one image differ by
   hundredths of a millisecond (they draw a link nonce and the RNG); the
   gate reads whole milliseconds, so it cannot flake on the host's load.
-  Host wall-clock is still never read.
+  Host wall-clock is still never read. It is a figure of the image's
+  *bytes*, though, and those depend on the host that built them (at
+  `6fadbca6c` a desk build read 394 ms, CI's 385), so the record is CI's
+  reading, like a positional figure.
 - **It is the number that matters.** Time to first light under one second
   is the tree-store adoption's headline, and before this gate nothing
   stopped it creeping back: a saved Wi-Fi network cost ~900 ms of it on

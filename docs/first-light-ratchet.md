@@ -30,6 +30,14 @@ accuracy table: `docs/reports/2026-10-17-c6-flash-timing-emulator.md`), and two
 boots of one image differ by hundredths of a millisecond, so whole
 milliseconds do not flake.
 
+**The record is CI's reading, not a desk's.** The image's bytes depend on the
+host that built it (paths; the same reason [positional figures](chip-figures.md#positional-figures)
+exist), and `t4` charges for where code lands in flash and cache: at
+`6fadbca6c` a desk (M2 Max) build read 394 ms and the CI runner's build
+385 ms. CI's runners build identical bytes, so CI agrees with itself; a desk's
+`just first-light-check` shows a direction, never a value to record. Bless
+with the number CI printed.
+
 It runs where the C6's pinned figures run (the `emu_c6` filter or the C6
 firmware's crate closure), on its own files, and on every main push.
 
@@ -65,8 +73,7 @@ A rise of more than 5 ms on a change to the product is Yona's decision, never
 an agent's:
 
 ```bash
-just bless-first-light 392      # the value from the PR comment / job summary
-just bless-first-light          # or measure here and take what it reads
+just bless-first-light 392      # CI's reading, from the PR comment / job summary
 git commit -am "chore(first-light): Yona blesses 381 → 392 ms (<why>)"
 ```
 
@@ -121,5 +128,10 @@ and fix the model before trusting the gate again.
 
 ## The first record
 
-Recorded from `main` at `6fadbca6c` (after #1184), `lp-emu:esp32c6:t4`:
-**394 ms** (`basic+net`, both boots; `recorded_by: initial`); `c40+net` read 401 ms. The parts: boot 14, init 19, fs 6, radio 61, split 5, server 8, load 86, lit 195 ms. That is 6 ms under the 400 ms warning.
+Recorded on this PR's CI run (merge of `6fadbca6c`-based work, firmware
+unchanged from main `6fadbca6c`), `lp-emu:esp32c6:t4`: **385 ms**
+(`basic+net`, both boots; parts: boot 14, init 19, fs 6, radio 61, split 5,
+server 8, load 86, lit 186 ms); `c40+net` read 399 ms. It was first
+committed at the desk's 394 ms, and the ratchet's own drop patch, applied with
+`just apply-ci-figures`, brought it to CI's 385 — the path a drop takes,
+proven on its first run.

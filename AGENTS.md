@@ -1770,7 +1770,8 @@ Three rules before you use a number from it:
   never blesses a rise, and `just apply-ci-figures` refuses one), a drop
   ratchets the record down through CI's figure patch, and an emulator-only
   change re-records it with a note. It is the exception because `t4` read
-  373 ms against CX1's 378 (#1177) and is deterministic. `just
+  373 ms against CX1's 378 (#1177) and is deterministic. The record is
+  **CI's** reading: a desk build is other bytes and read 9 ms higher. `just
   first-light-cx1` is the periodic silicon cross-check. See
   `docs/first-light-ratchet.md` and the emulator-first ADR's 2026-10-18
   amendment. No other emulated duration may become a gate without the same

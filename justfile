@@ -3766,26 +3766,21 @@ first-light-measure dir="target/first-light": install-rv32-target
 # The first-light ratchet, as CI runs it (minus the PR's labels and base):
 # measure, then > 500 ms fails, > 400 ms warns, more than +5 ms over
 # `scripts/first-light-record/esp32c6.json` fails (Yona's to bless), and a
-# drop rewrites the record (commit it).
+# drop rewrites the record. INDICATIVE ON A DESK: the record is CI's reading,
+# and a desk build is not the same bytes (host paths) — at 6fadbca6c a desk
+# read 394 ms and CI 385. Use it to see a direction, not to bless.
 #   just first-light-check
 first-light-check dir="target/first-light": (first-light-measure dir)
     scripts/ci/first-light-ratchet.py check --json {{ dir }}/emu-first-light-t4.json
 
 # YONA'S bless of a first-light rise (docs/first-light-ratchet.md): writes
-# the record at `ms` with `recorded_by: yona` (no `ms`: measure first and
-# take the measured value). CI accepts a raised record only with that field
-# AND the PR label `first-light-blessed`. Agents never run this for a rise.
+# the record at `ms` — CI's reading, from the PR comment or the job summary,
+# never a desk measurement — with `recorded_by: yona`. CI accepts a raised
+# record only with that field AND the PR label `first-light-blessed`.
+# Agents never run this for a rise.
 #   just bless-first-light 392
-#   just bless-first-light
-bless-first-light ms="" dir="target/first-light":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -z "{{ ms }}" ]]; then
-        just first-light-measure {{ dir }}
-        scripts/ci/first-light-ratchet.py bless --json {{ dir }}/emu-first-light-t4.json
-    else
-        scripts/ci/first-light-ratchet.py bless {{ ms }}
-    fi
+bless-first-light ms:
+    scripts/ci/first-light-ratchet.py bless {{ ms }}
 
 # The first-light ratchet's periodic silicon cross-check (a DESK recipe,
 # never CI; docs/first-light-ratchet.md): flash this tree's split image whole
