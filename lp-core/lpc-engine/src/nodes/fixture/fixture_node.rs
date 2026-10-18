@@ -202,7 +202,8 @@ pub struct FixtureNode {
     power_last_time_seconds: Option<f32>,
     /// What an editor's selection does to its lamps (the `selection` Debug
     /// slot, `fixture_selection.rs`), parsed when its text changes.
-    selection: FixtureSelection,
+    /// `None` while nothing is selected: one pointer per fixture.
+    selection: Option<alloc::boxed::Box<FixtureSelection>>,
     /// Does this fixture's strip order mean something? (vision D3 — the
     /// single authored space question.) True puts 1D in this fixture's
     /// authored coordinate set. Synced from the def each tick; an absent
@@ -252,7 +253,7 @@ impl FixtureNode {
             power_scale_q16: power_limit::UNITY_SCALE_Q16,
             power_estimate_ma: 0,
             power_last_time_seconds: None,
-            selection: FixtureSelection::default(),
+            selection: None,
             strip_order_meaningful: true,
             wire_reversed: false,
             consume_policy: ConsumerPolicy::AUTO,
@@ -678,8 +679,10 @@ impl NodeRuntime for FixtureNode {
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         let selection: Option<alloc::string::String> = try_read_def_value(ctx, "selection")?;
-        self.selection
-            .update(selection.as_deref().unwrap_or_default());
+        FixtureSelection::update_in(
+            &mut self.selection,
+            selection.as_deref().unwrap_or_default(),
+        );
         // The two-sided space declaration (vision D3/D14). Absent reads —
         // a runtime fixture with no def behind it — leave the loaded
         // declaration standing rather than resetting it, the same rule the
@@ -1154,14 +1157,14 @@ impl ControlNode for FixtureNode {
         let now_seconds = ctx.time_seconds();
         // Held aside for the frame, so the lamp writes can read it while the
         // render borrows the node.
-        let selection = core::mem::take(&mut self.selection);
+        let selection = self.selection.take();
         let result = self.render_control_inner(
             request,
             target,
             settings,
             ctx,
             &mut power,
-            SelectionAt::new(&selection, now_seconds),
+            SelectionAt::new(selection.as_deref(), now_seconds),
         );
         self.selection = selection;
         let layout = result?;

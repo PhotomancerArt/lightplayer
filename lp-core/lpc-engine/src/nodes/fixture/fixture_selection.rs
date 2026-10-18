@@ -28,6 +28,7 @@
 //! the engine doesn't know is skipped, so a newer Studio's text never
 //! paints something wrong.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::output::chase;
@@ -47,13 +48,18 @@ pub(crate) struct FixtureSelection {
 }
 
 impl FixtureSelection {
-    /// The selection the slot's `text` says, keeping this one when it's the
-    /// same text.
-    pub(crate) fn update(&mut self, text: &str) {
-        if self.text == text {
+    /// Bring a fixture's held selection in step with its slot's `text`:
+    /// `None` for an empty one (nothing held), parsed again only when the
+    /// text changes.
+    pub(crate) fn update_in(held: &mut Option<Box<FixtureSelection>>, text: &str) {
+        if text.is_empty() {
+            *held = None;
             return;
         }
-        *self = Self::parse(text);
+        if held.as_ref().is_some_and(|s| s.text == text) {
+            return;
+        }
+        *held = Some(Box::new(Self::parse(text)));
     }
 
     fn parse(text: &str) -> Self {
@@ -124,9 +130,9 @@ impl<'a> SelectionAt<'a> {
         time_seconds: 0.0,
     };
 
-    pub(crate) fn new(selection: &'a FixtureSelection, time_seconds: f32) -> Self {
+    pub(crate) fn new(selection: Option<&'a FixtureSelection>, time_seconds: f32) -> Self {
         Self {
-            selection: selection.is_active().then_some(selection),
+            selection: selection.filter(|s| s.is_active()),
             time_seconds,
         }
     }
