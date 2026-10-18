@@ -3677,7 +3677,7 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         out=target/ota-scenarios
         scripts/ota/build-image.sh "$out/x" a0a0a0a0
         scripts/ota/build-image.sh "$out/y" b1b1b1b1
-        scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
+        scripts/ota/build-image.sh "$out/y-dies" c1c1c1c1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
     fi
     # Through both front doors, as test-emu-c6-split-boot.
