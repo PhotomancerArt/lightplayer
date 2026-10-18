@@ -37,6 +37,7 @@ use lab_mapping_model::{BoardFrame, Editor, NodeId};
 use crate::StudioServerClient;
 use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
+use crate::app::graph::graph_pictures;
 use crate::app::graph::graph_source::{GraphSource, location};
 use crate::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
 use crate::app::project::ProjectController;
@@ -63,6 +64,9 @@ pub struct GraphController {
     saved: u64,
     /// The selection the board last breathed, while it breathes one.
     pulsed: Option<Vec<lab_mapping_model::Target>>,
+    /// The render sources whose pictures the Graph shows, with their
+    /// visual products (`graph_pictures.rs`, plan D11).
+    pictures: Vec<(NodeId, crate::UiProductRef)>,
     frame: RefCell<Option<(FrameKey, Rc<BoardFrame>)>>,
 }
 
@@ -76,12 +80,13 @@ struct GraphOpened {
     nodes: BTreeMap<NodeId, lpc_model::NodeId>,
 }
 
-/// What the board's frame was built from: the board's frame count and
-/// the project it was laid onto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the board's frame was built from: the board's frame count, the
+/// project it was laid onto, and each picture's revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct FrameKey {
     frames_seen: u64,
     revision: u64,
+    pictures: Vec<Option<i64>>,
 }
 
 impl GraphController {
@@ -117,6 +122,11 @@ impl GraphController {
         let key = FrameKey {
             frames_seen: project.graph_frames_seen().unwrap_or(0),
             revision: editor.project.revision(),
+            pictures: self
+                .pictures
+                .iter()
+                .map(|(_, product)| project.graph_picture_revision(product))
+                .collect(),
         };
         let mut kept = self.frame.borrow_mut();
         if let Some((k, frame)) = kept.as_ref()
@@ -124,10 +134,13 @@ impl GraphController {
         {
             return frame.clone();
         }
-        let frame = Rc::new(graph_frame::board_frame(
-            &editor.project,
-            &opened.nodes,
-            |node| project.graph_output_frame(node),
+        let frame = graph_frame::board_frame(&editor.project, &opened.nodes, |node| {
+            project.graph_output_frame(node)
+        });
+        let frame = Rc::new(graph_pictures::with_pictures(
+            frame,
+            project,
+            &self.pictures,
         ));
         *kept = Some((key, frame.clone()));
         frame
@@ -153,6 +166,7 @@ impl GraphController {
             changed |= self.save(project, server).await;
             self.highlight(project, server, wanted).await;
         }
+        changed |= self.ask_for_pictures(project, wanted);
         if !wanted {
             return changed;
         }
@@ -306,6 +320,27 @@ impl GraphController {
         if project.apply_patch_pulse(server, op).await.is_ok() {
             self.pulsed = want;
         }
+    }
+
+    /// Ask the lens for the pictures the Graph shows now (plan D11), and
+    /// for none while it isn't the place. Returns whether that changed.
+    fn ask_for_pictures(&mut self, project: &mut ProjectController, wanted: bool) -> bool {
+        let pictures = match (&self.opened, wanted) {
+            (Some(opened), true) => {
+                let sources = graph_pictures::wanted_sources(
+                    &self.handle.editor().borrow(),
+                    project.graph_lens_is_device(),
+                );
+                graph_pictures::wanted_products(project, &opened.nodes, &sources)
+            }
+            _ => Vec::new(),
+        };
+        if pictures == self.pictures {
+            return false;
+        }
+        project.set_graph_pictures(pictures.iter().map(|(_, product)| *product).collect());
+        self.pictures = pictures;
+        true
     }
 
     /// Say on the canvas that a save didn't happen.

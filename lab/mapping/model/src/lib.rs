@@ -101,6 +101,7 @@ pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
 pub use domain::patch::{EffectivePatch, Gone, PatchProblem, PatchRule, Span, Unpatched};
 pub use domain::pattern::Pattern;
+pub use domain::picture::{Picture, picture_rect};
 pub use domain::placement::Placement;
 pub use domain::port_runs::PortRun;
 pub use domain::project::Project;

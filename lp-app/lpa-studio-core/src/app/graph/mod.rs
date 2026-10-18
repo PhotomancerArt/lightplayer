@@ -19,6 +19,7 @@ pub(crate) mod graph_highlight;
 mod graph_note;
 mod graph_offers;
 mod graph_op;
+mod graph_pictures;
 mod graph_source;
 mod ui_graph_view;
 

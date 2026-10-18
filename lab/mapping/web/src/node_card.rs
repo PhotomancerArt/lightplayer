@@ -65,7 +65,7 @@ pub fn NodeCard(
                             OutputFace { face, name, w, h, detail, zoom, frame }
                         },
                         UiNodeFace::Source(face) => rsx! {
-                            SourceFace { face, name, w, h, detail }
+                            SourceFace { face, name, w, h, detail, frame }
                         },
                         UiNodeFace::Plain(face) => rsx! {
                             PlainFace { face, name, w, h, detail }

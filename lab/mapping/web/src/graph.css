@@ -141,7 +141,9 @@
     .edge-channel { fill: var(--bound); font: 9px var(--font); opacity: 0.8; pointer-events: none; }
     .edge-quiet .edge-channel { opacity: 0.4; }
     /* A fixture's render product, faintly behind its lamps. */
-    .pictures { opacity: 0.1; pointer-events: none; }
+    .pictures { position: absolute; inset: 0; overflow: hidden; opacity: 0.1; pointer-events: none; }
+    .pictures .picture { position: absolute; image-rendering: auto; }
+    .source-picture { position: absolute; object-fit: contain; pointer-events: none; }
     .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
     /* A selected lamp's pixel, ringed on its port (D47). */
     /* A pinned node's mark (D48). */

@@ -4,7 +4,7 @@
 //! (what's lit, what's dimmed, which ports are tinted, which pixels are
 //! ringed).
 
-use crate::domain::geom::{Rect, Vec2, along_polyline, polyline_length};
+use crate::domain::geom::{Vec2, along_polyline, polyline_length};
 use crate::domain::node::{Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::placement::Frame;
@@ -16,9 +16,6 @@ use crate::ux::ui::{
     Emphasis, FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace,
     UiPortRow, UiRun, UiShape, UiSourceFace, UiWire,
 };
-
-/// A fixture's picture behind its lamps: this many cells each way.
-pub const PICTURE_CELLS: u32 = 16;
 
 /// What every face asks about the selection and the pointer, worked out
 /// once for all of them.
@@ -59,6 +56,7 @@ impl Editor {
             NodeKind::Fixture(_) => UiNodeFace::Fixture(self.fixture_face(&n.id, cx)),
             NodeKind::Output(_) => UiNodeFace::Output(self.output_face(&n.id, cx)),
             NodeKind::Source(s) => UiNodeFace::Source(UiSourceFace {
+                source: n.id.clone(),
                 kind: s.kind_words(),
                 writes: s.writes.to_string(),
                 pattern: s.pattern,
@@ -104,7 +102,8 @@ impl Editor {
                 look: FixtureLook::Live,
                 objects,
                 wires: Vec::new(),
-                picture: Vec::new(),
+                samples: None,
+                render_size: None,
                 not_shown,
             };
         }
@@ -126,11 +125,8 @@ impl Editor {
             look: FixtureLook::Editing,
             objects,
             wires,
-            picture: p
-                .render_preview(id, PICTURE_CELLS, 0.0)
-                .into_iter()
-                .map(|(r, c)| (Rect::new(local(r.min), local(r.max)), c))
-                .collect(),
+            samples: p.visual_source(id),
+            render_size: p.fixture(id).and_then(|f| f.render_size),
             not_shown,
         }
     }

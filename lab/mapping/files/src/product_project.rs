@@ -333,6 +333,7 @@ impl Reader<'_> {
             return Ok(fixture);
         }
         let doc = Map2dDoc::parse(&text).map_err(|e| FilesError::new(&map_path, e))?;
+        let render_size = render_size_of(value);
 
         // Ids: the file's, else the product's slug of the name, unique in
         // the document — then unique in the project for the lab.
@@ -381,6 +382,7 @@ impl Reader<'_> {
             }
         };
         let mut fixture = Fixture::new(size);
+        fixture.render_size = render_size;
         fixture.components = components;
         fixture.color_order = color_order_of(value);
         fixture.reads = Channel::new(fixture_reads(value));
@@ -447,6 +449,17 @@ fn canvas_size(text: &str) -> Vec2 {
         },
         None => Fixture::square().size,
     }
+}
+
+/// A fixture's `render_size`, when it gives one.
+fn render_size_of(value: &Value) -> Option<(u32, u32)> {
+    let r = value.get("render_size")?;
+    let n = |k: &str| {
+        r.get(k)
+            .and_then(Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+    };
+    Some((n("width")?, n("height")?)).filter(|(w, h)| *w > 0 && *h > 0)
 }
 
 /// An output's ports (in key order), and its name.

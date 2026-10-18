@@ -1,8 +1,9 @@
 //! A fixture's face. While you work in it, the mapping editor in place:
 //! what's drawn in it (each object's line, where its data enters and which
-//! way it runs), its wiring, and faintly behind them the picture its lamps
-//! sample — in SVG, in the fixture's own units — and its lamps as dots on a
-//! canvas (Q4), each in its colour in the fixture's control product.
+//! way it runs) and its wiring, in SVG in the fixture's own units; faintly
+//! behind them the picture its lamps sample, from the board frame
+//! (`picture_canvas.rs`); and its lamps as dots on a canvas (Q4), each in
+//! its colour in the fixture's control product.
 //! Otherwise Studio's live view: its lamps alone, as cells of light
 //! (`lamp_cells.rs`).
 //!
@@ -15,9 +16,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lab_mapping_model::{
-    BoardFrame, Emphasis, FixtureLook, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape, UiWire,
-    Vec2,
+    BoardFrame, Emphasis, FixtureLook, NodeId, ObjectId, Rect, UiFixtureFace, UiObject, UiShape,
+    UiWire, Vec2, picture_rect,
 };
+
+use crate::picture_canvas::PictureCanvas;
 
 use crate::dense_canvas::{Raster, Stamp, canvas_id, put_when_mounted};
 use crate::faces::{emphasis_alpha, emphasis_class, lamp_radius_px, rgb};
@@ -53,18 +56,31 @@ pub fn FixtureFace(
         .map(|o| o.id.clone())
         .collect();
     let editing = face.look == FixtureLook::Editing;
+    // The picture its lamps sample, where the product's fit puts it, as
+    // percentages of its box (the face clips what runs past it).
+    let picture = face.samples.clone().and_then(|source| {
+        let p = frame.read().picture(&source).map(|p| (p.width, p.height))?;
+        let (pw, ph) = face.render_size.unwrap_or(p);
+        let r = picture_rect(Rect::new(Vec2::default(), Vec2::new(w, h)), pw, ph);
+        let pct = |v: f64, of: f64| 100.0 * v / of.max(1e-9);
+        Some((
+            source,
+            format!(
+                "left: {}%; top: {}%; width: {}%; height: {}%",
+                pct(r.min.x, w),
+                pct(r.min.y, h),
+                pct(r.width(), w),
+                pct(r.height(), h)
+            ),
+        ))
+    });
     rsx! {
-        svg { class: "face-svg", view_box: "0 0 {w} {h}", preserve_aspect_ratio: "none",
-            g { class: "pictures",
-                for (i, (r, c)) in face.picture.iter().enumerate() {
-                    rect {
-                        key: "{i}",
-                        x: "{r.min.x}", y: "{r.min.y}",
-                        width: "{r.width() + 0.5 * px}", height: "{r.height() + 0.5 * px}",
-                        fill: "rgb({c.r},{c.g},{c.b})",
-                    }
-                }
+        if let Some((source, style)) = picture {
+            div { class: "pictures",
+                PictureCanvas { source, frame, class: "picture", style }
             }
+        }
+        svg { class: "face-svg", view_box: "0 0 {w} {h}", preserve_aspect_ratio: "none",
             for (i, wire) in face.wires.iter().enumerate() {
                 g { key: "w{i}", class: "wire wire-on", {wire_view(wire, lamp_r, px)} }
             }
