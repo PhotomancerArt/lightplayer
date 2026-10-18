@@ -17,6 +17,7 @@ description = "Mapping design lab: proves the lab's files crate fits the product
 lab-mapping-files = { path = "../files" }
 lab-mapping-model = { path = "../model" }
 lpc-engine = { path = "../../../lp-core/lpc-engine" }
+lpc-hardware = { path = "../../../lp-core/lpc-hardware" }
 lpc-mapping = { path = "../../../lp-core/lpc-mapping" }
 lpc-model = { path = "../../../lp-core/lpc-model" }
 lpfs = { path = "../../../lp-base/lpfs", default-features = false, features = ["std"] }

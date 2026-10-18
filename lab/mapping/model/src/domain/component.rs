@@ -12,9 +12,15 @@
 //! The kinds follow the product's shapes where it has them (D52): a path
 //! (with gaps and a `reversed` flag), a polygon, and a repeat are the
 //! product's `path`, `polygon` and `repeat`; a circle with its own rings,
-//! and a group, are the lab's (fit-check §4).
+//! and a group, are the lab's (fit-check §4). A grid, a ring set and a
+//! filled polygon are the product's `grid`, multi-ring `ring` and
+//! `filled_polygon`, taken whole (plan M4, D9): each is one object, edited
+//! from the inspector and moved whole, never point by point.
 
+use crate::domain::filled_polygon::FilledPolygon;
 use crate::domain::geom::Vec2;
+use crate::domain::grid::Grid;
+use crate::domain::ring_set::RingSet;
 
 /// A component's id, minted by the project when the component is created
 /// (`path1`, `circle2`, `group1`) and never reused or rewritten.
@@ -81,6 +87,14 @@ pub enum ComponentKind {
     /// Authored grouping: a group holds components and makes no objects of
     /// its own.
     Group { children: Vec<Component> },
+    /// The product's lamp matrix. Makes exactly one object.
+    Grid(Grid),
+    /// The product's concentric rings on one strand. Makes exactly one
+    /// object.
+    RingSet(RingSet),
+    /// The product's shaped matrix: an outline full of lamps. Makes exactly
+    /// one object.
+    Filled(FilledPolygon),
 }
 
 /// One ring of a circle. `key` is minted by the circle (`r1`, `r2`, …).
@@ -105,7 +119,11 @@ impl Component {
     pub fn is_single_object(&self) -> bool {
         matches!(
             self.kind,
-            ComponentKind::Path { .. } | ComponentKind::Polygon { .. }
+            ComponentKind::Path { .. }
+                | ComponentKind::Polygon { .. }
+                | ComponentKind::Grid(_)
+                | ComponentKind::RingSet(_)
+                | ComponentKind::Filled(_)
         )
     }
 
@@ -165,10 +183,22 @@ impl ComponentKind {
             ComponentKind::Circle { .. } => "circle",
             ComponentKind::Repeat { .. } => "repeat",
             ComponentKind::Group { .. } => "group",
+            ComponentKind::Grid(_) => "grid",
+            ComponentKind::RingSet(_) => "rings",
+            ComponentKind::Filled(_) => "filled polygon",
         }
     }
 
-    /// The points you drag, for a path or a polygon.
+    /// The word a new component's id starts with (`path1`, `grid2`).
+    pub fn id_word(&self) -> &'static str {
+        match self {
+            ComponentKind::Filled(_) => "filled",
+            other => other.word(),
+        }
+    }
+
+    /// The points you drag, for a path or a polygon. A filled polygon's
+    /// outline is moved whole (plan M4), so it has none here.
     pub fn points(&self) -> Option<&Vec<Vec2>> {
         match self {
             ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. } => {
@@ -211,6 +241,13 @@ impl ComponentKind {
             ComponentKind::Group { children } => {
                 for child in children {
                     child.translate(delta);
+                }
+            }
+            ComponentKind::Grid(g) => g.origin = g.origin + delta,
+            ComponentKind::RingSet(r) => r.center = r.center + delta,
+            ComponentKind::Filled(f) => {
+                for p in &mut f.points {
+                    *p = *p + delta;
                 }
             }
         }

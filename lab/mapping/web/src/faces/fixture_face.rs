@@ -96,6 +96,19 @@ fn object_view(o: &UiObject, lamp_r: f64, px: f64) -> Element {
         UiShape::Ring { center, radius } => rsx! {
             circle { class: "stroke", cx: "{center.x}", cy: "{center.y}", r: "{radius}" }
         },
+        UiShape::Rings { center, radii } => rsx! {
+            for r in radii.iter() {
+                circle { class: "stroke", cx: "{center.x}", cy: "{center.y}", r: "{r}" }
+            }
+        },
+        UiShape::Outline(points) => {
+            let d: String = points
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{}{},{} ", if i == 0 { "M" } else { "L" }, p.x, p.y))
+                .collect();
+            rsx! { path { class: "stroke", d: "{d}Z" } }
+        }
     };
     let arrow = o.arrow.map(|(at, d)| {
         let n = Vec2::new(-d.y, d.x);

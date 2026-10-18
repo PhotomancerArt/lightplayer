@@ -34,10 +34,24 @@ fn graph_choker_span_selected() -> Element {
 }
 
 #[story(
-    description = "A catalog pattern whose fixture is a grid: the Graph opens the project around it and draws the fixture as its box alone, saying plainly that its grid isn't on the Graph yet and Map is the way."
+    description = "A catalog pattern's fixture selected: a one-lamp grid and a disc of eight rings on one strand, each drawn whole (the grid as its box, the disc as its rings), its lamps where the product puts them."
 )]
-fn graph_grid_not_shown() -> Element {
-    rsx! { GraphStory { example: "catalog/plasma", setup: Setup::Nothing } }
+fn graph_pattern_whole_shapes() -> Element {
+    rsx! { GraphStory { example: "catalog/plasma", setup: Setup::Fixture } }
+}
+
+#[story(
+    description = "A fixture mapped with the product's older point lists: the Graph opens the project round it and draws the fixture as its box alone, saying where to edit it (Nodes)."
+)]
+fn graph_point_list_box() -> Element {
+    rsx! { GraphStory { example: "catalog/fiber-headband", setup: Setup::Nothing } }
+}
+
+#[story(
+    description = "A project the Graph can't open at all: the reason, small, under the way forward, which opens the project in Map (docs/ux P7, no dead ends)."
+)]
+fn graph_refused() -> Element {
+    rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::Refused } }
 }
 
 #[story(
@@ -54,6 +68,8 @@ enum Setup {
     Fixture,
     FirstPath,
     Stack,
+    /// The project refused whole (the state a broken patch gives).
+    Refused,
 }
 
 #[component]
@@ -63,7 +79,12 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
     let view = {
         let e = handle.editor().borrow();
         UiGraphView {
-            state: UiGraphState::Open { live: true },
+            state: match setup {
+                Setup::Refused => UiGraphState::Refused {
+                    why: "row 3 of fixture.patch.json: no output is named \"porch\"".to_string(),
+                },
+                _ => UiGraphState::Open { live: true },
+            },
             generation: 1,
             frame: UiGraphFrame(std::rc::Rc::new(e.board_frame(0.0))),
         }
@@ -75,7 +96,12 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
                 GraphTreePanel { page: page.clone() }
             }
             div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle",
-                GraphCenter { page: page.clone(), state: Some(view.state.clone()), on_action: move |_| {} }
+                GraphCenter {
+                    page: page.clone(),
+                    state: Some(view.state.clone()),
+                    map_href: Some("#".to_string()),
+                    on_action: move |_| {},
+                }
             }
             div { class: "tw:w-[280px] tw:flex-none tw:overflow-y-auto tw:bg-card-subtle tw:p-2.5",
                 GraphPropsPanel { page }
@@ -121,6 +147,7 @@ fn story_handle(example: &str, setup: Setup) -> GraphHandle {
         Setup::Stack => {
             handle.input(GraphInput::SetLayout(Some(LayoutKind::Stack)));
         }
+        Setup::Refused => {}
     }
     handle
 }

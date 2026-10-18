@@ -19,13 +19,18 @@
 //!   corner, so a triangle of 9 lamps has 3 on each side.
 //! - **a ring**: lamp 0 at 12 o'clock, clockwise in y-down space (or
 //!   counter-clockwise), one every 360° / count.
+//! - **a grid**, **a ring set** and **a filled polygon**: the product's
+//!   walks, copied step for step (each function says how).
 //! - **a turn** ([`Rotation`]): about a centre, a positive angle clockwise —
 //!   a repeat's instance `k` is its shape turned `k · 360° / count`.
 //!
 //! A shape the product would refuse (a zero-length path) still gets lamps
 //! here, all on its first point, so a drawing in progress never vanishes.
 
+use crate::domain::filled_polygon::FilledPolygon;
 use crate::domain::geom::Vec2;
+use crate::domain::grid::{Grid, Routing};
+use crate::domain::ring_set::RingSet;
 
 /// A point the way the product holds it.
 pub type P32 = [f32; 2];
@@ -109,6 +114,163 @@ pub fn ring_lamps(center: Vec2, radius: f64, count: u32, ccw: bool) -> Vec<Vec2>
 
 /// Where a ring's lamp 0 sits: 12 o'clock in y-down space.
 pub const RING_START_DEG: f32 = -90.0;
+
+/// A grid's lamps: row by row from its start corner, each row back the
+/// other way when it snakes. A grid with no columns or rows, or no pitch,
+/// has none (the product refuses it).
+pub fn grid_lamps(grid: &Grid) -> Vec<Vec2> {
+    let pitch = grid.pitch as f32;
+    if grid.cols == 0 || grid.rows == 0 || pitch <= 0.0 {
+        return Vec::new();
+    }
+    let origin = p32(grid.origin);
+    let flip_rows = grid.start_corner.from_bottom();
+    let flip_cols = grid.start_corner.from_right();
+    let mut out = Vec::with_capacity((grid.cols * grid.rows) as usize);
+    for row_step in 0..grid.rows {
+        let row = if flip_rows {
+            grid.rows - 1 - row_step
+        } else {
+            row_step
+        };
+        let odd_row = grid.routing == Routing::Snake && row_step % 2 == 1;
+        for col_step in 0..grid.cols {
+            let col = if flip_cols == odd_row {
+                col_step
+            } else {
+                grid.cols - 1 - col_step
+            };
+            out.push(vec2([
+                origin[0] + col as f32 * pitch,
+                origin[1] + row as f32 * pitch,
+            ]));
+        }
+    }
+    out
+}
+
+/// A ring set's lamps: ring after ring on one strand, outer first (or
+/// inner first), each from `start_angle_deg`. A ring's count is its own
+/// `counts` entry, or the outer count scaled by circumference,
+/// `max(1, round(outer · r / R))`.
+pub fn ring_set_lamps(set: &RingSet) -> Vec<Vec2> {
+    let radius = set.radius as f32;
+    if set.outer_lamps == 0 || radius <= 0.0 || set.rings == 0 {
+        return Vec::new();
+    }
+    let center = p32(set.center);
+    let mut rings: Vec<(f32, u32)> = (0..set.rings)
+        .map(|k| {
+            let r = radius * (set.rings - k) as f32 / set.rings as f32;
+            let count = set
+                .counts
+                .get(k as usize)
+                .copied()
+                .filter(|c| *c > 0)
+                .unwrap_or_else(|| {
+                    (libm::roundf(set.outer_lamps as f32 * r / radius) as u32).max(1)
+                });
+            (r, count)
+        })
+        .collect();
+    if set.inner_first {
+        rings.reverse();
+    }
+    let sign = if set.reversed { -1.0f32 } else { 1.0f32 };
+    let start = set.start_angle_deg as f32;
+    let mut out = Vec::new();
+    for (r, count) in rings {
+        let step = 360.0 / count as f32;
+        for lamp in 0..count {
+            let degrees = start + sign * lamp as f32 * step;
+            let radians = degrees * (core::f32::consts::PI / 180.0);
+            out.push(vec2([
+                center[0] + r * libm::cosf(radians),
+                center[1] + r * libm::sinf(radians),
+            ]));
+        }
+    }
+    out
+}
+
+/// A filled polygon's lamps: the populated cells of its lattice, in wiring
+/// order. The product's walk (`filled_polygon_cells`), step for step:
+///
+/// 1. the lattice is laid in a frame turned `−angle_deg` about the
+///    outline's box centre, and the outline is carried into it;
+/// 2. cell centres sit at `box.min + offset + (i + ½, j + ½) · pitch`, for
+///    every cell inside the frame's box;
+/// 3. a centre counts when it is inside the outline (even-odd) AND at
+///    least `pitch / 1000` from every edge, so a centre on an edge is
+///    always out;
+/// 4. rows run top to bottom, cells left to right, the start corner flips
+///    them, and a snake reverses every other row it *visits* (a row the
+///    outline misses doesn't count).
+///
+/// Malformed input (fewer than three points, no pitch, a point that isn't
+/// a number) has none, as the product refuses it.
+pub fn filled_polygon_lamps(filled: &FilledPolygon) -> Vec<Vec2> {
+    let pitch = filled.pitch as f32;
+    if filled.points.len() < 3 || !(pitch > 0.0) || !pitch.is_finite() {
+        return Vec::new();
+    }
+    let points: Vec<P32> = filled.points.iter().map(|p| p32(*p)).collect();
+    if !points.iter().all(|p| p[0].is_finite() && p[1].is_finite()) {
+        return Vec::new();
+    }
+    let angle = filled.angle_deg as f32;
+    let offset = p32(filled.offset);
+    let bbox = bounds(&points);
+    let center = vec2([(bbox[0] + bbox[2]) * 0.5, (bbox[1] + bbox[3]) * 0.5]);
+    let into_frame = Rotation::about(center, -angle);
+    let out_of_frame = Rotation::about(center, angle);
+    let outline: Vec<P32> = points
+        .iter()
+        .map(|p| p32(into_frame.apply(vec2(*p))))
+        .collect();
+    let [min_x, min_y, max_x, max_y] = bounds(&outline);
+    let base_x = min_x + offset[0];
+    let base_y = min_y + offset[1];
+    let (first_col, last_col) = index_span(min_x, max_x, base_x, pitch);
+    let (first_row, last_row) = index_span(min_y, max_y, base_y, pitch);
+    if last_col < first_col || last_row < first_row {
+        return Vec::new();
+    }
+    let epsilon = pitch * 1e-3;
+    let mut rows: Vec<Vec<P32>> = Vec::new();
+    for row in first_row..=last_row {
+        let y = base_y + (row as f32 + 0.5) * pitch;
+        let cells: Vec<P32> = (first_col..=last_col)
+            .map(|col| [base_x + (col as f32 + 0.5) * pitch, y])
+            .filter(|c| cell_is_populated(*c, &outline, epsilon))
+            .collect();
+        if !cells.is_empty() {
+            rows.push(cells);
+        }
+    }
+    let flip_rows = filled.start_corner.from_bottom();
+    let flip_cols = filled.start_corner.from_right();
+    let mut out = Vec::new();
+    for row_step in 0..rows.len() {
+        let row = if flip_rows {
+            rows.len() - 1 - row_step
+        } else {
+            row_step
+        };
+        let odd_row = filled.routing == Routing::Snake && row_step % 2 == 1;
+        let forward = flip_cols == odd_row;
+        let cells = &rows[row];
+        for col_step in 0..cells.len() {
+            let cell = if forward {
+                cells[col_step]
+            } else {
+                cells[cells.len() - 1 - col_step]
+            };
+            out.push(out_of_frame.apply(vec2(cell)));
+        }
+    }
+    out
+}
 
 /// A turn about a point, worked out once and applied to each point — the
 /// product's `Rotation2d`, so a repeat's instances land on the same floats
@@ -206,4 +368,67 @@ fn distance(a: P32, b: P32) -> f32 {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
     libm::sqrtf(dx * dx + dy * dy)
+}
+
+/// `[min_x, min_y, max_x, max_y]` over a non-empty point list.
+fn bounds(points: &[P32]) -> [f32; 4] {
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for p in points {
+        b[0] = b[0].min(p[0]);
+        b[1] = b[1].min(p[1]);
+        b[2] = b[2].max(p[0]);
+        b[3] = b[3].max(p[1]);
+    }
+    b
+}
+
+/// The cells whose centres fall in `[low, high]`, for a lattice anchored at
+/// `base`, one `pitch` apart.
+fn index_span(low: f32, high: f32, base: f32, pitch: f32) -> (i32, i32) {
+    let first = libm::ceilf((low - base) / pitch - 0.5);
+    let last = libm::floorf((high - base) / pitch - 0.5);
+    (first as i32, last as i32)
+}
+
+/// Inside the outline, and no closer than `epsilon` to any edge.
+fn cell_is_populated(center: P32, outline: &[P32], epsilon: f32) -> bool {
+    if !inside_outline(center, outline) {
+        return false;
+    }
+    let mut previous = outline[outline.len() - 1];
+    for p in outline {
+        if distance_to_segment(center, previous, *p) < epsilon {
+            return false;
+        }
+        previous = *p;
+    }
+    true
+}
+
+/// Even-odd, against the closed outline.
+fn inside_outline(point: P32, outline: &[P32]) -> bool {
+    let mut inside = false;
+    let mut previous = outline[outline.len() - 1];
+    for current in outline {
+        if (previous[1] > point[1]) != (current[1] > point[1]) {
+            let t = (point[1] - previous[1]) / (current[1] - previous[1]);
+            if point[0] < previous[0] + t * (current[0] - previous[0]) {
+                inside = !inside;
+            }
+        }
+        previous = *current;
+    }
+    inside
+}
+
+fn distance_to_segment(point: P32, start: P32, end: P32) -> f32 {
+    let vx = end[0] - start[0];
+    let vy = end[1] - start[1];
+    let length_squared = vx * vx + vy * vy;
+    let t = if length_squared <= 0.0 {
+        0.0
+    } else {
+        (((point[0] - start[0]) * vx + (point[1] - start[1]) * vy) / length_squared).clamp(0.0, 1.0)
+    };
+    distance(point, [start[0] + t * vx, start[1] + t * vy])
 }

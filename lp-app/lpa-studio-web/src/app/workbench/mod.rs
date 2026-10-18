@@ -560,7 +560,12 @@ pub fn WorkbenchFrame(
                             }
                         },
                         WorkbenchView::Graph => rsx! {
-                            GraphCenter { page: graph.clone(), state: graph_state.clone(), on_action }
+                            GraphCenter {
+                                page: graph.clone(),
+                                state: graph_state.clone(),
+                                map_href: hrefs.href(WorkbenchView::Mapping),
+                                on_action,
+                            }
                         },
                     }
                     if let Some(panel) = *summoned.read() {

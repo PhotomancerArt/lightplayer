@@ -92,7 +92,7 @@ pub use domain::channel::Channel;
 pub use domain::color_order::ColorOrder;
 pub use domain::component::{Component, ComponentId, ComponentKind, Ring};
 pub use domain::control_product::ControlProduct;
-pub use domain::fixture::Fixture;
+pub use domain::fixture::{Fixture, Unsupported};
 pub use domain::geom::{Rect, Vec2};
 pub use domain::node::{Node, NodeId, NodeKind};
 pub use domain::notice::{Notice, NoticeKind};

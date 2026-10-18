@@ -33,8 +33,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, PatchRule, Project,
-    Vec2,
+    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId, PatchRule,
+    Project, Vec2,
 };
 use serde_json::{Map, Value, json};
 
@@ -42,7 +42,7 @@ use crate::error::FilesError;
 use crate::json::{insert_sorted, num_f32, pretty, same, set};
 use crate::map2d_doc::{required_format, shape_of};
 use crate::patch_doc::{ObjectPath, PatchDoc, PatchEntry, PatchSource, valid_object_id};
-use crate::product_project::{ProductProject, scopes, slugify, uniquify};
+use crate::product_project::{ProductProject, object_lamp_ranges, scopes, slugify, uniquify};
 use crate::source::{file_name, join};
 
 /// What saving did: the files to write (path, text), and the files no
@@ -409,6 +409,16 @@ impl<'a> Writer<'a> {
         let mut entries = Vec::new();
         let mut addressed = BTreeSet::new();
         let mut auto = false;
+        // Rows read as a plain range stay one while their object still
+        // covers exactly those lamps.
+        let spans = object_lamp_ranges(p, &n.id);
+        let total: u32 = spans.iter().map(|(_, _, c)| c).sum();
+        let read_as_range = |object: &ObjectId| -> Option<PatchSource> {
+            let &(start, count) = carried?.patch.as_ref()?.ranges.get(object)?;
+            let &(_, s, c) = spans.iter().find(|(o, _, _)| o == object)?;
+            let same = s == start && count.map_or(s + c == total, |want| want == c);
+            same.then_some(PatchSource::Range(start, count))
+        };
         for r in &fx.rules {
             match r {
                 PatchRule::Auto { output } => auto |= p.output(output).is_some(),
@@ -427,17 +437,23 @@ impl<'a> Writer<'a> {
                     let Some(start) = out.port_start(port) else {
                         continue;
                     };
-                    let Some(path) = self.object_path(&n.id, c, &object.key) else {
-                        continue;
+                    let source = match read_as_range(object) {
+                        Some(range) => range,
+                        None => {
+                            let Some(path) = self.object_path(&n.id, c, &object.key) else {
+                                continue;
+                            };
+                            addressed.insert(c.id.clone());
+                            PatchSource::Path { path, range: None }
+                        }
                     };
-                    addressed.insert(c.id.clone());
                     let output_name = match self.labels.get(output) {
                         Some(l) => Some(l.clone()),
                         None if Some(output) == default.as_ref() => None,
                         None => Some(p.node_name(output)),
                     };
                     entries.push(PatchEntry {
-                        source: PatchSource::Path { path, range: None },
+                        source,
                         output: output_name,
                         lamp: start + pixel,
                         reversed: *reversed,

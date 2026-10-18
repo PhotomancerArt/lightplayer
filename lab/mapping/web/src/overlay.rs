@@ -229,6 +229,19 @@ fn shape(s: &UiShape) -> Element {
         UiShape::Ring { center, radius } => rsx! {
             circle { class: "stroke", cx: "{center.x}", cy: "{center.y}", r: "{radius}" }
         },
+        UiShape::Rings { center, radii } => rsx! {
+            for r in radii.iter() {
+                circle { class: "stroke", cx: "{center.x}", cy: "{center.y}", r: "{r}" }
+            }
+        },
+        UiShape::Outline(points) => {
+            let d: String = points
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{}{},{} ", if i == 0 { "M" } else { "L" }, p.x, p.y))
+                .collect();
+            rsx! { path { class: "stroke", d: "{d}Z" } }
+        }
     }
 }
 
