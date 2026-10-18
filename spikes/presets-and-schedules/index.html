@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Presets and schedules — behaviour lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Studio's palette, from lpa-studio-web/src/style.css :root (via
+   spikes/one-home-page, 2026-10-08). Throwaway: production never imports
+   spikes/. The model this page runs mirrors lab/presets/model (Rust), rule
+   for rule; the statements there are the source of truth.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
+  --heading:#e9e9ef;
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --st-good-bg:#13241d; --st-good-bd:#365545; --st-good-tx:#7be0b2;
+  --st-live-bg:#142330; --st-live-bd:#3c5c78; --st-live-tx:#9cc8ee;
+  --st-neutral-bg:#12171c; --st-neutral-bd:#3a444c; --st-neutral-tx:#d9e2df;
+  --st-warning-bg:#292614; --st-warning-bd:#796c33; --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d; --st-error-bd:#874b4b; --st-error-tx:#ffc7c7;
+  --st-bound-bg:#241a33; --st-bound-bd:#5f4a85; --st-bound-tx:#c9b1f5;
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --you:#e8e6e1;     /* the overrides layer: "your changes" */
+  --base:#8b8d99;    /* the panel defaults layer */
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:980px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:40px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 12px; max-width:980px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:10px 14px; margin-top:14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:80; background:rgba(11,12,14,.95); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button, .controls select { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 9px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.clock { font:700 14px var(--mono); color:var(--strong); min-width:150px; }
+.clock small { display:block; font:600 10px var(--font); color:var(--shell-dim); letter-spacing:.04em; }
+.clock .unknown { color:var(--st-warning-tx); }
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:22px; font-size:12.5px; color:var(--shell-mut); max-width:1000px; }
+.lean b { color:#7be0b2; }
+.lean ol, .lean ul { margin:6px 0 0; padding-left:20px; } .lean li { margin:4px 0; }
+.finding { border:1px solid var(--shell-bd-strong); border-radius:8px; padding:10px 14px; margin:8px 0; font-size:12.5px; color:var(--shell-mut); max-width:1000px; display:flex; gap:12px; align-items:flex-start; }
+.finding b { color:var(--shell-tx); }
+.finding .id { font:800 11px var(--mono); color:var(--st-attention-tx); padding-top:2px; flex:none; width:24px; }
+.finding .grow { flex:1; }
+.finding button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 9px; font-size:12px; flex:none; }
+
+/* =====================================================================
+   The app frame
+   ===================================================================== */
+.app { background:var(--bg); color:var(--tx); border:1px solid var(--shell-bd); border-radius:12px; font-size:13px; }
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:28px; padding:0 10px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
+  font-size:12px; font-weight:600; white-space:nowrap; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.sm { height:24px; padding:0 8px; font-size:11.5px; }
+.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); }
+.btn.quiet:hover { background:var(--raised); color:var(--strong); }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.x { appearance:none; border:0; background:transparent; color:inherit; cursor:pointer; font:700 13px/1 var(--font); padding:0 2px; opacity:.7; }
+.x:hover { opacity:1; }
+
+/* ---- §1 the panel --------------------------------------------------- */
+.s1 { display:grid; grid-template-columns:minmax(380px, 460px) 1fr; gap:18px; align-items:start; }
+.phone { border-radius:14px; overflow:hidden; }
+.phone .top { display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--bd-mut); }
+.phone .top b { font-size:13px; color:var(--strong); }
+.phone .top .sp { flex:1; }
+.phone .top .where { font-size:11px; color:var(--subtle); }
+.lamps { display:grid; grid-template-columns:repeat(30, 1fr); gap:3px; padding:14px 14px 10px; background:#07080a; }
+.lamps i { display:block; aspect-ratio:1; border-radius:50%; background:#111; }
+.lampcap { display:flex; justify-content:space-between; padding:0 14px 10px; background:#07080a; font-size:11px; color:var(--subtle); }
+.lampcap b { color:var(--muted); font-weight:600; }
+.pretend { display:flex; align-items:center; gap:8px; padding:8px 14px; background:var(--st-bound-bg); border-bottom:1px solid var(--st-bound-bd); color:var(--st-bound-tx); font-size:12px; }
+.pretend b { color:var(--strong); }
+.pretend .sp { flex:1; }
+.waiting { padding:8px 14px; background:var(--st-warning-bg); border-bottom:1px solid var(--st-warning-bd); color:var(--st-warning-tx); font-size:12px; }
+
+.active { padding:12px 14px 4px; }
+.active h4, .ctrls h4 { margin:0 0 8px; font:800 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); display:flex; gap:8px; align-items:center; }
+.active h4 .sp, .ctrls h4 .sp { flex:1; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 6px 0 9px; border-radius:999px; border:1px solid; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer; }
+.chip .end { font-weight:500; opacity:.8; font-size:11px; }
+.chip .src { font-weight:500; opacity:.7; font-size:10.5px; }
+.chip.editing { box-shadow:0 0 0 2px var(--bg), 0 0 0 3px currentColor; }
+.chip.base { border-style:dashed; }
+.none { font-size:12px; color:var(--faint); padding:3px 0; }
+
+.ctrls { padding:12px 14px 14px; display:grid; gap:2px; }
+.ctrl { display:grid; grid-template-columns:4px 92px 1fr auto; gap:10px; align-items:center; padding:7px 8px 7px 0; border-radius:6px; }
+.ctrl .lb { align-self:stretch; border-radius:2px; }
+.ctrl .nm { font-size:12px; font-weight:700; color:var(--muted); }
+.ctrl .who { font-size:10.5px; font-weight:600; white-space:nowrap; display:flex; gap:4px; align-items:center; }
+.ctrl .who .x { font-size:12px; }
+.ctrl .val { display:flex; gap:6px; align-items:center; flex-wrap:wrap; min-width:0; }
+.ctrl input[type=range] { flex:1; min-width:0; accent-color:var(--muted); }
+.ctrl .val:has(input[type=range]) { flex-wrap:nowrap; }
+.ctrl .num { font:600 11px var(--mono); color:var(--muted); width:34px; text-align:right; }
+.seg { display:inline-flex; border:1px solid var(--bd); border-radius:4px; overflow:hidden; }
+.seg button { appearance:none; border:0; background:transparent; color:var(--muted); font:600 11.5px var(--font); padding:4px 10px; cursor:pointer; }
+.seg button.on { background:var(--raised-strong); color:var(--strong); }
+.pat { appearance:none; border:1px solid var(--bd-mut); background:var(--surface); color:var(--muted); font:600 11px var(--font); padding:2px 7px; border-radius:3px; cursor:pointer; }
+.pat.in { border-color:var(--bd-strong); color:var(--strong); background:var(--raised); }
+.pat.hold { border-color:var(--sel-bd); background:var(--sel-bg); color:var(--strong); }
+.ctrl.unpinned .nm { color:var(--faint); }
+.editbar { display:flex; gap:8px; align-items:center; margin:0 14px 12px; padding:7px 10px; border-radius:6px; border:1px solid; font-size:12px; }
+.editbar .sp { flex:1; }
+.save { display:flex; gap:6px; align-items:center; margin:2px 14px 12px; }
+.save input { flex:1; height:26px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 8px; font:12px var(--font); }
+
+.side { display:grid; gap:14px; }
+.card { background:var(--panel); border:1px solid var(--bd); border-radius:10px; }
+.card > h4 { margin:0; padding:10px 14px; border-bottom:1px solid var(--bd-mut); font:800 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); display:flex; gap:8px; align-items:center; }
+.card > h4 .sp { flex:1; }
+.card > h4 .note { text-transform:none; letter-spacing:0; font-weight:500; color:var(--faint); }
+.prow { display:grid; grid-template-columns:20px 10px minmax(90px, 140px) 1fr auto; gap:10px; align-items:center; padding:7px 14px; border-bottom:1px solid var(--bd-mut); }
+.prow:last-child { border-bottom:0; }
+.prow .ord { display:grid; gap:0; }
+.prow .ord button { appearance:none; border:0; background:transparent; color:var(--faint); cursor:pointer; font-size:9px; line-height:10px; padding:0; }
+.prow .ord button:hover { color:var(--strong); }
+.sw { width:10px; height:10px; border-radius:3px; }
+.prow .pn { font-weight:700; font-size:12.5px; color:var(--strong); }
+.prow .pins { font-size:11px; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.prow .acts { display:flex; gap:4px; }
+.prow.on .pn::after { content:" · on"; color:var(--st-good-tx); font-weight:600; font-size:11px; }
+
+/* ---- §2 calendars ----------------------------------------------------- */
+.cal { padding:12px 14px 14px; overflow-x:auto; }
+.legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--subtle); margin:0 0 10px; }
+.legend span { display:inline-flex; gap:5px; align-items:center; }
+.week { display:grid; grid-template-columns:120px 1fr; margin-bottom:10px; }
+.week .lab { font-size:11px; color:var(--subtle); padding-top:16px; display:grid; align-content:start; gap:0; }
+.week .lab div { height:13px; line-height:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.week .lab .res { margin-top:4px; color:var(--muted); font-weight:700; }
+.track { position:relative; cursor:crosshair; }
+.days { display:grid; grid-template-columns:repeat(7, 1fr); height:16px; font-size:10.5px; color:var(--faint); }
+.days div { padding-left:4px; border-left:1px solid var(--bd-mut); white-space:nowrap; overflow:hidden; }
+.days div.today { color:var(--strong); font-weight:700; }
+.lanes { position:relative; border-left:1px solid var(--bd-mut); }
+.lane { position:relative; height:13px; }
+.lane:nth-child(odd) { background:rgba(255,255,255,.015); }
+.bar { position:absolute; top:2px; height:9px; border-radius:2px; opacity:.9; }
+.bar.past { opacity:.35; }
+.bar.manual { background-image:repeating-linear-gradient(135deg, rgba(0,0,0,.35) 0 3px, transparent 3px 6px); }
+.bar.gone { opacity:.25; outline:1px dashed currentColor; background:transparent !important; }
+.result { position:relative; height:12px; margin-top:4px; border-radius:2px; overflow:hidden; background:#07080a; }
+.result i { position:absolute; top:0; bottom:0; }
+.daylines { position:absolute; inset:16px 0 0 0; display:grid; grid-template-columns:repeat(7, 1fr); pointer-events:none; }
+.daylines div { border-left:1px solid var(--bd-mut); }
+.daylines div:first-child { border-left:0; }
+.cursor { position:absolute; top:12px; bottom:0; width:2px; background:var(--st-good-tx); pointer-events:none; border-radius:1px; }
+.cursor.pretend { background:var(--st-bound-tx); }
+.sunline { position:absolute; top:16px; bottom:16px; width:1px; background:rgba(245,224,78,.18); pointer-events:none; }
+
+/* concept B — one long strip */
+.strip { position:relative; min-width:1400px; }
+.strip .days { grid-template-columns:repeat(14, 1fr); }
+.strip .daylines { grid-template-columns:repeat(14, 1fr); }
+.striprow { display:grid; grid-template-columns:120px 1fr; }
+
+/* concept C — week grid, noon to noon */
+.wgrid { display:grid; grid-template-columns:44px repeat(7, 1fr); min-width:820px; }
+.wgrid .hd { font-size:11px; color:var(--subtle); padding:2px 6px 6px; border-left:1px solid var(--bd-mut); }
+.wgrid .hd.today { color:var(--strong); font-weight:700; }
+.wgrid .hrs { position:relative; }
+.wgrid .hrs div { position:absolute; right:6px; font:10px var(--mono); color:var(--faint); transform:translateY(-6px); }
+.wgrid .col { position:relative; height:480px; border-left:1px solid var(--bd-mut); background:repeating-linear-gradient(transparent 0 39px, rgba(255,255,255,.035) 39px 40px); cursor:crosshair; }
+.wgrid .ev { position:absolute; border-radius:4px; padding:2px 5px; font-size:10.5px; font-weight:700; color:#0d0d13; overflow:hidden; border:1px solid rgba(0,0,0,.25); }
+.wgrid .ev.past { opacity:.45; }
+.wgrid .ev small { display:block; font-weight:500; opacity:.8; }
+.wgrid .now { position:absolute; left:0; right:0; height:2px; background:var(--st-good-tx); }
+.wgrid .now.pretend { background:var(--st-bound-tx); }
+
+/* ---- §3 schedules ------------------------------------------------------ */
+.srow { display:grid; grid-template-columns:34px minmax(130px,170px) minmax(110px,150px) 1fr auto; gap:10px; align-items:center; padding:8px 14px; border-bottom:1px solid var(--bd-mut); font-size:12px; }
+.srow:last-child { border-bottom:0; }
+.srow .sn { font-weight:700; color:var(--strong); }
+.srow .when { color:var(--muted); }
+.srow .next { color:var(--subtle); font-size:11px; }
+.srow.off .sn, .srow.off .when { color:var(--faint); text-decoration:line-through; }
+.tog { width:30px; height:17px; border-radius:999px; border:1px solid var(--bd-strong); background:var(--surface); position:relative; cursor:pointer; padding:0; }
+.tog::after { content:""; position:absolute; top:2px; left:2px; width:11px; height:11px; border-radius:50%; background:var(--faint); transition:left .15s; }
+.tog.on { background:var(--st-good-bg); border-color:var(--st-good-bd); }
+.tog.on::after { left:15px; background:var(--st-good-tx); }
+.pchip { display:inline-flex; align-items:center; gap:5px; padding:1px 7px; border-radius:999px; border:1px solid; font-size:11px; font-weight:700; white-space:nowrap; }
+.sedit { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; background:var(--surface-muted); border-bottom:1px solid var(--bd-mut); font-size:12px; color:var(--muted); }
+.sedit select, .sedit input { height:26px; border-radius:5px; border:1px solid var(--bd); background:var(--surface); color:var(--tx); padding:0 6px; font:12px var(--font); }
+.sedit input[type=number] { width:62px; }
+.sedit input[type=time] { width:96px; }
+.sedit .daypick { display:inline-flex; gap:2px; }
+.sedit .daypick button { appearance:none; width:22px; height:22px; border-radius:4px; border:1px solid var(--bd); background:transparent; color:var(--faint); font:700 10px var(--font); cursor:pointer; }
+.sedit .daypick button.on { background:var(--raised-strong); color:var(--strong); border-color:var(--bd-strong); }
+
+/* ---- §4 log ------------------------------------------------------------- */
+.log { max-height:300px; overflow:auto; padding:6px 0; font-size:12px; }
+.log div { display:grid; grid-template-columns:130px 1fr; gap:10px; padding:3px 14px; color:var(--muted); }
+.log div span { font:11px var(--mono); color:var(--faint); }
+.log div.reset { color:var(--st-warning-tx); }
+</style>
+</head>
+<body>
+
+<h1>Presets and schedules — behaviour lab</h1>
+<p class="hint"><b>Thesis:</b> a preset is a partial overlay on the panel, and the panel is a stack of layers, last wins:
+<b>project → your baseline → active presets (in priority order) → your changes</b>. An <b>activation</b> holds a preset on, from one
+<b>source</b>, for a while; a <b>schedule</b> is only a trigger that makes activations. So every control can say why it has its value,
+and turning a preset off shows exactly what was under it. This page runs the model in <code>lab/presets/model</code> (Rust, 33
+statements) rule for rule, on a house's eave lights. Move the clock, cut the power, press presets, edit schedules, and see if it behaves.</p>
+
+<div class="controls" id="controls">
+  <div class="clock" id="clockbox"></div>
+  <div class="grp">
+    <button data-step="-60">−1 h</button><button data-step="15">+15 min</button><button data-step="60">+1 h</button><button data-step="360">+6 h</button><button data-step="1440">+1 day</button>
+    <button id="play">▶ Run</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Go to</b>
+    <select id="jump">
+      <option value="">a moment…</option>
+      <option value="2026-10-10T16:50">Sat Oct 10, before sunset</option>
+      <option value="2026-10-31T18:25">Halloween 18:25 (F1)</option>
+      <option value="2026-10-31T20:00">Halloween 20:00</option>
+      <option value="2026-10-31T23:20">Halloween 23:20</option>
+      <option value="2026-11-03T20:00">Tue Nov 3 20:00</option>
+      <option value="2026-12-24T16:00">Christmas Eve 16:00</option>
+      <option value="2027-01-07T17:00">Thu Jan 7 2027 17:00</option>
+    </select>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Board</b>
+    <button id="softreset" title="An update's reboot: RTC RAM keeps what's live">Soft reset</button>
+    <button id="powercut" title="Everything live is lost; saved stays">Power cut</button>
+    <button id="ntp" class="active" title="Whether the board can reach NTP. Off: it never learns the time.">Internet ✓</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Calendar days run</b><button id="ds0">midnight → midnight</button><button id="ds12" class="active">noon → noon</button></div>
+  <span class="sep"></span>
+  <button id="reseed">Start over</button>
+</div>
+
+<!-- =================================================================== -->
+<h2><span class="n">1</span>The panel</h2>
+<p class="sub">What you'd see in Play mode on your phone. <b>Active presets</b> are the chips; each control's left bar and label say which
+layer its value comes from, in that layer's colour. Turning a control writes <b>your changes</b> (the top layer), which end by themselves at the
+schedule's next change. Tap a chip to edit that preset in place; tap <b>Baseline</b> to edit the panel defaults.</p>
+<div class="s1">
+  <div class="app phone" id="phone"></div>
+  <div class="side">
+    <div class="card" id="presets"></div>
+    <div class="card"><h4>Log<span class="sp"></span><span class="note">R6 — what came on, why, and until when</span></h4><div class="log" id="log"></div></div>
+  </div>
+</div>
+
+<!-- =================================================================== -->
+<h2><span class="n">2</span>The schedule, three ways</h2>
+<p class="sub">Each bar is one activation a schedule will make (or made), in its preset's colour; hatched bars were pressed by hand;
+dashed outlines were turned off. The dark strip under each week is <b>what the lights do</b>, computed by the model every 15 minutes
+from the schedules alone (the "pretend it's…" copy): its colour is the preset that owns the pattern, its strength the brightness, black is off.
+Days run noon to noon by default so an evening is never cut at midnight (switch it in the strip above).
+<b>Click anywhere on a calendar to pretend it's that moment</b> — the panel shows that time without moving the board's clock.</p>
+<div class="legend" id="legend"></div>
+
+<h2 style="margin-top:18px"><span class="n">2A</span>Weeks stacked — time across, sources down (your sketch)</h2>
+<div class="app"><div class="cal" id="calA"></div></div>
+
+<h2><span class="n">2B</span>One strip — two weeks, unwrapped</h2>
+<div class="app"><div class="cal" id="calB"></div></div>
+
+<h2><span class="n">2C</span>Week grid — days across, noon to noon down</h2>
+<p class="sub">The calendar app people already know, with the day running noon to noon so an evening isn't cut at midnight.</p>
+<div class="app"><div class="cal" id="calC"></div></div>
+
+<!-- =================================================================== -->
+<h2><span class="n">3</span>Schedules</h2>
+<p class="sub">R5: every schedule, with what it does and when it next fires. A schedule is a trigger: <b>editing or switching one off
+never changes what's showing now</b>, only its next firing. Click a row to edit it.</p>
+<div class="app card" id="schedules"></div>
+
+<!-- =================================================================== -->
+<h2><span class="n">4</span>What building it turned up</h2>
+<p class="sub">Found while writing the toy's statements and this page. Each has a button that sets the scene.</p>
+<div id="findings"></div>
+
+<div class="lean">
+<b>My lean.</b>
+<ol>
+<li><b>Calendar: 2A (weeks stacked)</b> for the schedule's own page, because lights live in the evening and a week row shows a whole
+evening unbroken, the "what the lights do" strip reads at a glance, and lanes by source make two Halloween schedules visibly two things.
+2C is familiar but squeezes evenings into narrow columns and hides which source made what; 2B is the best for a week of detail and the
+worst for October.</li>
+<li><b>The model holds up.</b> Every journey in the requirements is a statement that passes (R1–R8). The two that felt wrong to build are F1
+(your change ending minutes later) and F2 (switching a schedule off leaves tonight's on): both are rules we chose, not bugs.</li>
+<li><b>F1 is the one to decide before planning.</b> My lean: your changes end per control, when the next change touches <i>that</i> control
+— brightness you turned survives Halloween starting, and gives way to Late dim.</li>
+</ol>
+</div>
+
+<script>
+/* =====================================================================
+   The model — a line-for-line mirror of lab/presets/model (Rust).
+   Time is minutes since 2026-01-01 00:00 local.
+   ===================================================================== */
+const DAY = 1440;
+function daysFromCivil(y, m, d) {
+  y -= m <= 2 ? 1 : 0;
+  const era = Math.floor(y / 400), yoe = y - era * 400;
+  const doy = Math.floor((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5) + d - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function civilFromDays(z) {
+  z += 719468;
+  const era = Math.floor(z / 146097), doe = z - era * 146097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  const mp = Math.floor((5 * doy + 2) / 153);
+  const d = doy - Math.floor((153 * mp + 2) / 5) + 1, m = mp < 10 ? mp + 3 : mp - 9;
+  return [yoe + era * 400 + (m <= 2 ? 1 : 0), m, d];
+}
+const EPOCH = daysFromCivil(2026, 1, 1);
+const at = (y, mo, d, h = 0, mi = 0) => (daysFromCivil(y, mo, d) - EPOCH) * DAY + h * 60 + mi;
+const dayOf = m => Math.floor(m / DAY);
+const mod = (a, b) => ((a % b) + b) % b;
+const civil = day => civilFromDays(day + EPOCH);
+const weekday = day => mod(day + 3, 7); // Mon = 0
+const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const hm = m => { const x = mod(m, DAY); return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); };
+const label = m => { const [, mo, d] = civil(dayOf(m)); return `${WD[weekday(dayOf(m))]} ${MO[mo - 1]} ${d} ${hm(m)}`; };
+const dayLabel = day => { const [, mo, d] = civil(day); return `${WD[weekday(day)]} ${MO[mo - 1]} ${d}`; };
+const dayOfYear = day => { const [y] = civil(day); return day + EPOCH - daysFromCivil(y, 1, 1) + 1; };
+
+// The stand-in sun (src/sun.rs): same table, same integer maths.
+const QS = (() => { const t = []; for (let i = 0; i < 92; i++) { const x = Math.trunc(1571 * i / 91), x2 = Math.trunc(x * x / 1000),
+  x3 = Math.trunc(x2 * x / 1000), x5 = Math.trunc(x3 * x2 / 1000), x7 = Math.trunc(x5 * x2 / 1000);
+  t.push(x - Math.trunc(x3 / 6) + Math.trunc(x5 / 120) - Math.trunc(x7 / 5040)); } return t; })();
+function sineMilli(d) { d = mod(d, 365); let q, s;
+  if (d < 92) [q, s] = [d, 1]; else if (d < 183) [q, s] = [182 - d, 1]; else if (d < 274) [q, s] = [d - 183, -1]; else [q, s] = [364 - d, -1];
+  return s * QS[Math.max(0, Math.min(91, q))]; }
+const sunset = day => 1125 + Math.trunc(145 * sineMilli(dayOfYear(day) - 81) / 1000);
+const sunrise = day => 2 * 790 - sunset(day) - 20;
+
+// TimeOfDay: {clock: minutes} | {sunset: offset} | {sunrise: offset}
+const todMin = (t, day) => 'clock' in t ? t.clock : 'sunset' in t ? sunset(day) + t.sunset : sunrise(day) + t.sunrise;
+const todOn = (t, day) => day * DAY + todMin(t, day);
+const todLabel = t => 'clock' in t ? hm(t.clock) : ('sunset' in t ? 'sunset' : 'sunrise') + (t.sunset ?? t.sunrise ? ` ${(t.sunset ?? t.sunrise) > 0 ? '+' : '−'}${Math.abs(t.sunset ?? t.sunrise)}` : '');
+
+function inDates(r, day) {
+  if (!r) return true;
+  const [, m, d] = civil(day), k = m * 100 + d, f = r.from[0] * 100 + r.from[1], t = r.to[0] * 100 + r.to[1];
+  return f <= t ? f <= k && k <= t : k >= f || k <= t;
+}
+const firingOn = (s, day) => (s.days & (1 << weekday(day))) && inDates(s.dates, day) ? todOn(s.start, day) : null;
+function endOf(s, fired) {
+  if (s.end.kind === 'for') return fired + s.end.minutes;
+  if (s.end.kind === 'never') return null;
+  for (let day = dayOf(fired); ; day++) { const c = todOn(s.end.at, day); if (c > fired) return c; }
+}
+// Looking back far enough to find a firing still running (the Rust looks a year; equivalent for these ends).
+const lookback = s => s.end.kind === 'never' ? 370 : s.end.kind === 'for' ? Math.ceil(s.end.minutes / DAY) + 2 : 3;
+function latestFiring(s, now) {
+  if (!s.enabled) return null;
+  for (let back = 0, today = dayOf(now); back < lookback(s); back++) {
+    const f = firingOn(s, today - back);
+    if (f !== null && f <= now) return f >= s.since ? f : null;
+  }
+  return null;
+}
+function nextFiringAfter(s, now) {
+  if (!s.enabled) return null;
+  for (let ahead = 0; ahead < 370; ahead++) { const f = firingOn(s, dayOf(now) + ahead); if (f !== null && f > now) return f; }
+  return null;
+}
+function firingsBetween(s, from, to) {
+  const out = []; if (!s.enabled) return out;
+  for (let d = dayOf(from) - 2; d <= dayOf(to); d++) { const f = firingOn(s, d); if (f !== null && f < to) { const e = endOf(s, f); if (e === null || e > from) out.push([f, e]); } }
+  return out;
+}
+const actEnds = a => a.started === null || a.lasts === null ? null : a.started + a.lasts;
+const sameSource = (a, b) => a.kind === b.kind && (a.kind === 'manual' || a.id === b.id);
+const srcEq = (a, b) => sameSource(a, b) && (a.kind === 'manual' || a.fired === b.fired);
+const clone = x => structuredClone(x);
+
+function newShow(project, saved) { return { project, saved, live: { activations: [], overrides: { pins: {}, ends: null }, dismissed: [], log: [] }, clock: null }; }
+function note(show, text, cls) { show.live.log.push({ at: show.clock, text, cls }); }
+const presetOf = (show, id) => show.saved.presets.find(p => p.id === id);
+const pname = (show, id) => presetOf(show, id)?.name ?? 'A deleted preset';
+
+function tick(show, clock) {
+  show.clock = clock;
+  if (clock === null) return;
+  const now = clock;
+  for (const a of show.live.activations) if (a.started === null) a.started = now;
+  const kept = [];
+  for (const a of show.live.activations) { const e = actEnds(a); if (e !== null && e <= now) note(show, `${pname(show, a.preset)} ended`); else kept.push(a); }
+  show.live.activations = kept;
+  const o = show.live.overrides;
+  if (o.ends !== null && o.ends <= now) { show.live.overrides = { pins: {}, ends: null }; note(show, 'Your changes ended'); }
+  for (const s of show.saved.schedules) {
+    const fired = latestFiring(s, now); if (fired === null) continue;
+    const ends = endOf(s, fired);
+    if (ends !== null && ends <= now) continue;
+    if (show.live.dismissed.some(([id, f]) => id === s.id && f === fired)) continue;
+    const source = { kind: 'schedule', id: s.id, fired };
+    if (show.live.activations.some(a => srcEq(a.source, source))) continue;
+    show.live.activations = show.live.activations.filter(a => !(a.preset === s.preset && sameSource(a.source, source)));
+    show.live.activations.push({ preset: s.preset, source, started: fired, lasts: ends === null ? null : ends - fired });
+    note(show, `${pname(show, s.preset)} on by “${s.name}”, ${ends === null ? 'until turned off' : 'until ' + label(ends)}${fired < now ? `, caught up from ${label(fired)}` : ''}`);
+  }
+  if (Object.keys(show.live.overrides.pins).length && show.live.overrides.ends === null) show.live.overrides.ends = nextChangeAfter(show, now);
+}
+function nextChangeAfter(show, now) {
+  let best = null; const take = m => { if (m !== null && m > now && (best === null || m < best)) best = m; };
+  show.saved.schedules.forEach(s => take(nextFiringAfter(s, now)));
+  show.live.activations.forEach(a => take(actEnds(a)));
+  return best;
+}
+// The stack, bottom to top. Layer: {kind:'project'|'base'|'preset'|'you', id?}
+function resolve(show) {
+  const out = {};
+  for (const [c, v] of Object.entries(show.project)) out[c] = { value: v, layer: { kind: 'project' } };
+  const lay = (pins, layer) => { for (const [c, v] of Object.entries(pins)) if (out[c]) out[c] = { value: v, layer }; };
+  lay(show.saved.panelDefaults, { kind: 'base' });
+  for (const p of show.saved.presets) if (show.live.activations.some(a => a.preset === p.id)) lay(p.pins, { kind: 'preset', id: p.id });
+  lay(show.live.overrides.pins, { kind: 'you' });
+  return out;
+}
+const activePresets = show => [...show.saved.presets].reverse()
+  .map(p => ({ preset: p.id, activations: show.live.activations.filter(a => a.preset === p.id) })).filter(x => x.activations.length);
+function activate(show, preset, minutes) {
+  show.live.activations = show.live.activations.filter(a => !(a.preset === preset && a.source.kind === 'manual'));
+  show.live.activations.push({ preset, source: { kind: 'manual' }, started: show.clock, lasts: minutes });
+  note(show, `You turned ${pname(show, preset)} on, ${minutes === null ? 'until turned off' : show.clock !== null ? 'until ' + label(show.clock + minutes) : `for ${minutes} min`}`);
+}
+function endOne(show, preset, source) {
+  show.live.activations = show.live.activations.filter(a => {
+    const hit = a.preset === preset && sameSource(a.source, source);
+    if (hit && a.source.kind === 'schedule') show.live.dismissed.push([a.source.id, a.source.fired]);
+    return !hit;
+  });
+}
+function turnOff(show, preset) {
+  for (const a of show.live.activations.filter(a => a.preset === preset)) endOne(show, preset, a.source);
+  note(show, `You turned ${pname(show, preset)} off`);
+}
+function turn(show, control, value) {
+  show.live.overrides.pins[control] = value;
+  if (show.live.overrides.ends === null && show.clock !== null) show.live.overrides.ends = nextChangeAfter(show, show.clock);
+}
+function saveOverridesAsPreset(show, name, colour) {
+  const id = Math.max(0, ...show.saved.presets.map(p => p.id)) + 1;
+  const { pins, ends } = show.live.overrides;
+  show.live.overrides = { pins: {}, ends: null };
+  show.saved.presets.push({ id, name, colour, pins });
+  const minutes = ends !== null && show.clock !== null ? Math.max(0, ends - show.clock) : null;
+  show.live.activations.push({ preset: id, source: { kind: 'manual' }, started: show.clock, lasts: minutes });
+  note(show, `You saved your changes as ${name}`);
+  return id;
+}
+function editSchedule(show, id, f) { const s = show.saved.schedules.find(s => s.id === id); f(s); if (show.clock !== null) s.since = show.clock; }
+function pretend(show, time) { const copy = newShow(clone(show.project), clone(show.saved)); tick(copy, time); return copy; }
+
+/* ---- the seed: src/seed.rs ------------------------------------------- */
+const PATTERNS = ['Embers', 'Aurora', 'Twinkle', 'Spooky', 'Pumpkin', 'Candy cane'];
+const PALETTES = ['Warm', 'Orange', 'Red & green', 'Ice', 'Purple'];
+const EVERY = 0b1111111;
+function eaves() {
+  const project = { power: true, brightness: 100, pattern: { cycle: [...PATTERNS] }, palette: 'Warm', speed: 50 };
+  const panelDefaults = { power: false, brightness: 80 };
+  const presets = [
+    { id: 1, name: 'Evening', colour: '#53c6f2', pins: { power: true, pattern: { cycle: ['Embers', 'Aurora', 'Twinkle'] } } },
+    { id: 2, name: 'Late dim', colour: '#a58af7', pins: { brightness: 30 } },
+    { id: 3, name: 'Christmas', colour: '#5fe08b', pins: { power: true, pattern: { cycle: ['Twinkle', 'Candy cane'] }, palette: 'Red & green' } },
+    { id: 4, name: 'Halloween', colour: '#ffab4a', pins: { power: true, pattern: { cycle: ['Spooky', 'Pumpkin'] }, palette: 'Orange' } },
+    { id: 5, name: 'Party', colour: '#ff5d5d', pins: { power: true, brightness: 100, speed: 80 } },
+  ];
+  const always = at(2026, 1, 1);
+  const sch = (id, name, preset, dates, start, end, days = EVERY) => ({ id, name, preset, enabled: true, days, dates, start, end, since: always });
+  const schedules = [
+    sch(1, 'Evenings', 1, null, { sunset: -15 }, { kind: 'at', at: { clock: 30 } }),
+    sch(2, 'Late nights', 2, null, { clock: 23 * 60 }, { kind: 'for', minutes: 90 }),
+    sch(3, 'Halloween nights', 4, { from: [10, 1], to: [10, 31] }, { clock: 18 * 60 + 30 }, { kind: 'at', at: { clock: 23 * 60 } }),
+    sch(4, 'Christmas season', 3, { from: [12, 1], to: [1, 6] }, { sunset: 0 }, { kind: 'at', at: { clock: 0 } }),
+  ];
+  return newShow(project, { panelDefaults, presets, schedules });
+}
+
+/* =====================================================================
+   The page
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let show, world, ntp, knowsAt, pretendAt, editing, openSchedule, saveOpen, dayStart = 12 * 60;
+const SWATCHES = ['#9cc8ee', '#f5e04e', '#ff6b9a', '#7be0b2', '#c9b1f5', '#f0b97a'];
+
+function start() {
+  show = eaves(); world = at(2026, 10, 31, 12, 0); ntp = true; knowsAt = world; pretendAt = null;
+  editing = 'you'; openSchedule = null; saveOpen = false;
+  tick(show, world); advance(at(2026, 10, 31, 16, 30) - world);
+}
+// The board learns the time a minute after it boots, if it can reach NTP.
+function advance(minutes) {
+  const target = world + minutes;
+  if (minutes < 0) { world = target; tick(show, show.clock === null ? null : world); render(); return; } // a clock moved back: the toy keeps what it has (F5)
+  // Step straight to each moment something changes, so firings happen on time (a real board ticks every frame).
+  while (world < target) {
+    let next = target;
+    const change = nextChangeAfter(show, world); if (change !== null && change < next) next = change;
+    if (show.clock === null && ntp && knowsAt !== null && knowsAt > world && knowsAt < next) next = knowsAt;
+    if (show.live.overrides.ends !== null && show.live.overrides.ends > world && show.live.overrides.ends < next) next = show.live.overrides.ends;
+    world = next; boardTick();
+  }
+  render();
+}
+function boardTick() {
+  if (show.clock === null && ntp && knowsAt !== null && world >= knowsAt) { show.live.log.push({ at: world, text: 'The board learned the time (NTP)' }); tick(show, world); }
+  else if (show.clock !== null) tick(show, world);
+}
+function reboot(kind) {
+  if (kind === 'power') { show.live = { activations: [], overrides: { pins: {}, ends: null }, dismissed: [], log: show.live.log }; }
+  show.clock = null; knowsAt = ntp ? world + 1 : null;
+  note(show, kind === 'power' ? 'Power cut: everything live is gone' : 'Soft reset: RTC RAM kept everything live', 'reset');
+  render();
+}
+
+// ---- layer colours and names ----
+const layerColour = l => l.kind === 'preset' ? presetOf(show, l.id).colour : l.kind === 'you' ? 'var(--you)' : l.kind === 'base' ? 'var(--base)' : 'var(--bd-strong)';
+const layerName = l => l.kind === 'preset' ? pname(show, l.id) : l.kind === 'you' ? 'Your change' : l.kind === 'base' ? 'Baseline' : 'Project';
+const valueLabel = (c, v) => c === 'power' ? (v ? 'on' : 'off') : c === 'pattern' ? ('hold' in v ? v.hold : 'cycle ' + v.cycle.join(', ')) : (c === 'brightness' || c === 'speed') ? v + ' %' : v;
+const endLabel = e => e === null ? 'until off' : dayOf(e) === dayOf(world) || (dayOf(e) === dayOf(world) + 1 && e % DAY < 6 * 60) ? 'until ' + hm(e) : 'until ' + label(e).slice(0, -6) + ' ' + hm(e);
+
+// ---- §1 the panel ----
+function editLayerPins() {
+  if (editing === 'you') return show.live.overrides.pins;
+  if (editing === 'base') return show.saved.panelDefaults;
+  return presetOf(show, editing).pins;
+}
+function writeControl(c, v) {
+  if (pretendAt !== null) return;
+  if (editing === 'you') turn(show, c, v); else editLayerPins()[c] = v;
+  render();
+}
+function renderPhone() {
+  const view = pretendAt !== null ? pretend(show, pretendAt) : show;
+  const r = resolve(view);
+  const unknown = view.clock === null;
+  let h = `<div class="top"><b>Eaves</b><span class="where">Front of the house · 256 lamps</span><span class="sp"></span><span class="where">${unknown ? '—' : hm(view.clock)}</span></div>`;
+  if (pretendAt !== null) h += `<div class="pretend">Pretending it's <b>${label(pretendAt)}</b> — the lights aren't changing.<span class="sp"></span><button class="btn sm" id="unpretend">Back to now</button></div>`;
+  else if (unknown) h += `<div class="waiting">Waiting for the time. Showing ${show.live.activations.length ? 'what was on before the reset' : 'your baseline'} until the board knows it${ntp ? ' (it asks NTP a minute after boot — press +15 min)' : ' — and the internet is off'}.</div>`;
+  h += `<div class="lamps" id="lamps">${'<i></i>'.repeat(60)}</div>`;
+  h += `<div class="lampcap"><span>${r.power.value ? `<b>${esc(currentPattern(r))}</b> · ${esc(r.palette.value)}` : '<b>Off</b>'}</span><span>${r.power.value ? r.brightness.value + ' %' : ''}</span></div>`;
+  // active presets
+  const act = activePresets(view);
+  h += `<div class="active"><h4>Active presets<span class="sp"></span></h4><div class="chips">`;
+  const ov = view.live.overrides;
+  if (Object.keys(ov.pins).length) h += chip({ colour: 'var(--you)', name: 'Your changes', end: ov.ends === null ? 'until the time is known' : endLabel(ov.ends), key: 'you', x: 'you' });
+  for (const a of act) {
+    const p = presetOf(view, a.preset);
+    const srcs = a.activations.map(x => x.source.kind === 'manual' ? 'you' : view.saved.schedules.find(s => s.id === x.source.id)?.name ?? '?');
+    const ends = a.activations.map(actEnds); const last = ends.includes(null) ? null : Math.max(...ends);
+    h += chip({ colour: p.colour, name: p.name, end: endLabel(last), src: srcs.join(' + '), key: p.id, x: p.id });
+  }
+  h += chip({ colour: 'var(--base)', name: 'Baseline', end: '', key: 'base', base: true });
+  if (!act.length && !Object.keys(ov.pins).length) h += `<span class="none">Nothing on — your baseline shows.</span>`;
+  h += `</div></div>`;
+  // edit bar
+  if (editing !== 'you' && pretendAt === null) {
+    const c = editing === 'base' ? 'var(--base)' : presetOf(show, editing).colour;
+    h += `<div class="editbar" style="border-color:${c};color:${c}">Editing <b>${esc(layerName(editing === 'base' ? { kind: 'base' } : { kind: 'preset', id: editing }))}</b> — controls write into it; ○ unpins.<span class="sp"></span><button class="btn sm" id="doneedit">Done</button></div>`;
+  }
+  // controls
+  const pins = editLayerPins();
+  h += `<div class="ctrls"><h4>Controls<span class="sp"></span></h4>`;
+  for (const c of ['power', 'brightness', 'pattern', 'palette', 'speed']) {
+    const { value, layer } = r[c];
+    const col = layerColour(layer);
+    const pinnedHere = editing !== 'you' && c in pins;
+    const shown = editing !== 'you' && pinnedHere ? pins[c] : value;
+    h += `<div class="ctrl ${editing !== 'you' && !pinnedHere ? 'unpinned' : ''}"><div class="lb" style="background:${col}"></div><div class="nm">${c[0].toUpperCase() + c.slice(1)}</div><div class="val">${controlWidget(c, shown)}</div>`;
+    if (editing === 'you') h += `<div class="who" style="color:${col}">${esc(layerName(layer))}${layer.kind === 'you' && pretendAt === null ? ` <button class="x" data-unpin="${c}" title="Drop this change">×</button>` : ''}</div>`;
+    else h += `<div class="who">${pinnedHere ? `<button class="x" data-unpin="${c}" title="Unpin from this layer" style="color:var(--strong)">● pinned</button>` : `<span style="color:var(--faint)">○ not pinned</span>`}</div>`;
+    h += `</div>`;
+  }
+  h += `</div>`;
+  if (editing === 'you' && Object.keys(show.live.overrides.pins).length && pretendAt === null) {
+    h += saveOpen
+      ? `<div class="save"><input id="savename" placeholder="Name the preset — e.g. Frost" value=""><button class="btn sm" id="savego">Save</button><button class="btn sm quiet" id="savecancel">Cancel</button></div>`
+      : `<div class="save"><button class="btn sm" id="saveopen">Save your changes as a preset…</button><span style="font-size:11px;color:var(--faint)">pins only the ${Object.keys(show.live.overrides.pins).length} control(s) you changed</span></div>`;
+  }
+  $('phone').innerHTML = h;
+  $('phone').classList.toggle('dimmed', pretendAt !== null);
+  wirePhone();
+}
+function chip({ colour, name, end, src, key, x, base }) {
+  const ed = String(editing) === String(key);
+  return `<span class="chip ${base ? 'base' : ''} ${ed ? 'editing' : ''}" data-edit="${key}" style="color:${colour};border-color:${colour};background:color-mix(in srgb, ${colour} 12%, transparent)">${esc(name)}`
+    + (src ? ` <span class="src">${esc(src)}</span>` : '') + (end ? ` <span class="end">${esc(end)}</span>` : '')
+    + (x !== undefined && pretendAt === null ? `<button class="x" data-off="${x}" title="Turn off">×</button>` : '') + `</span>`;
+}
+function controlWidget(c, v) {
+  const dis = pretendAt !== null ? 'disabled' : '';
+  if (c === 'power') return `<div class="seg"><button data-set="power" data-v="false" class="${!v ? 'on' : ''}" ${dis}>Off</button><button data-set="power" data-v="true" class="${v ? 'on' : ''}" ${dis}>On</button></div>`;
+  if (c === 'brightness' || c === 'speed') return `<input type="range" min="0" max="100" step="5" value="${v}" data-range="${c}" ${dis}><span class="num">${v}%</span>`;
+  if (c === 'palette') return PALETTES.map(p => `<button class="pat ${p === v ? 'hold' : ''}" data-set="palette" data-v="${esc(p)}" ${dis}>${esc(p)}</button>`).join('');
+  if (c === 'pattern') {
+    const set = 'cycle' in v ? v.cycle : [v.hold];
+    return PATTERNS.map(p => `<button class="pat ${'hold' in v && v.hold === p ? 'hold' : set.includes(p) ? 'in' : ''}" data-pat="${esc(p)}" ${dis} title="Click: hold this one · ⌥/shift-click: add to or remove from the cycle">${esc(p)}</button>`).join('')
+      + `<span style="font-size:10.5px;color:var(--faint)">${'hold' in v ? 'holding' : 'cycling'}</span>`;
+  }
+}
+function wirePhone() {
+  $('phone').querySelectorAll('[data-set]').forEach(b => b.onclick = () => {
+    const c = b.dataset.set; writeControl(c, c === 'power' ? b.dataset.v === 'true' : b.dataset.v);
+  });
+  $('phone').querySelectorAll('[data-range]').forEach(i => i.onchange = () => writeControl(i.dataset.range, Number(i.value)));
+  $('phone').querySelectorAll('[data-pat]').forEach(b => b.onclick = e => {
+    const p = b.dataset.pat, cur = resolve(show).pattern.value;
+    const pins = editLayerPins(); const base = editing !== 'you' && 'pattern' in pins ? pins.pattern : cur;
+    if (e.shiftKey || e.altKey) {
+      const set = new Set('cycle' in base ? base.cycle : [base.hold]); set.has(p) ? set.delete(p) : set.add(p);
+      writeControl('pattern', { cycle: PATTERNS.filter(x => set.has(x)) });
+    } else writeControl('pattern', { hold: p });
+  });
+  $('phone').querySelectorAll('[data-unpin]').forEach(b => b.onclick = () => { delete editLayerPins()[b.dataset.unpin];
+    if (editing === 'you' && !Object.keys(show.live.overrides.pins).length) show.live.overrides.ends = null; render(); });
+  $('phone').querySelectorAll('[data-off]').forEach(b => b.onclick = e => { e.stopPropagation();
+    const k = b.dataset.off; if (k === 'you') { show.live.overrides = { pins: {}, ends: null }; note(show, 'You dropped your changes'); } else turnOff(show, Number(k));
+    if (String(editing) === k) editing = 'you'; render(); });
+  $('phone').querySelectorAll('[data-edit]').forEach(c => c.onclick = () => { if (pretendAt !== null) return;
+    const k = c.dataset.edit; editing = k === 'you' || k === 'base' ? k : Number(k); if (String(editing) === 'you') editing = 'you'; render(); });
+  const u = $('unpretend'); if (u) u.onclick = () => { pretendAt = null; render(); };
+  const d = $('doneedit'); if (d) d.onclick = () => { editing = 'you'; render(); };
+  const so = $('saveopen'); if (so) so.onclick = () => { saveOpen = true; render(); $('savename').focus(); };
+  const sc = $('savecancel'); if (sc) sc.onclick = () => { saveOpen = false; render(); };
+  const sg = $('savego'); if (sg) sg.onclick = () => { const n = $('savename').value.trim() || 'My preset';
+    saveOverridesAsPreset(show, n, SWATCHES[show.saved.presets.length % SWATCHES.length]); saveOpen = false; render(); };
+}
+function currentPattern(r) {
+  const v = r.pattern.value; if ('hold' in v) return v.hold;
+  return v.cycle.length ? v.cycle[Math.floor(performance.now() / 4000) % v.cycle.length] : '—';
+}
+
+// ---- the lamps (a few lines of "shader" per pattern) ----
+const PAL = { 'Warm': ['#ff9a3c', '#ffcf6b', '#ff5a2a'], 'Orange': ['#ff7a1a', '#ffb347', '#8a3cff'], 'Red & green': ['#ff2d3a', '#2ee86a', '#fff4e0'],
+  'Ice': ['#bfe8ff', '#6fb7ff', '#ffffff'], 'Purple': ['#a24cff', '#ff5fa8', '#4b6bff'] };
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function lampFrame() {
+  const box = $('lamps'); if (box) {
+    const view = pretendAt !== null ? pretend(show, pretendAt) : show, r = resolve(view);
+    const on = r.power.value, b = r.brightness.value / 100, pal = (PAL[r.palette.value] || PAL.Warm).map(hex), pat = currentPattern(r);
+    const t = performance.now() / 1000 * (0.4 + r.speed.value / 50);
+    [...box.children].forEach((el, i) => {
+      if (!on) { el.style.background = '#121216'; el.style.boxShadow = 'none'; return; }
+      let k, c;
+      switch (pat) {
+        case 'Embers': k = .45 + .55 * Math.abs(Math.sin(i * 12.9898 + t * 1.7) * Math.sin(i * 3.1 + t * .9)); c = pal[i % 2]; break;
+        case 'Aurora': k = .5 + .5 * Math.sin(i / 6 + t); c = pal[Math.floor((i / 10 + t / 3) % 3)]; break;
+        case 'Twinkle': k = Math.pow(Math.max(0, Math.sin(i * 7.7 + t * 2.3)), 6) * .9 + .1; c = pal[2]; break;
+        case 'Spooky': k = .25 + .75 * Math.pow(.5 + .5 * Math.sin(t * .8 + i / 20), 3); c = pal[(i % 7 === 0) ? 2 : 0]; break;
+        case 'Pumpkin': k = (Math.floor(i - t * 8) % 6 + 6) % 6 < 2 ? 1 : .15; c = pal[0]; break;
+        case 'Candy cane': k = .9; c = (Math.floor(i / 3 + t * 2) % 2) ? pal[0] : pal[2]; break;
+        default: k = .6; c = pal[0];
+      }
+      const [R, G, B] = c.map(x => Math.round(x * k * b));
+      el.style.background = `rgb(${R},${G},${B})`;
+      el.style.boxShadow = `0 0 ${4 + 6 * k * b}px rgba(${R},${G},${B},${.5 * k})`;
+    });
+    const cap = document.querySelector('.lampcap span b'); if (cap && on) cap.textContent = pat;
+  }
+  requestAnimationFrame(lampFrame);
+}
+
+// ---- presets card ----
+function renderPresets() {
+  const act = new Set(show.live.activations.map(a => a.preset));
+  let h = `<h4>Presets<span class="sp"></span><span class="note">top of the list wins · ↑↓ to reorder</span></h4>`;
+  for (const p of [...show.saved.presets].reverse()) {
+    const pins = Object.entries(p.pins).map(([c, v]) => valueLabel(c, v)).join(' · ') || 'pins nothing';
+    h += `<div class="prow ${act.has(p.id) ? 'on' : ''}"><div class="ord"><button data-up="${p.id}">▲</button><button data-down="${p.id}">▼</button></div>`
+      + `<div class="sw" style="background:${p.colour}"></div><div class="pn">${esc(p.name)}</div><div class="pins" title="${esc(pins)}">${esc(pins)}</div>`
+      + `<div class="acts"><button class="btn sm" data-act="${p.id}" data-for="60">1 h</button><button class="btn sm" data-act="${p.id}" data-for="tonight">Tonight</button><button class="btn sm" data-act="${p.id}" data-for="">On</button></div></div>`;
+  }
+  $('presets').innerHTML = h;
+  $('presets').querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+    const f = b.dataset.for, id = Number(b.dataset.act);
+    let m = f === '' ? null : f === 'tonight' ? (show.clock === null ? null : (dayOf(show.clock) + 1) * DAY + 4 * 60 - show.clock) : Number(f);
+    if (m !== null && show.clock !== null && f === 'tonight' && show.clock % DAY < 4 * 60) m -= DAY; // already past midnight: until 04:00 today
+    activate(show, id, m); render();
+  });
+  const move = (id, d) => { const ps = show.saved.presets, i = ps.findIndex(p => p.id === id), j = i + d; if (j < 0 || j >= ps.length) return; [ps[i], ps[j]] = [ps[j], ps[i]]; render(); };
+  $('presets').querySelectorAll('[data-up]').forEach(b => b.onclick = () => move(Number(b.dataset.up), 1));
+  $('presets').querySelectorAll('[data-down]').forEach(b => b.onclick = () => move(Number(b.dataset.down), -1));
+}
+
+// ---- log ----
+function renderLog() {
+  $('log').innerHTML = [...show.live.log].reverse().map(l => `<div class="${l.cls || ''}"><span>${l.at === null ? '(no time yet)' : label(l.at)}</span>${esc(l.text)}</div>`).join('') || '<div><span></span>Nothing yet.</div>';
+}
+
+// ---- calendars ----
+// Sources: one lane per schedule plus "By hand", top-priority preset first.
+function lanes() {
+  const order = [...show.saved.presets].reverse().map(p => p.id);
+  const ls = show.saved.schedules.map(s => ({ key: 's' + s.id, name: s.name, preset: s.preset, schedule: s }));
+  ls.sort((a, b) => order.indexOf(a.preset) - order.indexOf(b.preset));
+  ls.push({ key: 'manual', name: 'By hand', preset: null });
+  return ls;
+}
+function barsIn(from, to) {
+  const out = [];
+  for (const s of show.saved.schedules) for (const [f, e] of firingsBetween(s, from, to)) {
+    const gone = show.live.dismissed.some(([id, fi]) => id === s.id && fi === f);
+    out.push({ lane: 's' + s.id, start: f, end: e === null ? to : e, colour: presetOf(show, s.preset).colour, gone, title: `${s.name} → ${pname(show, s.preset)} · ${label(f)}${e === null ? '' : ' – ' + hm(e)}` });
+  }
+  for (const a of show.live.activations) if (a.source.kind === 'manual' && a.started !== null) {
+    const e = actEnds(a) ?? Math.max(world, a.started) + DAY;
+    if (e > from && a.started < to) out.push({ lane: 'manual', start: a.started, end: e, colour: presetOf(show, a.preset).colour, manual: true, title: `${pname(show, a.preset)} by hand` });
+  }
+  return out;
+}
+// What the lights do, from the schedules alone, every 15 min.
+const resultCache = new Map();
+function resultSlices(from, to) {
+  const key = JSON.stringify([from, to, show.saved]);
+  if (resultCache.has(key)) return resultCache.get(key);
+  const out = [];
+  for (let m = from; m < to; m += 15) {
+    const r = resolve(pretend(show, m));
+    out.push(r.power.value ? [r.pattern.layer.kind === 'preset' ? presetOf(show, r.pattern.layer.id).colour : '#8b8d99', r.brightness.value] : null);
+  }
+  if (resultCache.size > 60) resultCache.clear();
+  resultCache.set(key, out); return out;
+}
+function track(from, days, withLabels) {
+  const to = from + days * DAY, span = to - from, L = lanes(), pct = m => ((m - from) / span * 100).toFixed(3) + '%';
+  const today = dayOf(world - dayStart);
+  let h = `<div class="track" data-from="${from}" data-span="${span}"><div class="days">`;
+  for (let d = 0; d < days; d++) h += `<div class="${dayOf(from) + d === today ? 'today' : ''}">${dayLabel(dayOf(from) + d)}${dayStart ? ' <span style="opacity:.6">noon→</span>' : ''}</div>`;
+  h += `</div><div class="daylines">${'<div></div>'.repeat(days)}</div>`;
+  for (let d = 0; d < days; d++) { const day = dayOf(from) + d; h += `<div class="sunline" style="left:${pct(day * DAY + sunset(day))}" title="sunset ${hm(sunset(day))}"></div>`; }
+  h += `<div class="lanes">`;
+  const bars = barsIn(from, to);
+  for (const l of L) {
+    h += `<div class="lane">`;
+    for (const b of bars.filter(b => b.lane === l.key)) {
+      const s = Math.max(b.start, from), e = Math.min(b.end, to); if (e <= s) continue;
+      h += `<div class="bar ${b.end <= world ? 'past' : ''} ${b.manual ? 'manual' : ''} ${b.gone ? 'gone' : ''}" title="${esc(b.title)}" style="left:${pct(s)};width:${((e - s) / span * 100).toFixed(3)}%;background:${b.colour};color:${b.colour}"></div>`;
+    }
+    h += `</div>`;
+  }
+  h += `</div><div class="result">`;
+  const slices = resultSlices(from, to);
+  slices.forEach((c, i) => { if (c) h += `<i style="left:${(i * 15 / span * 100).toFixed(3)}%;width:${(15 / span * 100 + .05).toFixed(3)}%;background:color-mix(in srgb, ${c[0]} ${Math.round(25 + 75 * c[1] / 100)}%, #07080a)"></i>`; });
+  h += `</div>`;
+  if (world >= from && world < to) h += `<div class="cursor" style="left:${pct(world)}" title="now"></div>`;
+  if (pretendAt !== null && pretendAt >= from && pretendAt < to) h += `<div class="cursor pretend" style="left:${pct(pretendAt)}" title="pretending"></div>`;
+  h += `</div>`;
+  return h;
+}
+function laneLabels() {
+  return `<div class="lab">${lanes().map(l => `<div style="color:${l.preset ? presetOf(show, l.preset).colour : 'var(--subtle)'}">${esc(l.name)}</div>`).join('')}<div class="res">Lights</div></div>`;
+}
+const mondayOf = m => (dayOf(m) - weekday(dayOf(m))) * DAY;
+function renderCalA() {
+  const first = mondayOf(world - dayStart) + dayStart - 7 * DAY;
+  let h = '';
+  for (let w = 0; w < 5; w++) h += `<div class="week">${laneLabels()}${track(first + w * 7 * DAY, 7)}</div>`;
+  $('calA').innerHTML = h;
+}
+function renderCalB() {
+  $('calB').innerHTML = `<div class="striprow strip">${laneLabels()}${track(mondayOf(world - dayStart) + dayStart, 14)}</div>`;
+}
+function renderCalC() {
+  const mon = mondayOf(world), top = 12 * 60, H = 480, pxm = H / DAY;
+  let h = `<div class="wgrid"><div></div>`;
+  for (let d = 0; d < 7; d++) h += `<div class="hd ${dayOf(mon) + d === dayOf(world) ? 'today' : ''}">${dayLabel(dayOf(mon) + d)}</div>`;
+  h += `<div class="hrs">${[12, 15, 18, 21, 0, 3, 6, 9].map((x, i) => `<div style="top:${i * 60}px">${String(x).padStart(2, '0')}:00</div>`).join('')}</div>`;
+  for (let d = 0; d < 7; d++) {
+    const colFrom = mon + d * DAY + top, colTo = colFrom + DAY;
+    h += `<div class="col" data-from="${colFrom}">`;
+    const bars = barsIn(colFrom, colTo).filter(b => !b.gone);
+    // side by side when they overlap: give each bar the next free column
+    const cols = []; bars.sort((a, b) => a.start - b.start);
+    for (const b of bars) { let c = cols.findIndex(end => end <= b.start); if (c < 0) { c = cols.length; cols.push(0); } cols[c] = b.end; b.col = c; }
+    const n = Math.max(1, cols.length);
+    for (const b of bars) {
+      const s = Math.max(b.start, colFrom), e = Math.min(b.end, colTo);
+      const nm = b.lane === 'manual' ? 'by hand' : show.saved.schedules.find(x => 's' + x.id === b.lane).name;
+      h += `<div class="ev ${b.end <= world ? 'past' : ''}" title="${esc(b.title)}" style="top:${(s - colFrom) * pxm}px;height:${Math.max(14, (e - s) * pxm - 2)}px;left:${b.col / n * 100}%;width:calc(${100 / n}% - 3px);background:${b.colour}">${esc(nm)}<small>${hm(b.start)}–${hm(b.end)}</small></div>`;
+    }
+    if (world >= colFrom && world < colTo) h += `<div class="now" style="top:${(world - colFrom) * pxm}px"></div>`;
+    if (pretendAt !== null && pretendAt >= colFrom && pretendAt < colTo) h += `<div class="now pretend" style="top:${(pretendAt - colFrom) * pxm}px"></div>`;
+    h += `</div>`;
+  }
+  h += `</div>`;
+  $('calC').innerHTML = h;
+}
+function wireCalendars() {
+  document.querySelectorAll('.track').forEach(t => t.onclick = e => {
+    const r = t.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+    pretendAt = Math.round((Number(t.dataset.from) + x * Number(t.dataset.span)) / 5) * 5; render(); $('phone').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  document.querySelectorAll('.wgrid .col').forEach(c => c.onclick = e => {
+    const r = c.getBoundingClientRect(), y = (e.clientY - r.top) / r.height;
+    pretendAt = Math.round((Number(c.dataset.from) + y * DAY) / 5) * 5; render(); $('phone').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+function renderLegend() {
+  $('legend').innerHTML = show.saved.presets.map(p => `<span><i class="sw" style="background:${p.colour}"></i>${esc(p.name)}</span>`).join('')
+    + `<span><i class="sw" style="background:var(--st-good-tx);width:2px"></i>now</span><span><i class="sw" style="background:var(--st-bound-tx);width:2px"></i>pretending</span><span><i class="sw" style="background:rgba(245,224,78,.4);width:1px"></i>sunset</span>`;
+}
+
+// ---- §3 schedules ----
+const daysLabel = d => d === EVERY ? 'Every day' : WD.filter((_, i) => d & (1 << i)).join(' ');
+const datesLabel = r => r ? `${MO[r.from[0] - 1]} ${r.from[1]} – ${MO[r.to[0] - 1]} ${r.to[1]}` : '';
+const endText = e => e.kind === 'for' ? `for ${e.minutes >= 60 ? (e.minutes / 60) + ' h' : e.minutes + ' min'}` : e.kind === 'never' ? 'until turned off' : `→ ${todLabel(e.at)}`;
+function renderSchedules() {
+  let h = `<h4>Schedules<span class="sp"></span><button class="btn sm" id="addsched">+ schedule</button></h4>`;
+  for (const s of show.saved.schedules) {
+    const p = presetOf(show, s.preset), nx = show.clock === null ? null : nextFiringAfter(s, show.clock);
+    h += `<div class="srow ${s.enabled ? '' : 'off'}" data-open="${s.id}"><button class="tog ${s.enabled ? 'on' : ''}" data-tog="${s.id}" title="Switch on/off"></button>`
+      + `<div class="sn">${esc(s.name)}</div><div><span class="pchip" style="color:${p.colour};border-color:${p.colour}">${esc(p.name)}</span></div>`
+      + `<div class="when">${daysLabel(s.days)}${s.dates ? ' · ' + datesLabel(s.dates) : ''} · ${todLabel(s.start)} ${endText(s.end)}</div>`
+      + `<div class="next">${s.enabled ? (nx === null ? '' : 'next ' + label(nx)) : 'off'}</div></div>`;
+    if (openSchedule === s.id) h += scheduleEditor(s);
+  }
+  $('schedules').innerHTML = h;
+  $('schedules').querySelectorAll('[data-tog]').forEach(b => b.onclick = e => { e.stopPropagation(); const id = Number(b.dataset.tog);
+    editSchedule(show, id, s => s.enabled = !s.enabled); note(show, `You switched “${show.saved.schedules.find(s => s.id === id).name}” ${show.saved.schedules.find(s => s.id === id).enabled ? 'on' : 'off'}`); render(); });
+  $('schedules').querySelectorAll('[data-open]').forEach(r => r.onclick = () => { const id = Number(r.dataset.open); openSchedule = openSchedule === id ? null : id; render(); });
+  $('addsched').onclick = () => {
+    const id = Math.max(0, ...show.saved.schedules.map(s => s.id)) + 1;
+    const s = { id, name: 'Halloween weekend', preset: 4, enabled: true, days: (1 << 4) | (1 << 5), dates: { from: [10, 1], to: [10, 31] },
+      start: { clock: 17 * 60 }, end: { kind: 'at', at: { clock: 60 } }, since: show.clock ?? at(2026, 1, 1) };
+    show.saved.schedules.push(s); openSchedule = id; note(show, `You added “${s.name}”`); render();
+  };
+  wireScheduleEditor();
+}
+function scheduleEditor(s) {
+  const tod = (t, k) => {
+    const kind = 'clock' in t ? 'clock' : 'sunset' in t ? 'sunset' : 'sunrise';
+    return `<select data-k="${k}-kind"><option ${kind === 'clock' ? 'selected' : ''}>clock</option><option ${kind === 'sunset' ? 'selected' : ''}>sunset</option><option ${kind === 'sunrise' ? 'selected' : ''}>sunrise</option></select>`
+      + (kind === 'clock' ? `<input type="time" data-k="${k}-clock" value="${hm(t.clock)}">` : `<input type="number" step="5" data-k="${k}-off" value="${t[kind]}"> min`);
+  };
+  return `<div class="sedit" data-sid="${s.id}">
+    <input data-k="name" value="${esc(s.name)}" style="width:150px">
+    <select data-k="preset">${show.saved.presets.map(p => `<option value="${p.id}" ${p.id === s.preset ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+    <span class="daypick">${WD.map((d, i) => `<button data-day="${i}" class="${s.days & (1 << i) ? 'on' : ''}">${d[0]}${d[1]}</button>`).join('')}</span>
+    <label><input type="checkbox" data-k="hasdates" ${s.dates ? 'checked' : ''}> between</label>
+    ${s.dates ? `<input type="number" min="1" max="12" data-k="fm" value="${s.dates.from[0]}">/<input type="number" min="1" max="31" data-k="fd" value="${s.dates.from[1]}"> and <input type="number" min="1" max="12" data-k="tm" value="${s.dates.to[0]}">/<input type="number" min="1" max="31" data-k="td" value="${s.dates.to[1]}">` : ''}
+    <span>start</span>${tod(s.start, 'start')}
+    <span>end</span><select data-k="endkind"><option value="at" ${s.end.kind === 'at' ? 'selected' : ''}>at</option><option value="for" ${s.end.kind === 'for' ? 'selected' : ''}>for</option><option value="never" ${s.end.kind === 'never' ? 'selected' : ''}>never</option></select>
+    ${s.end.kind === 'at' ? tod(s.end.at, 'end') : s.end.kind === 'for' ? `<input type="number" step="15" data-k="formin" value="${s.end.minutes}"> min` : ''}
+    <button class="btn sm quiet" data-del="${s.id}">Delete schedule</button>
+    <span style="color:var(--faint);font-size:11px">Edits shape the next firing; what's on now stays.</span></div>`;
+}
+function wireScheduleEditor() {
+  const box = $('schedules').querySelector('.sedit'); if (!box) return;
+  const id = Number(box.dataset.sid);
+  const ed = f => { editSchedule(show, id, f); render(); };
+  const parseTime = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
+  box.querySelectorAll('[data-day]').forEach(b => b.onclick = () => ed(s => s.days ^= 1 << Number(b.dataset.day)));
+  box.querySelectorAll('[data-k]').forEach(i => i.onchange = () => {
+    const k = i.dataset.k, v = i.type === 'checkbox' ? i.checked : i.value;
+    ed(s => {
+      if (k === 'name') s.name = v;
+      else if (k === 'preset') s.preset = Number(v);
+      else if (k === 'hasdates') s.dates = v ? { from: [10, 1], to: [10, 31] } : null;
+      else if (k === 'fm') s.dates.from[0] = Number(v); else if (k === 'fd') s.dates.from[1] = Number(v);
+      else if (k === 'tm') s.dates.to[0] = Number(v); else if (k === 'td') s.dates.to[1] = Number(v);
+      else if (k === 'endkind') s.end = v === 'at' ? { kind: 'at', at: { clock: 23 * 60 } } : v === 'for' ? { kind: 'for', minutes: 120 } : { kind: 'never' };
+      else if (k === 'formin') s.end.minutes = Number(v);
+      else {
+        const [which, part] = k.split('-'); const t = which === 'start' ? s.start : s.end.at; const nt = {};
+        if (part === 'kind') { if (v === 'clock') nt.clock = 19 * 60; else nt[v] = 0; }
+        else if (part === 'clock') nt.clock = parseTime(v);
+        else nt['sunset' in t ? 'sunset' : 'sunrise'] = Number(v);
+        if (which === 'start') s.start = nt; else s.end.at = nt;
+      }
+    });
+  });
+  box.querySelector('[data-del]').onclick = () => { const s = show.saved.schedules.find(s => s.id === id);
+    show.saved.schedules = show.saved.schedules.filter(s => s.id !== id); note(show, `You deleted “${s.name}” (what it turned on stays)`); openSchedule = null; render(); };
+}
+
+// ---- §4 findings ----
+const FINDINGS = [
+  ['F1', `<b>“Until the next change” can be minutes away.</b> Turn brightness at 18:25 on Halloween and it ends at 18:30, because Halloween starts — though Halloween doesn't pin brightness. Lean: each change ends when the next change touches <i>its</i> control.`,
+    'Set the scene', () => { jumpTo(at(2026, 10, 31, 18, 25)); turn(show, 'brightness', 45); render(); }],
+  ['F2', `<b>Switching a schedule off leaves tonight's on.</b> It follows “edits never change what's showing” — right for an edit, maybe wrong for an off switch. Try it: Halloween is on; switch “Halloween nights” off in §3.`,
+    'Set the scene', () => jumpTo(at(2026, 10, 31, 20, 0))],
+  ['F3', `<b>A power cut forgets what you turned off.</b> Turn Halloween off tonight, cut the power, and catching up turns it back on. Accepted (what you do by hand is lost on power off), but it's the one case where the lights redo something you undid.`,
+    'Set the scene', () => { jumpTo(at(2026, 10, 31, 20, 0)); turnOff(show, 4); render(); }],
+  ['F4', `<b>A preset that doesn't pin power can't turn the lights on.</b> Late dim pins only brightness; turn Evening off at 23:10 and Late dim is “active” on a dark house. That's partial presets working — the panel should say “on, but nothing to dim”.`,
+    'Set the scene', () => { jumpTo(at(2026, 11, 3, 23, 10)); turnOff(show, 1); render(); }],
+  ['F5', `<b>A clock that steps backwards</b> (an NTP correction, or −1 h above) leaves activations “from the future”. The product should drop any activation that starts after now. Pretend never moves the board's clock, for this reason.`,
+    'Set the scene', () => { jumpTo(at(2026, 10, 31, 23, 20)); advance(-60); }],
+  ['F6', `<b>After an update's reboot the board shows what was on, waiting for the time</b> (RTC RAM keeps it); after a power cut, your baseline. With “Internet ✓” off the board never learns the time — try a power cut with it off to see the default look hold.`,
+    'Set the scene', () => { jumpTo(at(2026, 10, 31, 20, 0)); ntp = false; $('ntp').classList.remove('active'); $('ntp').textContent = 'Internet ✗'; reboot('power'); }],
+];
+function renderFindings() {
+  $('findings').innerHTML = FINDINGS.map(([id, text], i) => `<div class="finding"><span class="id">${id}</span><span class="grow">${text}</span><button data-find="${i}">${FINDINGS[i][2]}</button></div>`).join('');
+  $('findings').querySelectorAll('[data-find]').forEach(b => b.onclick = () => { FINDINGS[Number(b.dataset.find)][3](); $('phone').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+}
+function jumpTo(m) {
+  show = eaves(); world = m; ntp = true; $('ntp').classList.add('active'); $('ntp').textContent = 'Internet ✓';
+  knowsAt = m; pretendAt = null; editing = 'you'; saveOpen = false;
+  // A board that was on all day: start at noon (or 8 h earlier) and run to the moment.
+  world = Math.min(m, dayOf(m - 12 * 60) * DAY + 12 * 60); tick(show, world); advance(m - world);
+}
+
+// ---- controls strip ----
+function renderClock() {
+  $('clockbox').innerHTML = `${label(world)}<small>${show.clock === null ? '<span class="unknown">the board doesn\'t know the time</span>' : 'the board knows the time'} · sunset ${hm(sunset(dayOf(world)))}</small>`;
+}
+function render() { renderClock(); renderPhone(); renderPresets(); renderLog(); renderLegend(); renderCalA(); renderCalB(); renderCalC(); wireCalendars(); renderSchedules(); }
+
+document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => advance(Number(b.dataset.step)));
+$('jump').onchange = e => { if (!e.target.value) return; const [d, t] = e.target.value.split('T'); const [y, mo, da] = d.split('-').map(Number); const [h, mi] = t.split(':').map(Number);
+  const m = at(y, mo, da, h, mi); if (m > world) advance(m - world); else jumpTo(m); e.target.value = ''; };
+$('softreset').onclick = () => reboot('soft');
+$('powercut').onclick = () => reboot('power');
+$('ntp').onclick = () => { ntp = !ntp; $('ntp').classList.toggle('active', ntp); $('ntp').textContent = ntp ? 'Internet ✓' : 'Internet ✗'; if (ntp && show.clock === null) knowsAt = world + 1; render(); };
+$('reseed').onclick = () => start();
+const setDayStart = v => { dayStart = v; $('ds0').classList.toggle('active', v === 0); $('ds12').classList.toggle('active', v !== 0); render(); };
+$('ds0').onclick = () => setDayStart(0); $('ds12').onclick = () => setDayStart(12 * 60);
+let timer = null;
+$('play').onclick = () => { if (timer) { clearInterval(timer); timer = null; $('play').textContent = '▶ Run'; $('play').classList.remove('active'); }
+  else { timer = setInterval(() => advance(5), 120); $('play').textContent = '❚❚ Pause'; $('play').classList.add('active'); } };
+
+start(); renderFindings(); requestAnimationFrame(lampFrame);
+// ?scene=… sets a scene on load (used for the gate's screenshots).
+const SCENES = {
+  halloween: () => { jumpTo(at(2026, 10, 31, 20, 0)); turn(show, 'brightness', 55); render(); },
+  editing: () => { jumpTo(at(2026, 10, 31, 20, 0)); turn(show, 'brightness', 55); editing = 4; render(); },
+  late: () => { jumpTo(at(2026, 10, 31, 23, 20)); activate(show, 5, 60); render(); },
+  waiting: () => { jumpTo(at(2026, 10, 31, 20, 0)); ntp = false; $('ntp').classList.remove('active'); $('ntp').textContent = 'Internet ✗'; reboot('power'); },
+};
+const sceneName = new URLSearchParams(location.search).get('scene'); if (SCENES[sceneName]) SCENES[sceneName]();
+</script>
+</body>
+</html>
