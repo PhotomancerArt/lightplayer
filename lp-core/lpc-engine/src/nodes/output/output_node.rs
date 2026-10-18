@@ -97,7 +97,7 @@ const HIGHLIGHT_CREST_16: u16 = 96 * 257;
 /// The breath's level at `time_seconds`: a raised cosine from
 /// [`HIGHLIGHT_FLOOR_16`] (at phase 0) to [`HIGHLIGHT_CREST_16`] (half
 /// period), never zero — a selection must never read as dead lamps.
-fn highlight_level_16(time_seconds: f32) -> u16 {
+pub(crate) fn highlight_level_16(time_seconds: f32) -> u16 {
     let phase =
         0.5 - 0.5 * libm::cosf(core::f32::consts::TAU * time_seconds / HIGHLIGHT_BREATH_SECONDS);
     let span = f32::from(HIGHLIGHT_CREST_16 - HIGHLIGHT_FLOOR_16);
@@ -1109,7 +1109,7 @@ fn parse_chase_spans(text: &str) -> Vec<ChaseSpan> {
 
 /// One `lamp` or `lamp-lamp` segment as its written endpoints, or `None`
 /// when it is not a segment at all.
-fn parse_span_segment(segment: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_span_segment(segment: &str) -> Option<(u32, u32)> {
     let segment = segment.trim();
     if segment.is_empty() {
         return None;
