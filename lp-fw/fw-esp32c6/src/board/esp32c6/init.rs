@@ -54,12 +54,34 @@ pub fn init_board() -> (
     // docs/adr/2026-09-02-esp32c6-ram-split.md, "Amendment".
     // SAFETY: each array is handed to the allocator exactly once, here, and
     // nothing else ever names it except to read its address.
+    //
+    // The main array's top reaches into the split loader's RAM
+    // (`lp_bootctl::BOOT_STAGE_RAM`, 0x40850000..0x40860000: 18,408 B of it
+    // at main 17c6c34d6), which a still-running radio must not write across
+    // a warm reset any more than `dram2_seg` (below). So the array is two
+    // regions, cut where it reaches that range: the part below is `Internal`
+    // (where the radio's C heap overflows to when its own region is full),
+    // the part from the range up carries no tag, like `dram2_seg`, so only
+    // Rust's global allocator lands there. Rust tries them in this order, so
+    // it fills main RAM bottom-up as before
+    // (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+    let (main_dma, main_fenced) = main_region_split();
+    // SAFETY: the two parts are disjoint and together the array.
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             core::ptr::addr_of_mut!(HEAP_MAIN).cast::<u8>(),
-            HEAP_MAIN_SIZE,
+            main_dma,
             esp_alloc::MemoryCapability::Internal.into(),
         ));
+        if main_fenced != 0 {
+            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+                core::ptr::addr_of_mut!(HEAP_MAIN)
+                    .cast::<u8>()
+                    .add(main_dma),
+                main_fenced,
+                crate::c_heap::BOOTLOADER_RECLAIMED,
+            ));
+        }
     }
     // The 40 KB the main region gave up comes back with interest from
     // `dram2_seg`: the 64 KB (0x4086E610..0x4087E610) the ESP-IDF
@@ -180,6 +202,15 @@ pub fn heap_regions() -> [(usize, usize); 3] {
         (core::ptr::addr_of!(HEAP_DRAM2) as usize, HEAP_DRAM2_SIZE),
         radio_region(),
     ]
+}
+
+/// The main array cut at the boot stages' RAM: `(below, from)` — the
+/// bytes that may hold radio DMA, then the bytes from
+/// `lp_bootctl::BOOT_STAGE_RAM` up, which may not.
+pub fn main_region_split() -> (usize, usize) {
+    let start = core::ptr::addr_of!(HEAP_MAIN) as u32;
+    let (below, from) = lp_bootctl::split_at_boot_stage_ram(start, HEAP_MAIN_SIZE as u32);
+    (below as usize, from as usize)
 }
 
 /// The radio's region as `(start address, size)`.

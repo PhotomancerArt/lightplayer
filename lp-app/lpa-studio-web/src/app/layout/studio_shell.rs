@@ -89,6 +89,8 @@ pub fn StudioShell(
         app_agent: _,
         // every migrated surface below reads its verbs from here
         offers,
+        // the Graph view's slice, for the workbench
+        graph,
     } = view;
     // The offer tree reaches the surfaces through context, not props: a
     // node card nested any depth down asks for its own verbs
@@ -174,6 +176,7 @@ pub fn StudioShell(
                     running,
                     now_secs,
                     hrefs,
+                    graph_view: graph,
                     on_action,
                 }
             }

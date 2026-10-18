@@ -5,8 +5,8 @@
 The project editor renders as the **workbench** (`src/app/workbench/`):
 a full-height PanelDock frame under ONE chrome band — each dock's
 attached panel tabs in a segment sized to its dock, the view tabs
-(Nodes · Map · Patch, as route suffixes; `/patching` and `/map` parse
-as aliases) centered between them. Fixed-home panels (Tree | Device ·
+(Nodes · Map · Patch · Graph, as route suffixes; `/patching` and `/map`
+parse as aliases) centered between them. Fixed-home panels (Tree | Device ·
 Outputs · Props), radio per side with per-view memory; a collapsed side
 keeps its tab row as the reopen affordance; the Tree's body is
 view-keyed — node tree on Nodes, and the fixture tree's GRAIN follows
@@ -19,6 +19,17 @@ lives on the site header's session·project control. See
 2026-08-14),
 `docs/adr/2026-08-19-single-session-web-and-session-control.md`, and
 `docs/adr/2026-08-20-patching-view-grain-follows-activity.md`.
+
+The **Graph** view (`/graph`, `src/app/workbench/graph_view.rs`) mounts
+the mapping design lab's canvas, tree, inspector and hint bar
+(`lab/mapping/web`'s library) over core's Graph editor
+(`lpa_studio_core::app::graph`): the canvas and hint bar in the center,
+the lab's tree in the Tree dock and its inspector in Props. The page
+holds core's `GraphHandle` (provided as context by `web_app.rs`) and
+hands it every pointer and key fact directly; the toolbar's tools, Move
+& draw, undo and redo are core's `project/graph/…` offers. Colours are
+the board's own frames from the Graph's slice of the studio view, except
+for a drawing in progress, which lights from the lab's simulated board.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into

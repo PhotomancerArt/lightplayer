@@ -189,6 +189,9 @@ pub struct UiStudioView {
     /// place the web renders migrated surfaces' buttons from and the app
     /// agent reads and presses (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`).
     pub offers: crate::UiOfferTree,
+    /// The Graph tab's slice (`app/graph`): `None` until the Graph has
+    /// been asked for on the open project.
+    pub graph: Option<crate::app::graph::UiGraphView>,
 }
 
 impl UiStudioView {
@@ -214,7 +217,14 @@ impl UiStudioView {
             access_added: None,
             app_agent: crate::UiAppAgentView::default(),
             offers: crate::UiOfferTree::default(),
+            graph: None,
         }
+    }
+
+    /// The Graph tab's slice.
+    pub fn with_graph(mut self, graph: Option<crate::app::graph::UiGraphView>) -> Self {
+        self.graph = graph;
+        self
     }
 
     /// The lens board's login line (BLE M6).

@@ -9306,6 +9306,48 @@ impl ProjectController {
             .map(|bytes| UiAssetContent::from_bytes(bytes, false, revision))
     }
 
+    /// The open project's revisions, for the Graph (`app/graph`): `None`
+    /// with no project synced.
+    pub(crate) fn graph_files_key(&self) -> Option<crate::app::graph::GraphFilesKey> {
+        let sync = self.sync.as_ref()?;
+        Some(crate::app::graph::GraphFilesKey {
+            root: self
+                .project_fs_root
+                .as_ref()
+                .map(|root| root.as_str().to_string())
+                .unwrap_or_default(),
+            revision: self.snapshot().sync.map(|sync| sync.revision),
+            overlay: sync.overlay_revision().0,
+            edits: self.edit_seq(),
+        })
+    }
+
+    /// The frame an output node last published, for the Graph's colours.
+    pub(crate) fn graph_output_frame(
+        &self,
+        node: NodeId,
+    ) -> Option<&crate::UiControlProductPreview> {
+        self.sync.as_ref()?.output_frame(node)
+    }
+
+    /// How many engine frames the lens has seen, `None` with no project.
+    pub(crate) fn graph_frames_seen(&self) -> Option<u64> {
+        Some(self.sync.as_ref()?.frames_seen())
+    }
+
+    /// A node's tree path, as `editor.json` keys it.
+    pub(crate) fn graph_node_address(&self, node: NodeId) -> Option<String> {
+        Some(self.node_by_runtime_id(node)?.address().to_string())
+    }
+
+    /// The node whose definition lives in `artifact`.
+    pub(crate) fn graph_node_for_def(&self, artifact: &ArtifactLocation) -> Option<NodeId> {
+        self.def_artifacts
+            .iter()
+            .find(|(_, at)| *at == artifact)
+            .map(|(node, _)| *node)
+    }
+
     fn allocate_mutation_cmd_id(&mut self) -> MutationCmdId {
         let id = MutationCmdId::new(self.next_mutation_cmd_id);
         self.next_mutation_cmd_id += 1;

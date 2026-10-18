@@ -33,6 +33,15 @@
 //! tree's, `LP_FIRST_LIGHT_CASES` (`none`, `basic`, `c40`, `project:<dir>`)
 //! picks the projects, and `LP_FIRST_LIGHT_LPFS` (`label=lpfs.bin,…`) also
 //! runs each case on a chip whose `lpfs` starts as that store.
+//! `LP_FIRST_LIGHT_NET=1` puts each board on a virtual LAN with one access
+//! point (made-up test values) and saves that network before the measured
+//! boots, so every boot joins it (the network seam, `net=lan`); the row's
+//! project is then `<case>+net`, and the boot is stepped on to the board's
+//! address. The join's key derivation runs in esp-radio's Wi-Fi task on
+//! silicon and is not run under the seam, so this shows the boot's ORDER
+//! with a network saved, not the join's CPU cost
+//! (`docs/defects/2026-10-17-the-emulated-join-costs-no-cpu.md`).
+//!
 //! `#[ignore]`d: it needs the split build (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).
 
@@ -43,7 +52,10 @@ mod tree_store_board;
 
 use editor_reads::block_on;
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp_common::Strap;
+use lp_emu_esp_common::seam::net::{
+    LanConfig, LanDriver, SharedLan, VirtualAccessPoint, VirtualLan,
+};
+use lp_emu_esp_common::{ParticipantId, Strap};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::ResetCause;
 use lp_emu_esp32c6::machine::{AppSource, BootMode, Esp32C6Builder, TimeGrade, UsbHost};
@@ -54,6 +66,10 @@ use tree_store_board::{c40_files, project_files};
 
 /// Emulated µs a boot may take to its first-light line (a wedge detector).
 const LINE_BUDGET_US: u64 = 30_000_000;
+
+/// The virtual LAN's network (`LP_FIRST_LIGHT_NET`): made-up test values.
+const NET_SSID: &str = "lp-walk-net";
+const NET_PASSWORD: &str = "correct-horse-42";
 
 /// Power-on boots per case. The machine is deterministic but a boot draws
 /// a link nonce and the RNG, so two show whether the figure moves.
@@ -69,6 +85,7 @@ fn time_to_first_light_on_the_emulated_c6() {
             TimeGrade::parse(&g).expect("LP_FIRST_LIGHT_GRADE is t1, t2, t3 or t4")
         });
     let grade_name = format!("{grade:?}").to_lowercase();
+    let net = std::env::var("LP_FIRST_LIGHT_NET").is_ok_and(|v| v == "1");
     let mut rows = Vec::new();
     // `LP_FIRST_LIGHT_MERGED` (`label=merged.bin`, comma-joined) boots those
     // chips instead of this tree's split builds — a silicon sitting's own
@@ -141,11 +158,14 @@ fn time_to_first_light_on_the_emulated_c6() {
                         )
                     }
                 };
-                let project = if store == "fresh" {
+                let mut project = if store == "fresh" {
                     project
                 } else {
                     format!("{project}@{store}")
                 };
+                if net {
+                    project.push_str("+net");
+                }
                 let mut chip = merged.clone();
                 if let Some(region) = region {
                     let at = lp_emu_esp32c6::flash::LPFS_OFFSET as usize;
@@ -157,16 +177,20 @@ fn time_to_first_light_on_the_emulated_c6() {
                 if let Some(elf) = p2_elf {
                     builder = builder.app(AppSource::Path(elf.clone()));
                 }
-                let machine = builder
+                let builder = builder
                     .flash(FlashBacking::Bytes(chip))
                     .reset_cause(ResetCause::UsbUartHpSys)
                     .strap(Strap::App)
                     .time_grade(grade)
                     .usb_host(UsbHost::Attached { draining: true })
                     .usb_sj_queue_source()
-                    .reboot_on_reset(true)
-                    .build()
-                    .expect("the split image builds a machine");
+                    .reboot_on_reset(true);
+                let builder = if net {
+                    builder.lan(lan(), ParticipantId(0))
+                } else {
+                    builder
+                };
+                let machine = builder.build().expect("the split image builds a machine");
                 let mut host = EmuLinkHost::new(
                     C6Board::new(machine).expect("a hosted board"),
                     0x7EE1_0001,
@@ -185,6 +209,17 @@ fn time_to_first_light_on_the_emulated_c6() {
                     // `/projects/a`), not this one. Silicon's
                     // `board_first_light` settles for the same reason.
                     line(&mut host, "startup_project set to first-light");
+                }
+                if net {
+                    let mut client = LpClient::new(&mut host).with_request_ids_from(2_000);
+                    block_on(client.network_add(
+                        NET_SSID.to_string(),
+                        lpc_wire::WifiPassword::new(NET_PASSWORD),
+                        None,
+                    ))
+                    .unwrap_or_else(|e| panic!("{label}/{project}: wifi add: {e}"));
+                    block_on(client.network_set(Some(true), None))
+                        .unwrap_or_else(|e| panic!("{label}/{project}: wifi on: {e}"));
                 }
                 for boot in 0..BOOTS {
                     host = power_cycle(host, 0x7EE1_0100 + boot as u32);
@@ -213,12 +248,20 @@ fn time_to_first_light_on_the_emulated_c6() {
                             "{label}/{project}: {said}"
                         );
                     }
+                    // A joining boot: on to its address (`[wifi] address …`).
+                    let address = net.then(|| {
+                        let l = line(&mut host, "[wifi] address");
+                        (l, (host.board.machine.micros() - t0) as f64 / 1e3)
+                    });
                     let parts = parts_of(&said);
                     println!(
                         "{label:8} {project:5} boot {boot}: frame on the pad {} | {}",
                         lit_us.map_or("none".to_string(), |us| format!("{:.1} ms", us / 1e3)),
                         said.split("[perf] ").nth(1).unwrap_or(&said)
                     );
+                    if let Some((l, ms)) = &address {
+                        println!("{label:8} {project:5} boot {boot}: by {ms:.1} ms: {l}");
+                    }
                     rows.push(serde_json::json!({
                         "image": label,
                         "project": project,
@@ -226,6 +269,8 @@ fn time_to_first_light_on_the_emulated_c6() {
                         "line": said,
                         "parts_ms": parts,
                         "pad_first_lit_start_ms": lit_us.map(|us| us / 1e3),
+                        "address": address.as_ref().map(|(l, _)| l.clone()),
+                        "address_by_ms": address.as_ref().map(|(_, ms)| *ms),
                     }));
                 }
             }
@@ -303,6 +348,18 @@ fn power_cycle(host: EmuLinkHost<C6Board>, nonce: u32) -> EmuLinkHost<C6Board> {
     let mut board = host.board;
     assert!(board.machine.power_cycle(Strap::App), "a power-on snapshot");
     EmuLinkHost::new(board, nonce, true)
+}
+
+/// A LAN of one access point, on the board's own clock.
+fn lan() -> SharedLan {
+    let mut lan = VirtualLan::new(LanConfig::new(CYCLES_PER_US));
+    lan.add_access_point(VirtualAccessPoint {
+        name: NET_SSID.to_string(),
+        password: Some(NET_PASSWORD.to_string()),
+        signal_dbm: -50,
+        hidden: false,
+    });
+    SharedLan::new(lan, LanDriver::SelfDriven)
 }
 
 /// The line's `name value` pairs after the colon, as a JSON object.

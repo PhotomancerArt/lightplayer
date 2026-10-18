@@ -55,6 +55,45 @@ pub fn choose(sectors: [Option<BootSlot>; 2], reset: ResetKind) -> Option<BootCh
     pick(newest, false)
 }
 
+/// The record a running core was booted by: [`choose`]'s pick, unless the
+/// loader could not load that pick's core and fell back to the other
+/// record's — which it does when the chosen core's bytes are gone.
+///
+/// The case this exists for: a trial dies warm and is rolled back; the
+/// rolled-back core's engine is then written back over the dead core's
+/// bytes (the heal); and on a **cold** boot `choose` picks that trial again
+/// (a power cut is not a failure until [`COLD_RETRY_CAP`]), the loader finds
+/// no image there and boots the other record's core. When that core is
+/// where `running` says, its record is proven, and the chosen one is an
+/// unconfirmed trial, this is a rollback in all but name: the trial's core
+/// cannot boot. The answer is the other record, `rolled_back`, so the core
+/// trusts its state, refuses the dead build and starts its engine — and the
+/// next update's record replaces the dead trial's.
+///
+/// Anything else (the chosen core runs, or a fallback that is not that
+/// case) is `choose`'s answer unchanged; a caller that sees the records
+/// disagree with `running` trusts nothing. It reads only what the loader
+/// reads and writes nothing: the records mean what they meant.
+pub fn booted_by(
+    sectors: [Option<BootSlot>; 2],
+    reset: ResetKind,
+    running: u32,
+) -> Option<BootChoice> {
+    let chosen = choose(sectors, reset)?;
+    if chosen.slot.record.core_off == running || chosen.slot.proven() {
+        return Some(chosen);
+    }
+    let other = 1 - chosen.sector;
+    match sectors[other] {
+        Some(slot) if slot.record.core_off == running && slot.proven() => Some(BootChoice {
+            sector: other,
+            slot,
+            rolled_back: true,
+        }),
+        _ => Some(chosen),
+    }
+}
+
 /// Whether `slot` is a trial that failed, given the reset before this boot.
 pub fn failed(slot: &BootSlot, reset: ResetKind) -> bool {
     let m = slot.marks;
@@ -301,6 +340,69 @@ mod tests {
             ..attempted()
         };
         assert!(!cold_retry_to_count(&s(true, confirmed), Cold));
+    }
+
+    // The defect of 2026-10-17: a trial that died warm, whose core the heal
+    // overwrote, picked again by a cold boot; the loader fell back to the
+    // proven record's core. That is the rollback.
+    #[test]
+    fn a_fallback_from_an_unconfirmed_trial_to_a_proven_core_is_a_rollback() {
+        let good = proven(2);
+        let good_off = good.unwrap().record.core_off;
+        for started in [false, true] {
+            let dead = trial(
+                3,
+                Marks {
+                    started,
+                    ..attempted()
+                },
+            );
+            for sectors in [[dead, good], [good, dead]] {
+                let c = booted_by(sectors, Cold, good_off).unwrap();
+                assert_eq!(Some(c.slot), good);
+                assert!(c.rolled_back);
+                assert_eq!(sectors[c.sector], good);
+            }
+        }
+        // Never attempted (its core never loaded either): the same.
+        let c = booted_by([good, trial(3, NONE)], Cold, good_off).unwrap();
+        assert_eq!((c.sector, c.rolled_back), (0, true));
+        // A warm boot already rolls back in `choose`.
+        let c = booted_by([trial(3, attempted()), good], Warm, good_off).unwrap();
+        assert_eq!((c.sector, c.rolled_back), (1, true));
+    }
+
+    #[test]
+    fn booted_by_is_choose_whenever_the_chosen_core_runs() {
+        for reset in [Cold, Warm] {
+            for sectors in [
+                [proven(1), trial(2, attempted())],
+                [proven(1), trial(2, NONE)],
+                [proven(1), proven(2)],
+                [None, trial(2, attempted())],
+            ] {
+                let c = choose(sectors, reset).unwrap();
+                assert_eq!(booted_by(sectors, reset, c.slot.record.core_off), Some(c));
+            }
+        }
+        assert_eq!(booted_by([None, None], Cold, 0x18000), None);
+    }
+
+    #[test]
+    fn any_other_fallback_is_left_for_the_caller_to_distrust() {
+        let pick = |sectors, running| booted_by(sectors, Cold, running).unwrap();
+        // The newest is proven: no rollback is invented over it.
+        let s = [proven(1), proven(2)];
+        assert_eq!(pick(s, 0x10000), choose(s, Cold).unwrap());
+        // The other record is an unconfirmed trial, not proven.
+        let s = [trial(1, attempted()), trial(2, NONE)];
+        assert_eq!(pick(s, 0x10000), choose(s, Cold).unwrap());
+        // The running core is neither record's.
+        let s = [proven(1), trial(2, attempted())];
+        assert_eq!(pick(s, 0x90000), choose(s, Cold).unwrap());
+        // No other record at all.
+        let s = [None, trial(2, attempted())];
+        assert_eq!(pick(s, 0x10000), choose(s, Cold).unwrap());
     }
 
     #[test]

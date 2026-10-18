@@ -700,7 +700,12 @@ async function main() {
   const snapshotExpr = () => `(() => {
     const hex = ${JSON.stringify(macHex(here?.mac))};
     const words = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
-    const lineOf = (el) => (el ? [...el.children].map(words).filter(Boolean).join(' ') : null);
+    // The row's line, one leaf at a time: since the card's row grammar (#1176)
+    // the name and its state are sibling spans in one flow, so joining
+    // textContent runs them together ("dev a0a0a0abacking up · 12%"), and no
+    // word boundary is left for CARD_LINES to match on.
+    const leaves = (el) => (el.children.length ? [...el.children].flatMap(leaves) : [words(el)]);
+    const lineOf = (el) => (el ? leaves(el).filter(Boolean).join(' ') : null);
     const pathOf = (card) => card.getAttribute('data-board-card') || '';
     const cornerOf = (card) => card.querySelector('[data-board-corner]')?.getAttribute('data-board-corner') ?? null;
     const live = (card) => cornerOf(card) !== 'quiet';

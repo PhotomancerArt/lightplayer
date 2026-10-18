@@ -3,7 +3,10 @@
 //!
 //! Reads the same two records the loader read and makes the same choice
 //! (`lp_bootctl::choose`, with the same reset classification), so the core
-//! and the loader agree by construction. The state is **trusted** — and
+//! and the loader agree by construction — and when the loader had to fall
+//! back from an unconfirmed trial whose core would not load to the proven
+//! core running here, the core reads it as the rollback it is
+//! (`lp_bootctl::booted_by`). The state is **trusted** — and
 //! anything is ever written — only when every read succeeded, the flashed
 //! table gave a layout, and the records agree with the MMU about where this
 //! core runs.
@@ -76,12 +79,16 @@ impl BootState {
                 reads_ok = false;
             }
         }
-        let choice = lp_bootctl::choose(sectors, reset);
+        let running = running_core_offset();
+        // The loader's choice — or, when it fell back from an unconfirmed
+        // trial whose core would not load to the proven core running here,
+        // that rollback (`booted_by`; defect 2026-10-17, a power cycle after
+        // a heal).
+        let choice = lp_bootctl::booted_by(sectors, reset, running);
         let failed_build = choice
             .filter(|c| c.rolled_back)
             .and_then(|c| sectors[1 - c.sector])
             .map(|s| s.record.build);
-        let running = running_core_offset();
         let (core_off, core_len) = match choice {
             Some(c) if c.slot.record.core_off == running => {
                 (c.slot.record.core_off, c.slot.record.core_len)

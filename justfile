@@ -573,6 +573,7 @@ claude-launch-json mode="":
         ;;
       *) echo "unknown mode: {{ mode }} (want empty | bench)" >&2; exit 2 ;;
     esac
+    lab_port="$(scripts/dev-port.sh --query lab-mapping)"
     mkdir -p .claude
     cat > .claude/launch.json <<EOF
     {
@@ -584,11 +585,27 @@ claude-launch-json mode="":
           "runtimeArgs": ["${recipe}"],
           "port": ${port},
           "autoPort": false
+        },
+        {
+          "name": "lab-mapping",
+          "runtimeExecutable": "just",
+          "runtimeArgs": ["lab-mapping"],
+          "port": ${lab_port},
+          "autoPort": false
         }
       ]
     }
     EOF
-    echo "wrote .claude/launch.json (${recipe} port ${port})"
+    echo "wrote .claude/launch.json (${recipe} port ${port}, lab-mapping port ${lab_port})"
+
+# The mapping design lab (lab/mapping/README.md): the editor canvas on its
+# own, no device and no Studio. Port from dev-port.sh like every dev server.
+lab-mapping: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="$(scripts/dev-port.sh lab-mapping)"
+    echo "Serving the mapping lab at http://127.0.0.1:${port}/"
+    dx serve --web -p lab-mapping-web --port "${port}" --addr 127.0.0.1 --open false
 
 # studio-dev on a reserved bench-block port, so the standing WebSerial
 # grant (`just serial-grant`) covers the origin and the chooser never
@@ -3660,7 +3677,7 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         out=target/ota-scenarios
         scripts/ota/build-image.sh "$out/x" a0a0a0a0
         scripts/ota/build-image.sh "$out/y" b1b1b1b1
-        scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
+        scripts/ota/build-image.sh "$out/y-dies" c1c1c1c1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
     fi
     # Through both front doors, as test-emu-c6-split-boot.

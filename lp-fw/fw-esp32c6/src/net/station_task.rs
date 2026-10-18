@@ -26,6 +26,16 @@
 //!   no attempt is under way, and records what was heard for the next ask.
 //!   It is the one scan a board with nothing saved ever makes, and only on
 //!   request; afterwards the radio goes back to ESP-NOW's channel.
+//! - **The boot's first join waits for first light** ([`FIRST_JOIN_CAP`]),
+//!   on a board that will join. A WPA2 join with a password derives the key
+//!   from it (PBKDF2-HMAC-SHA-1, 4,096 rounds, in software inside
+//!   esp-radio's Wi-Fi task, above every thread of ours): ~0.9 s in which
+//!   the main thread does not run. Started at boot, it fell on the project
+//!   load or the shader compile and held the first lit frame back ~900 ms
+//!   (CX2, 2026-10-17: 1,320 ms against 409 with no network; a 64-hex raw
+//!   key joins in ~130 ms and costs no light). Waiting moves the join ~0.1 s
+//!   later and leaves its one long frame just after the light. See
+//!   `docs/defects/2026-10-17-a-saved-network-held-the-c6s-first-light-back-900-ms.md`.
 //! - Every radio call is bounded (`EspStation`'s limits, which the seam's
 //!   station keeps), so an emulated board whose radio never finishes a scan
 //!   still answers. A scan that
@@ -59,10 +69,19 @@ const SIGNAL_EVERY: Duration = Duration::from_secs(10);
 /// is what tells the next desk sitting which half is stuck.
 const DHCP_RESTART_AFTER: Duration = Duration::from_secs(3);
 
+/// The latest the boot's first join waits for first light, from reset: a
+/// boot that never lights (an engine-less core) joins then.
+const FIRST_JOIN_CAP: Duration = Duration::from_millis(2_000);
+
 /// The task. `host` is the board's LAN name (`lp-xxxx.local`).
 #[embassy_executor::task]
 pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: String) {
     let mut policy = StationPolicy::new(host);
+    // The boot's settings are on the board before this thread starts
+    // (`station_probes::boot_settings`): only a board that will join waits.
+    if STATION_BOARD.uses_wifi() {
+        wait_for_first_light().await;
+    }
     let mut file = NetworkFile::none();
     let mut queue: VecDeque<StationAction> = VecDeque::new();
     // When the DHCP client is next restarted, while an address is awaited.
@@ -170,7 +189,14 @@ pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: S
                 queue.extend(policy.handle(now_ms(), StationEvent::LinkLost));
             }
             Either4::Fourth(Some(ip)) => {
-                log::info!("[wifi] address {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+                log::info!(
+                    "[wifi] address {}.{}.{}.{} at {} ms",
+                    ip[0],
+                    ip[1],
+                    ip[2],
+                    ip[3],
+                    now_ms()
+                );
                 super::net_address::publish(Some(ip));
                 queue.extend(policy.handle(now_ms(), StationEvent::AddressAcquired(ip)));
             }
@@ -246,6 +272,16 @@ fn dhcp_config() -> DhcpConfig {
     config.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(1);
     config.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(1);
     config
+}
+
+/// Until this boot's first light is decided (a frame lit, or none in its
+/// first frames: `first_light::decided`), or [`FIRST_JOIN_CAP`] from reset.
+async fn wait_for_first_light() {
+    let cap = Instant::from_ticks(0) + FIRST_JOIN_CAP;
+    while !crate::first_light::decided() && Instant::now() < cap {
+        Timer::after(Duration::from_millis(10)).await;
+    }
+    log::info!("[wifi] station starts at {} ms", now_ms());
 }
 
 /// Sleep until `at`, or forever with no deadline.

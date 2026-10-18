@@ -78,6 +78,9 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
             ("BluetoothReach".to_string(), format!("{reach:?}"))
         }
         StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
+        // A selection box or a drag sends one per move: the timeline keeps
+        // what they changed, not every one.
+        StudioCommand::Graph(note) => ("Graph".to_string(), format!("{note:?}")),
         StudioCommand::LibraryChanged => ("LibraryChanged".to_string(), String::new()),
         StudioCommand::BoardHold { from, note } => (
             format!("BoardHold/{}", variant_of(&bounded_debug(note))),

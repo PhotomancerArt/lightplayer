@@ -14,7 +14,8 @@
 //!
 //! - `x` — the packaged split image, app version `a0a0a0a0`;
 //! - `y` — the same tree at `b1b1b1b1`;
-//! - `y-dies` — `y` with `fixture-trial-dies`;
+//! - `y-dies` — `y` with `fixture-trial-dies`, at `c1c1c1c1`: a build id of its
+//!   own, so refusing it never refuses `y` (U19 heals `y` after it);
 //! - `x-untrusted` — `x` with `fixture-usb-untrusted`.
 //!
 //! A **power cut** after request N is the flash as it stood when the host had
@@ -719,6 +720,93 @@ fn u12_a_build_that_dies_on_trial_rolls_back_and_is_refused() {
             "Y-dies rolled back to X (engine-less), M.refusedBuild = {failed:#010x}; the next \
              host healed X from the read-back; the next offer of Y-dies N/F"
         ),
+    );
+}
+
+// --- U19: a power cycle after a failed trial and its heal ----------------------------------
+
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// X → Y puts Y's core high and its engine low; Y → Y-dies puts the dying
+/// core low, over Y's engine; the rollback to Y and the heal put Y's engine
+/// back low — over the dead core the newer record still names. Every power
+/// cycle after that must boot Y with its engine running.
+#[test]
+#[ignore = "needs the OTA images; `just test-emu-c6-ota`"]
+fn u19_power_cycles_after_a_failed_trial_and_its_heal_run_the_engine() {
+    let (Some(x), Some(y), Some(yd)) = (image("x"), image("y"), image("y-dies")) else {
+        return;
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let with_cache = |img: &Image| {
+        offer(img, |a| {
+            a.ota_no_z = true;
+            a.ota_cache = Some(cache.path().to_path_buf());
+        })
+    };
+    let mut host = hosted(x.merged(), Some(with_cache(&y)));
+    assert_eq!(
+        run_to_done(&mut host, None),
+        Finish::UpToDate,
+        "{}",
+        tail(&host)
+    );
+    expect_last_core(&host, &y, true);
+
+    let failed = lp_bootctl::build_hash(yd.build_id.as_bytes());
+    let refused = Finish::Stopped(StopReason::Decision(lpa_update::Decision::RefusedBuild {
+        build: failed,
+    }));
+    host.ota = OtaHost::from_args(&with_cache(&yd)).unwrap();
+    let now_ms = host.now_us() / 1_000;
+    host.ota.as_mut().unwrap().link_up(now_ms);
+    assert_eq!(run_to_done(&mut host, None), refused, "{}", tail(&host));
+    assert!(console_has(&host, "fixture-trial-dies"));
+
+    // The heal: Y offered again, its engine from the read-back.
+    host.ota = OtaHost::from_args(&with_cache(&y)).unwrap();
+    let now_ms = host.now_us() / 1_000;
+    host.ota.as_mut().unwrap().link_up(now_ms);
+    let finish = run_to_done(&mut host, None);
+    let last = host.ota.as_ref().unwrap().manifests.last().unwrap().clone();
+    assert_eq!(
+        (last.state, &last.build_id),
+        (BoardState::Running, &y.build_id),
+        "Y healed and runs ({finish:?}):\n{}",
+        tail(&host)
+    );
+    assert_eq!(last.refused_build, Some(failed));
+
+    // Power cycles: a fresh machine over the flash each time.
+    let mut chip = flash_of(&host);
+    for cycle in 1..=2 {
+        let mut host = hosted(chip, None);
+        let line = wait_line(&mut host, "[CORE] core @");
+        assert!(
+            line.is_some(),
+            "cycle {cycle}: no core line\n{}",
+            tail(&host)
+        );
+        host.run_until(host.board.machine.micros() + 3_000_000, None)
+            .expect("the run");
+        assert!(
+            !console_has(&host, "boot state not trusted"),
+            "cycle {cycle}: the core did not trust its boot state\n{}",
+            tail(&host)
+        );
+        expect_last_core(&host, &y, true);
+        let hello =
+            hello_firmware_of(&mut host, &y.build_id).expect("a hello after the power cycle");
+        assert_eq!(
+            (hello.state, hello.refused_build),
+            (BoardState::Running, Some(failed)),
+            "cycle {cycle}: Y runs and still refuses the dead build"
+        );
+        chip = flash_of(&host);
+    }
+    report(
+        "U19",
+        "X->Y, Y->Y-dies rolled back, Y healed; two power cycles: Y runs its engine, \
+         Y-dies still refused",
     );
 }
 
