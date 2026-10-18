@@ -410,6 +410,9 @@ impl GraphController {
         {
             let mut editor = self.handle.editor().borrow_mut();
             let mut e = Editor::new(lab).with_view_of(&editor);
+            // The board (or the preview host) runs the project: its
+            // shaders' pictures are their own.
+            e.runs_for_real = true;
             e.selection = editor
                 .selection
                 .iter()

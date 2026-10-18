@@ -74,7 +74,7 @@ impl Editor {
             out.push(section(&format!("{} selected", selection.len()), items));
         }
         if let [t] = selection.as_slice()
-            && let Some(facts) = node_facts(p, t)
+            && let Some(facts) = node_facts(p, t, self.runs_for_real)
         {
             out.extend(facts);
         }
@@ -237,7 +237,9 @@ fn lamp_fact(p: &Project, t: &Target, object: &crate::ObjectId, index: u32) -> O
 
 /// What the inspector says about one node, port or pixel, beyond its
 /// properties.
-fn node_facts(p: &Project, t: &Target) -> Option<Vec<UiSection>> {
+/// `runs_for_real`: the project runs on a board or Studio's preview host,
+/// so a shader shows its own picture, not a stand-in.
+fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSection>> {
     let patch = p.effective_patch();
     let mut ports: Vec<UiItem> = Vec::new();
     let mut rules: Vec<UiItem> = Vec::new();
@@ -338,10 +340,12 @@ fn node_facts(p: &Project, t: &Target) -> Option<Vec<UiSection>> {
                         format!(", read by {}", feeds.join(", "))
                     }
                 )));
-                facts.push(fact(format!(
-                    "The lab doesn't run GLSL: it shows a stand-in, the {} pattern",
-                    src.pattern.words()
-                )));
+                if !runs_for_real {
+                    facts.push(fact(format!(
+                        "The lab doesn't run GLSL: it shows a stand-in, the {} pattern",
+                        src.pattern.words()
+                    )));
+                }
                 if let Some(code) = &src.glsl {
                     facts.push(UiItem::Code(code.clone()));
                 }

@@ -194,6 +194,10 @@ pub struct Editor {
     /// (the dome). M toggles it.
     pub move_draw: bool,
     pub debug: DebugFlags,
+    /// The project runs for real (Studio's Graph: a board, or Studio's
+    /// preview host): a shader's picture is its own, not the lab's
+    /// stand-in, so nothing says it is one.
+    pub runs_for_real: bool,
     /// The layout you chose; `None` until you choose one, and the screen's
     /// size class picks.
     layout_choice: Option<LayoutKind>,
@@ -233,6 +237,7 @@ impl Editor {
             path_draft: Vec::new(),
             move_draw: true,
             debug: DebugFlags::default(),
+            runs_for_real: false,
             layout_choice: None,
             screen_class: SizeClass::default(),
             edge_hover: None,

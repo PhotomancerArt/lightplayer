@@ -24,15 +24,21 @@ pub const PIXEL_BOTTOM: f64 = 1.4;
 
 /// A node's size as core declares it: a fixture's is its box; a card's is
 /// a header and one row per port (any other card has one row, saying what
-/// it is); a module's is nothing, since it wraps its children.
+/// it is, and a render source's its picture under it); a module's is
+/// nothing, since it wraps its children.
 pub fn node_size(n: &Node) -> Vec2 {
     match &n.kind {
         NodeKind::Fixture(f) => f.size,
         NodeKind::Module { .. } => Vec2::default(),
         NodeKind::Output(o) => card_size(o.ports.len()),
-        NodeKind::Source(_) | NodeKind::Other(_) => card_size(1),
+        // A render source's card shows its picture under its row.
+        NodeKind::Source(_) => card_size(1) + Vec2::new(0.0, SOURCE_PICTURE),
+        NodeKind::Other(_) => card_size(1),
     }
 }
+
+/// How tall a render source's picture is on its card, under its row.
+pub const SOURCE_PICTURE: f64 = 30.0;
 
 /// A card with `rows` rows.
 pub fn card_size(rows: usize) -> Vec2 {
