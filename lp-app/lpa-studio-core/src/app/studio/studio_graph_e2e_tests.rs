@@ -296,6 +296,59 @@ fn leaving_the_graph_stops_the_highlight() {
     assert!(!graph.handle.editor().borrow().selection.is_empty());
 }
 
+/// Over a device link the Graph asks for a shader's picture only when the
+/// selection does (plan D11): nothing selected, no picture; the shader
+/// selected, its live picture; a path in the fixture it feeds selected,
+/// the same picture, which the fixture's face draws behind its lamps.
+#[test]
+fn a_shaders_picture_follows_the_selection_over_a_device_link() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let shader = NodeId::new("shader");
+    let picture = |graph: &mut Graph| {
+        let view = graph.refresh();
+        view.graph
+            .expect("the Graph's slice")
+            .frame
+            .0
+            .picture(&shader)
+            .map(|p| (p.width, p.height, p.rgb.iter().any(|b| *b != 0)))
+    };
+    assert_eq!(
+        picture(&mut graph),
+        None,
+        "nothing selected, nothing asked for"
+    );
+
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Node(shader.clone())]));
+    graph.batch();
+    let (w, h, lit) = picture(&mut graph).expect("the selected shader's picture");
+    assert!(w > 0 && h > 0 && lit, "{w}×{h}, lit: {lit}");
+
+    let first = graph.first_component();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Component(first)]));
+    graph.batch();
+    assert!(
+        picture(&mut graph).is_some(),
+        "a path's fixture samples the shader"
+    );
+    let e = graph.handle.editor().borrow();
+    let face = e
+        .view_nodes()
+        .into_iter()
+        .find(|n| n.id == NodeId::new("fixture"))
+        .and_then(|n| n.face);
+    let Some(UiNodeFace::Fixture(face)) = face else {
+        panic!("the fixture's face");
+    };
+    assert_eq!(face.samples, Some(shader));
+    assert_eq!(face.render_size, Some((104, 28)));
+}
+
 /// A studio actor on a running catalog project, and the Graph's handle.
 struct Graph {
     actor: StudioActor<fn(core::time::Duration) -> core::future::Ready<()>>,

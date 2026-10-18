@@ -41,9 +41,14 @@ use crate::domain::fixture_overrides::FixtureOverrides;
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
 use crate::domain::output_overrides::OutputOverrides;
+use crate::domain::picture::Picture;
 use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
 use crate::domain::target::Target;
+
+/// How many pixels each way the lab's simulated board draws a render
+/// source's stand-in.
+pub const SIMULATED_PICTURE: u32 = 32;
 
 /// One frame of the board: every fixture's control product and every
 /// port's pixels.
@@ -62,6 +67,10 @@ pub struct BoardFrame {
     /// Which pixel each lamp lands on, shared by every frame made from one
     /// project (`derived.rs`).
     wiring: Arc<Wiring>,
+    /// Each render source's picture, when there is one: the board's (or the
+    /// preview host's) frame of its render product, or the lab's stand-in
+    /// drawn (plan D11).
+    pictures: HashMap<NodeId, Picture>,
 }
 
 impl PartialEq for BoardFrame {
@@ -71,6 +80,7 @@ impl PartialEq for BoardFrame {
             && self.lamps == other.lamps
             && self.fixtures == other.fixtures
             && (Arc::ptr_eq(&self.wiring, &other.wiring) || self.wiring == other.wiring)
+            && self.pictures == other.pictures
     }
 }
 
@@ -127,6 +137,17 @@ impl BoardFrame {
     ) -> impl Iterator<Item = Option<Rgb>> + 'a {
         let first = self.wiring.first_lamp.get(object).copied();
         (0..lamps).map(move |i| *self.lamps.get(first? + i)?)
+    }
+
+    /// A render source's picture in this frame, when there is one.
+    pub fn picture(&self, source: &NodeId) -> Option<&Picture> {
+        self.pictures.get(source)
+    }
+
+    /// The frame with `picture` as `source`'s.
+    pub fn with_picture(mut self, source: NodeId, picture: Picture) -> Self {
+        self.pictures.insert(source, picture);
+        self
     }
 
     /// Whether a lamp is patched to a pixel that exists: whether anything
@@ -221,6 +242,7 @@ impl Project {
             lamps,
             fixtures,
             wiring,
+            pictures: HashMap::new(),
         }
     }
 
@@ -252,12 +274,25 @@ impl Project {
         for n in self.fixtures() {
             board.control_product(&n.id);
         }
+        // Every render source's stand-in, drawn.
+        let pictures = self
+            .all_nodes()
+            .iter()
+            .filter_map(|n| {
+                let pattern = n.source()?.pattern;
+                let picture = Picture::sampled(SIMULATED_PICTURE, SIMULATED_PICTURE, |uv| {
+                    pattern.sample(uv, time)
+                });
+                Some((n.id.clone(), picture))
+            })
+            .collect();
         BoardFrame {
             ports,
             inputs,
             lamps: board.lamps,
             fixtures: board.done,
             wiring: board.wiring,
+            pictures,
         }
     }
 }

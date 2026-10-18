@@ -7,7 +7,6 @@ use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
 use crate::domain::pattern::Pattern;
-use crate::domain::rgb::Rgb;
 use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::ui::Emphasis;
 
@@ -34,9 +33,14 @@ pub struct UiFixtureFace {
     /// The order the wire runs through its objects (`data_path.rs`); empty
     /// in the live view.
     pub wires: Vec<UiWire>,
-    /// The picture its lamps sample, as a coarse grid of cells, drawn
-    /// faintly behind them; empty in the live view.
-    pub picture: Vec<(Rect, Rgb)>,
+    /// The render source whose picture its lamps sample, drawn faintly
+    /// behind them where the product's fit puts it (`picture_rect`, the
+    /// frame's [`BoardFrame::picture`](crate::BoardFrame::picture));
+    /// `None` in the live view, or when nothing writes the channel it reads.
+    pub samples: Option<NodeId>,
+    /// The shape the picture is fitted into: the fixture's render size,
+    /// else the picture's own.
+    pub render_size: Option<(u32, u32)>,
     /// Why nothing is drawn in it: what it holds that the lab can't show
     /// yet, in a sentence.
     pub not_shown: Option<String>,
@@ -133,6 +137,8 @@ pub struct UiRun {
 /// A shader or other render source: what it is and where it writes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiSourceFace {
+    /// The node, to find its picture in the frame by.
+    pub source: NodeId,
     /// `shader`.
     pub kind: String,
     /// The channel it writes: `visual.out`.

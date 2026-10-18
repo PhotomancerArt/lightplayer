@@ -84,6 +84,11 @@ pub struct ProjectController {
     /// request (lean-wire P5, ruling B). Cleared by the first explicit focus
     /// (`focus_editor_target`).
     focus_is_automatic: bool,
+    /// The visual products the Graph shows while it is the place (plan
+    /// D11): every render source's on a simulator lens, the selection's on
+    /// a device lens (`GraphController::wanted_pictures`). Probed beside
+    /// what the tree subscribes; empty off the Graph.
+    graph_pictures: BTreeSet<UiProductRef>,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -455,6 +460,7 @@ impl ProjectController {
             lens_device_features: None,
             lens_transport: None,
             focus_is_automatic: false,
+            graph_pictures: BTreeSet::new(),
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -5984,6 +5990,7 @@ impl ProjectController {
         // per pull, so over a device wire it follows focus like every other
         // node product (see `always_live_products`).
         product_refs.extend(self.always_live_products());
+        product_refs.extend(self.graph_pictures.iter().copied());
         product_refs.into_iter().collect()
     }
 
@@ -9328,6 +9335,52 @@ impl ProjectController {
         node: NodeId,
     ) -> Option<&crate::UiControlProductPreview> {
         self.sync.as_ref()?.output_frame(node)
+    }
+
+    /// Ask for the visual products the Graph shows (plan D11), in place of
+    /// what it asked for before.
+    pub(crate) fn set_graph_pictures(&mut self, products: BTreeSet<UiProductRef>) {
+        self.graph_pictures = products;
+    }
+
+    /// Whether the lens runs over a device wire, where the Graph asks for
+    /// a picture only for what is selected (plan D11).
+    pub(crate) fn graph_lens_is_device(&self) -> bool {
+        self.lens_is_device()
+    }
+
+    /// The visual products a node publishes (a shader's picture).
+    pub(crate) fn graph_visual_products(&self, node: NodeId) -> Vec<UiProductRef> {
+        let Some(n) = self.node_by_runtime_id(node) else {
+            return Vec::new();
+        };
+        let mut products = Vec::new();
+        n.collect_produced_product_refs(&mut products);
+        products.retain(|p| matches!(p, UiProductRef::Visual { .. }));
+        products
+    }
+
+    /// The latest picture of a visual product, when the lens has one:
+    /// width, height and its `Srgb8` bytes.
+    pub(crate) fn graph_picture(&self, product: &UiProductRef) -> Option<(u32, u32, Rc<[u8]>)> {
+        match self.sync.as_ref()?.product_preview(product)? {
+            crate::UiProductPreview::VisualSrgb8 {
+                width,
+                height,
+                bytes,
+                ..
+            } => Some((*width, *height, bytes.clone())),
+            _ => None,
+        }
+    }
+
+    /// The revision of a visual product's latest picture, to know when the
+    /// Graph's frame is stale.
+    pub(crate) fn graph_picture_revision(&self, product: &UiProductRef) -> Option<i64> {
+        match self.sync.as_ref()?.product_preview(product)? {
+            crate::UiProductPreview::VisualSrgb8 { revision, .. } => Some(*revision),
+            _ => None,
+        }
     }
 
     /// How many engine frames the lens has seen, `None` with no project.
@@ -14345,7 +14398,7 @@ mod tests {
         assert_eq!(products[0].tracking, UiProductTrackingState::Paused);
         assert_eq!(
             products[0].preview,
-            UiProductPreview::VisualSrgb8 {
+            crate::UiProductPreview::VisualSrgb8 {
                 width: 1,
                 height: 2,
                 revision: 8,

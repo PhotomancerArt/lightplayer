@@ -38,6 +38,9 @@ pub struct Fixture {
     /// nothing can be drawn into it or resized, and its files are never
     /// written. The rest of the project opens round it (plan M4).
     pub unsupported: Option<Unsupported>,
+    /// The product's `render_size`, when it has one: the shape of the
+    /// picture it samples, which its box is fitted into (`picture_rect`).
+    pub render_size: Option<(u32, u32)>,
 }
 
 /// Why a fixture opens as its box alone, and where it can be edited.
@@ -70,6 +73,7 @@ impl Fixture {
             color_order: ColorOrder::default(),
             reads: Channel::visual_out(),
             unsupported: None,
+            render_size: None,
         }
     }
 

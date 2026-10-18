@@ -25,6 +25,7 @@ mod lamp_cells;
 mod node_card;
 mod overlay;
 mod panels;
+mod picture_canvas;
 mod text_measure;
 mod view;
 mod world_layer;
