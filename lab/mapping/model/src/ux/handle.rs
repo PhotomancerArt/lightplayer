@@ -193,13 +193,75 @@ impl Project {
     /// to the next), at `at` in world units. The path keeps its lamps.
     pub fn insert_path_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) -> bool {
         let frame = self.component_frame(path);
-        match self.component_mut(path).and_then(|c| c.kind.points_mut()) {
+        let inserted = match self.component_mut(path).and_then(|c| c.kind.points_mut()) {
             Some(points) if segment + 1 < points.len() => {
                 points.insert(segment + 1, frame.to_local(at));
                 true
             }
             _ => false,
+        };
+        // A jumper split in two is two jumpers; the segments after it move
+        // up one.
+        if inserted && let Some(gaps) = self.path_gaps_mut(path) {
+            let s = segment as u32;
+            let was = gaps.contains(&s);
+            for g in gaps.iter_mut().filter(|g| **g > s) {
+                *g += 1;
+            }
+            if was {
+                gaps.push(s + 1);
+                gaps.sort_unstable();
+            }
         }
+        inserted
+    }
+
+    /// Make a path's segment `segment` a jumper (wire, no lamps) or lit
+    /// again. Returns whether it is a jumper now; `None` when it isn't a
+    /// path's segment. A path keeps at least one lit segment.
+    pub fn toggle_path_jumper(&mut self, path: &ComponentId, segment: usize) -> Option<bool> {
+        let segments = self.path_points(path)?.len().saturating_sub(1);
+        if segment >= segments {
+            return None;
+        }
+        let gaps = self.path_gaps_mut(path)?;
+        let s = segment as u32;
+        if let Some(i) = gaps.iter().position(|g| *g == s) {
+            gaps.remove(i);
+            return Some(false);
+        }
+        if gaps.len() + 1 >= segments {
+            return None;
+        }
+        gaps.push(s);
+        gaps.sort_unstable();
+        Some(true)
+    }
+
+    /// A path's jumpers (by segment), when it is a path: its own, or the
+    /// path a repeat copies.
+    pub fn path_jumpers(&self, path: &ComponentId) -> &[u32] {
+        fn of(kind: &ComponentKind) -> Option<&Vec<u32>> {
+            match kind {
+                ComponentKind::Path { gaps, .. } => Some(gaps),
+                ComponentKind::Repeat { shape, .. } => of(shape),
+                _ => None,
+            }
+        }
+        self.component(path)
+            .and_then(|c| of(&c.kind))
+            .map_or(&[], |g| g.as_slice())
+    }
+
+    fn path_gaps_mut(&mut self, path: &ComponentId) -> Option<&mut Vec<u32>> {
+        fn of(kind: &mut ComponentKind) -> Option<&mut Vec<u32>> {
+            match kind {
+                ComponentKind::Path { gaps, .. } => Some(gaps),
+                ComponentKind::Repeat { shape, .. } => of(shape),
+                _ => None,
+            }
+        }
+        self.component_mut(path).and_then(|c| of(&mut c.kind))
     }
 
     /// Take one point away from a path (or a polygon). Refused (false)
@@ -209,13 +271,29 @@ impl Project {
             return false;
         };
         let min = kind.min_points();
-        match kind.points_mut() {
+        let removed = match kind.points_mut() {
             Some(points) if points.len() > min && index < points.len() => {
                 points.remove(index);
                 true
             }
             _ => false,
+        };
+        // The two segments either side of the point become one: a jumper
+        // when both were, lit otherwise (an end point takes its one segment
+        // with it); the segments after it move down one.
+        if removed && let Some(gaps) = self.path_gaps_mut(path) {
+            let i = index as u32;
+            let merged_jumper = i > 0 && gaps.contains(&(i - 1)) && gaps.contains(&i);
+            gaps.retain(|g| *g != i && !(i > 0 && *g == i - 1));
+            for g in gaps.iter_mut().filter(|g| **g > i) {
+                *g -= 1;
+            }
+            if merged_jumper {
+                gaps.push(i - 1);
+            }
+            gaps.sort_unstable();
         }
+        removed
     }
 
     /// The segment of a path nearest `p` (screen), within its area, and the

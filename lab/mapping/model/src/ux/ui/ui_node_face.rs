@@ -71,6 +71,9 @@ pub struct UiObject {
     /// Which way its data runs, for a small arrow: a point on it and a
     /// direction.
     pub arrow: Option<(Vec2, Vec2)>,
+    /// A path's jumpers, by segment of its line: wire with no lamps,
+    /// drawn dashed.
+    pub jumpers: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

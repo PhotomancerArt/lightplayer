@@ -1564,6 +1564,111 @@ fn every_offered_key_does_something() {
     }
 }
 
+// ---- corner jumpers (plan M5) ---------------------------------------------------
+
+/// An editor with an eave in its first fixture: a path of 20 lamps
+/// turning one corner on a short segment, three segments in all.
+fn eave() -> (Editor, ComponentId) {
+    let mut p = Project::seed();
+    let fixture = p.fixtures()[0].id.clone();
+    let c = p.mint(ComponentKind::path(
+        vec![
+            Vec2::new(5.0, 40.0),
+            Vec2::new(5.0, 10.0),
+            Vec2::new(7.0, 8.0),
+            Vec2::new(40.0, 8.0),
+        ],
+        20,
+    ));
+    let id = c.id.clone();
+    p.fixture_mut(&fixture).unwrap().components.push(c);
+    (editor_of(p), id)
+}
+
+/// A segment made a jumper carries no lamps: the path keeps its count, and
+/// every lamp lands on its lit segments. Lit again, they spread back.
+#[test]
+fn a_jumper_carries_no_lamps_and_keeps_the_count() {
+    let (mut e, path) = eave();
+    let before: Vec<Vec2> = e
+        .project
+        .objects_of(&path)
+        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+        .collect();
+    e.toggle_jumper(&path, 0);
+    assert_eq!(e.project.path_jumpers(&path), &[0]);
+    let points = e.project.path_points(&path).unwrap().to_vec();
+    let after: Vec<Vec2> = e
+        .project
+        .objects_of(&path)
+        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+        .collect();
+    assert_eq!(after.len(), before.len(), "the count stays");
+    // The first lamp sits where the first lit segment starts, not on the
+    // jumper's start.
+    let frame = e.project.component_frame(&path);
+    let start = frame.to_world(points[1]);
+    assert!(
+        after[0].distance(start) < 1e-3,
+        "{:?} vs {start:?}",
+        after[0]
+    );
+    assert_ne!(after, before);
+    e.toggle_jumper(&path, 0);
+    assert!(e.project.path_jumpers(&path).is_empty());
+}
+
+/// A path keeps at least one lit segment.
+#[test]
+fn a_path_keeps_one_lit_segment() {
+    let (mut e, path) = eave();
+    let segments = e.project.path_points(&path).unwrap().len() - 1;
+    for s in 0..segments {
+        e.toggle_jumper(&path, s);
+    }
+    assert_eq!(e.project.path_jumpers(&path).len(), segments - 1);
+}
+
+/// Adding a point keeps a jumper where it was: a point added before it
+/// moves it along one, and one added inside it makes it two.
+#[test]
+fn adding_a_point_keeps_the_jumpers_in_place() {
+    let (mut e, path) = eave();
+    e.toggle_jumper(&path, 1);
+    let points = e.project.path_points(&path).unwrap().to_vec();
+    let frame = e.project.component_frame(&path);
+    let mid0 = frame.to_world(points[0].lerp(points[1], 0.5));
+    assert!(e.project.insert_path_point(&path, 0, mid0));
+    assert_eq!(e.project.path_jumpers(&path), &[2]);
+    let points = e.project.path_points(&path).unwrap().to_vec();
+    let mid2 = frame.to_world(points[2].lerp(points[3], 0.5));
+    assert!(e.project.insert_path_point(&path, 2, mid2));
+    assert_eq!(e.project.path_jumpers(&path), &[2, 3]);
+}
+
+/// A fixture's colour order is one of the product's six, picked in the
+/// inspector: what a WS2811 string needs is found by picking and looking.
+#[test]
+fn a_fixtures_colour_order_is_picked_from_six() {
+    let mut e = editor();
+    let fixture = e.project.fixtures()[0].id.clone();
+    e.selection = vec![Target::Node(fixture.clone())];
+    let props = e.project.props_of(&Target::Node(fixture.clone()));
+    let (desc, _) = props
+        .iter()
+        .find(|(d, _)| d.id == "colour-order")
+        .expect("a colour order");
+    assert!(matches!(desc.kind, PropKind::Choice { options } if options.len() == 6));
+    e.input(GraphInput::EditProp {
+        id: "colour-order",
+        edit: PropEdit::SetChoice(4),
+    });
+    assert_eq!(
+        e.project.fixture(&fixture).unwrap().color_order,
+        ColorOrder::Brg
+    );
+}
+
 // ---- verbs by name -------------------------------------------------------------
 
 /// Every verb the hint bar names is on offer by name, and pressing one

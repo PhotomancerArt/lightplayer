@@ -84,7 +84,13 @@ impl Editor {
                 } else {
                     Emphasis::Full
                 };
-                ui_object(o, emphasis, frame)
+                let mut ui = ui_object(o, emphasis, frame);
+                ui.jumpers = p
+                    .path_jumpers(&o.id.component)
+                    .iter()
+                    .map(|g| *g as usize)
+                    .collect();
+                ui
             })
             .collect();
         let not_shown = p.fixture(id).and_then(|f| f.unsupported.as_ref()).map(|u| {
@@ -221,6 +227,7 @@ pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, frame: Frame) -> UiObjec
         shape,
         emphasis,
         first_lamp: lamps.first().copied(),
+        jumpers: Vec::new(),
     }
 }
 

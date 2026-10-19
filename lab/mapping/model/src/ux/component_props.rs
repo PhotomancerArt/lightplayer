@@ -6,6 +6,7 @@
 //! direction are edited with the ring selected, but they are stored on the
 //! circle.
 
+use crate::domain::color_order::ColorOrder;
 use crate::domain::component::{ComponentKind, Ring};
 use crate::domain::fixture::Fixture;
 use crate::domain::grid::Routing;
@@ -80,6 +81,18 @@ pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     reshapes: false,
 };
 
+/// Which byte of each pixel is red, green and blue: the product's six
+/// orders, in `ColorOrder::ALL`'s order. Most WS2811 strings are RGB or
+/// BRG; the way to find one's is to pick and look at the house.
+pub const COLOUR_ORDER: PropDesc = PropDesc {
+    id: "colour-order",
+    label: "Colour order",
+    kind: PropKind::Choice {
+        options: &["RGB", "GRB", "RBG", "GBR", "BRG", "BGR"],
+    },
+    nudge: false,
+    reshapes: false,
+};
 pub const COLUMNS: PropDesc = PropDesc {
     id: "columns",
     label: "Columns",
@@ -143,6 +156,15 @@ impl Project {
                 Some(f) if f.unsupported.is_none() => vec![
                     (WIDTH, PropRaw::Number(f.size.x)),
                     (HEIGHT, PropRaw::Number(f.size.y)),
+                    (
+                        COLOUR_ORDER,
+                        PropRaw::Choice(
+                            ColorOrder::ALL
+                                .iter()
+                                .position(|o| *o == f.color_order)
+                                .unwrap_or(0),
+                        ),
+                    ),
                 ],
                 _ => Vec::new(),
             },
@@ -235,6 +257,9 @@ impl Project {
                 match (prop_id, new) {
                     ("width", PropRaw::Number(v)) => f.size.x = v,
                     ("height", PropRaw::Number(v)) => f.size.y = v,
+                    ("colour-order", PropRaw::Choice(i)) => {
+                        f.color_order = ColorOrder::ALL.get(i).copied().unwrap_or_default()
+                    }
                     _ => return false,
                 }
             }

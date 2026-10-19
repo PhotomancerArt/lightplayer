@@ -184,6 +184,7 @@ impl Editor {
         out.push(h("drag on empty space", "box-select"));
         if self.move_draw && !self.shaped_paths(sel).is_empty() {
             out.push(h("double-click", "add point"));
+            out.push(h("J", "jumper"));
         }
         out.push(h("right-click", "what's here"));
 

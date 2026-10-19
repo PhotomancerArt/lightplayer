@@ -1,7 +1,8 @@
 //! Properties, as data. The inspector is drawn from these and nothing else.
 //!
 //! A component *describes* the properties of each thing it makes — an id, a
-//! label, a kind (count, number, flag) — and reads and writes their values.
+//! label, a kind (count, number, flag, choice) — and reads and writes their
+//! values.
 //! The inspector knows nothing about paths or circles: it lays out whatever
 //! descriptors it is handed. A new component kind adds descriptors, never
 //! inspector code.
@@ -38,6 +39,9 @@ pub enum PropKind {
     Number { min: f64, step: f64 },
     /// On or off.
     Flag,
+    /// One of a few named options, in this order (a fixture's colour
+    /// order).
+    Choice { options: &'static [&'static str] },
 }
 
 /// One target's value for one property.
@@ -46,6 +50,8 @@ pub enum PropRaw {
     Count(i64),
     Number(f64),
     Flag(bool),
+    /// The option's index.
+    Choice(usize),
 }
 
 /// An edit, applied to every selected thing that has the property.
@@ -56,6 +62,7 @@ pub enum PropEdit {
     SetCount(i64),
     SetNumber(f64),
     SetFlag(bool),
+    SetChoice(usize),
 }
 
 /// A property's value across the whole selection.
@@ -75,6 +82,12 @@ pub enum PropValue {
         on: usize,
         off: usize,
     },
+    /// The option the first thing has, and whether the rest agree.
+    Choice {
+        index: usize,
+        word: &'static str,
+        mixed: bool,
+    },
 }
 
 impl PropValue {
@@ -83,6 +96,7 @@ impl PropValue {
             PropValue::Count { min, max } => min != max,
             PropValue::Number { min, max } => (max - min).abs() > 1e-9,
             PropValue::Flag { on, off } => *on > 0 && *off > 0,
+            PropValue::Choice { mixed, .. } => *mixed,
         }
     }
 
@@ -98,6 +112,8 @@ impl PropValue {
                 (0, _) => "no".into(),
                 _ => "mixed".into(),
             },
+            PropValue::Choice { mixed: true, .. } => "mixed".into(),
+            PropValue::Choice { word, .. } => (*word).into(),
         }
     }
 }
@@ -137,15 +153,23 @@ pub fn common_props(fixture: &Project, selection: &[Target]) -> Vec<Prop> {
         }
         out.push(Prop {
             desc,
-            value: combine(&raws),
+            value: combine(&desc, &raws),
             applies_to: raws.len(),
         });
     }
     out
 }
 
-fn combine(raws: &[PropRaw]) -> PropValue {
+fn combine(desc: &PropDesc, raws: &[PropRaw]) -> PropValue {
     match raws[0] {
+        PropRaw::Choice(index) => PropValue::Choice {
+            index,
+            word: match desc.kind {
+                PropKind::Choice { options } => options.get(index).copied().unwrap_or("?"),
+                _ => "?",
+            },
+            mixed: raws.iter().any(|r| *r != PropRaw::Choice(index)),
+        },
         PropRaw::Count(_) => {
             let (min, max) = raws.iter().fold((i64::MAX, i64::MIN), |(a, b), r| match r {
                 PropRaw::Count(n) => (a.min(*n), b.max(*n)),
@@ -189,6 +213,11 @@ pub fn edited(desc: &PropDesc, current: PropRaw, edit: PropEdit) -> PropRaw {
             PropRaw::Number(v.max(min))
         }
         (PropKind::Flag, PropRaw::Flag(_), PropEdit::SetFlag(v)) => PropRaw::Flag(v),
+        (PropKind::Choice { options }, PropRaw::Choice(_), PropEdit::SetChoice(i))
+            if i < options.len() =>
+        {
+            PropRaw::Choice(i)
+        }
         _ => current,
     }
 }
