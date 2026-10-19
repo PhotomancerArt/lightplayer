@@ -4,8 +4,10 @@
 //!
 //! The busiest part of today's card — the face's verdict, the update
 //! story's line and bar, the layout question, Flash, Update, Reinstall,
-//! Other version…, From a file…, Finish update, Download backup and Factory
-//! reset — as one row.
+//! Other version…, From a file…, Finish update and Download backup — as one
+//! row. Factory reset is the Hardware row's: it erases the board, not only
+//! its firmware (Yona, 2026-10-19: "I expect to find factory reset in the
+//! hardware section").
 //!
 //! First match wins:
 //!
@@ -45,7 +47,7 @@ use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 
 use super::bar_work::{bar_work, board_pick, running_work, update_work};
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{danger, facts, notice, verbs, without_empty};
+use super::detail_sections::{facts, notice, verbs, without_empty};
 use super::project_bar::data_lost;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
@@ -260,8 +262,16 @@ pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
             UiStatusKind::Neutral,
         ),
     };
-    let mut said = facts("Firmware", Vec::new());
-    said.sentence = Some(pending_firmware_line(face));
+    // A face that wants firmware is said by the card's top, and here in
+    // the row's own words; the rest keep their line.
+    let said = match face.wants_flash() {
+        true => facts("Firmware", vec![RichLine::new("Version", summary.clone())]),
+        false => {
+            let mut said = facts("Firmware", Vec::new());
+            said.sentence = Some(pending_firmware_line(face));
+            said
+        }
+    };
     UiStackBar {
         aside: aside.map(str::to_string),
         tone,
@@ -379,9 +389,9 @@ fn face_words(face: &FirmwareFace) -> (String, Option<&'static str>) {
 }
 
 /// The Firmware row's details: the notice, the firmware's facts, its
-/// panels, every firmware verb not drawn as the action, and Factory reset
-/// apart. A board whose data was lost has its ways back on the Project
-/// row's details (O3), not here.
+/// panels, and every firmware verb not drawn as the action. A board whose
+/// data was lost has its ways back on the Project row's details (O3), and
+/// Factory reset is the Hardware row's, not here.
 fn details(
     input: &BoardCardInput<'_>,
     version: &str,
@@ -439,15 +449,11 @@ fn details(
             action.cloned(),
         ));
     } else if view.firmware_face.wants_flash() {
-        // Quiet: Install firmware is the primary; the face's verdict is
-        // the details' sentence.
-        let board = device_identity_line(view).board;
-        sections.push(notice(
-            "Firmware",
-            UiStatusKind::Neutral,
-            device_firmware_line(&view.firmware_face, board.as_deref()),
-            None,
-        ));
+        // No notice: the card's top says what is on the board, in a
+        // sentence, with Install firmware as the primary, and the row says
+        // it as a label ("none", "unknown  no response"). A verdict here
+        // said it a third time, as a dashed label in a sentence's place
+        // ("No response — try flashing firmware", Yona's C6, 2026-10-19).
     } else if tone != UiStatusKind::Neutral {
         sections.push(notice(
             "Firmware",
@@ -457,7 +463,12 @@ fn details(
         ));
     }
 
-    // 2. The facts.
+    // 2. The facts. A board with no LightPlayer on it says what is there
+    // in the row's own words ("none", "unknown (pre-2026.07)").
+    let version = match view.firmware_face.wants_flash() {
+        true => face_words(&view.firmware_face).0,
+        false => version.to_string(),
+    };
     let mut lines = vec![RichLine::new("Version", version)];
     if let Some(update) = update {
         if let Some(commit) = &update.version.commit {
@@ -547,15 +558,6 @@ fn details(
     .filter(|action| Some(&action.offer) != panel_download.as_ref())
     .collect();
     sections.push(verbs(actions));
-
-    // 5. Factory reset, apart.
-    sections.push(danger(
-        input
-            .offer("erase")
-            .map(|erase| UiCardAction::own_words(erase).with_icon(erase.icon.clone()))
-            .into_iter()
-            .collect(),
-    ));
 
     UiBarDetails {
         sections: without_empty(sections),
@@ -927,6 +929,20 @@ mod tests {
             assert_eq!(bar.aside.as_deref(), state, "{face:?}");
             assert_eq!(bar.tone, UiStatusKind::Neutral, "{face:?}");
             assert_eq!(bar.action, None, "Install firmware is the primary");
+            // The card's top says it in a sentence; the details say what
+            // is there in the row's words, and no dashed verdict (Yona's
+            // C6, 2026-10-19: "No response — try flashing firmware").
+            assert_eq!(bar.details.notice(), None, "{face:?}");
+            assert_eq!(line(&bar, "Version").as_deref(), Some(name), "{face:?}");
+            assert!(
+                bar.details
+                    .sections
+                    .iter()
+                    .filter_map(|section| section.sentence.as_deref())
+                    .all(|sentence| !sentence.contains(" — ")),
+                "{face:?}: {:?}",
+                bar.details.sections
+            );
         }
     }
 
@@ -963,11 +979,11 @@ mod tests {
         blank.view.can_remove_project = false;
         let bar = firmware_bar(&blank.input());
         assert_eq!(
-            bar.details
-                .notice()
-                .and_then(|notice| notice.sentence.as_deref()),
-            Some("Blank flash — needs firmware")
+            bar.details.notice(),
+            None,
+            "the card's top says it; the details say what is there"
         );
+        assert_eq!(line(&bar, "Version").as_deref(), Some("none"));
         let mut running = CardFixture::ready();
         let bar = firmware_bar(&running.input());
         assert_eq!(
@@ -1002,17 +1018,8 @@ mod tests {
             line(&bar, "Over this link").as_deref(),
             Some(lpa_devices::view::FIRMWARE_NEEDS_USB)
         );
-        let reset = bar
-            .details
-            .sections
-            .last()
-            .and_then(|danger| danger.affordances.first())
-            .expect("Factory reset");
-        assert_eq!(reset.word, "Factory reset");
-        assert_eq!(
-            reset.refused.as_deref(),
-            Some(lpa_devices::view::FIRMWARE_NEEDS_USB)
-        );
+        // Factory reset keeps the same reason, on the Hardware row
+        // (`hardware_bar`'s tests).
     }
 
     #[test]
@@ -1029,10 +1036,8 @@ mod tests {
             UiStatusKind::Neutral,
             "Install firmware is the primary"
         );
-        assert_eq!(
-            bar.details.sections[0].sentence.as_deref(),
-            Some("Blank flash — needs firmware")
-        );
+        assert_eq!(bar.details.sections[0].sentence, None);
+        assert_eq!(line(&bar, "Version").as_deref(), Some("none"));
         assert_eq!(bar.action, None);
         pending.firmware_face = FirmwareFace::NoHello;
         assert_eq!(

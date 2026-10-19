@@ -239,9 +239,21 @@ struct ScriptedTransport {
     push_plan: Rc<Cell<PushPlan>>,
     /// What a remove effect does. `Real` runs the real conversation too.
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// What an erase effect leaves the board doing.
+    erase_plan: Rc<Cell<ErasePlan>>,
     /// Every file set a push effect was handed — the bytes Studio sent
     /// down the wire, captured before the conversation runs.
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
+}
+
+/// What an erase effect leaves the board doing: booting its blank flash
+/// (the boot loop the Erase listens for), or silent in the flasher's stub
+/// (no reset after the wipe — what a real C6 did, 2026-10-19).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ErasePlan {
+    #[default]
+    Reboots,
+    Silent,
 }
 
 /// The scripted outcomes a remove effect can play out. Same three shapes the
@@ -418,9 +430,13 @@ impl DeviceTransport for ScriptedTransport {
             }
             DeviceEffectCall::EraseFlash => {
                 let device = self.device.clone();
+                let plan = self.erase_plan.get();
                 Box::pin(async move {
                     progress("Erasing flash".to_string(), Some(50));
-                    device.fake_erase();
+                    match plan {
+                        ErasePlan::Reboots => device.fake_erase(),
+                        ErasePlan::Silent => device.fake_erase_without_reset(),
+                    }
                     progress("Flash erased".to_string(), Some(100));
                     Ok(DeviceEffectFacts {
                         summary: "flash erased".to_string(),
@@ -838,6 +854,7 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    erase_plan: Rc<Cell<ErasePlan>>,
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
     /// The sim half of the transport, when this bench has one. Held so a
     /// row can assert what is RUNNING as opposed to what is remembered.
@@ -1092,6 +1109,7 @@ impl DeviceBench {
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
         let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
+        let erase_plan: Rc<Cell<ErasePlan>> = Rc::new(Cell::new(ErasePlan::default()));
         let pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>> = Rc::new(RefCell::new(Vec::new()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
@@ -1103,6 +1121,7 @@ impl DeviceBench {
             manifest_writes: Rc::clone(&manifest_writes),
             push_plan: Rc::clone(&push_plan),
             remove_plan: Rc::clone(&remove_plan),
+            erase_plan: Rc::clone(&erase_plan),
             pushed: Rc::clone(&pushed),
         }));
 
@@ -1123,6 +1142,7 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            erase_plan,
             pushed,
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
