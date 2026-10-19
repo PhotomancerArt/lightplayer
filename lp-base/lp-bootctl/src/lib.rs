@@ -106,7 +106,7 @@ mod reset_kind;
 mod sector;
 mod split_layout;
 
-pub use boot_choice::{BootChoice, booted_by, choose, cold_retry_to_count, failed};
+pub use boot_choice::{BootChoice, booted_by, choose, cold_retry_to_count, failed, stray_trial};
 pub use boot_record::{
     ATTEMPTED_MARK_OFFSET, BOOT_RECORD_LEN, BOOT_RECORD_READ_LEN, BOOT_RECORD_VERSION, BootMarks,
     BootRecord, BootSlot, COLD_RETRY_CAP, COLD_TALLY_OFFSET, CONFIRMED_MARK_OFFSET, RECORD_MAGIC,
