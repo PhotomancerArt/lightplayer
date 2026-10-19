@@ -839,7 +839,10 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
         Classification::Foreign { label: None } => "Unrecognized firmware".to_string(),
-        Classification::Quiet { .. } => "Not responding".to_string(),
+        // The label of a board that never said hello and says nothing (a
+        // board that said hello and went quiet is `NotResponding`, whose
+        // own label is "Not responding").
+        Classification::Quiet { .. } => "No response — needs firmware".to_string(),
     }
 }
 
