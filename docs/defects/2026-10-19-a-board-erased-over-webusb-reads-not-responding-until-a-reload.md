@@ -53,6 +53,13 @@ attached`, with and without the wireless charger), so Chrome's chooser lost
 it mid-pick and no walk got past add. The phone walk is owed once the board
 holds on the phone's port (a powered hub is on order).
 
+**The flash path, since** — `flashFirmware`, `executePlan`,
+`writeBootControl` and `probeTarget` end with the same pulse
+(`browser_esp32_flash_reboot.test.mjs` runs each one whole). Before, a
+flashed C6 answered only at the reconnect ladder's Normal rung, 8 s after
+the write; a classic on a CH340 only at the both-then-drop rung after that,
+because its macOS driver ignores the Normal rung's one-line writes.
+
 Was open: whether the board printed while no reader was open, or the
 reopen over WebUSB did not reset it the way Web Serial does. Neither: no
 backend ever reset it.
