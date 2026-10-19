@@ -2033,6 +2033,135 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
     );
 }
 
+/// 2026-10-19, a real C6 over USB: after a Factory reset the card read "This
+/// board stopped responding over USB." with Retry, Retry timed out, and only
+/// a replug reached "no firmware". The erased board said nothing (the
+/// flasher left it in its stub), and a board whose record remembers a hello
+/// "stopped responding" when it goes quiet. Studio erased it, so it knows
+/// the flash is blank: the card is the blank chip, with no Retry, through
+/// silence, a re-identify and a replug — until the board shows firmware.
+#[test]
+fn a_factory_reset_board_that_says_nothing_is_blank_not_unresponsive() {
+    let mut replay = ready_device();
+    let device = first_device(&replay);
+    let remembered = |replay: &Replay| {
+        replay
+            .roster()
+            .device(device)
+            .and_then(|device| device.record.as_ref())
+            .and_then(|record| record.firmware.clone())
+    };
+    assert!(
+        remembered(&replay).is_some(),
+        "setup: the record remembers the hello's firmware"
+    );
+
+    replay.step(Millis(1_000), Step::Erase { device: device.0 });
+    replay.step(
+        Millis(3_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: Some(ActivityKind::Erase),
+        },
+    );
+    // The observation reopens the port; the erased board says nothing.
+    replay.step(Millis(3_100), Step::opened(1));
+    replay.advance_to(Millis(12_000));
+
+    let card = replay.view().devices[0].clone();
+    assert!(card.activity.is_none(), "the erase settled: {card:?}");
+    assert!(card.last_outcome.as_ref().is_some_and(|outcome| outcome.ok));
+    assert_eq!(card.status, DeviceStatus::NeedsAttention, "{card:?}");
+    assert_eq!(card.firmware_face, lpa_devices::FirmwareFace::Blank);
+    assert_eq!(card.state_label, "Blank flash — needs firmware");
+    assert!(card.needs_firmware(), "its way on is the firmware");
+    assert!(
+        !card.escapes.contains(&Escape::Retry),
+        "no Retry on a board Studio knows is blank: {:?}",
+        card.escapes
+    );
+    assert_eq!(
+        remembered(&replay),
+        None,
+        "the firmware the record remembered is gone with the erase"
+    );
+    let board = replay.roster().device(device).expect("device");
+    assert!(board.known_blank());
+    assert!(!board.spoke_light_player());
+
+    // Asked again, it still says nothing: still the blank chip.
+    replay.step(Millis(13_000), Step::Identify { device: device.0 });
+    replay.advance_to(Millis(30_000));
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.status, DeviceStatus::NeedsAttention, "{card:?}");
+    assert_eq!(card.firmware_face, lpa_devices::FirmwareFace::Blank);
+
+    // Its boot loop re-enumerates it: gone, then back and silent.
+    replay.step(Millis(31_000), Step::detach(1));
+    assert_eq!(replay.view().devices[0].status, DeviceStatus::Offline);
+    replay.step(Millis(32_000), Step::attach(2, "usb-1"));
+    replay.step(Millis(32_020), Step::opened(2));
+    replay.advance_to(Millis(50_000));
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.status, DeviceStatus::NeedsAttention, "{card:?}");
+    assert_eq!(card.firmware_face, lpa_devices::FirmwareFace::Blank);
+
+    // Firmware on it again (written elsewhere): the board says what it is,
+    // and the erase is over — its silence now is a board that stopped.
+    replay.step(Millis(51_000), Step::Identify { device: device.0 });
+    replay.step(Millis(51_100), Step::hello(2).uid("dev_2f8a"));
+    replay.advance_to(Millis(52_000));
+    assert_eq!(replay.view().devices[0].status, DeviceStatus::Ready);
+    assert!(
+        !replay
+            .roster()
+            .device(device)
+            .expect("device")
+            .known_blank()
+    );
+}
+
+/// The same erase on a board whose boot loop reaches the port: the verdict
+/// settles the erase at once (not at the next poke) and gives the port
+/// back, as identify's does — a blank board has nothing more to say.
+#[test]
+fn a_factory_reset_settles_on_the_boot_loop_and_gives_the_port_back() {
+    let mut replay = ready_device();
+    let device = first_device(&replay);
+    replay.step(Millis(1_000), Step::Erase { device: device.0 });
+    replay.step(
+        Millis(3_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: Some(ActivityKind::Erase),
+        },
+    );
+    replay.step(Millis(3_100), Step::opened(1));
+    replay.step(Millis(3_150), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    let commands = replay.step(Millis(3_200), Step::line(1, "invalid header: 0xffffffff"));
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                command: LinkCommand::Close,
+                ..
+            }
+        )),
+        "the port goes back with the verdict: {commands:?}"
+    );
+    let card = replay.view().devices[0].clone();
+    assert!(card.activity.is_none(), "{card:?}");
+    assert_eq!(card.firmware_face, lpa_devices::FirmwareFace::Blank);
+    assert_eq!(card.status, DeviceStatus::NeedsAttention);
+    assert!(!card.escapes.contains(&Escape::Retry));
+}
+
 // ---------------------------------------------------------------- helpers
 
 fn run_fixture(json: &str) {

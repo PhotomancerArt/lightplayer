@@ -183,6 +183,19 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
         totalSteps: 3,
         percent: 100,
       });
+      // Boot what the flash now holds, as every other write here does (and
+      // the host's erase does): without it the chip sat in the flasher's
+      // stub, saying nothing, until a replug (2026-10-19, a real C6:
+      // docs/defects/2026-10-19-a-factory-reset-board-reads-stopped-responding.md).
+      // The blank chip's boot loop is what the Erase activity listens for.
+      // The wipe is done and verified: a reset that fails leaves the chip
+      // in its stub, which Studio reads as the blank chip it knows it is,
+      // so it is a warning, never the erase's failure.
+      try {
+        await loader.after("hard_reset");
+      } catch (error) {
+        console.warn("[esp32-erase] reset after the erase failed", error);
+      }
       return {
         chipName: chipName ? String(chipName) : null,
         logs,
