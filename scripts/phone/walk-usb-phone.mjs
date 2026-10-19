@@ -95,8 +95,15 @@ async function main() {
   mkdirSync(shots, { recursive: true });
 
   const serial = phone.pickPhone();
-  const onPort = phone.usbDevice(serial);
-  if (!onPort) throw new Error("nothing is plugged into the phone's USB port (`phone usb` lists no device)");
+  // Asked for a while, not once: a board in a reset loop (one the walk left
+  // blank, or a crashing firmware) is off the bus for a moment every few
+  // seconds, and the walk is what heals it.
+  let onPort = null;
+  for (let tries = 0; !onPort && tries < 15; tries += 1) {
+    onPort = phone.usbDevice(serial);
+    if (!onPort) await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!onPort) throw new Error("nothing is plugged into the phone's USB port (`phone usb` lists no device for 15 s)");
   const BOARD = opt("--board", onPort.serialNumber);
   const info = JSON.parse(boardCmd("show", BOARD, "--json"));
   if (info.mac.toUpperCase() !== String(onPort.serialNumber).toUpperCase()) {
@@ -290,9 +297,10 @@ async function main() {
         await driver.pressOffer("erase", { board: mac, bar: "hardware", confirm: true, timeoutMs: STEP_DEADLINE_MS });
         await driver.closeDetails({ board: mac }).catch(() => {});
         await driver.waitFor(`!${ROW_WORKING}`, { timeoutMs: FLASH_DEADLINE_MS, what: "the erase to finish" });
-        // The card that erased the board knows it is blank, heard or not:
-        // Install firmware, on the same page, with no reload
-        // (docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
+        // The same card, with no reload: the erase reboots the board out of
+        // the stub, its ROM loops on the blank flash, and the card reads that
+        // as blank; and the card that erased it knows it is blank, heard or
+        // not (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`).
         blank = await driver.waitFor(BLANK_CARD, { timeoutMs: STEP_DEADLINE_MS, what: "the same page's card offering the blank board Install firmware" });
         return `was ${report.before}; the blank board is ${blank}, offered Install firmware with no reload`;
       });

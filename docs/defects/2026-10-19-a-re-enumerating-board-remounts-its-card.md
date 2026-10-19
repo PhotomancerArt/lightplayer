@@ -27,8 +27,8 @@ board was Offline for that moment. Its card is keyed by its section
 mounted in Offline boards, and moved back on the `connect`. Each mount
 started its local state over. A re-enumeration was read as an unplug.
 
-The reset this PR adds after a Factory reset starts that boot loop at
-once, so the fix had to ride it.
+The reboot after a Factory reset (#1197, `rebootFromFlash`) starts that
+boot loop at once, so this fix rides with the Factory reset one (#1198).
 
 **Fix** — the departure sweep asks once more after a re-enumeration grace
 (`REENUMERATION_GRACE`, 3 s) before it detaches a USB link, and detaches
