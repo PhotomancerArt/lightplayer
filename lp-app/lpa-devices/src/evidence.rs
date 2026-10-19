@@ -197,12 +197,6 @@ pub struct Evidence {
     /// detach.
     #[serde(default)]
     link_carries_update_channel: bool,
-    /// Why firmware cannot be written over the current link, as its
-    /// [`LinkInfo`](crate::LinkInfo) said at attach and open (Chrome on
-    /// Android's WebUSB port). Like the update channel, a fact about the
-    /// LINK; cleared on detach.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    link_firmware_blocked: Option<String>,
     observations: Observations,
 }
 
@@ -229,7 +223,6 @@ impl Evidence {
                     since: now,
                 };
                 self.link_carries_update_channel = info.carries_update_channel;
-                self.link_firmware_blocked = info.firmware_blocked.clone();
                 self.begin_window(now);
                 // A borrow belongs to the link it was taken on. This is a
                 // different link, so nothing is holding it.
@@ -244,7 +237,6 @@ impl Evidence {
             Event::LinkDetached { .. } => {
                 self.presence = Presence::Detached { since: now };
                 self.link_carries_update_channel = false;
-                self.link_firmware_blocked = None;
                 self.begin_window(now);
                 // Unplugged mid-effect: the release event the effect will
                 // eventually raise addresses a link this device no longer
@@ -475,14 +467,6 @@ impl Evidence {
         self.link_carries_update_channel && self.presence.is_attached()
     }
 
-    /// Why firmware cannot be written over the current link, when its
-    /// [`LinkInfo`](crate::LinkInfo) said so — `None` while detached.
-    pub fn link_firmware_blocked(&self) -> Option<&str> {
-        self.link_firmware_blocked
-            .as_deref()
-            .filter(|_| self.presence.is_attached())
-    }
-
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -607,7 +591,6 @@ impl Evidence {
             LinkEvent::Opened { info } => {
                 self.presence = Presence::Open { link, since: now };
                 self.link_carries_update_channel = info.carries_update_channel;
-                self.link_firmware_blocked = info.firmware_blocked.clone();
                 // It opened, so no other tab holds it now.
                 self.link_held_by_tab = false;
                 // A fresh port is a fresh window: whatever we concluded

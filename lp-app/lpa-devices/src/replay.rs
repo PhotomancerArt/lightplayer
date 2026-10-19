@@ -1239,7 +1239,6 @@ fn link_info(endpoint: &str, label: Option<&str>) -> LinkInfo {
         usb: None,
         serial_number: None,
         carries_update_channel: false,
-        firmware_blocked: None,
     }
 }
 

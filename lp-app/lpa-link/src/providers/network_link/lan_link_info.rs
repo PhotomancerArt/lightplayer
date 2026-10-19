@@ -20,7 +20,6 @@ pub fn lan_link_info(url: &str) -> LinkInfo {
         usb: None,
         serial_number: None,
         carries_update_channel: true,
-        firmware_blocked: None,
     }
 }
 
