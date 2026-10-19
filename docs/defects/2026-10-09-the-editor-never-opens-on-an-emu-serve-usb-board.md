@@ -120,3 +120,12 @@ project read frame seq 1, got 0` between link resets, two runs in Chrome for
 Testing 142 and one in Brave. The same walk on the tab backing
 (`WALK_BACKING=tab`) passed every step, both cable pulls included. The
 card's change touches no read path: this is the defect above, not the round.
+
+**Seen again 2026-10-19** (`claude/flash-reboots-the-board`, `lp-emu:esp32c6:t1`,
+`just walk-no-board --serve-release`, door backing, Chrome headless). The
+`card-connect` step failed 2 runs of 2 with this branch's flash code and 1 of
+1 with `main`'s (`776113d65`): "the corner's details give no frame rate", or
+the panel never reaching the card, each with `expected project read frame seq
+N, got 0` repeating in the page's errors. `flash`, `connect`, `identify` and
+`upload` passed every time. The same walk on the tab backing passed all 13
+steps both ways. Now a second walk that meets it.
