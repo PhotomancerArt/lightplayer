@@ -92,11 +92,7 @@ impl Editor {
         {
             out.push(section("Spans", spans));
         }
-        if let [Target::Node(id)] = selection.as_slice()
-            && p.fixture(id).is_some()
-        {
-            out.push(section("Patch", patch_facts(p, id)));
-        }
+
         if let [t @ Target::Lamp { object, index }] = selection.as_slice()
             && let Some(info) = lamp_fact(p, t, object, *index)
         {
@@ -381,6 +377,9 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     }
                     None => format!("Nothing writes {}: its lamps have no colour", fx.reads),
                 }));
+                // Auto and how much is on the wire first, with what changes
+                // them (patching by hand), then the rules themselves.
+                rules.extend(patch_facts(p, id));
                 if fx.rules.is_empty() {
                     rules.push(UiItem::Rule("No rule: its lamps go nowhere yet".into()));
                 }

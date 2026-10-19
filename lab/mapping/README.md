@@ -93,6 +93,10 @@ one of the test projects, and fits the view:
   with a repeat selected and its lamps animating, about 83 ms.
   `web/perf/` is the harness that measured it:
   `bun lab/mapping/web/perf/run.mjs <page url> radiance-dome`.
+- **Sean's eaves** (`projects/eaves`): two runs turning their corners on
+  jumpers, D10 counted 60, the rest flowing on to D9. Its piece is wired
+  as the house is (`projects/eaves-wired`: the front run reversed on D10,
+  the side run on D9, both by hand), for the J2 walk.
 
 What the model took from the product to open them (each with its
 statement, fit-check's resolutions applied): lamps resolved in the
@@ -141,7 +145,7 @@ A 2D canvas with selection, and the start of the whole node graph on it
   (`Editor::set_placement`). It is **automatic only, on trial** (D64):
   dragging a node selects it and moves nothing. **Pinning** is under
   Debug: on, dragging a node by its title or border (an output by its
-  card) pins it where you drop it, the rest lay out around it, and U or
+  card) pins it where you drop it, the rest lay out around it, and ⌥U or
   "Unpin" gives it back. Every reach for a drag is a finding for the
   lab's `notes.md`.
 - **The engine, small** (D55; `board.rs`): a recreation of the product's
@@ -173,7 +177,44 @@ A 2D canvas with selection, and the start of the whole node graph on it
   output's ports in order, after every placed run and after fixtures
   before it in the product's attach order). The effective patch is
   derived and never stored. A rule whose output, port or object is gone
-  shows as a problem and is never retargeted.
+  shows as a problem and is never retargeted. Two objects on the same
+  pixels are allowed and reported as an **overlap**; the board shows the
+  later span.
+- **Patching by hand** (the roadmap's stage 4, plan
+  `lp2025/2026-10-18-2337-explicit-patching-spike`; `patch_edits.rs`,
+  `ux/patching.rs`). Looking is free; a pair takes an arm. **A** arms a
+  patch from what is selected: one object, or a **free segment** (a run
+  of selected pixels on one port; a selected port means its first free
+  segment, sized to the next object not on the wire). While armed, **← →**
+  walk the other end's candidates (free segments in wire order from an
+  object; objects not on the wire from a segment), the board previews the
+  pair as if it were made, and **Enter** or a click makes it. **M** is
+  lp2014's `m`: armed, it patches and moves on to the next free segment
+  still armed; on an object just patched (and lined up), it moves on the
+  same way. **Esc** disarms first. **S** arms a swap between two objects
+  on the wire. On the selected objects: **R** reverses the placement
+  while Move & draw is off (on, it reverses the path itself), **K L** turn
+  one lamp and **; '** a third (direction-aware, as lp2014's keys were),
+  **[ ]** shift a pixel along the port, **U** unpatches. **⇧← ⇧→** walk
+  the places on the wire (spans and free segments, port after port), **.**
+  the next port's first free segment. On a fixture, **⇧A** turns auto on
+  or off and **⇧U** unpatches every object. **A wiring edit moves only
+  what it edits**: when auto would move an object nobody touched, the edit
+  pins it where it was and says so.
+- **The piece** (plan D4; `piece.rs`, `web/src/piece_view.rs`): the
+  install as it is really wired, lit by what the board sends, so a hand
+  patch can be walked with no hardware. Its wiring (the truth) is the
+  project's patch as it opened, or for **Sean's eaves** the
+  `eaves-wired` project (the house). **Debug → Scramble the piece**
+  shuffles the first output's objects across its ports, each a random way
+  round (seeded). The lab's page shows it at the canvas's lower left; the
+  **Piece** toggle hides it. Studio has none: there the piece is real.
+- **Port grouping** (D14): the toolbar's **Ports** switch draws each
+  output card's pixels as **objects** (a run per span), **groups of N**
+  (free pixels cut to the next object's size) or **pixels**. View state.
+  The journeys, J1 (the dome's first box, panel by panel) and J2 (the
+  eaves across D10 and D9), run as key-driven tests in
+  `files/tests/journeys.rs`.
 - **Edges are node to node** (D57, amending D45/D46): one per pair of
   nodes, violet, with an arrowhead where the data arrives. Core says
   which there are and what each says; the page routes them with
@@ -244,13 +285,13 @@ A 2D canvas with selection, and the start of the whole node graph on it
   point to … here", to add one there; ⌥-click a point's handle, or
   right-click "Remove point N", to take one away. A path keeps at least
   two. Handles are never assumed to sit on lamps (Béziers are coming).
-- **Move & draw** (D50): a toolbar toggle, named for what's on, and M.
+- **Move & draw** (D50): a toolbar toggle, named for what's on, and D.
   Off, nothing moves, pins, draws or reshapes (no handles, no tools, no
   counts or sizes that move lamps — `PropDesc::reshapes`); each try says
-  "Move & draw is off · M turns it on". Selection, pixels, the board, a
-  port's own count and reverse still work — select and patch only, for
+  "Move & draw is off · D turns it on". Selection, pixels, the board, a
+  port's own count and patching still work — select and patch only, for
   the dome.
-- **Drawing:** a path tool (P, or L) and a circle tool (O). A path is
+- **Drawing:** a path tool (P) and a circle tool (O). A path is
   clicked out point by point, like the product's: each click adds a
   point, the draft runs on to the cursor with its lamps lit on the board,
   double-click or Enter finishes, Esc takes back a point (and, with none
@@ -262,7 +303,10 @@ A 2D canvas with selection, and the start of the whole node graph on it
 - **One tree and a data-driven inspector:** the tree lists modules,
   fixtures, outputs and ports. The inspector shows the properties
   everything selected shares, a fixture's rules and problems, and an
-  output's ports with how full each one is.
+  output's ports with how full each one is. A selected object's **Wire**
+  section says where it is on the wire (with Unpatch and Reverse beside
+  the facts); a fixture's **Patch** section says whether auto is on and
+  how many objects are on the wire.
 - **Verbs by name** (`graph_verb.rs`): every key the hint bar names is a
   `GraphVerb` (`delete`, `go-in`, `select-all`, `path-tool`, …), and each
   hint carries its verbs; `Editor::verbs` lists the ones on offer now from

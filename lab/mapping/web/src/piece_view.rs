@@ -16,7 +16,7 @@ use crate::graph_editor::GraphEditor;
 use crate::lamp_cells::CellMap;
 
 /// How wide the piece is drawn, in CSS pixels.
-const WIDTH: f64 = 220.0;
+const WIDTH: f64 = 320.0;
 
 #[component]
 pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
