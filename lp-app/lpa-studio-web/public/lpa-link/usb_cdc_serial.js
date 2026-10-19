@@ -38,14 +38,14 @@ const LINE_DTR = 0x01;
 const LINE_RTS = 0x02;
 
 // IN transfers kept in flight, each one packet long — what a desktop CDC
-// driver does (Linux's cdc-acm queues 16). One at a time is NOT enough: in the
-// gap between a transfer completing and the page submitting the next, nobody
-// reads the endpoint, and esptool's flasher stub on a C6 flushes a frame only
-// if the previous packet was read within a short spin. With one transfer the
-// stub's first `c0` arrived and its "OHAI" never did (the first flash from
-// the phone, 2026-10-18). WebUSB completes transfers on one endpoint in the
-// order they were submitted, so the bytes stay in order. One packet each, so
-// a full packet completes its transfer instead of waiting for a short one.
+// driver does (Linux's cdc-acm queues 16), so the endpoint is asked for its
+// next packet without waiting on the page. WebUSB completes transfers on one
+// endpoint in the order they were submitted, so the bytes stay in order. One
+// packet each, so a full packet completes its transfer instead of waiting
+// for a short one. It does NOT make esptool's flasher safe on a phone: the
+// desk's Pixel still lost about 40 % of a continuous 4 KB burst with 1 or 16
+// in flight alike (2026-10-18), which is why the flash is refused over this
+// port (`browser_esp32_flash.js`'s `isSupported`).
 const IN_TRANSFERS_IN_FLIGHT = 16;
 // What the port holds for a reader that is not reading, like a serial
 // driver's buffer. Beyond it the oldest bytes go: the link resends what it

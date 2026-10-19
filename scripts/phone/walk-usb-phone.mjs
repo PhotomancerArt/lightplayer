@@ -11,9 +11,9 @@
 //
 //     add over USB (the real chooser; Android's dialog the first time)
 //       → identify (the card is the board on the phone's port, by MAC)
+//       → firmware: the card refuses the flasher in plain words (a flash
+//         over WebUSB loses the board's replies on the phone; see the ADR)
 //       → the editor → Play → turn a knob
-//       → restart the board from Studio (the reset path over WebUSB): the
-//         card comes back
 //
 // The board needs a project loaded and firmware the chosen Studio speaks to.
 // The board on the phone is found by MAC from the phone's own USB list
@@ -46,6 +46,9 @@ function opt(name, dflt) {
   return i < 0 ? dflt : args[i + 1];
 }
 const HOLDER = process.env.BOARD_HOLDER ?? "walk-usb-phone";
+/// `lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER`: what the card says over
+/// a phone's USB link (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+const FIRMWARE_NEEDS_A_COMPUTER = "Installing firmware from a phone needs a computer";
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 const CARD = `document.querySelector('[data-board-card]')`;
@@ -175,6 +178,15 @@ async function main() {
       return `the card is ${info.mac}, running a project; connection "${bar}"`;
     });
 
+    await step("firmware", "the card refuses the flasher in plain words (Chrome on Android cannot flash over WebUSB)", async () => {
+      const said = await driver.detailsFact("firmware", "Over this link", { board: mac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.closeDetails({ board: mac });
+      if (said !== FIRMWARE_NEEDS_A_COMPUTER) {
+        throw new Error(`the Firmware details say ${JSON.stringify(said)} over this link, not ${JSON.stringify(FIRMWARE_NEEDS_A_COMPUTER)}`);
+      }
+      return `"Over this link: ${said}"`;
+    });
+
     await step("editor", "open the board in the editor", async () => {
       await driver.pressOffer("edit", { board: mac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`!${MAIN_TEXT}.includes('Connecting project') && Boolean(${SLIDER})`, {
@@ -224,7 +236,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log(`\n✓ the phone USB walk finished: a ${device.model}'s Chrome over WebUSB, ${info.slug} on its port — card, editor, Play.`);
+  console.log(`\n✓ the phone USB walk finished: a ${device.model}'s Chrome over WebUSB, ${info.slug} on its port — card, the flasher refused, editor, Play.`);
 }
 
 await main();

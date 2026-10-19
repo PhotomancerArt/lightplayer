@@ -1,4 +1,9 @@
-import { getPort, isSupported as serialIsSupported, releasePort } from "./browser_serial.js";
+import {
+  getPort,
+  isSupported as serialIsSupported,
+  releasePort,
+  serialBackendKind,
+} from "./browser_serial.js";
 
 const ESPTOOL_TRANSPORT_TRACING = false;
 
@@ -6,8 +11,13 @@ const ESPTOOL_TRANSPORT_TRACING = false;
 // version + refuse: a v1 manifest fails loudly rather than half-decoding.
 const FIRMWARE_MANIFEST_SCHEMA_VERSION = 2;
 
+// Not over WebUSB (Chrome on Android): a C6 drops what it sends while the
+// phone is slow to read, and esptool's protocol has no resend, so a flash
+// there fails partway (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+// The provider then advertises no flash and the card says
+// "Installing firmware from a phone needs a computer" before anyone presses.
 export function isSupported() {
-  return Boolean(serialIsSupported() && globalThis.fetch);
+  return Boolean(serialIsSupported() && serialBackendKind() === "serial" && globalThis.fetch);
 }
 
 export async function loadManifest(manifestPath) {

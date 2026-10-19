@@ -1015,6 +1015,33 @@ mod tests {
         );
     }
 
+    /// On USB from a phone (Chrome on Android's WebUSB) the flasher's verbs
+    /// are refused with the link's own sentence, said once as a fact, while
+    /// the over-the-air update (which rides lp-link) is not blocked.
+    #[test]
+    fn a_phones_usb_link_refuses_the_flasher_in_its_own_words() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.firmware_blocked =
+            Some(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER.to_string());
+        let bar = firmware_bar(&fixture.input());
+        assert_eq!(
+            line(&bar, "Over this link").as_deref(),
+            Some(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER)
+        );
+        let reset = bar
+            .details
+            .sections
+            .last()
+            .and_then(|danger| danger.affordances.first())
+            .expect("Factory reset");
+        assert_eq!(reset.word, "Factory reset");
+        assert_eq!(
+            reset.refused.as_deref(),
+            Some(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER)
+        );
+        assert_eq!(fixture.view.update_blocked, None);
+    }
+
     #[test]
     fn a_new_board_is_unknown_then_none() {
         let mut pending = pending_view();

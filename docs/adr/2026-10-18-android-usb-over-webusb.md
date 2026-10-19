@@ -64,13 +64,35 @@ device.
    The chooser lists CDC devices only; opening anything else fails in plain
    words. A bridge that IS CDC (WCH's CH9102, vendor `0x1a86`) is admitted.
 
+5. **Firmware is not written over it, and the card says so first.** The
+   phone walk found the flasher losing the board's replies (the C6 drops
+   output the phone is not reading fast enough, and esptool's protocol has
+   no resend; `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`).
+   So `browser_esp32_flash.js` reports flashing unsupported over WebUSB, the
+   provider advertises no flash, erase, boot-control or raw-filesystem read
+   on such a port, and its `LinkInfo::firmware_blocked` carries
+   "Installing firmware from a phone needs a computer". The card draws
+   Update firmware, Install firmware and Factory reset disabled with that
+   sentence under them, as it does over Bluetooth. The over-the-air update
+   rides lp-link's update channel, which resends, and stays offered.
+
 ## Consequences
 
-- A phone is a USB host for a C6 with no computer at all. What the walk
-  showed on the Pixel is recorded below.
+- A phone is a USB host for a C6 with no computer at all. Walked on the
+  desk's Pixel 8a (Android 14, Chrome 155) with loose-c6 on its USB-C port
+  (`just walk-usb-phone --serve-release`): Chrome's own WebUSB chooser lists
+  the board, Android asks once to allow Chrome, and Studio connects,
+  identifies the board by MAC, opens the editor and runs Play. Reloading
+  reconnects with no chooser (Android keeps the grant). Installing firmware
+  from the phone is refused (decision 5).
 - The port reads for as long as it is open, whoever is reading (a serial
-  driver's buffer, capped at 4 MiB): a reader that cancels does not take an
-  in-flight IN transfer's bytes with it.
+  driver's buffer, capped at 4 MiB), with 16 packet-long IN transfers in
+  flight as desktop CDC drivers keep: a reader that cancels does not take
+  an in-flight transfer's bytes with it.
+- The device controller now takes a port's reader before its writer, so a
+  session that cannot read a port holds nothing on it
+  (`docs/defects/2026-10-18-a-failed-reopen-kept-the-ports-writer-and-fed-the-flasher.md`;
+  the same open runs on Web Serial).
 - The open asserts DTR and RTS together, never RTS alone: RTS asserted while
   DTR is not resets a C6. The controller's reset dances then run as they do on
   a Mac, each step a whole-status write; the conformance suite pins that the
@@ -83,4 +105,5 @@ device.
   (`just lpa-link-browser-test`). The phone walk is `just walk-usb-phone`.
 - When Chrome on Android ships wired Web Serial, the backend rule's Android
   arm can go; the port stays useful for any browser with WebUSB and no Web
-  Serial.
+  Serial. Lifting decision 5 needs a flash that survives loss (the open
+  defect says what was measured), walked on the phone.

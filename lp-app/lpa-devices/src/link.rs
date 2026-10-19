@@ -66,6 +66,14 @@ pub struct LinkInfo {
     /// over-the-air update can run on it. False on `M!` transports and sims.
     #[serde(default)]
     pub carries_update_channel: bool,
+    /// Why firmware cannot be written over this link although it is a USB
+    /// one, when it cannot: Chrome on Android reaches a board over WebUSB,
+    /// and the flasher does not survive the phone reading slower than the
+    /// chip writes ([`crate::view::FIRMWARE_NEEDS_A_COMPUTER`]). `None` =
+    /// the link itself does not stand in the way. (A network link's refusal
+    /// is read off its endpoint's scheme instead.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_blocked: Option<String>,
 }
 
 /// USB vendor/product pair, for board guessing and grant revocation.

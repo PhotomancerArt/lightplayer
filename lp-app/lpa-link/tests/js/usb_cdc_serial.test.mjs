@@ -280,9 +280,8 @@ test("close is refused while a stream is held, and the holder's reads go on", as
 });
 
 test("sixteen packet-long IN transfers stay in flight, so the endpoint is never left unread", async () => {
-  // esptool's flasher stub on a C6 flushes a frame only if the host read the
-  // previous packet within a short spin; with one transfer at a time its
-  // "OHAI" never left the chip (the first flash from the phone).
+  // A desktop CDC driver's shape: the endpoint is asked for its next packet
+  // without waiting on the page, and a full packet completes its transfer.
   const device = new FakeUsbDevice();
   const port = new UsbCdcSerialPort(device);
   await port.open({ baudRate: 115200 });
