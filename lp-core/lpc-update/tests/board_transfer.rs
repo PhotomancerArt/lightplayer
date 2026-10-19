@@ -7,7 +7,8 @@ mod support;
 use lpc_update::board::{AccessFacts, LinkId, LinkTrust, SessionConfig, SessionMode};
 use lpc_update::code_table::CHUNK;
 use lpc_update::testing::{
-    BootFault, FakeBoard, MODEL_BLOCK, MODEL_PROGRESS, MODEL_REGION_START, ModelBuild,
+    BoardRig, BootFault, FakeBoard, MODEL_BLOCK, MODEL_PROGRESS, MODEL_RECORDS, MODEL_REGION_START,
+    ModelBuild,
 };
 use lpc_update::transfer_record::{RecordRead, RecordStage, TransferRecord};
 use lpc_update::{BoardState, Mismatch, PieceKind, Refusal, build_id_field};
@@ -572,6 +573,96 @@ fn a_build_that_failed_its_trial_is_refused_f() {
         })
     );
     assert!(rig.board.flash.bytes() == before.as_slice());
+}
+
+/// X → Y on trial, and Y crashes warm: X runs again, rolled back, and the
+/// spare record (sector 1) is still Y's, naming the end of the region Y's
+/// core filled.
+fn rolled_back_from(x: &ModelBuild, y: &ModelBuild, z: &ModelBuild) -> (BoardRig, u64) {
+    let mut rig = rig(vec![x.clone(), y.clone(), z.clone()], 0);
+    let mut host = Host::new(y.clone());
+    let mut now = 0;
+    for _ in 0..2 {
+        rig.link_up(now, USB, T);
+        let o = host.offer();
+        exchange(&mut rig, &mut host, USB, o, &mut now);
+        rig.reboot().unwrap();
+    }
+    assert!(rig.session.as_ref().unwrap().facts().on_trial);
+    rig.board.fail_trial();
+    rig.reboot().unwrap();
+    assert_eq!(
+        rig.session.as_ref().unwrap().facts().refused_build,
+        Some(y.build_hash())
+    );
+    (rig, now)
+}
+
+/// Defect 2026-10-19: after a rollback the next core goes where the dead
+/// trial's core was, and the dead trial's record — which a cold boot of the
+/// real loader still chooses — names those bytes. A cut anywhere in that
+/// install must never leave that record over bytes the new core changed.
+#[test]
+fn a_core_install_after_a_rollback_retires_the_dead_trials_record_before_its_first_byte() {
+    let (x, y) = x_and_y();
+    // Z's core is Y's length, so it lands exactly where Y's did.
+    let z = ModelBuild::synthetic("2026.10.19-1", 5, y.core.len(), 9 * 4096 + 5);
+    let total = {
+        let (mut rig, mut now) = rolled_back_from(&x, &y, &z);
+        let start = rig.board.flash.ops();
+        drive(&mut rig, &mut Host::new(z.clone()), USB, T, &mut now);
+        assert_eq!(rig.board.running_build(), Some(&z));
+        rig.board.flash.ops() - start
+    };
+    let dead = MODEL_RECORDS[1] as usize;
+    let mut retired_before_a_core_byte = 0;
+    for k in 0..total {
+        let (mut rig, mut now) = rolled_back_from(&x, &y, &z);
+        let before = rig.board.flash.bytes().to_vec();
+        let word = |at: usize| u32::from_le_bytes(before[at..at + 4].try_into().unwrap()) as usize;
+        let core = word(dead + 8)..word(dead + 8) + word(dead + 12);
+        rig.board.flash.cut_after(k);
+        let mut host = Host::new(z.clone());
+        let mut guard = 0;
+        while !rig.board.flash.is_frozen() {
+            guard += 1;
+            assert!(guard < 10, "cut {k} never landed");
+            if rig.reset_pending
+                && let Err(e) = rig.reboot()
+            {
+                assert_eq!(e, BootFault::PowerCut, "cut {k}");
+                break;
+            }
+            rig.link_up(now, USB, T);
+            let o = host.offer();
+            exchange(&mut rig, &mut host, USB, o, &mut now);
+            rig.link_down(now, USB);
+        }
+        let f = rig.board.flash.bytes();
+        let record_kept = f[dead..dead + 32] == before[dead..dead + 32];
+        let core_moved = f[core.clone()] != before[core.clone()];
+        assert!(
+            !(record_kept && core_moved),
+            "cut after op {k}: the dead trial's record still names {core:#x?}, whose bytes the new core changed"
+        );
+        if core_moved {
+            retired_before_a_core_byte += 1;
+        }
+        rig.board
+            .check_invariant()
+            .unwrap_or_else(|e| panic!("cut after op {k}: {e:?}"));
+        drive(&mut rig, &mut host, USB, T, &mut now);
+        assert_eq!(
+            rig.board.running_build(),
+            Some(&z),
+            "cut {k} converged elsewhere"
+        );
+        assert!(rig.board.engine_valid(), "cut {k}");
+    }
+    assert!(
+        retired_before_a_core_byte > 10,
+        "{retired_before_a_core_byte}"
+    );
 }
 
 #[test]
