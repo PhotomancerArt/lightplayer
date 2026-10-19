@@ -288,11 +288,15 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
 .ico svg.i { width:12px !important; height:12px !important; }
 .srow.todo .s { color:var(--strong); }
 .att-dot .srow.todo::before { content:""; position:absolute; left:3px; top:50%; width:5px; height:5px; margin-top:-2.5px; border-radius:50%; background:var(--strong); }
-.att-lit .srow.todo .wo { background:linear-gradient(90deg, rgba(95,224,139,.22), rgba(83,198,242,.22), rgba(165,138,247,.22)); }
-.att-raised .srow.todo { background:var(--raised-strong); }
-.att-raised .srow.todo .kd { color:var(--muted); }
-.att-ring .srow.todo .ico { background:var(--strong); color:#17171f; }
-.att-ring .srow.todo .ico svg.i { width:10px !important; height:10px !important; }
+/* the whole row, lit: a lighter flat ground, its words at full strength, its
+   button on the same ground (no fill of its own); never a gradient */
+.att-row .srow.todo, .att-rowdot .srow.todo, .att-rowedge .srow.todo { background:#23232f; }
+.att-row .srow.todo .kd, .att-rowdot .srow.todo .kd, .att-rowedge .srow.todo .kd { color:var(--tx); }
+.att-row .srow.todo .ico, .att-rowdot .srow.todo .ico, .att-rowedge .srow.todo .ico { color:var(--strong); }
+.att-row .srow.todo .wo, .att-rowdot .srow.todo .wo, .att-rowedge .srow.todo .wo { background:transparent; border-left-color:#3d3d50; }
+.att-row .srow.todo.clickable:hover, .att-rowdot .srow.todo.clickable:hover, .att-rowedge .srow.todo.clickable:hover { background:#2a2a38; }
+.att-rowdot .srow.todo::before { content:""; position:absolute; left:3px; top:50%; width:5px; height:5px; margin-top:-2.5px; border-radius:50%; background:var(--strong); }
+.att-rowedge .srow.todo { box-shadow:inset 0 1px 0 #4a4a5e, inset 0 -1px 0 #4a4a5e; }
 /* ---- round 3: the name, editable where it is ------------------------ */
 .nb .nmw { flex:1; min-width:0; display:flex; align-items:center; gap:6px; cursor:text; }
 .nb .nmw .nm { flex:0 1 auto; }
@@ -341,7 +345,7 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
 <main>
 
 <header>
-  <span class="eyebrow">Spike · a new board’s setup · round 3</span>
+  <span class="eyebrow">Spike · a new board’s setup · round 3b</span>
   <h1>The card’s rows are the setup list</h1>
   <p class="hint">Sean flashed his first board on 2026-10-18 and nothing asked for his Wi‑Fi. Round 1 compared four ways to ask; Yona chose none of them and set a direction: <q>the rows of the card are actually a great benefit here. its almost a todo list. all we have to do is call out each item.</q> Round 2 drew that as eight rows. Round 3 answers his notes on it.</p>
   <div class="log">
@@ -356,7 +360,7 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
   <div class="log" style="border-color:var(--st-live-bd);background:#0e1319">
     <h3 style="color:var(--st-live-tx)">Round 3 answers</h3>
     <ol>
-      <li><q>I want the rows that want attention to have an affordance indicating that. its all a bit flat right now.</q> → Section 1: five marks, one lean. The strip applies any of them to the whole page.</li>
+      <li><q>I want the rows that want attention to have an affordance indicating that. its all a bit flat right now.</q> → Section 1. Then, on round 3: <q>I imagined the whole row getting a light styling, not just the button. and I don't love the background gradient. but its really close.</q> → the whole row lit, three ways, no gradient. The strip applies any of them to the whole page.</li>
       <li><q>“Set up Wi-Fi” probably shouldn’t be the primary CTA. if we want it … it would probably be to set up the project.</q> → The primary is Install firmware, then Add a project, then Connect. Wi‑Fi and lightplayer.app ask through their rows only.</li>
       <li><q>we need a way to “hush” the rows</q> → Hushing a row is turning its thing off: <b>Disable Wi‑Fi</b> and <b>Disable lightplayer.app</b> sit in the row’s details, beside the list. The row then says <b>disabled</b> and wants nothing.</li>
       <li><q>how do I edit the name?</q> → The name is edited where it is: a faint pencil after it, press the name, type, Enter. Section 4.</li>
@@ -370,10 +374,10 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
   <div class="line"><span class="lbl">Attention</span>
     <div class="seg" role="group" aria-label="What marks a row that wants attention">
       <button type="button" data-set="att" data-v="flat">none (round 2)</button>
-      <button type="button" data-set="att" data-v="dot">dot</button>
-      <button type="button" data-set="att" data-v="lit">lit button</button>
-      <button type="button" data-set="att" data-v="raised">raised row</button>
-      <button type="button" data-set="att" data-v="ring">ringed icon</button>
+      <button type="button" data-set="att" data-v="dot">dot (round 3)</button>
+      <button type="button" data-set="att" data-v="row">lit row</button>
+      <button type="button" data-set="att" data-v="rowdot">lit row + dot</button>
+      <button type="button" data-set="att" data-v="rowedge">lit row + edges</button>
     </div>
   </div>
   <div class="line"><span class="lbl">Account</span>
@@ -395,7 +399,7 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
 
 <section id="s1">
   <h2><span class="n">1</span>What wants attention</h2>
-  <p class="lede">The same moment five ways: installed, signed out, no project. Three rows have something to do (Project <b>Add</b>, Wi‑Fi <b>Set up</b>, lightplayer.app <b>Sign in</b>). The mark goes only on a row that has something left to do, never on a problem (those keep their orange or red) and never on a row someone disabled. Today’s card is first, for where we started.</p>
+  <p class="lede">The same moment, five ways: installed, signed out, no project. Three rows have something to do (Project <b>Add</b>, Wi‑Fi <b>Set up</b>, lightplayer.app <b>Sign in</b>). The mark goes only on a row that has something left to do, never on a problem (those keep their orange or red) and never on a row someone disabled. Today’s card is first, for where we started.</p>
   <div class="variants" id="variants"></div>
 </section>
 
@@ -448,6 +452,7 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
   <div class="qs" id="qs"></div>
   <div class="rejected">
     <h3>Set aside</h3>
+    <p><b>Round 3 · a lit button</b> (the row’s button in the primary’s gradient): <q>I don't love the background gradient</q>, and the whole row is the mark now. <b>Round 3 · a raised row, a ringed icon</b>: the lit row replaces the first; the second read as “selected”.</p>
     <p><b>Round 2 · Set up Wi‑Fi as the primary</b>: Yona, “probably shouldn’t be the primary CTA”. The rows carry Wi‑Fi now; the primary carries the project. <b>Round 2 · “not set up”</b>: repeated its own button.</p>
     <p><b>Round 1</b> (commit <code>0eb88122c</code>): <b>A</b> the install asks first (the board can’t list networks before it has firmware); <b>B</b> an install sheet, WLED’s way (a second surface saying what the card says); <b>C</b> the card asks next (its Wi‑Fi pages live on here, in the Wi‑Fi row’s details); <b>D</b> setup rows as a temporary face (right idea, wrong lifetime: the rows are the list for good now).</p>
   </div>
@@ -494,7 +499,7 @@ const HOME = 'Cedar Lane', AWAY = 'Sprinter Hotspot';
 const MDNS = 'lp-3f2a.local', IP = '192.168.1.42', BLE = 'LP-3f2a', ACCT = 'River’s account';
 const V = 'v2026.10.19-4', NAME = 'XIAO ESP32-C6', PROJ = 'Holiday Eaves';
 const HEARD = [ { ssid:HOME, bars:4 }, { ssid:'Cedar Lane Guest', bars:3, open:true }, { ssid:'Juniper-2G', bars:2 }, { ssid:'NETGEAR47', bars:1 } ];
-const LEAN_ATT = 'dot';
+const LEAN_ATT = 'row';
 
 /* =====================================================================
    Settings (the strip) and the board model
@@ -503,7 +508,7 @@ const ST = { acct:'out', join:'ok', att:LEAN_ATT };
 const qs0 = new URLSearchParams(location.search);
 if (['out','first','known'].includes(qs0.get('acct'))) ST.acct = qs0.get('acct');
 if (['ok','wrongpw','nointernet'].includes(qs0.get('join'))) ST.join = qs0.get('join');
-if (['flat','dot','lit','raised','ring'].includes(qs0.get('att'))) ST.att = qs0.get('att');
+if (['flat','dot','row','rowdot','rowedge'].includes(qs0.get('att'))) ST.att = qs0.get('att');
 const signedIn = () => ST.acct !== 'out';
 const knows = () => ST.acct === 'known';
 
@@ -814,11 +819,11 @@ function walkWords() {
    Section 1: the attention variants
    ===================================================================== */
 const VARIANTS = [
-  { att:'flat', name:'None', note:'Round 2. The buttons are the only sign, and three buttons in a column read as equal to every ›.' },
-  { att:'dot', name:'A dot', lean:true, note:'A small white dot at the row’s left edge: the mark other software uses for “unfinished”. It takes no colour a status owns and borrows nothing from the primary, and it goes when the row is done. The row’s value is full white beside it.' },
-  { att:'lit', name:'A lit button', note:'The row’s button takes the primary’s spectrum fill. Loud and clear, but it makes three gradient buttons on one card, and the gradient is the primary’s alone (ui.md: “the one loud fill is the gradient Primary”).' },
-  { att:'raised', name:'A raised row', note:'The row sits on a lighter ground. Clear at a glance, but a lighter ground is what hover looks like, and three raised rows make a stripe pattern.' },
-  { att:'ring', name:'A ringed icon', note:'The row’s icon turns into a white disc, an echo of the notice icon on the card’s top. Strong, but it reads as “selected” as easily as “to do”.' },
+  { att:'flat', name:'None', note:'Round 2, for comparison. The buttons are the only sign.' },
+  { att:'row', name:'The row, lit', lean:true, note:'Yona’s picture: the whole row on a lighter flat ground, its icon, kind and value at full strength, its button on the same ground with no fill of its own. No gradient anywhere. The button’s word says what is left (P14), so the ground needs no hue.' },
+  { att:'rowdot', name:'The row, lit, and a dot', note:'The same, with round 3’s dot at the left edge: a shape as well as a ground, for a screen whose contrast flattens the ground.' },
+  { att:'rowedge', name:'The row, lit, with edges', note:'The same, with brighter hairlines above and below, so a lit row reads as a band even beside another lit row.' },
+  { att:'dot', name:'The dot alone', note:'Round 3’s lean, kept for comparison: the row itself stays flat.' },
 ];
 function renderVariants() {
   const save = ST.acct; ST.acct = 'out';
@@ -992,9 +997,9 @@ function renderWhere() {
 }
 function renderQs() {
   document.getElementById('qs').innerHTML = `
-  <div class="q"><h3><span class="id">Q1</span>Which mark says a row wants something?</h3>
-    <p>Section 1 has all five; the strip’s <b>Attention</b> puts any of them on the whole page, the live card included.</p>
-    <p class="lean"><b>Lean: the dot.</b> It is the mark other software uses for “unfinished”, it takes no colour a status owns (orange stays “a problem”), it borrows nothing from the primary, and it is gone the moment the row is done or disabled.</p></div>
+  <div class="q"><h3><span class="id">Q1</span>The row, lit: alone, with the dot, or with edges?</h3>
+    <p>Yona on round 3: <q>I imagined the whole row getting a light styling, not just the button. and I don't love the background gradient.</q> Section 1 now has the row lit three ways; the strip’s <b>Attention</b> puts any of them on the whole page, the live card included.</p>
+    <p class="lean"><b>Lean: the row, lit, alone.</b> It is what you described, it needs no second mark, and the button’s word already says what is left. Hover on a lit row goes one step lighter again, so a pointer passing over it still reads.</p></div>
   <div class="q"><h3><span class="id">Q2</span>“not connected” or “disconnected”?</h3>
     <p>You suggested <q>Wi‑Fi - disconnected - Set up</q>. “Disconnected” reads as “it was connected, and dropped”, which a new board never was; the card already says “USB · not connected” for the same fact, and P6’s list has “Not connected”.</p>
     <p class="lean"><b>Lean: “not connected”</b>, on USB, Wi‑Fi and lightplayer.app alike.</p></div>
