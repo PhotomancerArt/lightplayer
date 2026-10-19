@@ -442,6 +442,103 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     );
 }
 
+/// The dead end of 2026-10-18 (a first-time user on lightplayer.app): a new
+/// board whose firmware prints nothing at all, set up before it answered,
+/// read "This board stopped responding over USB." with Retry — "duh, I'm
+/// trying to program it". A board that never said hello and says nothing
+/// is a board to install: the surface says it doesn't respond, the primary
+/// is Install firmware (`flash`), pressed by path, and the Link row says
+/// nothing loud.
+#[test]
+fn a_silent_board_that_never_said_hello_offers_install_not_retry() {
+    let device = FakeEsp32Device::new(silent_script());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-silent-1");
+    bench.run_until(&tasks, "the new board to be identifying", |bench| {
+        !bench.view().pending.is_empty()
+    });
+    // "Set up this device" while it identifies: the board becomes a card.
+    bench
+        .press("devices/new-1/adopt", OfferArgs::new())
+        .expect("Set up this device");
+    bench.run_until(&tasks, "its identify to settle silent", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+    let id = bench.view().devices[0].id;
+    assert_eq!(
+        bench.view().devices[0].status,
+        crate::DeviceStatus::NeedsAttention,
+        "it never said hello: it needs firmware, it did not stop responding"
+    );
+    let card = card_of(&bench, id);
+    assert_eq!(card.surface.state, crate::SurfaceState::Silent);
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board doesn't respond.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Install the firmware to use it.")
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer, bench.device_verb(id, "flash"));
+    let link = card.bar(crate::BarLayer::Connection).clone();
+    assert_eq!(link.summary, "USB · connected");
+    assert_eq!(link.tone, crate::UiStatusKind::Neutral);
+    assert_eq!(link.action, None, "no Retry on the Link row");
+    every_card_action_is_offered(&mut bench);
+
+    // Over firmware that will not say what it is, the flash is Lasting:
+    // the user's second click.
+    bench
+        .press_lasting(
+            &install.offer,
+            OfferArgs::new().with(crate::FLASH_BOARD_PARAM, c6_board_choice().board_id),
+        )
+        .expect("Install firmware starts the flash");
+    bench.run_until(&tasks, "the flash to run", |bench| {
+        bench.view().devices.iter().any(|card| {
+            card.activity
+                .as_ref()
+                .is_some_and(|work| work.kind == crate::DeviceActivityKind::Flash)
+        })
+    });
+}
+
+/// The same silent board left on its new-board card: once it settles, the
+/// card says it doesn't respond, and Install firmware is the primary.
+#[test]
+fn a_silent_new_boards_card_offers_install() {
+    let device = FakeEsp32Device::new(silent_script());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-silent-2");
+    bench.run_until(&tasks, "the silent verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let id = bench.view().pending[0].device;
+    let card = card_of(&bench, id);
+    assert_eq!(card.surface.state, crate::SurfaceState::Silent);
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board doesn't respond.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Install the firmware to use it.")
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer.to_string(), "devices/new-1/flash");
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).summary,
+        "USB · connected"
+    );
+    every_card_action_is_offered(&mut bench);
+}
+
 /// The hardware bar's details: Reset says why it waits while work runs
 /// (the offer's own reason), and Forget is Lasting — the second click
 /// forgets the board.
@@ -1101,4 +1198,13 @@ fn every_card_action_is_offered(bench: &mut DeviceBench) {
             );
         }
     }
+}
+
+/// A board whose firmware prints nothing at all, ever: no ROM banner, no
+/// boot line, no hello (a factory firmware that keeps quiet on USB).
+fn silent_script() -> FakeDeviceScript {
+    let mut script = FakeDeviceScript::new(FakeBootState::ForeignFirmware);
+    script.rom_banner.clear();
+    script.foreign_banner.clear();
+    script
 }

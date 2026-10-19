@@ -341,6 +341,39 @@ fn board_card_surface_reach() -> Element {
 }
 
 #[story(
+    description = "A board that says nothing on its open USB port, by whether it ever said hello (the dead end of 2026-10-18, a first-time user on lightplayer.app: \"'board not responding' is sort of a 'duh, I'm trying to program it'\"). NEVER SAID HELLO, set up before it answered: a factory firmware that prints nothing reads \"This board doesn't respond. Install the firmware to use it.\", Install firmware as the primary, and its Link row says \"USB · connected\", quietly: the link works, and the surface and the Firmware row say the silence. NEVER SAID HELLO, left on its new-board card: the same words and the same Install firmware. SAID HELLO, THEN WENT QUIET (a LightPlayer Studio knows): \"This board stopped responding over USB. Retry to reconnect.\", Retry, its Link row \"USB · not responding\"."
+)]
+fn board_card_says_nothing() -> Element {
+    let mut went_quiet = porch();
+    went_quiet.status = DeviceStatus::NotResponding;
+    went_quiet.state_label = "Not responding".to_string();
+    went_quiet.firmware_face = DeviceFirmwareFace::Silent;
+    went_quiet.remembered_firmware = Some("fw-esp32c6 2026.10.16-1".to_string());
+    went_quiet.loaded_project = DeviceLoadedProject::Unknown;
+    went_quiet.engine_fps = None;
+    went_quiet.can_receive_project = false;
+    went_quiet.can_remove_project = false;
+    went_quiet.escapes = vec![
+        DeviceEscape::Retry,
+        DeviceEscape::Disconnect,
+        DeviceEscape::Forget,
+    ];
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "never said hello",
+                StoryBoardCard { card: never_said_hello(), on_action: |_| {} }
+            }
+            Cell { caption: "never said hello, a new board",
+                StoryNewBoardCard { pending: silent_new_board(), on_action: |_| {} }
+            }
+            Cell { caption: "said hello, then went quiet",
+                StoryBoardCard { card: went_quiet, on_action: |_| {} }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The surface while work runs: its icon (or the spinner in its place, when the work has no number) and one sentence, the work's bar and percent under it, the picture dimmed beneath; no primary but the spinner while the board is being reached. UPDATING (\"This board is updating its firmware.\" · 40%), SENDING (\"Sending the project “studio” to this board.\": a project's name in running text is quoted), INSTALLING a flash, CONNECTING (the spinner, here and as the primary), MOVING a board from another tab, IDENTIFYING, RECONNECTING (Done stays the primary: the session holds on) and the editor holding the board (\"This board is open in the editor.\", Done). The row doing the work still shows it along its foot."
 )]
 fn board_card_surface_work() -> Element {
@@ -1552,6 +1585,41 @@ pub(crate) fn new_board() -> PendingLinkView {
         firmware_blocked: None,
         held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
+    }
+}
+
+/// A new board set up before it answered, whose factory firmware prints
+/// nothing at all: no hello ever, no boot banner, so no chip, no MAC, no
+/// name but the placeholder.
+fn never_said_hello() -> DeviceView {
+    DeviceView {
+        id: DeviceId(105),
+        title: "New device".to_string(),
+        state_label: "No response — needs firmware".to_string(),
+        detail: None,
+        freshness_label: None,
+        heard_age_ms: None,
+        identity_label: None,
+        detected_chip: None,
+        terminal: Vec::new(),
+        escapes: vec![
+            DeviceEscape::Retry,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..needs_firmware(DeviceFirmwareFace::Silent)
+    }
+}
+
+/// The same silent board, left on its new-board card.
+fn silent_new_board() -> PendingLinkView {
+    PendingLinkView {
+        title: "New device".to_string(),
+        state_label: "New device found — no response (is another app using this port?)".to_string(),
+        firmware_face: DeviceFirmwareFace::Silent,
+        detected_chip: None,
+        mac: None,
+        ..new_board()
     }
 }
 
