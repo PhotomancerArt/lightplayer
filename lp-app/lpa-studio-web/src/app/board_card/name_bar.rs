@@ -23,7 +23,7 @@
 //!
 //! While the board is being reached or identified the primary is Studio's
 //! conic spinner alone in the same section ([`UiPrimary::Working`]), its
-//! label the accessible name: the Link row (or the Hardware row) says how.
+//! label the accessible name: the link row (or the Hardware row) says how.
 //! When nothing can be pressed there is no section at all — never a greyed
 //! verb, and never a row's words said again here (P2, P7). The spinner
 //! presses nothing, so it is not an action.
@@ -83,7 +83,8 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RenamableName(title: String, rename: OfferPath, on_action: EventHandler<UiAction>) -> Element {
     let offer = use_offer_at(rename.clone())();
-    let mut editing = use_signal(|| false);
+    let renaming = super::card_action::use_card_scope().previews.renaming;
+    let mut editing = use_signal(|| renaming);
     let mut value = use_signal(|| title.clone());
     // Esc puts the name back; the blur that follows must not press.
     let mut cancelled = use_signal(|| false);

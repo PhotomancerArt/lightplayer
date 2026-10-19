@@ -66,7 +66,7 @@
 // `cancel-update`, `flash`), the firmware bar's work (the update's steps,
 // `lpa_devices::FlashStep`), the firmware details core raises while the
 // layout question is open (`UiDetailPanel::Layout` — no longer a dialog),
-// the access and connection details, and the board's terminal in the status
+// the access and link row's details, and the board's terminal in the status
 // corner. Never the card's face text.
 //
 // NOT CI (same rule as walk-no-board). Needs: the release Studio bundle
@@ -404,16 +404,16 @@ function offerButton(board, verb, inDetails) {
 /// The card the board is on now: its own (`CARD`) while that card is
 /// linked, else the one linked card on the page — a board that comes back
 /// from a pulled cable not running LightPlayer can be a new card until it
-/// says who it is. Linked: its connection bar reads neither "Offline · …"
-/// nor, for an unplugged board Wi‑Fi or lightplayer.app still reaches,
-/// "<that way> · not connected" (`connection_bar.rs`).
+/// says who it is. Linked: its USB row is not last-known (an offline
+/// board's rows are drawn stale, `usb_bar.rs`).
 async function liveBoard(driver) {
   const paths = await driver.cardPaths();
   const linked = [];
   for (const board of paths) {
-    const line = await driver.barText("connection", { board });
-    const unplugged = line?.startsWith("Offline") || /^(Wi‑Fi|lightplayer\.app) · not connected/.test(line ?? "");
-    if (line && !unplugged) linked.push(board);
+    const unplugged = await driver.evaluate(`(() => {
+      const row = document.querySelector(${JSON.stringify(`[data-board-card="${board}"] [data-bar="usb"]`)});
+      return row ? row.getAttribute('data-stale') === 'true' : null; })()`);
+    if (unplugged === false) linked.push(board);
   }
   if (CARD && linked.includes(CARD)) return CARD;
   if (linked.length === 1) return linked[0];
@@ -661,12 +661,13 @@ const CARDS_NOW = `[...document.querySelectorAll('[data-board-card]')].map((card
     .map((m) => m.getAttribute('data-offer-path').split('/').pop()),
 }))`;
 
-/// Page-side: the Bluetooth switch in the card's open connection details
-/// (`UiDetailPanel::Bluetooth`, drawn only while the card holds the board's
-/// access list or the link is Bluetooth), as `{ on, disabled }`, or null.
+/// Page-side: the Bluetooth switch in the card's open Bluetooth row's
+/// details — its Disable Bluetooth (on) or Enable Bluetooth (off), the core
+/// offer `bluetooth/enabled`, drawn once the card holds the board's access
+/// list — as `{ on, disabled }`, or null.
 function bluetoothSwitch(board) {
-  return `(() => { const sw = ${barPanel(board, "connection")}?.querySelector('button[role="switch"][aria-label="Bluetooth"]');
-    return sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null; })()`;
+  return `(() => { const sw = ${barPanel(board, "bluetooth")}?.querySelector('[data-offer-path$="/bluetooth/enabled"] button');
+    return sw ? { on: (sw.textContent || '').includes('Disable'), disabled: sw.disabled } : null; })()`;
 }
 
 /// Page-side: one fact in the card's open `layer` details (`dt` → `dd`), or
@@ -679,12 +680,12 @@ function detailsLine(board, layer, label) {
 }
 
 /// The card's access rows, read where they live now: the Bluetooth switch
-/// (the connection details); who gets in with no password, the access
+/// (the Bluetooth row's details); who gets in with no password, the access
 /// details' "Open to" (null while the card holds no list); and whether the
 /// access panel still says it is reading the list.
 async function readAccess(driver, board) {
   try {
-    await driver.openBar("connection", { board, timeoutMs: STEP_MS });
+    await driver.openBar("bluetooth", { board, timeoutMs: STEP_MS });
     const bluetooth = await driver.evaluate(bluetoothSwitch(board));
     await driver.openBar("access", { board, timeoutMs: STEP_MS });
     const open = await driver.evaluate(detailsLine(board, "access", "Open to"));
@@ -696,13 +697,13 @@ async function readAccess(driver, board) {
 }
 
 /// Until the card's access rows are the board's, `timeoutMs` in all: the
-/// Bluetooth switch on and usable (it is locked until the board has answered
-/// its list, `ui_bluetooth_switch.rs`), then "Open to" saying `want`.
+/// Bluetooth switch on and usable (it is not drawn until the board has
+/// answered its list, `bluetooth_bar.rs`), then "Open to" saying `want`.
 async function awaitAccess(driver, board, want, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const left = () => Math.max(1_000, deadline - Date.now());
   try {
-    await driver.openBar("connection", { board, timeoutMs: left() });
+    await driver.openBar("bluetooth", { board, timeoutMs: left() });
     await driver.waitFor(`(() => { const sw = ${bluetoothSwitch(board)}; return Boolean(sw) && sw.on && !sw.disabled; })()`, {
       timeoutMs: left(),
       what: "the Bluetooth switch on and usable",
@@ -1146,7 +1147,7 @@ async function main() {
     // connection; wait for that, then say what the card shows. W7a's board
     // is formatted, so its list is a different one and is not judged here.
     // The rows live in the card's details now: the Bluetooth switch in the
-    // connection details, who gets in with no password in the access
+    // link row's details, who gets in with no password in the access
     // details ("Open to"), the access panel beside it.
     if (scenario !== "W7a") {
       const board = await liveBoard(driver).catch(() => CARD);

@@ -254,18 +254,19 @@ async function main() {
       if (reason !== "Firmware updates need USB") {
         throw new Error(`the firmware details do not say \`Firmware updates need USB\` (they say ${JSON.stringify(reason)})`);
       }
-      // The connection details: over the link it is on, Bluetooth is locked
-      // on and the switch's line says how to turn it off instead.
-      await driver.openBar("connection", { timeoutMs: STEP_DEADLINE_MS });
+      // The Bluetooth row is the link in use, and over it Disable
+      // Bluetooth is refused: it is the link you are on.
+      await driver.waitBar("bluetooth", /^Bluetooth \S+ connected$/, { timeoutMs: STEP_DEADLINE_MS });
+      await driver.openBar("bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const locked = await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
-                  const panel = card.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]');
-                  return Boolean(panel) && (panel.innerText || '').includes('turn off by USB')
-                    && Boolean(panel.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled')); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the connection details' locked Bluetooth switch" },
+                  const panel = card.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
+                  const off = panel?.querySelector('[data-offer-path$="/bluetooth/enabled"] button');
+                  return Boolean(off) && off.disabled && (off.textContent || '').includes('Disable Bluetooth'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's Disable Bluetooth, refused over Bluetooth" },
       );
       await driver.closeDetails();
-      if (!locked) throw new Error("the card has no locked Bluetooth switch");
+      if (!locked) throw new Error("the card's Disable Bluetooth is not refused over Bluetooth");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
       );

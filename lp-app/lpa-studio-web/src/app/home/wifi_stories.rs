@@ -25,7 +25,7 @@ use crate::app::home::wifi_panel::{WifiPage, WifiPanel};
 // --- 1 · The row ------------------------------------------------------------
 
 #[story(
-    description = "On a board joined to Wi‑Fi, over USB: the connection bar \"USB · connected\" with the cloud alone at its end, lit (\"Also reachable through lightplayer.app\" is its label and hover, no words on the bar); its details list USB \"connected\" and Wi‑Fi \"Starlink Truck\" (good tone) above the Wi‑Fi panel."
+    description = "On a board joined to Wi‑Fi, over USB: the USB row says \"connected\" and the Wi‑Fi row its network, \"Starlink Truck\"; the Wi‑Fi row's details are the Wi‑Fi panel, with Disable Wi‑Fi under it."
 )]
 fn wifi_row_on_the_card() -> Element {
     rsx! {
@@ -44,7 +44,7 @@ fn wifi_row_on_the_card() -> Element {
 }
 
 #[story(
-    description = "The connection details open over their own bar, holding the Wi‑Fi panel, on a page with no room for them above or below (a long Nearby list): the details card slides back across the connection bar it opened from, and nothing of that bar shows through the network list. Yona's G1 walk found a card row's top-layer copy drawn between two network names; the popover skips the copy whenever the panel overlaps its trigger, not only when it covers all of it (a full-width bar is wider than the panel)."
+    description = "The Wi‑Fi row's details open over their own row, holding the Wi‑Fi panel, on a page with no room for them above or below (a long Nearby list): the details card slides back across the row it opened from, and nothing of that row shows through the network list. Yona's G1 walk found a card row's top-layer copy drawn between two network names; the popover skips the copy whenever the panel overlaps its trigger, not only when it covers all of it (a full-width bar is wider than the panel)."
 )]
 fn wifi_popover_open_over_its_card_row() -> Element {
     use crate::app::board_card::CardPart;

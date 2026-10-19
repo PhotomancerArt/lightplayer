@@ -36,7 +36,7 @@ use crate::core::OffersProvider;
 // --- 1 · Connections ------------------------------------------------------
 
 #[story(
-    description = "Over USB, Bluetooth ON (the default): the connection bar says \"USB · connected\"; its details hold the USB line and the Bluetooth switch — only the icon, the word and the switch. The access bar: \"You can edit\", \"anyone can edit\", warning-tinted (a new board is open to anyone nearby, for now), and it opens the access panel. No \"Bluetooth\" or \"Unlock for edit\" verb."
+    description = "Over USB, Bluetooth ON (the default): the USB row says \"connected\" and the Bluetooth row the name a phone sees; its details hold Disable Bluetooth. The access bar: \"You can edit\", \"anyone can edit\", warning-tinted (a new board is open to anyone nearby, for now), and it opens the access panel. No \"Bluetooth\" or \"Unlock for edit\" verb."
 )]
 fn ble_connections_usb_on() -> Element {
     rsx! {
@@ -54,7 +54,7 @@ fn ble_connections_usb_on() -> Element {
 }
 
 #[story(
-    description = "Over USB, Bluetooth OFF (left), and just after flipping it on (right): the board reads the switch at boot, so Studio restarts it to apply, and the switch (connection details) says \"Restarting to turn Bluetooth on…\" and waits until it is back."
+    description = "Over USB, Bluetooth OFF (left), and just after flipping it on (right): the board reads the switch at boot, so Studio restarts it to apply, and the Bluetooth row's details say \"Restarting to turn Bluetooth on…\", Enable waiting, until it is back."
 )]
 fn ble_connections_usb_off_and_restarting() -> Element {
     rsx! {
@@ -80,7 +80,7 @@ fn ble_connections_usb_off_and_restarting() -> Element {
 }
 
 #[story(
-    description = "A device reached over Bluetooth, unlocked at edit by this phone's own key (no screen was shown): the connection bar says \"Bluetooth · connected\", no USB line, and its details' Bluetooth switch is LOCKED on, \"connected this way — turn off by USB\" (you cannot turn off the radio you are talking over). Firmware verbs: disabled, \"Firmware updates need USB\"."
+    description = "A device reached over Bluetooth, unlocked at edit by this phone's own key (no screen was shown): the Bluetooth row says its name and \"connected\", the USB row \"not connected\", and Disable Bluetooth in its details waits with why — \"Bluetooth can only be turned off by USB — it is the link you are on.\" Firmware verbs: disabled, \"Firmware updates need USB\"."
 )]
 fn ble_connections_over_bluetooth() -> Element {
     let mut panel = panel(

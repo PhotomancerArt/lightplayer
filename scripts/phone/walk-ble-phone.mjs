@@ -200,12 +200,13 @@ async function main() {
       }
       const face = await driver.boardRuns({ board: mac, timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") throw new Error(`${info.slug} has no project loaded; load one (over USB) and walk again`);
-      await driver.openBar("connection", { board: mac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitBar("bluetooth", /^Bluetooth \S+ connected\b/, { board: mac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.openBar("bluetooth", { board: mac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
-        `(() => { const panel = ${CARD}?.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]');
-                  return Boolean(panel) && (panel.innerText || '').includes('turn off by USB')
-                    && Boolean(panel.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled')); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the connection details' locked Bluetooth switch (this link is Bluetooth)" },
+        `(() => { const panel = ${CARD}?.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
+                  const off = panel?.querySelector('[data-offer-path$="/bluetooth/enabled"] button');
+                  return Boolean(off) && off.disabled && (off.textContent || '').includes('Disable Bluetooth'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's Disable Bluetooth, refused (this link is Bluetooth)" },
       );
       await driver.closeDetails({ board: mac });
       return `the card is ${info.mac}, running a project, on Bluetooth`;

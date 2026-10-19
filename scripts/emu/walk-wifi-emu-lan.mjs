@@ -18,7 +18,7 @@
 //   W5  the LAN probe asks for `_lightplayer._tcp` → both boards answer,
 //       each with its own name and MAC
 //   W6  a network with a wrong password on c6-b, from Studio over c6-b's
-//       USB door (the Wi‑Fi panel in its card's connection details; why
+//       USB door (the Wi‑Fi panel in its card's link row's details; why
 //       over USB, below) → "Wrong password"; the board goes back to the
 //       good network
 //   W7  a name no access point has → "Not in range"
@@ -65,7 +65,7 @@
 // door's `GET /boards` lists for that forward (`devices/mac-<hex>`, `Page`'s
 // `boardAt`), "ready" is core offering it a project or the editor
 // (`boardRuns`), a verb is pressed by its offer path, and the Wi‑Fi panel is a
-// section of the connection bar's details.
+// section of the link row's details.
 //
 // The interfaces this walk drives were written ahead of the code that
 // provides them (P12's hosts, built in parallel). The door's shapes (the
@@ -150,20 +150,19 @@ const RADIO_OFF_FOR_WIFI =
 /// Wi‑Fi panel's own "Cloud relay", `app/home/wifi_panel.rs`). They say WHEN
 /// to look; the board's status says what happened.
 export const WORDS = {
-  // U+2011. The Link row on a LAN link: `<link> · connected`
-  // (`board_card/connection_bar.rs`), the link's word being
-  // `UiLinkKind::Wifi.label()` (`ui_link_kind.rs`). A board through the relay
-  // reads "lightplayer.app · …", which this does not match, and an unplugged
-  // board Wi‑Fi still reaches reads "Wi‑Fi · not connected", which this does
-  // not match either.
-  wifiLine: "Wi‑Fi · connected",
+  // U+2011. The Wi‑Fi row on a LAN link: its network, then "connected",
+  // this tab's link (`board_card/wifi_bar.rs`), the row's kind being
+  // `UiLinkKind::Wifi.label()` (`ui_link_kind.rs`). A board through the
+  // relay says "connected" on its lightplayer.app row instead, and an
+  // unplugged board's Wi‑Fi row says its network dimmed, neither of which
+  // this matches.
+  wifiLine: /^Wi\u2011Fi .*(?<!not )connected$/,
   connectToANetwork: "Connect to a network",
   otherNetwork: "Other network",
   connect: "Connect",
   checkingPassword: "Checking the password",
   wrongPassword: "Wrong password",
   notInRange: "Not in range",
-  cloudRelay: "Cloud relay",
 };
 
 export const STUDIO_LOAD_MS = 420_000;
@@ -177,7 +176,7 @@ const RTT_COUNT = 40;
 
 export const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 /// The open popover's panel (`studio-driver.mjs`'s): one popover is open at
-/// a time — a card's details (the Wi‑Fi panel is the connection details'),
+/// a time — a card's details (the Wi‑Fi panel is the link row's details'),
 /// or a pick the card opened.
 export { PANEL };
 export const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
@@ -273,7 +272,7 @@ export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/" }) 
 /// (`?emu=`), in its own browser.
 ///
 /// The Wi‑Fi panel and its in-row test are a section of the board card's
-/// connection details (`board_card/connection_bar.rs`, the panel drawn by
+/// link row's details (`board_card/link_bar.rs`, the panel drawn by
 /// `app/home/wifi_panel.rs`), and the walk opens them on c6-b's card over
 /// USB. The plan allows either ("Studio, over USB or LAN"); the LAN page
 /// cannot be the one, below. A separate
@@ -598,9 +597,9 @@ function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/// The open connection details' panel on a card (`scope`, a card's
+/// The open Wi‑Fi row's details' panel on a card (`scope`, a card's
 /// expression): where the board's Wi‑Fi panel is drawn.
-const connectionPanel = (scope) => `${scope}?.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]')`;
+const connectionPanel = (scope) => `${scope}?.querySelector('[data-bar="wifi"] [id^="ux-popover-panel"]')`;
 
 /// Type `text` into the panel's input `selector`, the way a keyboard does
 /// for Dioxus (`input` events carry the value).
@@ -652,16 +651,16 @@ export class Page {
   /// The MAC of the card Studio reached at `forward`, checked three ways:
   /// the card is keyed by the MAC the board's own hello said
   /// (`devices/mac-<hex>`, which must be the door's MAC for this forward),
-  /// its connection bar reads the Wi‑Fi link ("Wi‑Fi · connected",
-  /// `connection_bar.rs`), and its connection details' Address is this
+  /// its Wi‑Fi row reads the Wi‑Fi link ("Wi‑Fi <network> connected",
+  /// `wifi_bar.rs`), and that row's details' Address is this
   /// forward (`lan_link_view.rs`: the LAN link's host and port). A card that
   /// is another board's, or is reached some other way, fails here; this is
   /// where reading the MAC off the card's face stood.
   async cardMac(forward, { timeoutMs = STEP_MS } = {}) {
     const board = await this.boardAt(forward);
     const ref = await this.driver.waitCard({ board, timeoutMs });
-    await this.driver.waitBar("connection", WORDS.wifiLine, { board, timeoutMs });
-    const address = await this.driver.detailsFact("connection", "Address", { board, timeoutMs });
+    await this.driver.waitBar("wifi", WORDS.wifiLine, { board, timeoutMs });
+    const address = await this.driver.detailsFact("wifi", "Address", { board, timeoutMs });
     if (address !== forward) {
       throw new Error(`the card ${ref} says it is reached at ${JSON.stringify(address)}, not at ${forward}`);
     }
@@ -674,26 +673,27 @@ export class Page {
   async cardLines(forward) {
     const board = await this.boardAt(forward);
     const lines = {};
-    for (const layer of ["project", "connection", "access", "firmware", "hardware"]) {
+    for (const layer of ["project", "usb", "wifi", "bluetooth", "cloud", "access", "firmware", "hardware"]) {
       lines[layer] = await this.driver.barText(layer, { board });
     }
     return lines;
   }
 
   /// Open the board's Wi‑Fi panel on its first page. The panel is a section
-  /// of the card's connection details (`connection_bar.rs`; drawn by
-  /// `app/home/wifi_panel.rs`), and its first page ends with the Cloud relay
-  /// switch. Details open on another of the panel's pages are closed first:
-  /// the panel opens on its first page each time it is drawn.
+  /// of the card's Wi‑Fi row's details (`wifi_bar.rs`; drawn by
+  /// `app/home/wifi_panel.rs`), and its first page is the one with no Back.
+  /// Details open on another of the panel's pages are closed first: the
+  /// panel opens on its first page each time it is drawn.
   async openWifi({ board }) {
     const panel = connectionPanel(await this.driver.card({ board }));
-    const onFirstPage = `(${panel}?.innerText || '').includes(${JSON.stringify(WORDS.cloudRelay)})`;
+    const onFirstPage = `(Boolean(${panel}) && (${panel}.innerText || '').includes('Disable Wi\u2011Fi')
+      && !${panel}.querySelector('button[aria-label="Back"]'))`;
     if (await this.driver.evaluate(`Boolean(${panel})`)) {
       if (await this.driver.evaluate(onFirstPage)) return;
       await this.driver.closeDetails({ board });
     }
-    await this.driver.openBar("connection", { board, timeoutMs: STEP_MS });
-    await this.driver.waitFor(onFirstPage, { timeoutMs: STEP_MS, what: "the Wi‑Fi panel in the connection details" });
+    await this.driver.openBar("wifi", { board, timeoutMs: STEP_MS });
+    await this.driver.waitFor(onFirstPage, { timeoutMs: STEP_MS, what: "the Wi‑Fi panel in the Wi‑Fi row's details" });
     await this.driver
       .waitFor(`getComputedStyle(${panel}).opacity === '1'`, { timeoutMs: 10_000, what: "the details to finish fading in" })
       .catch(() => null);
@@ -840,7 +840,7 @@ async function main() {
         `W1 lp-cli wifi add serial:ws://<door>/board/<id>/bytes ${NET.ssid} --password-stdin --json   (each board)`,
         "W1 lp-cli wifi status serial:ws://<door>/board/<id>/bytes --json   until connected",
         "   lp-cli link capture tcp://127.0.0.1:<bridge to /bytes> --console console/<id>.link.log   (held to the end)",
-        "W2 Studio ?lan=… → two Wi‑Fi cards (each card by the door's MAC for its forward: ready, its connection bar on Wi‑Fi, its Address the forward); each console: [lan] link … secure session opening",
+        "W2 Studio ?lan=… → two Wi‑Fi cards (each card by the door's MAC for its forward: ready, its link row on Wi‑Fi, its Address the forward); each console: [lan] link … secure session opening",
         `W3 push ${WALK_PROJECT} to ${A} over the LAN (push → the project pick → Put it on the board); console: Project loaded, frames advance; edit (the card's Edit) a knob`,
         `W4 ${B}'s card ready (push or edit offered) with its own MAC; no [lan] link … closed on either console; a second LAN dial to ${B} turned away (one LAN link); ${B} answers over its USB door`,
         `W5 GET /lans/${LAN}/browse?service=_lightplayer._tcp.local → both MACs`,
@@ -1107,7 +1107,7 @@ async function main() {
         // Then the page, which only says where to look: the card of the
         // board the door serves at this forward — keyed by the MAC its hello
         // said — ready (core offers it a project or the editor), its
-        // connection bar on the Wi‑Fi link, and its connection details'
+        // link row on the Wi‑Fi link, and its link row's details'
         // Address this forward (`Page.cardMac`). A card keyed by another
         // MAC, or reached another way, fails there.
         await page.cardReady(fwd[id]);
@@ -1155,7 +1155,7 @@ async function main() {
       const face = await driver.waitFor(
         `(() => { const c = ${cardA}; if (!c) return false;
                   if (c.querySelector('[data-board-panel]')) return 'connected';
-                  return c.querySelector('[data-bar="connection"]') ? 'watched' : false; })()`,
+                  return c.querySelector('[data-bar="usb"]') ? 'watched' : false; })()`,
         { timeoutMs: STEP_MS, what: `${A}'s card, connected or watched` },
       );
       if (face === "connected") {
@@ -1244,7 +1244,7 @@ async function main() {
       await awaitStatus(lan(B), (s) => stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid, {
         what: `connected to ${NET.ssid} after Studio opened its USB door`,
       });
-      // c6-b's card, by its MAC: the Wi‑Fi panel in its connection details.
+      // c6-b's card, by its MAC: the Wi‑Fi panel in its link row's details.
       await usbTab.page.openWifi({ board: mac[B] });
       await usbTab.page.panelClick(WORDS.connectToANetwork);
       // The board heard it: its scan answer is what lists it. The first

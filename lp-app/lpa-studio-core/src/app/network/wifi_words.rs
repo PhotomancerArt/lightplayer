@@ -170,6 +170,8 @@ pub mod card {
     pub const CANT_REACH: &str = "can't reach";
     /// The board dialling lightplayer.app.
     pub const CONNECTING: &str = "connecting";
+    /// Networks a firmware saved and cannot join yet.
+    pub const SAVED: &str = "saved";
     /// The Wi‑Fi row's fix for a board with nothing saved: its details.
     pub const SET_UP: &str = "Set up";
     /// The Wi‑Fi row's fix for a refused password: its details.

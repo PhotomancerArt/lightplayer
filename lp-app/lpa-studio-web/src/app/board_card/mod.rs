@@ -11,7 +11,7 @@
 //!
 //! | piece | draws |
 //! |---|---|
-//! | [`BoardCard`] | the card: the picture's row, the name bar, the five bars at one height in every state (connected, the board's whole panel in their place, as tall as it needs: [`CompactPanel`](crate::app::module::CompactPanel)) |
+//! | [`BoardCard`] | the card: the picture's row, the name bar, the eight rows at one height in every state (connected, the board's whole panel in their place, as tall as it needs: [`CompactPanel`](crate::app::module::CompactPanel)) |
 //! | [`BoardPicture`](board_picture::BoardPicture) | the board's lights, dimmed when last known, or the update's light strip |
 //! | [`BoardSurface`](board_surface::BoardSurface) | over the picture, what matters now: the state's icon in its tone, one or two plain sentences, the work's progress; the picture dims under it |
 //! | [`StatusCorner`](status_corner::StatusCorner) | the notch cut out of the picture: a quiet ⋯ that opens the corner's details |
@@ -66,12 +66,15 @@
 //!
 //! The card is mounted wherever a board appears: the home page's
 //! `BoardCardSlot`, the editor's docked card (`LensCardPane`) and the
-//! mismatch page. Its stories are [`board_card_stories`].
+//! mismatch page. Its stories are [`board_card_stories`], and the rows as a
+//! new board's setup list [`board_card_setup_stories`].
 
 pub(crate) mod bar_detail_panel;
 pub(crate) mod bar_details;
 pub(crate) mod bar_work;
 pub(crate) mod board_card;
+#[cfg(feature = "stories")]
+pub(crate) mod board_card_setup_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;
 pub(crate) mod board_picture;

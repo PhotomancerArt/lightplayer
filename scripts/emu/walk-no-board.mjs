@@ -753,12 +753,12 @@ async function main() {
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
       // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
-      // Since that fix the card's Link row should read the port open ("USB ·
-      // connected") once its work is over; "USB · not connected" here is a
+      // Since that fix the card's USB row should read the port open ("USB
+      // connected") once its work is over; "USB not connected" here is a
       // regression worth chasing, not the expected answer.
       const settled = await driver
-        .waitWork("connection", ["none", "failed"], { timeoutMs: 60_000 })
-        .then(() => driver.barText("connection"))
+        .waitWork("usb", ["none", "failed"], { timeoutMs: 60_000 })
+        .then(() => driver.barText("usb"))
         .catch(() => "(the card never settled)");
       console.log(`  after the replug the card reads: ${JSON.stringify(settled)}`);
       steps.replugSettled = settled;

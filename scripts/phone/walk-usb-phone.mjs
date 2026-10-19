@@ -246,9 +246,9 @@ async function main() {
       }
       const face = await driver.boardRuns({ board: mac, timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") throw new Error(`${info.slug} has no project loaded; load one and walk again`);
-      const bar = await driver.barText("connection", { board: mac });
-      if (!/USB/.test(bar)) throw new Error(`the card's connection bar says ${JSON.stringify(bar)}, not USB`);
-      return `the card is ${info.mac}, running a project; connection "${bar}"`;
+      const bar = await driver.barText("usb", { board: mac });
+      if (!/^USB connected\b/.test(bar)) throw new Error(`the card's USB row says ${JSON.stringify(bar)}, not connected`);
+      return `the card is ${info.mac}, running a project; USB row "${bar}"`;
     });
 
     if (INSTALL && !blank) {

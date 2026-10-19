@@ -1,4 +1,4 @@
-//! The "Link" section of the connection bar's details
+//! The "Link" section of the details of the row of the link in use
 //! ([`UiDetailPanel::LinkCounters`]): the board's link counters off its
 //! heartbeat as label/value rows, words, units and the caption from core
 //! ([`link_counter_rows`], [`LINK_COUNTERS_CAPTION`]). A count the link had

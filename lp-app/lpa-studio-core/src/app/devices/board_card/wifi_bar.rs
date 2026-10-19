@@ -7,7 +7,8 @@
 //!
 //! | Board says | Name · state | Action | Tone |
 //! |---|---|---|---|
-//! | nothing yet (no firmware, not answered, a stand-in, a firmware with no Wi‑Fi) | "—" | — | Neutral |
+//! | nothing yet (no firmware, not answered, a stand-in, a firmware with no Wi‑Fi and nothing saved) | "—" | — | Neutral |
+//! | a firmware that saves networks and can't join yet | "`ssid` · saved" ("2 networks · saved") | — | Neutral |
 //! | its Wi‑Fi switch off | "disabled" | — | Neutral |
 //! | joining `ssid` | "`ssid`" (work: "joining") | — | Neutral |
 //! | joined `ssid` | "`ssid`", and "connected" when this tab's link is Wi‑Fi | — | Neutral |
@@ -76,7 +77,19 @@ fn station_facts(input: &BoardCardInput<'_>, status: &NetworkStatus) -> LinkFact
     }
     match &status.station {
         StationState::Off => row(DISABLED),
-        StationState::Unsupported => row(NOT_KNOWN),
+        // A firmware that saves networks and cannot join them yet: what it
+        // holds, "saved".
+        StationState::Unsupported => match status.networks.as_slice() {
+            [] => row(NOT_KNOWN),
+            [only] => LinkFacts {
+                aside: Some(card::SAVED.to_string()),
+                ..named(&only.ssid)
+            },
+            many => LinkFacts {
+                aside: Some(card::SAVED.to_string()),
+                ..named(&card::networks(many.len()))
+            },
+        },
         StationState::Connecting { ssid, .. } => LinkFacts {
             work: Some(UiBarWork::running(card::JOINING, None)),
             ..named(ssid)
@@ -190,6 +203,13 @@ mod tests {
         let table: Vec<(Option<StationState>, &[&str], bool, &str, Option<&str>)> = vec![
             (None, &[], true, "\u{2014}", None),
             (Some(StationState::Unsupported), &[], true, "\u{2014}", None),
+            (
+                Some(StationState::Unsupported),
+                &["home", "van"],
+                true,
+                "2 networks",
+                Some("saved"),
+            ),
             (Some(StationState::Off), &["home"], false, "disabled", None),
             (
                 Some(StationState::Connected {
