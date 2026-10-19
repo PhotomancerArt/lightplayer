@@ -107,3 +107,54 @@ device.
   arm can go; the port stays useful for any browser with WebUSB and no Web
   Serial. Lifting decision 5 needs a flash that survives loss (the open
   defect says what was measured), walked on the phone.
+
+## Amendment 2026-10-19: decision 5 is lifted — firmware is written over WebUSB
+
+The flasher now survives what a C6 drops on a phone, so the refusal is
+gone. The card offers Update firmware, Install firmware and Factory reset
+over a phone's USB as over a computer's, and `LinkInfo::firmware_blocked`
+and `FIRMWARE_NEEDS_A_COMPUTER` are removed (nothing produced them any
+more).
+
+**What it took.** A lab page driving esptool-js over the shipped port
+found that the loss is narrow: the stub ends a USB packet at every `0x0a`,
+and the phone falls behind a long burst of short ones. Writes, whose
+replies are one short frame with one command waiting, lost nothing. And
+the stub recovers a read without a new session: acking a READ_FLASH's
+whole length ends its send loop in about 60 ms. So the fix is the client
+side alone, in `browser_esp32_flash.js`. esptool-js, Espressif's stub and
+the firmware are unchanged:
+
+- reads are READ_FLASH segments, each checked against the stub's own
+  digest and read again with half-length packets when one is lost (clean
+  segments double them again; WebUSB 32 to 384 B, Web Serial 64 to 384 B
+  starting at its 384);
+- each written image is proven by FLASH_MD5 and written again from its
+  FLASH_DEFL_BEGIN when it does not match or a reply is lost. A block is
+  never resent, because the stub would inflate it twice;
+- up to three bootloader sessions over WebUSB.
+
+Writing a stub of our own, or installing through the over-the-air update,
+was weighed and not needed. The over-the-air update already works from
+the phone, but a blank board, a board that needs USB once and the files
+migration have no LightPlayer firmware to speak lp-link, so the ROM and
+stub path had to work.
+
+**Walked** on the desk's Pixel 8a (Android 14, Chrome 155) with loose-c6
+on its port, `just walk-usb-phone --serve-release`, which now writes
+firmware:
+
+- the USB update of a fielded board, littlefs to the tree store with its
+  files moved and its project kept: 2026.10.10-14 to 2026.10.19-2 in 55 s;
+- a first install onto a blank board in 9.3 s, the board's hello on the
+  new build, then a project, the editor and Play;
+- Factory reset (esptool's erase, 3.0 s): the board is blank after it.
+  The card that erased it says "not responding" until the page reloads
+  (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`,
+  open); the walk reloads.
+
+No write or bootloader session was retried on those runs. Read segments
+read twice were not logged then; `readFlashSafely` now says each one on the
+flash's terminal, and the walk counts them. The node tests
+(`lp-app/lpa-link/tests/js/browser_esp32_flash.test.mjs`) lose packets,
+digests and replies on purpose.
