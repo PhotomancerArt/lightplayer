@@ -76,7 +76,7 @@ fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
     assert_eq!(done.icon.as_deref(), Some("check"));
     every_card_action_is_offered(&mut bench);
 
-    // Edit: the project bar's action (the panel's All controls row's too).
+    // Edit: the project bar's action (the panel foot's too).
     let edit = card
         .bar(crate::BarLayer::Project)
         .action

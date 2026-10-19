@@ -82,7 +82,6 @@ pub(crate) fn knob_control_stepped(
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
-        wires: Vec::new(),
     }
 }
 
@@ -113,7 +112,6 @@ pub(crate) fn fader_control(
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
-        wires: Vec::new(),
     }
 }
 
@@ -140,7 +138,6 @@ pub(crate) fn toggle_control(
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
-        wires: Vec::new(),
     }
 }
 
@@ -183,7 +180,6 @@ pub(crate) fn palette_swatch_control(
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
-        wires: Vec::new(),
     };
     if shared {
         control.panel_target = Some(lpa_studio_core::UiPanelTarget {

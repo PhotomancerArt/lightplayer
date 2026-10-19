@@ -436,11 +436,6 @@ pub(crate) fn story_board_prefix(device: lpa_studio_core::DeviceId) -> OfferPath
     OfferPath::board(&BoardRef::New(device.0 as u32))
 }
 
-/// The play page a connected story card's All controls links: the porch
-/// board's project, played (the router's `play_address` for a bound lens).
-pub(crate) const STORY_PLAY_ADDRESS: &str =
-    "/p/aurora-drift-prjh7kq9xy2mq4tb8wz/play?on=mac:60:55:f9:0a:0b:0c";
-
 /// What the controller knows about a story board's session, for
 /// [`story_session_offers`].
 #[derive(Clone, Copy, Debug, Default)]
@@ -681,11 +676,6 @@ pub(crate) fn StoryBoardCard(
         connection: &connection,
         panel: panel.as_ref(),
     });
-    // A connected card's All controls goes to the session's play page; a
-    // story's session is the porch board's project.
-    crate::app::board_card::card_play_address::use_provide_card_play_address(
-        built.panel.as_ref().map(|_| STORY_PLAY_ADDRESS.to_string()),
-    );
     // A story that opens a part's details (or whose layout question raises
     // them) keeps the room they float in, so a capture holds the whole
     // details card and a grid of such cards never stacks one over the next.
@@ -827,10 +817,6 @@ pub(crate) fn StoryHomePage(
         &offers,
         now_secs.unwrap_or(STORY_BOARD_NOW),
         connected.as_ref().map(|(device, panel)| (*device, panel)),
-    );
-    // The connected card's All controls.
-    crate::app::board_card::card_play_address::use_provide_card_play_address(
-        connected.as_ref().map(|_| STORY_PLAY_ADDRESS.to_string()),
     );
     rsx! {
         OffersProvider { offers,

@@ -65,7 +65,7 @@ pub use bar_work::{activity_bar, activity_words};
 pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
-pub use board_panel_picks::{BOARD_PANEL_CONTROLS, MASTER_CHANNEL, board_panel_picks};
+pub use board_panel_picks::{MASTER_CHANNEL, board_panel_picks};
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
 pub use connection_bar::{
     ALSO_THROUGH_THE_CLOUD, CLOUD_NOT_YET, CONNECTION_FAILED, RECONNECTING, SOMEONE_ELSE_SENTENCE,
@@ -84,7 +84,7 @@ pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_c
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
-pub use ui_board_panel::{UiBoardPanel, UiCardControl};
+pub use ui_board_panel::{UiBoardPanel, UiBoardPanelSection, UiCardControl};
 pub use ui_board_picture::{PictureSource, UiBoardPicture};
 pub use ui_board_surface::{
     SurfacePicture, SurfaceProgress, SurfaceState, UiBoardSurface, UiSurfaceNotice,

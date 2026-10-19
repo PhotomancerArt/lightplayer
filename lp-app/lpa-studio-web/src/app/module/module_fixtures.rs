@@ -22,8 +22,8 @@ use lpa_studio_core::{
     UiBusSiteOrigin, UiBusSiteView, UiBusView, UiExportsGroup, UiModuleExport, UiModuleFace,
     UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
-    UiPanelWireRole, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind,
-    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreviewFrame,
+    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -139,7 +139,6 @@ pub(crate) fn knob(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
-            wires: Vec::new(),
         },
     )
 }
@@ -174,8 +173,21 @@ pub(crate) fn fader(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
-            wires: Vec::new(),
         },
+    )
+}
+
+/// The fixture's brightness as a panel draws it: a knob over 0–255 (the
+/// fixture's own card keeps its fader; the card panel pass, 2026-10-19).
+pub(crate) fn brightness(scope: &str, value: f32) -> UiPanelControlView {
+    knob(
+        scope,
+        "brightness",
+        "brightness",
+        value,
+        0.0,
+        255.0,
+        Some(1.0),
     )
 }
 
@@ -199,7 +211,6 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
-            wires: Vec::new(),
         },
     )
 }
@@ -231,7 +242,6 @@ pub(crate) fn swatch(
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
-            wires: Vec::new(),
         },
     )
 }
@@ -270,96 +280,55 @@ pub(crate) fn palette_panel() -> UiPanelGroup {
         ])
 }
 
-// ------------------------------------------------------- clock transport
+// ------------------------------------------------------- the clock's speed
 
-/// The clock's default wiring: each transport leaf on its own `clock.*`
-/// channel, promoted onto the panel by the record's `panel = "show"`.
-pub(crate) const TRANSPORT_CHANNELS: [(UiPanelWireRole, &str); 3] = [
-    (UiPanelWireRole::Rate, "clock.rate"),
-    (UiPanelWireRole::PlayState, "clock.play_state"),
-    (UiPanelWireRole::Scrub, "clock.scrub"),
-];
-
-/// The clock's GROUPED Transport control on a module panel (P8): one
-/// control, three wires, one faceplate.
-///
-/// `channels` is the per-dimension wiring in anchor order (rate first), so
-/// a story can retarget one leaf — an authored binding on `rate` — and see
-/// the group re-anchor without the faceplate changing shape.
-pub(crate) fn transport_control(
-    transport: lpa_studio_core::UiClockTransport,
-    channels: [(UiPanelWireRole, &str); 3],
-) -> UiPanelControlView {
-    let target = |channel: &str| lpa_studio_core::UiPanelTarget {
-        scope: scope_target(ROOT_SCOPE),
-        channel: channel.to_string(),
-        engaged: false,
-    };
-    let slot = |role: UiPanelWireRole| match role {
-        UiPanelWireRole::Rate => "transport.rate",
-        UiPanelWireRole::PlayState => "transport.play_state",
-        UiPanelWireRole::Scrub => "transport.scrub_offset_seconds",
-    };
-    let wires: Vec<lpa_studio_core::UiPanelWire> = channels
-        .into_iter()
-        .map(|(role, channel)| lpa_studio_core::UiPanelWire {
-            role,
-            address: Some(walk_address(ROOT_SCOPE, slot(role))),
-            panel_target: Some(target(channel)),
-            live_value: None,
-        })
-        .collect();
-    // The anchor is the first wired dimension in the list (Q22).
-    let anchor = channels[0].1;
+/// The clock's Speed knob on a module panel: the rate leaf's own control,
+/// on `clock.rate`, the knob log ¼×–8× with 1× at the top.
+pub(crate) fn speed_control(scope: &str, rate: f32) -> UiPanelControlView {
     UiPanelControlView::new(
-        anchor,
+        "clock.rate",
         UiPanelControl {
-            label: "Time".to_string(),
-            address: Some(walk_address(ROOT_SCOPE, "transport.rate")),
-            widget: UiPanelWidget::Transport {
-                transport: transport.clone(),
-            },
-            value: UiSlotValue::f32(transport.rate),
             emit: UiPanelEmit::Value,
+            label: "Speed".to_string(),
+            address: Some(walk_address(scope, "transport.rate")),
+            widget: UiPanelWidget::Speed,
+            value: UiSlotValue::f32(rate),
             live_value: None,
             live_gradient: None,
-            panel_target: Some(target(anchor)),
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: "clock.rate".to_string(),
+                engaged: false,
+            }),
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
-            wires,
         },
     )
 }
 
-/// A root panel with the clock's Transport in its own "Clock" child group
-/// (the production assembly shape — an instrument never sits in the flat
-/// strip; G2 feedback 2026-08-08), plus the scarf's brightness fader and a
-/// knob in the flat strip — the real shape of the panel a phone opens
-/// onto, so the instrument is judged in company rather than alone.
-pub(crate) fn transport_panel(
-    transport: lpa_studio_core::UiClockTransport,
-    channels: [(UiPanelWireRole, &str); 3],
-) -> UiPanelGroup {
+/// A root panel with the clock's Speed knob in the flat strip beside the
+/// scarf's brightness and a hue knob — the panel a phone opens onto, so the
+/// knob is judged in company rather than alone.
+pub(crate) fn speed_panel(rate: f32) -> UiPanelGroup {
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
         .with_target(scope_target(ROOT_SCOPE))
         .with_controls(vec![
-            at_default(
-                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
-                "authored 200",
-            ),
+            at_default(brightness(ROOT_SCOPE, 200.0), "authored 200"),
             following(
                 knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
                 "0.41",
                 "lfo · hue",
             ),
+            at_default(speed_control(ROOT_SCOPE, rate), "the clock's own rate"),
         ])
-        .with_groups(vec![
-            UiPanelGroup::new("Clock", "/aurora.sign/clock").with_controls(vec![at_default(
-                transport_control(transport, channels),
-                "the clock's own transport",
-            )]),
-        ])
+}
+
+/// [`speed_panel`] with the Speed knob held at `rate`: gold, its let-go.
+pub(crate) fn speed_panel_held(rate: f32) -> UiPanelGroup {
+    let mut panel = speed_panel(1.0);
+    engage_group(&mut panel, ROOT_SCOPE, "clock.rate", rate);
+    panel
 }
 
 /// Put a control in Read-following-automation, displaying `live`.
@@ -536,10 +505,7 @@ pub(crate) fn root_controls() -> Vec<UiPanelControlView> {
     vec![
         // The scarf (panel.md §3): authored bright; the stories hold it
         // dim, and P10 says it must come back dim without one bright frame.
-        at_default(
-            fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
-            "authored 200",
-        ),
+        at_default(brightness(ROOT_SCOPE, 200.0), "authored 200"),
         // E4's host control: an authored control node writes this channel,
         // so the panel control follows it until someone grabs it.
         following(
@@ -616,7 +582,7 @@ pub(crate) fn control_root_face() -> UiModuleFace {
         panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
             .with_target(scope_target(ROOT_SCOPE))
             .with_controls(vec![at_default(
-                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                brightness(ROOT_SCOPE, 200.0),
                 "authored 200",
             )]),
         wiring: Some(control_wiring()),
@@ -686,7 +652,7 @@ pub(crate) fn both_products_root_face(hero: ModuleHeroProduct) -> UiModuleFace {
         panel: UiPanelGroup::new("Scanner Rig", ROOT_SCOPE)
             .with_target(scope_target(ROOT_SCOPE))
             .with_controls(vec![at_default(
-                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                brightness(ROOT_SCOPE, 200.0),
                 "authored 200",
             )]),
         wiring: Some(both_products_wiring()),
@@ -774,7 +740,7 @@ pub(crate) fn root_children() -> Vec<UiNodeChild> {
             UiPanelGroup::new("halo", ROOT_SCOPE)
                 .with_target(scope_target(ROOT_SCOPE))
                 .with_controls(vec![at_default(
-                    fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                    brightness(ROOT_SCOPE, 200.0),
                     "authored 200",
                 )]),
         ),
@@ -1021,7 +987,7 @@ fn rig_children() -> Vec<UiNodeChild> {
             UiPanelGroup::new("halo", ROOT_SCOPE)
                 .with_target(scope_target(ROOT_SCOPE))
                 .with_controls(vec![at_default(
-                    fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                    brightness(ROOT_SCOPE, 200.0),
                     "authored 200",
                 )]),
         ),
@@ -1211,10 +1177,9 @@ pub(crate) fn entry_held_panel(entry: u32) -> UiPanelGroup {
 
 // ------------------------------------------------- the board card's panel
 
-/// The root panel a connected board card picks from
+/// The root panel a connected board card draws whole
 /// (`lpa_studio_core::board_panel_picks`): the master (brightness), three
-/// knobs, then a toggle and a second fader the card leaves to the play
-/// page — "· 2 more".
+/// knobs, a toggle and a fader.
 pub(crate) fn card_root_panel() -> UiPanelGroup {
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
         .with_target(scope_target(ROOT_SCOPE))
@@ -1224,10 +1189,7 @@ pub(crate) fn card_root_panel() -> UiPanelGroup {
 /// [`card_root_panel`]'s controls.
 fn card_root_controls() -> Vec<UiPanelControlView> {
     vec![
-        at_default(
-            fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
-            "authored 200",
-        ),
+        at_default(brightness(ROOT_SCOPE, 200.0), "authored 200"),
         following(
             knob(ROOT_SCOPE, "speed", "speed", 0.62, 0.0, 1.0, None),
             "0.62",
@@ -1253,6 +1215,27 @@ fn card_root_controls() -> Vec<UiPanelControlView> {
     ]
 }
 
+/// The PLAYFUL choker's root panel (`catalog/projects/playful-choker`), in
+/// its panel order: the clock's Speed knob, the fixture's brightness, the
+/// shader's scale knob and its palette, cycling.
+pub(crate) fn card_playful_panel() -> UiPanelGroup {
+    use crate::app::node::node_story_fixtures::palette_cycle;
+    UiPanelGroup::new("Playful Choker", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(speed_control(ROOT_SCOPE, 1.0), "the clock's own rate"),
+            at_default(brightness(ROOT_SCOPE, 128.0), "authored 128"),
+            at_default(
+                knob(ROOT_SCOPE, "scale", "scale", 1.6, 0.5, 4.0, None),
+                "authored default",
+            ),
+            at_default(
+                swatch(ROOT_SCOPE, "palette", "palette", &palette_cycle()),
+                "authored default",
+            ),
+        ])
+}
+
 /// [`card_root_panel`] with `channel` held at `value` (gold, its let-go):
 /// the held value is what the channel reads now, so the face shows it.
 pub(crate) fn card_root_panel_held(channel: &str, value: f32) -> UiPanelGroup {
@@ -1267,7 +1250,7 @@ pub(crate) fn card_root_panel_held(channel: &str, value: f32) -> UiPanelGroup {
 }
 
 /// A big project's root panel: [`card_root_panel`] and four effects'
-/// groups — fifteen controls, so the card says "· 11 more".
+/// groups — fifteen controls, every one on the card.
 pub(crate) fn card_many_controls_panel() -> UiPanelGroup {
     let effect = |scope: &str, channels: &[&str]| {
         UiPanelGroup::new(instance_label(scope), scope)

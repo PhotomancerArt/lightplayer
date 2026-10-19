@@ -295,9 +295,11 @@ From the top:
 
 The rules:
 
-- **The card is a fixed height.** A board's events never change it (see
-  Stable Layout). Offline, locked, blank, updating and connected cards all
-  measure the same.
+- **The card is a fixed height, but for connected.** A board's events
+  never change it (see Stable Layout). Offline, locked, blank and updating
+  cards all measure the same. A connected card grows once, on connect, to
+  hold the board's panel, and shrinks back on Done; the grid keeps every
+  other card at its own height.
 - **No boxes in boxes.** The bars are full-bleed rows of one card,
   separated by hairlines. Nothing inside a bar draws its own frame.
 - **A state tints its row,** in ui.md's status families and no others,
@@ -344,26 +346,24 @@ The rules:
   its details. The corner doesn't change; the surface says the work over
   the dimmed picture, with its bar and percent.
 - **Connected, the bars become the panel.** Connect turns the card's bars
-  into the board's panel, drawn with Studio's existing panel widgets: as
-  many controls as fit at the card's height, then All controls. Done turns
-  them back. The card does not grow to fit more controls. The connected
-  face, top to bottom, in exactly the five bars' height (140 px, their grid
-  rows, with the same hairlines):
-  - **the master fader** (the project's brightness), one row across the
-    card: its label, the fader, its value;
-  - **one row of controls**, knobs and toggles, each an equal share of the
-    row, at most four controls on the card with the master;
-  - **All controls**, the last row: a link to the board's play page, "· N
-    more" after it when the card leaves controls out, and **Edit** (or
-    Edit with a lock, on a board you can only play) flush at its end as
-    the row's action.
+  into the board's whole panel, drawn with Studio's existing panel widgets,
+  and the card grows once to hold it. Done turns them back. Top to bottom:
+  - **the root's controls, the master first** (the project's brightness, a
+    knob on a panel): knobs and toggles in rows, as many to a row as the
+    card is wide (three on a phone's narrow card); a palette, a fader or
+    the Pattern instrument across the card;
+  - **each nested group's controls** under a quiet heading, its name on a
+    hairline;
+  - **the foot**: a bar with **Edit** (or Edit with a lock, on a board you
+    can only play) flush at its end.
 
-  The controls keep the panel's own look and gestures: the gold held state,
-  the let-go glyph, the detail popover. The card draws no panel-wide reset
-  and no auto-save switch; the play page has them. The name bar's primary
-  is Done (✓) while connected. A card that is connecting, reconnecting or
-  failed to connect keeps its bars, and the connection bar carries the
-  work.
+  The clock is one **Speed** knob there (1× at the top); its own card keeps
+  the tape. The controls keep the panel's own look and gestures: the gold
+  held state, the let-go glyph, the detail popover. Nothing links away: no
+  All controls, no "· N more". The panel's reset and auto-save switch are in
+  the card's ⋯. The name bar's primary is Done (✓) while connected. A card
+  that is connecting, reconnecting or failed to connect keeps its bars, and
+  the connection bar carries the work.
 
 The card is built in core, as a name bar and bars, and drawn by a few
 generic pieces. The web decides how a bar looks, never what it says or

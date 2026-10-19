@@ -264,7 +264,7 @@ pub(crate) fn data_lost(input: &BoardCardInput<'_>) -> bool {
     input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some()
 }
 
-/// Edit, as the Project row and the connected panel's All controls row
+/// Edit, as the Project row and the connected panel's foot
 /// draw it (D32, CD15): `edit` with the pencil on a board you can edit, or
 /// Edit with a lock — the `unlock` sheet — on a board whose link holds play
 /// only (an editor there could not edit). `None` where `edit` is not
