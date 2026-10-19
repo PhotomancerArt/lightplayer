@@ -19,11 +19,11 @@
 //! | [`StackBar`](stack_bar::StackBar) | one 28 px row in the card's grammar — icon · kind · name · state (one trigger for its details), its action outside the trigger; while it works, the spinner in the icon's place and the work's words as its state |
 //! | [`WorkFoot`](bar_work::WorkFoot) | a row's running work: the iridescent fill along its foot |
 //! | [`BarDetails`](bar_details::BarDetails) | a bar's (or the corner's) details: the merged detail card, its sections, panels and danger zone |
-//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, the Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other version, restore from file, the connected panel's settings |
+//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, Wi‑Fi, link counters, rename, the layout question, other version, restore from file, the connected panel's settings |
 //! | [`CardAction`] | one action from the offer it presses, in the card's word and icon |
 //!
-//! The panels moved here from today's card (`bluetooth_switch_panel`,
-//! `link_counters_section`, `other_version_form`,
+//! The panels moved here from today's card (`link_counters_section`,
+//! `other_version_form`,
 //! `restore_from_file_button`) are sections of the details card they sit
 //! in: no box in a box, no popover in a popover.
 //!
@@ -71,7 +71,6 @@
 pub(crate) mod bar_detail_panel;
 pub(crate) mod bar_details;
 pub(crate) mod bar_work;
-pub(crate) mod bluetooth_switch_panel;
 pub(crate) mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;

@@ -165,6 +165,7 @@ pub(crate) fn link_bar(
             sections: without_empty(sections),
             panels,
             raised: facts.details.raised,
+            foot: without_empty(facts.details.foot),
         },
         ..UiStackBar::new(layer, facts.icon, summary)
     }

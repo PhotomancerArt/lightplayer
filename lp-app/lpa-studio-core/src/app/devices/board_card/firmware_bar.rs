@@ -28,7 +28,8 @@
 //! | An update offered (over the air, or by USB) | the version | — | Neutral | Update |
 //! | Offline, or a closed port (nothing heard this time) | the version remembered, dimmed | — | Neutral | — |
 //! | Too old to say hello | "unknown (pre-2026.07)" | — | Neutral | Install (the USB update), unless the primary is Install firmware |
-//! | No LightPlayer on it (blank, another firmware, download mode, silent) | "none", or what it is | the state, when it says one | Neutral | — (Install firmware is the primary) |
+//! | A blank chip | "none" | — | Neutral | Install (the board pick, as the primary's): a to-do, lit |
+//! | Another firmware, download mode, silent | what it is | the state, when it says one | Neutral | — (Install firmware is the primary) |
 //! | Nothing known | "unknown" | — | Neutral | — |
 //! | Otherwise | the version | — | Neutral | — |
 //!
@@ -48,6 +49,7 @@ use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 use super::bar_work::{bar_work, board_pick, running_work, update_work};
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{facts, notice, verbs, without_empty};
+use super::primary_action::{install_firmware, pending_action};
 use super::project_bar::data_lost;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
@@ -62,6 +64,9 @@ use crate::core::data_kinds::{
     pre_ota_version,
 };
 use crate::{RichLine, UiOffer, UiStatusKind};
+
+/// The Firmware row's to-do on a blank chip.
+const INSTALL: &str = "Install";
 
 /// The state of a board whose file store it refused: its files are kept,
 /// and nothing on the card can read them.
@@ -90,6 +95,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let version = version_alone(input, &identity.firmware);
     let mut stale = false;
     let mut opens_details = None;
+    let mut todo = false;
     let (summary, aside, tone, action): (String, Option<&str>, UiStatusKind, _) = if layout
         .is_some_and(|layout| layout.panel.is_some())
     {
@@ -206,7 +212,17 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 }
             });
         let (name, state) = face_words(&view.firmware_face);
-        (name, state, UiStatusKind::Neutral, update)
+        // A blank chip is a new board's to-do: "none · Install", the
+        // primary's own pick (P19's accepted repeat).
+        let install = (view.firmware_face == FirmwareFace::Blank)
+            .then(|| install_firmware(input))
+            .flatten()
+            .map(|install| UiCardAction {
+                word: INSTALL.to_string(),
+                ..install
+            });
+        todo = install.is_some();
+        (name, state, UiStatusKind::Neutral, update.or(install))
     } else if let FirmwareFace::CoreOnly {
         version: core,
         state,
@@ -236,16 +252,22 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         action: if running { None } else { action },
         opens_details: opens_details.filter(|_| !running),
         stale,
+        todo: todo && !running,
         work,
         ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
     }
 }
 
 /// A new board's Firmware row: "unknown" while it identifies; once it
-/// settles, what the verdict found — "none" on a blank chip, "unknown
-/// (pre-2026.07)" on a LightPlayer too old to say hello. Quiet, with no
-/// action: Install firmware is the primary.
-pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
+/// settles, what the verdict found — "none" on a blank chip, with Install
+/// (the primary's own pick) as its lit to-do; "unknown (pre-2026.07)" on a
+/// LightPlayer too old to say hello, quietly, with Install firmware the
+/// primary.
+pub(crate) fn pending_firmware_bar(
+    pending: &PendingLinkView,
+    board: &crate::OfferPath,
+    offers: &[crate::UiOffer],
+) -> UiStackBar {
     let face = &pending.firmware_face;
     let (summary, aside, tone) = match face {
         FirmwareFace::Unknown => (FIRMWARE_UNKNOWN.to_string(), None, UiStatusKind::Neutral),
@@ -272,13 +294,24 @@ pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
             said
         }
     };
+    let install = (*face == FirmwareFace::Blank)
+        .then(|| pending_action(pending, board, offers))
+        .flatten()
+        .filter(|install| install.refused.is_none())
+        .map(|install| UiCardAction {
+            word: INSTALL.to_string(),
+            ..install
+        });
     UiStackBar {
         aside: aside.map(str::to_string),
         tone,
+        todo: install.is_some(),
+        action: install,
         details: UiBarDetails {
             sections: vec![said],
             panels: Vec::new(),
             raised: false,
+            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
     }
@@ -563,6 +596,7 @@ fn details(
         sections: without_empty(sections),
         panels,
         raised: layout.is_some_and(|layout| layout.panel.is_some()),
+        foot: Vec::new(),
     }
 }
 
@@ -928,7 +962,22 @@ mod tests {
             assert_eq!(bar.summary, name, "{face:?}");
             assert_eq!(bar.aside.as_deref(), state, "{face:?}");
             assert_eq!(bar.tone, UiStatusKind::Neutral, "{face:?}");
-            assert_eq!(bar.action, None, "Install firmware is the primary");
+            // A blank chip is a new board's to-do: "none · Install", the
+            // primary's own pick; the others leave Install firmware to the
+            // primary.
+            match face {
+                FirmwareFace::Blank => {
+                    let install = bar.action.clone().expect("Install");
+                    assert_eq!(install.word, "Install");
+                    assert!(install.offer.to_string().ends_with("/flash"));
+                    assert!(matches!(install.draw, UiActionDraw::BoardPick { .. }));
+                    assert!(bar.todo);
+                }
+                _ => {
+                    assert_eq!(bar.action, None, "Install firmware is the primary");
+                    assert!(!bar.todo, "{face:?}");
+                }
+            }
             // The card's top says it in a sentence; the details say what
             // is there in the row's words, and no dashed verdict (Yona's
             // C6, 2026-10-19: "No response — try flashing firmware").
@@ -1025,11 +1074,11 @@ mod tests {
     #[test]
     fn a_new_board_is_unknown_then_none() {
         let mut pending = pending_view();
-        let bar = pending_firmware_bar(&pending);
+        let bar = pending_firmware_bar(&pending, &super::super::card_fixtures::board(), &[]);
         assert_eq!(bar.summary, "unknown");
         assert_eq!(bar.tone, UiStatusKind::Neutral);
         pending.firmware_face = FirmwareFace::Blank;
-        let bar = pending_firmware_bar(&pending);
+        let bar = pending_firmware_bar(&pending, &super::super::card_fixtures::board(), &[]);
         assert_eq!(bar.summary, "none");
         assert_eq!(
             bar.tone,
@@ -1041,7 +1090,7 @@ mod tests {
         assert_eq!(bar.action, None);
         pending.firmware_face = FirmwareFace::NoHello;
         assert_eq!(
-            pending_firmware_bar(&pending).summary,
+            pending_firmware_bar(&pending, &super::super::card_fixtures::board(), &[]).summary,
             "unknown (pre-2026.07)"
         );
     }
@@ -1055,7 +1104,7 @@ mod tests {
             version: Some("2026.10.16-1".to_string()),
             state: UpdateBoardState::NeedsEngine,
         };
-        let bar = pending_firmware_bar(&pending);
+        let bar = pending_firmware_bar(&pending, &super::super::card_fixtures::board(), &[]);
         assert_eq!(bar.summary, "v2026.10.16-1");
         assert_eq!(bar.aside.as_deref(), Some("incomplete"));
         assert_eq!(bar.tone, UiStatusKind::Attention);
@@ -1063,7 +1112,7 @@ mod tests {
             version: None,
             state: UpdateBoardState::EngineCrashing,
         };
-        let bar = pending_firmware_bar(&pending);
+        let bar = pending_firmware_bar(&pending, &super::super::card_fixtures::board(), &[]);
         assert_eq!(bar.summary, "unknown");
         assert_eq!(bar.aside.as_deref(), Some("crashing"));
         assert_eq!(bar.tone, UiStatusKind::Error);

@@ -30,7 +30,7 @@
 //!   about) and [`link_bar`] (a link row from its facts),
 //!   [`board_panel_picks`], and one per row — [`project_bar`], [`usb_bar`],
 //!   [`wifi_bar`], [`bluetooth_bar`], [`cloud_bar`], [`access_bar`],
-//!   [`firmware_bar`], [`hardware_bar`] — with [`ui_bluetooth_switch`];
+//!   [`firmware_bar`], [`hardware_bar`];
 //!   [`roster_board_cards`] builds every card on a roster.
 
 pub mod access_bar;
@@ -57,7 +57,6 @@ pub mod project_bar;
 pub mod roster_board_cards;
 pub mod status_corner;
 pub mod ui_bar_work;
-pub mod ui_bluetooth_switch;
 pub mod ui_board_card;
 pub mod ui_board_panel;
 pub mod ui_board_picture;
@@ -72,7 +71,9 @@ pub mod wifi_bar;
 
 pub use access_bar::ANYONE_CAN_EDIT_SENTENCE;
 pub use bar_work::{activity_bar, activity_words};
-pub use bluetooth_bar::{BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE};
+pub use bluetooth_bar::{
+    BLUETOOTH_DISABLED_SENTENCE, BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE,
+};
 pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
@@ -96,7 +97,6 @@ pub use primary_action::{ADD_A_PROJECT, CONNECT_HERE, CONNECTING};
 pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE, PROJECT_UNKNOWN};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
 pub use ui_bar_work::{BarWorkState, UiBarWork};
-pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
 pub use ui_board_panel::{UiBoardPanel, UiBoardPanelSection, UiCardControl};
 pub use ui_board_picture::{PictureSource, UiBoardPicture};

@@ -62,11 +62,11 @@ pub use app::devices::board_card::{
     LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN, PROJECT_NONE,
     PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
     SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
-    UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch, UiBoardCard, UiBoardPanel,
+    UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBoardCard, UiBoardPanel,
     UiBoardPanelSection, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
     UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
-    UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words, bluetooth_switch,
-    board_card, board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words, board_card,
+    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
     roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
@@ -171,13 +171,15 @@ pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
-    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
+    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BLUETOOTH_ENABLED_PARAM,
+    BluetoothSwitchOp, BrowserKey, DEFAULT_KDF_ITERATIONS, DISABLE_BLUETOOTH, DeviceAccessChange,
+    DroppedKey, ENABLE_BLUETOOTH, MAX_SECRETS_PER_FILE, NetworkLinkKeys, OFF_OVER_BLUETOOTH,
     OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
     UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
     UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
-    account_key_refused_sentence, device_unlock_offer, dropped_sentence, not_permitted_sentence,
-    open_summary, tier_word, unlock_offer,
+    account_key_refused_sentence, bluetooth_offer, bluetooth_path, bluetooth_restart_words,
+    device_unlock_offer, dropped_sentence, not_permitted_sentence, open_summary, tier_word,
+    unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

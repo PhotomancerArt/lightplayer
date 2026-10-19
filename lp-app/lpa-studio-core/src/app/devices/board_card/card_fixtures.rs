@@ -309,6 +309,22 @@ impl CardFixture {
         if self.relay && offline_wire {
             offers.push(connect_relay_offer(&self.board, self.view.id, false));
         }
+        // The controller's `bluetooth/enabled`, where the access list says
+        // the switch.
+        if let Some(access) = self.access.as_ref() {
+            let over_bluetooth = self.link == Some(UiLinkKind::Bluetooth)
+                && self.view.status != DeviceStatus::Offline;
+            offers.extend(crate::bluetooth_offer(
+                &self.board,
+                self.view.id,
+                access,
+                over_bluetooth,
+            ));
+        }
+        // The controller's Wi‑Fi verbs, where the board's Wi‑Fi facts are.
+        if let Some(wifi) = self.wifi.as_ref() {
+            offers.extend(crate::app::network::wifi_offers(&self.board, wifi));
+        }
         // The controller's `sign-in`, while nobody is signed in.
         if self.account.is_none() && face == DeviceFace::Wire {
             offers.push(crate::sign_in_offer(&self.board));

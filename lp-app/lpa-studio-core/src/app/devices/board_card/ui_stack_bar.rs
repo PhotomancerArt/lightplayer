@@ -211,6 +211,9 @@ pub struct UiBarDetails {
     pub sections: Vec<RichSection<UiCardAction>>,
     /// Today's panels, named ([`UiDetailPanel`]).
     pub panels: Vec<UiDetailPanel>,
+    /// Sections drawn after the panels, before the Danger section: a
+    /// row's hush under its list ("Disable Wi‑Fi" under the networks).
+    pub foot: Vec<RichSection<UiCardAction>>,
     /// A question that must be answered now (the layout question, Q40): the
     /// web opens these details while it is set.
     pub raised: bool,

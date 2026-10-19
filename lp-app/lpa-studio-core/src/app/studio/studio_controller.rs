@@ -3791,6 +3791,18 @@ impl StudioController {
                     offers.publish(offer);
                 }
             }
+            // The Bluetooth switch (`<board>/bluetooth/enabled`), where the
+            // board's access list says it; "on Bluetooth" is the link's
+            // own kind, read off the endpoint.
+            if let Some(access) = roster.access.get(&view.id) {
+                let over_bluetooth = view.status != crate::DeviceStatus::Offline
+                    && roster.link_kinds.get(&view.id) == Some(&crate::UiLinkKind::Bluetooth);
+                if let Some(offer) =
+                    crate::bluetooth_offer(&facts.prefix, view.id, access, over_bluetooth)
+                {
+                    offers.publish(offer);
+                }
+            }
             offers.place_device(view.id, facts.prefix);
         }
         // The layout verbs (C6 repartition) under the same prefixes.
@@ -4634,6 +4646,11 @@ impl StudioController {
         }
         if node_id.as_str() == crate::UnlockOp::NODE_ID {
             let op = action.into_op::<crate::UnlockOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::BluetoothSwitchOp::NODE_ID {
+            let op = action.into_op::<crate::BluetoothSwitchOp>()?;
             self.apply_access_command(op.into_access_command());
             return Ok(UiNotices::new());
         }

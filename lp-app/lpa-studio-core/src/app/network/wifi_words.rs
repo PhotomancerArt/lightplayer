@@ -174,6 +174,18 @@ pub mod card {
     pub const SET_UP: &str = "Set up";
     /// The Wi‑Fi row's fix for a refused password: its details.
     pub const CHANGE: &str = "Change";
+    /// The Wi‑Fi row's hush, under the network list, and its undoing.
+    pub const DISABLE_WIFI: &str = "Disable Wi\u{2011}Fi";
+    pub const ENABLE_WIFI: &str = "Enable Wi\u{2011}Fi";
+    /// A board whose Wi‑Fi is off.
+    pub const WIFI_DISABLED: &str =
+        "Wi\u{2011}Fi is disabled on this board. It reaches Studio over USB and Bluetooth only.";
+    /// The lightplayer.app row's hush, and its undoing.
+    pub const DISABLE_CLOUD: &str = "Disable lightplayer.app";
+    pub const ENABLE_CLOUD: &str = "Enable lightplayer.app";
+    /// A board whose Cloud relay is off.
+    pub const CLOUD_DISABLED: &str =
+        "lightplayer.app is disabled for this board: it never connects to the cloud.";
     /// More than one saved network, none joined.
     pub fn networks(count: usize) -> String {
         format!("{count} networks")

@@ -107,6 +107,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 .into_iter()
                 .collect(),
             raised: false,
+            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }
@@ -154,6 +155,7 @@ pub(crate) fn pending_hardware_bar(
             ]),
             panels: Vec::new(),
             raised: false,
+            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }

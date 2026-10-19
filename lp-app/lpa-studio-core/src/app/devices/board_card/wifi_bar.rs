@@ -15,6 +15,12 @@
 //! | nothing saved | "not connected" | Set up (its details) | Neutral |
 //! | saved, none joined (out of range) | "`ssid` · not connected" ("2 networks" for more) | — | Neutral |
 //!
+//! Nothing saved is a new board's to-do: the row is lit, and Set up opens
+//! the details at the network list. Hushing it is turning Wi‑Fi off:
+//! "Disable Wi‑Fi" under the network list (the board's own switch,
+//! `devices/<board>/wifi/enabled`), after which the row says "disabled"
+//! and wants nothing, and its details offer "Enable Wi‑Fi".
+//!
 //! Its details are the Wi‑Fi panel (the board's networks, and adding one),
 //! and "Connect over Wi‑Fi" when the primary doesn't already offer it. A
 //! Wi‑Fi connect that failed is this row's, red, with Retry
@@ -23,15 +29,17 @@
 use lpc_wire::server::{LastAttempt, NetworkStatus, StationFailure, StationState};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::facts;
+use super::detail_sections::{facts, help, verbs};
 use super::link_bar::{LinkFacts, connect_verb, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_CONNECTED, NOT_KNOWN};
 use super::ui_bar_work::UiBarWork;
+use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::ui_link_kind::UiLinkKind;
+use crate::app::network::WIFI_ENABLED_PARAM;
 use crate::app::network::wifi_words::card;
-use crate::{RichLine, UiStatusKind};
+use crate::{OfferArgs, RichLine, UiStatusKind};
 
 /// The Wi‑Fi row.
 pub(crate) fn wifi_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -79,8 +87,10 @@ fn station_facts(input: &BoardCardInput<'_>, status: &NetworkStatus) -> LinkFact
                 .then(|| CONNECTED.to_string()),
             ..named(ssid)
         },
+        // Nothing saved: a new board's to-do, until set up or disabled.
         _ if status.networks.is_empty() => LinkFacts {
             opens_details: can_fix.then_some(card::SET_UP),
+            todo: can_fix,
             ..row(NOT_CONNECTED)
         },
         StationState::Failed { ssid, .. } => LinkFacts {
@@ -118,12 +128,38 @@ fn refused(status: &NetworkStatus) -> Option<&str> {
 }
 
 /// The row's details: the Wi‑Fi panel while the board answers on a link
-/// that may see it; else, for a board that is away, what it last said.
+/// that may see it, with Disable Wi‑Fi under it; "Wi‑Fi is disabled…" and
+/// Enable Wi‑Fi while it is off; for a board that is away, what it last
+/// said.
 fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
-    match input.wifi.filter(|_| !input.offline()) {
-        Some(wifi) => details.panels.push(UiDetailPanel::Wifi(wifi.clone())),
-        None => {
+    let switch = |on: bool, word: &str| {
+        input.offer_under(&["wifi", "enabled"]).map(|offer| {
+            UiCardAction::press_with(
+                offer,
+                word,
+                OfferArgs::new().with(WIFI_ENABLED_PARAM, on.to_string()),
+            )
+            .with_icon("wifi")
+        })
+    };
+    let live = input.wifi.filter(|_| !input.offline());
+    match (live, status) {
+        (Some(_), Some(status)) if !status.wifi => {
+            details
+                .sections
+                .push(help("Wi\u{2011}Fi", card::WIFI_DISABLED));
+            details
+                .sections
+                .push(verbs(switch(true, card::ENABLE_WIFI).into_iter().collect()));
+        }
+        (Some(wifi), _) => {
+            details.panels.push(UiDetailPanel::Wifi(wifi.clone()));
+            details.foot.push(verbs(
+                switch(false, card::DISABLE_WIFI).into_iter().collect(),
+            ));
+        }
+        (None, _) => {
             if let Some(StationState::Connected { ssid, ip, .. }) =
                 status.map(|status| &status.station)
             {

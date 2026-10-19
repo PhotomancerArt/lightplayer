@@ -218,7 +218,7 @@ pub fn pending_board_card(
             .chain(pending_link_bars(pending, link))
             .chain([
                 pending_access_bar(pending),
-                pending_firmware_bar(pending),
+                pending_firmware_bar(pending, board, offers),
                 pending_hardware_bar(pending, board, offers),
             ])
             .collect(),
@@ -267,6 +267,52 @@ mod tests {
         assert_eq!(card.name_bar.place, None);
         assert_eq!(card.presence, UiBoardPresence::Online);
         assert_eq!(card.board.to_string(), "devices/mac-a0f26287b48c");
+    }
+
+    /// AC4: a new board's to-do rows are lit, and only those. Installed and
+    /// signed out: Project (none · Add), Wi‑Fi (not connected · Set up) and
+    /// lightplayer.app (not connected · Sign in). Signed in, lightplayer.app
+    /// waits on Wi‑Fi — its fix is the Wi‑Fi row's — so it is not lit. A
+    /// blank chip: Firmware (none · Install).
+    #[test]
+    fn a_new_boards_to_do_rows_are_lit_and_only_those() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.loaded_project = lpa_devices::view::LoadedProject::Empty;
+        fixture.view.can_remove_project = false;
+        fixture.plays = crate::app::devices::board_plays::BoardPlays::Nothing;
+        fixture.wifi = Some(crate::UiDeviceWifi {
+            status: Some(lpc_wire::server::NetworkStatus {
+                wifi: true,
+                cloud_relay: true,
+                networks: Vec::new(),
+                station: lpc_wire::server::StationState::NotConnected,
+                relay: lpc_wire::server::RelayState::NoAccount,
+            }),
+            ..crate::UiDeviceWifi::new(fixture.view.id, true)
+        });
+        let lit = |fixture: &mut CardFixture| -> Vec<BarLayer> {
+            board_card(&fixture.input())
+                .bars
+                .iter()
+                .filter(|bar| bar.todo)
+                .map(|bar| bar.layer)
+                .collect()
+        };
+        assert_eq!(
+            lit(&mut fixture),
+            [BarLayer::Project, BarLayer::Wifi, BarLayer::Cloud]
+        );
+        fixture.account = Some("Yona".to_string());
+        assert_eq!(lit(&mut fixture), [BarLayer::Project, BarLayer::Wifi]);
+
+        let mut blank = CardFixture::ready();
+        blank.view.status = DeviceStatus::NeedsAttention;
+        blank.view.firmware_face = lpa_devices::view::FirmwareFace::Blank;
+        blank.view.loaded_project = lpa_devices::view::LoadedProject::Unknown;
+        blank.view.can_receive_project = false;
+        blank.view.can_remove_project = false;
+        blank.plays = crate::app::devices::board_plays::BoardPlays::Unknown;
+        assert_eq!(lit(&mut blank), [BarLayer::Firmware]);
     }
 
     /// The card can only point at verbs core offered: in every state a test

@@ -318,3 +318,131 @@ fn wifi_status(
 fn wifi_verb(bench: &mut DeviceBench, device: crate::DeviceId, verb: &str) -> crate::OfferPath {
     bench.device_verb(device, "wifi").child(verb)
 }
+
+/// The radio rows hush from their own details (the setup rows' P3): Disable
+/// Wi‑Fi under the network list, then Enable Wi‑Fi once it is off; Disable
+/// lightplayer.app, then Enable — each the board's own switch, pressed by
+/// the offer path and args the card carries, and the row says "disabled"
+/// and wants nothing while it is off.
+#[test]
+fn the_radio_rows_hush_from_their_own_details() {
+    let device = wifi_light_player("dev000000wifi00009");
+    let (mut bench, tasks) = identified(&device, "usb-wifi-9");
+    let target = bench.view().devices[0].id;
+    wifi_status(&mut bench, &tasks, target);
+
+    let card = home_card(&bench, target);
+    let wifi = card.bar(crate::BarLayer::Wifi);
+    assert_eq!(wifi.summary, "not connected");
+    assert_eq!(wifi.opens_details, Some("Set up"));
+    assert!(wifi.todo, "nothing saved: a new board's to-do");
+    let disable = verb_of(&wifi.details.foot, "Disable Wi\u{2011}Fi");
+    bench
+        .press(&disable.offer, disable.args.clone())
+        .expect("Disable Wi‑Fi presses the board's switch");
+    assert!(!wifi_status(&mut bench, &tasks, target).wifi);
+    let card = home_card(&bench, target);
+    let wifi = card.bar(crate::BarLayer::Wifi);
+    assert_eq!(wifi.summary, "disabled");
+    assert!(!wifi.todo, "disabled wants nothing");
+    assert_eq!(wifi.opens_details, None);
+    let enable = verb_of(&wifi.details.sections, "Enable Wi\u{2011}Fi");
+    bench
+        .press(&enable.offer, enable.args.clone())
+        .expect("Enable Wi‑Fi presses it back");
+    assert!(wifi_status(&mut bench, &tasks, target).wifi);
+
+    let card = home_card(&bench, target);
+    let cloud = card.bar(crate::BarLayer::Cloud);
+    let disable = verb_of(&cloud.details.sections, "Disable lightplayer.app");
+    bench
+        .press(&disable.offer, disable.args.clone())
+        .expect("Disable lightplayer.app presses Cloud relay");
+    assert!(!wifi_status(&mut bench, &tasks, target).cloud_relay);
+    let card = home_card(&bench, target);
+    let cloud = card.bar(crate::BarLayer::Cloud);
+    assert_eq!(cloud.summary, "disabled");
+    assert!(!cloud.todo);
+    let enable = verb_of(&cloud.details.sections, "Enable lightplayer.app");
+    bench
+        .press(&enable.offer, enable.args.clone())
+        .expect("Enable lightplayer.app presses it back");
+    assert!(wifi_status(&mut bench, &tasks, target).cloud_relay);
+}
+
+/// The card the home view publishes for `device`.
+fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard {
+    bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .unwrap_or_else(|| panic!("no card for {device:?}"))
+}
+
+/// The verb worded `word` among `sections`' affordances.
+#[track_caller]
+fn verb_of(
+    sections: &[crate::RichSection<crate::UiCardAction>],
+    word: &str,
+) -> crate::UiCardAction {
+    sections
+        .iter()
+        .flat_map(|section| section.affordances.iter())
+        .find(|action| action.word == word)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {word:?} in {sections:?}"))
+}
+
+/// Bluetooth on and off is a core offer (`devices/<board>/bluetooth/enabled`):
+/// the Bluetooth row's Disable presses it by path over USB, the board's
+/// access file says off once it is back (Studio restarts it to apply), and
+/// the row says "disabled" with Enable in its details.
+#[test]
+fn disable_bluetooth_is_a_core_offer_pressed_from_its_row() {
+    let device = wifi_light_player("dev000000wifi00010");
+    let (mut bench, tasks) = identified(&device, "usb-wifi-10");
+    let target = bench.view().devices[0].id;
+    bench.run_until(&tasks, "the board's access list", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&target)
+            .and_then(|access| access.panel.as_ref())
+            .is_some_and(|panel| panel.ble_enabled == Some(true))
+    });
+    let card = home_card(&bench, target);
+    let bluetooth = card.bar(crate::BarLayer::Bluetooth);
+    assert_eq!(bluetooth.summary, "LP-0b0d");
+    let disable = verb_of(&bluetooth.details.sections, crate::DISABLE_BLUETOOTH);
+    assert_eq!(
+        disable.offer,
+        bench.device_verb(target, "bluetooth").child("enabled")
+    );
+    assert_eq!(
+        *bench.offered(&disable.offer).consequence(),
+        crate::ActionConsequence::Undoable,
+        "it restarts the board: the error tint, one click"
+    );
+    bench
+        .press(&disable.offer, disable.args.clone())
+        .expect("Disable Bluetooth presses the core offer");
+    bench.run_until(&tasks, "the board to say Bluetooth is off", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&target)
+            .and_then(|access| access.panel.as_ref())
+            .is_some_and(|panel| panel.ble_enabled == Some(false) && !panel.restart_pending)
+    });
+    let card = home_card(&bench, target);
+    let bluetooth = card.bar(crate::BarLayer::Bluetooth);
+    assert_eq!(bluetooth.summary, "disabled");
+    verb_of(&bluetooth.details.sections, crate::ENABLE_BLUETOOTH);
+}

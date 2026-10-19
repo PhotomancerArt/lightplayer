@@ -1,6 +1,8 @@
 //! The device's Wi‑Fi popover: the detail card the Connections group's
-//! Wi‑Fi row opens — and, on the board card, a section of the connection
-//! bar's details (`in_card`: the section's divider, no frame of its own) —
+//! Wi‑Fi row opens — and, on the board card, a section of the Wi‑Fi row's
+//! details (`in_card`: the section's divider, no frame of its own, and no
+//! switches: the Wi‑Fi and lightplayer.app rows' Disable and Enable are
+//! theirs) —
 //! three pages, the UX spike's 2B (`spikes/wifi-networks/index.html`,
 //! chosen 2026-10-05).
 //!
@@ -83,15 +85,23 @@ pub(crate) fn WifiPanel(
     /// `connecting` while it tries; a later step is M6's to tell).
     #[props(default)]
     test_preview: Option<UiWifiTest>,
-    /// Drawn as a section of a details card (the board card's connection
-    /// details), not as a popover's whole body: its divider, no frame.
+    /// Drawn as a section of a details card (the board card's Wi‑Fi row's
+    /// details), not as a popover's whole body: its divider, no frame, and
+    /// no switches (the rows' Disable and Enable are theirs).
     #[props(default)]
     in_card: bool,
 ) -> Element {
     let mut page = use_signal(|| page_preview.clone().unwrap_or(WifiPage::Networks));
     let panel_class = panel_class(in_card);
     let args = use_signal(|| args_preview.clone().unwrap_or_default());
-    let verbs = WifiVerbs::of(&offers);
+    let mut verbs = WifiVerbs::of(&offers);
+    // On the board card the two switches are the rows' own verbs: Disable
+    // Wi‑Fi under this list (the Wi‑Fi row's foot), and the
+    // lightplayer.app row's Disable / Enable.
+    if in_card {
+        verbs.enabled = None;
+        verbs.cloud_relay = None;
+    }
     let shown = shown_page(&page.read(), &wifi);
     let device = wifi.device;
 

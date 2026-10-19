@@ -303,6 +303,7 @@ fn details(
             .into_iter()
             .collect(),
         raised: false,
+        foot: Vec::new(),
     }
 }
 

@@ -12,7 +12,8 @@
 //!
 //! Inside, core's sections render in the order core gave them
 //! ([`RichDetailSection`]), then the panels ([`BarDetailPanel`]), then the
-//! Danger section, which always comes last. While core raises the details
+//! row's foot (its hush under its list: "Disable Wi‑Fi" under the
+//! networks), then the Danger section, which always comes last. While core raises the details
 //! (`raised`: a question that must be answered now, Q40) they open by
 //! themselves and stay open until core lowers them — or, for a refusal,
 //! until its Close closes it, which the details remember until core's panel
@@ -42,6 +43,9 @@ use crate::core::RichDetailSection;
 pub fn BarDetails(
     sections: Vec<RichSection<UiCardAction>>,
     panels: Vec<UiDetailPanel>,
+    /// Sections after the panels (`UiBarDetails::foot`).
+    #[props(default)]
+    foot: Vec<RichSection<UiCardAction>>,
     /// Core asks for these details now: open them, and keep them open.
     #[props(default)]
     raised: bool,
@@ -140,6 +144,9 @@ pub fn BarDetails(
                         on_close_layout,
                         on_action,
                     }
+                }
+                for (index, section) in foot.into_iter().enumerate() {
+                    RichDetailSection { key: "foot-{index}", section, on_action }
                 }
                 for (index, section) in danger.into_iter().enumerate() {
                     RichDetailSection { key: "danger-{index}", section, on_action }

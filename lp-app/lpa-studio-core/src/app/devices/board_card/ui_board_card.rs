@@ -35,14 +35,14 @@ pub struct UiBoardCard {
     pub surface: UiBoardSurface,
     pub status: UiStatusCorner,
     pub name_bar: UiNameBar,
-    /// Always five, in [`BarLayer::ALL`]'s order. Built while the board is
+    /// Always eight, in [`BarLayer::ALL`]'s order. Built while the board is
     /// connected too (tests and the app agent read them); the web draws
     /// [`Self::panel`] in their place then.
     pub bars: Vec<UiStackBar>,
     /// The board's panel at card size: `Some` exactly while this tab's
     /// session is connected on the card and its project is ready (the
-    /// ADR's §4, CD7). The web draws it in the five bars' place, at their
-    /// height.
+    /// ADR's §4, CD7). The web draws it in the rows' place; the card grows
+    /// once to hold it.
     pub panel: Option<UiBoardPanel>,
 }
 
@@ -63,7 +63,7 @@ impl UiBoardCard {
         self.bars
             .iter()
             .find(|bar| bar.layer == layer)
-            .expect("a card always has its five bars")
+            .expect("a card always has its eight rows")
     }
 
     /// Every action anywhere on the card: the primary, the panel's All
@@ -90,7 +90,7 @@ impl UiBoardCard {
             {
                 actions.push(retry);
             }
-            for section in &bar.details.sections {
+            for section in bar.details.sections.iter().chain(&bar.details.foot) {
                 actions.extend(section.affordances.iter());
             }
         }

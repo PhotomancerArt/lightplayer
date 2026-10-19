@@ -17,6 +17,12 @@
 //! | the board dialling | "Yona's account · connecting" | — | Neutral |
 //! | reachable | "Yona's account", and "connected" when this tab's link is the relay | — | Neutral |
 //!
+//! Signed out is a new board's to-do: the row is lit, with Sign in. Hushing
+//! it is turning Cloud relay off — "Disable lightplayer.app" beside Sign
+//! in, or under the account (the board's own switch,
+//! `devices/<board>/wifi/cloud-relay`) — after which the row says
+//! "disabled", for privacy, and its details offer "Enable lightplayer.app".
+//!
 //! The struck cloud mark the Link row carried is gone: this row says it.
 //! The account is the signed-in one, named as its key is on every board
 //! ("Yona's account", [`super::board_links::account_words`]).
@@ -24,15 +30,16 @@
 use lpc_wire::server::{NetworkStatus, RelayRefusal, RelayState, StationState};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{facts, help};
+use super::detail_sections::{facts, help, verbs};
 use super::link_bar::{LinkFacts, connect_verb, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_CONNECTED, NOT_KNOWN};
 use super::ui_card_action::UiCardAction;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::sign_in_offer::SIGN_IN_VERB;
 use crate::app::devices::ui_link_kind::UiLinkKind;
+use crate::app::network::WIFI_ENABLED_PARAM;
 use crate::app::network::wifi_words::{CLOUD_RELAY_HELP, card, relay};
-use crate::{RichLine, UiStatusKind};
+use crate::{OfferArgs, RichLine, RichSection, UiStatusKind};
 
 /// The details' line while nobody is signed in.
 pub const SIGN_IN_SENTENCE: &str =
@@ -55,6 +62,13 @@ pub(crate) fn cloud_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     )
     .into_iter()
     .collect();
+    // Signed in and on, the hush sits with the row's other verbs; signed
+    // out it is beside Sign in, and off its details offer Enable.
+    if input.links.account.is_some() && status.is_some_and(|status| status.cloud_relay) {
+        facts
+            .verbs
+            .extend(relay_switch(input, false, card::DISABLE_CLOUD));
+    }
     link_bar(input, BarLayer::Cloud, facts)
 }
 
@@ -80,9 +94,12 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
         // Cloud relay on, and the board has no relay to dial with.
         return row(NOT_KNOWN);
     }
+    // Signed out: a new board's to-do, until signed in or disabled.
     let Some(account) = account else {
+        let action = sign_in(input);
         return LinkFacts {
-            action: sign_in(input),
+            todo: action.is_some(),
+            action,
             ..row(NOT_CONNECTED)
         };
     };
@@ -115,38 +132,71 @@ fn sign_in(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
         .map(|offer| UiCardAction::own_words(offer).with_icon(offer.icon.clone()))
 }
 
+/// The board's Cloud relay switch (`devices/<board>/wifi/cloud-relay`)
+/// pressed to `on`, worded `word`, where it is offered (a link at edit).
+fn relay_switch(input: &BoardCardInput<'_>, on: bool, word: &str) -> Option<UiCardAction> {
+    input.offer_under(&["wifi", "cloud-relay"]).map(|offer| {
+        UiCardAction::press_with(
+            offer,
+            word,
+            OfferArgs::new().with(WIFI_ENABLED_PARAM, on.to_string()),
+        )
+        .with_icon("cloud")
+    })
+}
+
 /// The row's details: signed out, what signing in gets you and what stays
-/// at home; signed in, the account and how the board stands with
-/// lightplayer.app.
+/// at home, with Sign in and Disable lightplayer.app; signed in, the
+/// account and how the board stands with lightplayer.app; disabled, that
+/// it never connects, and Enable lightplayer.app.
 fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
-    let Some(account) = input.links.account_words() else {
-        if status.is_some_and(|status| status.cloud_relay) {
-            // Not a notice: signing in is a to-do, not news for the corner.
-            let mut ask = help("lightplayer.app", SIGN_IN_SENTENCE);
-            ask.affordances.extend(sign_in(input));
-            details.sections.push(ask);
-            details
-                .sections
-                .push(help("lightplayer.app", NOTHING_GOES_SENTENCE));
+    let Some(status) = status else {
+        return details;
+    };
+    if !status.cloud_relay {
+        details
+            .sections
+            .push(help("lightplayer.app", card::CLOUD_DISABLED));
+        let enable = relay_switch(input, true, card::ENABLE_CLOUD);
+        if enable.is_none() {
+            details.sections.extend(cannot_change(input));
         }
+        details.sections.push(verbs(enable.into_iter().collect()));
+        return details;
+    }
+    let Some(account) = input.links.account_words() else {
+        // Not a notice: signing in is a to-do, not news for the corner.
+        let mut ask = help("lightplayer.app", SIGN_IN_SENTENCE);
+        ask.affordances.extend(sign_in(input));
+        ask.affordances
+            .extend(relay_switch(input, false, card::DISABLE_CLOUD));
+        details.sections.push(ask);
+        details
+            .sections
+            .push(help("lightplayer.app", NOTHING_GOES_SENTENCE));
         return details;
     };
     let mut lines = vec![RichLine::new("Account", account)];
-    if let Some((line, _)) = status.and_then(relay::line) {
+    if let Some((line, _)) = relay::line(status) {
         lines.push(RichLine::new("Now", line));
     }
     details.sections.push(facts("lightplayer.app", lines));
-    if let Some(note) = status
-        .filter(|status| status.cloud_relay)
-        .and_then(|status| relay::note(status.relay))
-    {
+    if let Some(note) = relay::note(status.relay) {
         details.sections.push(help("lightplayer.app", note));
     }
-    if status.is_some_and(|status| status.cloud_relay) {
-        details.sections.push(help("Cloud relay", CLOUD_RELAY_HELP));
-    }
+    details.sections.push(help("Cloud relay", CLOUD_RELAY_HELP));
     details
+}
+
+/// Why the switch isn't here on a board that answers: this link may not
+/// change its network settings.
+fn cannot_change(input: &BoardCardInput<'_>) -> Option<RichSection<UiCardAction>> {
+    input
+        .wifi
+        .filter(|_| !input.offline())
+        .and_then(|wifi| wifi.waiting_line())
+        .map(|line| help("lightplayer.app", line))
 }
 
 #[cfg(test)]

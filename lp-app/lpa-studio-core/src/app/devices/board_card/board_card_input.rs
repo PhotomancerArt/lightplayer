@@ -102,6 +102,16 @@ impl<'a> BoardCardInput<'a> {
         offer_at(self.offers, self.board, verb)
     }
 
+    /// The board's offer at `segments` under its prefix
+    /// (`devices/<board>/wifi/enabled` is `["wifi", "enabled"]`), when the
+    /// tree publishes it.
+    pub fn offer_under(&self, segments: &[&str]) -> Option<&'a UiOffer> {
+        let path = segments
+            .iter()
+            .fold(self.board.clone(), |path, segment| path.child(*segment));
+        self.offers.iter().find(|offer| offer.path == path)
+    }
+
     /// The model holds a link to the board (Disconnect is offered exactly
     /// then).
     pub fn linked(&self) -> bool {

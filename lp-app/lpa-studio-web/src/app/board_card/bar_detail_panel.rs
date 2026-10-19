@@ -6,9 +6,8 @@
 //! |---|---|---|
 //! | Terminal | [`DeviceTerminal`], flush | the status corner's details |
 //! | Access | [`DeviceAccessPanel`] (its own sections) | the access bar's |
-//! | Bluetooth | [`BluetoothSwitchPanel`] | the connection bar's |
-//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`) | the connection bar's |
-//! | Link counters | [`LinkCountersSection`] | the connection bar's |
+//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`; its Wi‑Fi and Cloud relay switches are the Wi‑Fi and lightplayer.app rows' Disable and Enable) | the Wi‑Fi row's |
+//! | Link counters | [`LinkCountersSection`] | the row of the link in use |
 //! | Rename | [`DeviceRenameSection`] over the `rename` offer | the hardware bar's |
 //! | Layout | [`DeviceLayoutSheet`]: the question or the refusal | the firmware bar's (raised) |
 //! | Other version | [`OtherVersionForm`], inline | the firmware bar's |
@@ -17,14 +16,14 @@
 //!
 //! The panels' words are core's payload or the moved panels' own,
 //! unchanged; their verbs are offers drawn from the tree. The access
-//! panel's edits, the Bluetooth switch and the Wi‑Fi refresh still send
-//! their access and network commands, and the panel settings their panel
-//! commands, as today (out of scope here).
+//! panel's edits and the Wi‑Fi refresh still send their access and network
+//! commands, and the panel settings their panel commands, as today (out of
+//! scope here). The Bluetooth switch is a core offer now, pressed from the
+//! Bluetooth row's details as Disable / Enable Bluetooth.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceId, OfferPath, UiAction, UiDetailPanel, UiDeviceWifi, UiLayoutPanel};
 
-use super::bluetooth_switch_panel::BluetoothSwitchPanel;
 use super::card_action::use_card_scope;
 use super::link_counters_section::LinkCountersSection;
 use super::other_version_form::OtherVersionForm;
@@ -67,9 +66,6 @@ pub fn BarDetailPanel(
                 on_access,
                 keys_open_preview: scope.previews.access_keys_open,
             }
-        },
-        UiDetailPanel::Bluetooth(switch) => rsx! {
-            BluetoothSwitchPanel { switch, device, on_access }
         },
         UiDetailPanel::Wifi(wifi) => rsx! {
             WifiDetails { wifi, board, on_action }
@@ -210,9 +206,7 @@ const RESTORE_SECTION_CLASS: &str = "tw:grid tw:border-0 tw:border-t tw:border-s
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{
-        DeviceLinkCounters, UiAccessPanel, UiBluetoothSwitch, UiOffer, UiOfferTree,
-    };
+    use lpa_studio_core::{DeviceLinkCounters, UiAccessPanel, UiOffer, UiOfferTree};
 
     use super::*;
     use crate::app::board_card::card_test_fixtures::{
@@ -260,12 +254,6 @@ mod tests {
                 dropped: 3,
             },
             UiDetailPanel::Access(UiAccessPanel::reading(DeviceId(7))),
-            UiDetailPanel::Bluetooth(UiBluetoothSwitch {
-                on: true,
-                locked: false,
-                sub: None,
-                restart_note: Some("Restarting to turn Bluetooth on…".to_string()),
-            }),
             UiDetailPanel::Wifi(UiDeviceWifi::new(DeviceId(7), true)),
             UiDetailPanel::Rename {
                 offer: board().child("rename"),
@@ -312,7 +300,6 @@ mod tests {
         match panel {
             UiDetailPanel::Terminal { .. } => ("3", None),
             UiDetailPanel::Access(_) => ("Access", None),
-            UiDetailPanel::Bluetooth(_) => ("Restarting to turn Bluetooth on…", None),
             UiDetailPanel::Wifi(_) => ("Wi", None),
             UiDetailPanel::Rename { offer, .. } => ("Rename", Some(offer.clone())),
             UiDetailPanel::LinkCounters(_) => ("Link", None),

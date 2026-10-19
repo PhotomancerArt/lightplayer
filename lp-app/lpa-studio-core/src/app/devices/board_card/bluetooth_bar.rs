@@ -19,25 +19,37 @@
 //! (`BoardCardInput::link`), never `UiDeviceAccess::over_bluetooth`, which
 //! has called a LAN or relay board "Bluetooth" before.
 //!
-//! Its details: the switch, the name, what the name is for, and — on a
-//! board open to anyone — that anyone nearby can edit it.
+//! Hushing it is turning Bluetooth off: "Disable Bluetooth" in its details
+//! (the core offer `devices/<board>/bluetooth/enabled`, which refuses off
+//! over Bluetooth — the link you are on — and restarts a board on USB to
+//! apply it). Off, the row says "disabled" and its details offer "Enable
+//! Bluetooth".
+//!
+//! Its details: the name, what the name is for, and — on a board open to
+//! anyone — that anyone nearby can edit it; then Disable (or Enable).
 
 use lpa_devices::view::LoadedProject;
 use lpc_access::{OpenTo, Tier};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{facts, help};
+use super::detail_sections::{facts, help, verbs};
 use super::link_bar::{LinkFacts, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_KNOWN};
-use super::ui_bluetooth_switch::bluetooth_switch;
-use super::ui_detail_panel::UiDetailPanel;
+use super::ui_card_action::UiCardAction;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use crate::app::access::{
+    BLUETOOTH_ENABLED_PARAM, DISABLE_BLUETOOTH, ENABLE_BLUETOOTH, bluetooth_restart_words,
+};
 use crate::app::devices::ui_link_kind::UiLinkKind;
-use crate::{BoardRef, RichLine};
+use crate::{BoardRef, OfferArgs, RichLine};
 
 /// What the name is for.
 pub const BLUETOOTH_NAME_SENTENCE: &str =
     "A phone or laptop nearby can connect to it by this name.";
+
+/// A board whose Bluetooth is off.
+pub const BLUETOOTH_DISABLED_SENTENCE: &str =
+    "Bluetooth is disabled on this board: nothing nearby can connect by it.";
 
 /// On a board open to edit with no password.
 pub const OPEN_BOARD_SENTENCE: &str =
@@ -88,35 +100,62 @@ pub(crate) fn advertised_name(input: &BoardCardInput<'_>) -> Option<String> {
     Some(format!("LP-{:02x}{:02x}", octets[4], octets[5]))
 }
 
-/// The row's details: the switch, the name, and what it means.
+/// The row's details: the name and what it means, then Disable; off, that
+/// it is off, then Enable; and while a change applies, the restart's words.
 fn details(input: &BoardCardInput<'_>, on: Option<bool>, name: Option<&str>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
-    let over_bluetooth = input.reached_over(UiLinkKind::Bluetooth);
-    if let Some(access) = input
+    let switch = |on: bool, word: &str| {
+        input.offer_under(&["bluetooth", "enabled"]).map(|offer| {
+            UiCardAction::press_with(
+                offer,
+                word,
+                OfferArgs::new().with(BLUETOOTH_ENABLED_PARAM, on.to_string()),
+            )
+            .with_icon("bluetooth")
+        })
+    };
+    let applying = input
         .access
-        .filter(|access| access.panel.is_some() || over_bluetooth)
-    {
-        details
-            .panels
-            .push(UiDetailPanel::Bluetooth(bluetooth_switch(
-                access,
-                over_bluetooth,
-            )));
-    }
-    if on == Some(true)
-        && let Some(name) = name
-    {
-        details
-            .sections
-            .push(facts("Bluetooth", vec![RichLine::new("Name", name)]));
-        details
-            .sections
-            .push(help("Bluetooth", BLUETOOTH_NAME_SENTENCE));
-        if open_to_edit(input) {
+        .and_then(|access| access.panel.as_ref())
+        .filter(|panel| panel.restart_pending)
+        .and_then(|panel| {
+            Some(bluetooth_restart_words(
+                panel.ble_enabled?,
+                panel.can_restart,
+            ))
+        });
+    match (on, name) {
+        (Some(true), Some(name)) => {
             details
                 .sections
-                .push(help("Anyone can edit", OPEN_BOARD_SENTENCE));
+                .push(facts("Bluetooth", vec![RichLine::new("Name", name)]));
+            details
+                .sections
+                .push(help("Bluetooth", BLUETOOTH_NAME_SENTENCE));
+            if open_to_edit(input) {
+                details
+                    .sections
+                    .push(help("Anyone can edit", OPEN_BOARD_SENTENCE));
+            }
+            details
+                .sections
+                .extend(applying.map(|words| help("Bluetooth", words)));
+            details.sections.push(verbs(
+                switch(false, DISABLE_BLUETOOTH).into_iter().collect(),
+            ));
         }
+        (Some(false), _) => {
+            details
+                .sections
+                .push(help("Bluetooth", BLUETOOTH_DISABLED_SENTENCE));
+            details
+                .sections
+                .extend(applying.map(|words| help("Bluetooth", words)));
+            details
+                .sections
+                .push(verbs(switch(true, ENABLE_BLUETOOTH).into_iter().collect()));
+        }
+        _ => {}
     }
     details
 }
@@ -211,21 +250,15 @@ mod tests {
         assert_eq!(bar.summary, "\u{2014}");
     }
 
-    /// Its details: the switch, the name and what it is for, and on an
-    /// open board that anyone nearby can edit it.
+    /// Its details: the name and what it is for, on an open board that
+    /// anyone nearby can edit it, then Disable Bluetooth; off, Enable.
     #[test]
-    fn its_details_hold_the_switch_and_say_what_the_name_is_for() {
+    fn its_details_say_what_the_name_is_for_and_offer_disable() {
         let mut fixture = CardFixture::ready();
         let mut access = usb_access(Some(true));
         access.panel.as_mut().unwrap().open = OpenTo::Edit;
         fixture.access = Some(access);
         let bar = bluetooth_bar(&fixture.input());
-        assert!(
-            bar.details
-                .panels
-                .iter()
-                .any(|panel| matches!(panel, UiDetailPanel::Bluetooth(_)))
-        );
         let sentences: Vec<&str> = bar
             .details
             .sections
@@ -233,6 +266,29 @@ mod tests {
             .filter_map(|section| section.sentence.as_deref())
             .collect();
         assert_eq!(sentences, [BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE]);
+        let disable = only_verb(&bar);
+        assert_eq!(disable.word, "Disable Bluetooth");
+        assert!(disable.offer.to_string().ends_with("/bluetooth/enabled"));
+        assert_eq!(disable.args.get(BLUETOOTH_ENABLED_PARAM), Some("false"));
+        assert_eq!(disable.refused, None);
+
+        fixture.access = Some(usb_access(Some(false)));
+        let bar = bluetooth_bar(&fixture.input());
+        assert_eq!(bar.summary, "disabled");
+        assert!(!bar.todo, "disabled wants nothing");
+        assert_eq!(only_verb(&bar).word, "Enable Bluetooth");
+    }
+
+    /// Over Bluetooth, Disable says why it waits: it is the link you are on.
+    #[test]
+    fn over_bluetooth_disable_says_why_it_waits() {
+        let mut fixture = CardFixture::ready().over(UiLinkKind::Bluetooth);
+        fixture.access = Some(usb_access(Some(true)));
+        let bar = bluetooth_bar(&fixture.input());
+        assert_eq!(
+            only_verb(&bar).refused.as_deref(),
+            Some(crate::OFF_OVER_BLUETOOTH)
+        );
     }
 
     #[test]
@@ -241,6 +297,18 @@ mod tests {
         fixture.runtime = Some(crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None));
         fixture.access = Some(usb_access(Some(true)));
         assert_eq!(bluetooth_bar(&fixture.input()).summary, "\u{2014}");
+    }
+
+    fn only_verb(bar: &UiStackBar) -> UiCardAction {
+        let verbs: Vec<&UiCardAction> = bar
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .filter(|action| action.offer.to_string().contains("/bluetooth/"))
+            .collect();
+        assert_eq!(verbs.len(), 1, "{verbs:?}");
+        verbs[0].clone()
     }
 
     fn usb_access(ble_enabled: Option<bool>) -> UiDeviceAccess {

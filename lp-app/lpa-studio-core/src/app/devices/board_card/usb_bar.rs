@@ -84,6 +84,7 @@ pub(crate) fn pending_link_bars(pending: &PendingLinkView, link: UiLinkKind) -> 
                     sections: vec![facts("Reach", vec![RichLine::new("State", state.clone())])],
                     panels: Vec::new(),
                     raised: false,
+                    foot: Vec::new(),
                 },
                 ..UiStackBar::new(layer, icon, CONNECTED)
             },

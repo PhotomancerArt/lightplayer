@@ -265,6 +265,7 @@ mod tests {
                 }],
                 panels: Vec::new(),
                 raised: false,
+                foot: Vec::new(),
             },
             ..UiStackBar::new(layer, "chip", "")
         }

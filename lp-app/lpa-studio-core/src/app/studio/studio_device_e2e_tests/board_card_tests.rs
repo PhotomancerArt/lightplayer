@@ -252,9 +252,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board's Project row says "none", and its primary is "Add a project":
-/// the `push` offer, drawn as the picker, which the project bar does not
-/// repeat; pressed by path with a source, the push runs.
+/// An empty board's Project row says "none" with Add, lit as a to-do, and
+/// its primary is "Add a project": the same `push` offer, drawn as the
+/// picker; pressed by path with a source, the push runs.
 #[test]
 fn an_empty_boards_primary_adds_a_project_by_path() {
     let device = empty_light_player("dev000000card000005");
@@ -270,8 +270,13 @@ fn an_empty_boards_primary_adds_a_project_by_path() {
     let card = card_of(&bench, id);
     let bar = card.bar(crate::BarLayer::Project).clone();
     assert_eq!(bar.summary, "none");
-    assert_eq!(bar.action, None, "the primary carries it, once");
+    assert!(bar.todo, "lit: something left to do");
     let add = primary_offer(&card);
+    assert_eq!(
+        bar.action.as_ref().map(|row| (&row.offer, &row.draw)),
+        Some((&add.offer, &add.draw)),
+        "the row's Add is the primary's pick"
+    );
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(id, "push"));
     assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));

@@ -100,6 +100,7 @@ pub fn StackBar(
                 BarDetails {
                     sections: details.sections,
                     panels: details.panels,
+                    foot: details.foot,
                     raised: details.raised,
                     board,
                     label,

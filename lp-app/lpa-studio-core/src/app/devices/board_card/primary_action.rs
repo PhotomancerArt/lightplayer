@@ -181,15 +181,14 @@ pub(crate) fn state_action(
                 ..install(flash).drawn(board_pick(input))
             })
         }),
-        PreHelloFirmware | NoFirmware | DownloadMode | Silent => input
-            .offer("flash")
-            .map(|flash| install(flash).drawn(board_pick(input)))
-            .or_else(|| {
+        PreHelloFirmware | NoFirmware | DownloadMode | Silent => {
+            install_firmware(input).or_else(|| {
                 update_firmware(input).map(|update| UiCardAction {
                     word: INSTALL_FIRMWARE.to_string(),
                     ..update
                 })
-            }),
+            })
+        }
         Locked => input.offer("unlock").map(|unlock| {
             UiCardAction::press(unlock, "Unlock")
                 .with_icon("lock")
@@ -297,6 +296,15 @@ pub(crate) fn pending_action(
             chip_from_banner: pending.detected_chip.is_some(),
         })
     })
+}
+
+/// Install firmware on a board with no LightPlayer: the `flash` offer with
+/// the board pick — the primary's, and the Firmware row's to-do ("none ·
+/// Install").
+pub(crate) fn install_firmware(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
+    input
+        .offer("flash")
+        .map(|flash| install(flash).drawn(board_pick(input)))
 }
 
 /// Install firmware: the `flash` offer, in the card's words (P12: install

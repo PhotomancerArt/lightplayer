@@ -5,7 +5,6 @@
 use lpa_devices::LinkCounterFacts;
 use lpa_devices::evidence::TerminalLine;
 
-use super::ui_bluetooth_switch::UiBluetoothSwitch;
 use crate::OfferPath;
 use crate::app::access::UiAccessPanel;
 use crate::app::devices::device_layout_view::UiLayoutPanel;
@@ -24,8 +23,6 @@ pub enum UiDetailPanel {
     /// Who has access: the play and edit passwords and the keys (the access
     /// panel), where this link may see them.
     Access(UiAccessPanel),
-    /// The board's Bluetooth switch.
-    Bluetooth(UiBluetoothSwitch),
     /// The board's Wi‑Fi: its networks, the form, the test, Cloud relay
     /// (the Wi‑Fi panel). Its verbs are offers at `devices/<board>/wifi/…`.
     Wifi(UiDeviceWifi),
@@ -78,7 +75,6 @@ impl UiDetailPanel {
             UiDetailPanel::Terminal { .. }
             | UiDetailPanel::PanelSettings { .. }
             | UiDetailPanel::Access(_)
-            | UiDetailPanel::Bluetooth(_)
             | UiDetailPanel::Wifi(_)
             | UiDetailPanel::LinkCounters(_) => Vec::new(),
         }
