@@ -120,8 +120,8 @@ lightplayer.app failed      Studio couldn't reach this board through lightplayer
                             Retry to connect.                                              ↻ Retry
 connect failed              Studio couldn't connect to this board over USB.
                             Retry to connect.                                              ↻ Retry
-not answering               This board stopped responding over USB.
-                            Retry to reconnect.                                            ↻ Retry
+not answering (it said      This board stopped responding over USB.
+  hello, now says nothing)  Retry to reconnect.                                            ↻ Retry
 sim off                     This simulated board is off.                                   ▶ Power on
 offline, another way        This board isn't plugged in.
   reaches it                Connect over Wi‑Fi to use it.                                  ↔ Connect
@@ -158,7 +158,8 @@ no firmware                 This board doesn't have LightPlayer firmware.
                             Install the firmware to use it.                                ▲ Install firmware
 download mode               This board is waiting in download mode.
                             Install the firmware to use it.                                ▲ Install firmware
-says nothing                This board doesn't respond.  Install the firmware to use it.   ▲ Install firmware
+says nothing (it never      This board doesn't respond.  Install the firmware to use it.   ▲ Install firmware
+  said hello)                                                        # was: not answering, Retry (a new board, lightplayer.app 10-18)
 locked                      This board is locked.  Unlock it to connect.                   ○ Unlock
 a shader error              This board's project has an error.  Edit the project to fix it.   ✎ Edit project
 no project                  This board has no project yet.                                 + Add a project
@@ -252,10 +253,11 @@ phone's two), the name is cut at its end and the details hold it whole:
 
 ```text
 ↔ USB · connected                    # was: USB · live
+↔ USB · connected                    # a board that never said hello and says nothing: the surface and Firmware say it. was: USB · not responding, orange (10-18)
 ↔ USB · not connected
 ◌ USB · connecting
 ◌ USB · reconnecting
-↔ USB · not responding     │ Retry │   # orange; quiet while the surface says it
+↔ USB · not responding     │ Retry │   # a board that said hello went quiet. orange; quiet while the surface says it
 ↔ USB · connection failed  │ Retry │   # red; quiet while the surface says it
 ↔ Wi‑Fi · connected   ☁              # ☁ lit: lightplayer.app reaches it too
 ↔ Bluetooth · connected
@@ -334,7 +336,7 @@ phone's two), the name is cut at its end and the details hold it whole:
 │ Porch lamp            │ ✓ Done              │   connected, reconnecting, in the editor
 │ Porch lamp            │ ◌                   │   connecting, moving here from another tab
 │ Porch lamp            │ ▲ Update firmware   │   old firmware; files that need newer firmware   # was: no button (the desk C6)
-│ Porch lamp            │ ▲ Install firmware  │   no firmware, incomplete, a version Studio can't get   # was: Install
+│ Porch lamp            │ ▲ Install firmware  │   no firmware, says nothing, incomplete, a version Studio can't get   # was: Install; says nothing was Retry (10-18)
 │ Porch lamp            │ ▲ Reinstall firmware│   crashing   # was: Connect
 │ Porch lamp            │ ▲ Resume update     │   an update stopped half-way
 │ Porch lamp            │ ◆ Restore           │   its files lost (Reset when there is no backup)   # was: Add a project

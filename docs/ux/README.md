@@ -376,6 +376,14 @@ do:   │ XIAO ESP32-C6                  │ Update firmware │   # the likely 
 
 bad:  │ XIAO ESP32-C6                                    │   # card 10-17: no button up top;
       │ ▲ Firmware  v2026.07.02                 │ Update │   #   the fix a red Update in a row
+
+do:   │ This board doesn't respond.                      │   # a new board that never said hello
+      │ Install the firmware to use it.                  │
+      │ New device                    │ Install firmware │
+
+bad:  │ This board stopped responding over USB.          │   # lightplayer.app 10-18, a first-time user:
+      │ New device                               │ Retry │   #   "'board not responding' is sort of a 'duh,
+                                                           #   I'm trying to program it'"
 ```
 
 app: `lpa-studio-core/…/board_card/primary_action.rs`
