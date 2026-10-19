@@ -765,12 +765,15 @@ impl Editor {
             p.component(id)
                 .is_some_and(|c| c.kind.points().is_some() && c.kind.min_points() == 2)
         };
-        let found = p.things_at(&self.camera, at).into_iter().find_map(|t| match t {
-            Target::Component(id) if is_path(&id) => {
-                p.segment_at(&self.camera, &id, at).map(|(s, _)| (id, s))
-            }
-            _ => None,
-        });
+        let found = p
+            .things_at(&self.camera, at)
+            .into_iter()
+            .find_map(|t| match t {
+                Target::Component(id) if is_path(&id) => {
+                    p.segment_at(&self.camera, &id, at).map(|(s, _)| (id, s))
+                }
+                _ => None,
+            });
         if let Some((path, segment)) = found {
             self.toggle_jumper(&path, segment);
         }

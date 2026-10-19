@@ -1590,17 +1590,29 @@ fn eave() -> (Editor, ComponentId) {
 #[test]
 fn a_jumper_carries_no_lamps_and_keeps_the_count() {
     let (mut e, path) = eave();
-    let before: Vec<Vec2> = e.project.objects_of(&path).flat_map(|o| o.lamps.iter().map(|l| l.pos)).collect();
+    let before: Vec<Vec2> = e
+        .project
+        .objects_of(&path)
+        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+        .collect();
     e.toggle_jumper(&path, 0);
     assert_eq!(e.project.path_jumpers(&path), &[0]);
     let points = e.project.path_points(&path).unwrap().to_vec();
-    let after: Vec<Vec2> = e.project.objects_of(&path).flat_map(|o| o.lamps.iter().map(|l| l.pos)).collect();
+    let after: Vec<Vec2> = e
+        .project
+        .objects_of(&path)
+        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+        .collect();
     assert_eq!(after.len(), before.len(), "the count stays");
     // The first lamp sits where the first lit segment starts, not on the
     // jumper's start.
     let frame = e.project.component_frame(&path);
     let start = frame.to_world(points[1]);
-    assert!(after[0].distance(start) < 1e-3, "{:?} vs {start:?}", after[0]);
+    assert!(
+        after[0].distance(start) < 1e-3,
+        "{:?} vs {start:?}",
+        after[0]
+    );
     assert_ne!(after, before);
     e.toggle_jumper(&path, 0);
     assert!(e.project.path_jumpers(&path).is_empty());
@@ -1651,7 +1663,10 @@ fn a_fixtures_colour_order_is_picked_from_six() {
         id: "colour-order",
         edit: PropEdit::SetChoice(4),
     });
-    assert_eq!(e.project.fixture(&fixture).unwrap().color_order, ColorOrder::Brg);
+    assert_eq!(
+        e.project.fixture(&fixture).unwrap().color_order,
+        ColorOrder::Brg
+    );
 }
 
 // ---- verbs by name -------------------------------------------------------------
