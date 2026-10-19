@@ -688,6 +688,89 @@ fn a_factory_reset_from_hardware_lands_on_install_firmware_with_no_retry() {
     });
 }
 
+/// Yona's C6, 2026-10-19: "the card periodically 'refreshes' which is
+/// jarring and resets the ui." An erased native-USB chip re-enumerates on
+/// every watchdog reset of its boot loop; each one took the board offline
+/// and back, and its card moved from Online boards to Offline boards and
+/// back, remounted (open details closed, an armed button disarmed). A port
+/// that comes back within the grace is the same board that never left: the
+/// blank card holds — Online, the blank board, Install firmware — through
+/// every turn of the loop. A board that stays gone is offline after the
+/// grace.
+#[test]
+fn an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone() {
+    let device = light_player("dev_bootloop");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-bootloop");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    bench.erase_plan.set(ErasePlan::Silent);
+    let erase = bench.device_verb(id, "erase");
+    bench
+        .press_lasting(&erase, OfferArgs::new())
+        .expect("Factory reset, after the arm");
+    bench.run_until(&tasks, "the erase to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let blank = |bench: &DeviceBench| {
+        let card = card_of(bench, id);
+        assert_eq!(
+            card.presence,
+            crate::UiBoardPresence::Online,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(
+            card.surface.state,
+            crate::SurfaceState::NoFirmware,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(primary_offer(&card).word, "Install firmware");
+    };
+    blank(&bench);
+
+    // Three turns of the boot loop: the port leaves, and is back (under the
+    // same grant) a moment later. The card never moves or changes.
+    let steps = |seconds: f64| (seconds / STEP_MS) as usize;
+    for _ in 0..3 {
+        bench.granted.set(false);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+        for _ in 0..steps(1.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+        bench.granted.set(true);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+        for _ in 0..steps(4.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+    }
+
+    // Unplugged for good: offline once the grace has passed.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to be offline", |bench| {
+        card_of(bench, id).presence == crate::UiBoardPresence::Offline
+    });
+}
+
 /// The layout question rides the firmware bar: while it is open the bar's
 /// details are raised (the web opens them) and hold the Layout panel, its
 /// work is the flash's own step, and Continue — Lasting — is pressed by

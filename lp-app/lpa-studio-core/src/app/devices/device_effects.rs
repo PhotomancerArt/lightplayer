@@ -74,6 +74,20 @@ const LINK_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// [`DeviceEffects::sweep_departed_ports`].
 const HOTPLUG_SETTLE: Duration = Duration::from_millis(250);
 
+/// How long a port that left may take to come back before its board is
+/// gone ([`DeviceEffects::sweep_departed_ports`]).
+///
+/// A native-USB chip (the C6) re-enumerates on a watchdog reset: an erased
+/// one does it every few seconds, in its blank boot loop (bench 2026-08-30),
+/// and comes back under the same grant a moment later (session adoption
+/// keeps its endpoint). Detaching on the first sweep took the board offline
+/// and back on every turn of the loop, and its card left Online boards for
+/// Offline boards and came back, remounted each time: open details closed,
+/// an armed button disarmed, the card jumped ("the card periodically
+/// 'refreshes' which is jarring and resets the ui", Yona's C6, 2026-10-19).
+/// A board that is really unplugged reads offline this much later.
+pub(crate) const REENUMERATION_GRACE: Duration = Duration::from_millis(3_000);
+
 /// Links attached (or detached) per granted-port sweep.
 ///
 /// Ids are minted before the sweep awaits (a spawned future cannot hold
@@ -1247,9 +1261,14 @@ impl DeviceEffects {
     /// the browser answers both.
     ///
     /// See [`HOTPLUG_SETTLE`] for why the ask waits a beat, and
-    /// [`MAX_SWEEP_LINKS`] for the bound. Re-attachment needs nothing new:
-    /// the connect edge sweeps grants, and the model's endpoint supersede +
-    /// identity merge put the board back on its own card.
+    /// [`MAX_SWEEP_LINKS`] for the bound. A USB port missing from that
+    /// answer is asked about once more after [`REENUMERATION_GRACE`], and
+    /// only a port still missing then is detached: a native-USB chip that
+    /// re-enumerated is back by then under the same endpoint, and its board
+    /// never left. A network link missing from it is detached at once.
+    /// Re-attachment needs nothing new: the connect edge sweeps grants, and
+    /// the model's endpoint supersede + identity merge put the board back on
+    /// its own card.
     pub fn sweep_departed_ports(&mut self) {
         let (Some(transport), Some(spawn), Some(make_timer), Some(sink)) = (
             self.transport.clone(),
@@ -1270,30 +1289,48 @@ impl DeviceEffects {
         let sleep = (make_timer.borrow_mut())(HOTPLUG_SETTLE);
         spawn(Box::pin(async move {
             sleep.await;
-            let remaining: Vec<EndpointKey> = match transport.discover_granted().await {
-                Ok(granted) => granted
-                    .into_iter()
-                    .map(|grant| grant.info.endpoint)
-                    .collect(),
-                Err(error) => {
-                    // A discovery that FAILED says nothing about which board
-                    // left. Detaching on it would tear down every card over
-                    // a transient browser error.
-                    log::warn!("departure sweep could not list grants: {error}");
-                    return;
-                }
+            // A discovery that FAILED says nothing about which board left.
+            // Detaching on it would tear down every card over a transient
+            // browser error.
+            let Some(remaining) = granted_endpoints(&transport).await else {
+                return;
             };
+            // A network link (Bluetooth, the LAN, the relay) is gone now:
+            // its session redials by itself and needs the old link out of
+            // the way. A USB port may only be re-enumerating.
+            let (network, usb): (Vec<_>, Vec<_>) = held
+                .into_iter()
+                .filter(|(_, endpoint)| !remaining.contains(endpoint))
+                .partition(|(_, endpoint)| endpoint.is_network());
             let mut budget = MAX_SWEEP_LINKS;
-            for (link, endpoint) in held {
-                if remaining.contains(&endpoint) {
-                    continue;
-                }
+            let mut detach = |link: LinkId| {
                 if budget == 0 {
                     log::warn!("more departed ports than one sweep detaches; the rest wait");
-                    return;
+                    return false;
                 }
                 budget -= 1;
                 sink(Input::Event(Event::LinkDetached { link }));
+                true
+            };
+            for (link, _) in network {
+                if !detach(link) {
+                    return;
+                }
+            }
+            if usb.is_empty() {
+                return;
+            }
+            // Gone, or re-enumerating: ask again once a re-enumerated port
+            // would be back.
+            let grace = (make_timer.borrow_mut())(REENUMERATION_GRACE);
+            grace.await;
+            let Some(remaining) = granted_endpoints(&transport).await else {
+                return;
+            };
+            for (link, endpoint) in usb {
+                if !remaining.contains(&endpoint) && !detach(link) {
+                    return;
+                }
             }
         }));
     }
@@ -1469,6 +1506,23 @@ struct PumpShared {
     resets: LinkResets,
     /// Where channel-3 bytes go.
     update: super::update_host::UpdateHost,
+}
+
+/// The endpoints the browser still grants, for the departure sweep; `None`
+/// when it could not say (logged), which says nothing about who left.
+async fn granted_endpoints(transport: &Rc<dyn DeviceTransport>) -> Option<Vec<EndpointKey>> {
+    match transport.discover_granted().await {
+        Ok(granted) => Some(
+            granted
+                .into_iter()
+                .map(|grant| grant.info.endpoint)
+                .collect(),
+        ),
+        Err(error) => {
+            log::warn!("departure sweep could not list grants: {error}");
+            None
+        }
+    }
 }
 
 /// Whether a link error is the platform saying the port itself is gone —

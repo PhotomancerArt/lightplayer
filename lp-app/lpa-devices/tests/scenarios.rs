@@ -2162,6 +2162,54 @@ fn a_factory_reset_settles_on_the_boot_loop_and_gives_the_port_back() {
     assert!(!card.escapes.contains(&Escape::Retry));
 }
 
+/// An erased native-USB chip re-enumerates on every watchdog reset of its
+/// boot loop. While the Erase only listens for that loop (the wipe is done
+/// and verified), a vanished link is a gap, not a failure: the Erase waits
+/// it out, hears the loop on the link that comes back, and ends well — by a
+/// detach and a new link, or by a new link superseding the old in place.
+#[test]
+fn a_factory_reset_outlives_the_erased_chips_re_enumeration() {
+    for supersede in [false, true] {
+        let mut replay = ready_device();
+        let device = first_device(&replay);
+        replay.step(Millis(1_000), Step::Erase { device: device.0 });
+        replay.step(
+            Millis(3_000),
+            Step::EffectEnded {
+                device: device.0,
+                ok: true,
+                message: None,
+                effect: None,
+                kind: Some(ActivityKind::Erase),
+            },
+        );
+        replay.step(Millis(3_100), Step::opened(1));
+        // The chip resets and its USB re-enumerates under the same grant.
+        if !supersede {
+            replay.step(Millis(3_500), Step::detach(1));
+        }
+        replay.step(Millis(4_000), Step::attach(2, "usb-1"));
+        let card = replay.view().devices[0].clone();
+        assert_eq!(
+            card.activity.as_ref().map(|work| work.kind),
+            Some(ActivityKind::Erase),
+            "supersede={supersede}: the erase waits the gap out: {card:?}"
+        );
+        replay.advance_to(Millis(5_000));
+        replay.step(Millis(5_100), Step::opened(2));
+        replay.step(Millis(5_200), Step::line(2, "invalid header: 0xffffffff"));
+        let card = replay.view().devices[0].clone();
+        assert!(card.activity.is_none(), "supersede={supersede}: {card:?}");
+        assert!(
+            card.last_outcome.as_ref().is_some_and(|outcome| outcome.ok),
+            "supersede={supersede}: the erase ended well: {:?}",
+            card.last_outcome
+        );
+        assert_eq!(card.firmware_face, lpa_devices::FirmwareFace::Blank);
+        assert_eq!(card.status, DeviceStatus::NeedsAttention);
+    }
+}
+
 // ---------------------------------------------------------------- helpers
 
 fn run_fixture(json: &str) {

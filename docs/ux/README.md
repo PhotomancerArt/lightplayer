@@ -102,7 +102,14 @@ do:   ▲ Firmware  v2026.07.02 (pre-OTA)   │ Update to v2026.10.16-1 │
 
 bad:  ◆ Out of date                studio     # shipped: the name moved to the right
 bad:  Old LightPlayer firmware                # spike r1: a word in front of the firmware
+bad:  the card leaves Online boards for Offline boards and comes back, every few seconds,
+      its open details closed                 # C6 walk 10-19: an erased board re-enumerating,
+                                              #   "jarring and resets the ui"
 ```
+
+A board's events never reset what someone is doing on its card: open
+details stay open, an armed button stays armed, and the card keeps its
+place.
 
 app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
 

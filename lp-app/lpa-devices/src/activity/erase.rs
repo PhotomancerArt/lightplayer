@@ -79,6 +79,12 @@ impl EraseActivity {
         }
     }
 
+    /// The wipe is done and verified; the activity only listens for the
+    /// blank chip's boot loop (and outlives a vanished link meanwhile).
+    pub(crate) fn is_observing(&self) -> bool {
+        matches!(self.phase, ErasePhase::Observing { .. })
+    }
+
     /// The command that starts the coarse effect. Emitted by
     /// [`Device::spawn_erase`](crate::Device::spawn_erase) at spawn.
     pub(crate) fn spawn_commands(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
