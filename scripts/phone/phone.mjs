@@ -155,7 +155,13 @@ export function awake(serial = pickPhone()) {
   shell(serial, "input keyevent KEYCODE_WAKEUP");
   shell(serial, "svc power stayon true");
   shell(serial, "wm dismiss-keyguard");
-  const now = status(serial);
+  // The keyguard goes a moment after the wake, not with it (2026-10-18: a
+  // phone woken from sleep read locked on the first look).
+  let now = status(serial);
+  for (let attempt = 0; attempt < 10 && now.locked; attempt++) {
+    execFileSync("sleep", ["0.3"]);
+    now = status(serial);
+  }
   if (now.locked) throw new Error("the phone is still locked: a test phone runs with Screen lock › None");
   return now;
 }
