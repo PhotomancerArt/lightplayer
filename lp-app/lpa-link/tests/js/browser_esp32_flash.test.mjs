@@ -13,8 +13,11 @@ import { test } from "node:test";
 import {
   READ_PACE,
   readFlashSafely,
+  rebootFromFlash,
   writeFlashChecked,
 } from "../../src/providers/browser_serial_esp32/browser_esp32_flash.js";
+import { UsbCdcSerialPort } from "../../../lpa-studio-web/public/lpa-link/usb_cdc_serial.js";
+import { FakeUsbDevice } from "./fake_usb_device.js";
 
 const PHONE = READ_PACE["usb-cdc"];
 
@@ -117,7 +120,61 @@ test("a lost MD5 reply is asked again, not written again", async () => {
   assert.equal(stub.md5Asked, 2);
 });
 
+test("an erase reboots the board out of the stub, over WebUSB", async () => {
+  // A Factory reset from a phone (2026-10-19) erased the board and left it in
+  // the stub, which says nothing, so the card read "not responding" until a
+  // reload. esptool-js's own hard reset only releases RTS, and the connect's
+  // reset sequence had already left both lines low.
+  const device = new FakeUsbDevice();
+  const port = new UsbCdcSerialPort(device);
+  await port.open({ baudRate: 115200 });
+  // Where esptool-js's USB-JTAG connect sequence leaves the lines.
+  await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  const before = device.lineLog.length;
+  const lines = [];
+  await rebootFromFlash({ device: port }, { writeLine: (l) => lines.push(l) });
+  const pulse = device.lineLog.slice(before);
+  assert.deepEqual(pulse, [
+    { dtr: false, rts: true },
+    { dtr: false, rts: false },
+  ]);
+  assert.equal(c6Resets(device.lineLog.slice(before - 1)), 1, "the C6 saw no reset");
+  assert.ok(
+    !pulse.some((l) => l.dtr && !l.rts),
+    "the pulse passed through a CH34x's download-mode selection",
+  );
+  assert.match(lines.join("\n"), /Rebooting the board/);
+  await port.close();
+});
+
+test("a board that re-enumerates on the reset does not fail the erase", async () => {
+  const signals = [];
+  const port = {
+    async setSignals(next) {
+      signals.push(next);
+      if (signals.length === 2) throw new Error("The device has been lost.");
+    },
+  };
+  const lines = [];
+  await rebootFromFlash({ device: port }, { writeLine: (l) => lines.push(l) });
+  assert.equal(signals.length, 2);
+  assert.match(lines.join("\n"), /release went unanswered: The device has been lost/);
+});
+
 // --- helpers ---------------------------------------------------------------
+
+/// How many times the lines entered the state a C6's USB-Serial-JTAG resets
+/// the chip on: RTS asserted, DTR not (the ESP32-C6 TRM's USB Serial/JTAG
+/// controller; esptool's hard reset drives the same).
+function c6Resets(lineLog) {
+  let resets = 0;
+  for (let i = 1; i < lineLog.length; i += 1) {
+    const was = lineLog[i - 1];
+    const now = lineLog[i];
+    if (now.rts && !now.dtr && !(was.rts && !was.dtr)) resets += 1;
+  }
+  return resets;
+}
 
 function patterned(length) {
   // JSON-ish, with the bytes SLIP escapes and the stub flushes on.

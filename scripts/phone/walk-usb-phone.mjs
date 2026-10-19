@@ -289,13 +289,11 @@ async function main() {
         await driver.pressOffer("erase", { board: mac, bar: "firmware", confirm: true, timeoutMs: STEP_DEADLINE_MS });
         await driver.closeDetails({ board: mac }).catch(() => {});
         await driver.waitFor(`!${ROW_WORKING}`, { timeoutMs: FLASH_DEADLINE_MS, what: "the erase to finish" });
-        // The card that erased the board does not see it come back blank
-        // (it says "not responding"; a sibling fix, "Offer Install, not
-        // Retry, on a board that never spoke"), so the walk reloads, as a
-        // person would, and the granted port reconnects with no chooser.
-        await driver.navigate(studio, { loadTimeoutMs: STUDIO_LOAD_DEADLINE_MS });
+        // The same card, with no reload: the erase reboots the board out of
+        // the stub, its ROM loops on the blank flash, and the card reads that
+        // as blank (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`).
         blank = await driver.waitFor(BLANK_CARD, { timeoutMs: STEP_DEADLINE_MS, what: "a card offering the blank board Install firmware" });
-        return `was ${report.before}; after a reload the blank board is ${blank}, offered Install firmware`;
+        return `was ${report.before}; the blank board is ${blank}, offered Install firmware with no reload`;
       });
 
     }
