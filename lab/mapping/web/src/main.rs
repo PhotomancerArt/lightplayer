@@ -121,7 +121,7 @@ fn App() -> Element {
                         },
                         span { class: "toggle-box", if move_draw { "✓" } else { "" } }
                         " Move & draw "
-                        kbd { "M" }
+                        kbd { "D" }
                     }
                 }
                 div { class: "tools",

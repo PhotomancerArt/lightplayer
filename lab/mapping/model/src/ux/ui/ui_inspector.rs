@@ -3,6 +3,7 @@
 
 use crate::domain::notice::Notice;
 use crate::domain::target::Target;
+use crate::ux::graph_verb::GraphVerb;
 use crate::ux::props::Prop;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,4 +52,10 @@ pub enum UiItem {
     },
     /// A quiet line saying what to do.
     Hint(String),
+    /// A fact with the verb that changes it beside it, as a button that
+    /// presses the verb (`GraphInput::Verb`): "On D10 at 0 · Unpatch".
+    Action {
+        text: String,
+        verb: GraphVerb,
+    },
 }

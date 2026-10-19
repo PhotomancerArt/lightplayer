@@ -14,6 +14,7 @@ use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::debug_flags::DebugFlags;
 use crate::ux::handle::{Handle, HandleKind};
+use crate::ux::patching::Armed;
 use crate::ux::pick::{PickMode, level_candidates, pick};
 use crate::ux::ui::{LayoutKind, SizeClass};
 
@@ -193,8 +194,11 @@ pub struct Editor {
     pub path_draft: Vec<Vec2>,
     /// "Move & draw" (D50): on, the drawing can be moved, drawn and
     /// reshaped; off, it holds still and only selection and patching work
-    /// (the dome). M toggles it.
+    /// (the dome). D toggles it.
     pub move_draw: bool,
+    /// A pair half made (`patching.rs`): A or S chose one end, and the
+    /// other is being looked for.
+    pub armed: Option<Armed>,
     pub debug: DebugFlags,
     /// The project runs for real (Studio's Graph: a board, or Studio's
     /// preview host): a shader's picture is its own, not the lab's
@@ -238,6 +242,7 @@ impl Editor {
             menu: None,
             path_draft: Vec::new(),
             move_draw: true,
+            armed: None,
             debug: DebugFlags::default(),
             runs_for_real: false,
             layout_choice: None,
@@ -451,6 +456,15 @@ impl Editor {
         if button == Button::Middle || self.space_held {
             self.gesture = Gesture::Panning { last: at };
             return;
+        }
+        if self.armed.is_some() {
+            // Armed, a click on the other end makes the pair; anywhere else
+            // it disarms and selects as usual.
+            if let Some(other) = self.end_at(at) {
+                self.complete_with(other);
+                return;
+            }
+            self.armed = None;
         }
         match self.tool {
             Tool::Circle => {
@@ -851,6 +865,9 @@ impl Editor {
     pub fn key_down(&mut self, key: Key, mods: Mods) -> bool {
         self.mods = mods;
         self.notice = None;
+        if self.armed.is_some() && self.armed_key(&key, mods) {
+            return true;
+        }
         match key {
             Key::Space => {
                 self.space_held = true;
@@ -874,6 +891,14 @@ impl Editor {
                 self.delete_selection();
                 true
             }
+            Key::Left | Key::Up if mods.shift => {
+                self.step_wire(-1);
+                true
+            }
+            Key::Right | Key::Down if mods.shift => {
+                self.step_wire(1);
+                true
+            }
             Key::Left | Key::Up => {
                 self.step(-1);
                 true
@@ -884,6 +909,27 @@ impl Editor {
             }
             Key::Char(c) => self.char_key(c.to_ascii_lowercase(), mods),
         }
+    }
+
+    /// A key while armed: the arrows walk the candidates, Enter makes the
+    /// pair, M makes it and moves on, Esc disarms. Any other key disarms
+    /// and does what it always does. Returns whether the arm used it.
+    fn armed_key(&mut self, key: &Key, mods: Mods) -> bool {
+        match key {
+            Key::Left | Key::Up if !mods.shift => self.step_candidate(-1),
+            Key::Right | Key::Down if !mods.shift => self.step_candidate(1),
+            Key::Enter => {
+                self.complete();
+            }
+            Key::Escape => self.disarm(),
+            Key::Char('m' | 'M') if !mods.command => self.patch_next(),
+            Key::Space => return false,
+            _ => {
+                self.disarm();
+                return false;
+            }
+        }
+        true
     }
 
     pub fn key_up(&mut self, key: Key, mods: Mods) {
@@ -899,14 +945,29 @@ impl Editor {
             ('z', true, true) => self.redo(),
             ('a', true, _) => self.select_all(),
             ('v', false, _) => self.set_tool(Tool::Select),
-            ('p' | 'l', false, _) => self.set_tool(Tool::Path),
+            ('p', false, _) => self.set_tool(Tool::Path),
             ('o', false, _) => self.set_tool(Tool::Circle),
             ('-' | '_', false, _) => self.nudge(-1),
             ('=' | '+', false, _) => self.nudge(1),
-            ('r', false, _) => self.reverse(),
-            ('u', false, _) => self.unpin_selection(),
+            ('r', false, _) if self.move_draw => self.reverse(),
+            ('r', false, _) => self.reverse_placements(),
+            ('u', false, false) if mods.alt => self.unpin_selection(),
+            ('u', false, false) => self.unpatch_selection(),
+            ('u', false, true) => self.unpatch_all_selected(),
             ('j', false, _) => self.jumper_under_pointer(),
-            ('m', false, _) => self.set_move_draw(!self.move_draw),
+            ('d', false, _) => self.set_move_draw(!self.move_draw),
+            // Patching by hand (`patching.rs`).
+            ('a', false, false) => self.arm_patch(),
+            ('a', false, true) => self.toggle_auto(),
+            ('m', false, _) => self.patch_next(),
+            ('s', false, _) => self.arm_swap(),
+            ('k', false, _) => self.turn_selection(1, false),
+            ('l', false, _) => self.turn_selection(-1, false),
+            (';' | ':', false, _) => self.turn_selection(1, true),
+            ('\'' | '"', false, _) => self.turn_selection(-1, true),
+            ('[' | '{', false, _) => self.shift_selection(-1),
+            (']' | '}', false, _) => self.shift_selection(1),
+            ('.' | '>', false, _) => self.next_port(),
             ('1' | '!', false, true) => self.fit(),
             ('2' | '@', false, true) => self.frame_selection(),
             _ => return false,
@@ -1125,12 +1186,14 @@ impl Editor {
     /// Select exactly these (the tree pane and the breadcrumb do this).
     pub fn select(&mut self, targets: Vec<Target>) {
         self.notice = None;
+        self.armed = None;
         self.selection = targets;
     }
 
     /// ⇧-click in the tree pane.
     pub fn toggle_select(&mut self, t: Target) {
         self.notice = None;
+        self.armed = None;
         self.toggle(t);
     }
 
@@ -1512,7 +1575,7 @@ impl Editor {
         self.notice = Some(Notice::info(if on {
             "Move & draw on — drag to move, P and O draw"
         } else {
-            "Move & draw off — select and patch only; nothing moves · M turns it back on"
+            "Move & draw off — select and patch only; nothing moves · D turns it back on"
         }));
     }
 
@@ -1591,7 +1654,7 @@ impl Editor {
         self.notice = Some(Notice::refused(
             format!("Can't {what}"),
             "Move & draw is off",
-            "M turns it on (or Move & draw in the toolbar)",
+            "D turns it on (or Move & draw in the toolbar)",
         ));
     }
 
@@ -1760,6 +1823,11 @@ impl Editor {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// Drop the last checkpoint: an edit that put everything back.
+    pub(crate) fn undo_pop(&mut self) {
+        self.undo.pop();
     }
 
     pub fn undo(&mut self) {

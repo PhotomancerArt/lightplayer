@@ -3,9 +3,13 @@
 //! and patch, a lamp's place, and the properties you can edit.
 
 use crate::domain::node::{NodeId, NodeKind};
+use crate::domain::object::ObjectId;
+use crate::domain::patch::PatchRule;
+use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::graph_verb::GraphVerb;
 use crate::ux::props::common_props;
 use crate::ux::ui::{UiCrumb, UiInspector, UiItem, UiSection};
 
@@ -78,10 +82,20 @@ impl Editor {
         {
             out.extend(facts);
         }
+        if let Some(o) = self.selected_object()
+            && p.object(&o).is_some_and(|o| !o.lamps.is_empty())
+        {
+            out.push(section("Wire", wire_facts(p, &o)));
+        }
         if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice()
             && let Some(spans) = span_facts(p, t)
         {
             out.push(section("Spans", spans));
+        }
+        if let [Target::Node(id)] = selection.as_slice()
+            && p.fixture(id).is_some()
+        {
+            out.push(section("Patch", patch_facts(p, id)));
         }
         if let [t @ Target::Lamp { object, index }] = selection.as_slice()
             && let Some(info) = lamp_fact(p, t, object, *index)
@@ -165,6 +179,86 @@ fn project_facts(p: &Project) -> Vec<String> {
         },
     ]);
     facts
+}
+
+/// How one object is on the wire, with what changes it (patching by hand,
+/// `patching.rs`).
+fn wire_facts(p: &Project, o: &ObjectId) -> Vec<UiItem> {
+    match p.on_wire(o) {
+        OnWire::Placed {
+            output,
+            port,
+            pixel,
+            reversed,
+            rotation,
+        } => {
+            let port = p.long_label(&Target::Port { output, key: port });
+            let mut out = vec![
+                UiItem::Action {
+                    text: format!("On {port} at {pixel}"),
+                    verb: GraphVerb::Unpatch,
+                },
+                UiItem::Action {
+                    text: if reversed {
+                        "Runs reversed".into()
+                    } else {
+                        "Runs forward".into()
+                    },
+                    verb: GraphVerb::Reverse,
+                },
+            ];
+            if rotation > 0 {
+                out.push(UiItem::Fact(format!("Turned {rotation} lamps")));
+            }
+            out
+        }
+        OnWire::Flowing => vec![UiItem::Fact("Flows on by its fixture's auto".into())],
+        OnWire::Nowhere => vec![UiItem::Action {
+            text: "Not on the wire".into(),
+            verb: GraphVerb::Patch,
+        }],
+    }
+}
+
+/// A fixture's patch at a glance: auto, and how many of its objects are
+/// on the wire.
+fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
+    let objects: Vec<&crate::domain::object::Object> = p
+        .objects_in(fixture)
+        .into_iter()
+        .filter(|o| !o.lamps.is_empty())
+        .collect();
+    let patch = p.effective_patch();
+    let on = objects.iter().filter(|o| patch.lands(&o.id)).count();
+    let by_hand = objects
+        .iter()
+        .filter(|o| matches!(p.on_wire(&o.id), OnWire::Placed { .. }))
+        .count();
+    let auto = match p
+        .fixture(fixture)
+        .and_then(|f| f.rules.iter().find(|r| matches!(r, PatchRule::Auto { .. })))
+    {
+        Some(r) => format!("Auto onto {}", p.node_name(r.output())),
+        None => "Auto off".to_string(),
+    };
+    let mut out = vec![
+        UiItem::Action {
+            text: auto,
+            verb: GraphVerb::Auto,
+        },
+        UiItem::Fact(format!(
+            "{on} of {} on the wire · {} waiting",
+            objects.len(),
+            objects.len() - on
+        )),
+    ];
+    if by_hand > 0 {
+        out.push(UiItem::Action {
+            text: format!("{by_hand} patched by hand"),
+            verb: GraphVerb::UnpatchAll,
+        });
+    }
+    out
 }
 
 /// Where a drawn thing's lamps land: one line per span, its pixels on its

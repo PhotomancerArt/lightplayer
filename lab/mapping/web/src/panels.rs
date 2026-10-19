@@ -134,6 +134,20 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
             }
         },
         UiItem::Prop { prop, locked } => rsx! { PropRow { ed: ed.clone(), prop, locked } },
+        UiItem::Action { text, verb } => rsx! {
+            div { class: "fact action-fact",
+                span { "{text}" }
+                button {
+                    class: "action-fact-button",
+                    title: "{verb.keys()}",
+                    onclick: move |_| {
+                        ed.input(GraphInput::Verb(verb));
+                    },
+                    "{verb.label()} "
+                    kbd { "{verb.keys()}" }
+                }
+            }
+        },
     }
 }
 
@@ -241,7 +255,7 @@ fn PropRow(ed: GraphEditor, prop: Prop, locked: bool) -> Element {
     rsx! {
         div {
             class: "prop",
-            title: if locked { "Move & draw is off · M turns it on" } else { "" },
+            title: if locked { "Move & draw is off · D turns it on" } else { "" },
             span { class: "prop-label", "{prop.desc.label}" }
             {control}
             if mixed {

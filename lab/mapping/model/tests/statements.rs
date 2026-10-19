@@ -464,7 +464,7 @@ fn the_layout_places_every_node_while_pinning_is_off() {
         e.hint_bar().hints.iter().all(|h| h.keys != "drag"),
         "the bar offers no dragging"
     );
-    key(&mut e, Key::Char('u'), none());
+    key(&mut e, Key::Char('u'), alt());
     assert!(
         e.notice
             .as_ref()
@@ -512,8 +512,8 @@ fn dragging_a_node_pins_it() {
     );
     lay_out(&mut e);
     assert!(e.project.node_rect(&ring).unwrap().min.distance(moved) < 1e-9);
-    // U gives it back to the layout.
-    key(&mut e, Key::Char('u'), none());
+    // ⌥U gives it back to the layout.
+    key(&mut e, Key::Char('u'), alt());
     lay_out(&mut e);
     assert!(e.project.node(&ring).unwrap().pinned.is_none());
     assert_eq!(e.project.node_rect(&ring).unwrap(), before);
@@ -1194,8 +1194,8 @@ fn clicking_points_builds_a_path() {
     assert_eq!(e.tool, Tool::Select);
     assert!(e.path_draft.is_empty());
 
-    // Enter finishes too; L is the same tool as P.
-    key(&mut e, Key::Char('l'), none());
+    // Enter finishes too.
+    key(&mut e, Key::Char('p'), none());
     assert_eq!(e.tool, Tool::Path);
     let at = place(&e, "scarf", 10.0, 80.0);
     click_at(&mut e, at, none());
@@ -1535,7 +1535,7 @@ fn every_offered_key_does_something() {
         e.select(vec![start.clone()]);
         let bar = e.hint_bar();
         if matches!(start, Target::Object(_)) {
-            for keys in ["Esc", "Enter", "r", "− ="] {
+            for keys in ["Esc", "Enter", "R", "− ="] {
                 assert!(
                     bar.hints.iter().any(|h| h.keys == keys),
                     "{keys} is offered"
@@ -1545,7 +1545,7 @@ fn every_offered_key_does_something() {
         for (keys, key_) in [
             ("Esc", Key::Escape),
             ("Enter", Key::Enter),
-            ("r", Key::Char('r')),
+            ("R", Key::Char('r')),
             ("− =", Key::Char('=')),
             ("⌫", Key::Delete),
         ] {
@@ -2529,14 +2529,14 @@ fn the_bar_lead_says_what_youre_doing() {
 #[test]
 fn with_move_and_draw_off_nothing_moves() {
     let mut e = editor();
-    key(&mut e, Key::Char('m'), none());
+    key(&mut e, Key::Char('d'), none());
     assert!(!e.move_draw);
     let before = e.project.clone();
     let refused = |e: &Editor| {
         let n = e.notice.clone().expect("a notice");
         n.kind == NoticeKind::Refused
             && n.why.as_deref() == Some("Move & draw is off")
-            && n.help.unwrap_or_default().starts_with("M turns it on")
+            && n.help.unwrap_or_default().starts_with("D turns it on")
     };
 
     // Selecting works: a click selects circle1, and again its ring.
@@ -2578,7 +2578,7 @@ fn with_move_and_draw_off_nothing_moves() {
         "the bar offers no moving: {:?}",
         bar.hints
     );
-    assert!(bar.hints.iter().any(|h| h.keys == "M"));
+    assert!(bar.hints.iter().any(|h| h.keys == "D"));
 
     // A pixel still lights; a port's own count is patching, not drawing.
     let main = node_id(&e, "main");
@@ -2588,8 +2588,8 @@ fn with_move_and_draw_off_nothing_moves() {
     key(&mut e, Key::Char('='), none());
     assert_eq!(e.project.port_fill(&main, "1"), (30, 31));
 
-    // M turns it back on, and a drag moves again.
-    key(&mut e, Key::Char('m'), none());
+    // D turns it back on, and a drag moves again.
+    key(&mut e, Key::Char('d'), none());
     e.select(vec![comp("circle1")]);
     let at = lamp_screen(&e, "circle1", "r1", 3);
     drag(&mut e, at, at + Vec2::new(40.0, 0.0), none());

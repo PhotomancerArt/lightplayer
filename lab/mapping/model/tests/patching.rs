@@ -176,6 +176,241 @@ fn free_segments_and_the_next_object() {
     assert_eq!(p.next_unplaced(&f), Some(objects[1].clone()));
 }
 
+// ---- the editor: the arm and the keys ---------------------------------------
+
+/// Plain clicks never patch: selecting a pixel, then an object, writes
+/// nothing.
+#[test]
+fn plain_clicks_never_patch() {
+    let (p, _, out, objects) = paths(&[("D0", 40)], &[3]);
+    let mut e = editor_of(p);
+    let before = e.project.clone();
+    e.select(vec![pixel(&out, "0", 4)]);
+    e.select(vec![Target::Component(objects[0].component.clone())]);
+    assert_eq!(e.project, before);
+}
+
+/// Wire first: A on a free segment arms; the arrows start on the first
+/// object not on the wire; Enter patches it there, and selects it.
+#[test]
+fn wire_first_a_then_enter_patches() {
+    let (p, _, out, objects) = paths(&[("D0", 40)], &[3, 4]);
+    let mut e = editor_of(p);
+    e.select(vec![port(&out, "0")]);
+    key(&mut e, Key::Char('a'), none());
+    assert!(e.armed.is_some());
+    assert_eq!(
+        e.focused_candidate(),
+        Some(PairEnd::Object(objects[0].clone()))
+    );
+    key(&mut e, Key::Right, none());
+    assert_eq!(
+        e.focused_candidate(),
+        Some(PairEnd::Object(objects[1].clone()))
+    );
+    key(&mut e, Key::Enter, none());
+    assert!(e.armed.is_none());
+    assert_eq!(landing(&e.project, &objects[1], 0), Some(("0".into(), 0)));
+    assert_eq!(e.selected_object(), Some(objects[1].clone()));
+}
+
+/// Object first: A on an object arms; the arrows walk the free segments in
+/// wire order, across ports; Enter patches it on the one in focus.
+#[test]
+fn object_first_arrows_walk_free_segments() {
+    let (p, _, out, objects) = paths(&[("D0", 4), ("D1", 10)], &[3]);
+    let mut e = editor_of(p);
+    e.select(vec![Target::Component(objects[0].component.clone())]);
+    key(&mut e, Key::Char('a'), none());
+    let walked: Vec<(String, u32)> = e
+        .candidates()
+        .iter()
+        .map(|c| match c {
+            PairEnd::Segment { port, pixels, .. } => (port.clone(), pixels.start),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        walked,
+        vec![
+            ("0".into(), 0),
+            ("0".into(), 3),
+            ("1".into(), 0),
+            ("1".into(), 3),
+            ("1".into(), 6),
+            ("1".into(), 9)
+        ]
+    );
+    key(&mut e, Key::Right, none());
+    key(&mut e, Key::Right, none());
+    key(&mut e, Key::Enter, none());
+    assert_eq!(landing(&e.project, &objects[0], 0), Some(("1".into(), 0)));
+    let _ = out;
+}
+
+/// M patches, then selects the next free segment and stays armed: the
+/// loop is one key and one look per object.
+#[test]
+fn m_patches_and_moves_on_armed() {
+    let (p, _, out, objects) = paths(&[("D0", 3), ("D1", 3), ("D2", 3)], &[3, 3, 3]);
+    let mut e = editor_of(p);
+    e.select(vec![port(&out, "0")]);
+    key(&mut e, Key::Char('m'), none());
+    assert!(e.armed.is_some(), "unarmed, M arms");
+    for (i, o) in objects.iter().enumerate() {
+        assert_eq!(e.focused_candidate(), Some(PairEnd::Object(o.clone())));
+        key(&mut e, Key::Char('m'), none());
+        assert_eq!(landing(&e.project, o, 0), Some((i.to_string(), 0)));
+    }
+    assert!(
+        e.armed.is_none(),
+        "every port is full: nothing left to arm from"
+    );
+}
+
+/// Esc disarms first; only the next Esc climbs.
+#[test]
+fn esc_disarms_before_it_climbs() {
+    let (p, _, _, objects) = paths(&[("D0", 40)], &[3]);
+    let mut e = editor_of(p);
+    let t = Target::Component(objects[0].component.clone());
+    e.select(vec![t.clone()]);
+    key(&mut e, Key::Char('a'), none());
+    key(&mut e, Key::Escape, none());
+    assert!(e.armed.is_none());
+    assert_eq!(e.selection, vec![t]);
+}
+
+/// While armed, the board shows the pair as if it were made: the object's
+/// first lamp blue on the candidate's first pixel. Unarmed, that pixel is
+/// as the patch has it.
+#[test]
+fn armed_the_board_previews_the_pair() {
+    let (p, _, out, objects) = paths(&[("D0", 40)], &[3]);
+    let mut e = editor_of(p);
+    e.select(vec![Target::Component(objects[0].component.clone())]);
+    let unarmed = e.board_frame(0.0).port(&out, "0").unwrap()[0];
+    key(&mut e, Key::Char('a'), none());
+    let armed = e.board_frame(0.0).port(&out, "0").unwrap()[0];
+    assert_eq!(armed, Rgb::new(0, 0, 255), "lp2014's blue start");
+    assert_ne!(unarmed, armed);
+}
+
+/// R reverses the placement while Move & draw is off, and the path's own
+/// direction (its points and flag) stays as drawn; with Move & draw on, R
+/// reverses the path itself.
+#[test]
+fn r_reverses_the_placement_with_move_and_draw_off() {
+    let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3]);
+    p.auto_patch(&f, &out);
+    let mut e = editor_of(p);
+    let c = objects[0].component.clone();
+    e.select(vec![Target::Component(c.clone())]);
+    key(&mut e, Key::Char('d'), none());
+    let path = e.project.component(&c).cloned();
+    key(&mut e, Key::Char('r'), none());
+    assert_eq!(
+        e.project.component(&c).cloned(),
+        path,
+        "the path is as drawn"
+    );
+    assert!(matches!(
+        e.project.on_wire(&objects[0]),
+        OnWire::Placed { reversed: true, .. }
+    ));
+    key(&mut e, Key::Char('d'), none());
+    key(&mut e, Key::Char('r'), none());
+    assert_ne!(
+        e.project.component(&c).cloned(),
+        path,
+        "now the path reverses"
+    );
+}
+
+/// U on an object auto flows on is refused, and says to turn auto off.
+#[test]
+fn unpatching_a_flowing_object_says_turn_auto_off() {
+    let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3]);
+    p.auto_patch(&f, &out);
+    let mut e = editor_of(p);
+    e.select(vec![Target::Component(objects[0].component.clone())]);
+    key(&mut e, Key::Char('u'), none());
+    let n = e.notice.clone().unwrap();
+    assert_eq!(n.kind, NoticeKind::Refused);
+    assert!(n.help.unwrap().contains("⇧A"));
+}
+
+/// ⇧→ walks the wire: the objects on it and its free segments, in pixel
+/// order, port after port; . jumps to the next port's first free segment.
+#[test]
+fn shift_arrows_walk_the_wire() {
+    let (mut p, _, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3, 4]);
+    p.patch_object(&objects[1], &out, "0", 3).unwrap();
+    let mut e = editor_of(p);
+    e.select(vec![port(&out, "0")]);
+    key(&mut e, Key::Right, shift());
+    assert_eq!(e.selected_end(), Some(segment(&out, "0", 0..3)));
+    key(&mut e, Key::Right, shift());
+    assert_eq!(e.selected_object(), Some(objects[1].clone()));
+    key(&mut e, Key::Right, shift());
+    assert_eq!(e.selected_end(), Some(segment(&out, "0", 7..10)));
+    key(&mut e, Key::Char('.'), none());
+    assert_eq!(e.selected_end(), Some(segment(&out, "1", 0..3)));
+}
+
+/// Every patching verb the hint bar offers does something, for an object
+/// on the wire, one off it, a port, a free segment and a fixture.
+#[test]
+fn every_offered_patching_verb_does_something() {
+    let (mut p, f, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3, 4]);
+    p.patch_object(&objects[0], &out, "0", 2).unwrap();
+    let starts = vec![
+        vec![Target::Component(objects[0].component.clone())],
+        vec![Target::Component(objects[1].component.clone())],
+        vec![port(&out, "1")],
+        vec![pixel(&out, "1", 0), pixel(&out, "1", 1)],
+        vec![Target::Node(f.clone())],
+    ];
+    let patching = [
+        GraphVerb::Patch,
+        GraphVerb::PatchNext,
+        GraphVerb::Unpatch,
+        GraphVerb::Swap,
+        GraphVerb::Turn,
+        GraphVerb::TurnBack,
+        GraphVerb::TurnThird,
+        GraphVerb::TurnThirdBack,
+        GraphVerb::Shift,
+        GraphVerb::ShiftBack,
+        GraphVerb::WireNext,
+        GraphVerb::WirePrevious,
+        GraphVerb::NextPort,
+        GraphVerb::Auto,
+        GraphVerb::UnpatchAll,
+    ];
+    let mut e = editor_of(p);
+    key(&mut e, Key::Char('d'), none());
+    for start in starts {
+        e.select(start.clone());
+        for verb in e.verbs().into_iter().filter(|v| patching.contains(v)) {
+            let mut probe = e.clone();
+            let before = (probe.project.clone(), probe.selection.clone());
+            assert!(probe.press(verb), "{verb:?} listened for {start:?}");
+            let changed =
+                (probe.project.clone(), probe.selection.clone()) != before || probe.armed.is_some();
+            assert!(changed, "{verb:?} did something for {start:?}");
+            assert!(
+                probe
+                    .notice
+                    .as_ref()
+                    .is_none_or(|n| n.kind != NoticeKind::Refused),
+                "{verb:?} was offered but refused for {start:?}: {:?}",
+                probe.notice
+            );
+        }
+    }
+}
+
 // ---- the piece ------------------------------------------------------------
 
 /// The piece shows the board's pixels through its true wiring, not the
@@ -259,6 +494,54 @@ fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec
         })
         .collect();
     (p, f, out, objects)
+}
+
+/// An editor on `p`, laid out the way the page does it.
+fn editor_of(p: Project) -> Editor {
+    let mut e = Editor::new(p);
+    let placement = lab_layout::canvas_layout(&e.layout_input());
+    e.set_placement(&placement);
+    e.resize(Vec2::new(1200.0, 800.0));
+    e
+}
+
+fn key(e: &mut Editor, k: Key, mods: Mods) {
+    e.key_down(k.clone(), mods);
+    e.key_up(k, mods);
+}
+
+fn none() -> Mods {
+    Mods::default()
+}
+
+fn shift() -> Mods {
+    Mods {
+        shift: true,
+        ..Mods::default()
+    }
+}
+
+fn port(output: &NodeId, key: &str) -> Target {
+    Target::Port {
+        output: output.clone(),
+        key: key.into(),
+    }
+}
+
+fn pixel(output: &NodeId, key: &str, index: u32) -> Target {
+    Target::Pixel {
+        output: output.clone(),
+        key: key.into(),
+        index,
+    }
+}
+
+fn segment(output: &NodeId, port: &str, pixels: std::ops::Range<u32>) -> PairEnd {
+    PairEnd::Segment {
+        output: output.clone(),
+        port: port.into(),
+        pixels,
+    }
 }
 
 /// The project as the page has it: laid out, so its lamps sit in their

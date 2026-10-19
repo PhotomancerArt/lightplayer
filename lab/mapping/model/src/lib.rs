@@ -125,6 +125,7 @@ pub use ux::graph_input::GraphInput;
 pub use ux::graph_verb::GraphVerb;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
 pub use ux::hints::{Hint, HintBar, HintKind};
+pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};

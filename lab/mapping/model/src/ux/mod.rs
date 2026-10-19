@@ -16,6 +16,7 @@ pub mod handle;
 pub mod highlight;
 pub mod hints;
 pub mod layout_input;
+pub mod patching;
 pub mod pick;
 pub mod pixel_grid;
 pub mod props;
