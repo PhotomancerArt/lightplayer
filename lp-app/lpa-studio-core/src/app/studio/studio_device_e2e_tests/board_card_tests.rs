@@ -1116,50 +1116,6 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
     });
 }
 
-/// The same older LightPlayer, reached from Chrome on Android over USB
-/// (WebUSB), where the flasher cannot run: the USB square still connects it
-/// by path, and its card's Update firmware is published disabled, with the
-/// reason under it — the press a refused verb gets.
-/// (`docs/adr/2026-10-18-android-usb-over-webusb.md`.)
-#[test]
-fn from_a_phone_over_usb_update_firmware_is_refused_in_plain_words() {
-    const HELLO_PROTO_32: &str =
-        include_str!("../../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
-    super::links_cannot_flash(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER);
-    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
-        FakeLightPlayerState::new()
-            .with_base_mac(BENCH_BOARD_MAC)
-            .with_hello_json(HELLO_PROTO_32),
-    )));
-    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-webusb-older-1");
-    bench
-        .press("devices/connect-usb", OfferArgs::new())
-        .expect("the USB square is offered on a phone too");
-    bench.run_until(
-        &tasks,
-        "the board to read as an older LightPlayer",
-        |bench| {
-            bench.view().pending.first().is_some_and(|pending| {
-                matches!(
-                    pending.firmware_face,
-                    lpa_devices::view::FirmwareFace::OlderLightPlayer { .. }
-                )
-            })
-        },
-    );
-    let id = bench.view().pending[0].device;
-    let card = card_of(&bench, id);
-    assert_eq!(card.surface.state, crate::SurfaceState::OldFirmware);
-    let notice = card.surface.notice.clone().expect("the surface says it");
-    assert_eq!(notice.first, "This board is running old firmware.");
-    assert_eq!(
-        bench.offer_reason("devices/new-1/flash"),
-        lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER,
-        "Update firmware is drawn disabled, with the reason under it"
-    );
-    every_card_action_is_offered(&mut bench);
-}
-
 /// The card the home view publishes for `device`.
 fn card_of(bench: &DeviceBench, device: crate::DeviceId) -> UiBoardCard {
     bench

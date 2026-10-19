@@ -1882,64 +1882,6 @@ mod tests {
         }));
     }
 
-    /// A USB link that cannot carry the flasher says so in its `LinkInfo`
-    /// (Chrome on Android's WebUSB port), and the card says it before
-    /// anyone presses — for a known board and for a pending one; the same
-    /// board back on a link that can flash says nothing.
-    #[test]
-    fn a_usb_link_that_cannot_flash_carries_its_reason_to_the_card() {
-        let mut roster = Roster::new(RosterConfig::default());
-        let facts = roster_proto(&roster);
-        let mut webusb = info("usb-webusb-1");
-        webusb.firmware_blocked = Some(crate::view::FIRMWARE_NEEDS_A_COMPUTER.to_string());
-        roster.handle(
-            Millis(0),
-            Input::Event(Event::LinkAttached {
-                link: LinkId(1),
-                info: webusb.clone(),
-            }),
-        );
-        roster.handle(
-            Millis(5),
-            Input::link(LinkId(1), LinkEvent::Opened { info: webusb }),
-        );
-        assert_eq!(
-            crate::view::pending_link_view(&roster.pending()[0], Millis(10))
-                .firmware_blocked
-                .as_deref(),
-            Some(crate::view::FIRMWARE_NEEDS_A_COMPUTER),
-            "a pending board's Flash says why too"
-        );
-        roster.handle(
-            Millis(20),
-            hello_mac(LinkId(1), &facts, "10:bd:a3:b0:8e:30"),
-        );
-        let device = &roster.devices()[0];
-        let view = crate::view::device_view(device, Millis(30));
-        assert_eq!(
-            view.firmware_blocked.as_deref(),
-            Some(crate::view::FIRMWARE_NEEDS_A_COMPUTER)
-        );
-        assert!(!view.is_over_bluetooth(), "a USB link, not a network one");
-
-        roster.handle(
-            Millis(40),
-            Input::Event(Event::LinkDetached { link: LinkId(1) }),
-        );
-        roster.handle(Millis(50), attach(LinkId(2), "usb-2"));
-        roster.handle(Millis(55), opened(LinkId(2), "usb-2"));
-        roster.handle(
-            Millis(60),
-            hello_mac(LinkId(2), &facts, "10:bd:a3:b0:8e:30"),
-        );
-        let device = &roster.devices()[0];
-        assert_eq!(roster.devices().len(), 1);
-        assert_eq!(
-            crate::view::device_view(device, Millis(70)).firmware_blocked,
-            None
-        );
-    }
-
     #[test]
     fn a_board_heard_over_usb_and_bluetooth_at_once_is_one_device() {
         let mut roster = Roster::new(RosterConfig::default());
@@ -2263,7 +2205,6 @@ mod tests {
             usb: None,
             serial_number: None,
             carries_update_channel: false,
-            firmware_blocked: None,
         }
     }
 }

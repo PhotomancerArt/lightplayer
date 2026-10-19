@@ -21,7 +21,6 @@ pub fn relay_link_info(url: &str) -> Option<LinkInfo> {
         usb: None,
         serial_number: None,
         carries_update_channel: true,
-        firmware_blocked: None,
     })
 }
 

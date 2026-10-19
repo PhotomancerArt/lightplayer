@@ -74,13 +74,6 @@ pub fn link_info(endpoint: &LinkEndpoint, usb_vid_pid: Option<(u16, u16)>) -> Li
         // link port carries channel 3 (M7 P7). Whether the BOARD speaks it
         // is its own announcement (DS9), never this flag.
         carries_update_channel: true,
-        // A port the provider cannot flash through is Chrome on Android's
-        // WebUSB one (the provider drops the flash capability there): the
-        // card says so before anyone presses Install or Update.
-        firmware_blocked: (!endpoint
-            .capabilities
-            .supports(crate::LinkOperation::FlashFirmware))
-        .then(|| lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER.to_string()),
     }
 }
 
@@ -776,34 +769,6 @@ mod tests {
             "board",
         );
         assert!(link_info(&endpoint, None).carries_update_channel);
-    }
-
-    /// A port with the flash capability (Web Serial) writes firmware; one
-    /// without it (Chrome on Android's WebUSB) says why not, in the card's
-    /// sentence.
-    #[test]
-    fn a_port_that_cannot_flash_says_so_and_one_that_can_does_not() {
-        let flashing = LinkEndpoint::new(
-            "serial:1",
-            crate::LinkProviderKind::BrowserSerialEsp32,
-            "board",
-        )
-        .with_capabilities(crate::LinkCapabilities::esp32_serial_base().with_flash());
-        assert_eq!(link_info(&flashing, None).firmware_blocked, None);
-        let webusb = LinkEndpoint::new(
-            "serial:2",
-            crate::LinkProviderKind::BrowserSerialEsp32,
-            "board",
-        )
-        .with_capabilities(crate::LinkCapabilities::esp32_serial_base());
-        assert_eq!(
-            link_info(&webusb, None).firmware_blocked.as_deref(),
-            Some(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER)
-        );
-        assert!(
-            link_info(&webusb, None).carries_update_channel,
-            "an update still rides lp-link"
-        );
     }
 
     fn hello_with_version(version: &'static str) -> ServerHello {

@@ -42,10 +42,11 @@ const LINE_RTS = 0x02;
 // next packet without waiting on the page. WebUSB completes transfers on one
 // endpoint in the order they were submitted, so the bytes stay in order. One
 // packet each, so a full packet completes its transfer instead of waiting
-// for a short one. It does NOT make esptool's flasher safe on a phone: the
-// desk's Pixel still lost about 40 % of a continuous 4 KB burst with 1 or 16
-// in flight alike (2026-10-18), which is why the flash is refused over this
-// port (`browser_esp32_flash.js`'s `isSupported`).
+// for a short one. It does NOT make the board's output lossless on a phone:
+// the desk's Pixel still lost about 40 % of a continuous 4 KB burst with 1 or
+// 16 in flight alike (2026-10-18). The link resends what it loses, and the
+// flasher reads in short, digest-checked segments it reads again
+// (`browser_esp32_flash.js`'s `readFlashSafely`).
 const IN_TRANSFERS_IN_FLIGHT = 16;
 // What the port holds for a reader that is not reading, like a serial
 // driver's buffer. Beyond it the oldest bytes go: the link resends what it

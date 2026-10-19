@@ -61,6 +61,5 @@ pub fn fake_link_info(endpoint: &str) -> LinkInfo {
         }),
         serial_number: None,
         carries_update_channel: false,
-        firmware_blocked: None,
     }
 }

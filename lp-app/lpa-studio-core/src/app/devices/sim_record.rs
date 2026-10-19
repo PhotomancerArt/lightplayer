@@ -173,7 +173,6 @@ pub fn ble_link_info(device_id: &str, name: &str) -> LinkInfo {
         // Its lp-link carries the update channel (M7 P12); whether the board
         // speaks it is the board's own announcement (DS9).
         carries_update_channel: true,
-        firmware_blocked: None,
     }
 }
 
@@ -215,7 +214,6 @@ pub fn sim_link_info(uid: &str, display_name: &str) -> LinkInfo {
         usb: None,
         serial_number: None,
         carries_update_channel: false,
-        firmware_blocked: None,
     }
 }
 
@@ -233,7 +231,6 @@ pub fn emu_link_info(uid: &str, display_name: &str) -> LinkInfo {
         // Its lp-link carries the update channel (M7 P7); whether the board
         // speaks it is the board's own announcement (DS9).
         carries_update_channel: true,
-        firmware_blocked: None,
     }
 }
 

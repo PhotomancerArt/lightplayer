@@ -1143,7 +1143,7 @@ async fn webusb_off() {
 }
 
 /// On Android the USB square is still offered (the provider reads
-/// `isSupported`; flashing is not), its chooser asks `navigator.usb` for CDC
+/// `isSupported`, and flashing too), its chooser asks `navigator.usb` for CDC
 /// devices of the same vendors Web Serial's filter names, and the port it
 /// returns is the one `getGrantedPorts` enumerates, as the same session.
 #[wasm_bindgen_test]
@@ -1158,11 +1158,9 @@ async fn on_android_the_usb_chooser_is_webusbs_and_its_port_is_a_session() {
         boolean(js_is_supported()).await,
         "the USB square is offered"
     );
-    // Flashing is not: the C6 drops what it sends faster than the phone
-    // reads, and esptool's protocol has no resend. The card says so.
     assert!(
-        !boolean(js_flash_bridge_is_supported()).await,
-        "flashing is not offered over WebUSB"
+        boolean(js_flash_bridge_is_supported()).await,
+        "flashing is offered"
     );
 
     let session = JsFuture::from(js_request_port())
