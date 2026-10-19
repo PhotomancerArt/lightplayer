@@ -37,7 +37,7 @@ export async function probeTarget(portId, esptoolModulePath) {
     const terminal = terminalFor(logs, "esp32-probe");
     const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         chipName: chipName ? String(chipName) : null,
         logs,
@@ -127,7 +127,7 @@ export async function flashFirmware(
       // the bootloader we just wrote cannot boot from the LP state a fresh
       // board's factory firmware leaves behind.
       await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         manifest: summarizeManifest(manifest, manifestPath),
         chipName: chipName ? String(chipName) : null,
@@ -269,7 +269,7 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
         totalSteps: 2,
         percent: 100,
       });
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         chipName: chipName ? String(chipName) : null,
         logs,
@@ -593,7 +593,7 @@ export async function executePlan(
       }
       pushProgress(progress, onEvent, { label: "Resetting the board", percent: 100 });
       await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         manifest: summarizeManifest(manifest, manifestPath),
         chipName: chipName ? String(chipName) : null,
@@ -818,14 +818,17 @@ export async function drainQuietly(transport, quietMs = DRAIN_QUIET_MS) {
 /// low, so it changes no line and the board stays in the stub, silent. An
 /// erase that ended that way left its card "not responding" until a reload
 /// (2026-10-19, `docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`;
-/// a Mac's tty open and close leave a parked C6 in the stub as well).
+/// a Mac's tty open and close leave a parked C6 in the stub as well). A
+/// flash, a boot-control write and a probe ended that way too, and the
+/// flashed board answered only when the Flash activity's reconnect ladder
+/// reached its `ResetKind::Normal` rung, a rung (8 s) later.
 ///
 /// Whole-status writes, both lines named each time: a CH34x's macOS driver
 /// ignores a write naming one line, and the order never passes through
 /// (DTR asserted, RTS released), a CH34x's download-mode selection (see the
 /// controller's `runBothThenDropReset`). A C6 re-enumerates on the reset,
 /// so the release may find the port gone; the reset has happened by then,
-/// and the erase stands either way.
+/// and what was written stands either way.
 export async function rebootFromFlash(transport, terminal = null) {
   const port = transport.device;
   terminal?.writeLine?.("Rebooting the board from its flash (RTS pulse, DTR low)");

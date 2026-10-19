@@ -33,7 +33,7 @@ if [ "$head" != "$local_head" ]; then
     echo "apply-ci-figures: the patch is for the PR's head; applying anyway (it only touches the records)." >&2
 fi
 
-records=(lp-emu/esp/figures scripts/heap-budget-record)
+records=(lp-emu/esp/figures scripts/heap-budget-record scripts/first-light-record)
 if ! git diff --quiet HEAD -- "${records[@]}"; then
     echo "apply-ci-figures: the records already have uncommitted changes; commit or discard them first:" >&2
     git --no-pager diff --stat HEAD -- "${records[@]}" >&2
@@ -80,6 +80,17 @@ else
     echo "apply-ci-figures: plain apply failed ($(head -1 "$tmp/apply.err")); fetching origin and retrying with --3way" >&2
     git fetch -q origin
     git apply --3way "${patches[@]}"
+fi
+
+# The first-light ratchet (docs/first-light-ratchet.md): a raised record is
+# Yona's to bless, never a CI patch's. CI hands back none, so a staged rise
+# here is a patch that should not exist — roll every record back and stop.
+# A ratchet down, or CI's re-record for an image-unchanged change, passes.
+if ! python3 scripts/ci/first-light-ratchet.py guard-apply; then
+    git reset -q HEAD -- "${records[@]}"
+    git checkout HEAD -- "${records[@]}"
+    echo "apply-ci-figures: nothing applied." >&2
+    exit 1
 fi
 
 echo
