@@ -14,9 +14,9 @@
 //       → Factory reset is under Hardware (not Firmware)
 //       → Factory reset → the card is the blank board, Install firmware
 //         (no Retry, and the card's top never says "stopped responding")
-//       → three re-enumerations (the cable out and in, standing in for the
-//         erased chip's watchdog): the same card, its details open, still
-//         the blank board
+//       → three re-enumerations (the shim's, with a gap, standing in for
+//         the erased chip's watchdog): the same card, its details open,
+//         still the blank board
 //       → Install firmware, one press → the board says hello on what
 //         Studio wrote
 //
@@ -283,16 +283,26 @@ async function main() {
 
     // The erased chip's watchdog re-enumerates its USB every few seconds on
     // a real C6. The emulator does not re-enumerate on a reset (the shim's
-    // ruling), so the cable stands in: out, and back in a moment later,
-    // three times — the same disconnect/connect edges and new SerialPort
-    // under the same grant. The card must not move, change or close.
-    await step("bootloop", "the blank card holds through three re-enumerations (the cable out and in), its details open", async () => {
+    // ruling), so the walk does what Chrome does, through the shim's own
+    // re-enumeration (`reenumerate`), split by a gap: the port goes dead
+    // and `disconnect` fires; a second later a NEW SerialPort holds the same
+    // grant and `connect` fires. Not the cable: a re-enumeration is the
+    // device, and the emulated USB host stays attached through it. Three
+    // times. The card must not move, change or close.
+    await step("bootloop", "the blank card holds through three re-enumerations, its details open", async () => {
       await driver.openBar("hardware", { timeoutMs: STEP_DEADLINE_MS });
       await driver.evaluate(PIN_CARD);
       for (let turn = 1; turn <= 3; turn += 1) {
-        await driver.detach(BOARD);
+        await driver.evaluate(`(() => { const bus = window.__lpEmuSerial.bus;
+          const old = bus.livePortFor(${JSON.stringify(BOARD)}); old.markDead();
+          window.__lpReenumerating = old;
+          bus.dispatchEvent(new CustomEvent("disconnect", { detail: { port: old } }));
+          return true; })()`);
         await pause(1_000);
-        await driver.attach(BOARD);
+        await driver.evaluate(`(() => { const bus = window.__lpEmuSerial.bus;
+          const fresh = bus.adopt(window.__lpReenumerating);
+          bus.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
+          return true; })()`);
         await pause(4_000);
         const held = JSON.parse(await driver.evaluate(CARD_HELD("hardware")));
         const now = await surface();
@@ -310,11 +320,10 @@ async function main() {
       return `same card, details open, still the blank board; the card's top: ${trail.join(" → ")}`;
     });
 
-    // REPORTED, not asserted: a C6 boots its blank flash after the erase's
-    // reset and loops "invalid header"; the emulated chip, as of this walk,
-    // stays in the flasher's stub after esptool-js's hard reset (its console
-    // ends at "OHAI"), so the card is held by what Studio knows, not by
-    // what the board says. Either way the card is the blank board.
+    // REPORTED, not asserted: the erase reboots the board out of the stub
+    // (`rebootFromFlash`), and the blank chip loops "invalid header". Were
+    // the reboot to miss, the card would be held by what Studio knows
+    // instead of by what the board says: the blank board either way.
     await step("words", "the board's terminal after the erase (reported)", async () => {
       const lines = await driver.terminalLines({ timeoutMs: STEP_DEADLINE_MS }).catch(() => []);
       await driver.closeDetails().catch(() => {});

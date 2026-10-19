@@ -43,7 +43,8 @@ back whether or not it heard the boot loop. A port left open meets the
 chip's next re-enumeration as a dead port, which the read pump detaches at
 once, and the card moved anyway. The emulator walk caught exactly that: its
 erased chip said nothing, the Erase ended on its deadline with the port
-open, and the first cable turn remounted the card.
+open (before #1197's reboot, the erased chip stayed in the stub), and
+the first cable turn remounted the card.
 
 **Regression tests** — `lpa-studio-core` `board_card_tests.rs`:
 `an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone`
@@ -52,8 +53,8 @@ with no grace it goes Offline). `lpa-devices` `tests/scenarios.rs`:
 `a_factory_reset_outlives_the_erased_chips_re_enumeration`, and
 `a_factory_reset_board_that_says_nothing_is_blank_not_unresponsive` (the
 quiet window gives the port back). The emulator walk,
-`just walk-factory-reset-emu`, turns the cable three times under the blank
-card with its details open.
+`just walk-factory-reset-emu`, re-enumerates the board three times under
+the blank card with its details open.
 
 **Not covered** — a port that was OPEN when it re-enumerated still departs
 at once: the pump hears the dead port's own error and detaches (a dead
@@ -63,5 +64,6 @@ a closed port. A healthy board whose open port re-enumerates (a reset that
 takes USB with it) still moves sections for the moment it is gone. That is
 a follow-up of its own: hold a card in place across a brief departure. The emulator does not re-enumerate on a
 chip reset (the shim's ruling: a C6's USB-Serial-JTAG survives a reset the
-serial channel asks for). Its walk stands the cable out and back in for
-the watchdog's re-enumeration, so the real cadence is the desk's to see.
+serial channel asks for). Its walk re-enumerates the board through the
+shim (the old port dead, a new one under the same grant, a second apart)
+for the watchdog's, so the real cadence is the desk's to see.

@@ -5116,9 +5116,10 @@ walk-ble-emu *args:
 # packaged firmware, ROM-up, through Studio's real device stack over `?emu=`.
 # Factory reset is under Hardware (not Firmware); after it the card is the
 # blank board with Install firmware and no Retry, and its top never says
-# "stopped responding" (every `data-surface` it showed is recorded); the
-# board's own terminal shows its blank boot loop; Install firmware, one
-# press, brings its hello back. Needs a Studio on this worktree's port, or
+# "stopped responding" (every `data-surface` it showed is recorded); three
+# re-enumerations (the shim's, with a gap, for the erased chip's watchdog)
+# leave the same card with its details open; Install firmware, one press,
+# brings its hello back. Needs a Studio on this worktree's port, or
 # `--serve-release` (after `just studio-web-story-build`,
 # `just studio-firmware-package-served` and `cargo build -p lp-cli`). Proves
 # Studio's flow on the emulated chip, not a real C6's re-enumeration. Not CI.
