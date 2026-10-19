@@ -114,6 +114,44 @@ touches:
 Everything above those seams — the product's own device logic — is what
 the emulator walk covers, and where it is trusted.
 
+**Amendment 2026-10-18 — the one gate on emulated time: t4 first light.**
+Yona approved a first-light ratchet (plan
+`lp2025/2026-10-16-0848-tree-store-adoption`): CI boots the C6's split
+image ROM-up through our bootloader on `lp-emu:esp32c6:t4`, power-on,
+`projects/test/basic` with a saved Wi-Fi network on the emulated LAN, and
+gates the firmware's own `[perf] first light at <ms> ms` — red above
+500 ms, a warning above 400 ms, red more than 5 ms above the recorded value
+until Yona blesses the rise, and the record ratchets down when it drops.
+This is the **only** deliberate exception to "never gate on emulated time"
+(AGENTS.md; vision D13, plan PD9), and it is an exception for three
+reasons that hold for this reading and no other yet:
+
+- **It is measured against silicon, end to end.** `t4` (#1177) adds the
+  flash interface's time to `t3`'s CPU model; on the cutover image it read
+  basic **373 ms against CX1's 378 ms**, and
+  #1177's table holds the flash-bound parts within ~3 % (DIO/QIO fill
+  0.97/0.96, the c40 mount 0.97, the first-boot format 1.02).
+  `docs/reports/2026-10-17-c6-flash-timing-emulator.md`.
+- **It is deterministic.** Two power-on boots of one image differ by
+  hundredths of a millisecond (they draw a link nonce and the RNG); the
+  gate reads whole milliseconds, so it cannot flake on the host's load.
+  Host wall-clock is still never read. It is a figure of the image's
+  *bytes*, though, and those depend on the host that built them (at
+  `6fadbca6c` a desk build read 394 ms, CI's 385), so the record is CI's
+  reading, like a positional figure.
+- **It is the number that matters.** Time to first light under one second
+  is the tree-store adoption's headline, and before this gate nothing
+  stopped it creeping back: a saved Wi-Fi network cost ~900 ms of it on
+  silicon (fixed by #1184) and no gate saw it.
+
+What stays true: every other emulated duration is a report; the ratchet's
+`t4` reading is a figure of the emulator *and* the image, so a PR that
+changes the emulator but not the image re-records it (with a note) rather
+than asking Yona; and the silicon cross-check (`just first-light-cx1`,
+10 power-on boots on CX1) is the periodic drift check — a gap beyond ~5 %
+is a fidelity defect against the emulator, filed before the record is
+trusted again. Mechanics: [docs/first-light-ratchet.md](../first-light-ratchet.md).
+
 ## Two director-proposed riders (NOT yet Yona's — for the ship gate)
 
 These two are the **director's proposals**, offered for Yona to keep or
