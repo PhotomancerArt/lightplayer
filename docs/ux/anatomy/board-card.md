@@ -349,6 +349,7 @@ switches of its own on the card: the rows' Disable and Enable are theirs.
 ᛒ Bluetooth        —                         # nothing read yet, a stand-in
 ᛒ Bluetooth        LP-3f2a                   # the name a phone sees: LP-<project>, else LP-<MAC's last two bytes>
 ᛒ Bluetooth        LP-3f2a   connected       # this tab's link
+ᛒ Bluetooth        on                        # on, but what it runs is not known (offline, or before its first report), so neither is the name
 ᛒ Bluetooth        disabled
 ```
 

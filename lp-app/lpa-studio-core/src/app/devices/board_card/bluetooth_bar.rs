@@ -6,14 +6,16 @@
 //! | Board says | Name · state | Tone |
 //! |---|---|---|
 //! | nothing yet (no firmware, not read, a stand-in) | "—" | Neutral |
-//! | on | its advertised name, `LP-<project>` or `LP-xxxx` ("on" when Studio knows no MAC); "connected" when this tab's link is Bluetooth | Neutral |
+//! | on | its advertised name, `LP-<project>` or `LP-xxxx` ("on" while what it runs is not known, or Studio knows no MAC); "connected" when this tab's link is Bluetooth | Neutral |
 //! | off | "disabled" | Neutral |
 //!
 //! The advertised name is the firmware's rule
 //! (`fw-esp32c6/src/ble/advertising.rs`): `LP-` and the loaded project's
 //! folder name, cut to fit the advertising packet, else `LP-` and the last
 //! two bytes of the MAC in lower-case hex. Studio knows the folder while the
-//! board says what it runs; an offline board's row says the MAC form.
+//! board says what it runs, and the MAC form once it has said it runs
+//! nothing; while it has not said (offline, or before its first report) the
+//! name could be either, so the row says "on".
 //!
 //! "This tab is on Bluetooth" is the link's own kind, read off the endpoint
 //! (`BoardCardInput::link`), never `UiDeviceAccess::over_bluetooth`, which
@@ -81,19 +83,24 @@ pub(crate) fn bluetooth_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     link_bar(input, BarLayer::Bluetooth, facts)
 }
 
-/// The name the board advertises: `LP-<project folder>`, else `LP-xxxx`
-/// from its MAC (its board ref's, else the one it said); `None` for a
-/// board Studio knows no MAC of.
+/// The name the board advertises: `LP-<project folder>` while it runs one,
+/// `LP-xxxx` from its MAC (its board ref's, else the one it said) once it
+/// has said it runs nothing; `None` while it has not said, which would make
+/// either a guess, and for a board Studio knows no MAC of.
 pub(crate) fn advertised_name(input: &BoardCardInput<'_>) -> Option<String> {
-    if let LoadedProject::Running { label } = &input.view.loaded_project {
-        let mut name = String::from("LP-");
-        for c in label.chars() {
-            if name.len() + c.len_utf8() > ADV_NAME_MAX {
-                break;
+    match &input.view.loaded_project {
+        LoadedProject::Running { label } => {
+            let mut name = String::from("LP-");
+            for c in label.chars() {
+                if name.len() + c.len_utf8() > ADV_NAME_MAX {
+                    break;
+                }
+                name.push(c);
             }
-            name.push(c);
+            return Some(name);
         }
-        return Some(name);
+        LoadedProject::Unknown => return None,
+        LoadedProject::Empty => {}
     }
     let key = input
         .board
@@ -246,15 +253,19 @@ mod tests {
             advertised_name(&fixture.input()).as_deref(),
             Some("LP-b48c")
         );
+        fixture.view.loaded_project = LoadedProject::Unknown;
+        assert_eq!(advertised_name(&fixture.input()), None);
     }
 
-    /// Offline, the switch the board last said, dimmed, by its MAC name.
+    /// Offline, the switch the board last said, dimmed — "on", never a
+    /// name: what it runs is not known, so neither is the name.
     #[test]
     fn an_offline_board_keeps_its_last_switch() {
         let mut fixture = CardFixture::offline();
+        fixture.view.loaded_project = LoadedProject::Unknown;
         fixture.remembered_bluetooth = Some(true);
         let bar = bluetooth_bar(&fixture.input());
-        assert_eq!(bar.summary, "LP-b48c");
+        assert_eq!(bar.summary, "on");
         assert!(bar.stale);
         fixture.remembered_bluetooth = None;
         let bar = bluetooth_bar(&fixture.input());
