@@ -19,6 +19,7 @@ pub mod layout_input;
 pub mod patching;
 pub mod pick;
 pub mod pixel_grid;
+pub mod port_grouping;
 pub mod props;
 pub mod tree_rows;
 pub mod ui;

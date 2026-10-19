@@ -9,6 +9,7 @@ use crate::domain::geom::{Rect, Vec2, polyline_length};
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
 use crate::domain::object::{Object, objects_of};
+use crate::domain::piece::Piece;
 use crate::domain::project::{Project, union};
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
@@ -16,6 +17,7 @@ use crate::ux::debug_flags::DebugFlags;
 use crate::ux::handle::{Handle, HandleKind};
 use crate::ux::patching::Armed;
 use crate::ux::pick::{PickMode, level_candidates, pick};
+use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::{LayoutKind, SizeClass};
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
@@ -199,6 +201,11 @@ pub struct Editor {
     /// A pair half made (`patching.rs`): A or S chose one end, and the
     /// other is being looked for.
     pub armed: Option<Armed>,
+    /// How output cards group a port's pixels (view state).
+    pub grouping: PortGrouping,
+    /// The install as it is really wired, when the host has one to show
+    /// (the lab's page: the project's patch as it opened; `piece.rs`).
+    pub piece: Option<Piece>,
     pub debug: DebugFlags,
     /// The project runs for real (Studio's Graph: a board, or Studio's
     /// preview host): a shader's picture is its own, not the lab's
@@ -243,6 +250,8 @@ impl Editor {
             path_draft: Vec::new(),
             move_draw: true,
             armed: None,
+            grouping: PortGrouping::default(),
+            piece: None,
             debug: DebugFlags::default(),
             runs_for_real: false,
             layout_choice: None,

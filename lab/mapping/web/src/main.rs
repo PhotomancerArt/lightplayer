@@ -12,10 +12,12 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{Editor, GraphInput, LayoutKind, Notice, Project, SizeClass, Tool};
+use lab_mapping_model::{
+    Editor, GraphInput, LayoutKind, Notice, Piece, PortGrouping, Project, SizeClass, Tool,
+};
 use lab_mapping_web::{
-    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, TreePane, input, use_simulated_frame,
-    use_view,
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, PieceView, TreePane, input,
+    use_simulated_frame, use_view,
 };
 
 const LAB_CSS: &str = include_str!("lab.css");
@@ -27,8 +29,11 @@ fn main() {
 #[component]
 fn App() -> Element {
     let tick = use_signal(|| 0_u64);
-    let ed =
-        use_hook(|| GraphEditor::owned(Rc::new(RefCell::new(Editor::new(Project::seed()))), tick));
+    let ed = use_hook(|| {
+        let mut e = Editor::new(Project::seed());
+        e.piece = Some(Piece::of(&e.project, "the desk when it opened"));
+        GraphEditor::owned(Rc::new(RefCell::new(e)), tick)
+    });
     let mut project = use_signal(|| DESK.to_string());
     let view = use_view(ed.clone());
     let frame = use_simulated_frame(ed.clone());
@@ -37,8 +42,9 @@ fn App() -> Element {
     let move_draw = toolbar.move_draw;
     let (can_undo, can_redo) = (toolbar.can_undo, toolbar.can_redo);
     let class = toolbar.size_class;
-    // Page-local view state: the md tree drawer, the sm sheet.
+    // Page-local view state: the md tree drawer, the sm sheet, the piece.
     let mut tree_open = use_signal(|| false);
+    let mut piece_open = use_signal(|| true);
     let mut sheet = use_signal(|| Sheet::Half);
     let has_selection = use_memo({
         let ed = ed.clone();
@@ -174,6 +180,34 @@ fn App() -> Element {
                         }
                     }
                 }
+                div { class: "tools",
+                    span { class: "tools-label", "Ports" }
+                    for g in PortGrouping::ALL {
+                        button {
+                            key: "{g:?}",
+                            class: if toolbar.grouping == g { "tool on" } else { "tool" },
+                            tabindex: "-1",
+                            title: "How an output card groups a port's pixels",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: {
+                                let ed = e();
+                                move |_| {
+                                    ed.input(GraphInput::Grouping(g));
+                                }
+                            },
+                            "{g.words(toolbar.group_size)}"
+                        }
+                    }
+                }
+                button {
+                    class: if piece_open() { "tool toggle on" } else { "tool toggle" },
+                    tabindex: "-1",
+                    title: "The install as it is really wired, lit by the board",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| piece_open.toggle(),
+                    span { class: "toggle-box", if piece_open() { "✓" } else { "" } }
+                    " Piece"
+                }
                 if class == SizeClass::Md {
                     button {
                         class: if tree_open() { "tool on" } else { "tool" },
@@ -188,12 +222,20 @@ fn App() -> Element {
             match class {
                 SizeClass::Lg => rsx! {
                     aside { class: "tree", TreePane { ed: e(), tree: view.tree } }
-                    main { class: "canvas-wrap", Canvas { ed: e(), view, frame } }
+                    main { class: "canvas-wrap",
+                        Canvas { ed: e(), view, frame }
+                        if piece_open() {
+                            PieceView { ed: e(), frame }
+                        }
+                    }
                     aside { class: "inspector", Inspector { ed: e(), inspector: view.inspector } }
                 },
                 SizeClass::Md => rsx! {
                     main { class: "canvas-wrap",
                         Canvas { ed: e(), view, frame }
+                        if piece_open() {
+                            PieceView { ed: e(), frame }
+                        }
                         if tree_open() {
                             aside { class: "drawer drawer-left tree", TreePane { ed: e(), tree: view.tree } }
                         }
@@ -230,16 +272,44 @@ fn App() -> Element {
     }
 }
 
+/// The seed the lab's scrambled piece uses, so a walk can be repeated.
+const SCRAMBLE_SEED: u64 = 7;
+
+/// Wire the piece as a real install often is (plan D4): the first output's
+/// objects shuffled across its ports, from the patch as it is now.
+fn scramble_piece(ed: &GraphEditor) {
+    {
+        let mut e = ed.editor().borrow_mut();
+        let Some(output) = e.project.outputs().first().map(|n| n.id.clone()) else {
+            return;
+        };
+        let name = e.project.node_name(&output);
+        let piece = Piece::scrambled(
+            &e.project,
+            &output,
+            SCRAMBLE_SEED,
+            format!("the patch on {name}, scrambled (seed {SCRAMBLE_SEED})"),
+        );
+        e.piece = Some(piece);
+        e.notice = Some(Notice::info(format!(
+            "The piece is wired differently now: {name}'s objects are on other ports, \
+             some reversed and turned. ⇧U on a fixture, then patch them by hand."
+        )));
+    }
+    ed.changed();
+}
+
 /// The picker's key for the lab's own starting project.
 const DESK: &str = "desk";
 
 /// Open a project in the editor and fit the view to it. A project that
 /// won't open leaves the current one and says why.
 fn open_project(ed: &GraphEditor, key: &str) {
+    let entry = embedded::ALL.iter().find(|p| p.key == key);
     let project = if key == DESK {
         Ok(Project::seed())
     } else {
-        match embedded::ALL.iter().find(|p| p.key == key) {
+        match entry {
             Some(p) => Opened::open(&p.files())
                 .map(|o| o.project)
                 .map_err(|e| e.to_string()),
@@ -249,7 +319,19 @@ fn open_project(ed: &GraphEditor, key: &str) {
     match project {
         Ok(project) => {
             let viewport = ed.peek().viewport;
+            // The piece is wired as the project opened (plan D4), or as the
+            // project it names says (Sean's eaves: the house): what a hand
+            // patch is walked against.
+            let wired = entry.and_then(|p| p.wired_as).and_then(|w| {
+                let o = Opened::open(&w.files()).ok()?;
+                Some(Piece::of(&o.project, format!("{}'s patch", w.title)))
+            });
+            let piece = wired.unwrap_or_else(|| {
+                let name = entry.map_or("the desk", |p| p.title);
+                Piece::of(&project, format!("{name}'s patch when it opened"))
+            });
             let mut e = Editor::new(project).with_view_of(&ed.peek());
+            e.piece = Some(piece);
             e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
@@ -365,6 +447,17 @@ fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Eleme
                         },
                         span { class: "toggle-box", if pinning { "✓" } else { "" } }
                         " Pinning"
+                    }
+                    button {
+                        class: "tool",
+                        tabindex: "-1",
+                        title: "Wire the piece as a real install often is: the first output's objects shuffled across its ports, each a random way round, entering at a random lamp (seeded)",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: {
+                            let ed = ed.clone();
+                            move |_| scramble_piece(&ed)
+                        },
+                        "Scramble the piece"
                     }
                     div { class: "debug-row",
                         span { class: "debug-label", "Size" }

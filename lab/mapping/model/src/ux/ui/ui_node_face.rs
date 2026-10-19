@@ -124,8 +124,13 @@ pub struct UiPortRow {
     pub grid: PixelGrid,
     /// Each object's run of pixels, outlined.
     pub runs: Vec<UiRun>,
-    /// Pixels ringed: the pixel of each selected lamp (D47).
+    /// Pixels ringed: the pixel of each selected lamp (D47), and while a
+    /// patch is armed, the candidate in focus.
     pub marked: Vec<u32>,
+    /// Where two objects share pixels (plan D7): their outline, and the
+    /// words for the row (`overlap 3`).
+    pub overlaps: Vec<Rect>,
+    pub overlap: Option<String>,
 }
 
 /// The outline round one run of a port's pixels: one box per line it

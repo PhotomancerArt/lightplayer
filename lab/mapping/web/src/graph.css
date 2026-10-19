@@ -254,6 +254,13 @@
     .run rect { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-opacity: 0.55; }
     .run.unpatched rect { stroke-dasharray: 2 2; stroke-opacity: 0.35; }
     .run.lit rect { stroke: var(--selection); stroke-opacity: 1; stroke-width: 1.5; }
+    /* Two objects on the same pixels (patching by hand, plan D7): trouble, and
+       the row says "overlap" too. */
+    .run-overlap { fill: none; stroke: var(--refused); stroke-width: 1.5; pointer-events: none; }
+    .port-overlap { fill: var(--refused); }
+    /* A fact with the verb that changes it (the inspector). */
+    .action-fact { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .action-fact-button { flex: none; }
 
     /* A shader's GLSL in the inspector: shown, never run. */
     .glsl { margin: 6px 0 0; padding: 6px 8px; max-height: 240px; overflow: auto; font: 10px/1.35 var(--mono); color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; white-space: pre; }
@@ -269,4 +276,5 @@
     .world .run.unpatched rect { stroke-dasharray: calc(2px / var(--zoom)) calc(2px / var(--zoom)); }
     .world .run.lit rect { stroke-width: calc(1.5px / var(--zoom)); }
     .world .px-mark { stroke-width: calc(1.6px / var(--zoom)); }
+    .world .run-overlap { stroke-width: calc(1.5px / var(--zoom)); }
 }

@@ -125,7 +125,7 @@ impl Editor {
                 p.wire_ports()
                     .into_iter()
                     .flat_map(|(output, port)| {
-                        p.free_segments(&output, &port, n)
+                        p.free_segments_for(&output, &port, n, Some(o))
                             .into_iter()
                             .map(move |pixels| PairEnd::Segment {
                                 output: output.clone(),
@@ -262,12 +262,20 @@ impl Editor {
         }
     }
 
-    /// M: patch and move on. Armed, it makes the pair, then selects the next
-    /// free segment and arms from it, so the next press of M patches the
-    /// next object. Unarmed, it arms (A).
+    /// M: patch and move on, lp2014's `m`. Armed, it makes the pair, then
+    /// selects the next free segment and arms from it, so the next press of
+    /// M patches the next object. Unarmed on an object on the wire (just
+    /// patched, and turned until the piece matched), it moves on the same
+    /// way. Otherwise it arms (A).
     pub fn patch_next(&mut self) {
         if self.armed.is_none() {
-            self.arm_patch();
+            let placed = self
+                .selected_object()
+                .filter(|o| self.project.effective_patch().lands(o));
+            match placed {
+                Some(o) => self.arm_after(&o),
+                None => self.arm_patch(),
+            }
             return;
         }
         let Some(other) = self.focused_candidate() else {
@@ -286,7 +294,33 @@ impl Editor {
             return;
         };
         let notice = self.notice.take();
-        if let Some(next) = self.next_free_segment(&output, &port, true) {
+        self.arm_next_free(&output, &port);
+        if self.notice.is_none() {
+            self.notice = notice;
+        }
+    }
+
+    /// Arm from the next free segment after an object on the wire.
+    fn arm_after(&mut self, object: &ObjectId) {
+        let Some((output, port)) = self
+            .project
+            .effective_patch()
+            .spans_of(object)
+            .next()
+            .map(|s| (s.output.clone(), s.port.clone()))
+        else {
+            return;
+        };
+        self.arm_next_free(&output, &port);
+        if self.armed.is_none() && self.notice.is_none() {
+            self.notice = Some(Notice::info("No free pixel after this one"));
+        }
+    }
+
+    /// Select the next free segment after the selection on `port` (or on a
+    /// later port) and arm a patch from it.
+    fn arm_next_free(&mut self, output: &NodeId, port: &str) {
+        if let Some(next) = self.next_free_segment(output, port, true) {
             self.selection = self.end_targets(&next);
             self.armed = Some(Armed {
                 verb: ArmVerb::Patch,
@@ -297,9 +331,6 @@ impl Editor {
             if self.candidates().is_empty() {
                 self.armed = None;
             }
-        }
-        if self.notice.is_none() {
-            self.notice = notice;
         }
     }
 

@@ -82,6 +82,7 @@ macro_rules! fit {
 fit!(radiance_dome, radiance());
 fit!(whole_shapes, lab_project("whole-shapes"));
 fit!(eaves, lab_project("eaves"));
+fit!(eaves_wired, lab_project("eaves-wired"));
 
 // catalog/projects/
 fit!(fiber_headband, catalog("fiber-headband"));

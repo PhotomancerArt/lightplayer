@@ -140,6 +140,8 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 button {
                     class: "action-fact-button",
                     title: "{verb.keys()}",
+                    tabindex: "-1",
+                    onmousedown: move |evt| evt.prevent_default(),
                     onclick: move |_| {
                         ed.input(GraphInput::Verb(verb));
                     },

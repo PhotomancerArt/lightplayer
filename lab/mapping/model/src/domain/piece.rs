@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::board::BoardFrame;
+use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
 use crate::domain::patch::{EffectivePatch, Landing};
 use crate::domain::project::Project;
@@ -69,6 +70,48 @@ impl Piece {
         Self::wired(project.effective_patch().clone(), wired_as)
     }
 
+    /// A piece wired the way an install really is when nobody wrote it
+    /// down: every object the project has on `output`'s ports, shuffled
+    /// across those same places, each running a random way round and
+    /// entering at a random lamp. Seeded, so a test and a person at the
+    /// gate get the same install.
+    pub fn scrambled(
+        project: &Project,
+        output: &NodeId,
+        seed: u64,
+        wired_as: impl Into<String>,
+    ) -> Self {
+        let patch = project.effective_patch();
+        // Each object on the output, and where its first span starts.
+        let mut objects: Vec<ObjectId> = Vec::new();
+        let mut places: Vec<(String, u32)> = Vec::new();
+        for s in patch.spans.iter().filter(|s| &s.output == output) {
+            if objects.contains(&s.object) {
+                continue;
+            }
+            objects.push(s.object.clone());
+            places.push((s.port.clone(), s.pixels().start));
+        }
+        let mut rng = Lcg(seed);
+        for i in (1..places.len()).rev() {
+            let j = (rng.next() % (i as u64 + 1)) as usize;
+            places.swap(i, j);
+        }
+        let mut wired = project.clone();
+        for o in &objects {
+            wired.unpatch_object(o);
+        }
+        for (o, (port, pixel)) in objects.iter().zip(places) {
+            wired.patch_object(o, output, &port, pixel);
+            if rng.next() % 2 == 1 {
+                wired.reverse_placement(o);
+            }
+            let n = wired.object(o).map_or(1, |o| o.lamps.len() as u64).max(1);
+            wired.turn_placement(o, (rng.next() % n) as i64);
+        }
+        Self::wired(wired.effective_patch().clone(), wired_as)
+    }
+
     /// Where one of an object's lamps really is.
     pub fn landing(&self, object: &ObjectId, lamp: u32) -> Option<Landing> {
         let s = self
@@ -97,35 +140,54 @@ impl Piece {
     /// Every object the project's patch puts somewhere the piece doesn't,
     /// in the project's tree order.
     pub fn differences(&self, project: &Project) -> Vec<Difference> {
+        project
+            .placed_objects()
+            .iter()
+            .filter_map(|(_, o)| self.difference(project, &o.id))
+            .collect()
+    }
+
+    /// How one object's place differs from the piece's, if it does.
+    pub fn difference(&self, project: &Project, object: &ObjectId) -> Option<Difference> {
         let patch = project.effective_patch();
-        let mut out = Vec::new();
-        for (_, o) in project.placed_objects() {
-            let n = o.lamps.len() as u32;
-            let truth: Vec<Option<Landing>> = (0..n).map(|j| self.landing(&o.id, j)).collect();
-            let now: Vec<Option<Landing>> = (0..n).map(|j| patch.landing(&o.id, j)).collect();
-            if truth == now {
-                continue;
-            }
-            let kind = if now.iter().all(Option::is_none) {
-                DifferenceKind::NotPatched
-            } else if as_set(&truth) != as_set(&now) {
-                DifferenceKind::OtherPlace
-            } else if direction(&truth) != direction(&now) {
-                DifferenceKind::Reversed
-            } else {
-                DifferenceKind::Turned
-            };
-            out.push(Difference {
-                object: o.id.clone(),
-                kind,
-            });
+        let n = project.object(object)?.lamps.len() as u32;
+        let truth: Vec<Option<Landing>> = (0..n).map(|j| self.landing(object, j)).collect();
+        let now: Vec<Option<Landing>> = (0..n).map(|j| patch.landing(object, j)).collect();
+        if truth == now {
+            return None;
         }
-        out
+        let kind = if now.iter().all(Option::is_none) {
+            DifferenceKind::NotPatched
+        } else if as_set(&truth) != as_set(&now) {
+            DifferenceKind::OtherPlace
+        } else if direction(&truth) != direction(&now) {
+            DifferenceKind::Reversed
+        } else {
+            DifferenceKind::Turned
+        };
+        Some(Difference {
+            object: object.clone(),
+            kind,
+        })
     }
 
     /// Whether the project's patch puts every lamp where the piece has it.
     pub fn matches(&self, project: &Project) -> bool {
         self.differences(project).is_empty()
+    }
+}
+
+/// A small seeded generator (Knuth's MMIX constants): the model takes no
+/// randomness from anywhere else (sans-IO).
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.0 >> 33
     }
 }
 

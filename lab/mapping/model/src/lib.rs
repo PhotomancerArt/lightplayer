@@ -128,6 +128,7 @@ pub use ux::hints::{Hint, HintBar, HintKind};
 pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
+pub use ux::port_grouping::PortGrouping;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use ux::tree_rows::TreeRow;
 pub use ux::ui::*;
