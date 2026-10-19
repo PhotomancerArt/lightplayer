@@ -158,6 +158,28 @@ pub mod row {
     pub const SAVED: &str = "Saved";
 }
 
+/// What the board card's Wi‑Fi and lightplayer.app rows say: label voice,
+/// lower case, the state the fact and the button the fix
+/// (`docs/ux/anatomy/board-card.md`, the link rows).
+pub mod card {
+    /// The board is joining a saved network (its row's work).
+    pub const JOINING: &str = "joining";
+    /// A saved network refused its password.
+    pub const WRONG_PASSWORD: &str = "wrong password";
+    /// Joined, and lightplayer.app did not answer the board.
+    pub const CANT_REACH: &str = "can't reach";
+    /// The board dialling lightplayer.app.
+    pub const CONNECTING: &str = "connecting";
+    /// The Wi‑Fi row's fix for a board with nothing saved: its details.
+    pub const SET_UP: &str = "Set up";
+    /// The Wi‑Fi row's fix for a refused password: its details.
+    pub const CHANGE: &str = "Change";
+    /// More than one saved network, none joined.
+    pub fn networks(count: usize) -> String {
+        format!("{count} networks")
+    }
+}
+
 /// The popover's own labels: its pages, buttons and fields.
 pub mod label {
     pub const WIFI: &str = "Wi‑Fi";

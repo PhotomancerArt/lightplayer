@@ -80,6 +80,10 @@ pub const NOT_RESPONDING: &str = "not responding";
 /// firmware, not answered): a dash, dimmed.
 pub const NOT_KNOWN: &str = "\u{2014}";
 
+/// A radio the board has turned off: Wi‑Fi, Bluetooth or lightplayer.app
+/// hushed from its row's details.
+pub const DISABLED: &str = "disabled";
+
 /// What this tab's session says on a link row, in place of the row's own
 /// facts: who holds the board, or that it stopped answering.
 #[derive(Clone, Debug, PartialEq)]

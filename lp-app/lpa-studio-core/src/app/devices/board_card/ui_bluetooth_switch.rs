@@ -1,5 +1,5 @@
-//! [`UiBluetoothSwitch`]: the board's Bluetooth switch, as the connection
-//! bar's details draw it (moved here from the web's Connections group, Q39).
+//! [`UiBluetoothSwitch`]: the board's Bluetooth switch, as the Bluetooth
+//! row's details draw it (moved here from the web's Connections group, Q39).
 //!
 //! Bluetooth is on by default, so most people never touch the switch. The
 //! board reads it once, at boot: flipped over USB, Studio restarts the board
@@ -22,9 +22,12 @@ pub struct UiBluetoothSwitch {
     pub restart_note: Option<String>,
 }
 
-/// The switch for a board with these access facts.
-pub fn bluetooth_switch(access: &UiDeviceAccess) -> UiBluetoothSwitch {
-    if access.over_bluetooth {
+/// The switch for a board with these access facts, `over_bluetooth` when
+/// this tab's link to it is Bluetooth — the endpoint's own kind, never
+/// `UiDeviceAccess::over_bluetooth`, which has called a LAN or relay board
+/// "Bluetooth" before.
+pub fn bluetooth_switch(access: &UiDeviceAccess, over_bluetooth: bool) -> UiBluetoothSwitch {
+    if over_bluetooth {
         return UiBluetoothSwitch {
             on: true,
             locked: true,
@@ -63,10 +66,7 @@ mod tests {
 
     #[test]
     fn over_bluetooth_the_switch_is_locked_on_and_says_how() {
-        let switch = bluetooth_switch(&UiDeviceAccess {
-            over_bluetooth: true,
-            ..UiDeviceAccess::default()
-        });
+        let switch = bluetooth_switch(&UiDeviceAccess::default(), true);
         assert!(switch.on && switch.locked);
         assert_eq!(
             switch.sub.as_deref(),
@@ -77,10 +77,10 @@ mod tests {
     #[test]
     fn a_switch_over_usb_says_the_restart_until_the_device_is_back() {
         let mut access = usb(Some(true));
-        assert_eq!(bluetooth_switch(&access).restart_note, None);
-        assert!(!bluetooth_switch(&access).locked);
+        assert_eq!(bluetooth_switch(&access, false).restart_note, None);
+        assert!(!bluetooth_switch(&access, false).locked);
         access.panel.as_mut().unwrap().restart_pending = true;
-        let switch = bluetooth_switch(&access);
+        let switch = bluetooth_switch(&access, false);
         assert_eq!(
             switch.restart_note.as_deref(),
             Some("Restarting to turn Bluetooth on…")
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn before_the_list_arrives_the_switch_waits() {
-        assert!(bluetooth_switch(&usb(None)).locked);
+        assert!(bluetooth_switch(&usb(None), false).locked);
     }
 
     fn usb(ble_enabled: Option<bool>) -> UiDeviceAccess {

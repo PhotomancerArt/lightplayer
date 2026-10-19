@@ -20,28 +20,23 @@
 //! | Its port there and closed, unplugged, or reached another way | "not connected" | Neutral | — (Connect is the primary) |
 //! | Offline | "not connected", dimmed | Neutral | — (the surface says since when) |
 //!
-//! Its details: how the cable reaches the board (when it is the link in
-//! use), Identify again, Connect, Disconnect.
+//! Its details, while the cable is the link in use: how it reaches the
+//! board, Identify again, Connect, Disconnect ([`super::link_bar`]).
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::PendingLinkView;
 
 use super::board_card_input::{BoardCardInput, link_icon};
-use super::detail_sections::{facts, verbs};
+use super::detail_sections::facts;
 use super::link_bar::{LinkFacts, link_bar};
 use super::link_session::{CONNECTED, NOT_CONNECTED, NOT_KNOWN};
-use super::primary_action::primary_action;
-use super::ui_bluetooth_switch::bluetooth_switch;
-use super::ui_card_action::UiCardAction;
-use super::ui_detail_panel::UiDetailPanel;
-use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::RichLine;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 
 /// The USB row.
 pub(crate) fn usb_bar(input: &BoardCardInput<'_>) -> UiStackBar {
-    let mut facts = match input.runtime {
+    let facts = match input.runtime {
         Some(runtime) => LinkFacts {
             kind: Some(runtime.kind_word()),
             ..LinkFacts::new(
@@ -63,7 +58,6 @@ pub(crate) fn usb_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             )
         },
     };
-    facts.details = details(input);
     link_bar(input, BarLayer::Usb, facts)
 }
 
@@ -108,81 +102,6 @@ fn by_cable(input: &BoardCardInput<'_>) -> bool {
             input.view.status,
             DeviceStatus::Attached | DeviceStatus::Offline
         )
-}
-
-/// The USB row's details: its panels, and the other ways to reach it.
-fn details(input: &BoardCardInput<'_>) -> UiBarDetails {
-    let view = input.view;
-    let link = input.link_kind();
-    let held = input.held();
-
-    let mut panels = Vec::new();
-    if let Some(access) = input
-        .access
-        .filter(|access| access.panel.is_some() || link == UiLinkKind::Bluetooth)
-    {
-        panels.push(UiDetailPanel::Bluetooth(bluetooth_switch(access)));
-    }
-    if let Some(wifi) = input.wifi {
-        panels.push(UiDetailPanel::Wifi(wifi.clone()));
-    }
-    if let Some(counters) = view.link_counters {
-        panels.push(UiDetailPanel::LinkCounters(counters));
-    }
-
-    let primary = match primary_action(input, None) {
-        Some(UiPrimary::Offer(action)) => Some(action.offer),
-        _ => None,
-    };
-    // The road the primary's Connect takes to an offline board: its own
-    // offer is the same reach, and is not offered twice.
-    let primary_road = input
-        .offer("connect")
-        .filter(|connect| Some(&connect.path) == primary.as_ref())
-        .and_then(|connect| match connect.action.op_as::<crate::RuntimeOp>() {
-            Some(crate::RuntimeOp::ConnectDevice {
-                reach: Some(reach), ..
-            }) => Some(road_verb(*reach)),
-            _ => None,
-        });
-    let mut actions = Vec::new();
-    if let Some(identify) = input.offer("identify") {
-        actions.push(UiCardAction::press(identify, "Identify again").with_icon("info"));
-    }
-    for (verb, word, icon) in [
-        ("reconnect", "Connect", link_icon(link)),
-        ("connect-wifi", "Connect over Wi\u{2011}Fi", "wifi"),
-        ("connect-relay", "Connect through lightplayer.app", "cloud"),
-    ] {
-        // A board another tab holds is reached by the take-over (the
-        // primary); each of these would fight that tab for the board.
-        if held.is_none()
-            && Some(verb) != primary_road
-            && let Some(offer) = input
-                .offer(verb)
-                .filter(|offer| Some(&offer.path) != primary.as_ref())
-        {
-            actions.push(UiCardAction::press(offer, word).with_icon(icon));
-        }
-    }
-    if let Some(disconnect) = input.offer("disconnect") {
-        actions.push(UiCardAction::own_words(disconnect).with_icon(disconnect.icon.clone()));
-    }
-    UiBarDetails {
-        sections: vec![verbs(actions)],
-        panels,
-        raised: false,
-    }
-}
-
-/// The verb of the offer that reaches an offline board by `reach`, the
-/// road a Connect takes there.
-fn road_verb(reach: crate::ConnectReach) -> &'static str {
-    match reach {
-        crate::ConnectReach::Wifi => "connect-wifi",
-        crate::ConnectReach::Relay => "connect-relay",
-        crate::ConnectReach::Usb => "reconnect",
-    }
 }
 
 /// The link an offline board's Connect takes (`road_link`), for a test.
@@ -579,15 +498,12 @@ mod tests {
         let bar = usb_bar(&fixture.input());
         assert_eq!(words_of(&bar), ["Identify again", "Disconnect"]);
 
-        // Offline with both roads: the primary takes Wi‑Fi; the cable and
-        // the cloud stay in details.
+        // Offline with both roads: the primary takes Wi‑Fi; the cable stays
+        // in the USB row's details, the cloud in lightplayer.app's.
         let mut offline = CardFixture::offline();
         offline.wifi_address = true;
         offline.relay = true;
-        assert_eq!(
-            words_of(&usb_bar(&offline.input())),
-            ["Connect", "Connect through lightplayer.app"]
-        );
+        assert_eq!(words_of(&usb_bar(&offline.input())), ["Connect"]);
     }
 
     /// A new board's link rows: the link it arrived on, connected, and the

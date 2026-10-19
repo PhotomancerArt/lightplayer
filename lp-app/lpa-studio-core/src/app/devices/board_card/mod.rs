@@ -27,13 +27,15 @@
 //!   [`primary_action`],
 //!   [`bar_work`], [`held_board`] (a board another tab holds),
 //!   [`link_session`] (this tab's session, on the row of the link it is
-//!   about), [`board_panel_picks`], and one per row — [`project_bar`],
-//!   [`usb_bar`], [`access_bar`], [`firmware_bar`], [`hardware_bar`] —
-//!   with [`ui_bluetooth_switch`];
+//!   about) and [`link_bar`] (a link row from its facts),
+//!   [`board_panel_picks`], and one per row — [`project_bar`], [`usb_bar`],
+//!   [`wifi_bar`], [`bluetooth_bar`], [`cloud_bar`], [`access_bar`],
+//!   [`firmware_bar`], [`hardware_bar`] — with [`ui_bluetooth_switch`];
 //!   [`roster_board_cards`] builds every card on a roster.
 
 pub mod access_bar;
 pub mod bar_work;
+pub mod bluetooth_bar;
 pub mod board_card_builder;
 pub mod board_card_input;
 pub mod board_connection;
@@ -43,6 +45,7 @@ pub mod board_picture;
 pub mod board_surface;
 #[cfg(test)]
 pub(crate) mod card_fixtures;
+pub mod cloud_bar;
 pub(crate) mod detail_sections;
 pub mod firmware_bar;
 pub mod hardware_bar;
@@ -65,15 +68,18 @@ pub mod ui_name_bar;
 pub mod ui_stack_bar;
 pub mod ui_status_corner;
 pub mod usb_bar;
+pub mod wifi_bar;
 
 pub use access_bar::ANYONE_CAN_EDIT_SENTENCE;
 pub use bar_work::{activity_bar, activity_words};
+pub use bluetooth_bar::{BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE};
 pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
 pub use board_links::{BoardLinks, account_words};
 pub use board_panel_picks::{MASTER_CHANNEL, board_panel_picks};
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
+pub use cloud_bar::{NOTHING_GOES_SENTENCE, SIGN_IN_SENTENCE};
 pub use firmware_bar::{
     CONFIRMATION_REQUIRED, DATA_UNREADABLE, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
 };
@@ -82,7 +88,10 @@ pub use held_board::{
     EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
     TAKEN_BY_ANOTHER_TAB,
 };
-pub use link_session::{CONNECTION_FAILED, RECONNECTING, SOMEONE_ELSE_SENTENCE};
+pub use link_session::{
+    CONNECTED, CONNECTION_FAILED, DISABLED, NOT_CONNECTED, NOT_KNOWN, RECONNECTING,
+    SOMEONE_ELSE_SENTENCE,
+};
 pub use primary_action::{ADD_A_PROJECT, CONNECT_HERE, CONNECTING};
 pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE, PROJECT_UNKNOWN};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};

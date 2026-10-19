@@ -309,6 +309,10 @@ impl CardFixture {
         if self.relay && offline_wire {
             offers.push(connect_relay_offer(&self.board, self.view.id, false));
         }
+        // The controller's `sign-in`, while nobody is signed in.
+        if self.account.is_none() && face == DeviceFace::Wire {
+            offers.push(crate::sign_in_offer(&self.board));
+        }
         // The controller's `take-over`, on a board another tab holds.
         if let Some(held) = self.view.held_elsewhere.as_ref() {
             let asking = self

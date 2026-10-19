@@ -230,6 +230,9 @@ pub struct StudioController {
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
     play_views: u32,
+    /// How many times a card's Sign in was pressed: the shell leaves for
+    /// sign-in when the count it sees advances (`UiStudioView::sign_in_requests`).
+    sign_in_seq: u64,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -548,6 +551,7 @@ impl StudioController {
             place: None,
             graph: crate::app::graph::GraphController::default(),
             play_views: 0,
+            sign_in_seq: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -3414,6 +3418,7 @@ impl StudioController {
                     self.access.access_added().cloned(),
                 )
                 .with_app_agent(app_agent)
+                .with_sign_in_requests(self.sign_in_seq)
                 .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -3480,6 +3485,7 @@ impl StudioController {
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
             .with_app_agent(app_agent)
+            .with_sign_in_requests(self.sign_in_seq)
             .with_offers(offers)
             .with_graph(graph)
     }
@@ -3762,6 +3768,9 @@ impl StudioController {
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.sign_in_offer(&facts) {
+                offers.publish(offer);
+            }
             if let Some(offer) = self.take_over_offer_for(view, &facts) {
                 offers.publish(offer);
             }
@@ -3867,6 +3876,16 @@ impl StudioController {
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
+    }
+
+    /// `devices/<board>/sign-in`: the lightplayer.app row's Sign in, on a
+    /// board that is not a runtime, while this page can reach lightplayer.app
+    /// (its relay transport is installed) and nobody is signed in.
+    fn sign_in_offer(&self, facts: &crate::DeviceOfferFacts<'_>) -> Option<crate::UiOffer> {
+        (self.relay_transport.is_some()
+            && self.access.account_keys().is_none()
+            && facts.face == crate::DeviceFace::Wire)
+            .then(|| crate::sign_in_offer(&facts.prefix))
     }
 
     /// Whether another tab of this browser holds the network slot of the
@@ -4652,6 +4671,12 @@ impl StudioController {
                 log::debug!("start fresh on {:?}: nothing to remember", op.device);
             }
             self.keep_fresh_starts();
+            self.mark_dirty();
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::SignInOp::NODE_ID {
+            let _op = action.into_op::<crate::SignInOp>()?;
+            self.sign_in_seq += 1;
             self.mark_dirty();
             return Ok(UiNotices::new());
         }

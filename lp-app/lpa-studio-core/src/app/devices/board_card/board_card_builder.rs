@@ -13,13 +13,14 @@
 use lpa_devices::view::PendingLinkView;
 
 use super::access_bar::{access_bar, pending_access_bar};
+use super::bluetooth_bar::bluetooth_bar;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
 use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
+use super::cloud_bar::cloud_bar;
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
-use super::link_bar::radio_placeholder;
 use super::primary_action::{pending_action, pending_primary, primary_action, state_action};
 use super::project_bar::{edit_action, pending_project_bar, project_bar};
 use super::status_corner::{layer_title, status_corner};
@@ -32,6 +33,7 @@ use super::ui_name_bar::UiNameBar;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use super::usb_bar::{pending_link_bars, usb_bar};
+use super::wifi_bar::wifi_bar;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
 
@@ -40,9 +42,9 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     let bars: Vec<UiStackBar> = vec![
         project_bar(input),
         usb_bar(input),
-        radio_placeholder(input, BarLayer::Wifi),
-        radio_placeholder(input, BarLayer::Bluetooth),
-        radio_placeholder(input, BarLayer::Cloud),
+        wifi_bar(input),
+        bluetooth_bar(input),
+        cloud_bar(input),
         access_bar(input),
         firmware_bar(input),
         hardware_bar(input),

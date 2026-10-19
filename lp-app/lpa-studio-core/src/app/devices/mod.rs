@@ -131,6 +131,8 @@ pub mod relay_transport;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
+pub mod sign_in_offer;
+pub mod sign_in_op;
 pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
@@ -301,6 +303,8 @@ pub use relay_transport::{RelayDeviceTransport, RelayLinkSource};
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
+pub use sign_in_offer::{SIGN_IN_VERB, sign_in_offer};
+pub use sign_in_op::SignInOp;
 pub use sim_create_op::{SimCreateOp, sim_device_name};
 pub use sim_record::{
     BLE_ENDPOINT_PREFIX, NewSimRecord, RuntimeKind, SimRecord, ble_endpoint, ble_link_info,

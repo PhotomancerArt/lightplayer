@@ -147,6 +147,7 @@ pub use app::devices::{
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
 };
+pub use app::devices::{SIGN_IN_VERB, SignInOp, sign_in_offer};
 /// Connect on a board another tab holds: the offer, its op and its words.
 pub use app::devices::{
     TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,

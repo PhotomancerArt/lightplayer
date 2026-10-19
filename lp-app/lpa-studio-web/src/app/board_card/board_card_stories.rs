@@ -927,7 +927,7 @@ fn board_card_project_details_open() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details, open: how the board is reached (the link, the last word heard, the board's own words), its links, then Identify again and Disconnect as menu rows."
+    description = "The USB row's details, open, on the link in use: how the board is reached (what the row says, the last word heard, the board's own words), then Identify again and Disconnect as menu rows."
 )]
 fn board_card_connection_details_open() -> Element {
     details_open(BarLayer::Usb)
@@ -985,7 +985,7 @@ fn board_card_corner_details_open() -> Element {
 }
 
 #[story(
-    description = "The 2026-10-06 regression case: a details card taller than the room below its bar — the connection details with the Wi‑Fi panel's long Nearby list (nothing saved, so it opens on what the board hears) — opened from a card at the bottom of the page. The shared popover places the card where it fits across its own wide bar, and the bar's copy is never drawn over the card's rows (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`); past the viewport's budget the details scroll inside themselves."
+    description = "The 2026-10-06 regression case: a details card taller than the room below its bar — the Wi‑Fi row's details with the Wi‑Fi panel's long Nearby list (nothing saved, so it opens on what the board hears) — opened from a card at the bottom of the page. The shared popover places the card where it fits across its own wide bar, and the bar's copy is never drawn over the card's rows (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`); past the viewport's budget the details scroll inside themselves."
 )]
 fn board_card_tall_details_over_its_bar() -> Element {
     let mut wifi = wifi_board(StationState::NotConnected, Vec::new());
@@ -1005,7 +1005,7 @@ fn board_card_tall_details_over_its_bar() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(wifi),
-                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
+                    details_open: Some(CardPart::Bar(BarLayer::Wifi)),
                     on_action: |_| {},
                 }
             }
@@ -1041,7 +1041,7 @@ fn board_card_access_details_keys_open() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details with the Wi‑Fi panel inline, as a section of the card (its divider, no frame): the connected network first, the other saved ones with their words, \"+ Connect to a network\", the Wi‑Fi and Cloud relay switches. Opening these details asks the board for its networks again, as opening today's Wi‑Fi popover did."
+    description = "The Wi‑Fi row's details with the Wi‑Fi panel inline, as a section of the card (its divider, no frame): the connected network first, the other saved ones with their words, \"+ Connect to a network\", the Wi‑Fi and Cloud relay switches. Opening these details asks the board for its networks again, as opening today's Wi‑Fi popover did."
 )]
 fn board_card_connection_details_wifi() -> Element {
     rsx! {
@@ -1053,7 +1053,7 @@ fn board_card_connection_details_wifi() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(connected_truck()),
-                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
+                    details_open: Some(CardPart::Bar(BarLayer::Wifi)),
                     on_action: |_| {},
                 }
             }
@@ -1062,7 +1062,7 @@ fn board_card_connection_details_wifi() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details over USB just after Bluetooth was flipped: the switch row (moved from the Connections group), locked while it applies, and core's note under it — \"Restarting to turn Bluetooth on…\"."
+    description = "The Bluetooth row's details over USB just after Bluetooth was flipped: the switch row (moved from the Connections group), locked while it applies, and core's note under it — \"Restarting to turn Bluetooth on…\"."
 )]
 fn board_card_connection_details_bluetooth_restarting() -> Element {
     rsx! {
@@ -1074,7 +1074,7 @@ fn board_card_connection_details_bluetooth_restarting() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     access: Some(usb_access(Some(true), true)),
-                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
+                    details_open: Some(CardPart::Bar(BarLayer::Bluetooth)),
                     on_action: |_| {},
                 }
             }
@@ -1083,7 +1083,7 @@ fn board_card_connection_details_bluetooth_restarting() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details with the board's link counters (moved from today's ⋯ menu): resends, damaged frames, restarts, stalls and traffic in core's words and units, the two the link had to recover from in the warning tone, and core's caption."
+    description = "The USB row's details with the board's link counters (moved from today's ⋯ menu): resends, damaged frames, restarts, stalls and traffic in core's words and units, the two the link had to recover from in the warning tone, and core's caption."
 )]
 fn board_card_connection_details_link_counters() -> Element {
     let mut card = porch();
