@@ -1,9 +1,10 @@
 # The desk's Android test phone
 
 A Pixel 8a kept on the desk for agents to drive with no hands: Studio in the
-phone's own Chrome, its own Bluetooth and Web Serial, against desk boards.
-`phone.mjs` is the kit (`just phone …`), `walk-ble-phone.mjs` the first walk
-on it (`just walk-ble-phone`).
+phone's own Chrome, its own Bluetooth and USB, against desk boards.
+`phone.mjs` is the kit (`just phone …`); `walk-ble-phone.mjs` (`just
+walk-ble-phone`) and `walk-usb-phone.mjs` (`just walk-usb-phone`) are the
+walks on it.
 
 Why a phone and not the Mac: Mac Chrome's Web Bluetooth is not a phone's
 (different Bluetooth stack, MTU, connection timing), and the emulated walks
@@ -50,6 +51,14 @@ with no pairing code (2026-10-17).
   Enable the snoop log before the session you want in it.
 - **`just phone shot <png>`** is the whole screen, system UI and choosers
   included — what CDP's page screenshot cannot see.
+- **`just phone ui`** is the screen as uiautomator reads it (text and
+  bounds), and `phone.tapText(pattern)` taps a node by what it says: how a
+  walk answers a native sheet CDP cannot reach (the WebUSB chooser,
+  Android's "Allow Chrome to access …?"). CDP's `DeviceAccess` covers the
+  Bluetooth chooser only.
+- **`just phone usb`** is the USB device on the phone's port, as Android
+  lists it; on a C6 its serial number is the MAC, which names the desk
+  board.
 
 ## What the first sitting found (2026-10-17)
 
@@ -74,6 +83,25 @@ with no pairing code (2026-10-17).
   2026-10-17, not `btsnoop_hci.log`: check Developer options › Enable
   Bluetooth HCI snoop log is set to *Enabled*, not *Filtered*, before a
   session you want the packets of.
+
+## The USB walk
+
+Chrome on Android has no wired Web Serial, so Studio's USB square speaks to
+a board over WebUSB there (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+The board is plugged into the PHONE's USB-C port, not the desk hub, and is
+powered by the phone.
+
+```bash
+just walk-usb-phone --serve-release        # this checkout's release bundle (just studio-web-story-build)
+just walk-usb-phone --studio https://lightplayer.app/
+```
+
+It finds the board by MAC (`phone usb`) and leases it, presses USB, answers
+Chrome's chooser and Android's access dialog by tapping what they say, and
+checks the card (by MAC), the Firmware details' refusal ("Installing
+firmware from a phone needs a computer"), the editor and Play. A Studio tab
+an earlier walk left open still holds the board, so the walk closes them
+first. There is no power cut: the board's power is the phone's port.
 
 ## The walk
 

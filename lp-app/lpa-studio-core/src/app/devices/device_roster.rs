@@ -790,6 +790,7 @@ mod tests {
             usb: None,
             serial_number: None,
             carries_update_channel: false,
+            firmware_blocked: None,
         }
     }
 

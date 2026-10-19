@@ -1564,6 +1564,7 @@ impl Board {
             }),
             serial_number: None,
             carries_update_channel: true,
+            firmware_blocked: None,
         }
     }
 

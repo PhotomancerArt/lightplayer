@@ -86,6 +86,8 @@ pub fn ble_link_info(device: &BleDevice) -> LinkInfo {
         // Its lp-link carries the update channel (M7 P12); whether the board
         // speaks it is the board's own announcement (DS9).
         carries_update_channel: true,
+        // Bluetooth's refusal is its endpoint's scheme (`ble:`), not this.
+        firmware_blocked: None,
     }
 }
 

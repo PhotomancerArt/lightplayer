@@ -28,8 +28,11 @@ export class BrowserEsp32DeviceController {
     return Boolean(globalThis.navigator?.serial);
   }
 
-  static async requestPort() {
-    if (!this.isSupported()) {
+  // `serial` is the `navigator.serial` to ask: the browser's own, or (Chrome
+  // on Android) the WebUSB one `browser_serial.js` picks
+  // (`usb_cdc_serial.js`), which takes the same filters.
+  static async requestPort(serial = globalThis.navigator?.serial) {
+    if (!serial) {
       throw new Error("Web Serial is not supported in this browser.");
     }
     // The chooser admits Espressif native USB AND the serial-bridge chips
@@ -43,7 +46,7 @@ export class BrowserEsp32DeviceController {
     // product-id allowlists; dev-board vendors do not use stable ones.
     // An empty filtered chooser still rejects with NotFoundError, which
     // upstream maps to "cancelled".
-    const port = await navigator.serial.requestPort({
+    const port = await serial.requestPort({
       filters: ESP32_USB_VENDOR_IDS.map((usbVendorId) => ({ usbVendorId })),
     });
     return { port, label: labelForPort(port) };
@@ -119,10 +122,22 @@ export class BrowserEsp32DeviceController {
       this.clearBufferedInput();
     }
     await this.openPortWithRetry(baudRate, log);
-    this.writer = this.port.writable.getWriter();
+    // The reader FIRST. A port another holder is reading — esptool-js,
+    // mid-flash, when the link reopens this session — refuses it, and the
+    // session must then hold nothing: with the writer taken first, the
+    // writer stayed taken after the failed open and the link's frames went
+    // into the flasher's stub, which hung a flash on the first one carrying
+    // a 0xC0 (2026-10-18, Chrome on Android; the same open runs on Web Serial).
     this.closed = false;
     this.releasing = false;
-    this.startReadPump();
+    try {
+      this.startReadPump();
+      this.writer = this.port.writable.getWriter();
+    } catch (error) {
+      this.closed = true;
+      await this.stopReadPump({ collectErrors: false });
+      throw error;
+    }
     return { label: this.label };
   }
 

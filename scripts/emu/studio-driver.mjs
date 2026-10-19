@@ -527,6 +527,19 @@ export class StudioDriver {
     }
   }
 
+  /// Press a Connect a board square WITH a user gesture and do not wait for
+  /// it: a square whose verb opens the browser's own chooser
+  /// (`requestPort`, `requestDevice`) refuses without a gesture and resolves
+  /// only once the chooser is answered — on a phone, by `phone.tapText`.
+  async pressConnectWithGesture(word, { timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.waitFor(`${matchingControls(word, { scope: CONNECT_SCOPE, exact: true })}.length > 0`, {
+      timeoutMs,
+      what: `the ${word} square`,
+    });
+    const press = `(() => { const el = ${matchingControls(word, { scope: CONNECT_SCOPE, exact: true })}[0]; el.scrollIntoView({ block: 'center' }); el.click(); return true; })()`;
+    this.cdp.send("Runtime.evaluate", { expression: press, userGesture: true }, this.sessionId, timeoutMs + 5_000).catch(() => {});
+  }
+
   /// Press the Bluetooth square and answer the browser's own Web Bluetooth
   /// chooser — the REAL one, for a page whose `navigator.bluetooth` is the
   /// browser's (the phone walk), never `?ble=emu`'s in-page picker. The

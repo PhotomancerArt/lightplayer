@@ -290,9 +290,22 @@ enum FlashPlan {
 /// executor's normalization is part of the evidence path under test.
 const SCRIPTED_PREFLIGHT_MAC: &str = "60:55:F9:0A:0B:0C";
 
+thread_local! {
+    /// The reason the next granted link gives for not writing firmware —
+    /// what Chrome on Android's WebUSB port says (`LinkInfo::firmware_blocked`).
+    /// `None`, a link that can flash, unless a test sets it.
+    static LINK_FIRMWARE_BLOCKED: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Make every link this thread's bench grants say it cannot write firmware.
+fn links_cannot_flash(reason: &str) {
+    LINK_FIRMWARE_BLOCKED.with(|blocked| *blocked.borrow_mut() = Some(reason.to_string()));
+}
+
 impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
-        let info = fake_link_info(&self.endpoint);
+        let mut info = fake_link_info(&self.endpoint);
+        info.firmware_blocked = LINK_FIRMWARE_BLOCKED.with(|blocked| blocked.borrow().clone());
         GrantedLink {
             link: Box::new(bench_link(info.clone(), &self.device)),
             info,

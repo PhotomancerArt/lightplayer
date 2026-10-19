@@ -133,9 +133,11 @@ pub struct DeviceView {
     /// keep it bounded — the panel's honest "…and N more" count.
     pub terminal_dropped: u32,
     /// Why this board's firmware cannot be written from here, when it
-    /// cannot: today exactly one reason, [`FIRMWARE_NEEDS_USB`], for a board
-    /// reached over Bluetooth or the LAN. `None` = nothing about the LINK stands in the
-    /// way (whether a verb is offered is still the firmware face's call).
+    /// cannot: [`FIRMWARE_NEEDS_USB`] for a board reached over Bluetooth,
+    /// the LAN or the relay, or the link's own reason
+    /// ([`FIRMWARE_NEEDS_A_COMPUTER`] for Chrome on Android's WebUSB). `None`
+    /// = nothing about the LINK stands in the way (whether a verb is offered
+    /// is still the firmware face's call).
     ///
     /// A reason and not a bool on purpose: the card draws the verb DISABLED
     /// with this sentence under it rather than hiding it, so "why can't I
@@ -164,6 +166,14 @@ pub struct DeviceView {
 /// Bluetooth link has no reset lines and no ROM downloader behind it, so
 /// flash, update and factory reset all need the cable.
 pub const FIRMWARE_NEEDS_USB: &str = "Firmware updates need USB";
+
+/// The sentence a card says when the board is on USB but the link still
+/// cannot carry the flasher: Chrome on Android reaches a wired board over
+/// WebUSB, where the board drops what it sends faster than the phone reads,
+/// and the flash protocol has no resend (an over-the-air update rides
+/// lp-link, which does, and stays offered). See
+/// `docs/adr/2026-10-18-android-usb-over-webusb.md`.
+pub const FIRMWARE_NEEDS_A_COMPUTER: &str = "Installing firmware from a phone needs a computer";
 
 /// The running activity, as the card shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -405,7 +415,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .endpoint
             .as_ref()
             .filter(|endpoint| endpoint.is_network())
-            .map(|_| FIRMWARE_NEEDS_USB.to_string()),
+            .map(|_| FIRMWARE_NEEDS_USB.to_string())
+            .or_else(|| device.evidence.link_firmware_blocked().map(str::to_string)),
         update_blocked: update_blocked(device),
         held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
@@ -787,7 +798,8 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .info
             .endpoint
             .is_bluetooth()
-            .then(|| FIRMWARE_NEEDS_USB.to_string()),
+            .then(|| FIRMWARE_NEEDS_USB.to_string())
+            .or_else(|| entry.info.firmware_blocked.clone()),
         held_by_tab,
         escapes: vec![Escape::Forget],
     }

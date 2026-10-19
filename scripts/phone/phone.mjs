@@ -33,6 +33,8 @@
 //   serve <port>              the Mac's 127.0.0.1:<port> on the phone's localhost:<port>
 //   open <url>                open a URL in the phone's Chrome, in front
 //   shot <file.png>           the phone's whole screen (system UI included)
+//   ui                        what is on screen, as text and bounds (uiautomator)
+//   usb                       the USB device on the phone's port (its MAC on a C6)
 //   snoop <dir>               a bug report, and the Bluetooth packet log out of it
 //
 // `ANDROID_SERIAL` picks a phone when adb sees several.
@@ -214,6 +216,22 @@ export async function cdp(serial = pickPhone()) {
   return { port: Number(port), browserWsUrl, browser: version.Browser };
 }
 
+/// Close every page in the phone's Chrome whose URL starts with `prefix`,
+/// over the DevTools port `cdp()` forwarded. A walk's tab outlives the walk
+/// (and the server it was loaded from), and a Studio tab left behind still
+/// holds its board: the next walk's card says "open in another tab".
+export async function closePages(port, prefix) {
+  const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const closed = [];
+  for (const page of pages) {
+    if (page.type === "page" && String(page.url).startsWith(prefix)) {
+      await fetch(`http://127.0.0.1:${port}/json/close/${page.id}`);
+      closed.push(page.url);
+    }
+  }
+  return closed;
+}
+
 /// The Mac's 127.0.0.1:`port` on the phone's localhost:`port`.
 export function serve(port, serial = pickPhone()) {
   adb(["reverse", `tcp:${port}`, `tcp:${port}`], { serial });
@@ -251,6 +269,79 @@ export function snoop(dir, serial = pickPhone()) {
   };
 }
 
+/// What is on the phone's screen as uiautomator sees it, system dialogs and
+/// Chrome's own choosers included: `[{ text, desc, id, cls, clickable,
+/// bounds: [x1, y1, x2, y2] }]`. The way to answer a native sheet CDP cannot
+/// reach (the WebUSB chooser, Android's "Allow Chrome to access …?") by what
+/// it says rather than by pixel.
+export function ui(serial = pickPhone()) {
+  // To a file: `dump /dev/tty` prints only "dumped to" over adb, no XML.
+  const xml = shell(serial, "uiautomator dump /sdcard/lp-ui.xml >/dev/null && cat /sdcard/lp-ui.xml", { timeoutMs: 30_000 });
+  const nodes = [];
+  for (const match of xml.matchAll(/<node ([^>]*?)\/?>/g)) {
+    const attr = (name) => match[1].match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] ?? "";
+    const bounds = attr("bounds").match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!bounds) continue;
+    nodes.push({
+      text: unescapeXml(attr("text")),
+      desc: unescapeXml(attr("content-desc")),
+      id: attr("resource-id"),
+      cls: attr("class"),
+      clickable: attr("clickable") === "true",
+      bounds: bounds.slice(1).map(Number),
+    });
+  }
+  return nodes;
+}
+
+/// Tap the middle of the first on-screen node whose text or description
+/// matches `pattern` (a RegExp or a substring), waiting up to `timeoutMs` for
+/// it to appear. Returns the node; throws naming what WAS on screen.
+export async function tapText(pattern, { serial = pickPhone(), timeoutMs = 20_000 } = {}) {
+  const matches = (value) => (pattern instanceof RegExp ? pattern.test(value) : value.includes(pattern));
+  const deadline = Date.now() + timeoutMs;
+  let seen = [];
+  for (;;) {
+    seen = ui(serial);
+    const node = seen.find((candidate) => matches(candidate.text) || matches(candidate.desc));
+    if (node) {
+      const [x1, y1, x2, y2] = node.bounds;
+      shell(serial, `input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`);
+      return node;
+    }
+    if (Date.now() > deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  const words = [...new Set(seen.flatMap((node) => [node.text, node.desc]).filter(Boolean))];
+  throw new Error(`nothing on the phone's screen matches ${pattern}; it shows: ${words.slice(0, 30).join(" | ")}`);
+}
+
+function unescapeXml(text) {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&amp;/g, "&");
+}
+
+/// The USB device on the phone's port, as Android lists it (`dumpsys usb`):
+/// `{ vendorId, productId, product, serialNumber }`, or null. On a C6 the
+/// serial number is its MAC, which names the desk board.
+export function usbDevice(serial = pickPhone()) {
+  const text = shell(serial, "dumpsys usb");
+  const field = (name) => text.match(new RegExp(`\\b${name}=([^\\n]+)`))?.[1]?.trim() ?? null;
+  const vendor = field("vendor_id");
+  if (!vendor || vendor === "-1") return null;
+  return {
+    vendorId: Number(vendor),
+    productId: Number(field("product_id")),
+    product: field("product_name"),
+    serialNumber: field("serial_number"),
+  };
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const run = {
@@ -263,6 +354,8 @@ async function main() {
     serve: () => serve(Number(rest[0] ?? usage())),
     open: () => open(rest[0] ?? usage()),
     shot: () => shot(rest[0] ?? "phone.png"),
+    ui: () => ui().filter((node) => node.text || node.desc),
+    usb: () => usbDevice(),
     snoop: () => snoop(rest[0] ?? path.join("target", "phone-snoop")),
   }[command];
   if (!run) usage();
@@ -270,7 +363,7 @@ async function main() {
 }
 
 function usage() {
-  console.error("usage: phone status | setup | pair <code> | connect | awake | cdp | serve <port> | open <url> | shot <file.png> | snoop <dir>");
+  console.error("usage: phone status | setup | pair <code> | connect | awake | cdp | serve <port> | open <url> | shot <file.png> | ui | usb | snoop <dir>");
   process.exit(2);
 }
 
