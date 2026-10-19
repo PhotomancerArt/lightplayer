@@ -704,6 +704,8 @@ export async function readFlashSafely(loader, offset, length, onProgress = null,
       );
     }
     packet = Math.max(pace.min, Math.floor(packet / 2));
+    // On the flash's terminal, so a walk can count what it read twice.
+    loader.info?.(`read at 0x${(offset + done).toString(16)} lost a segment (${lastLoss}); reading it again in ${packet}-byte packets`);
   }
   return bytes;
 }
