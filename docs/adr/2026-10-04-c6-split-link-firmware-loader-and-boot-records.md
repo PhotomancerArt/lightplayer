@@ -368,6 +368,36 @@ power cycle
   `emu_ota` U19 (X → Y, Y → Y-dies rolled back, Y healed, power cycles),
   through both doors.
 
+## Amendment (2026-10-19): no record names a core while it is written
+
+The 2026-10-17 amendment leaves the dead trial's record in place after a
+rollback, and a cold boot still chooses it. The next update writes its new
+core into the end of the region the running core is not in — the end that
+record names — and the core stage used to write the core's own trial record
+**last**. A power cut in the core's write, or between its hash and its
+record, booted the new core (or part of it) under the dead build's record:
+its build, length and marks
+([defect](../defects/2026-10-19-a-cut-before-the-next-cores-record-boots-it-under-the-dead-trials.md)).
+
+- **Write order** (`lpc-update`, `UpdateTarget::retire_spare_record`): the
+  core stage erases the spare record sector — the one the trial record goes
+  into — on every start and resume, before the core's first byte. Until
+  the trial record is written, the running core's record is the only one.
+  A refused build named by a rollback is forgotten if the board
+  power-cycles mid-transfer.
+- **Reader** (`lp_bootctl::stray_trial`, read by the core's `ota::begin`):
+  a core under an unconfirmed trial record of **another build**, with a
+  proven record behind it, marks the trial attempted and resets warm; the
+  loader rolls back to the proven core, which names the dead build refused.
+  This is what covers a core released before the write-order fix installing
+  this one. A stray with nothing proven behind it is still booted.
+- **No record byte, mark or loader change**, and channel 3 is unchanged: the
+  sector erased early is the one the trial record erased anyway, later, and
+  the reset is the warm death §4 already reads.
+- Tests: `lpc-update` `board_transfer` (a cut after every flash op of the
+  install after a rollback), `lp-bootctl` unit tests, `emu_ota` U20 (U19's
+  state, cuts across the next core and its record), through both doors.
+
 ## Amendment (2026-10-17): the second stage at `0x0` is ours
 
 The `0x0` row of §2 and §3's "the IDF bootloader starts the loader": from the
