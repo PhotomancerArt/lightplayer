@@ -101,6 +101,24 @@ pub fn FixtureFace(
 /// ring where it enters.
 fn object_view(o: &UiObject, lamp_r: f64, px: f64) -> Element {
     let stroke = match &o.shape {
+        // A path with jumpers: its lit segments as one line, each jumper
+        // dashed (wire, no lamps).
+        UiShape::Polyline(points) if !o.jumpers.is_empty() => {
+            let mut lit = String::new();
+            let mut dashed = String::new();
+            for (i, w) in points.windows(2).enumerate() {
+                let seg = format!("M{},{} L{},{} ", w[0].x, w[0].y, w[1].x, w[1].y);
+                if o.jumpers.contains(&i) {
+                    dashed.push_str(&seg);
+                } else {
+                    lit.push_str(&seg);
+                }
+            }
+            rsx! {
+                path { class: "stroke", d: "{lit}" }
+                path { class: "stroke jumper", d: "{dashed}" }
+            }
+        }
         UiShape::Polyline(points) => {
             let d: String = points
                 .iter()

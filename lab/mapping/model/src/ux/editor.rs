@@ -150,6 +150,8 @@ pub enum MenuCommand {
     },
     /// Take a point away from a path.
     RemovePoint { path: ComponentId, index: usize },
+    /// Make a path's segment a jumper (wire, no lamps), or lit again.
+    ToggleJumper { path: ComponentId, segment: usize },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -720,6 +722,60 @@ impl Editor {
         }
     }
 
+    /// Make a path's segment a jumper (wire that carries no lamps: a corner,
+    /// a run between windows) or lit again. The lamps keep their count and
+    /// respace over the lit segments, as the product places them.
+    pub fn toggle_jumper(&mut self, path: &ComponentId, segment: usize) {
+        if !self.move_draw {
+            self.refuse_move_draw(&format!("change {path}'s jumpers"));
+            return;
+        }
+        self.checkpoint();
+        match self.project.toggle_path_jumper(path, segment) {
+            Some(true) => {
+                self.selection = vec![Target::Component(path.clone())];
+                self.notice = Some(Notice::info(format!(
+                    "Segment {} of {path} is a jumper: no lamps on it, the same lamps along the rest",
+                    segment + 1
+                )));
+            }
+            Some(false) => {
+                self.selection = vec![Target::Component(path.clone())];
+                self.notice = Some(Notice::info(format!(
+                    "Segment {} of {path} is lit again",
+                    segment + 1
+                )));
+            }
+            None => {
+                self.notice = Some(Notice::refused(
+                    format!("Segment {} of {path} can't be a jumper", segment + 1),
+                    "a path keeps at least one lit segment",
+                    "light another segment first",
+                ));
+            }
+        }
+    }
+
+    /// `J`: the segment under the pointer, of a selected path (or the
+    /// path under the pointer), becomes a jumper or lit again.
+    fn jumper_under_pointer(&mut self) {
+        let Some(at) = self.pointer else { return };
+        let p = &self.project;
+        let is_path = |id: &ComponentId| {
+            p.component(id)
+                .is_some_and(|c| c.kind.points().is_some() && c.kind.min_points() == 2)
+        };
+        let found = p.things_at(&self.camera, at).into_iter().find_map(|t| match t {
+            Target::Component(id) if is_path(&id) => {
+                p.segment_at(&self.camera, &id, at).map(|(s, _)| (id, s))
+            }
+            _ => None,
+        });
+        if let Some((path, segment)) = found {
+            self.toggle_jumper(&path, segment);
+        }
+    }
+
     /// Take a point away from a path (or a polygon); refused below two
     /// points (three).
     pub fn remove_point(&mut self, path: &ComponentId, index: usize) {
@@ -846,6 +902,7 @@ impl Editor {
             ('=' | '+', false, _) => self.nudge(1),
             ('r', false, _) => self.reverse(),
             ('u', false, _) => self.unpin_selection(),
+            ('j', false, _) => self.jumper_under_pointer(),
             ('m', false, _) => self.set_move_draw(!self.move_draw),
             ('1' | '!', false, true) => self.fit(),
             ('2' | '@', false, true) => self.frame_selection(),
@@ -923,6 +980,7 @@ impl Editor {
             if let Target::Component(id) = &t
                 && let Some((segment, q)) = p.segment_at(&self.camera, id, at)
             {
+                let is_path = p.component(id).is_some_and(|c| c.kind.points().is_some());
                 out.push(MenuAction {
                     label: format!("Add a point to {id} here"),
                     keys: "double-click".into(),
@@ -930,6 +988,22 @@ impl Editor {
                         path: id.clone(),
                         segment,
                         at: q,
+                    },
+                });
+                let jumper = p.path_jumpers(id).contains(&(segment as u32));
+                if !is_path || p.component(id).is_some_and(|c| c.kind.min_points() > 2) {
+                    continue;
+                }
+                out.push(MenuAction {
+                    label: if jumper {
+                        "Light this segment".to_string()
+                    } else {
+                        "Make this segment a jumper".to_string()
+                    },
+                    keys: "J".into(),
+                    command: MenuCommand::ToggleJumper {
+                        path: id.clone(),
+                        segment,
                     },
                 });
             }
@@ -954,6 +1028,7 @@ impl Editor {
             MenuCommand::Unpin(id) => self.unpin(&[id]),
             MenuCommand::AddPoint { path, segment, at } => self.add_point(&path, segment, at),
             MenuCommand::RemovePoint { path, index } => self.remove_point(&path, index),
+            MenuCommand::ToggleJumper { path, segment } => self.toggle_jumper(&path, segment),
         }
     }
 

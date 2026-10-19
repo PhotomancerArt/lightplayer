@@ -141,6 +141,7 @@
     .edge-channel { fill: var(--bound); font: 9px var(--font); opacity: 0.8; pointer-events: none; }
     .edge-quiet .edge-channel { opacity: 0.4; }
     /* A fixture's render product, faintly behind its lamps. */
+    .stroke.jumper { stroke-dasharray: 3 3; opacity: 0.7; }
     .pictures { position: absolute; inset: 0; overflow: hidden; opacity: 0.1; pointer-events: none; }
     .pictures .picture { position: absolute; image-rendering: auto; }
     .source-picture { position: absolute; object-fit: contain; pointer-events: none; }

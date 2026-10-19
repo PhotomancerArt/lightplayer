@@ -193,6 +193,29 @@ fn PropRow(ed: GraphEditor, prop: Prop, locked: bool) -> Element {
                 }
             }
         }
+        PropKind::Choice { options } => {
+            let current = match prop.value {
+                PropValue::Choice { index, .. } => index,
+                _ => 0,
+            };
+            rsx! {
+                select {
+                    class: "choice",
+                    onkeydown: move |evt| evt.stop_propagation(),
+                    onchange: move |evt| {
+                        if let Ok(i) = evt.value().parse::<usize>() {
+                            ed.input(GraphInput::EditProp { id, edit: PropEdit::SetChoice(i) });
+                        }
+                    },
+                    if mixed {
+                        option { value: "", selected: true, disabled: true, "mixed" }
+                    }
+                    for (i, word) in options.iter().enumerate() {
+                        option { value: "{i}", selected: !mixed && i == current, "{word}" }
+                    }
+                }
+            }
+        }
         PropKind::Flag => {
             let on = matches!(prop.value, PropValue::Flag { off: 0, .. });
             let label = if mixed {
