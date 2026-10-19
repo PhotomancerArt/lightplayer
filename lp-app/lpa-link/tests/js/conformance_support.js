@@ -844,20 +844,33 @@ class UsbDeviceOverSerialPort {
     return { status: "ok" };
   }
 
-  async transferIn(_endpointNumber, length) {
-    if (!this.reader) {
-      throw new DOMException("The device must be opened first.", "InvalidStateError");
+  // Transfers queue (the port keeps several in flight) and complete in the
+  // order they were submitted, each at most `length` bytes; what a read
+  // brought beyond that is the next transfer's.
+  transferIn(_endpointNumber, length) {
+    const turn = (this.inTurn ?? Promise.resolve()).then(() => this.takeIn(length));
+    this.inTurn = turn.catch(() => {});
+    return turn;
+  }
+
+  async takeIn(length) {
+    if (!this.leftover?.length) {
+      if (!this.reader) {
+        throw new DOMException("The device must be opened first.", "InvalidStateError");
+      }
+      let result;
+      try {
+        result = await this.reader.read();
+      } catch (error) {
+        throw new DOMException(`The transfer failed: ${error?.message ?? error}`, "NetworkError");
+      }
+      if (result.done) {
+        throw new DOMException("The transfer was cancelled.", "AbortError");
+      }
+      this.leftover = result.value;
     }
-    let result;
-    try {
-      result = await this.reader.read();
-    } catch (error) {
-      throw new DOMException(`The transfer failed: ${error?.message ?? error}`, "NetworkError");
-    }
-    if (result.done) {
-      throw new DOMException("The transfer was cancelled.", "AbortError");
-    }
-    const bytes = result.value.slice(0, length);
+    const bytes = this.leftover.slice(0, length);
+    this.leftover = this.leftover.slice(length);
     return { status: "ok", data: new DataView(bytes.buffer) };
   }
 
@@ -870,6 +883,7 @@ class UsbDeviceOverSerialPort {
 
   async close() {
     this.opened = false;
+    this.leftover = null;
     const { reader, writer } = this;
     this.reader = null;
     this.writer = null;

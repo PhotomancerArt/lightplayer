@@ -263,6 +263,72 @@ test("the controller's CH34x reset reaches the lines as whole-status writes", as
   await controller.close();
 });
 
+test("close is refused while a stream is held, and the holder's reads go on", async () => {
+  // Web Serial's rule: the controller and esptool-js share one port in turn,
+  // and a close from the one that does not hold it must not end the other's.
+  const device = new FakeUsbDevice();
+  const port = new UsbCdcSerialPort(device);
+  await port.open({ baudRate: 115200 });
+  const flasher = port.readable.getReader();
+  await assert.rejects(port.close(), TypeError);
+  device.deliver(new TextEncoder().encode("OHAI"));
+  assert.equal(new TextDecoder().decode((await flasher.read()).value), "OHAI");
+  await flasher.cancel();
+  flasher.releaseLock();
+  await port.close();
+  assert.equal(device.opened, false);
+});
+
+test("sixteen packet-long IN transfers stay in flight, so the endpoint is never left unread", async () => {
+  // esptool's flasher stub on a C6 flushes a frame only if the host read the
+  // previous packet within a short spin; with one transfer at a time its
+  // "OHAI" never left the chip (the first flash from the phone).
+  const device = new FakeUsbDevice();
+  const port = new UsbCdcSerialPort(device);
+  await port.open({ baudRate: 115200 });
+  await settle();
+  assert.equal(device.pendingIn.length, 16);
+  const reader = port.readable.getReader();
+  device.deliver([0xc0]);
+  device.deliver([0x4f, 0x48, 0x41, 0x49, 0xc0]);
+  assert.deepEqual(Array.from((await reader.read()).value), [0xc0]);
+  assert.deepEqual(Array.from((await reader.read()).value), [0x4f, 0x48, 0x41, 0x49, 0xc0]);
+  await settle();
+  assert.equal(device.pendingIn.length, 16, "each completed transfer is replaced");
+  // A packet each: 100 bytes come as a full packet and the rest.
+  device.deliver(new Uint8Array(100).fill(7));
+  assert.equal((await reader.read()).value.length, 64);
+  assert.equal((await reader.read()).value.length, 36);
+  reader.releaseLock();
+  await port.close();
+});
+
+test("a session reopening while esptool holds the port fails and holds nothing", async () => {
+  // A flash from the phone (2026-10-18) hung 1.4 MB into reading the board:
+  // Studio's link reopened its session mid-flash, the reopen took the free
+  // writer before failing on the held reader, and kept it — the link's own
+  // frames then went into the flasher's stub until one carried a 0xC0.
+  const device = new FakeUsbDevice();
+  const port = new UsbCdcSerialPort(device);
+  await port.open({ baudRate: 115200 });
+  const flasher = port.readable.getReader();
+
+  const session = new BrowserEsp32DeviceController({ port });
+  await assert.rejects(session.openProtocol({ baudRate: 115200, reset: false }));
+  assert.equal(port.writable.locked, false, "the failed reopen let the writer go");
+  await assert.rejects(session.writeBytes(new Uint8Array([0x00, 0x02])), /not open/);
+
+  const writer = port.writable.getWriter();
+  await writer.write(new Uint8Array([0xc0, 0x00, 0xc0]));
+  writer.releaseLock();
+  assert.deepEqual(Array.from(device.writtenBytes()), [0xc0, 0x00, 0xc0], "only the flasher wrote");
+  device.deliver([0x42]);
+  assert.deepEqual(Array.from((await flasher.read()).value), [0x42]);
+  await flasher.cancel();
+  flasher.releaseLock();
+  await port.close();
+});
+
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

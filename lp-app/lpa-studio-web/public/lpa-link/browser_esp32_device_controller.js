@@ -122,10 +122,22 @@ export class BrowserEsp32DeviceController {
       this.clearBufferedInput();
     }
     await this.openPortWithRetry(baudRate, log);
-    this.writer = this.port.writable.getWriter();
+    // The reader FIRST. A port another holder is reading — esptool-js,
+    // mid-flash, when the link reopens this session — refuses it, and the
+    // session must then hold nothing: with the writer taken first, the
+    // writer stayed taken after the failed open and the link's frames went
+    // into the flasher's stub, which hung a flash on the first one carrying
+    // a 0xC0 (2026-10-18, Chrome on Android; the same open runs on Web Serial).
     this.closed = false;
     this.releasing = false;
-    this.startReadPump();
+    try {
+      this.startReadPump();
+      this.writer = this.port.writable.getWriter();
+    } catch (error) {
+      this.closed = true;
+      await this.stopReadPump({ collectErrors: false });
+      throw error;
+    }
     return { label: this.label };
   }
 

@@ -37,9 +37,16 @@ const SET_CONTROL_LINE_STATE = 0x22;
 const LINE_DTR = 0x01;
 const LINE_RTS = 0x02;
 
-// One IN transfer's length. A transfer completes on a short packet, so this is
-// a ceiling, not a wait: a board that sends ten bytes is read as ten bytes.
-const TRANSFER_IN_LENGTH = 16 * 1024;
+// IN transfers kept in flight, each one packet long — what a desktop CDC
+// driver does (Linux's cdc-acm queues 16). One at a time is NOT enough: in the
+// gap between a transfer completing and the page submitting the next, nobody
+// reads the endpoint, and esptool's flasher stub on a C6 flushes a frame only
+// if the previous packet was read within a short spin. With one transfer the
+// stub's first `c0` arrived and its "OHAI" never did (the first flash from
+// the phone, 2026-10-18). WebUSB completes transfers on one endpoint in the
+// order they were submitted, so the bytes stay in order. One packet each, so
+// a full packet completes its transfer instead of waiting for a short one.
+const IN_TRANSFERS_IN_FLIGHT = 16;
 // What the port holds for a reader that is not reading, like a serial
 // driver's buffer. Beyond it the oldest bytes go: the link resends what it
 // lost, and a port nobody reads must not grow without bound.
@@ -141,6 +148,12 @@ export class UsbCdcSerialPort {
     if (!this.opened) {
       return;
     }
+    // Refused while a holder has a stream locked, as Web Serial refuses it:
+    // the device controller and esptool-js share one port in turn, and a
+    // close from the one that does not hold it must not end the other's reads.
+    if (this.readableStream?.locked || this.writableStream?.locked) {
+      throw new TypeError("Cannot close a port while its streams are locked.");
+    }
     this.opened = false;
     if (this.control && !this.lost) {
       // Dropped on close, as a tty's close drops them.
@@ -168,21 +181,42 @@ export class UsbCdcSerialPort {
   // reader cancelled must not take an IN transfer's bytes with it, so the
   // transfers belong to the port and the streams only carry what they read.
   async runPump() {
-    const { inEndpoint } = this.data;
+    const { inEndpoint, inPacketSize } = this.data;
+    const inFlight = [];
+    const submit = () => {
+      const transfer = this.device.transferIn(inEndpoint, inPacketSize);
+      // Awaited below in order; the ones a close cancels are never awaited.
+      transfer.catch(() => {});
+      inFlight.push(transfer);
+    };
+    for (let i = 0; i < IN_TRANSFERS_IN_FLIGHT; i++) submit();
     while (this.opened) {
       let result;
       try {
-        result = await this.device.transferIn(inEndpoint, TRANSFER_IN_LENGTH);
+        result = await inFlight.shift();
       } catch (error) {
         if (this.opened) {
           this.deviceLost(error);
         }
         return;
       }
+      if (!this.opened) {
+        return;
+      }
       if (result.status === "stall") {
-        await this.device.clearHalt("in", inEndpoint).catch((error) => this.deviceLost(error));
+        // A halt fails every transfer queued behind it: clear it, and start
+        // the queue again.
+        await Promise.allSettled(inFlight.splice(0));
+        try {
+          await this.device.clearHalt("in", inEndpoint);
+        } catch (error) {
+          this.deviceLost(error);
+          return;
+        }
+        for (let i = 0; i < IN_TRANSFERS_IN_FLIGHT; i++) submit();
         continue;
       }
+      submit();
       const view = result.data;
       if (!view || view.byteLength === 0) {
         continue;
@@ -365,8 +399,13 @@ export function cdcInterfaces(device) {
       if (!data && alternate.interfaceClass === CDC_DATA_CLASS) {
         const inEndpoint = bulkEndpoint(alternate, "in");
         const outEndpoint = bulkEndpoint(alternate, "out");
-        if (inEndpoint !== null && outEndpoint !== null) {
-          data = { interfaceNumber: iface.interfaceNumber, inEndpoint, outEndpoint };
+        if (inEndpoint && outEndpoint) {
+          data = {
+            interfaceNumber: iface.interfaceNumber,
+            inEndpoint: inEndpoint.endpointNumber,
+            inPacketSize: inEndpoint.packetSize || 64,
+            outEndpoint: outEndpoint.endpointNumber,
+          };
         }
       }
     }
@@ -382,10 +421,11 @@ function hasCdcInterface(device) {
 }
 
 function bulkEndpoint(alternate, direction) {
-  const endpoint = (alternate.endpoints ?? []).find(
-    (candidate) => candidate.type === "bulk" && candidate.direction === direction,
+  return (
+    (alternate.endpoints ?? []).find(
+      (candidate) => candidate.type === "bulk" && candidate.direction === direction,
+    ) ?? null
   );
-  return endpoint ? endpoint.endpointNumber : null;
 }
 
 // PSTN 1.2, table 17: dwDTERate, bCharFormat, bParityType, bDataBits.

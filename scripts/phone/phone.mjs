@@ -216,6 +216,22 @@ export async function cdp(serial = pickPhone()) {
   return { port: Number(port), browserWsUrl, browser: version.Browser };
 }
 
+/// Close every page in the phone's Chrome whose URL starts with `prefix`,
+/// over the DevTools port `cdp()` forwarded. A walk's tab outlives the walk
+/// (and the server it was loaded from), and a Studio tab left behind still
+/// holds its board: the next walk's card says "open in another tab".
+export async function closePages(port, prefix) {
+  const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const closed = [];
+  for (const page of pages) {
+    if (page.type === "page" && String(page.url).startsWith(prefix)) {
+      await fetch(`http://127.0.0.1:${port}/json/close/${page.id}`);
+      closed.push(page.url);
+    }
+  }
+  return closed;
+}
+
 /// The Mac's 127.0.0.1:`port` on the phone's localhost:`port`.
 export function serve(port, serial = pickPhone()) {
   adb(["reverse", `tcp:${port}`, `tcp:${port}`], { serial });
@@ -259,7 +275,8 @@ export function snoop(dir, serial = pickPhone()) {
 /// reach (the WebUSB chooser, Android's "Allow Chrome to access …?") by what
 /// it says rather than by pixel.
 export function ui(serial = pickPhone()) {
-  const xml = shell(serial, "uiautomator dump /dev/tty", { timeoutMs: 30_000 });
+  // To a file: `dump /dev/tty` prints only "dumped to" over adb, no XML.
+  const xml = shell(serial, "uiautomator dump /sdcard/lp-ui.xml >/dev/null && cat /sdcard/lp-ui.xml", { timeoutMs: 30_000 });
   const nodes = [];
   for (const match of xml.matchAll(/<node ([^>]*?)\/?>/g)) {
     const attr = (name) => match[1].match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] ?? "";

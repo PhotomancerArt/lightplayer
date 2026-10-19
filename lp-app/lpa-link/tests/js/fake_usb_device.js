@@ -104,7 +104,7 @@ export class FakeUsbDevice {
       return Promise.resolve(this.inResult(this.inbox.shift(), length));
     }
     return new Promise((resolve, reject) => {
-      this.pendingIn.push({ resolve: (bytes) => resolve(this.inResult(bytes, length)), reject, endpointNumber });
+      this.pendingIn.push({ resolve: (bytes) => resolve(this.inResult(bytes, length)), reject, endpointNumber, length });
     });
   }
 
@@ -112,14 +112,16 @@ export class FakeUsbDevice {
 
   // --- the board's side ----------------------------------------------------
 
+  // The board sending: the transfers already waiting take it a transfer's
+  // length at a time, in the order they were submitted; what is left waits.
   deliver(bytes) {
-    const copy = Uint8Array.from(bytes);
-    const pending = this.pendingIn.shift();
-    if (pending) {
-      pending.resolve(copy);
-    } else {
-      this.inbox.push(copy);
+    let rest = Uint8Array.from(bytes);
+    while (rest.length && this.pendingIn.length) {
+      const pending = this.pendingIn.shift();
+      pending.resolve(rest.slice(0, pending.length));
+      rest = rest.slice(pending.length);
     }
+    if (rest.length) this.inbox.push(rest);
   }
 
   unplug() {

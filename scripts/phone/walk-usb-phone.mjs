@@ -84,12 +84,14 @@ async function main() {
   }
 
   const device = phone.awake(serial);
-  const { browserWsUrl, browser } = await phone.cdp(serial);
+  const { browserWsUrl, browser, port: cdpPort } = await phone.cdp(serial);
+  // A Studio tab an earlier walk left open still holds the board.
+  const stale = await phone.closePages(cdpPort, new URL(studio).origin);
 
   console.log("\nTHE USB WALK ON A PHONE");
   console.log(`  phone   ${device.model}, Android ${device.android}, ${browser} (${serial}), battery ${device.battery}`);
   console.log(`  board   ${info.mark} ${info.slug} ${info.mac} on the phone's port: ${onPort.product} (leased as ${JSON.stringify(HOLDER)})`);
-  console.log(`  studio  ${studio}\n`);
+  console.log(`  studio  ${studio}${stale.length ? ` (closed ${stale.length} Studio tab(s) left open)` : ""}\n`);
 
   const driver = await StudioDriver.attach({ browserWsUrl });
   const report = { phone: device, browser, board: { slug: info.slug, mark: info.mark, mac: info.mac }, usb: onPort, studio, steps: [] };
