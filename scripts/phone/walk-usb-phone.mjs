@@ -95,8 +95,15 @@ async function main() {
   mkdirSync(shots, { recursive: true });
 
   const serial = phone.pickPhone();
-  const onPort = phone.usbDevice(serial);
-  if (!onPort) throw new Error("nothing is plugged into the phone's USB port (`phone usb` lists no device)");
+  // Asked for a while, not once: a board in a reset loop (one the walk left
+  // blank, or a crashing firmware) is off the bus for a moment every few
+  // seconds, and the walk is what heals it.
+  let onPort = null;
+  for (let tries = 0; !onPort && tries < 15; tries += 1) {
+    onPort = phone.usbDevice(serial);
+    if (!onPort) await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!onPort) throw new Error("nothing is plugged into the phone's USB port (`phone usb` lists no device for 15 s)");
   const BOARD = opt("--board", onPort.serialNumber);
   const info = JSON.parse(boardCmd("show", BOARD, "--json"));
   if (info.mac.toUpperCase() !== String(onPort.serialNumber).toUpperCase()) {
