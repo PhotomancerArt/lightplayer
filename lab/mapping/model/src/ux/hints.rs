@@ -346,11 +346,16 @@ impl Editor {
     }
 
     /// The bar's lead while armed: what the pair is waiting for.
+    /// It names the candidate in focus too, the cursor note's words, since
+    /// at the keyboard the cursor may be nowhere near.
     fn armed_lead(&self, armed: &Armed) -> String {
+        if let Some(note) = self.cursor_note() {
+            return note;
+        }
         let from = self.end_words(&armed.from);
         match armed.verb {
-            ArmVerb::Patch => format!("Patching {from}"),
-            ArmVerb::Swap => format!("Swapping {from}"),
+            ArmVerb::Patch => format!("Patching {from} · nothing to pair with"),
+            ArmVerb::Swap => format!("Swapping {from} · nothing to swap with"),
         }
     }
 

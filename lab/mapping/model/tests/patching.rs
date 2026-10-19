@@ -203,6 +203,13 @@ fn wire_first_a_then_enter_patches() {
         e.focused_candidate(),
         Some(PairEnd::Object(objects[0].clone()))
     );
+    // The bar names the pair in focus, for whoever isn't looking at the
+    // cursor.
+    assert!(
+        e.hint_bar().lead.starts_with("Patch "),
+        "{}",
+        e.hint_bar().lead
+    );
     key(&mut e, Key::Right, none());
     assert_eq!(
         e.focused_candidate(),
