@@ -201,14 +201,15 @@ A 2D canvas with selection, and the start of the whole node graph on it
   or off and **⇧U** unpatches every object. **A wiring edit moves only
   what it edits**: when auto would move an object nobody touched, the edit
   pins it where it was and says so.
-- **The piece** (plan D4; `piece.rs`, `web/src/piece_view.rs`): the
-  install as it is really wired, lit by what the board sends, so a hand
-  patch can be walked with no hardware. Its wiring (the truth) is the
-  project's patch as it opened, or for **Sean's eaves** the
-  `eaves-wired` project (the house). **Debug → Scramble the piece**
-  shuffles the first output's objects across its ports, each a random way
-  round (seeded). The lab's page shows it at the canvas's lower left; the
-  **Piece** toggle hides it. Studio has none: there the piece is real.
+- **The hardware preview** (plan D4's piece; `piece.rs`,
+  `web/src/piece_view.rs`): the real lights as they are really wired, lit
+  by what the board sends, so a hand patch can be walked with no hardware.
+  Its wiring (the truth) is the project's patch as it opened, or for
+  **Sean's eaves** the `eaves-wired` project (the house). **Debug →
+  Scramble the hardware** shuffles the first output's objects across its
+  ports, each a random way round (seeded). The lab's page docks it at the
+  foot of the right column, under the inspector; the **Hardware preview**
+  toggle hides it. Studio has none: there the hardware is real.
 - **Port grouping** (D14): the toolbar's **Ports** switch draws each
   output card's pixels as **objects** (a run per span), **groups of N**
   (free pixels cut to the next object's size) or **pixels**. View state.

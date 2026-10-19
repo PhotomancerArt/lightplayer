@@ -202,11 +202,11 @@ fn App() -> Element {
                 button {
                     class: if piece_open() { "tool toggle on" } else { "tool toggle" },
                     tabindex: "-1",
-                    title: "The install as it is really wired, lit by the board",
+                    title: "How the real lights show what the board sends: the hardware as it is really wired",
                     onmousedown: move |evt| evt.prevent_default(),
                     onclick: move |_| piece_open.toggle(),
                     span { class: "toggle-box", if piece_open() { "✓" } else { "" } }
-                    " Piece"
+                    " Hardware preview"
                 }
                 if class == SizeClass::Md {
                     button {
@@ -222,25 +222,31 @@ fn App() -> Element {
             match class {
                 SizeClass::Lg => rsx! {
                     aside { class: "tree", TreePane { ed: e(), tree: view.tree } }
-                    main { class: "canvas-wrap",
-                        Canvas { ed: e(), view, frame }
+                    main { class: "canvas-wrap", Canvas { ed: e(), view, frame } }
+                    // The right column: the inspector, and the piece docked
+                    // under it in the lower-right corner.
+                    div { class: "right-column",
+                        aside { class: "inspector", Inspector { ed: e(), inspector: view.inspector } }
                         if piece_open() {
                             PieceView { ed: e(), frame }
                         }
                     }
-                    aside { class: "inspector", Inspector { ed: e(), inspector: view.inspector } }
                 },
                 SizeClass::Md => rsx! {
                     main { class: "canvas-wrap",
                         Canvas { ed: e(), view, frame }
-                        if piece_open() {
-                            PieceView { ed: e(), frame }
-                        }
                         if tree_open() {
                             aside { class: "drawer drawer-left tree", TreePane { ed: e(), tree: view.tree } }
                         }
-                        if has_selection() {
-                            aside { class: "drawer drawer-right inspector", Inspector { ed: e(), inspector: view.inspector } }
+                        if has_selection() || piece_open() {
+                            div { class: "drawer drawer-right right-column",
+                                if has_selection() {
+                                    aside { class: "inspector", Inspector { ed: e(), inspector: view.inspector } }
+                                }
+                                if piece_open() {
+                                    PieceView { ed: e(), frame }
+                                }
+                            }
                         }
                     }
                 },
@@ -259,6 +265,9 @@ fn App() -> Element {
                                 }
                                 div { class: "sheet-body inspector",
                                     Inspector { ed: e(), inspector: view.inspector }
+                                    if piece_open() {
+                                        PieceView { ed: e(), frame }
+                                    }
                                 }
                             }
                         }
@@ -292,7 +301,7 @@ fn scramble_piece(ed: &GraphEditor) {
         );
         e.piece = Some(piece);
         e.notice = Some(Notice::info(format!(
-            "The piece is wired differently now: {name}'s objects are on other ports, \
+            "The hardware is wired differently now: {name}'s objects are on other ports, \
              some reversed and turned. ⇧U on a fixture, then patch them by hand."
         )));
     }
@@ -451,13 +460,13 @@ fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Eleme
                     button {
                         class: "tool",
                         tabindex: "-1",
-                        title: "Wire the piece as a real install often is: the first output's objects shuffled across its ports, each a random way round, entering at a random lamp (seeded)",
+                        title: "Wire the hardware as a real install often is: the first output's objects shuffled across its ports, each a random way round, entering at a random lamp (seeded)",
                         onmousedown: move |evt| evt.prevent_default(),
                         onclick: {
                             let ed = ed.clone();
                             move |_| scramble_piece(&ed)
                         },
-                        "Scramble the piece"
+                        "Scramble the hardware"
                     }
                     div { class: "debug-row",
                         span { class: "debug-label", "Size" }

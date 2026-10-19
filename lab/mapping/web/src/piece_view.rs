@@ -4,7 +4,8 @@
 //! the pixel it is really on (`Piece::lamp`), drawn as Studio's live view
 //! draws a fixture (`lamp_cells.rs`).
 //!
-//! The lab's page mounts it; Studio has the real install instead. It
+//! The lab's page mounts it at the foot of the right column, under the
+//! inspector; Studio has the real install instead. It
 //! shows the selection's fixture, or the first fixture the piece wires.
 
 use dioxus::prelude::*;
@@ -15,8 +16,9 @@ use crate::faces::{lamp_radius_px, rgb};
 use crate::graph_editor::GraphEditor;
 use crate::lamp_cells::CellMap;
 
-/// How wide the piece is drawn, in CSS pixels.
-const WIDTH: f64 = 320.0;
+/// How wide the piece is drawn, in CSS pixels: the right column's width
+/// inside its padding.
+const WIDTH: f64 = 252.0;
 
 #[component]
 pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
@@ -82,8 +84,8 @@ pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
     });
     rsx! {
         div { class: "piece-view",
-            div { class: "piece-title", "Piece · {name}" }
-            div { class: "piece-box", style: "width: {WIDTH}px; height: {height}px",
+            div { class: "piece-title", "Hardware preview · {name}" }
+            div { class: "piece-box", style: "aspect-ratio: {WIDTH} / {height}",
                 canvas { id: "{id}", class: "face-canvas" }
             }
             div { class: "piece-note", "Wired as {wired_as}" }
