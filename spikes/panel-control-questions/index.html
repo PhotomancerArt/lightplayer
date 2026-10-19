@@ -1,7 +1,7 @@
 <title>Panel control questions</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
-/* Layout: one column of questions; each question a row of option tiles, each tile a live mock in Studio's own panel look.
+/* Layout: the open questions first, each a row of option tiles with a live mock in Studio's own panel look; what's decided below.
    Single dark theme by choice: the mocks are Studio's dark UI (lpa-studio-web/src/style.css), and they only mean something in it. */
 :root {
   color-scheme: dark;
@@ -14,6 +14,7 @@
   --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
   --bound:#c9b1f5; --bound-bd:#5f4a85;
   --eng:#e8c56b; --eng-bd:#8a6f35; --eng-bg:#292213;
+  --live:#9cc8ee;
   --good:#7be0b2; --good-bd:#365545; --good-bg:#13241d;
   --sel:#d6dae0; --sel-bg:rgba(214,218,224,.07);
 
@@ -31,6 +32,7 @@ h1 { margin:0; font-size:22px; font-weight:800; letter-spacing:-.01em; text-wrap
 .decided span { font-size:12px; color:var(--page-mut); border:1px solid var(--page-bd); border-radius:999px; padding:2px 10px; }
 .decided span b { color:var(--good); font-weight:600; }
 
+#qs { display:grid; gap:44px; }
 section.q { display:grid; gap:12px; scroll-margin-top:20px; }
 .qhead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
 .qid { font:700 12px var(--mono); color:var(--page-tx); border:1px solid var(--page-bd-strong); border-radius:5px; padding:1px 7px; }
@@ -40,7 +42,7 @@ section.q { display:grid; gap:12px; scroll-margin-top:20px; }
 .why { margin:0; color:var(--page-mut); font-size:13px; max-width:880px; }
 .why b { color:var(--page-tx); font-weight:600; }
 .opts { display:grid; grid-template-columns:repeat(auto-fill, minmax(255px, 1fr)); gap:12px; }
-.opt { position:relative; display:grid; gap:10px; align-content:start; text-align:left; font:inherit; color:inherit; cursor:pointer;
+.opt { position:relative; display:grid; gap:10px; align-content:start; text-align:left; cursor:pointer;
   background:#0f1014; border:1px solid var(--page-bd); border-radius:10px; padding:12px; min-width:0; }
 .opt:hover { border-color:var(--page-bd-strong); }
 .opt:focus-visible { outline:2px solid var(--sel); outline-offset:2px; }
@@ -48,16 +50,29 @@ section.q { display:grid; gap:12px; scroll-margin-top:20px; }
 .opt .ot { display:flex; align-items:baseline; gap:8px; }
 .opt .ol { font:700 12px var(--mono); color:var(--page-mut); }
 .opt.on .ol { color:var(--sel); }
-.opt .on-mark { margin-left:auto; font-size:11px; font-weight:700; color:var(--sel); visibility:hidden; }
+.opt .on-mark { margin-left:auto; font-size:11px; font-weight:700; color:var(--sel); visibility:hidden; white-space:nowrap; }
 .opt.on .on-mark { visibility:visible; }
 .opt h3 { margin:0; font-size:13.5px; font-weight:650; }
 .opt p { margin:0; font-size:12.5px; color:var(--page-mut); }
-#qs { display:grid; gap:44px; }
+.opt .sub { font-size:10.5px; color:var(--page-dim); margin:2px 0 -6px; }
 .lean { white-space:nowrap; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--good); border:1px solid var(--good-bd); border-radius:4px; padding:0 5px; }
 .note { display:grid; gap:4px; max-width:880px; }
 .note label { font-size:12px; color:var(--page-dim); }
 .note textarea { font:13px/1.4 var(--font); color:var(--page-tx); background:#0f1014; border:1px solid var(--page-bd); border-radius:8px; padding:8px 10px; min-height:38px; resize:vertical; }
 .note textarea:focus { outline:none; border-color:var(--page-bd-strong); }
+
+/* what's decided */
+.done { display:grid; gap:10px; max-width:980px; }
+.done h2 { margin:0; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--page-mut); }
+.done ol { margin:0; padding:0; list-style:none; display:grid; gap:0; border:1px solid var(--page-bd); border-radius:10px; overflow:hidden; }
+.done li { display:grid; grid-template-columns:3.2em minmax(0,1fr) minmax(0,1.3fr); gap:12px; padding:9px 14px; border-top:1px solid var(--page-bd); font-size:13px; align-items:baseline; }
+.done li:first-child { border-top:0; }
+.done .k { font:700 12px var(--mono); color:var(--page-mut); }
+.done .t { color:var(--page-mut); }
+.done .a { color:var(--page-tx); }
+.done .a b { color:var(--sel); font-weight:600; }
+.done .a i { display:block; font-style:normal; color:var(--page-mut); font-size:12.5px; margin-top:2px; }
+@media (max-width:640px) { .done li { grid-template-columns:3em minmax(0,1fr); } .done .a { grid-column:2; } }
 
 footer.bar { position:sticky; bottom:0; display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
   background:rgba(11,12,14,.95); backdrop-filter:blur(8px); border:1px solid var(--page-bd-strong); border-radius:10px; font-size:12.5px; color:var(--page-mut); }
@@ -65,10 +80,10 @@ footer.bar .sum { font:500 12px var(--mono); color:var(--page-tx); min-width:0; 
 footer.bar .st { margin-left:auto; }
 footer.bar button { font:inherit; font-size:12px; cursor:pointer; color:var(--page-tx); background:#16181c; border:1px solid var(--page-bd-strong); border-radius:6px; padding:3px 10px; }
 footer.bar button:hover { background:#1e2126; }
+#out { flex-basis:100%; font:12px/1.4 var(--mono); color:var(--page-tx); background:#0f1014; border:1px solid var(--page-bd); border-radius:6px; padding:8px; }
 
 /* ---------------- the mocks: Studio's panel, round 2's look ---------------- */
 .mock { background:var(--panel); border:1px solid var(--bd); border-radius:8px; overflow:hidden; font-family:var(--font); color:var(--tx); cursor:default; }
-.mock.bare { background:transparent; border:0; }
 .caps { display:flex; font-size:10.5px; color:var(--page-dim); }
 .caps span { flex:1; text-align:center; }
 .cells { display:flex; }
@@ -77,82 +92,74 @@ footer.bar button:hover { background:#1e2126; }
 .cell:last-child { box-shadow:none; }
 .cell:hover, .cell.hov { background:rgba(255,255,255,.04); }
 .cell .knob svg { display:block; }
-.lbl { max-width:100%; font:700 9.5px/1.15 var(--font); text-transform:uppercase; letter-spacing:.1em; color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.val { font:500 10.5px/1 var(--mono); color:var(--muted); }
+.lbl { max-width:100%; min-width:0; font:700 9.5px/1.15 var(--font); text-transform:uppercase; letter-spacing:.1em; color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.val { font:500 10.5px/1 var(--mono); color:var(--muted); white-space:nowrap; }
 .held .lbl, .held .val { color:var(--eng); }
 .follow .lbl, .follow .val { color:var(--bound); }
 .tgl { position:relative; width:32px; height:18px; border-radius:999px; border:1px solid var(--bd-strong); background:var(--track); margin:14px 0 10px; }
 .tgl::after { content:""; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--subtle); }
-.tgl.on { border-color:var(--good-bd); background:var(--good-bg); }
-.tgl.on::after { left:16px; background:var(--good); }
 .narrow .cell { padding-inline:2px; }
+.narrow .tgl { margin:11px 0 7px; }
 
-/* corners */
-.cn { position:absolute; display:grid; place-items:center; width:var(--cs,22px); height:var(--cs,22px); font:700 calc(var(--cs,22px) * .5)/1 var(--font); z-index:2; }
+/* corners: let go (r) and details (d) */
+.cn { position:absolute; display:grid; place-items:center; width:var(--cs,24px); height:var(--cs,24px); font:700 calc(var(--cs,24px) * .5)/1 var(--font); z-index:2; flex:none; }
 .cn.r { top:0; left:0; color:var(--eng); }
 .cn.d { top:0; right:0; color:var(--muted); }
 .cn.hv { opacity:0; transition:opacity .08s; }
 .cell:hover .cn.hv, .cell.hov .cn.hv { opacity:1; }
-/* tab: a square the light lines cut out of the cell's corner */
+.cn.ph { visibility:hidden; }
+/* circle (round 3's pick) */
+.s-chip .cn { width:calc(var(--cs,24px) - 2px); height:calc(var(--cs,24px) - 2px); border-radius:50%; border:1px solid var(--bd-strong); background:var(--raised); top:4px; }
+.s-chip .cn.r { left:4px; border-color:var(--eng-bd); background:var(--eng-bg); }
+.s-chip .cn.d { right:4px; }
+/* tab: a square the light lines cut out of the corner */
 .s-tab .cn.r { box-shadow:inset -1px -1px 0 var(--line); background:var(--eng-bg); }
 .s-tab .cn.d { box-shadow:inset 1px -1px 0 var(--line); background:rgba(255,255,255,.03); }
-.s-tab .cn:hover { background:var(--raised-strong); }
 /* dog-ear: a folded triangle */
-.s-ear .cn { width:calc(var(--cs,22px) * 1.25); height:calc(var(--cs,22px) * 1.25); place-items:start; padding:3px; }
+.s-ear .cn { width:calc(var(--cs,24px) * 1.25); height:calc(var(--cs,24px) * 1.25); place-items:start; padding:3px; }
 .s-ear .cn.r { clip-path:polygon(0 0, 100% 0, 0 100%); background:var(--eng-bg); }
 .s-ear .cn.d { clip-path:polygon(0 0, 100% 0, 100% 100%); background:var(--raised-strong); justify-items:end; }
-/* chip: a floating round button */
-.s-chip .cn { width:calc(var(--cs,22px) - 2px); height:calc(var(--cs,22px) - 2px); border-radius:50%; border:1px solid var(--bd-strong); background:var(--raised); top:4px; }
-.s-chip .cn.r { left:4px; border-color:var(--eng-bd); }
-.s-chip .cn.d { right:4px; }
-/* head: the label row becomes the action bar */
-.s-head .cell { padding-top:0; }
-.s-head .hbar { display:grid; grid-template-columns:var(--cs,22px) minmax(0,1fr) var(--cs,22px); align-items:center; width:calc(100% + 8px); margin:0 -4px 4px; height:var(--cs,22px); box-shadow:inset 0 -1px 0 var(--line); }
-.s-head .hbar .lbl { text-align:center; }
-.s-head .hbar .cn { position:static; }
-.s-head .hbar .cn.r { box-shadow:inset -1px 0 0 var(--line); }
-.s-head .hbar .cn.d { box-shadow:inset 1px 0 0 var(--line); }
+
+/* at the bottom */
+.p-bottom .cn.r, .p-bottom .cn.d { top:auto; bottom:0; }
+.p-bottom.s-chip .cn { top:auto; bottom:4px; }
+.p-bottom.s-tab .cn.r { box-shadow:inset -1px 1px 0 var(--line); }
+.p-bottom.s-tab .cn.d { box-shadow:inset 1px 1px 0 var(--line); }
+.p-bottom.s-ear .cn.r { clip-path:polygon(0 0, 0 100%, 100% 100%); align-items:end; }
+.p-bottom.s-ear .cn.d { clip-path:polygon(100% 0, 100% 100%, 0 100%); align-items:end; justify-items:end; }
+/* in line with the label or the value: ↺ · text · ⓘ */
+.inl { display:grid; grid-template-columns:var(--cs,24px) minmax(0,1fr) var(--cs,24px); align-items:center; justify-items:center; gap:2px; width:100%; }
+.inl .cn, .s-chip .inl .cn { position:static; }
+.p-label .cell, .p-value .cell { padding-bottom:6px; }
+/* a foot bar: the label row as a bar at the cell's foot */
+.s-foot .cell { padding-bottom:0; }
+.fbar { display:grid; grid-template-columns:var(--cs,24px) minmax(0,1fr) var(--cs,24px); align-items:center; justify-items:center; width:calc(100% + 8px); margin:5px -4px 0; height:var(--cs,24px); box-shadow:inset 0 1px 0 var(--line); }
+.narrow .fbar { width:calc(100% + 4px); margin-inline:-2px; }
+.fbar .cn { position:static; }
+.fbar .cn.r { box-shadow:inset -1px 0 0 var(--line); background:var(--eng-bg); }
+.fbar .cn.d { box-shadow:inset 1px 0 0 var(--line); }
 
 /* a strip */
-.strip { position:relative; display:grid; gap:2px; padding:9px 12px 11px; }
+.strip { position:relative; display:grid; gap:2px; padding:8px 12px 10px; }
 .sh { display:flex; justify-content:space-between; align-items:baseline; gap:8px; min-width:0; }
-.ftrack { position:relative; height:22px; }
+.ftrack { position:relative; height:20px; }
 .ftrack .slot { position:absolute; left:0; right:0; top:50%; height:7px; transform:translateY(-50%); border-radius:999px; border:1px solid var(--bd-strong); background:var(--bg); overflow:hidden; }
 .ftrack .fill { position:absolute; inset:0 auto 0 0; border-radius:999px; background:var(--muted); }
-.ftrack .grip { position:absolute; top:50%; width:10px; height:18px; border-radius:4px; transform:translate(-50%,-50%); background:#e9e9ef; border:1px solid var(--bd-strong); }
-.strip.held .fill { background:var(--eng); } .strip.held .slot { border-color:var(--eng-bd); }
-.strip .shead { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:center; gap:8px; margin:-9px -12px 0; height:24px; padding-right:0; }
-.strip .shead .cn { position:static; }
-.strip .shead .cn.r { box-shadow:inset -1px -1px 0 var(--line); background:var(--eng-bg); }
-.strip .shead .cn.d { box-shadow:inset 1px -1px 0 var(--line); }
-.strip .shead .lbl { padding-left:2px; }
-.strip .endcap { position:absolute; top:0; right:0; bottom:0; width:30px; display:grid; grid-template-rows:1fr 1fr; box-shadow:inset 1px 0 0 var(--line); }
-.strip .endcap .cn { position:static; width:30px; height:auto; }
-.strip .endcap .cn.r { box-shadow:inset 0 -1px 0 var(--line); background:var(--eng-bg); }
-.strip.capped { padding-right:42px; }
+.ftrack .grip { position:absolute; top:50%; width:10px; height:16px; border-radius:4px; transform:translate(-50%,-50%); background:#e9e9ef; border:1px solid var(--bd-strong); }
 
-/* details popover (Q5) */
-.pop { margin:8px; border:1px solid var(--bd-strong); border-radius:8px; background:var(--raised); padding:9px 11px; display:grid; gap:4px; font-size:11.5px; color:var(--muted); }
-.pop b { color:var(--strong); font-weight:650; }
-.pop .row { display:flex; justify-content:space-between; gap:8px; }
-.pop .row span:last-child { font-family:var(--mono); font-size:10.5px; }
-.pop .act { margin-top:4px; display:flex; gap:6px; }
-.pop .act span { border:1px solid var(--eng-bd); color:var(--eng); border-radius:5px; padding:1px 8px; font-weight:600; }
-.focusring { outline:2px solid #a5b8ff; outline-offset:-3px; border-radius:4px; }
-.hint { font:500 10px var(--mono); color:var(--faint); text-align:center; padding:0 0 8px; }
-
-/* Q5 */
-.surfaces { display:grid; gap:6px; font-size:11.5px; color:var(--muted); padding:10px; }
-.surfaces div { display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding-bottom:5px; }
-.surfaces div:last-child { border-bottom:0; }
-.surfaces em { font-style:normal; color:var(--faint); font-family:var(--mono); font-size:10.5px; }
-.surfaces .one { color:var(--good); }
-
-/* Q7 band */
+/* Q9: zones */
 .gband { background:var(--band); }
-.ghead { display:flex; align-items:center; gap:6px; padding:8px 12px 2px; font:700 9.6px/1 var(--font); text-transform:uppercase; letter-spacing:.12em; color:var(--dim); }
-.ghead svg { width:12px; height:12px; }
+.zhead { display:flex; align-items:center; gap:6px; padding:7px 10px 1px; font:700 9.6px/1 var(--font); text-transform:uppercase; letter-spacing:.12em; color:var(--dim); min-width:0; }
+.zhead svg { width:11px; height:11px; flex:none; }
+.zhead em { font-style:normal; color:var(--faint); }
 .zone { border-top:1px solid var(--bd); }
+.zone.nest { margin-left:12px; border-left:1px solid var(--bd); }
+.mini .cell { padding:8px 2px 7px; gap:2px; }
+.mini .strip { padding:6px 10px 7px; }
+.pk { display:flex; align-items:center; gap:6px; padding:6px 10px 8px; }
+.pk .b { width:22px; height:22px; display:grid; place-items:center; border:1px solid var(--bd-strong); border-radius:3px; background:var(--raised); font:500 11px var(--mono); color:var(--strong); }
+.pk .n { flex:1; text-align:center; font-size:12px; font-weight:650; color:var(--live); }
+.proj { font:600 10.5px var(--font); color:var(--page-dim); margin:2px 0 -4px; }
 
 @media (max-width:520px) { .wrap { padding-inline:16px; } .opts { grid-template-columns:1fr; } footer.bar .st { margin-left:0; } }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
@@ -161,21 +168,26 @@ footer.bar button:hover { background:#1e2126; }
 <div class="wrap">
   <header>
     <h1>Panel control questions</h1>
-    <p class="lede">Round 2 of the <b>panel layout spike</b> (<code>spikes/panel-layout</code>) settled the layout. What's left is mostly the cell itself: you want its corners to carry <b>let go</b> (↺) and <b>details</b> (ⓘ) instead of today's tiny glyph and label, and that raises a few smaller calls. Pick one tile per question; the mocks are live (hover a cell), and your picks save on this page as you choose.</p>
+    <p class="lede"><b>Round 4.</b> Your round-3 picks are now decisions (listed at the bottom). Two things are still open. <b>Q8:</b> you liked the circles and wanted to see them at the cell's bottom, and the other markings down there too, near the label. <b>Q9:</b> zone headings that follow the project's structure, with as few words as possible and no "global". Hover the cells: details only shows on hover (your Q1).</p>
     <div class="decided">
-      <span><b>✓</b> Three shapes: cell, strip, block</span>
-      <span><b>✓</b> Brightness first by the bus's rank; no MASTER_CHANNEL</span>
-      <span><b>✓</b> Global band (G2), as leaned</span>
-      <span><b>✓</b> Labels above strips · light lines · whole cell to hit</span>
-      <span><b>✓</b> Shared lines (B) dropped</span>
+      <span><b>✓</b> Circles, 24 px</span>
+      <span><b>✓</b> Let go while held · details on hover</span>
+      <span><b>✓</b> A tap without a drag opens details</span>
+      <span><b>✓</b> A strip's at its label row's ends</span>
+      <span><b>✓</b> The global band: tint alone, no word</span>
+      <span><b>✓</b> The board card first; other surfaces later</span>
     </div>
   </header>
   <div id="qs"></div>
+  <section class="done" aria-labelledby="done-h">
+    <h2 id="done-h">Decided in round 3</h2>
+    <ol id="done"></ol>
+  </section>
   <footer class="bar" aria-live="polite">
     <span class="sum" id="sum">No picks yet</span>
     <span class="st" id="st">Loading…</span>
     <button type="button" id="copy">Copy answers</button>
-    <textarea id="out" readonly hidden rows="7" aria-label="Your answers" style="flex-basis:100%;font:12px/1.4 var(--mono);color:var(--page-tx);background:#0f1014;border:1px solid var(--page-bd);border-radius:6px;padding:8px"></textarea>
+    <textarea id="out" readonly hidden rows="5" aria-label="Your answers"></textarea>
   </footer>
 </div>
 
@@ -201,125 +213,112 @@ const CELLS = [
   { label: 'Speed', val: '0.62', f: .62, tone: 'follow', cap: 'hovered', hov: true },
   { label: 'Mirror', val: 'off', toggle: true, tone: 'rest', cap: 'at rest' },
 ];
-/* cfg: style tab|ear|chip|head, reset 'held'|'hover'|false, det 'always'|'hover'|false, cs corner size */
+/* Round 3's decisions ride every corner mock: let go while held, details on hover, 24 px.
+   cfg.style chip|tab|ear|foot · cfg.pos top|bottom|label|value */
 function cell(c, cfg) {
   const held = c.tone === 'held';
-  const r = cfg.reset && held ? `<span class="cn r ${cfg.reset === 'hover' ? 'hv' : ''}" title="Let go">↺</span>` : '';
-  const d = cfg.det ? `<span class="cn d ${cfg.det === 'hover' ? 'hv' : ''}" title="Details">i</span>` : '';
-  const widget = c.toggle ? `<span class="tgl"></span>` : knob(c.f, c.tone, cfg.narrow ? 40 : 46);
-  const cls = `cell ${c.tone === 'held' ? 'held' : c.tone === 'follow' ? 'follow' : ''} ${c.hov ? 'hov' : ''}`;
-  if (cfg.style === 'head') {
-    const rr = r || `<span class="cn r" style="visibility:hidden"></span>`, dd = d || `<span class="cn d" style="visibility:hidden"></span>`;
-    return `<div class="${cls}"><div class="hbar">${rr}<span class="lbl">${c.label}</span>${dd}</div>${widget}<span class="val">${c.val}</span></div>`;
-  }
-  return `<div class="${cls}">${r}${d}${widget}<span class="lbl">${c.label}</span><span class="val">${c.val}</span></div>`;
+  const R = keep => held && cfg.reset !== false ? `<span class="cn r" title="Let go">↺</span>` : (keep ? `<span class="cn r ph"></span>` : '');
+  const D = keep => cfg.det !== false ? `<span class="cn d hv" title="Details">i</span>` : (keep ? `<span class="cn d ph"></span>` : '');
+  const widget = c.toggle ? `<span class="tgl"></span>` : knob(c.f, c.tone, cfg.ksize || (cfg.narrow ? 40 : 46));
+  const lbl = `<span class="lbl">${c.label}</span>`, val = `<span class="val">${c.val}</span>`;
+  const cls = `cell ${held ? 'held' : c.tone === 'follow' ? 'follow' : ''} ${c.hov ? 'hov' : ''}`;
+  if (cfg.style === 'foot') return `<div class="${cls}">${widget}${val}<div class="fbar">${R(1)}${lbl}${D(1)}</div></div>`;
+  if (cfg.pos === 'label') return `<div class="${cls}">${widget}<div class="inl">${R(1)}${lbl}${D(1)}</div>${val}</div>`;
+  if (cfg.pos === 'value') return `<div class="${cls}">${widget}${lbl}<div class="inl">${R(1)}${val}${D(1)}</div></div>`;
+  return `<div class="${cls}">${R()}${D()}${widget}${lbl}${val}</div>`;
 }
 function row(cfg, cells = CELLS) {
-  return `<div class="mock s-${cfg.style || 'tab'} ${cfg.narrow ? 'narrow' : ''}" style="--cs:${cfg.cs || 22}px${cfg.width ? ';width:' + cfg.width + 'px' : ''}"><div class="cells">${cells.map(c => cell(c, cfg)).join('')}</div></div>`
-    + `<div class="caps" style="${cfg.width ? 'width:' + cfg.width + 'px' : ''}">${cells.map(c => `<span>${c.cap}</span>`).join('')}</div>`;
+  const w = cfg.width ? `;width:${cfg.width}px` : '';
+  return `<div class="mock s-${cfg.style || 'chip'} p-${cfg.pos || 'top'} ${cfg.narrow ? 'narrow' : ''}" style="--cs:${cfg.cs || 24}px${w}"><div class="cells">${cells.map(c => cell(c, cfg)).join('')}</div></div>`
+    + `<div class="caps" style="${w.slice(1)}">${cells.map(c => `<span>${c.cap}</span>`).join('')}</div>`;
 }
-function fader(cfg) {
-  const f = .72, track = `<span class="ftrack"><span class="slot"><span class="fill" style="width:${f * 100}%"></span></span><span class="grip" style="left:${f * 100}%"></span></span>`;
-  const r = `<span class="cn r" title="Let go">↺</span>`, d = `<span class="cn d" title="Details">i</span>`;
-  if (cfg.kind === 'head') return `<div class="mock" style="--cs:24px"><div class="strip held"><div class="shead">${r}<span class="lbl">Level</span><span class="val">180</span>${d}</div>${track}</div></div>`;
-  if (cfg.kind === 'corners') return `<div class="mock s-tab" style="--cs:22px"><div class="strip held" style="padding-top:22px">${r}${d}<div class="sh"><span class="lbl">Level</span><span class="val">180</span></div>${track}</div></div>`;
-  return `<div class="mock" style="--cs:30px"><div class="strip held capped"><div class="sh"><span class="lbl">Level</span><span class="val">180</span></div>${track}<span class="endcap">${r}${d}</span></div></div>`;
-}
+/* each option: the 300 px card's cells, then the phone's narrow card (50–56 px cells) */
+const both = cfg => `${row(cfg)}<div class="sub">the phone's narrow card</div>${row({ ...cfg, narrow: true, width: 168 })}`;
 
-/* ------------------------------------------------------------------ the questions */
+/* ------------------------------------------------------------------ Q9 mocks */
+const ICON = {
+  module: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6 1.5 10.5 3.8 6 6.1 1.5 3.8Z"/><path d="M1.5 6.2 6 8.5l4.5-2.3"/></svg>',
+  playlist: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 3h8M2 6h8M2 9h5"/></svg>',
+  pattern: '<svg viewBox="0 0 12 12" fill="currentColor"><path d="M3.5 2.2v7.6L9.6 6Z"/></svg>',
+};
+const mc = (label, val, f, tone = 'rest') => cell({ label, val, f, tone }, { reset: false, det: false, ksize: 32 });
+const blank = '<div class="cell" aria-hidden="true"></div>';
+const mstrip = (label, val, f) => `<div class="strip"><div class="sh"><span class="lbl">${label}</span><span class="val">${val}</span></div><span class="ftrack"><span class="slot"><span class="fill" style="width:${f * 100}%"></span></span><span class="grip" style="left:${f * 100}%"></span></span></div>`;
+/* how a zone's heading reads, per option */
+function zhead(mode, z) {
+  const icon = mode === 'icons' ? ICON[z.kind] : '';
+  const name = mode === 'path' && z.parent ? `<em>${z.parent} ›</em> ${z.name}` : z.name;
+  return `<div class="zhead">${icon}${name}</div>`;
+}
+function zone(mode, z, body) {
+  const nest = mode === 'nest' && z.parent ? 'nest' : '';
+  return `<div class="zone ${nest}">${zhead(mode, z)}${body}</div>`;
+}
+function tryout(mode) {
+  const band = `<div class="gband">${mstrip('Brightness', '20%', .2)}<div class="cells">${mc('Speed', '1×', .5)}${mc('Detail', '1.00', .2)}${blank}</div></div>`;
+  const pick = zone(mode, { name: 'Pattern', kind: 'playlist' }, `<div class="pk"><span class="b">‹</span><span class="n">Scanner</span><span class="b">›</span></div>`);
+  const knobs = zone(mode, { name: 'Scanner', kind: 'pattern', parent: 'Pattern' }, `<div class="cells">${mc('Width', '2.50', .17)}${mc('Tail', '0.45', .42)}${blank}</div>`);
+  return `<div class="proj">PLAYFUL tryout · a playlist inside the project</div><div class="mock mini">${band}${pick}${knobs}</div>`;
+}
+function smalldome(mode) {
+  const band = `<div class="gband"><div class="cells">${mc('Speed', '1×', .5)}${blank}${blank}</div></div>`;
+  const dome = zone(mode, { name: 'Dome', kind: 'module' }, `${mstrip('Brightness', '100%', 1)}<div class="cells">${mc('Bands', '3.00', .29)}${mc('Phase', '24 s', .2)}${blank}</div>`);
+  const doors = zone(mode, { name: 'Doors', kind: 'module' }, `${mstrip('Brightness', '100%', 1)}<div class="cells">${mc('Phase', '24 s', .2)}${mc('Warmth', '0.80', .75)}${blank}</div>`);
+  return `<div class="proj">small-dome · two modules side by side</div><div class="mock mini">${band}${dome}${doors}</div>`;
+}
+const zones = mode => tryout(mode) + smalldome(mode);
+
+/* ------------------------------------------------------------------ the open questions */
 const QS = [
   {
-    id: 'Q1', title: 'Which actions get a corner?',
-    why: 'A cell has two actions besides turning it. <b>Let go</b> (↺) releases a held control and only exists while it is held, and <b>details</b> (ⓘ) says what the control is and what drives it. Today they are a 10 px glyph beside the label and the label itself. Drawn as tabs here; Q2 is how they look.',
+    id: 'Q8', title: 'Where do the corners sit, and as what?',
+    why: 'Your round-3 picks applied everywhere: circles, 24 px, let go while held, details on hover. Top first, for reference, then the bottom: in the corners, beside the label, beside the value, and the other markings down there too. Each tile shows the 300 px card\'s cells and the narrow card\'s, where a 24 px pair of corners and a label have to share 50 px. Pick one.',
     opts: [
-      { id: 'a', title: 'Both, always', desc: 'Let go while held, details on every cell all the time. Fifteen ⓘ on Aurora\'s card.', mock: () => row({ reset: 'held', det: 'always' }) },
-      { id: 'b', lean: true, title: 'Let go while held, details on hover', desc: 'The held state shows its way out; details appear where the pointer is. On touch, which has no hover, a tap without a drag opens details (Q5).', mock: () => row({ reset: 'held', det: 'hover' }) },
-      { id: 'c', title: 'Let go only', desc: 'No details corner at all; a press without a drag opens details everywhere (Q5).', mock: () => row({ reset: 'held', det: false }) },
-      { id: 'd', title: 'Both on hover only', desc: 'Quietest at rest, but a held control hides its way out until you hover it (panel.md: clearing is always one obvious gesture).', mock: () => row({ reset: 'hover', det: 'hover' }) },
+      { id: 'a', lean: true, title: 'Circles, top corners', desc: 'Round 3\'s pick. The knob is round, so its top corners are empty space: nothing collides, even in a 50 px cell.', mock: () => both({ style: 'chip', pos: 'top' }) },
+      { id: 'b', title: 'Circles, bottom corners', desc: 'Close to the label and value. They sit beside the text, so a long label meets them, and in a narrow cell they cover its ends.', mock: () => both({ style: 'chip', pos: 'bottom' }) },
+      { id: 'c', title: 'Circles beside the label', desc: '↺ LABEL ⓘ on one line. Clearly about this control, but the label gives up 48 px: Speed fits on the card; on the narrow card nothing does.', mock: () => both({ style: 'chip', pos: 'label' }) },
+      { id: 'd', title: 'Circles beside the value', desc: '↺ 0.41 ⓘ: let go sits against the value it would let go of. Values are short, so the card has room; the narrow card barely does.', mock: () => both({ style: 'chip', pos: 'value' }) },
+      { id: 'e', title: 'Tabs, bottom corners', desc: 'Squares the light lines cut out of the bottom corners. Clear targets, the same line system as the cells.', mock: () => both({ style: 'tab', pos: 'bottom' }) },
+      { id: 'f', title: 'Dog-ears, bottom corners', desc: 'Folded triangles at the foot. The triangle\'s target is half its box.', mock: () => both({ style: 'ear', pos: 'bottom' }) },
+      { id: 'g', title: 'A foot bar', desc: 'The label moves to a bar at the cell\'s foot: ↺ · LABEL · ⓘ, each a section. The biggest targets; the label keeps a third of the cell.', mock: () => both({ style: 'foot' }) },
     ],
   },
   {
-    id: 'Q2', title: 'How is a corner marked?',
-    why: 'Whatever it is, it has to read as its own target, clearly apart from the knob. Hover the middle cells.',
+    id: 'Q9', title: 'How do zone headings follow the project\'s structure?',
+    why: 'The global band is a tint with no word (your Q7). What\'s left is the zones under it. The panel already follows the node tree: the root\'s controls, then a playlist\'s instrument, then the playing pattern, which sits <b>inside</b> the playlist; or a project\'s modules side by side. Shown on both kinds.',
     opts: [
-      { id: 'a', lean: true, title: 'Tab', desc: 'A square the panel\'s light lines cut out of the corner: the same line system as the cells, so it reads as a small cell of its own.', mock: () => row({ style: 'tab', reset: 'held', det: 'always' }) },
-      { id: 'b', title: 'Dog-ear', desc: 'A folded triangle in the corner. Reads as "something tucked here", but the triangle\'s target is half its box.', mock: () => row({ style: 'ear', reset: 'held', det: 'always' }) },
-      { id: 'c', title: 'Chip', desc: 'A small round button floating in the corner. Familiar, but it is a box on a cell on a panel (P9).', mock: () => row({ style: 'chip', reset: 'held', det: 'always' }) },
-      { id: 'd', title: 'Header bar', desc: 'The label moves to the cell\'s top as a bar: ↺ · LABEL · ⓘ, each its own section. Biggest targets; the knob sits lower.', mock: () => row({ style: 'head', reset: 'held', det: 'always' }) },
-    ],
-  },
-  {
-    id: 'Q3', title: 'How big is a corner?',
-    why: 'You called today\'s glyphs tiny hit areas, and they are: 10 px. The phone\'s narrow card has 50–54 px cells, where two corners eat most of the top. Shown on a 300 px card\'s cells and the narrow card\'s.',
-    opts: [
-      { id: 'a', title: '20 px', desc: 'Fits two corners in a narrow cell with the label between. Still small for a thumb.', mock: () => row({ reset: 'held', det: 'always', cs: 20 }) + row({ reset: 'held', det: 'always', cs: 20, narrow: true, width: 170 }) },
-      { id: 'b', lean: true, title: '24 px', desc: 'The WCAG 2.2 minimum target. Two corners touch at the top of a narrow cell, which is fine when details is hover-only (Q1 b).', mock: () => row({ reset: 'held', det: 'always', cs: 24 }) + row({ reset: 'held', det: 'always', cs: 24, narrow: true, width: 170 }) },
-      { id: 'c', title: '32 px on touch', desc: 'Thumb-sized on phones, 24 px with a pointer. On the narrow card the corners cover the whole top row.', mock: () => row({ reset: 'held', det: 'always', cs: 32 }) + row({ reset: 'held', det: 'always', cs: 32, narrow: true, width: 170 }) },
-    ],
-  },
-  {
-    id: 'Q4', title: 'Where do a strip\'s actions go?',
-    why: 'A fader or a palette is a whole line with its label above the track. Its corners could sit in that header, or at the strip\'s end.',
-    opts: [
-      { id: 'a', lean: true, title: 'The header\'s ends', desc: '↺ before the label, ⓘ after the value, as tabs in the header row. The track keeps the whole width.', mock: () => fader({ kind: 'head' }) },
-      { id: 'b', title: 'The strip\'s corners', desc: 'Like a cell\'s: tabs at the strip\'s top corners, over the header.', mock: () => fader({ kind: 'corners' }) },
-      { id: 'c', title: 'An end cap', desc: 'A section at the strip\'s right end, the full height, ↺ above ⓘ: the board card\'s "the action is a section of the bar" (P10). The track gets shorter.', mock: () => fader({ kind: 'cap' }) },
-    ],
-  },
-  {
-    id: 'Q5', title: 'A press without a drag: what does it do?',
-    why: 'With the whole cell as the hit area, a drag turns the knob. A plain press or tap is free for one thing.',
-    opts: [
-      { id: 'a', lean: true, title: 'Opens details', desc: 'As the label does today, so nothing is lost; it is also the only way to details on a phone if details is hover-only.', mock: () => `<div class="mock s-tab" style="--cs:24px"><div class="cells">${cell(CELLS[0], { reset: 'held', det: false })}${cell({ ...CELLS[1], hov: false }, { det: false })}${cell(CELLS[2], { det: false })}</div><div class="pop"><b>Hue</b><div class="row"><span>held at</span><span>0.41</span></div><div class="row"><span>was following</span><span>lfo · hue</span></div><div class="act"><span>↺ Let go</span></div></div></div>` },
-      { id: 'b', title: 'Nothing', desc: 'Only a drag changes anything; details only through its corner. Safest against a stray tap, but on a phone details then needs a visible corner (Q1 a).', mock: () => row({ reset: 'held', det: 'always', cs: 24 }) },
-      { id: 'c', title: 'Selects it for the keyboard', desc: 'A focus ring; arrows nudge it, Enter opens details. Good on a desktop, invisible on a phone.', mock: () => `<div class="mock s-tab" style="--cs:24px"><div class="cells">${cell(CELLS[0], { reset: 'held', det: false })}${cell({ ...CELLS[1], hov: false }, { det: false }).replace('class="cell', 'class="focusring cell')}${cell(CELLS[2], { det: false })}</div><div class="hint">↑ ↓ nudge · Enter details</div></div>` },
-    ],
-  },
-  {
-    id: 'Q6', title: 'F: "a single unified system for these controls". Which do you mean?',
-    why: 'Today Studio draws a control four different ways. I want the plan to aim at the right one.',
-    opts: [
-      { id: 'a', title: 'One control, everywhere', desc: 'The panel\'s cell, strip and block replace a node card\'s slot fields, the fixture card\'s fader and the clock card\'s controls: one component, one look, one set of corners.', mock: () => `<div class="mock"><div class="surfaces"><div><span>panel</span><em>ModulePanelControl</em></div><div><span>node card fields</span><em>slot_fields</em></div><div><span>fixture card hero</span><em>HFaderField</em></div><div><span>clock card tape</span><em>tape_transport</em></div><div class="one"><span>→ one control</span><em>cell · strip · block</em></div></div></div>` },
-      { id: 'b', title: 'One layout system', desc: 'Every surface lays controls out by the same rule, computed once in core: the card, the play page and the editor stop having their own layouts.', mock: () => `<div class="mock"><div class="surfaces"><div><span>card</span><em>compact_panel grid</em></div><div><span>play page</span><em>flex-wrap + boxes</em></div><div><span>editor</span><em>flex-wrap + boxes</em></div><div class="one"><span>→ one layout, from core</span><em>shape · rank · walk</em></div></div></div>` },
-      { id: 'c', lean: true, title: 'Both, and order belongs to it', desc: 'One control and one layout system, so an authored order (when it comes) is a setting of that system, not a separate feature bolted onto the panel.', mock: () => `<div class="mock"><div class="surfaces"><div><span>controls</span><em>one component</em></div><div><span>layout</span><em>one rule, in core</em></div><div><span>order</span><em>a setting of that rule</em></div><div class="one"><span>→ one system</span><em>every surface</em></div></div></div>` },
-      { id: 'd', title: 'Something else', desc: 'Say what in the note below.', mock: () => '' },
-    ],
-  },
-  {
-    id: 'Q7', title: 'What does the global band say?',
-    why: 'G2 puts the project\'s global controls on a tinted band above the zones. Shown on the PLAYFUL tryout, a playlist.',
-    opts: [
-      { id: 'a', lean: true, title: 'Its reach', desc: '"Everything", or "All patterns" on a playlist: what the controls reach, in the person\'s words.', mock: () => band('All patterns', true) },
-      { id: 'b', title: 'The project\'s name', desc: 'The band is the project; zones are its parts.', mock: () => band('PLAYFUL tryout', true) },
-      { id: 'c', title: '"Global"', desc: 'Short and exact, but it is our word, not theirs (P11).', mock: () => band('Global', true) },
-      { id: 'd', title: 'Nothing, the tint alone', desc: 'The band is the band; only zones get headings.', mock: () => band('', false) },
+      { id: 'a', title: 'Names only', desc: 'Each zone is its node\'s name. The fewest words; the structure is only the order.', mock: () => zones('names') },
+      { id: 'b', title: 'Names with their kind', desc: 'The name plus the node\'s kind icon: a module, a playlist, a pattern. No more words, and it says what each zone is (P1).', mock: () => zones('icons') },
+      { id: 'c', lean: true, title: 'Names, nested as in the tree', desc: 'A zone inside another sits indented on a thin rail under its parent: the playing pattern under the playlist. Side-by-side modules stay flat. The structure is drawn, not written.', mock: () => zones('nest') },
+      { id: 'd', title: 'Names with their path', desc: '"Pattern › Scanner" for a zone inside another. Exact, but it is more words on every deeper heading.', mock: () => zones('path') },
     ],
   },
 ];
-function band(word, icon) {
-  const f = .2;
-  const glob = icon ? '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4.6"/><circle cx="6" cy="6" r="1.6" fill="currentColor"/></svg>' : '';
-  const head = word ? `<div class="ghead">${glob}${word}</div>` : '';
-  return `<div class="mock"><div class="gband">${head}<div class="strip" style="${word ? '' : 'padding-top:12px'}"><div class="sh"><span class="lbl">Brightness</span><span class="val">20%</span></div><span class="ftrack"><span class="slot"><span class="fill" style="width:${f * 100}%"></span></span><span class="grip" style="left:${f * 100}%"></span></span></div></div>`
-    + `<div class="zone"><div class="ghead"><svg viewBox="0 0 12 12" fill="currentColor"><path d="M3.5 2.2v7.6L9.6 6Z"/></svg>Scanner <span style="color:var(--faint)">· this pattern</span></div><div class="cells">${cell({ label: 'Width', val: '2.50', f: .17, tone: 'rest' }, {})}${cell({ label: 'Tail', val: '0.45', f: .42, tone: 'rest' }, {})}</div></div></div>`;
-}
+
+/* ------------------------------------------------------------------ round 3, decided */
+const DONE = [
+  ['Q1', 'Which actions get a corner?', 'b · Let go while held, details on hover'],
+  ['Q2', 'How is a corner marked?', 'c · Circles', 'Asked again in Q8: at the bottom, near the label.'],
+  ['Q3', 'How big is a corner?', 'b · 24 px'],
+  ['Q4', 'Where do a strip\'s actions go?', 'a · The ends of its label row'],
+  ['Q5', 'A press without a drag?', 'a · Opens details'],
+  ['Q6', '"A single unified system for these controls"', 'No pick', 'Your note: maybe too broad to say it applies to everything; OK with it applying only to the device cards, then to more things later.'],
+  ['Q7', 'What does the global band say?', 'd · Nothing, the tint alone', 'Your note: it should reflect the project structure; minimal labels, no "global" if we can avoid it. Continued in Q9.'],
+];
 
 /* ------------------------------------------------------------------ state + saving */
 const state = { picks: {}, notes: {} };
 let db = null, docRef = null, writing = false, dirty = false, noteTimer = 0, typing = false;
-const LS = 'panel-control-questions.v1';
+const LS = 'panel-control-questions.round4';
 try { const s = JSON.parse(localStorage.getItem(LS) || 'null'); if (s && s.picks) Object.assign(state, s); } catch (e) { /* storage unavailable */ }
 
 function setStatus(t) { document.getElementById('st').textContent = t; }
-function summary() {
-  const parts = QS.map(q => `${q.id} ${state.picks[q.id] || '–'}`);
-  return parts.join(' · ');
-}
+const summary = () => QS.map(q => `${q.id} ${state.picks[q.id] || '–'}`).join(' · ');
 function answerText() {
   return QS.map(q => {
     const p = state.picks[q.id], o = q.opts.find(x => x.id === p);
     const note = (state.notes[q.id] || '').trim();
-    return `${q.id} ${p ? p + ' (' + o.title + ')' : '–'}${note ? ' — ' + note : ''}`;
+    return `${q.id} ${p ? p + ' (' + o.title + ')' : '–'}${note ? ': ' + note : ''}`;
   }).join('\n');
 }
 async function save() {
@@ -337,8 +336,7 @@ async function save() {
 
 /* ------------------------------------------------------------------ render */
 function render() {
-  const host = document.getElementById('qs');
-  host.innerHTML = QS.map(q => `
+  document.getElementById('qs').innerHTML = QS.map(q => `
     <section class="q" id="${q.id}">
       <div class="qhead"><span class="qid">${q.id}</span><h2>${q.title}</h2><span class="picked" id="pk-${q.id}"></span></div>
       <p class="why">${q.why}</p>
@@ -351,6 +349,7 @@ function render() {
       </div>
       <div class="note"><label for="note-${q.id}">Anything to add on ${q.id}?</label><textarea id="note-${q.id}" data-q="${q.id}" rows="1" placeholder="Optional"></textarea></div>
     </section>`).join('');
+  document.getElementById('done').innerHTML = DONE.map(([k, t, a, n]) => `<li><span class="k">${k}</span><span class="t">${t}</span><span class="a"><b>${a}</b>${n ? `<i>${n}</i>` : ''}</span></li>`).join('');
   sync();
 }
 function sync() {
@@ -393,12 +392,12 @@ document.getElementById('copy').addEventListener('click', async () => {
 render();
 setStatus('Saved in this browser only');
 
-/* The answers live in this page's store, where Claude reads them back. */
+/* Round 4's answers live in this page's store, where Claude reads them back. */
 (async () => {
   if (!window.claude || typeof window.claude.use !== 'function') return;
   db = await window.claude.use('db');
   if (!db) { setStatus('Saved in this browser only'); return; }
-  docRef = db.doc('answers/round3');
+  docRef = db.doc('answers/round4');
   docRef.onSnapshot(snap => {
     if (!snap.exists || snap.metadata.hasPendingWrites || writing || typing) return;
     const d = snap.data() || {};
