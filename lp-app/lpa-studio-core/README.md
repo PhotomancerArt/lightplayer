@@ -656,15 +656,17 @@ A card (`UiBoardCard`) is:
   and the bar's work while an activity runs in it. Each bar has its own file
   (`project_bar.rs` …), whose doc is the table of what it says.
 
-**Connected**, the card carries the board's **panel** in the five bars'
-place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while the
-session is connected with its project ready): a pick of the project's root
-panel (`board_panel_picks.rs`: the master brightness fader, then knobs and
-toggles in panel order, `BOARD_PANEL_CONTROLS` = 4 at most, the rest
-counted in `more`), each control the root panel's own
+**Connected**, the card carries the board's whole **panel** in the five
+bars' place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while
+the session is connected with its project ready): every control of the
+project's root panel in sections (`board_panel_picks.rs`: the root's own
+with the master, the `brightness` channel, leading; then each nested
+group's under its name), each control the root panel's own
 `UiPanelControlView` with its scope, so its writes are the panel's own.
-`auto_save` is `Some` only at the edit tier, and `edit` is the All controls
-row's action: Edit, or Edit with a lock (`unlock`) on a play-only board.
+The card grows to hold them. `auto_save` is `Some` only at the edit tier;
+it and the panel's reset are drawn in the status corner's details
+(`UiDetailPanel::PanelSettings`). `edit` is the panel foot's action: Edit,
+or Edit with a lock (`unlock`) on a play-only board.
 The root face is `ProjectEditorView::root_module_face`, which the play page
 and the docs embed read too. The session's state while it is not open is
 the connection bar's work (`BoardConnection`, per board on

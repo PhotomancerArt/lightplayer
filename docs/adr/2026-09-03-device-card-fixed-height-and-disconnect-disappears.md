@@ -277,6 +277,16 @@ already running LightPlayer firmware when it first hello'd.
   zone into the status corner's details. A direction, built by the board
   card milestone of `lp2025/2026-10-06-1530-boards-and-projects-model`.
 
+- **2026-10-19 — one exception: a connected card grows once, to hold the
+  board's panel.** The board card ADR's 2026-10-19 amendment
+  ([2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md))
+  puts every panel control on the connected card. Yona: "I'm OK with the
+  card changing height once when connecting." So a card changes height
+  twice in its life on screen — on connect, and back on Done — and never
+  for anything a board does in between. Section 1's rule stands for every
+  other state, and the home page's grid keeps each card at its own height
+  (`align-items: start`), so a connected card's neighbours do not move.
+
 ## Spike and gate record
 
 - Spike: `spikes/device-card-v2/index.html`, rounds 1–3, commits
