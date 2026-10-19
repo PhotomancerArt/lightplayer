@@ -1,0 +1,1160 @@
+<title>Wi‑Fi at Install</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* =====================================================================
+   Wi‑Fi and Bluetooth as part of installing LightPlayer on a board.
+   Palette: lpa-studio-web/src/style.css :root, via spikes/board-card-surface
+   (round 3 of the card, shipped) and spikes/board-card-stack. Studio is
+   dark-only, so this page is too (one committed look, both hosts).
+   Layout: a sticky strip of switches over numbered sections; each concept
+   is a real board card at a card's width, walked by pressing its buttons.
+   Throwaway: production never imports spikes/.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28; --raised-strong:#252532; --pic:#07080a;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --faint:#6d6f7a; --heading:#e9e9ef;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-error-stripes:repeating-linear-gradient(135deg, rgba(255,93,93,.09) 0 6px, transparent 6px 12px);
+  --shell-bg:#0b0c0e; --shell-panel:#0e0f12; --shell-mut:#a7a49c; --shell-dim:#7c7a73; --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --lean:#7be0b2; --lean-bd:#365545; --bad:#ff8a8a; --focus:#a5b8ff;
+}
+* { box-sizing:border-box; }
+html { background:var(--shell-bg); }
+body { margin:0; padding-block:28px 120px; padding-inline:max(16px, 2vw); background:var(--shell-bg); color:var(--shell-tx); font:14px/1.5 var(--font); }
+main { max-width:1400px; margin:0 auto; display:grid; gap:44px; }
+p { margin:0; }
+code { font-family:var(--mono); font-size:12px; color:var(--shell-mut); overflow-wrap:anywhere; }
+header { display:grid; gap:12px; }
+.eyebrow { font:700 11px var(--font); letter-spacing:.14em; text-transform:uppercase; color:var(--shell-dim); }
+h1 { font-size:26px; line-height:1.15; letter-spacing:-.01em; margin:0; color:var(--strong); text-wrap:balance; }
+.hint { color:var(--shell-mut); font-size:14px; max-width:98ch; }
+.hint b { color:var(--shell-tx); font-weight:600; }
+.hint q, .q q, .log q { color:var(--shell-tx); font-style:italic; quotes:"“" "”"; }
+section { display:grid; gap:14px; min-width:0; }
+h2 { margin:0; font-size:18px; color:var(--strong); display:flex; align-items:baseline; gap:12px; text-wrap:balance; }
+h2 .n { font:700 12px var(--mono); color:var(--shell-dim); min-width:16px; }
+.lede { color:var(--shell-mut); max-width:110ch; }
+.lede b { color:var(--shell-tx); font-weight:600; }
+
+.facts { border:1px solid var(--st-live-bd); border-radius:10px; padding:12px 16px; display:grid; gap:6px; background:#0e1319; max-width:1180px; }
+.facts h3 { margin:0; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--st-live-tx); }
+.facts ul { margin:0; padding-left:18px; display:grid; gap:5px; }
+.facts li { color:var(--shell-mut); font-size:13px; max-width:118ch; }
+.facts li b { color:var(--shell-tx); font-weight:600; }
+
+/* ---- the controls strip -------------------------------------------- */
+.strip { position:sticky; top:env(safe-area-inset-top, 0px); z-index:60; display:grid; gap:9px; border:1px dashed var(--shell-bd-strong); border-radius:10px; padding:11px 14px; background:rgba(11,12,14,.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.strip .line { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.strip .lbl { font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); min-width:58px; }
+.seg { display:inline-flex; flex-wrap:wrap; border:1px solid var(--bd); border-radius:7px; overflow:hidden; flex:none; max-width:100%; }
+.seg button { appearance:none; font:600 12.5px var(--font); color:var(--muted); background:transparent; border:0; padding:5px 11px; cursor:pointer; }
+.seg button + button { border-left:1px solid var(--bd); }
+.seg button[aria-pressed="true"] { background:var(--raised-strong); color:var(--strong); }
+.chip { appearance:none; font:600 12px var(--font); color:var(--muted); background:transparent; border:1px solid var(--bd); border-radius:6px; padding:4px 10px; cursor:pointer; }
+.chip:hover { border-color:var(--bd-strong); color:var(--strong); }
+.strip .note { color:var(--shell-dim); font-size:12.5px; flex:1; min-width:min(280px, 100%); }
+.strip .note b { color:var(--shell-mut); font-weight:600; }
+button:focus-visible, input:focus-visible, .gitem:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+/* ---- the card (spikes/board-card-surface, round 3 as shipped) -------- */
+svg.i { width:14px; height:14px; flex:none; }
+.sc { position:relative; width:100%; max-width:362px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); color:var(--tx); font-size:13px; }
+.pic { position:relative; height:138px; background:var(--pic); border-radius:7px 7px 0 0; overflow:hidden; }
+.pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.notch { position:absolute; top:0; right:0; z-index:6; height:24px; display:inline-flex; align-items:center; padding:0 9px; background:var(--panel); color:var(--faint); border-bottom-left-radius:9px; }
+.notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
+.notch::before { left:-9px; top:0; }
+.notch::after { right:0; bottom:-9px; }
+.nb { position:relative; display:flex; align-items:center; gap:8px; height:50px; padding:0 8px 0 11px; border-top:1px solid var(--bd-mut); min-width:0; }
+.nb .nm { flex:1; min-width:0; font-size:13.5px; font-weight:700; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gosec { appearance:none; font:inherit; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 15px; border:0; border-left:1px solid var(--bd);
+  background:rgba(255,255,255,.035); color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.gosec svg.i { width:12px; height:12px; }
+.gosec::before { content:""; position:absolute; inset:0; padding:1px; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; opacity:0; transition:opacity .2s; pointer-events:none; }
+.gosec:hover { background:rgba(255,255,255,.07); }
+.gosec:hover::before { opacity:1; }
+.gosec.spinonly { padding:0 18px; background:transparent; cursor:default; }
+.gosec.spinonly::before { display:none; }
+.spin { width:11px; height:11px; border-radius:50%; flex:none; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); -webkit-mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); animation:spin 1.1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.iri { position:absolute; left:0; bottom:0; height:2px; border-radius:0 2px 2px 0; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; animation:iri 4s linear infinite; }
+@keyframes iri { to { background-position:300% 0; } }
+
+.face { height:140px; }
+.face > :last-child { border-radius:0 0 7px 7px; }
+.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); background:var(--surface); overflow:hidden; }
+.srow svg.i { width:12px; height:12px; flex:none; color:var(--subtle); }
+.srow .kd { flex:none; width:56px; color:var(--faint); font-weight:500; }
+.srow .s { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tx); }
+.srow .spring { flex:1; }
+.srow .a { flex:none; color:var(--subtle); white-space:nowrap; }
+.srow .a.good { color:var(--st-good-tx); }
+.srow .chev { color:var(--faint); font-size:12px; flex:none; }
+.srow .mark { display:inline-flex; flex:none; color:var(--st-live-tx); }
+.srow .mark.off { color:var(--faint); }
+.srow .mark svg.i { color:currentColor; }
+.srow.working .s, .srow.working .a { color:var(--strong); font-weight:700; }
+.srow.clickable { cursor:pointer; }
+.srow.clickable:hover { background:#191922; }
+.srow.open { z-index:41; background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); overflow:visible; }
+.wo { appearance:none; font:inherit; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+.wo svg.i { width:11px !important; height:11px !important; color:currentColor !important; }
+.wo:hover { background:rgba(255,255,255,.09); }
+.face > :last-child .wo:last-child { border-bottom-right-radius:7px; }
+
+/* the surface: concept B of round 3, the notice as an object */
+.say { display:grid; gap:3px; min-width:0; }
+.say .s1 { margin:0; font-size:13px; line-height:1.35; font-weight:600; color:var(--strong); text-wrap:pretty; }
+.say .s2 { margin:0; font-size:12px; line-height:1.4; color:var(--muted); text-wrap:pretty; }
+.prog { display:flex; align-items:center; justify-content:center; gap:9px; margin-top:6px; }
+.prog .track { position:relative; flex:1; max-width:190px; height:3px; border-radius:2px; background:rgba(255,255,255,.12); overflow:hidden; }
+.prog .track i { position:absolute; left:0; top:0; bottom:0; border-radius:2px; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; animation:iri 4s linear infinite; }
+.prog .pc { font:700 11px var(--mono); color:var(--strong); font-variant-numeric:tabular-nums; }
+.sf { display:grid; place-items:center; padding:8px 18px; text-align:center; }
+.sf .scrim { position:absolute; inset:0; background:rgba(7,8,10,.55); }
+.sf .under { position:absolute; inset:0; }
+.sf .under canvas { opacity:.22; filter:saturate(.6); }
+.sf .inner { position:relative; display:grid; justify-items:center; gap:6px; }
+.obj { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--bd-strong); background:var(--raised); color:var(--muted); }
+.obj svg.i { width:15px; height:15px; }
+.obj .spin { width:15px; height:15px; }
+.tone-att .obj { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.tone-err .obj { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); border-color:var(--st-error-bd); color:var(--st-error-tx); }
+.tone-good .obj { background:var(--st-good-bg); border-color:var(--st-good-bd); color:var(--st-good-tx); }
+
+/* ---- the detail card, merged with the bar that opened it ------------ */
+.nb.open, .gosec.open { z-index:41; }
+.gosec.open { background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); }
+.gosec.open::before { opacity:0; }
+.dpop { position:absolute; left:-1px; right:-1px; top:100%; z-index:40; background:var(--raised); border:1px solid var(--bd-strong);
+  border-radius:0 0 10px 10px; box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; color:var(--muted); font-size:12px; cursor:default; text-align:left; }
+.dsec { display:grid; gap:4px; padding:8px 12px; border-top:1px solid var(--bd-mut); min-width:0; }
+.dsec:first-child { border-top:0; }
+.dsec h6 { margin:0; font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); display:flex; align-items:center; gap:7px; }
+.dsec h6 .back { appearance:none; border:0; background:transparent; color:var(--subtle); padding:0 2px 0 0; cursor:pointer; display:inline-flex; }
+.dsec h6 .back:hover { color:var(--strong); }
+.dsec h6 .r { margin-left:auto; text-transform:none; letter-spacing:0; font-weight:600; color:var(--subtle); }
+.dsec p { margin:0; color:var(--tx); line-height:1.42; font-size:12.5px; text-wrap:pretty; }
+.dsec p.help { color:var(--subtle); font-size:11.5px; }
+.dsec p.help b { color:var(--muted); font-weight:600; }
+.dsec .kvl { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.dsec .kvl span:first-child { color:var(--subtle); }
+.dsec .kvl span:last-child { font:11.5px var(--mono); color:var(--tx); text-align:right; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dsec.tw-good { background:linear-gradient(90deg,var(--st-good-bg) 0%,transparent 72%); } .dsec.tw-good h6 { color:var(--st-good-tx); }
+.dsec.tw-att  { background:linear-gradient(90deg,var(--st-attention-bg) 0%,transparent 72%); } .dsec.tw-att h6 { color:var(--st-attention-tx); }
+.dsec.tw-err  { background-color:transparent; background-image:var(--st-error-stripes), linear-gradient(90deg,var(--st-error-bg) 0%,transparent 72%); } .dsec.tw-err h6 { color:var(--st-error-tx); }
+.dsec.flush { padding:0; gap:0; }
+.dsec .acts { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding-top:4px; }
+.btn { appearance:none; font:800 11.5px var(--font); height:28px; padding:0 12px; border-radius:6px; border:1px solid var(--bd-strong); background:rgba(255,255,255,.05); color:var(--strong); display:inline-flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; }
+.btn svg.i { width:12px; height:12px; }
+.btn:hover { background:rgba(255,255,255,.09); }
+.btn.go { background:linear-gradient(90deg, rgba(95,224,139,.16), rgba(83,198,242,.16), rgba(165,138,247,.16)); border-color:#5a5a78; }
+.tlink { appearance:none; border:0; background:transparent; padding:0; cursor:pointer; font:700 11.5px var(--font); color:var(--muted); text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--faint); }
+.tlink:hover { color:var(--strong); }
+.tlink.quiet { color:var(--subtle); font-weight:600; }
+.sw { display:flex; align-items:center; gap:9px; }
+.sw .tg { position:relative; width:28px; height:16px; border-radius:9px; background:var(--strong); flex:none; }
+.sw .tg::after { content:""; position:absolute; top:2px; left:14px; width:12px; height:12px; border-radius:50%; background:#1d1d28; }
+.sw .tg.off { background:#3a3a4a; } .sw .tg.off::after { left:2px; background:#9c9cab; }
+.sw .lb { color:var(--tx); font-weight:600; font-size:12.5px; }
+.field { display:grid; gap:3px; }
+.field label { color:var(--subtle); font-size:11px; font-weight:600; }
+.field input { font:13px var(--font); color:var(--strong); background:#121219; border:1px solid var(--bd); border-radius:6px; height:30px; padding:0 9px; width:100%; }
+.field input[readonly] { color:var(--muted); background:transparent; border-style:dashed; }
+.field .fromacct { font-size:11px; color:var(--subtle); display:flex; align-items:center; gap:5px; }
+.field .fromacct svg.i { width:11px; height:11px; }
+
+/* networks: what the board hears (the 2B list), in the card's row grammar */
+.net { appearance:none; font:inherit; width:100%; display:flex; align-items:center; gap:8px; height:32px; padding:0 12px; border:0; border-top:1px solid var(--bd-mut); background:transparent; color:var(--tx); text-align:left; cursor:pointer; min-width:0; }
+.net:first-of-type { border-top:0; }
+.net:hover { background:rgba(255,255,255,.04); }
+.net .nm { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12.5px; font-weight:600; }
+.net .st { flex:none; color:var(--subtle); font-size:11.5px; white-space:nowrap; }
+.net .chev { color:var(--faint); flex:none; }
+.net.dim .nm, .net.dim .bars { opacity:.5; }
+.net.pick { background:rgba(255,255,255,.05); }
+.net .radio { width:12px; height:12px; border-radius:50%; border:1.5px solid var(--bd-strong); flex:none; }
+.net.pick .radio { border:4px solid var(--strong); }
+.lhead { padding:7px 12px 3px; font:700 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); display:flex; align-items:center; gap:6px; }
+.lhead svg.i { width:11px; height:11px; }
+.bars { display:inline-flex; align-items:flex-end; gap:1.5px; height:11px; flex:none; }
+.bars i { width:2.5px; border-radius:1px; background:var(--muted); }
+.bars i.o { background:#3a3a4a; }
+
+/* the test: the steps, then what came of it */
+.steps { display:grid; gap:5px; padding:2px 0; }
+.step { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--subtle); min-width:0; }
+.step .mk { width:14px; display:inline-grid; place-items:center; flex:none; }
+.step .mk svg.i { width:12px; height:12px; }
+.step.done { color:var(--muted); } .step.done .mk { color:var(--st-good-tx); }
+.step.now { color:var(--strong); font-weight:600; }
+.step.fail { color:var(--st-error-tx); font-weight:700; } .step.fail .mk { color:var(--st-error-tx); }
+.step.skip { color:var(--faint); }
+.step .wait { width:6px; height:6px; border-radius:50%; background:#3a3a4a; }
+
+/* ways to connect: the card's row grammar, one link a line */
+.ways { display:grid; }
+.way { display:flex; align-items:center; gap:7px; min-height:30px; padding:5px 12px; border-top:1px solid var(--bd-mut); font-size:12px; min-width:0; }
+.way:first-child { border-top:0; }
+.way svg.i { width:12px; height:12px; color:var(--subtle); flex:none; }
+.way .wn { flex:none; width:96px; color:var(--tx); font-weight:600; white-space:nowrap; }
+.way .wh { flex:1; min-width:0; color:var(--subtle); overflow-wrap:anywhere; line-height:1.35; }
+.way .wh b { color:var(--tx); font-weight:500; font-family:var(--mono); font-size:11.5px; }
+.way .wst { flex:none; color:var(--st-attention-tx); font-weight:700; }
+.way.here .wn::after { content:" · here"; color:var(--faint); font-weight:500; }
+.way .tlink { flex:none; }
+
+/* ---- concept B: the install sheet ----------------------------------- */
+.sheetwrap { position:relative; }
+.sheetwrap .behind { opacity:.32; filter:saturate(.5); pointer-events:none; }
+.sheet { position:absolute; left:50%; top:22px; transform:translateX(-50%); width:min(340px, calc(100% - 12px)); z-index:45; background:var(--raised); border:1px solid var(--bd-strong); border-radius:12px; box-shadow:0 24px 70px rgba(0,0,0,.7); display:grid; overflow:hidden; }
+.sheet .sh { display:flex; align-items:center; gap:8px; padding:11px 12px 9px; }
+.sheet .sh b { flex:1; min-width:0; color:var(--strong); font-size:13.5px; }
+.sheet .sh .x { appearance:none; border:0; background:transparent; color:var(--subtle); cursor:pointer; font-size:15px; line-height:1; padding:2px 4px; }
+.stepper { display:flex; gap:0; padding:0 12px; border-bottom:1px solid var(--bd-mut); }
+.stepper span { position:relative; flex:1; padding:6px 0 7px; font:700 11px var(--font); color:var(--faint); text-align:center; }
+.stepper span.on { color:var(--strong); }
+.stepper span.on::after { content:""; position:absolute; left:8px; right:8px; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg, var(--spectrum)); }
+.stepper span.did { color:var(--subtle); }
+.sheet .dsec:first-child { border-top:0; }
+
+/* ---- concept D: the setup rows -------------------------------------- */
+.srow .a.todo { color:var(--subtle); }
+.srow.done-row .s { color:var(--muted); }
+
+/* ---- spike shell ---------------------------------------------------- */
+.concepts { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap:18px; align-items:start; }
+.concept { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:var(--shell-panel); display:grid; gap:10px; align-content:start; min-width:0; }
+.concept.leanc { border-color:var(--lean-bd); box-shadow:inset 0 0 0 1px var(--lean-bd); }
+.chead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.cl { font:800 20px/1 var(--mono); color:var(--shell-tx); }
+.cn { font-size:14px; font-weight:700; color:var(--shell-tx); }
+.leanb { font-size:11px; font-weight:700; color:var(--lean); border:1px solid var(--lean-bd); border-radius:999px; padding:1px 9px; }
+.todayb { font-size:11px; font-weight:700; color:var(--shell-mut); border:1px solid var(--shell-bd-strong); border-radius:999px; padding:1px 9px; }
+.cw { font-size:12.5px; color:var(--shell-mut); }
+.cw b { color:var(--shell-tx); font-weight:600; }
+.walkbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--shell-dim); min-height:24px; }
+.walkbar .now { color:var(--shell-tx); font-weight:600; }
+.cfa { font-size:12px; color:var(--shell-dim); line-height:1.5; display:grid; gap:4px; }
+.cfa b { color:var(--shell-mut); font-weight:600; }
+.stage { position:relative; }
+
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap:22px 16px; align-items:start; }
+.gitem { position:relative; display:grid; gap:6px; min-width:0; }
+.gitem .stage { pointer-events:none; }
+.gcap { display:flex; align-items:baseline; gap:8px; font:700 11px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--shell-dim); min-width:0; }
+.gcap .k { font:700 11px var(--mono); color:var(--shell-mut); letter-spacing:0; }
+.gsub { font-size:12px; color:var(--shell-dim); max-width:362px; }
+.gsub b { color:var(--shell-mut); font-weight:600; }
+
+.tbl { border:1px solid var(--shell-bd); border-radius:10px; background:#0f1014; overflow-x:auto; max-width:1180px; }
+table { width:100%; border-collapse:collapse; min-width:720px; }
+thead th { text-align:left; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); padding:10px 12px; border-bottom:1px solid var(--shell-bd); }
+tbody td { vertical-align:top; padding:8px 12px; border-bottom:1px solid #1b1d22; font-size:13px; color:var(--shell-mut); }
+tbody tr:last-child td { border-bottom:0; }
+td.st { width:190px; color:var(--shell-tx); }
+td.say1 { color:var(--shell-tx); }
+td.role { width:110px; font:600 11.5px var(--mono); color:var(--shell-dim); }
+pre.pair { margin:0; padding:10px 12px; border:1px solid var(--shell-bd); border-radius:8px; background:#08090b; color:var(--shell-tx); font:12px/1.65 var(--mono); overflow-x:auto; max-width:1180px; }
+pre.pair .bad { color:var(--bad); } pre.pair .do { color:var(--lean); } pre.pair .c { color:var(--shell-dim); }
+
+.qs { display:grid; gap:14px; }
+.q { border:1px solid var(--shell-bd); border-radius:10px; padding:14px 16px; display:grid; gap:10px; background:#101115; min-width:0; }
+.q h3 { margin:0; font-size:15px; color:var(--strong); display:flex; gap:10px; align-items:baseline; text-wrap:balance; }
+.q h3 .id { font:700 12px var(--mono); color:var(--lean); flex:none; }
+.q p, .q li { color:var(--shell-mut); max-width:112ch; }
+.q .lean { color:var(--shell-tx); }
+.q .lean b { color:var(--lean); }
+.q ul, .q ol { margin:0; padding-left:18px; display:grid; gap:6px; }
+.q li b { color:var(--shell-tx); font-weight:600; }
+.opts { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap:12px; }
+.opt { border:1px solid var(--shell-bd); border-radius:9px; padding:11px 13px; display:grid; gap:6px; align-content:start; background:#0d0e11; }
+.opt.lean { border-color:var(--lean-bd); }
+.opt h4 { margin:0; font-size:13.5px; color:var(--shell-tx); display:flex; gap:8px; align-items:baseline; }
+.opt h4 .cid { font:700 11px var(--mono); color:var(--shell-dim); }
+.opt p { font-size:12.5px; color:var(--shell-mut); }
+.opt .pro, .opt .con { font-size:12.5px; }
+.opt .pro { color:#a9d8c1; } .opt .con { color:#e5b4b4; }
+.acctmock { max-width:340px; border:1px solid var(--bd-strong); border-radius:10px; background:var(--raised); display:grid; overflow:hidden; color:var(--muted); font-size:12px; }
+.twocol { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap:16px; align-items:start; max-width:1180px; }
+footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
+@media (max-width: 700px) { .strip { position:static; } .strip .lbl { min-width:0; } }
+@media (prefers-reduced-motion: reduce) { .spin, .iri, .prog .track i { animation:none; } }
+</style>
+
+<main>
+
+<header>
+  <span class="eyebrow">Spike · install · Wi‑Fi and Bluetooth · round 1</span>
+  <h1>Installing a board sets up its Wi‑Fi</h1>
+  <p class="hint">Sean flashed his first board from lightplayer.app on 2026-10-18. Nothing asked for his Wi‑Fi, and he couldn’t find where to add it. His boards will light his house’s eaves and update over Wi‑Fi, and WLED, his reference, asks for Wi‑Fi right after a web flash. Yona, 2026-10-19: <q>enabling wifi and ble should be part of the install step. ideally your account remembers wifi so its super easy in the future. this is our moment to get people to think about it</q>.</p>
+  <p class="hint"><b>The thesis:</b> the install is the one moment everyone is at the board with a cable and their attention. Ask for Wi‑Fi there, from the networks <b>the board</b> hears, say once what the board can now be reached by, and let the account remember the network so the next board takes one press. Four ways to place it, beside today’s card. <b>Press the buttons on each card</b> to walk it; the strip sets who is signed in and how the join goes.</p>
+  <div class="facts" id="facts">
+    <h3>What is true today (checked in the code)</h3>
+    <ul id="factlist"></ul>
+  </div>
+</header>
+
+<div class="strip" id="strip">
+  <div class="line"><span class="lbl">Account</span>
+    <div class="seg" role="group" aria-label="Account">
+      <button type="button" data-set="acct" data-v="out">signed out</button>
+      <button type="button" data-set="acct" data-v="first">signed in · first board</button>
+      <button type="button" data-set="acct" data-v="known">signed in · remembers Cedar Lane</button>
+    </div>
+  </div>
+  <div class="line"><span class="lbl">The join</span>
+    <div class="seg" role="group" aria-label="How the join goes">
+      <button type="button" data-set="join" data-v="ok">connects</button>
+      <button type="button" data-set="join" data-v="wrongpw">wrong password</button>
+      <button type="button" data-set="join" data-v="notseen">board can’t see it</button>
+      <button type="button" data-set="join" data-v="nointernet">no internet</button>
+    </div>
+    <span class="lbl">Board</span>
+    <div class="seg" role="group" aria-label="Which board">
+      <button type="button" data-set="board" data-v="blank">new</button>
+      <button type="button" data-set="board" data-v="kept">already on Wi‑Fi</button>
+    </div>
+    <button type="button" class="chip" data-reset="1">↺ start the walks again</button>
+  </div>
+  <p class="note" id="stripnote"></p>
+</div>
+
+<section id="s1">
+  <h2><span class="n">1</span>Where the setup lives</h2>
+  <p class="lede">Each concept is a whole board card at a card’s width, starting from a blank board on USB. Press <b>Install firmware</b> on it and keep pressing what it offers. The install runs in three seconds here; on a desk it is about a minute. The cards share every word they can: the networks list, the test and <b>Ways to connect</b> are the same pages wherever they appear.</p>
+  <div class="concepts" id="concepts"></div>
+</section>
+
+<section id="s2">
+  <h2><span class="n">2</span>Every state, in the lean (C)</h2>
+  <p class="lede">The lean’s states at once, frozen, so the words and the primaries scan as a set. The strip doesn’t change these. Each caption says which state of the brief it answers.</p>
+  <div class="grid" id="grid"></div>
+</section>
+
+<section id="s3">
+  <h2><span class="n">3</span>The words</h2>
+  <p class="lede">Every line the lean adds, with its role (<code>docs/ux/README.md</code> P20): a sentence on the card’s top, a label in a row, a button. The card’s copy rule holds: the second sentence is the primary’s button said aloud.</p>
+  <div class="tbl"><table><thead><tr><th>State</th><th>Role</th><th>Words</th><th>Why</th></tr></thead><tbody id="words"></tbody></table></div>
+  <p class="lede"><b>“You can now connect over Wi‑Fi, Bluetooth or lightplayer.app”</b>, said without marketing. The lean says it as a list of facts, one link a line, in the card’s row grammar, under one plain sentence.</p>
+  <pre class="pair" id="pairs"></pre>
+</section>
+
+<section id="s4">
+  <h2><span class="n">4</span>The account remembers networks</h2>
+  <p class="lede">What it looks like, and the security decision it needs. The account already keeps the board’s account keys and the optional play and edit passwords in the cloud, readable by the service (<code>docs/adr/2026-09-24-easy-bluetooth-access.md</code>, “Account keys and passwords live in the cloud”). That is the precedent. Storing a Wi‑Fi password there is its own decision, for an ADR in the plan that follows.</p>
+  <div class="twocol" id="acct"></div>
+  <div class="opts" id="where"></div>
+</section>
+
+<section id="s5">
+  <h2><span class="n">5</span>The gate</h2>
+  <div class="qs" id="qs"></div>
+</section>
+
+<footer>Cards follow <code>docs/ux/anatomy/board-card.md</code> (round 3, shipped) and <code>spikes/board-card-surface</code>; the networks list, the test’s steps and their words are the shipped Wi‑Fi panel’s (<code>lpa-studio-core/src/app/network/wifi_words.rs</code>, spike <code>wifi-networks</code> 2B). Network names, addresses and the account are made up. Spike only: production never imports <code>spikes/</code>.</footer>
+</main>
+
+<script>
+/* =====================================================================
+   Icons (spikes/board-card-surface)
+   ===================================================================== */
+const IC = {
+  usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/><rect x="5.6" y="7" width="2.8" height="2.4" rx=".4"/><circle cx="17" cy="7.5" r="1.3"/>',
+  ble:'<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
+  cloud:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>',
+  cloudfill:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z" fill="currentColor"/>',
+  cloudoff:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/><path d="M4 4l16 16"/>',
+  layers:'<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16 9 4.5 9-4.5"/>',
+  chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  fw:'<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>',
+  check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  x:'<path d="M6 6l12 12M18 6 6 18"/>',
+  add:'<path d="M12 5v14M5 12h14"/>',
+  retry:'<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/>',
+  dots:'<circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
+  back:'<path d="M15 6l-6 6 6 6"/>',
+  chev:'<path d="M9 6l6 6-6 6"/>',
+  person:'<circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c.9-3.9 3.7-6 7.2-6s6.3 2.1 7.2 6"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2.5 2.5M14 9l2 2"/>',
+  download:'<path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/>',
+};
+const ic = (n) => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const bars = (n) => `<span class="bars" aria-label="${['','weak','fair','good','strong'][n]} signal">${[4,6.5,9,11].map((h, i) => `<i class="${i < n ? '' : 'o'}" style="height:${h}px"></i>`).join('')}</span>`;
+
+/* =====================================================================
+   The world: made-up networks, a made-up board.
+   ===================================================================== */
+const HOME = 'Cedar Lane', AWAY = 'Sprinter Hotspot';
+const MDNS = 'lp-3f2a.local', IP = '192.168.1.42', BLE_NAME = 'LP-3f2a';
+const V = 'v2026.10.19-1', OLDV = 'v2026.10.16-1';
+const HEARD = [
+  { ssid:HOME, bars:4 },
+  { ssid:'Cedar Lane Guest', bars:3, open:true },
+  { ssid:'Juniper-2G', bars:2 },
+  { ssid:'NETGEAR47', bars:1 },
+];
+const ACCOUNT_NETS = [ { ssid:HOME, heard:true, bars:4 }, { ssid:AWAY, heard:false } ];
+
+/* =====================================================================
+   Settings (the strip) and the walks
+   ===================================================================== */
+const ST = { acct:'first', join:'ok', board:'blank' };
+const qs0 = new URLSearchParams(location.search);
+if (['out','first','known'].includes(qs0.get('acct'))) ST.acct = qs0.get('acct');
+if (['ok','wrongpw','notseen','nointernet'].includes(qs0.get('join'))) ST.join = qs0.get('join');
+if (['blank','kept'].includes(qs0.get('board'))) ST.board = qs0.get('board');
+const signedIn = () => ST.acct !== 'out';
+const knows = () => ST.acct === 'known';
+
+const fresh = () => ({ step:ST.board === 'kept' ? 'kept' : 'blank', prog:0, page:null, ssid:null, fromAcct:false, ti:0, outcome:null, retry:false, wifi:null, skipped:false, setup:{ wifi:false, project:false }, open:null });
+const W = { 0:fresh(), A:fresh(), B:fresh(), C:fresh(), D:fresh() };
+const timers = {};
+
+/* =====================================================================
+   The card's pieces
+   ===================================================================== */
+const P = (s, o={}) => ({ i:'layers', k:'Project', s, ...o });
+const L = (i, s, o={}) => ({ i, s, ...o });
+const A_ = (s, o={}) => ({ i:'lock', k:'Access', s, ...o });
+const F = (s, o={}) => ({ i:'fw', k:'Firmware', s, ...o });
+const H = (s, o={}) => ({ i:'chip', k:'Hardware', s, ...o });
+
+function row(spec, cid) {
+  const kd = spec.k ? `<span class="kd">${esc(spec.k)}</span>` : '';
+  const name = spec.s != null ? `<span class="s">${esc(spec.s)}</span>` : '';
+  const aside = spec.a ? `<span class="a${spec.ac ? ' ' + spec.ac : ''}">${esc(spec.a)}</span>` : '';
+  const acts = (spec.act || []).map((a) => `<button type="button" class="wo" data-c="${cid}" data-a="${a.act || ''}">${a.i ? ic(a.i) : ''}${esc(a.w)}</button>`).join('');
+  if (spec.work) {
+    const foot = `<span class="iri" style="width:${spec.work.p != null ? spec.work.p : 35}%"></span>`;
+    return `<div class="srow working"><span class="spin"></span>${kd}${name}<span class="spring"></span>${aside}${foot}</div>`;
+  }
+  const mark = spec.mark ? `<span class="mark${spec.mark === 'off' ? ' off' : ''}" title="${spec.mark === 'off' ? 'Cloud relay is on, and lightplayer.app can’t reach it' : 'Also reachable through lightplayer.app'}">${ic(spec.mark === 'off' ? 'cloudoff' : 'cloudfill')}</span>` : '';
+  const chev = acts ? '' : '<span class="chev">›</span>';
+  const click = spec.open != null ? ` data-c="${cid}" data-a="${spec.open}"` : '';
+  const cls = `srow${spec.open != null ? ' clickable' : ''}${spec.isOpen ? ' open' : ''}${spec.cls ? ' ' + spec.cls : ''}`;
+  return `<div class="${cls}"${click}>${ic(spec.i)}${kd}${name}<span class="spring"></span>${aside}${mark}${acts}${chev}${spec.pop || ''}</div>`;
+}
+function nb(name, p, cid, open, pop) {
+  let prim = '';
+  if (p && p.spin) prim = `<span class="gosec spinonly" role="status" aria-label="Working"><span class="spin"></span></span>`;
+  else if (p) prim = `<button type="button" class="gosec${open ? ' open' : ''}" data-c="${cid}" data-a="${p.act || ''}">${p.i ? ic(p.i) : ''}${esc(p.w)}</button>`;
+  return `<div class="nb${open ? ' open' : ''}"><span class="nm" title="${esc(name)}">${esc(name)}</span>${prim}${pop || ''}</div>`;
+}
+const notch = () => `<span class="notch" title="Details">${ic('dots')}</span>`;
+function surface(sf) {
+  if (!sf || sf === 'live') return `<div class="pic"><canvas data-pat="eaves" data-layout="roof" data-mode="live"></canvas>${notch()}</div>`;
+  const obj = `<span class="obj">${sf.spin ? '<span class="spin"></span>' : ic(sf.icon)}</span>`;
+  const prog = sf.prog != null ? `<div class="prog"><span class="track"><i style="width:${sf.prog}%"></i></span><span class="pc">${Math.round(sf.prog)}%</span></div>` : '';
+  const under = sf.pic ? `<div class="under"><canvas data-pat="eaves" data-layout="roof" data-mode="still"></canvas></div><div class="scrim"></div>` : '';
+  return `<div class="pic sf tone-${sf.tone || 'neu'}">${under}<div class="inner">${obj}<div class="say"><p class="s1">${esc(sf.s1)}</p>${sf.s2 ? `<p class="s2">${esc(sf.s2)}</p>` : ''}</div>${prog}</div>${notch()}</div>`;
+}
+function card(o, cid) {
+  const face = o.face || o.rows.map((r) => row(r, cid)).join('');
+  return `<div class="sc">${surface(o.sf)}${nb(o.name, o.prim, cid, !!o.pop, o.pop)}<div class="face">${face}</div></div>`;
+}
+
+/* rows a board has, by what has happened to it */
+const NEWNAME = 'XIAO ESP32-C6';
+function rowsBlank() { return [ P('none'), L('usb', 'USB · connected'), A_('edit · USB'), F('none'), H('ESP32-C6', { a:'model not set' }) ]; }
+function rowsInstalling(p) { return [ P('none'), L('usb', 'USB · connected'), A_('edit · USB'), F(null, { a:`installing · ${Math.round(p)}%`, work:{ p } }), H('ESP32-C6', { a:'model not set' }) ]; }
+function linkRow(w, cid, o = {}) {
+  /* the Link row after the install: the cloud mark once the board has said
+     how lightplayer.app stands; a skipped setup keeps its way back here */
+  let mark = null;
+  if (w.wifi === 'joined') mark = signedIn() ? (w.outcome === 'nointernet' ? 'off' : true) : null;
+  const act = (w.skipped && !w.wifi) ? [{ w:'Set up Wi‑Fi', i:'wifi', act:'setupwifi' }] : null;
+  return L('usb', 'USB · connected', { mark, act, ...o });
+}
+function rowsAfter(w, cid, o = {}) {
+  return [ P('none'), o.link || linkRow(w, cid), A_('edit · no password'), F(V), H(NEWNAME) ];
+}
+function rowsKept() { return [ P('Holiday Eaves'), L('usb', 'USB · connected', { mark:true }), A_('edit · USB'), F(OLDV, { act:[{ w:'Update', i:'download', act:'update' }] }), H(NEWNAME) ]; }
+
+/* =====================================================================
+   The pages of the setup: shared by A, B, C and D
+   ===================================================================== */
+function heardList() {
+  const mine = knows() ? ACCOUNT_NETS.map((n) => n.ssid) : [];
+  return HEARD.filter((n) => !mine.includes(n.ssid));
+}
+function netBtn(cid, n, o = {}) {
+  const st = o.st != null ? o.st : (n.open ? 'open' : '');
+  return `<button type="button" class="net${o.dim ? ' dim' : ''}" data-c="${cid}" data-a="pick" data-ssid="${esc(n.ssid)}" data-acct="${o.acct ? 1 : 0}">${n.bars ? bars(n.bars) : bars(0)}<span class="nm">${esc(n.ssid)}</span>${st ? `<span class="st">${esc(st)}</span>` : ''}<span class="chev">${ic('chev')}</span></button>`;
+}
+function pagePick(cid, o = {}) {
+  const mine = knows() ? `<div class="lhead">${ic('person')}Your networks</div>${ACCOUNT_NETS.map((n) => netBtn(cid, n, { acct:true, dim:!n.heard, st:n.heard ? '' : 'not in range' })).join('')}` : '';
+  const near = `<div class="lhead">Nearby</div>${heardList().map((n) => netBtn(cid, n)).join('')}`
+    + `<button type="button" class="net" data-c="${cid}" data-a="other">${bars(0)}<span class="nm">Other network…</span><span class="st">hidden, or not in range</span><span class="chev">${ic('chev')}</span></button>`;
+  const foot = [];
+  if (!signedIn()) foot.push(`<p class="help">Sign in to remember networks for your next board. <button type="button" class="tlink" data-c="${cid}" data-a="signin">Sign in</button></p>`);
+  foot.push(`<p class="help">The board only sees 2.4 GHz networks.</p>`);
+  const skip = o.noSkip ? '' : `<div class="acts"><button type="button" class="tlink quiet" data-c="${cid}" data-a="skip">Not now</button></div>`;
+  return `${o.noHead ? '' : `<div class="dsec"><h6>${ic('wifi')}Set up Wi‑Fi</h6><p>Pick the network this board will use.</p></div>`}`
+    + `<div class="dsec flush">${mine}${near}</div><div class="dsec">${foot.join('')}${skip}</div>`;
+}
+function pageForm(cid, w, o = {}) {
+  const other = w.ssid == null;
+  const name = other ? '' : w.ssid;
+  const refused = w.outcome === 'wrongpw' && w.retry;
+  const fromA = w.fromAcct && !refused;
+  const err = refused ? `<div class="dsec tw-err"><h6>${ic('wifi')}Wrong password</h6><p>${esc(name)} refused ${w.fromAcct ? 'the password your account remembers' : 'that password'}. Type the new one.</p></div>` : '';
+  const remember = signedIn()
+    ? `<div class="sw"><span class="tg"></span><span class="lb">Remember in your account</span></div><p class="help">lightplayer.app keeps the password, so your next board can join with one press.</p>`
+    : `<p class="help">Sign in to remember networks for your next board. <button type="button" class="tlink" data-c="${cid}" data-a="signin">Sign in</button></p>`;
+  return `${err}<div class="dsec"><h6>${o.noBack ? '' : `<button type="button" class="back" data-c="${cid}" data-a="back" aria-label="Back">${ic('back')}</button>`}${other ? 'Other network' : esc(name)}</h6>
+    ${other ? `<div class="field"><label for="nn-${cid}">Network</label><input id="nn-${cid}" value="${esc(HOME)}" autocomplete="off"></div>` : ''}
+    <div class="field"><label for="pw-${cid}">Password</label><input id="pw-${cid}" type="password" value="${fromA ? 'remembered-in-account' : 'made-up-for-spike'}" autocomplete="off">${fromA ? `<span class="fromacct">${ic('person')}from your account</span>` : ''}</div>
+    ${refused && w.fromAcct ? `<p class="help">The new password replaces your account’s copy when it connects.</p>` : !fromA ? remember : ''}
+    <div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="connect">${ic('wifi')}Connect</button></div></div>`;
+}
+const STEPS = (ssid) => [ `Looking for ${ssid}`, 'Checking the password', 'Getting an address', 'Reaching lightplayer.app' ];
+/* where each outcome stops the test: the step that fails */
+const FAILAT = { ok:null, wrongpw:1, notseen:0, nointernet:3 };
+function outcomeNow(w) { return w.retry ? 'ok' : ST.join; }
+function pageTest(cid, w) {
+  const steps = STEPS(w.ssid);
+  const oc = w.outcome;
+  const failAt = oc ? FAILAT[oc] : null;
+  const relay = signedIn();
+  const rows = steps.map((s, i) => {
+    if (i === 3 && !relay) return `<div class="step skip"><span class="mk">–</span>${esc(s)} · sign in to use it</div>`;
+    if (oc && failAt != null && i === failAt) return `<div class="step fail"><span class="mk">${ic('x')}</span>${esc(s)}</div>`;
+    if (oc && failAt != null && i > failAt) return `<div class="step skip"><span class="mk"><span class="wait"></span></span>${esc(s)}</div>`;
+    if (oc || i < w.ti) return `<div class="step done"><span class="mk">${ic('check')}</span>${esc(s)}</div>`;
+    if (i === w.ti) return `<div class="step now"><span class="mk"><span class="spin"></span></span>${esc(s)}</div>`;
+    return `<div class="step"><span class="mk"><span class="wait"></span></span>${esc(s)}</div>`;
+  }).join('');
+  let res = '';
+  if (oc === 'wrongpw') res = `<div class="dsec tw-err"><h6>Wrong password</h6><p>${esc(w.ssid)} is saved on the board, but it won’t connect until the password is changed.</p><div class="acts"><button type="button" class="btn" data-c="${cid}" data-a="changepw">Change password</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="repick">Pick another network</button></div></div>`;
+  if (oc === 'notseen') res = `<div class="dsec tw-att"><h6>Not in range</h6><p>The board can’t see ${esc(w.ssid)}. It’s saved, and the board will join it when it’s in range. The board only sees 2.4 GHz networks.</p><div class="acts"><button type="button" class="btn" data-c="${cid}" data-a="repick">Pick another network</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="donenotseen">Done</button></div></div>`;
+  return `<div class="dsec"><h6>${ic('wifi')}${esc(w.ssid)}${w.fromAcct ? `<span class="r">${ic('person')} from your account</span>` : ''}</h6><div class="steps">${rows}</div></div>${res}`;
+}
+function waysList(w, cid) {
+  const relayBad = w.outcome === 'nointernet';
+  const lp = !signedIn()
+    ? `<span class="wh">sign in to use it</span><button type="button" class="tlink" data-c="${cid}" data-a="signin">Sign in</button>`
+    : relayBad ? `<span class="wh">from any browser, signed in</span><span class="wst">didn’t answer</span>`
+    : `<span class="wh">from any browser, signed in</span>`;
+  return `<div class="ways">
+    <div class="way here">${ic('usb')}<span class="wn">USB</span><span class="wh">this cable</span></div>
+    <div class="way">${ic('wifi')}<span class="wn">Wi‑Fi</span><span class="wh">on ${esc(w.ssid || HOME)} · <b>${MDNS}</b></span></div>
+    <div class="way">${ic('cloud')}<span class="wn">lightplayer.app</span>${lp}</div>
+    <div class="way">${ic('ble')}<span class="wn">Bluetooth</span><span class="wh">as <b>LP-3f2a</b>, from a phone or laptop nearby</span></div>
+  </div>`;
+}
+function pageReady(cid, w, o = {}) {
+  const relayBad = w.outcome === 'nointernet';
+  const head = relayBad
+    ? `<div class="dsec tw-att"><h6>${ic('wifi')}Connected, no internet</h6><p>lightplayer.app didn’t answer (${IP}). The network may need a sign-in page.</p></div>`
+    : `<div class="dsec tw-good"><h6>${ic('wifi')}Connected</h6><p>Strong signal · <span style="font-family:var(--mono);font-size:11.5px">${IP}</span></p></div>`;
+  const remembered = signedIn() && !w.fromAcct ? `<p class="help">${esc(w.ssid)} is in your account now.</p>` : '';
+  const lede = o.surfaceSaid ? 'It can connect without its cable now.' : `This board is on ${esc(w.ssid)}, so it can connect without its cable.`;
+  return `${head}<div class="dsec"><p>${lede}</p></div>`
+    + `<div class="dsec flush"><div class="lhead">Ways to connect</div>${waysList(w, cid)}</div>`
+    + `<div class="dsec"><p class="help"><b>No password yet:</b> anyone nearby or on ${esc(w.ssid || HOME)} can connect and edit it. <button type="button" class="tlink" data-c="${cid}" data-a="setpw">Set a password</button></p>${remembered}`
+    + `${o.noDone ? '' : `<div class="acts"><button type="button" class="btn" data-c="${cid}" data-a="done">${ic('check')}Done</button></div>`}</div>`;
+}
+function pageFor(cid, w, o = {}) {
+  if (w.page === 'pick') return pagePick(cid, o);
+  if (w.page === 'form') return pageForm(cid, w, o);
+  if (w.page === 'test') return pageTest(cid, w);
+  if (w.page === 'ready') return pageReady(cid, w, o);
+  return '';
+}
+
+/* =====================================================================
+   The concepts. Each renders its card (or sheet) for its walk.
+   ===================================================================== */
+const sfBlank = { icon:'fw', s1:'This board doesn’t have LightPlayer firmware.', s2:'Install the firmware to use it.' };
+const sfInstalling = (p) => ({ icon:'fw', s1:'Installing the firmware on this board.', prog:p });
+const sfNoProj = { icon:'layers', s1:'This board has no project yet.' };
+const sfKeptUpdating = (p) => ({ icon:'fw', s1:'This board is updating its firmware.', prog:p, pic:true });
+const primInstall = { w:'Install firmware', i:'fw', act:'install' };
+const primAdd = { w:'Add a project', i:'add', act:'addproject' };
+
+function keptCard(cid, w) {
+  /* a board already on Wi‑Fi: the update keeps its network, so nothing is asked */
+  if (w.step === 'kept') return card({ sf:'live', name:'Porch eaves', prim:{ w:'Connect', i:'usb', act:'noop' }, rows:rowsKept() }, cid);
+  if (w.step === 'keptwork') return card({ sf:sfKeptUpdating(w.prog), name:'Porch eaves', prim:null, rows:[ P('Holiday Eaves'), L('usb', 'USB · connected', { mark:true }), A_('edit · USB'), F(OLDV, { a:`updating · ${Math.round(w.prog)}%`, work:{ p:w.prog } }), H(NEWNAME) ] }, cid);
+  return card({ sf:'live', name:'Porch eaves', prim:{ w:'Connect', i:'usb', act:'noop' }, rows:[ P('Holiday Eaves'), L('usb', 'USB · connected', { mark:true }), A_('edit · USB'), F(V), H(NEWNAME) ] }, cid);
+}
+
+const CONCEPTS = {
+  '0':{ name:'Today, as shipped', badge:'today',
+    what:'Install is one press. When the board answers, the card says it has no project and offers <b>Add a project</b>. Wi‑Fi is in the Link row’s details, and nothing points there.',
+    pro:'One press, no questions.',
+    con:'The moment passes. Sean never found the Link row’s details, and nobody hears that Bluetooth is on.',
+    render(w) {
+      const cid = '0';
+      if (w.step.startsWith('kept')) return keptCard(cid, w);
+      if (w.step === 'blank') return card({ sf:sfBlank, name:'ESP32-C6', prim:primInstall, rows:rowsBlank() }, cid);
+      if (w.step === 'installing') return card({ sf:sfInstalling(w.prog), name:'ESP32-C6', prim:null, rows:rowsInstalling(w.prog) }, cid);
+      const open = w.open === 'link';
+      const pop = open ? `<div class="dpop"><div class="dsec"><h6>Reach</h6><div class="kvl"><span>Now</span><span>USB</span></div><div class="kvl"><span>Wi‑Fi</span><span>${w.wifi === 'joined' ? esc(w.ssid) : 'set up'}</span></div></div><div class="dsec"><div class="sw"><span class="tg"></span><span class="lb">Bluetooth</span></div></div>${w.wifi === 'joined' ? `<div class="dsec flush"><div class="lhead">Wi‑Fi</div>${waysList(w, cid)}</div>` : `<div class="dsec"><h6>${ic('wifi')}Wi‑Fi</h6><p>Not connected. Pick the board’s network:</p></div>${w.page ? pageFor(cid, w, { noHead:true, noSkip:true }) : `<div class="dsec flush">${heardList().slice(0, 3).map((n) => netBtn(cid, n)).join('')}</div>`}<div class="dsec"><div class="sw"><span class="tg"></span><span class="lb">Cloud relay</span></div><p class="help">Lets lightplayer.app reach this board through the cloud.</p></div>`}</div>` : '';
+      const link = linkRow(w, cid, { open:'toggle-link', isOpen:open, pop });
+      return card({ sf:sfNoProj, name:NEWNAME, prim:primAdd, rows:rowsAfter(w, cid, { link }) }, cid);
+    } },
+
+  A:{ name:'Ask first: the install asks',
+    what:'Install firmware opens the install’s own details, under the button: the version, a Wi‑Fi pick and a word on Bluetooth, then <b>Install</b>. (The flash offer already takes a board and a name; Wi‑Fi would be two more parameters.) Studio keeps the network until the board answers, sends it, and the card’s top says how the join went.',
+    pro:'One sitting, before the wait. With remembered networks it is still one more press, not a form.',
+    con:'Before the install the board can’t list what it hears, so a new network is typed from memory (and a 5 GHz network fails only after the wait). A wrong password is found a minute later, on the card, after you have looked away. Every install grows a step, even when you don’t want Wi‑Fi.',
+    render(w) {
+      const cid = 'A';
+      if (w.step.startsWith('kept')) return keptCard(cid, w);
+      if (w.step === 'blank' || w.step === 'asking') {
+        let pop = '';
+        if (w.step === 'asking') {
+          let wifi;
+          if (knows()) {
+            const opts = [ ...ACCOUNT_NETS.map((n) => ({ k:n.ssid, t:n.ssid, st:'from your account' })), { k:'other', t:'Another network…', st:'' }, { k:'none', t:'No Wi‑Fi', st:'' } ];
+            const sel = w.choice || HOME;
+            wifi = `<div class="dsec flush"><div class="lhead">${ic('wifi')}Wi‑Fi after the install</div>${opts.map((x) => `<button type="button" class="net${sel === x.k ? ' pick' : ''}" data-c="A" data-a="choose" data-k="${esc(x.k)}"><span class="radio"></span><span class="nm">${esc(x.t)}</span>${x.st ? `<span class="st">${esc(x.st)}</span>` : ''}</button>`).join('')}</div>`;
+          } else {
+            wifi = `<div class="dsec"><h6>${ic('wifi')}Wi‑Fi after the install</h6>
+              <div class="field"><label for="an-A">Network</label><input id="an-A" value="${esc(HOME)}" autocomplete="off"></div>
+              <div class="field"><label for="ap-A">Password</label><input id="ap-A" type="password" value="made-up-for-spike" autocomplete="off"></div>
+              ${signedIn() ? `<div class="sw"><span class="tg"></span><span class="lb">Remember in your account</span></div>` : `<p class="help">Sign in to remember networks for your next board.</p>`}
+              <p class="help">The board only sees 2.4 GHz networks. Studio can’t list them until it’s installed.</p></div>`;
+          }
+          pop = `<div class="dpop"><div class="dsec"><h6>${ic('fw')}Install firmware</h6><div class="kvl"><span>Version</span><span>${V}</span></div><div class="kvl"><span>Board</span><span>${NEWNAME}</span></div></div>${wifi}
+            <div class="dsec"><h6>${ic('ble')}Bluetooth</h6><p>On. A phone or laptop nearby can connect.</p></div>
+            <div class="dsec"><div class="acts"><button type="button" class="btn go" data-c="A" data-a="go">${ic('fw')}Install</button>${knows() ? '' : `<button type="button" class="tlink quiet" data-c="A" data-a="gonowifi">Install without Wi‑Fi</button>`}</div></div></div>`;
+        }
+        return card({ sf:sfBlank, name:'ESP32-C6', prim:{ ...primInstall, act:'ask' }, pop, rows:rowsBlank() }, cid);
+      }
+      if (w.step === 'installing') return card({ sf:sfInstalling(w.prog), name:'ESP32-C6', prim:null, rows:rowsInstalling(w.prog) }, cid);
+      if (w.step === 'joining') return card({ sf:{ spin:true, s1:`This board is joining ${w.ssid}.` }, name:NEWNAME, prim:null, rows:rowsAfter(w, cid) }, cid);
+      if (w.step === 'failed') {
+        const sf = w.outcome === 'wrongpw'
+          ? { icon:'wifi', tone:'att', s1:`This board couldn’t join ${w.ssid}.`, s2:'Change the password to try again.' }
+          : { icon:'wifi', tone:'att', s1:`This board can’t see ${w.ssid}.`, s2:'Pick another network to try again.' };
+        const prim = w.outcome === 'wrongpw' ? { w:'Change password', i:'wifi', act:'Achange' } : { w:'Pick a network', i:'wifi', act:'Arepick' };
+        const pop = w.page ? `<div class="dpop">${pageFor(cid, w, { noBack:true })}</div>` : '';
+        return card({ sf, name:NEWNAME, prim, pop, rows:rowsAfter(w, cid) }, cid);
+      }
+      return card({ sf:sfNoProj, name:NEWNAME, prim:primAdd, rows:rowsAfter(w, cid) }, cid);
+    } },
+
+  B:{ name:'The install sheet (WLED’s way)',
+    what:'Install firmware opens a sheet over the page: <b>Install · Wi‑Fi · Ready</b>. It picks a network while the bar runs when the account remembers one, lists what the board hears once it answers, and ends on Ways to connect.',
+    pro:'Sean’s reference point: ESP Web Tools asks for Wi‑Fi in its install dialog. A clear first run with room to explain, and a real end.',
+    con:'A new kind of surface for one flow, and it says the install’s progress again over the card that already says it. Close it and nothing on the card remembers the question. The card’s own grammar (the top explains, the primary acts) is set aside for a minute.',
+    render(w) {
+      const cid = 'B';
+      if (w.step.startsWith('kept')) return keptCard(cid, w);
+      const installed = !['blank', 'installing'].includes(w.step);
+      const behindCard = w.step === 'blank' ? card({ sf:sfBlank, name:'ESP32-C6', prim:{ ...primInstall, act:'sheet' }, rows:rowsBlank() }, cid)
+        : w.step === 'installing' || w.step === 'sheet' && !installed ? card({ sf:sfInstalling(w.prog), name:'ESP32-C6', prim:null, rows:rowsInstalling(w.prog) }, cid)
+        : card({ sf:sfNoProj, name:NEWNAME, prim:primAdd, rows:rowsAfter(w, cid) }, cid);
+      if (!w.sheet) return behindCard;
+      const stepIx = !installed ? 0 : (w.page === 'ready' ? 2 : 1);
+      const stepper = `<div class="stepper">${['Install', 'Wi‑Fi', 'Ready'].map((s, i) => `<span class="${i === stepIx ? 'on' : i < stepIx ? 'did' : ''}">${i < stepIx ? '✓ ' : ''}${s}</span>`).join('')}</div>`;
+      let body;
+      if (!installed) {
+        const early = knows()
+          ? `<div class="dsec flush"><div class="lhead">${ic('person')}While it installs, pick its Wi‑Fi</div>${ACCOUNT_NETS.map((n) => `<button type="button" class="net${(w.early || HOME) === n.ssid ? ' pick' : ''}" data-c="B" data-a="early" data-k="${esc(n.ssid)}"><span class="radio"></span><span class="nm">${esc(n.ssid)}</span><span class="st">${n.heard ? 'from your account' : 'from your account · not seen yet'}</span></button>`).join('')}</div>`
+          : `<div class="dsec"><p class="help">When it’s installed, the board will list the networks it hears.</p></div>`;
+        body = `<div class="dsec"><p>Installing the firmware on this board.</p><div class="prog" style="justify-content:flex-start"><span class="track" style="max-width:none"><i style="width:${w.prog}%"></i></span><span class="pc">${Math.round(w.prog)}%</span></div></div>${early}<div class="dsec"><h6>${ic('ble')}Bluetooth</h6><p>On. A phone or laptop nearby can connect.</p></div>`;
+      } else {
+        body = pageFor(cid, w, { noHead:true });
+        if (w.page === 'pick') body = `<div class="dsec"><p>Pick the network this board will use.</p></div>` + body;
+      }
+      const sheet = `<div class="sheet" role="dialog" aria-label="Install LightPlayer"><div class="sh"><b>Install LightPlayer · ${installed ? NEWNAME : 'ESP32-C6'}</b><button type="button" class="x" data-c="B" data-a="closesheet" aria-label="Close">×</button></div>${stepper}${body}</div>`;
+      return `<div class="sheetwrap"><div class="behind">${behindCard}</div>${sheet}</div>`;
+    } },
+
+  C:{ name:'The card asks next', lean:true,
+    what:'No new surface. When the board answers, the card’s top says what to do next: <b>Set up Wi‑Fi</b>, or <b>Join Cedar Lane</b> when the account remembers a network the board hears. Its details are the Wi‑Fi panel’s own pages, from what the board hears, ending on Ways to connect. Then the card moves on to Add a project.',
+    pro:'The card’s own grammar (P18 the top says what matters, P19 the primary is the likely next step). The list is what the board really hears. With a remembered network it is one press and no form. Skipped, the Link row keeps the way back.',
+    con:'It comes a minute after the press, so someone who walks away during the install comes back to a question, not a finished board. It comes before Add a project, which is what most people came for.',
+    render(w) {
+      const cid = 'C';
+      if (w.step.startsWith('kept')) return keptCard(cid, w);
+      if (w.step === 'blank') return card({ sf:sfBlank, name:'ESP32-C6', prim:primInstall, rows:rowsBlank() }, cid);
+      if (w.step === 'installing') return card({ sf:sfInstalling(w.prog), name:'ESP32-C6', prim:null, rows:rowsInstalling(w.prog) }, cid);
+      return cardC(w, cid);
+    } },
+
+  D:{ name:'The setup rows',
+    what:'When the board answers, its rows become the setup, the way they become the panel when it connects: Firmware done, Wi‑Fi, Bluetooth, Project, each with its own button. The primary is the next one. The rows go back to the board’s facts when the setup is done or finished early.',
+    pro:'The whole setup at a glance, Bluetooth included, and any step can be done in any order or left.',
+    con:'A third face for the rows, beside the facts and the panel, in a card that is meant to keep one shape. It repeats facts the rows already carry (Firmware, Project). A Bluetooth row with nothing to do is a checklist item that is only a fact.',
+    render(w) {
+      const cid = 'D';
+      if (w.step.startsWith('kept')) return keptCard(cid, w);
+      if (w.step === 'blank') return card({ sf:sfBlank, name:'ESP32-C6', prim:primInstall, rows:rowsBlank() }, cid);
+      if (w.step === 'installing') return card({ sf:sfInstalling(w.prog), name:'ESP32-C6', prim:null, rows:rowsInstalling(w.prog) }, cid);
+      if (w.step === 'setup') {
+        const s = w.setup;
+        const wifiRow = s.wifi
+          ? { i:'wifi', k:'Wi‑Fi', s:w.wifi === 'joined' ? `${w.ssid} · ${MDNS}` : `${w.ssid} · saved`, a:'done', ac:'good', cls:'done-row' }
+          : { i:'wifi', k:'Wi‑Fi', s:'not set up', act:[{ w:'Set up', act:'setupwifi' }] };
+        const projRow = s.project ? P('Starter', { a:'done', ac:'good' }) : P('none', { act:[{ w:'Add', i:'add', act:'Dproject' }] });
+        const left = (s.wifi ? 0 : 1) + (s.project ? 0 : 1);
+        const rows = [
+          F(V, { a:'installed', ac:'good', cls:'done-row' }),
+          wifiRow,
+          { i:'ble', k:'Bluetooth', s:'on · no password', act:[{ w:'Set password', act:'setpw' }] },
+          projRow,
+          { i:'check', k:'Setup', s:left ? `${left} left` : 'done', act:[{ w:left ? 'Finish' : 'Done', act:'Dfinish' }] },
+        ];
+        const prim = !s.wifi ? { w:'Set up Wi‑Fi', i:'wifi', act:'setupwifi' } : !s.project ? { w:'Add a project', i:'add', act:'Dproject' } : { w:'Done', i:'check', act:'Dfinish' };
+        const sf = !s.wifi ? { icon:'wifi', s1:'LightPlayer is installed on this board.', s2:'Set up Wi‑Fi to reach it without a cable.' }
+          : !s.project ? { icon:'layers', s1:`This board is on ${w.ssid}.`, s2:'Add a project to play on it.' }
+          : { icon:'check', tone:'good', s1:'This board is set up.' };
+        const pop = w.page ? `<div class="dpop">${pageFor(cid, w, { surfaceSaid:true })}</div>` : '';
+        return card({ sf:w.page ? setupSurface(w, sf) : sf, name:NEWNAME, prim, pop, rows }, cid);
+      }
+      return card({ sf:w.setup.project ? 'live' : sfNoProj, name:NEWNAME, prim:w.setup.project ? { w:'Connect', i:'usb', act:'noop' } : primAdd, rows:[ w.setup.project ? P('Starter') : P('none'), linkRow(w, cid), A_('edit · no password'), F(V), H(NEWNAME) ] }, cid);
+    } },
+};
+
+/* While the setup's details are open the card's top says one sentence, the
+   state, and the details hold the buttons; the primary stays the button that
+   opened them, drawn open (the merged outline). */
+function setupSurface(w, sf) {
+  if (w.page === 'pick' || w.page === 'form') return { ...sf, s2:null };
+  if (w.page === 'test' && !w.outcome) return { spin:true, s1:`This board is joining ${w.ssid}.` };
+  if (w.page === 'test' && w.outcome === 'wrongpw') return { icon:'wifi', tone:'att', s1:`This board couldn’t join ${w.ssid}.` };
+  if (w.page === 'test' && w.outcome === 'notseen') return { icon:'wifi', tone:'att', s1:`This board can’t see ${w.ssid}.` };
+  if (w.page === 'ready') return { icon:'wifi', tone:'good', s1:`This board is on ${w.ssid}.` };
+  return sf;
+}
+
+/* C's card once the board has answered */
+function cardC(w, cid) {
+  const heardMine = knows();   /* the account's Cedar Lane is heard */
+  if (w.step === 'installed') {
+    const prim = heardMine ? { w:`Join ${HOME}`, i:'wifi', act:'joinmine' } : { w:'Set up Wi‑Fi', i:'wifi', act:'setupwifi' };
+    let sf = heardMine
+      ? { icon:'wifi', s1:'LightPlayer is installed on this board.', s2:`Join ${HOME} to reach it without a cable.` }
+      : { icon:'wifi', s1:'LightPlayer is installed on this board.', s2:'Set up Wi‑Fi to reach it without a cable.' };
+    sf = setupSurface(w, sf);
+    const pop = w.page ? `<div class="dpop">${pageFor(cid, w, { surfaceSaid:true })}</div>` : '';
+    return card({ sf, name:NEWNAME, prim, pop, rows:rowsAfter(w, cid) }, cid);
+  }
+  /* after the setup (done or skipped): the board has no project yet */
+  const pop = w.page && w.skipped ? `<div class="dpop">${pageFor(cid, w)}</div>` : '';
+  const link = pop ? linkRow(w, cid, { isOpen:false }) : linkRow(w, cid);
+  return card({ sf:sfNoProj, name:NEWNAME, prim:primAdd, rows:rowsAfter(w, cid, { link }) }, cid);
+}
+
+/* =====================================================================
+   The walks: what each press does
+   ===================================================================== */
+function startInstall(cid, next) {
+  const w = W[cid];
+  w.step = 'installing'; w.prog = 0;
+  clearInterval(timers[cid]);
+  timers[cid] = setInterval(() => {
+    w.prog = Math.min(100, w.prog + 3.5);
+    if (cid === 'B' && w.sheet) w.step = 'installing';
+    if (w.prog >= 100) { clearInterval(timers[cid]); next(); }
+    renderConcept(cid);
+  }, 110);
+}
+function startTest(cid, done) {
+  const w = W[cid];
+  w.page = 'test'; w.ti = 0; w.outcome = null;
+  const oc = outcomeNow(w);
+  const failAt = FAILAT[oc];
+  const last = signedIn() ? 3 : 2;
+  clearInterval(timers[cid + 't']);
+  timers[cid + 't'] = setInterval(() => {
+    if (failAt != null && w.ti === failAt) { clearInterval(timers[cid + 't']); w.outcome = oc; done && done(oc); renderConcept(cid); return; }
+    if (w.ti >= last) { clearInterval(timers[cid + 't']); w.outcome = oc === 'nointernet' && !signedIn() ? 'ok' : oc; w.wifi = 'joined'; w.page = 'ready'; done && done(w.outcome); renderConcept(cid); return; }
+    w.ti++;
+    renderConcept(cid);
+  }, 620);
+  renderConcept(cid);
+}
+function afterInstall(cid) {
+  const w = W[cid];
+  if (cid === '0') { w.step = 'done'; return; }
+  if (cid === 'A') {
+    if (!w.ssid) { w.step = 'done'; return; }
+    w.step = 'joining';
+    const oc = ST.join;
+    setTimeout(() => {
+      if (oc === 'wrongpw' || oc === 'notseen') { w.step = 'failed'; w.outcome = oc; w.page = null; }
+      else { w.step = 'done'; w.wifi = 'joined'; w.outcome = oc; }
+      renderConcept(cid);
+    }, 2200);
+    return;
+  }
+  if (cid === 'B') { w.step = 'sheet'; w.page = knows() ? null : 'pick'; if (knows()) { w.ssid = w.early || HOME; w.fromAcct = true; w.step = 'sheet'; setTimeout(() => startTest('B'), 300); } return; }
+  if (cid === 'C') { w.step = 'installed'; return; }
+  if (cid === 'D') { w.step = 'setup'; return; }
+}
+function act(cid, a, el) {
+  const w = W[cid];
+  switch (a) {
+    case 'install': return startInstall(cid, () => afterInstall(cid));
+    case 'ask': w.step = w.step === 'asking' ? 'blank' : 'asking'; break;
+    case 'choose': w.choice = el.dataset.k; break;
+    case 'go': {
+      const k = knows() ? (w.choice || HOME) : 'typed';
+      if (k === 'none') w.ssid = null;
+      else if (k === 'other' || k === 'typed') { w.ssid = (document.getElementById('an-A') || {}).value || HOME; w.fromAcct = false; }
+      else { w.ssid = k; w.fromAcct = true; }
+      if (k === AWAY && ST.join === 'ok') { /* the account's away network: saved, not in range here */ }
+      return startInstall(cid, () => afterInstall(cid));
+    }
+    case 'gonowifi': w.ssid = null; return startInstall(cid, () => afterInstall(cid));
+    case 'Achange': w.page = 'form'; w.retry = true; w.outcome = 'wrongpw'; break;
+    case 'Arepick': w.page = 'pick'; break;
+    case 'sheet': w.sheet = true; return startInstall(cid, () => afterInstall(cid));
+    case 'early': w.early = el.dataset.k; break;
+    case 'closesheet': w.sheet = false; if (!w.wifi) w.skipped = true; break;
+    case 'setupwifi': w.page = w.page ? null : 'pick'; if (w.step === 'done' && cid === 'C') w.step = 'done'; break;
+    case 'joinmine': w.ssid = HOME; w.fromAcct = true; return startTest(cid);
+    case 'pick': {
+      w.ssid = el.dataset.ssid; w.fromAcct = el.dataset.acct === '1';
+      if (w.fromAcct) return startTest(cid, cid === 'A' ? (oc) => { if (oc === 'ok' || oc === 'nointernet') { w.step = 'done'; w.page = null; } } : null);
+      w.page = 'form'; break;
+    }
+    case 'other': w.ssid = null; w.fromAcct = false; w.page = 'form'; break;
+    case 'back': w.page = 'pick'; break;
+    case 'connect': {
+      if (w.ssid == null) w.ssid = (document.getElementById('nn-' + cid) || {}).value || HOME;
+      const retrying = w.outcome === 'wrongpw';
+      if (retrying) w.retry = true;
+      if (cid === 'A') return startTest(cid, (oc) => { if (oc === 'ok' || oc === 'nointernet') { w.step = 'done'; w.page = null; } });
+      return startTest(cid);
+    }
+    case 'changepw': w.page = 'form'; w.retry = true; break;
+    case 'repick': w.page = 'pick'; w.outcome = null; w.retry = false; break;
+    case 'donenotseen': w.wifi = 'saved'; return finishWifi(cid);
+    case 'done': return finishWifi(cid);
+    case 'skip': w.skipped = true; w.page = null; if (cid === 'C') w.step = 'done'; if (cid === 'B') w.sheet = false; break;
+    case 'toggle-link': w.open = w.open === 'link' ? null : 'link'; break;
+    case 'signin': flash(el, 'In Studio this is a page sign-in (it leaves the page), so it is never offered while a flash runs.'); return;
+    case 'setpw': flash(el, 'Opens the Access row’s details: Play and Author, each Anyone or Password (the two-passwords panel).'); return;
+    case 'addproject': case 'Dproject':
+      if (cid === 'D') { w.setup.project = true; w.page = null; break; }
+      flash(el, 'The project pick, as today.'); return;
+    case 'Dfinish': w.step = 'done'; w.page = null; if (!w.setup.wifi) w.skipped = true; break;
+    case 'update': w.step = 'keptwork'; w.prog = 0; clearInterval(timers[cid]);
+      timers[cid] = setInterval(() => { w.prog = Math.min(100, w.prog + 4); if (w.prog >= 100) { clearInterval(timers[cid]); w.step = 'keptdone'; } renderConcept(cid); }, 110); return;
+    case 'noop': flash(el, 'Connect, as today.'); return;
+  }
+  renderConcept(cid);
+}
+function finishWifi(cid) {
+  const w = W[cid];
+  w.page = null;
+  if (cid === 'B') { w.sheet = false; w.step = 'done'; }
+  if (cid === 'C') w.step = 'done';
+  if (cid === 'D') { w.setup.wifi = true; if (!w.wifi) w.wifi = 'saved'; }
+  if (cid === '0') w.open = null;
+  renderConcept(cid);
+}
+function flash(el, msg) {
+  const host = el.closest('.concept');
+  const note = host && host.querySelector('.walkbar');
+  if (note) { note.innerHTML = `<span class="now">${esc(msg)}</span>`; clearTimeout(note._t); note._t = setTimeout(() => renderConcept(host.dataset.cid), 2600); }
+}
+
+/* =====================================================================
+   Section 1: the concepts
+   ===================================================================== */
+function walkWords(cid) {
+  const w = W[cid];
+  const m = {
+    blank:'A blank board on USB. Press <b>Install firmware</b>.', asking:'The install asks first. Press <b>Install</b>.',
+    installing:'Installing…', joining:'The board answered; Studio sent the network.', failed:'The join failed, a minute after the press.',
+    installed:'The board answered.', setup:'The board answered; the rows are the setup.', sheet:'The board answered.',
+    done:'Done: the board has no project yet.', kept:'A board already on Wi‑Fi. Press its Firmware row’s <b>Update</b>.',
+    keptwork:'Updating over USB…', keptdone:'Updated. Its network was kept, so nothing was asked.',
+  };
+  let s = m[w.step] || '';
+  if (w.page === 'pick') s = 'Pick a network.';
+  if (w.page === 'form') s = 'Type the password, then <b>Connect</b>.';
+  if (w.page === 'test' && !w.outcome) s = 'The board is joining.';
+  if (w.page === 'ready') s = 'Joined. Ways to connect, then <b>Done</b>.';
+  if (cid === '0' && w.step === 'done' && !w.open) s = 'Done. Wi‑Fi is in the Link row’s details: press the row.';
+  if (w.skipped && !w.wifi && ['done', 'setup'].includes(w.step)) s += ' Skipped: the Link row keeps <b>Set up Wi‑Fi</b>.';
+  return s;
+}
+function conceptHtml(cid) {
+  const c = CONCEPTS[cid];
+  const badge = c.badge === 'today' ? '<span class="todayb">today</span>' : c.lean ? '<span class="leanb">lean</span>' : '';
+  return `<div class="concept${c.lean ? ' leanc' : ''}" data-cid="${cid}">
+    <div class="chead"><span class="cl">${cid}</span><span class="cn">${c.name}</span>${badge}</div>
+    <p class="cw">${c.what}</p>
+    <div class="walkbar" id="wb-${cid}"></div>
+    <div class="stage" id="st-${cid}"></div>
+    <div class="cfa"><span><b>For:</b> ${c.pro}</span><span><b>Against:</b> ${c.con}</span></div>
+  </div>`;
+}
+function renderConcept(cid) {
+  const st = document.getElementById('st-' + cid);
+  if (!st) return;
+  /* keep typed values across a re-render */
+  const kept = {};
+  st.querySelectorAll('input[id]').forEach((i) => { kept[i.id] = i.value; });
+  st.innerHTML = CONCEPTS[cid].render(W[cid]);
+  st.querySelectorAll('input[id]').forEach((i) => { if (kept[i.id] != null) i.value = kept[i.id]; });
+  const wb = document.getElementById('wb-' + cid);
+  if (wb && !wb._t) wb.innerHTML = `<span>${walkWords(cid)}</span>`;
+  if (wb && wb._t) { clearTimeout(wb._t); wb._t = null; wb.innerHTML = `<span>${walkWords(cid)}</span>`; }
+  fitStage(st);
+  mountCanvases(st);
+}
+function fitStage(st) {
+  st.style.minHeight = '';
+  const top = st.getBoundingClientRect().top;
+  let bottom = st.getBoundingClientRect().bottom;
+  st.querySelectorAll('.dpop, .sheet').forEach((p) => { bottom = Math.max(bottom, p.getBoundingClientRect().bottom + 8); });
+  st.style.minHeight = Math.ceil(bottom - top) + 'px';
+}
+
+/* =====================================================================
+   Section 2: every state in C, frozen
+   ===================================================================== */
+function frozen(over, settings) {
+  const save = { ...ST };
+  Object.assign(ST, settings || {});
+  const w = { ...fresh(), ...over };
+  const html = (over.render || ((ww) => CONCEPTS.C.render(ww)))(w);
+  Object.assign(ST, save);
+  return html;
+}
+const GRID = [
+  { k:'1', cap:'installing', sub:'As today. Nothing is asked while the flash runs: a sign-in would leave the page and cut it.', w:{ step:'installing', prog:64 } },
+  { k:'2', cap:'installed · nothing remembered', sub:'Signed out, or the account’s first board. <b>Set up Wi‑Fi</b> is the primary, and the top says it aloud.', w:{ step:'installed' }, s:{ acct:'first' } },
+  { k:'3', cap:'installed · signed out · the list', sub:'What the board hears, strongest first. One line offers to remember next time.', w:{ step:'installed', page:'pick' }, s:{ acct:'out' } },
+  { k:'4', cap:'first time on the account', sub:'<b>Remember in your account</b> is on: the blunt default. Off is one press.', w:{ step:'installed', page:'form', ssid:HOME }, s:{ acct:'first' } },
+  { k:'5', cap:'signed in · remembers a network it hears', sub:'One press, no form: <b>Join Cedar Lane</b>. The password is the account’s. The same after a Factory reset, the one thing that wipes a board’s network.', w:{ step:'installed' }, s:{ acct:'known' } },
+  { k:'6', cap:'signed in · the list', sub:'Your networks first (one not in range, dimmed), then the rest it hears. Picking yours connects at once.', w:{ step:'installed', page:'pick' }, s:{ acct:'known' } },
+  { k:'7', cap:'joining', sub:'The test runs where you pressed, as in the shipped panel (2B).', w:{ step:'installed', page:'test', ssid:HOME, ti:2 }, s:{ acct:'first' } },
+  { k:'8', cap:'wrong password', sub:'Saved, and marked. Change password is one step back to the form.', w:{ step:'installed', page:'test', ssid:HOME, outcome:'wrongpw' }, s:{ acct:'first' } },
+  { k:'9', cap:'the account’s password refused', sub:'The router’s password changed. The new one replaces the account’s copy when it connects.', w:{ step:'installed', page:'form', ssid:HOME, fromAcct:true, outcome:'wrongpw', retry:true }, s:{ acct:'known' } },
+  { k:'10', cap:'a network the board can’t see', sub:'Typed by hand, a 5 GHz network, or out of range. It’s saved and will join when it can.', w:{ step:'installed', page:'test', ssid:'Cedar Lane 5G', outcome:'notseen' }, s:{ acct:'first' } },
+  { k:'11', cap:'joined, no internet', sub:'Wi‑Fi works here; lightplayer.app didn’t answer. The line says why it may be.', w:{ step:'installed', page:'ready', ssid:HOME, outcome:'nointernet', wifi:'joined' }, s:{ acct:'first' } },
+  { k:'12', cap:'joined · ways to connect', sub:'The one place the card says what Wi‑Fi gets you: one link a line, and Bluetooth with them.', w:{ step:'installed', page:'ready', ssid:HOME, outcome:'ok', wifi:'joined' }, s:{ acct:'first' } },
+  { k:'13', cap:'joined · signed out', sub:'lightplayer.app needs the account: the line says so, with Sign in.', w:{ step:'installed', page:'ready', ssid:HOME, outcome:'ok', wifi:'joined' }, s:{ acct:'out' } },
+  { k:'14', cap:'after Done', sub:'On to the project. The Link row’s cloud mark says lightplayer.app reaches it.', w:{ step:'done', ssid:HOME, outcome:'ok', wifi:'joined' }, s:{ acct:'first' } },
+  { k:'15', cap:'skipped', sub:'<b>Not now</b>. The Link row keeps <b>Set up Wi‑Fi</b> until a network is saved.', w:{ step:'done', skipped:true }, s:{ acct:'first' } },
+  { k:'16', cap:'already on Wi‑Fi · updated or reinstalled', sub:'The flash and the update leave the file store alone, so its network is kept and nothing is asked: back to its picture.', w:{ step:'keptdone' }, s:{ acct:'first', board:'kept' } },
+];
+function renderGrid() {
+  document.getElementById('grid').innerHTML = GRID.map((g) => `<div class="gitem"><div class="gcap"><span class="k">${g.k}</span><span>${esc(g.cap)}</span></div><div class="stage">${frozen(g.w, g.s)}</div><p class="gsub">${g.sub}</p></div>`).join('');
+  document.querySelectorAll('#grid .stage').forEach((st) => { fitStage(st); mountCanvases(st); });
+}
+
+/* =====================================================================
+   Section 3: the words
+   ===================================================================== */
+const WORDS = [
+  ['installed, nothing saved', 'sentence', 'LightPlayer is installed on this board. / Set up Wi‑Fi to reach it without a cable.', 'What is going on, then the primary said aloud: its verb and object, then what it gets you (R2).'],
+  ['', 'button', 'Set up Wi‑Fi', 'A verb and its object (P12). The Wi‑Fi icon leads it, as the link icon leads Connect.'],
+  ['installed, a remembered network heard', 'sentence', `LightPlayer is installed on this board. / Join ${HOME} to reach it without a cable.`, 'The same rule. The network’s name is the object.'],
+  ['', 'button', `Join ${HOME}`, 'One press. A long name is cut at its end; the details hold it whole.'],
+  ['the list', 'label', 'Set up Wi‑Fi · Your networks · Nearby · Other network… · hidden, or not in range', 'The shipped panel’s words, plus Your networks for the account’s.'],
+  ['', 'sentence', 'Pick the network this board will use.', 'A lede under the heading. The only sentence on the page.'],
+  ['', 'label', 'The board only sees 2.4 GHz networks.', 'Said where it saves a wasted minute: under the list, and in Not in range.'],
+  ['signed out', 'sentence', 'Sign in to remember networks for your next board.', 'The button said aloud, then what it gets you. Never shown mid-flash.'],
+  ['first time on the account', 'label', 'Remember in your account', 'A positive switch, on by default (P6, “positive options”).'],
+  ['', 'sentence', 'lightplayer.app keeps the password, so your next board can join with one press.', 'Says where the password goes. No reassurance about safety.'],
+  ['joining', 'sentence', `This board is joining ${HOME}.`, '“is …ing” for a state (P20). The steps are the panel’s: Looking for, Checking the password, Getting an address, Reaching lightplayer.app.'],
+  ['wrong password', 'sentence', `This board couldn’t join ${HOME}. / Change the password to try again.`, 'The card’s top while the details say what happened.'],
+  ['', 'label', 'Wrong password · Change password · Pick another network', 'The panel’s labels.'],
+  ['the account’s password refused', 'sentence', `${HOME} refused the password your account remembers. Type the new one.`, 'Names whose password it was.'],
+  ['can’t see it', 'sentence', `The board can’t see ${HOME}. It’s saved, and the board will join it when it’s in range.`, '“will” for a consequence (P20).'],
+  ['joined', 'sentence', `This board is on ${HOME}. / (details) It can connect without its cable now.`, 'The top says the state; the details say what it means for you. No exclamation, no “you’re all set”, nothing said twice (P2).'],
+  ['', 'label', 'Ways to connect · USB this cable · Wi‑Fi on Cedar Lane · lp-3f2a.local · lightplayer.app from any browser, signed in · Bluetooth as LP-3f2a, from a phone or laptop nearby', 'One link a line, as the Link row names links (“over Wi‑Fi”, “through lightplayer.app”). Facts, not benefits; the names are what the person will see in a phone’s list and an address bar.'],
+  ['', 'sentence', 'No password yet: anyone nearby or on Cedar Lane can connect and edit it. Set a password', 'The open board’s one honest line: Bluetooth and the same Wi‑Fi both reach it. Open is the default (O4), so it is said once, here, and never as a warning.'],
+  ['joined, no internet', 'label', 'Connected, no internet · lightplayer.app didn’t answer (192.168.1.42). The network may need a sign-in page.', 'The panel’s words.'],
+  ['skipped', 'button', 'Not now · (Link row) Set up Wi‑Fi', 'The way out, and the way back where the link lives.'],
+];
+const PAIRS = `<span class="c"># the joined board, said three ways</span>
+<span class="bad">bad:</span>  You’re all set! Your board is now connected to the world.          <span class="c"># marketing, an exclamation, says nothing</span>
+<span class="bad">bad:</span>  Wireless freedom: control your lights from anywhere.               <span class="c"># a slogan; and “anywhere” is untrue signed out</span>
+<span class="bad">bad:</span>  Seamlessly connect over Wi‑Fi, Bluetooth or the cloud.             <span class="c"># a cliché, and “the cloud” is our word</span>
+<span class="bad">bad:</span>  Wi‑Fi unlocks the full LightPlayer experience.                     <span class="c"># sounds meaningful, says nothing</span>
+<span class="bad">bad:</span>  Don’t worry, you can always set this up later.                     <span class="c"># unasked reassurance (P20)</span>
+<span class="bad">bad:</span>  Wi‑Fi connected — LAN link and relay available                     <span class="c"># our mechanism, a dash</span>
+<span class="do">do:</span>   This board is on Cedar Lane.                                        <span class="c"># the card's top</span>
+      It can connect without its cable now.                              <span class="c"># the details</span>
+      Ways to connect
+      ↔ USB              this cable · here
+        Wi‑Fi            on Cedar Lane · lp-3f2a.local
+      ☁ lightplayer.app  from any browser, signed in
+      ᛒ Bluetooth        as LP-3f2a, from a phone or laptop nearby
+      No password yet: anyone nearby or on Cedar Lane can connect and edit it.  Set a password`;
+function renderWords() {
+  document.getElementById('words').innerHTML = WORDS.map(([s, r, t, why]) => `<tr><td class="st">${esc(s)}</td><td class="role">${r}</td><td class="say1">${esc(t)}</td><td>${esc(why)}</td></tr>`).join('');
+  document.getElementById('pairs').innerHTML = PAIRS;
+}
+
+/* =====================================================================
+   Section 4: the account
+   ===================================================================== */
+function renderAcct() {
+  const mock = `<div><p class="gsub" style="margin:0 0 6px"><b>Where you see them:</b> the account menu, beside Sign out. Each network says where it came from; Forget is one press (the boards keep their own copy).</p>
+    <div class="acctmock"><div class="dsec"><h6>${ic('person')}river@example.com</h6><div class="kvl"><span>Signed in with</span><span>Google</span></div></div>
+    <div class="dsec flush"><div class="lhead">${ic('wifi')}Wi‑Fi networks</div>
+      <div class="way"><span class="wn" style="width:auto;flex:1">${HOME}</span><span class="wh" style="flex:none">on 2 boards</span><button type="button" class="tlink quiet">Forget</button></div>
+      <div class="way"><span class="wn" style="width:auto;flex:1">${AWAY}</span><span class="wh" style="flex:none">on 1 board</span><button type="button" class="tlink quiet">Forget</button></div></div>
+    <div class="dsec"><p class="help">Passwords are kept by lightplayer.app and filled in when a board joins.</p></div></div></div>`;
+  const which = `<div class="q" style="margin:0"><h3><span class="id">·</span>Which of the account’s networks go on a board?</h3>
+    <ul><li><b>The one it joins</b> (drawn): the board gets the network you picked, nothing else.</li>
+    <li><b>All of them:</b> the board would join the house, the truck and the shop by itself, wherever it goes. Round 1 of the Wi‑Fi spike set this aside; the board holds up to eight.</li></ul>
+    <p class="lean"><b>Lean: the one it joins.</b> Sean’s boards live on one house. “Add your other networks to this board” can be a line in the Link row’s details later, and it needs no format change.</p></div>`;
+  document.getElementById('acct').innerHTML = mock + which;
+  document.getElementById('where').innerHTML = `
+    <div class="opt lean"><h4><span class="cid">4A</span>In the account, like its passwords</h4><p>Kept with the account record, encrypted at rest with the service’s key. Any browser signed in as you gets them when a board joins.</p><p class="pro">+ The same trust as the play and edit passwords already there, and no new crypto.</p><p class="pro">+ Works on a new laptop and on a phone over Bluetooth.</p><p class="con">− lightplayer.app, and anyone who breaks into it, can read your Wi‑Fi password.</p></div>
+    <div class="opt"><h4><span class="cid">4B</span>Sealed so only your browsers can read it</h4><p>The cloud holds ciphertext; the key comes from a passkey or from a browser that already holds it.</p><p class="pro">+ The service can’t read them.</p><p class="con">− Sign-in is Google or GitHub, with no passkey to derive a key from; a new browser needs a hand-off first, so the “one press on your next board” fails on the browser that matters most.</p></div>
+    <div class="opt"><h4><span class="cid">4C</span>This browser only</h4><p>Remembered in the browser that typed it, never uploaded.</p><p class="pro">+ Nothing new in the cloud.</p><p class="con">− The phone or the second laptop doesn’t know the house. Not what Yona asked for (“your account remembers wifi”).</p></div>`;
+}
+
+/* =====================================================================
+   Section 5: the gate
+   ===================================================================== */
+function renderQs() {
+  document.getElementById('qs').innerHTML = `
+  <div class="q"><h3><span class="id">Q1</span>Where does the setup live: asked first (A), a sheet (B), the card’s next step (C), or the setup rows (D)?</h3>
+    <p class="lean"><b>Lean: C, the card asks next.</b> Before the install the board can’t say what it hears, and Studio can’t read the laptop’s Wi‑Fi, so asking first (A) means typing a name from memory and finding a wrong password a minute later. Once the board answers, the list is real, the test runs in place, and the card already has the grammar for “the likely next step” (P18, P19). B is WLED’s way, but it is a second surface saying what the card says; D is a third face for the rows. C borrows B’s ending (Ways to connect) and D’s honesty about Bluetooth. Pass looks like: “C” or “C, but …”.</p></div>
+  <div class="q"><h3><span class="id">Q2</span>Signed in, and the board hears a network the account remembers: one press (Join Cedar Lane), or join by itself?</h3>
+    <p>The blunt version joins with no press at all: the install is the consent, and the card would say “This board joined Cedar Lane.” The drawn version makes it the primary, one press.</p>
+    <p class="lean"><b>Lean: one press.</b> It opens the page that says what Wi‑Fi gets the board, which is the moment you asked for (“this is our moment to get people to think about it”), and it is your home password leaving the account for a board that may be a gift. It is still one press and no form.</p></div>
+  <div class="q"><h3><span class="id">Q3</span>Is “Remember in your account” on by default, with lightplayer.app able to read the password (4A)?</h3>
+    <p class="lean"><b>Lean: yes, both.</b> On by default is the blunt default, and 4A is the precedent the account’s play and edit passwords already set. 4B fails on a new browser, the case it exists for. This is the decision for the ADR the plan writes; the spike only shows the switch and the one line saying where the password goes.</p></div>
+  <div class="q"><h3><span class="id">Q4</span>After Not now, does the Link row keep a Set up Wi‑Fi button until a network is saved?</h3>
+    <p class="lean"><b>Lean: yes.</b> It is “easy to find later” in the row whose subject it is, and it fixes the row’s state the way Retry does. Against: a board you never want on Wi‑Fi carries it forever. The alternative is the Link row’s details only (today), which is where Sean didn’t look.</p></div>
+  <div class="q"><h3><span class="id">·</span>Decided without you (Undoable, said here so you can veto)</h3>
+    <ul>
+      <li><b>Nothing is asked during the flash.</b> Sign-in is a page redirect (<code>cloud_account.rs</code>), which would drop the USB link mid-flash, and the board can’t take a network until it answers.</li>
+      <li><b>Bluetooth is told, not set up.</b> It is on by default and the board is open; the joined page names it (<code>LP-3f2a</code>) among the ways to connect and says once, plainly, “No password yet: anyone nearby or on Cedar Lane can connect and edit it.”, with Set a password, which opens the Access row’s details. No new Bluetooth step, and no warning tone (open is the default, O4).</li>
+      <li><b>Ways to connect</b> is the joined page’s list, and the same list belongs in the Link row’s details afterwards, so “how else can I reach it” has one home.</li>
+      <li><b>Every word of the list, the test and the outcomes is the shipped panel’s</b> (<code>wifi_words.rs</code>), plus three new lines (Your networks, Remember in your account, Ways to connect).</li>
+      <li><b>A board that already has a network is never asked</b>, after an update or a reinstall that keeps its files.</li>
+    </ul></div>
+  <div class="q"><h3><span class="id">·</span>Noted for the plan (no decision needed)</h3>
+    <ul id="plannotes"></ul></div>`;
+}
+
+/* =====================================================================
+   The facts box (filled from the fact check)
+   ===================================================================== */
+const FACTS = [
+  '<b>Install is one press</b>, the card’s Install firmware (<code>devices/&lt;board&gt;/flash</code>, with a board pick and a name as parameters, preselected when the chip fits one board). The top says “Installing the firmware on this board.” with its bar; then the Firmware row reads “installed” for 3 s, and the top says “This board has no project yet.” beside Add a project. Nothing mentions Wi‑Fi or Bluetooth.',
+  '<b>A reinstall or an update keeps the board’s network.</b> The flash writes the bootloader, table and app only (<code>eraseAll: false</code>), and the app ends where the file store begins, so <code>/.lp/network.json</code> survives; an over-the-air update leaves the store byte-identical. Only Factory reset wipes it.',
+  '<b>Wi‑Fi is set after the board answers</b>, over a link that holds edit (<code>wifi_offers.rs</code>: <code>wifi/add</code>, <code>wifi/enabled</code>, <code>wifi/cloud-relay</code>). The panel lives only in the Link row’s details, after the Bluetooth switch. The board <b>lists what it hears</b> (2.4 GHz, with signal), keeps up to 8 networks and joins the strongest, tests a new one in its row (Looking for, Checking the password, Getting an address, Reaching lightplayer.app), and reports Wrong password, Not in range, No address and Connected, no internet. Studio can read a saved network’s name, never its password.',
+  '<b>A web page can’t read the computer’s Wi‑Fi name</b>, so the list is the board’s, and before the install there is none.',
+  '<b>Bluetooth is on, and a new board is open</b>: anyone over Bluetooth, or on the same Wi‑Fi, can edit it, Wi‑Fi and access list included (<code>FRESH_OPEN = Edit</code>). It advertises as <code>LP-3f2a</code> (the same four hex digits as <code>lp-3f2a.local</code>). On a USB connect Studio quietly adds this browser’s key and, signed in, the account’s, and says so in a toast. Passwords are the Access row’s details (Play and Author: Anyone or Password).',
+  '<b>The account keeps</b> its key and the play and edit passwords, readable by the service (<code>lp-cloud-domain/…/account_access.rs</code>). <b>Nothing about Wi‑Fi</b>: the browser remembers only each board’s last address (<code>lp.devices.wifi-addresses.v1</code>), and the Wi‑Fi settings ADR lists account-kept passwords as later research.',
+  '<b>lightplayer.app reaches a board</b> once it has joined, Cloud relay is on (the default) and it holds an account key, which it gets on a USB connect while you are signed in.',
+  '<b>Sign-in is a page redirect</b> (<code>cloud_account.rs</code> sets <code>location.href</code>), so it must not happen while a flash holds the USB link.',
+];
+const PLAN_NOTES = [
+  'An ADR for where the account keeps Wi‑Fi passwords (Q3), and the cloud store’s new record. The store is persisted: its shape is Lasting.',
+  'Core: a new board-card state, “installed, no network saved”, its primary (Set up Wi‑Fi / Join &lt;network&gt;) and its words; Ways to connect as a view the Link row’s details reuse.',
+  'Skip is remembered per board. In this browser is enough to start; the account would carry it to other browsers.',
+  'There is no first-run flag. The state is read: the board answered after this tab installed it, it reports no saved network, and nobody pressed Not now. A board with a network is never asked.',
+  'The toast after a USB connect (“… can now unlock … over Bluetooth.”) lands in the same minute as the setup, and its words are now too narrow: the same keys unlock over Wi‑Fi and lightplayer.app. Ways to connect could carry it instead.',
+  'A Wi‑Fi mark beside the cloud on the Link row (reachable over Wi‑Fi) would make “easy to find later” quieter than a button. Not drawn: P16 says reuse before adding.',
+  'The phone: installing from a phone is refused today (the open WebUSB defect), but a phone over Bluetooth can run the same Set up Wi‑Fi pages after a laptop installs.',
+];
+
+/* =====================================================================
+   The LED picture (spikes/board-card-surface's renderer)
+   ===================================================================== */
+function hsv(h, s, v) { const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  const [r, g, b] = [[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][((i % 6) + 6) % 6]; return [r * 255, g * 255, b * 255]; }
+const PAT = {
+  eaves:(u, v, t) => { const k = Math.floor(u * 36 - t * 3); const tw = .6 + .4 * Math.sin(t * 5 + u * 90); return (k % 3 === 0) ? [255 * tw, 40, 30] : (k % 3 === 1) ? [40, 210 * tw, 80] : [255 * tw, 190 * tw, 90]; },
+  off:() => [0, 0, 0],
+};
+function layoutPts(w, h, dpr) {
+  const pts = []; const pad = Math.min(w, h) * .12; const sp = 11 * dpr;
+  const n = Math.max(18, Math.round(w / (sp * .8)));
+  for (let i = 0; i < n; i++) { const u = i / (n - 1); const y = h * .72 - (1 - Math.abs(u - .5) * 2) * h * .42; pts.push([pad + (w - 2 * pad) * u, y, u, .5]); }
+  return pts;
+}
+let canvases = [];
+const REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function mountCanvases(root) {
+  canvases = canvases.filter((e) => document.body.contains(e.c));
+  root.querySelectorAll('canvas[data-pat]').forEach((c) => {
+    const dpr = Math.min(2, window.devicePixelRatio || 1); const r = c.getBoundingClientRect();
+    c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr));
+    const e = { c, ctx:c.getContext('2d'), pat:PAT[c.dataset.pat] || PAT.off, pts:layoutPts(c.width, c.height, dpr), mode:c.dataset.mode, dpr };
+    draw(e, 4);
+    canvases.push(e);
+  });
+}
+function draw(e, t) {
+  const { ctx, c, pts } = e;
+  ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, c.width, c.height);
+  const spacing = pts.length > 1 ? Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]) : 10;
+  const R = Math.max(1.4 * e.dpr, Math.min(spacing * .32, 4.2 * e.dpr));
+  ctx.globalCompositeOperation = 'lighter';
+  pts.forEach(([x, y, u, v]) => {
+    const [r, g, b] = e.pat(u, v, t);
+    ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},.16)`; ctx.beginPath(); ctx.arc(x, y, R * 2.6, 0, 7); ctx.fill();
+    ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+  });
+}
+let last = 0;
+function loop(ts) {
+  if (ts - last > 50) { last = ts; const t = ts / 1000; for (const e of canvases) if (e.mode === 'live' && document.body.contains(e.c)) draw(e, t); }
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   Wiring
+   ===================================================================== */
+const STRIPNOTE = {
+  out:'<b>Signed out.</b> Nothing remembered; the list offers to remember next time, and lightplayer.app isn’t a way to connect yet.',
+  first:'<b>Signed in, first board.</b> Nothing remembered yet; the form’s <b>Remember in your account</b> is on.',
+  known:'<b>Signed in, remembers Cedar Lane</b> (and a Sprinter Hotspot it can’t hear here). The board hears Cedar Lane: one press.',
+};
+function renderStrip() {
+  document.querySelectorAll('[data-set]').forEach((b) => b.setAttribute('aria-pressed', String(ST[b.dataset.set] === b.dataset.v)));
+  document.getElementById('stripnote').innerHTML = STRIPNOTE[ST.acct] + (ST.board === 'kept' ? ' <b>Already on Wi‑Fi:</b> every concept updates it and asks nothing.' : '');
+}
+function resetWalks() {
+  for (const k of Object.keys(W)) { clearInterval(timers[k]); clearInterval(timers[k + 't']); W[k] = fresh(); }
+}
+function renderAll() {
+  renderStrip();
+  document.getElementById('concepts').innerHTML = ['0', 'C', 'A', 'B', 'D'].map(conceptHtml).join('');
+  ['0', 'A', 'B', 'C', 'D'].forEach(renderConcept);
+}
+document.addEventListener('click', (e) => {
+  const s = e.target.closest('[data-set]');
+  if (s) { ST[s.dataset.set] = s.dataset.v; resetWalks(); return renderAll(); }
+  if (e.target.closest('[data-reset]')) { resetWalks(); return renderAll(); }
+  const a = e.target.closest('[data-c][data-a]');
+  if (a && a.dataset.a && !a.closest('#grid')) { e.preventDefault(); act(a.dataset.c, a.dataset.a, a); }
+});
+document.getElementById('factlist').innerHTML = FACTS.map((f) => `<li>${f}</li>`).join('');
+renderAll();
+renderGrid();
+renderWords();
+renderAcct();
+renderQs();
+document.getElementById('plannotes').innerHTML = PLAN_NOTES.map((n) => `<li>${n}</li>`).join('');
+if (!REDUCE) requestAnimationFrame(loop);
+window.addEventListener('resize', () => { document.querySelectorAll('.stage').forEach((st) => { fitStage(st); }); });
+</script>
