@@ -49,10 +49,10 @@
 //! a fresh session has no local echo.
 //!
 //! **At card size** (`compact`, the connected board card's panel — the
-//! card's five 28 px bars give way to it, at their height) the same
-//! control lays out tighter, never as another widget: a fader is one row
-//! across the card, label · fader · value; a knob or a toggle keeps its
-//! column with its label and value close under it.
+//! card's five 28 px bars give way to it) the same control lays out
+//! tighter, never as another widget: a fader is one row across the card,
+//! label · fader · value; a palette is a strip across the card; a knob or a
+//! toggle keeps its column with its label and value close under it.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -96,6 +96,9 @@ const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:flex-none tw:ite
 /// outgrow the popover wrapper that centres it), so the fader keeps its
 /// reach on a phone's narrow card.
 const COMPACT_FADER_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:grid-cols-[fit-content(38%)_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:[&_button]:max-w-full";
+
+/// A palette at card size: the whole row, label over its strip.
+const COMPACT_STRIP_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:gap-1";
 
 /// A knob or a toggle at card size: an equal share of the row, the label
 /// and value close under the widget, the label truncating to the share.
@@ -164,10 +167,15 @@ pub fn ModulePanelControl(
     // below the narrow controls at phone widths.
     let is_instrument = matches!(control.widget, UiPanelWidget::PatternPicker { .. });
     let compact_fader = compact && matches!(control.widget, UiPanelWidget::Fader { .. });
+    // A palette at card size is a strip across the card, not the panel's
+    // fixed footprint.
+    let compact_strip = compact && matches!(control.widget, UiPanelWidget::PaletteSwatch);
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
     } else if compact_fader {
         COMPACT_FADER_CLASS
+    } else if compact_strip {
+        COMPACT_STRIP_CLASS
     } else if is_wide {
         FADER_CLASS
     } else if compact {

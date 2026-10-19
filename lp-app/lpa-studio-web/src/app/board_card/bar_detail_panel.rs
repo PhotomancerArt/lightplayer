@@ -13,11 +13,13 @@
 //! | Layout | [`DeviceLayoutSheet`]: the question or the refusal | the firmware bar's (raised) |
 //! | Other version | [`OtherVersionForm`], inline | the firmware bar's |
 //! | Restore from file | [`RestoreFromFileButton`] | the firmware bar's |
+//! | Panel settings | [`PanelSettingsSection`]: held controls' Reset, Auto-save | the status corner's, while connected |
 //!
 //! The panels' words are core's payload or the moved panels' own,
 //! unchanged; their verbs are offers drawn from the tree. The access
 //! panel's edits, the Bluetooth switch and the Wi‑Fi refresh still send
-//! their access and network commands, as today (out of scope here).
+//! their access and network commands, and the panel settings their panel
+//! commands, as today (out of scope here).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceId, OfferPath, UiAction, UiDetailPanel, UiDeviceWifi, UiLayoutPanel};
@@ -26,6 +28,7 @@ use super::bluetooth_switch_panel::BluetoothSwitchPanel;
 use super::card_action::use_card_scope;
 use super::link_counters_section::LinkCountersSection;
 use super::other_version_form::OtherVersionForm;
+use super::panel_settings_section::PanelSettingsSection;
 use super::restore_from_file_button::RestoreFromFileButton;
 use crate::app::agent::AgentMark;
 use crate::app::home::access_ui_context::{access_handler, network_handler};
@@ -104,6 +107,13 @@ pub fn BarDetailPanel(
             current_base_mac,
         } => rsx! {
             RestoreDetails { offer, current_base_mac, device, on_action }
+        },
+        UiDetailPanel::PanelSettings {
+            target,
+            held,
+            auto_save,
+        } => rsx! {
+            PanelSettingsSection { target, held, auto_save, on_action }
         },
     }
 }
@@ -287,6 +297,13 @@ mod tests {
                 offer: board().child("restore-from-file"),
                 current_base_mac: None,
             },
+            UiDetailPanel::PanelSettings {
+                target: Some(lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                }),
+                held: 1,
+                auto_save: Some(true),
+            },
         ]
     }
 
@@ -307,6 +324,7 @@ mod tests {
             UiDetailPanel::RestoreFromFile { offer, .. } => {
                 ("Restore from a backup file", Some(offer.clone()))
             }
+            UiDetailPanel::PanelSettings { .. } => ("Held controls", None),
         }
     }
 

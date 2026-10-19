@@ -20,7 +20,7 @@ use lpa_studio_core::{
 use lpc_model::{FromLpValue, PlaylistCycle};
 
 use super::module_fixtures::{
-    PIECE_SCOPE, PLAYING_PATTERN_SCOPE, at_default, fader, knob, scope_target, swatch,
+    PIECE_SCOPE, PLAYING_PATTERN_SCOPE, at_default, brightness, knob, scope_target, swatch,
 };
 
 /// The choker tryout's five patterns (PR #809), by their authored names.
@@ -200,10 +200,7 @@ pub(crate) fn apply_picker_action(facts: &mut PatternPickerFacts, action: &UiAct
 fn shared_controls() -> Vec<UiPanelControlView> {
     use crate::app::node::node_story_fixtures::palette_cycle;
     vec![
-        at_default(
-            fader(PIECE_SCOPE, "brightness", "brightness", 160.0, 255.0),
-            "authored 160",
-        ),
+        at_default(brightness(PIECE_SCOPE, 160.0), "authored 160"),
         at_default(
             knob(PIECE_SCOPE, "speed", "speed", 1.0, 0.25, 4.0, None),
             "authored default",

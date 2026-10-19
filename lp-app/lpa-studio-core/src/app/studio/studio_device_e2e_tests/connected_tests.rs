@@ -730,12 +730,13 @@ fn the_opening_frames_connect_keeps_the_editor_open() {
 // ---------------------------------------------------------------------
 
 /// CD6, CD7: Connect on a running board whose project has a root panel.
-/// The card carries the panel in the bars' place: the root panel's own
-/// picks — the master brightness fader, then the clock's Speed knob and
-/// the shader's knob — with the pattern picker and the palette left to All
-/// controls. Done is the primary, and auto-save rides along on USB (the
-/// edit tier). The editor's view is built to pick them, and none of its
-/// verbs are published on the home page.
+/// The card carries the whole panel in the bars' place: the master
+/// brightness (a knob on a panel) and the clock's Speed knob, then the
+/// Pattern instrument and the playing pattern's knob and palette, each
+/// group under its name — the root panel's own controls, every one. Done is the primary, and the ⋯
+/// holds the panel's reset and, on USB (the edit tier), auto-save. The
+/// editor's view is built to draw them, and none of its verbs are published
+/// on the home page.
 #[test]
 fn the_connected_card_carries_the_panel() {
     let (mut bench, _tasks, _device, id, _uid) =
@@ -746,19 +747,46 @@ fn the_connected_card_carries_the_panel() {
     let panel = card.panel.clone().expect("the panel in the bars' place");
     assert_eq!(
         channels(&panel),
-        [crate::MASTER_CHANNEL, "clock.rate", "glow"]
+        [
+            crate::MASTER_CHANNEL,
+            "clock.rate",
+            "playlist.cycle",
+            "glow",
+            "palette"
+        ]
+        .map(String::from)
     );
+    assert_eq!(
+        panel
+            .sections
+            .iter()
+            .map(|section| section.heading.is_some())
+            .collect::<Vec<_>>(),
+        [false, true, true],
+        "the root's own, then the Pattern instrument's and the pattern's \
+         groups under their names: {:?}",
+        panel.sections
+    );
+    let master = panel.controls().next().expect("the master");
     assert!(
         matches!(
-            panel.controls[0].view.control.widget,
-            crate::UiPanelWidget::Fader { .. }
+            master.view.control.widget,
+            crate::UiPanelWidget::Knob { .. }
         ),
-        "the master leads"
+        "the master leads, a knob on a panel: {:?}",
+        master.view.control.widget
     );
-    assert_eq!(panel.more, 2, "the pattern picker and the palette");
     assert!(panel.target.is_some(), "the root panel's scope");
     assert!(panel.auto_save.is_some(), "USB holds the edit tier");
-    let edit = panel.edit.clone().expect("Edit on the All controls row");
+    assert!(
+        card.status
+            .details
+            .panels
+            .iter()
+            .any(|panel| matches!(panel, crate::UiDetailPanel::PanelSettings { .. })),
+        "the ⋯ holds the reset and auto-save"
+    );
+    let edit = panel.edit.clone().expect("Edit at the panel's foot");
     assert_eq!(edit.offer, bench.device_verb(id, "edit"));
     assert_eq!(edit.icon.as_deref(), Some("edit"));
     assert_eq!(
@@ -780,8 +808,7 @@ fn the_connected_card_carries_the_panel() {
         .root_module_face()
         .expect("the root wears the module face");
     let picks = crate::board_panel_picks(&face.panel, face.auto_save);
-    assert_eq!(panel.controls, picks.controls);
-    assert_eq!(panel.more, picks.more);
+    assert_eq!(panel.sections, picks.sections);
     assert_eq!(panel.target, picks.target);
     assert_eq!(panel.auto_save, picks.auto_save);
 }
@@ -908,7 +935,7 @@ fn the_card_shows_the_lens_sessions_frames() {
 /// enough — and its panel plays: a panel write (the playlist's `cycle`,
 /// pressed by path where the editor shows the session) is accepted at the
 /// play tier. Auto-save is hidden below the edit tier, and Edit wears the
-/// lock: the All controls row presses `unlock`, and after Done so does the
+/// lock: the panel's foot presses `unlock`, and after Done so does the
 /// project bar.
 #[test]
 fn a_play_only_link_connects_and_plays() {
@@ -1013,11 +1040,11 @@ fn a_play_only_link_connects_and_plays() {
     assert_eq!(edit.icon.as_deref(), Some("lock"));
 }
 
-/// CD15 (Q19): while connected, Edit sits at the end of the All controls
-/// row. `panel.edit` presses `devices/<board>/edit` by path, and the editor
+/// CD15 (Q19): while connected, Edit sits at the panel's foot.
+/// `panel.edit` presses `devices/<board>/edit` by path, and the editor
 /// shows on the open session, with no new session installed.
 #[test]
-fn edit_while_connected_is_on_the_all_controls_row() {
+fn edit_while_connected_is_at_the_panels_foot() {
     let (mut bench, _tasks, _device, id, _uid) =
         running_library_board("dev000000cnct000013", "usb-conn-19");
     bench.press_device(id, "connect", OfferArgs::new());
@@ -1027,7 +1054,7 @@ fn edit_while_connected_is_on_the_all_controls_row() {
         .panel
         .expect("the panel")
         .edit
-        .expect("Edit on the All controls row");
+        .expect("Edit at the panel's foot");
     assert_eq!(edit.offer, bench.device_verb(id, crate::EDIT_VERB));
     assert_eq!(edit.word, "Edit");
 
@@ -1508,11 +1535,10 @@ fn assert_card_offers(bench: &DeviceBench, device: crate::DeviceId) {
 }
 
 /// The channels the card's panel draws, in order.
-fn channels(panel: &crate::UiBoardPanel) -> Vec<&str> {
+fn channels(panel: &crate::UiBoardPanel) -> Vec<String> {
     panel
-        .controls
-        .iter()
-        .map(|control| control.view.channel.as_str())
+        .controls()
+        .map(|control| control.view.channel.clone())
         .collect()
 }
 

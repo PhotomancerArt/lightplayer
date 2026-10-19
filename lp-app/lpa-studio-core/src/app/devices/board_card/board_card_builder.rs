@@ -75,7 +75,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         },
         picture,
         surface,
-        status: status_corner(input, &bars),
+        status: status_corner(input, &bars, panel.as_ref()),
         name_bar: UiNameBar {
             title: input.view.title.clone(),
             place: None,
@@ -140,10 +140,11 @@ fn with_failure_notice(mut bar: UiStackBar) -> UiStackBar {
     bar
 }
 
-/// The board's panel on its card: the controller's picks, while the session
-/// is connected here and its project is ready (CD7), with Edit (or its lock)
-/// at the end of the All controls row — the project bar's own action, built
-/// by the same function (CD15) — and auto-save only at the edit tier (Q12).
+/// The board's panel on its card: every control of the project's root
+/// panel, while the session is connected here and its project is ready
+/// (CD7), with Edit (or its lock) at its foot — the project bar's own
+/// action, built by the same function (CD15) — and auto-save only at the
+/// edit tier (Q12), for the ⋯ menu.
 fn connected_panel(input: &BoardCardInput<'_>) -> Option<UiBoardPanel> {
     let picks = input.panel.filter(|_| input.connection.is_connected())?;
     Some(UiBoardPanel {
@@ -303,18 +304,29 @@ mod tests {
     }
 
     /// CD7 and CD15: connected with its project ready, the card carries the
-    /// panel (the bars are still built), its primary is Done, and Edit sits
-    /// at the end of the All controls row — the project bar's own action.
-    /// Auto-save rides along at the edit tier.
+    /// whole panel (the bars are still built), its primary is Done, and Edit
+    /// sits at the panel's foot — the project bar's own action. The ⋯ holds
+    /// the panel's reset and, at the edit tier, auto-save.
     #[test]
-    fn a_connected_card_carries_the_panel_with_edit_at_its_end() {
+    fn a_connected_card_carries_the_panel_with_edit_at_its_foot() {
         let mut fixture = connected(CardFixture::ready());
         let card = board_card(&fixture.input());
         let panel = card.panel.clone().expect("the panel");
-        assert_eq!(panel.controls.len(), 1);
-        assert_eq!(panel.more, 2);
+        assert_eq!(panel.controls().count(), 3, "every control");
         assert_eq!(panel.auto_save, Some(true), "USB is the edit tier");
-        let edit = panel.edit.clone().expect("Edit on the All controls row");
+        assert!(
+            card.status
+                .details
+                .panels
+                .contains(&UiDetailPanel::PanelSettings {
+                    target: panel.target,
+                    held: 0,
+                    auto_save: Some(true),
+                }),
+            "the ⋯ holds the reset and auto-save: {:?}",
+            card.status.details.panels
+        );
+        let edit = panel.edit.clone().expect("Edit at the panel's foot");
         assert_eq!(edit.word, "Edit");
         assert_eq!(edit.icon.as_deref(), Some("edit"));
         assert_eq!(
@@ -361,8 +373,19 @@ mod tests {
             }),
             ..crate::UiDeviceAccess::default()
         });
-        let panel = board_card(&fixture.input()).panel.expect("the panel");
+        let card = board_card(&fixture.input());
+        let panel = card.panel.expect("the panel");
         assert_eq!(panel.auto_save, None, "below the edit tier");
+        assert!(
+            !card.status.details.panels.iter().any(|panel| matches!(
+                panel,
+                UiDetailPanel::PanelSettings {
+                    auto_save: Some(_),
+                    ..
+                }
+            )),
+            "no auto-save in the ⋯ either"
+        );
         let edit = panel.edit.expect("Edit, locked");
         assert_eq!(edit.icon.as_deref(), Some("lock"));
         assert!(edit.offer.to_string().ends_with("/unlock"));
@@ -466,8 +489,8 @@ mod tests {
         assert_eq!(card.panel, None);
     }
 
-    /// `fixture`, connected on its card with its project's picks: one
-    /// master fader, and two controls the card does not draw.
+    /// `fixture`, connected on its card with its project's panel: the
+    /// master, a fader and a palette.
     fn connected(mut fixture: CardFixture) -> CardFixture {
         fixture.editor_holds_it = true;
         fixture.connection = BoardConnection::Connected;
@@ -495,11 +518,15 @@ mod tests {
             max: 1.0,
             step: None,
         };
-        let root = crate::UiPanelGroup::new("Porch", "/").with_controls(vec![
-            control(super::super::MASTER_CHANNEL, fader()),
-            control("level", fader()),
-            control("palette", crate::UiPanelWidget::PaletteSwatch),
-        ]);
+        let root = crate::UiPanelGroup::new("Porch", "/")
+            .with_target(lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            })
+            .with_controls(vec![
+                control(super::super::MASTER_CHANNEL, fader()),
+                control("level", fader()),
+                control("palette", crate::UiPanelWidget::PaletteSwatch),
+            ]);
         fixture.panel = Some(super::super::board_panel_picks(&root, Some(true)));
         fixture
     }

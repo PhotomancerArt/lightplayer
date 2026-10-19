@@ -5371,7 +5371,7 @@ impl ProjectController {
             let (state, source) = self.panel_control_state(graph, scope, target);
             controls.push(crate::UiPanelControlView {
                 channel: target.channel.clone(),
-                control: control.clone(),
+                control: control.into_owned(),
                 state,
                 source,
             });
@@ -9715,22 +9715,39 @@ fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc
 /// through nested modules too — a leaf deep inside an embedded module can
 /// consume a channel that resolves in an OUTER scope (R5), and that control
 /// belongs on the outer module's panel.
-fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPanelControl> {
+fn subtree_panel_controls(
+    children: &[crate::UiNodeChild],
+) -> Vec<std::borrow::Cow<'_, crate::UiPanelControl>> {
+    use std::borrow::Cow;
+
     fn face_controls<'a>(
         face: Option<&'a crate::UiNodeFace>,
-        out: &mut Vec<&'a crate::UiPanelControl>,
+        out: &mut Vec<Cow<'a, crate::UiPanelControl>>,
     ) {
         match face {
-            Some(crate::UiNodeFace::Shader(shader)) => out.extend(shader.controls.iter()),
-            Some(crate::UiNodeFace::Fixture(fixture)) => out.push(&fixture.brightness),
+            Some(crate::UiNodeFace::Shader(shader)) => {
+                out.extend(shader.controls.iter().map(Cow::Borrowed));
+            }
+            // The fixture's brightness is a knob on a panel; its own card
+            // keeps the fader (the card panel pass, 2026-10-19).
+            Some(crate::UiNodeFace::Fixture(fixture)) => {
+                out.push(Cow::Owned(fixture.panel_brightness()));
+            }
             Some(crate::UiNodeFace::Controls(group)) => {
-                out.extend(group.controls.iter().map(|view| &view.control));
+                out.extend(
+                    group
+                        .controls
+                        .iter()
+                        .map(|view| Cow::Borrowed(&view.control)),
+                );
             }
             // The clock contributes at most ONE control: the rate's Speed
             // knob. Its phasor listing stays read-only (D10) — the one
             // editable period lives on the consuming shader's knob, never
             // here.
-            Some(crate::UiNodeFace::Clock(clock)) => out.extend(clock.controls.iter()),
+            Some(crate::UiNodeFace::Clock(clock)) => {
+                out.extend(clock.controls.iter().map(Cow::Borrowed));
+            }
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
             // not controls; an output face carries wires, not panel widgets.
@@ -9742,7 +9759,7 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             | None => {}
         }
     }
-    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<&'a crate::UiPanelControl>) {
+    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<Cow<'a, crate::UiPanelControl>>) {
         for child in children {
             face_controls(child.face.as_ref(), out);
             walk(&child.children, out);

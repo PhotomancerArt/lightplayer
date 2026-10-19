@@ -749,9 +749,9 @@ pub fn App() -> Element {
                     //
                     // A CONNECTED session never ends this way: it is alive,
                     // on its card, and its editor is just not built until
-                    // core hears the place (All controls from `/` lands
-                    // here first). Done, which ends it, still sends the
-                    // address home.
+                    // core hears the place (the session's own address,
+                    // followed from `/`, lands here first). Done, which ends
+                    // it, still sends the address home.
                     let open_failed = matches!(
                         lpa_studio_core::open_stage(),
                         lpa_studio_core::OpenStage::Failed(_)
@@ -1345,11 +1345,6 @@ pub fn App() -> Element {
     // session panel's Rename), the Unlock page's Connect, and everything
     // under the shell, which provides the same tree again for its stories.
     crate::core::use_provide_offers(&current_view.offers);
-    // A connected card's All controls: the session's play page, built once
-    // by the router for every card the page draws.
-    crate::app::board_card::card_play_address::use_provide_card_play_address(router::play_address(
-        &current_view,
-    ));
     // What the app agent just did (M8): every control below lights by its
     // offer path, and the user's Show scrolls to the one it names.
     crate::app::agent::use_provide_agent_activity(&current_view.app_agent.activity);
@@ -2019,7 +2014,7 @@ fn nav_session_plan(
 ///
 /// Never while the view's session is connected: that session is alive, on
 /// its card, and its editor is just not built until core hears the place
-/// (following All controls from `/` lands on its own lens route first).
+/// (following its own address from `/` lands on its lens route first).
 fn open_ended(
     next: &UiStudioView,
     open_failed: bool,

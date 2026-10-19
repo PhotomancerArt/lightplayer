@@ -1100,18 +1100,36 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     );
     let brightness = control_for_channel(&face, "brightness");
     assert!(
-        matches!(
-            brightness.control.widget,
-            crate::UiPanelWidget::Fader { .. }
-        ),
-        "the promoted brightness control is the fixture's fader, got {:?}",
+        matches!(brightness.control.widget, crate::UiPanelWidget::Knob { .. }),
+        "on a panel the fixture's brightness is a knob, got {:?}",
         brightness.control.widget
     );
     assert_eq!(
         brightness.state,
         crate::UiPanelControlState::ReadDefault,
-        "nothing writes bus:brightness, so the fader reads the fixture's \
+        "nothing writes bus:brightness, so the knob reads the fixture's \
          authored default (R6)"
+    );
+    // The fixture's own card keeps its fader, the face's hero: one control,
+    // two presentations, the same range, channel and address.
+    let fixture = node_by_kind(&snapshot, "Fixture");
+    let Some(UiNodeFace::Fixture(fixture_face)) = &fixture.face else {
+        panic!("the fixture card keeps its face");
+    };
+    let crate::UiPanelWidget::Fader { min, max, step } = fixture_face.brightness.widget else {
+        panic!(
+            "the fixture's own card draws a fader, got {:?}",
+            fixture_face.brightness.widget
+        );
+    };
+    assert_eq!(
+        brightness.control.widget,
+        crate::UiPanelWidget::Knob { min, max, step }
+    );
+    assert_eq!(brightness.control.address, fixture_face.brightness.address);
+    assert_eq!(
+        brightness.control.panel_target,
+        fixture_face.brightness.panel_target
     );
     let glow = control_for_channel(&face, "glow");
     assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);

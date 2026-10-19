@@ -1,8 +1,8 @@
 //! The fixture card's permanent face.
 
 use crate::{
-    ProjectSlotAddress, UiAssetEditor, UiFixturePower, UiPanelControl, UiProducedProduct,
-    UiSpaceSection,
+    ProjectSlotAddress, UiAssetEditor, UiFixturePower, UiPanelControl, UiPanelWidget,
+    UiProducedProduct, UiSpaceSection,
 };
 
 /// Permanent face for a fixture node card.
@@ -49,6 +49,24 @@ pub struct UiFixtureFace {
     /// output-frame probe. `None` when nothing this fixture produces has
     /// reached an output's wire yet.
     pub patch: Option<crate::UiFixturePatch>,
+}
+
+impl UiFixtureFace {
+    /// The brightness as a module panel draws it: the face's fader as a
+    /// knob, with the same range, step, channel, address and state (the
+    /// card panel pass, 2026-10-19: brightness on a panel is a knob, for
+    /// room; the fixture's own card keeps its fader, the face's hero).
+    #[must_use]
+    pub fn panel_brightness(&self) -> UiPanelControl {
+        let widget = match self.brightness.widget {
+            UiPanelWidget::Fader { min, max, step } => UiPanelWidget::Knob { min, max, step },
+            ref other => other.clone(),
+        };
+        UiPanelControl {
+            widget,
+            ..self.brightness.clone()
+        }
+    }
 }
 
 /// The slot addresses the fixture Shape presets write — **the
