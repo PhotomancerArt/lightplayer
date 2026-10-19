@@ -177,6 +177,10 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
       });
       await loader.eraseFlash();
       assertEraseCompleted(logs, "Device erase");
+      // The board is still in the stub, which says nothing. Rebooted, the
+      // wiped board's ROM loops on its blank-flash header, and those lines
+      // are what the card reads as Blank and offers Install for.
+      await rebootFromFlash(transport, terminal);
       pushProgress(progress, onEvent, {
         label: "Device flash erased",
         completedSteps: 3,
@@ -805,6 +809,35 @@ export async function drainQuietly(transport, quietMs = DRAIN_QUIET_MS) {
   transport.flushInput?.();
 }
 
+/// Reboot the board from its flash: EN held low for 100 ms (RTS asserted,
+/// DTR not), then released. The board leaves the stub and boots what is in
+/// flash, as `lp-cli`'s erase does (`reset_into_app`).
+///
+/// Not esptool-js 0.6.0's `after("hard_reset")`: its HardReset only
+/// RELEASES RTS, and the connect's reset sequence already left both lines
+/// low, so it changes no line and the board stays in the stub, silent. An
+/// erase that ended that way left its card "not responding" until a reload
+/// (2026-10-19, `docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`;
+/// a Mac's tty open and close leave a parked C6 in the stub as well).
+///
+/// Whole-status writes, both lines named each time: a CH34x's macOS driver
+/// ignores a write naming one line, and the order never passes through
+/// (DTR asserted, RTS released), a CH34x's download-mode selection (see the
+/// controller's `runBothThenDropReset`). A C6 re-enumerates on the reset,
+/// so the release may find the port gone; the reset has happened by then,
+/// and the erase stands either way.
+export async function rebootFromFlash(transport, terminal = null) {
+  const port = transport.device;
+  terminal?.writeLine?.("Rebooting the board from its flash (RTS pulse, DTR low)");
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(100);
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  } catch (error) {
+    terminal?.writeLine?.(`The reset's release went unanswered: ${errorMessage(error)}`);
+  }
+}
+
 /// How many times an image whose write failed, or does not read back the
 /// same, is written again before the flash fails.
 const WRITE_ATTEMPTS = 3;
@@ -1346,6 +1379,10 @@ function reportFailure(target, error, onEvent = null) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error ?? "unknown error");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function looksLikeHtml(contentType, text) {
