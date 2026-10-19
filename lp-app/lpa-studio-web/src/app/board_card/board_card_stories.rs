@@ -930,7 +930,7 @@ fn board_card_project_details_open() -> Element {
     description = "The connection bar's details, open: how the board is reached (the link, the last word heard, the board's own words), its links, then Identify again and Disconnect as menu rows."
 )]
 fn board_card_connection_details_open() -> Element {
-    details_open(BarLayer::Connection)
+    details_open(BarLayer::Usb)
 }
 
 #[story(
@@ -1005,7 +1005,7 @@ fn board_card_tall_details_over_its_bar() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(wifi),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
                     on_action: |_| {},
                 }
             }
@@ -1053,7 +1053,7 @@ fn board_card_connection_details_wifi() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(connected_truck()),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
                     on_action: |_| {},
                 }
             }
@@ -1074,7 +1074,7 @@ fn board_card_connection_details_bluetooth_restarting() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     access: Some(usb_access(Some(true), true)),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
                     on_action: |_| {},
                 }
             }
@@ -1105,7 +1105,7 @@ fn board_card_connection_details_link_counters() -> Element {
                     feed: live_feed(),
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
                     on_action: |_| {},
                 }
             }

@@ -56,17 +56,17 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
-    ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState,
-    BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONFIRMATION_REQUIRED, CONNECT_HERE,
-    CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, LENS_SOURCE_WORDS,
+    ADD_A_PROJECT, ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput,
+    BoardConnection, BoardLinks, CONFIRMATION_REQUIRED, CONNECT_HERE, CONNECTING,
+    CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, LENS_SOURCE_WORDS,
     LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN, PROJECT_NONE,
     PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
     SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
     UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch, UiBoardCard, UiBoardPanel,
     UiBoardPanelSection, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
     UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
-    UiStatusCorner, UiSurfaceNotice, activity_bar, activity_words, bluetooth_switch, board_card,
-    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words, bluetooth_switch,
+    board_card, board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
     roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]

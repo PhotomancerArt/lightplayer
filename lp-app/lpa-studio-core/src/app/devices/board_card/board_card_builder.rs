@@ -16,10 +16,10 @@ use super::access_bar::{access_bar, pending_access_bar};
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
 use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
-use super::connection_bar::{connection_bar, pending_connection_bar};
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
+use super::link_bar::radio_placeholder;
 use super::primary_action::{pending_action, pending_primary, primary_action, state_action};
 use super::project_bar::{edit_action, pending_project_bar, project_bar};
 use super::status_corner::{layer_title, status_corner};
@@ -31,6 +31,7 @@ use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
+use super::usb_bar::{pending_link_bars, usb_bar};
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
 
@@ -38,7 +39,10 @@ use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind}
 pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     let bars: Vec<UiStackBar> = vec![
         project_bar(input),
-        connection_bar(input),
+        usb_bar(input),
+        radio_placeholder(input, BarLayer::Wifi),
+        radio_placeholder(input, BarLayer::Bluetooth),
+        radio_placeholder(input, BarLayer::Cloud),
         access_bar(input),
         firmware_bar(input),
         hardware_bar(input),
@@ -63,7 +67,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         primary.as_ref(),
         state_action(input, state).as_ref(),
     );
-    let bars = quiet_rows(bars, carried_layer(state));
+    let bars = quiet_rows(bars, carried_layer(input, state));
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -118,7 +122,7 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
 /// A row whose work failed says why in its details, first: its notice is
 /// the failure, with the row's Retry, and the status corner reads it from
 /// there like any notice. The row itself says only that it failed ("send
-/// failed", "USB · connection failed"), never the sentence (P5).
+/// failed", "connection failed"), never the sentence (P5).
 fn with_failure_notice(mut bar: UiStackBar) -> UiStackBar {
     if let Some(UiBarWork {
         state: BarWorkState::Failed { retry },
@@ -208,13 +212,14 @@ pub fn pending_board_card(
             place: None,
             primary,
         },
-        bars: vec![
-            pending_project_bar(pending),
-            pending_connection_bar(pending, link),
-            pending_access_bar(pending),
-            pending_firmware_bar(pending),
-            pending_hardware_bar(pending, board, offers),
-        ],
+        bars: std::iter::once(pending_project_bar(pending))
+            .chain(pending_link_bars(pending, link))
+            .chain([
+                pending_access_bar(pending),
+                pending_firmware_bar(pending),
+                pending_hardware_bar(pending, board, offers),
+            ])
+            .collect(),
         panel: None,
     };
     debug_assert_offered(&card, offers);
@@ -252,7 +257,7 @@ mod tests {
     use crate::app::devices::device_card_feed_view::FeedLiveness;
 
     #[test]
-    fn a_card_has_its_five_bars_in_order() {
+    fn a_card_has_its_eight_rows_in_order() {
         let card = board_card(&CardFixture::ready().input());
         let layers: Vec<BarLayer> = card.bars.iter().map(|bar| bar.layer).collect();
         assert_eq!(layers, BarLayer::ALL);
@@ -334,7 +339,7 @@ mod tests {
             card.bar(BarLayer::Project).action.as_ref(),
             "one function builds both"
         );
-        assert_eq!(card.bars.len(), 5, "the bars are still built");
+        assert_eq!(card.bars.len(), 8, "the rows are still built");
         assert_eq!(
             card.name_bar
                 .primary
@@ -423,7 +428,7 @@ mod tests {
                 "the picture dims under the notice"
             );
             assert_eq!(
-                card.bar(BarLayer::Connection).tone,
+                card.bar(BarLayer::Usb).tone,
                 UiStatusKind::Neutral,
                 "the surface says someone has it, once (P2)"
             );
@@ -448,10 +453,7 @@ mod tests {
                     .and_then(|primary| primary.word()),
                 Some("Connect here")
             );
-            assert_eq!(
-                card.bar(BarLayer::Connection).summary,
-                "Open in another tab"
-            );
+            assert_eq!(card.bar(BarLayer::Usb).summary, "Open in another tab");
         }
     }
 
@@ -473,7 +475,8 @@ mod tests {
         assert_eq!(card.presence, UiBoardPresence::New);
         assert_eq!(card.status.mark, CornerMark::Blank);
         assert_eq!(card.name_bar.title, "New board");
-        assert_eq!(card.bars.len(), 5);
+        let layers: Vec<BarLayer> = card.bars.iter().map(|bar| bar.layer).collect();
+        assert_eq!(layers, BarLayer::ALL, "a new board has the eight rows too");
         assert!(matches!(
             card.status.details.panels.as_slice(),
             [UiDetailPanel::Terminal { lines, dropped: 0 }] if lines.is_empty()

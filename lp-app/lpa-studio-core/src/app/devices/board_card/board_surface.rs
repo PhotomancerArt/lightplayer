@@ -77,6 +77,7 @@ use super::bar_work::{failed_kind, retry};
 use super::board_card_input::{BoardCardInput, link_icon};
 use super::board_connection::BoardConnection;
 use super::board_picture::board_picture;
+use super::link_session::{connect_layer, held_layer};
 use super::project_bar::data_lost;
 use super::ui_bar_work::BarWorkState;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
@@ -277,12 +278,15 @@ pub(crate) fn pending_surface(
 
 /// The row whose problem the surface says, which goes quiet: it keeps its
 /// state word and its button, and loses its attention or error tone (the
-/// surface is the one loud place).
-pub(crate) fn carried_layer(state: SurfaceState) -> Option<BarLayer> {
+/// surface is the one loud place). A link's problem is the row of the link
+/// it is about: a Wi‑Fi connect that failed quiets the Wi‑Fi row, a board
+/// held on its network slot the row of that way in.
+pub(crate) fn carried_layer(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<BarLayer> {
     use SurfaceState::*;
     match state {
-        NotAnswering | ConnectFailed | NetworkFailed | SomeoneElse | AnotherTab
-        | AnotherTabBusy | TakenByAnotherTab | MoveFailed => Some(BarLayer::Connection),
+        NotAnswering | ConnectFailed => Some(BarLayer::of_link(input.link_kind())),
+        NetworkFailed | SomeoneElse => input.wifi_connect.map(connect_layer),
+        AnotherTab | AnotherTabBusy | TakenByAnotherTab | MoveFailed => Some(held_layer(input)),
         OldFirmware | PreHelloFirmware | NoFirmware | DownloadMode | Silent | Crashing
         | Incomplete | CantGetVersion | ConfirmationRequired | UpdateRequired | DataUnreadable
         | UpdateInterrupted | UpdateFailed | InstallFailed | EraseFailed => {
@@ -1081,8 +1085,8 @@ mod tests {
     fn the_row_the_surface_speaks_for_goes_quiet() {
         let mut fixture = CardFixture::not_answering();
         let card = board_card(&fixture.input());
-        let link = card.bar(BarLayer::Connection);
-        assert_eq!(link.summary, "USB · not responding");
+        let link = card.bar(BarLayer::Usb);
+        assert_eq!(link.summary, "not responding");
         assert_eq!(link.tone, UiStatusKind::Neutral, "the surface is loud");
         assert_eq!(link.action.as_ref().map(|a| a.word.as_str()), Some("Retry"));
 

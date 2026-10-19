@@ -553,6 +553,9 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        remembered_networks: Default::default(),
+        remembered_bluetooth: Default::default(),
+        account_name: None,
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
@@ -1401,6 +1404,9 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        remembered_networks: Default::default(),
+        remembered_bluetooth: Default::default(),
+        account_name: None,
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
@@ -1776,6 +1782,9 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        remembered_networks: Default::default(),
+        remembered_bluetooth: Default::default(),
+        account_name: None,
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
@@ -2722,7 +2731,7 @@ fn devices_card_menu_link_counters() -> Element {
                     projects: packages(),
                     examples: examples(),
                     details_open: Some(crate::app::board_card::CardPart::Bar(
-                        lpa_studio_core::BarLayer::Connection,
+                        lpa_studio_core::BarLayer::Usb,
                     )),
                     on_action: |_| {},
                 }

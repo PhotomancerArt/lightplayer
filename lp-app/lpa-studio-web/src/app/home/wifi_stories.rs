@@ -59,7 +59,7 @@ fn wifi_popover_open_over_its_card_row() -> Element {
                 card: usb_card(),
                 access: Some(usb_access(Some(true), false)),
                 wifi: Some(wifi),
-                details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                details_open: Some(CardPart::Bar(BarLayer::Usb)),
                 on_action: |_| {},
             }
         }

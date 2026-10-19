@@ -139,13 +139,13 @@ pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
 }
 
 /// The row's name and state, as drawn: at rest the summary and the aside;
-/// while it works, the name stays and the work's words are its state. On
-/// the Link row (no kind) the work's words are the whole line ("USB ·
-/// connecting"), and a row with no name yet puts them where the name goes
-/// ("installing · 30%").
+/// while it works, the name stays and the work's words are its state. A
+/// row with no name while it works puts them where the name goes:
+/// "installing · 30%", and a link row whose state the work says
+/// ("connecting").
 pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
     match &bar.work {
-        Some(work) if bar.kind.is_none() || bar.summary.is_empty() => (work.words.clone(), None),
+        Some(work) if bar.summary.is_empty() => (work.words.clone(), None),
         Some(work) => (
             bar.summary.clone(),
             Some(work.words.clone()).filter(|words| !words.is_empty()),
@@ -303,7 +303,10 @@ fn bar_title(bar: &UiStackBar) -> String {
 fn layer_name(layer: lpa_studio_core::BarLayer) -> &'static str {
     match layer {
         lpa_studio_core::BarLayer::Project => "Project",
-        lpa_studio_core::BarLayer::Connection => "Connection",
+        lpa_studio_core::BarLayer::Usb => "USB",
+        lpa_studio_core::BarLayer::Wifi => "Wi\u{2011}Fi",
+        lpa_studio_core::BarLayer::Bluetooth => "Bluetooth",
+        lpa_studio_core::BarLayer::Cloud => "lightplayer.app",
         lpa_studio_core::BarLayer::Access => "Access",
         lpa_studio_core::BarLayer::Firmware => "Firmware",
         lpa_studio_core::BarLayer::Hardware => "Hardware",
@@ -409,7 +412,7 @@ mod tests {
     fn a_mark_is_an_icon_alone_with_its_words_as_its_name() {
         let bar = link_row(Some(UiBarMark {
             icon: "cloud".to_string(),
-            label: lpa_studio_core::ALSO_THROUGH_THE_CLOUD.to_string(),
+            label: "Also reachable through lightplayer.app".to_string(),
             lit: true,
         }));
         let html = dioxus_ssr::render_element(bar_line(&bar));
@@ -423,7 +426,7 @@ mod tests {
         assert!(MARK_LIT_CLASS.contains("status-live"));
         assert_eq!(
             bar_title(&bar),
-            "USB · connected · Also reachable through lightplayer.app"
+            "USB connected · Also reachable through lightplayer.app"
         );
     }
 
@@ -451,7 +454,7 @@ mod tests {
     }
 
     /// The row's grammar: the kind's word in its own column after the icon,
-    /// then the name, then the state; the Link row has no kind.
+    /// then the name, then the state; a link row's kind is the link's name.
     #[test]
     fn a_row_reads_icon_kind_name_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -469,7 +472,9 @@ mod tests {
 
         let link = link_row(None);
         let html = dioxus_ssr::render_element(bar_line(&link));
-        assert!(!html.contains("data-bar-kind"), "{html}");
+        let kind = html.find("data-bar-kind=\"USB\"").expect("the link's name");
+        let name = html.find(">connected<").expect("how it stands");
+        assert!(kind < name, "{html}");
     }
 
     /// The name is the row's value and keeps its width: it and the state
@@ -507,7 +512,7 @@ mod tests {
     }
 
     /// While a row works its name stays and the work's words are its
-    /// state; on the Link row they are the whole line.
+    /// state; a row with no name while it works says them in its place.
     #[test]
     fn work_keeps_the_name_and_says_its_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -524,8 +529,9 @@ mod tests {
             )
         );
         let mut link = link_row(None);
-        link.work = Some(running("USB · connecting"));
-        assert_eq!(row_words(&link), ("USB · connecting".to_string(), None));
+        link.summary = String::new();
+        link.work = Some(running("connecting"));
+        assert_eq!(row_words(&link), ("connecting".to_string(), None));
         let mut nameless =
             lpa_studio_core::UiStackBar::new(lpa_studio_core::BarLayer::Firmware, "firmware", "");
         nameless.work = Some(running("installing · 30%"));
@@ -652,11 +658,7 @@ mod tests {
     fn link_row(mark: Option<UiBarMark>) -> UiStackBar {
         UiStackBar {
             mark,
-            ..UiStackBar::new(
-                lpa_studio_core::BarLayer::Connection,
-                "usb",
-                "USB · connected",
-            )
+            ..UiStackBar::new(lpa_studio_core::BarLayer::Usb, "usb", "connected")
         }
     }
 

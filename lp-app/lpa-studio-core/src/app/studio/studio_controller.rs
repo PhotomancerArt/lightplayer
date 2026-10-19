@@ -2350,6 +2350,18 @@ impl StudioController {
                     .map(|wifi| (device.id, wifi))
             })
             .collect();
+        for device in self.devices.roster().devices() {
+            if let Some(status) = self.network.remembered_status(device.id) {
+                view.remembered_networks.insert(device.id, status.clone());
+            }
+            if let Some(on) = self.access.remembered_bluetooth(device) {
+                view.remembered_bluetooth.insert(device.id, on);
+            }
+        }
+        view.account_name = self
+            .access
+            .account_keys()
+            .map(|keys| keys.account_name.clone());
         let updates = view
             .roster
             .devices

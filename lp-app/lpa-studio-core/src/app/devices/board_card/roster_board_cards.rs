@@ -10,7 +10,8 @@
 use lpa_devices::DeviceId;
 
 use super::{
-    BoardCardInput, BoardConnection, UiBoardCard, UiBoardPanel, board_card, pending_board_card,
+    BoardCardInput, BoardConnection, BoardLinks, UiBoardCard, UiBoardPanel, board_card,
+    pending_board_card,
 };
 use crate::{DeviceRosterView, DeviceView, UiOffer, UiOfferTree, UiPackageCard};
 
@@ -128,6 +129,11 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         panel: panel
             .filter(|(device, _)| *device == view.id)
             .map(|(_, panel)| panel),
+        links: BoardLinks {
+            account: roster.account_name.as_deref(),
+            remembered_network: roster.remembered_networks.get(&view.id),
+            remembered_bluetooth: roster.remembered_bluetooth.get(&view.id).copied(),
+        },
         now,
     }))
 }

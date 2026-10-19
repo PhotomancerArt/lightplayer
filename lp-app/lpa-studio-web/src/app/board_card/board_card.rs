@@ -265,13 +265,13 @@ mod tests {
 
     /// Connected (`panel: Some`), the card draws the board's panel in the
     /// bars' place and no bar, its last row as tall as the panel (the card
-    /// grows once); watched (`None`), the five bars at their fixed height.
+    /// grows once); watched (`None`), the eight rows at their fixed height.
     #[test]
     fn a_connected_card_draws_its_panel_in_the_bars_place() {
         let (watched, tree) = card_and_tree(&porch_view());
         assert_eq!(watched.panel, None);
         let html = render_card(watched.clone(), tree.clone(), None);
-        assert_eq!(attribute_values(&html, "data-bar").len(), 5);
+        assert_eq!(attribute_values(&html, "data-bar").len(), 8);
         assert!(!html.contains("data-board-panel"), "{html}");
         assert!(html.contains(CARD_CLASS), "{html}");
 

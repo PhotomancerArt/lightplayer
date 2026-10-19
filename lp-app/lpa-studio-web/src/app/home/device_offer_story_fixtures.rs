@@ -675,6 +675,7 @@ pub(crate) fn StoryBoardCard(
         now,
         connection: &connection,
         panel: panel.as_ref(),
+        links: Default::default(),
     });
     // A story that opens a part's details (or whose layout question raises
     // them) keeps the room they float in, so a capture holds the whole

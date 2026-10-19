@@ -74,7 +74,6 @@ use super::ui_bar_work::UiBarWork;
 use super::ui_board_surface::SurfaceState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use crate::core::data_kinds::age_spoken;
 use crate::{OfferPath, UiOffer};
 
 /// The Link row's state while a Connect is under way ("USB · connecting");
@@ -263,16 +262,6 @@ pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> 
                 board_id: view.board_id.clone(),
             }),
     )
-}
-
-/// "Offline · 2 hours ago", from the registry's last sighting, in the
-/// words the surface's sentence uses for the same age (P17); "Offline"
-/// when Studio has none.
-pub(crate) fn offline_words(last_seen_at: Option<f64>, now: f64) -> String {
-    match last_seen_at {
-        Some(seen) => format!("Offline · {}", age_spoken(now - seen)),
-        None => "Offline".to_string(),
-    }
 }
 
 /// A new board's primary: Install firmware once it settled on needing
@@ -474,7 +463,7 @@ pub(crate) mod tests {
         assert_eq!(path(&action), "reconnect");
     }
 
-    /// Offline with no way in: no button; the Link row says how long it
+    /// Offline with no way in: no button; the surface says how long it
     /// has been away.
     #[test]
     fn an_offline_board_nothing_reaches_has_no_primary() {
@@ -482,10 +471,6 @@ pub(crate) mod tests {
         fixture.view.escapes = vec![Escape::Forget];
         fixture.last_seen_at = Some(fixture.now - 15.0 * 86_400.0);
         assert_eq!(primary_action(&fixture.input(), None), None);
-        assert_eq!(
-            offline_words(fixture.last_seen_at, fixture.now),
-            "Offline · 2 weeks ago"
-        );
     }
 
     /// The dead end of 2026-10-17: an older LightPlayer on USB, its board

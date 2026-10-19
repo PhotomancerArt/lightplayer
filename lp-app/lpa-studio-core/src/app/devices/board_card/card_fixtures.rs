@@ -83,6 +83,12 @@ pub(crate) struct CardFixture {
     pub wifi_address: bool,
     /// Someone is signed in: `connect-relay` on an offline board.
     pub relay: bool,
+    /// The signed-in account's name: lightplayer.app's row names it.
+    pub account: Option<String>,
+    /// The board's network status as it last answered.
+    pub remembered_network: Option<lpc_wire::server::NetworkStatus>,
+    /// Bluetooth on or off, as its access file last said.
+    pub remembered_bluetooth: Option<bool>,
     /// More verbs the controller publishes beside the device's own (the
     /// layout verbs).
     pub extra_offers: Vec<UiOffer>,
@@ -128,6 +134,9 @@ impl CardFixture {
             reset: ResetReach::Lines,
             wifi_address: false,
             relay: false,
+            account: None,
+            remembered_network: None,
+            remembered_bluetooth: None,
             extra_offers: Vec::new(),
             hidden: Vec::new(),
             offers: Vec::new(),
@@ -238,6 +247,11 @@ impl CardFixture {
             editor_holds_it: self.editor_holds_it,
             connection: &self.connection,
             panel: self.panel.as_ref(),
+            links: super::board_links::BoardLinks {
+                account: self.account.as_deref(),
+                remembered_network: self.remembered_network.as_ref(),
+                remembered_bluetooth: self.remembered_bluetooth,
+            },
             now: self.now,
         }
     }
