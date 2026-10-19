@@ -688,11 +688,11 @@ fn board_card_connected_playful() -> Element {
 }
 
 #[story(
-    description = "The connected card's ⋯ open: below Running, the panel's two settings that are not controls — Held controls (none held, so no Reset) and Auto-save with its switch and what it does (\"Held values come back after a restart.\") — then the terminal. Reset appears beside Held controls once a control is held."
+    description = "The connected card's ⋯ open: below Running, the panel's two settings that are not controls — Held controls (the hue knob is held: \"1 held\" and Reset, which lets go of every held control) and Auto-save with its switch and what it does (\"Held values will come back after a restart.\") — then the terminal. With nothing held, the row reads \"None held\" and offers no Reset."
 )]
 fn board_card_connected_settings() -> Element {
     rsx! {
-        section { class: "tw:p-4 tw:pb-[420px]",
+        section { class: "tw:p-4",
             div { class: CARD_WIDTH_CLASS,
                 {connected_card_open(card_root_panel_held("hue", 0.82), None, Some(CardPart::Corner))}
             }

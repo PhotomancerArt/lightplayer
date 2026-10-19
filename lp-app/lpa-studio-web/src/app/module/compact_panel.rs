@@ -150,11 +150,12 @@ const HEADING_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:px-0
 const HEADING_WORDS_CLASS: &str = "tw:min-w-0 tw:truncate tw:text-[0.6rem] tw:font-bold tw:uppercase tw:leading-none tw:tracking-[0.12em] tw:text-dim-foreground";
 const HEADING_RULE_CLASS: &str = "tw:h-px tw:min-w-4 tw:flex-1 tw:bg-border-muted";
 
-/// The controls' grid: knobs and toggles at least 50 px a cell, as many to a
-/// row as the card holds (three on a phone's narrow card, five on a wide
-/// one); a strip spans the row.
-const GRID_CLASS: &str =
-    "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(50px,1fr))] tw:gap-x-1 tw:gap-y-2";
+/// The controls' grid: knobs and toggles as many to a row as the card
+/// holds — cells of at least 80 px, room for a label like BRIGHTNESS (three
+/// to a row on a 300 px card, four on a wide one), and of 50 px on a
+/// phone's narrow card (`@container board-card`, three to a row, a long
+/// label cut); a strip spans the row.
+const GRID_CLASS: &str = "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(80px,1fr))] tw:gap-x-1 tw:gap-y-2 tw:@max-[239px]:grid-cols-[repeat(auto-fill,minmax(50px,1fr))]";
 
 /// A knob's or a toggle's cell.
 const CELL_CLASS: &str = "tw:flex tw:min-w-0 tw:justify-center";

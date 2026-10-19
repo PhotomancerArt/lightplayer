@@ -92,8 +92,8 @@ fn held_words(held: usize) -> String {
 /// What auto-save does, said for its state.
 fn auto_save_words(on: bool) -> &'static str {
     match on {
-        true => "Held values come back after a restart.",
-        false => "Held values are lost on a restart.",
+        true => "Held values will come back after a restart.",
+        false => "Held values will be lost on a restart.",
     }
 }
 
@@ -124,7 +124,7 @@ mod tests {
         assert!(html.contains("data-panel-reset"), "{html}");
         assert!(html.contains("2 held"), "{html}");
         assert!(html.contains(r#"data-panel-auto-save="true""#), "{html}");
-        assert!(html.contains("Held values come back after a restart."));
+        assert!(html.contains("Held values will come back after a restart."));
 
         let html = render_section(Some(scope), 0, None);
         assert!(html.contains("None held"), "{html}");
@@ -140,7 +140,10 @@ mod tests {
         assert_eq!(held_words(0), "None held");
         assert_eq!(held_words(1), "1 held");
         assert_eq!(held_words(4), "4 held");
-        assert_eq!(auto_save_words(false), "Held values are lost on a restart.");
+        assert_eq!(
+            auto_save_words(false),
+            "Held values will be lost on a restart."
+        );
     }
 
     /// No box in a box: a section of the details card.

@@ -341,7 +341,7 @@ phone's two), the name is cut at its end and the details hold it whole:
 ╰───╯                         picture's facts, the terminal) one press away
                               connected: the panel's settings too —
                                 ↺ Held controls   2 held        │ Reset │
-                                ▣ Auto-save       comes back after a restart  (●)
+                                ▣ Auto-save       Held values will come back after a restart.  (●)
                               # was: on the play page only
                               # was: (nothing) live · "editing" while the editor held it ·
                               #      "!" while the panel covered the rows. the surface says those now.
