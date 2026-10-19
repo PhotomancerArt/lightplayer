@@ -158,12 +158,15 @@ The board card's verbs:
   connected card's primary, and the editor's docked card's.
 - **Edit** — open the board's project in the editor. It's the project
   bar's action, for people who can edit; on a board that isn't connected
-  it connects first. While the board is connected, Edit sits at the end of
-  the All controls row. On a board you can only play, Edit wears a lock
+  it connects first. While the board is connected, Edit sits at the foot
+  of the card's panel. On a board you can only play, Edit wears a lock
   and asks for the edit password (`unlock`).
-- **All controls** — the connected card's last row, a link to the board's
-  play page: **All controls · 2 more** when the page has controls the card
-  leaves out.
+- **Speed** — the clock's knob on a panel: how fast the show runs, read
+  as `1×`, `2×`, `½×`. The clock's own card keeps the whole tape.
+- **Held controls** · **Reset** — in a connected card's ⋯: how many
+  controls a panel write holds, and Reset, which lets go of them all so
+  the project controls them again. **Auto-save** beside it keeps held
+  values across a restart.
 - **Unlock** — enter a password for a locked board.
 - **Install firmware** — put Lightplayer on a blank board (the name bar's
   primary), or the version a board missing part of its firmware needs. On

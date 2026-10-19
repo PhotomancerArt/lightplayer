@@ -44,17 +44,33 @@ important information", and "the primary action slot should hold the most
 likely action a user wants to take". The surface explains; the primary
 gives the thing to do. There are no buttons on the surface.
 
-Connected, the rows become the board's panel and the primary becomes Done:
+Connected, the rows become the board's whole panel and the primary becomes
+Done. The card grows once to hold it, and shrinks back on Done:
 
 ```text
 ├────────────────────────────┬─────────────┤
-│ Porch lamp                 │ ✓ Done      │
+│ Playful choker             │ ✓ Done      │
 ├────────────────────────────┴─────────────┤
-│ Brightness  ━━━━━━━━━━━━━━━━━──────  72% │   the master fader
-│ ◎ Speed    ◎ Hue    ◎ Width   ▣ Strobe   │   one row of controls
-│ All controls · 3 more            │ Edit  │
-└──────────────────────────────────────────┘
+│    ◎            ◎            ◎           │   knobs and toggles, as many to a row
+│ BRIGHTNESS    SPEED        SCALE         │   as the card is wide; the master first
+│    128          1×          1.6          │   # was: the master fader across the card
+│ PALETTE                    ↻ 4 · 20 s    │   a palette across the card
+│ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ │
+│ PLASMA 1 ─────────────────────────────── │   a nested group under a quiet heading
+│    ◎ Hue        ◎ Width                  │
+├────────────────────────────────┬─────────┤
+│                                │ ✎ Edit  │   the foot: Edit, or its lock
+└────────────────────────────────┴─────────┘   # was: All controls · 3 more │ Edit
 ```
+
+```text
+Speed      the clock, one knob: log ¼×–8×, 1× at the top, the octave
+           stops marked. the clock's own card keeps the whole tape.     # was: the tape, on the play page
+Brightness a knob on the panel; the fixture's own card keeps its fader. # was: a fader across the card
+```
+
+Nothing on the card links away: every control is here, and the play page
+is an address (phones, shared links, the editor's Play), not a row.
 
 ## Surface
 
@@ -325,6 +341,10 @@ phone's two), the name is cut at its end and the details hold it whole:
 ╭───╮
 │ ⋯ │                         every state: the details (every notice, the
 ╰───╯                         picture's facts, the terminal) one press away
+                              connected: the panel's settings too —
+                                ↺ Held controls   2 held        │ Reset │
+                                ▣ Auto-save       Held values will come back after a restart.  (●)
+                              # was: on the play page only
                               # was: (nothing) live · "editing" while the editor held it ·
                               #      "!" while the panel covered the rows. the surface says those now.
 ```
@@ -387,3 +407,14 @@ R10 one update, one number: the surface reads the working row's percent       (d
 R11 no dead ends: a fix that isn't offered says why and what to do instead    (director's review)
 R12 a narrow name bar keeps the name's twelve characters; the primary says its verb alone   (director's review)
 ```
+
+The card panel pass, 2026-10-19 (PR #1196, plan `lp2025/2026-10-19-0826-card-panel-pass`):
+
+```text
+C1  connected, the card holds every panel control; it grows once, on connect   (Yona)
+C2  on a panel the clock is one Speed knob, 1× at the top; its card keeps the tape   (Yona)
+C3  on a panel brightness is a knob, still first; its fixture's card keeps the fader   (Yona)
+C4  the panel's reset and auto-save live in the ⋯                  (director's call, pending Yona's veto)
+C5  Edit, or its lock, stays at the bottom, at the panel's foot    (director's call, pending Yona's veto)
+```
+

@@ -618,3 +618,42 @@ changed, none of it a new decision:
   reached another way.
 
 The defects are filed under `docs/defects/2026-10-14-*`.
+
+## Amendment 2026-10-19: the connected card holds the whole panel
+
+Plan `lp2025/2026-10-19-0826-card-panel-pass`. Yona, on the PLAYFUL choker
+connected (2026-10-18): "we only show a few controls, and we don't make
+great use of the space. and 'all controls' takes us to a new page that's a
+bit awkward"; then (2026-10-19) "I'm OK with the card changing height once
+when connecting". This changes §4 ("as many controls as fit at the card's
+height … then All controls") and the M4 amendment's panel bullets ("four
+controls at most", "· N more", "the card keeps one height"):
+
+- **Connected, the card holds every panel control** (`board_panel_picks`):
+  the root's own controls with the master (the `brightness` channel, whatever
+  its widget) leading, then each nested group's under its name, depth
+  first. There is no cap, no "· N more" and no All controls row.
+- **The card grows once, on connect, and back on Done.** Its last grid row
+  is as tall as the panel. Knobs and toggles fill rows, as many to a row as
+  the card is wide (three on a phone's narrow card); a palette, a fader or
+  the Pattern instrument takes a row of its own; a nested group's controls
+  sit under a quiet heading. The home page's grid keeps every other card at
+  its own height (`2026-09-03-device-card-fixed-height-and-disconnect-disappears.md`,
+  its 2026-10-19 amendment).
+- **On the panel, brightness is a knob and the clock is one Speed knob**
+  (`2026-08-03-panel-visibility-is-derived.md` and
+  `2026-08-07-clock-transport-is-a-panel-instrument.md`, each amended the
+  same day), so the panel spends its room on controls.
+- **The panel reset and the auto-save switch move into the card's ⋯**
+  (`UiDetailPanel::PanelSettings`, in the status corner's details while
+  connected): Held controls with Reset (offered while one is held) and, at
+  the edit tier only, Auto-save. They still send their panel commands from
+  the web, as the play page's do; making them offers is the agentic UI
+  roadmap's.
+- **Edit, or its lock on a play-only board, stays at the bottom**, at the
+  end of the panel's foot (CD15 stands, its row renamed).
+- **The play page stays an address, not a link from the card.** `/p/…/play`
+  and `/device/<uid>/play` still open it (phones, shared links, the
+  editor's Play toggle); the card no longer links there, and the router's
+  `play_address` went with the link.
+

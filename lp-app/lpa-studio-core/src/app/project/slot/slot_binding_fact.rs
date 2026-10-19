@@ -122,7 +122,7 @@ impl BindingFactOverrides {
 /// The dotted form is what a `default_bind` declared on a leaf INSIDE a
 /// promoted record produces (clock-tape-hero P6). Keying those by their
 /// first segment alone collapsed all three transport leaves onto the one
-/// `transport` row, and the grouped control could not then tell which
+/// `transport` row, and the clock's wires could not then tell which
 /// dimension was wired.
 pub(in crate::app::project) fn binding_fact_slot_key(slot: &SlotPath) -> Option<String> {
     let mut key = String::new();

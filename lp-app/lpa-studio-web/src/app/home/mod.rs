@@ -98,11 +98,11 @@ pub(crate) fn card_grid_class() -> &'static str {
 }
 
 /// The DEVICE roster grid (Yona hardware-walk feedback, width revised
-/// down with the 2026-07-26 state-flow review): wide-enough columns and a
-/// stretched row floor so the common operations — tab switches, opening a
-/// sheet — resize the card WITHIN its footprint instead of reflowing the
-/// page. Cards stretch to the row (grid default `align-items: stretch`),
-/// so the min-height lives on the row, not the card component.
+/// down with the 2026-07-26 state-flow review): wide-enough columns. Each
+/// card keeps its own height (`items-start`): a board card is one height
+/// in every state but connected, where it grows to hold the board's panel,
+/// and that card's neighbours in its row stay as they were (the card panel
+/// pass, 2026-10-19).
 pub(crate) fn device_grid_class() -> &'static str {
-    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]"
+    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:items-start tw:gap-3.5"
 }

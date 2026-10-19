@@ -54,9 +54,9 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
         .collect();
     assert_eq!(
         labels,
-        vec!["Clock", "Pattern", "Soft noise"],
-        "shared (the clock's instrument, after the flat strip), then the \
-         Pattern instrument, then the playing pattern's own knobs"
+        vec!["Pattern", "Soft noise"],
+        "shared (the flat strip), then the Pattern instrument, then the \
+         playing pattern's own knobs"
     );
     assert_eq!(
         panel
@@ -64,8 +64,9 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["brightness"],
-        "the shared strip is unchanged: the fixture's promoted brightness"
+        vec!["clock.rate", "brightness"],
+        "the shared strip: the clock's Speed knob and the fixture's \
+         promoted brightness"
     );
 
     let picker = picker(&view);
@@ -100,7 +101,7 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
     );
 
     // Ruling 2: the pattern's knobs are its MODULE's, not the entry sink's.
-    let knobs = &panel.groups[2];
+    let knobs = &panel.groups[1];
     assert_eq!(
         knobs
             .controls
@@ -135,7 +136,7 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     session.refresh_until("Aurora plays", |view| picker(view).active == Some(2));
     let view = session.view.clone();
     assert_eq!(
-        root_panel(&view).groups[2].label,
+        root_panel(&view).groups[1].label,
         "Aurora",
         "this pattern's knobs follow the switch"
     );
@@ -235,7 +236,7 @@ fn activating_a_dormant_entry_loads_it_and_opens_its_card() {
 
     // The card is really open, not just marked focused in passing: its
     // own knob panel is the group the switch already proved follows.
-    assert_eq!(root_panel(&session.view).groups[2].label, "Aurora");
+    assert_eq!(root_panel(&session.view).groups[1].label, "Aurora");
 }
 
 /// Depth-first search of the project editor's card tree by label: `None`

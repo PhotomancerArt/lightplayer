@@ -49,6 +49,16 @@ pub enum UiDetailPanel {
         offer: OfferPath,
         current_base_mac: Option<String>,
     },
+    /// The connected board's panel settings, in the status corner's
+    /// details (the card panel pass, 2026-10-19): the panel reset over the
+    /// root's scope (`target`, offered while `held` controls are held) and
+    /// the auto-save switch (`auto_save`, at the edit tier only). The web
+    /// sends their panel commands, as the play page's panel does.
+    PanelSettings {
+        target: Option<lpc_wire::WireScopeRef>,
+        held: usize,
+        auto_save: Option<bool>,
+    },
 }
 
 impl UiDetailPanel {
@@ -66,6 +76,7 @@ impl UiDetailPanel {
                 .chain(&panel.cancel)
                 .collect(),
             UiDetailPanel::Terminal { .. }
+            | UiDetailPanel::PanelSettings { .. }
             | UiDetailPanel::Access(_)
             | UiDetailPanel::Bluetooth(_)
             | UiDetailPanel::Wifi(_)

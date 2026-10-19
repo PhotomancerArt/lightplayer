@@ -60,7 +60,7 @@
 //! Connect means one thing (the board card ADR, §4): this board's panel,
 //! here, on its card, reaching the board first when it must. Edit is the
 //! Project row's action ([`super::project_bar::edit_action`]), and while the
-//! board is connected, the panel's All controls row's.
+//! board is connected, the panel foot's.
 
 use lpa_devices::ActivityKind;
 use lpa_devices::device::DeviceStatus;
