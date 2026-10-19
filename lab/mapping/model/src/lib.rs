@@ -99,9 +99,13 @@ pub use domain::notice::{Notice, NoticeKind};
 pub use domain::object::{Lamp, Object, ObjectId, ObjectShape};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
-pub use domain::patch::{EffectivePatch, Gone, PatchProblem, PatchRule, Span, Unpatched};
+pub use domain::patch::{
+    EffectivePatch, Gone, Landing, Overlap, PatchProblem, PatchRule, Span, Unpatched,
+};
+pub use domain::patch_edits::{OnWire, PatchEdit, PortEdge};
 pub use domain::pattern::Pattern;
 pub use domain::picture::{Picture, picture_rect};
+pub use domain::piece::{Difference, DifferenceKind, Piece};
 pub use domain::placement::Placement;
 pub use domain::port_runs::PortRun;
 pub use domain::project::Project;

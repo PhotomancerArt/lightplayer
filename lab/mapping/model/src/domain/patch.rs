@@ -39,6 +39,13 @@
 //! places nothing and is reported as a problem; it is never retargeted on
 //! its own. Its lamps fall to the next rule, or are left unpatched. Two
 //! place rules for one object: the first wins (one object, one window).
+//!
+//! Two objects may land on the same pixels: nothing refuses it, since a
+//! hand patch passes through overlaps on its way to right (plan D7). The
+//! patch reports each one, and the board shows the later span, in the
+//! patch's order (fixtures in attach order, objects in tree order).
+//!
+//! Editing the rules by hand is `patch_edits.rs`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Range;
@@ -160,11 +167,30 @@ pub enum Gone {
     Object(ObjectId),
 }
 
+/// Pixels of one port where two objects land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Overlap {
+    pub output: NodeId,
+    pub port: String,
+    pub pixels: Range<u32>,
+    /// The two objects, in the patch's order: the board shows the second.
+    pub objects: [ObjectId; 2],
+}
+
+/// Where one lamp lands: an output's port, and the pixel on it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Landing {
+    pub output: NodeId,
+    pub port: String,
+    pub pixel: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EffectivePatch {
     pub spans: Vec<Span>,
     pub unpatched: Vec<Unpatched>,
     pub problems: Vec<PatchProblem>,
+    pub overlaps: Vec<Overlap>,
 }
 
 impl EffectivePatch {
@@ -185,6 +211,56 @@ impl EffectivePatch {
         self.spans
             .iter()
             .filter(move |s| &s.output == output && s.port == port)
+    }
+
+    /// An object's spans, in lamp order.
+    pub fn spans_of<'a>(&'a self, object: &'a ObjectId) -> impl Iterator<Item = &'a Span> {
+        self.spans.iter().filter(move |s| &s.object == object)
+    }
+
+    /// Where one of an object's lamps lands, if anywhere.
+    pub fn landing(&self, object: &ObjectId, lamp: u32) -> Option<Landing> {
+        let s = self.spans_of(object).find(|s| s.lamps.contains(&lamp))?;
+        Some(Landing {
+            output: s.output.clone(),
+            port: s.port.clone(),
+            pixel: s.pixel(lamp),
+        })
+    }
+
+    /// Whether any of an object's lamps lands on a pixel.
+    pub fn lands(&self, object: &ObjectId) -> bool {
+        self.spans_of(object).next().is_some()
+    }
+
+    /// Where two spans on one port share pixels.
+    fn find_overlaps(&mut self) {
+        let mut by_port: BTreeMap<(&NodeId, &str), Vec<&Span>> = BTreeMap::new();
+        for s in &self.spans {
+            by_port.entry((&s.output, &s.port)).or_default().push(s);
+        }
+        let mut found = Vec::new();
+        for ((output, port), spans) in by_port {
+            for (i, a) in spans.iter().enumerate() {
+                for b in &spans[i + 1..] {
+                    if a.object == b.object {
+                        continue;
+                    }
+                    let (pa, pb) = (a.pixels(), b.pixels());
+                    let pixels = pa.start.max(pb.start)..pa.end.min(pb.end);
+                    if pixels.is_empty() {
+                        continue;
+                    }
+                    found.push(Overlap {
+                        output: output.clone(),
+                        port: port.to_string(),
+                        pixels,
+                        objects: [a.object.clone(), b.object.clone()],
+                    });
+                }
+            }
+        }
+        self.overlaps = found;
     }
 }
 
@@ -343,7 +419,48 @@ impl Project {
             *cursor = cursor.saturating_add(lamps.total);
         }
         self.cut_into_spans(&fixtures, &runs, &mut patch);
+        patch.find_overlaps();
         patch
+    }
+
+    /// A port's pixels no span covers, cut into runs of at most `size`
+    /// (lp2014's channel groups, D14): the places on the wire a hand
+    /// patch can still put an object.
+    pub fn free_segments(&self, output: &NodeId, port: &str, size: u32) -> Vec<Range<u32>> {
+        let size = size.max(1);
+        let count = self.port_pixels(output, port);
+        let mut taken = vec![false; count as usize];
+        for s in self.effective_patch().on_port(output, port) {
+            for px in s.pixels() {
+                if let Some(t) = taken.get_mut(px as usize) {
+                    *t = true;
+                }
+            }
+        }
+        let mut out = Vec::new();
+        let mut px = 0u32;
+        while px < count {
+            if taken[px as usize] {
+                px += 1;
+                continue;
+            }
+            let start = px;
+            while px < count && !taken[px as usize] && px - start < size {
+                px += 1;
+            }
+            out.push(start..px);
+        }
+        out
+    }
+
+    /// The first of a fixture's objects, in tree order, with no lamp on
+    /// any pixel: the one a hand patch puts on the wire next.
+    pub fn next_unplaced(&self, fixture: &NodeId) -> Option<ObjectId> {
+        let patch = self.effective_patch();
+        self.objects_in(fixture)
+            .into_iter()
+            .find(|o| !o.lamps.is_empty() && !patch.lands(&o.id))
+            .map(|o| o.id.clone())
     }
 
     /// Fixtures in the order the product attaches them: each module's
