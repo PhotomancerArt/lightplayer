@@ -18,7 +18,7 @@
 //! | Busy in another tab | nothing (the surface: Connect here when it's done) | — | — |
 //! | Someone else connected, a Wi‑Fi connect failed | Retry | `connect-wifi` / `connect-relay` | retry |
 //! | The last Connect failed | Retry | `connect` | retry |
-//! | Not answering | Retry | `retry` | retry |
+//! | Not answering (a board that said hello went quiet) | Retry | `retry` | retry |
 //! | A stand-in, off | Power on | `reconnect` | play |
 //! | Offline: Wi‑Fi first, then lightplayer.app, then its cable | Connect | `connect`, else the road's own offer | wifi / cloud / the link's |
 //! | Offline, nothing reaches it | nothing | — | — |
@@ -29,7 +29,7 @@
 //! | Keeps crashing | Reinstall firmware | `reinstall-firmware` | firmware |
 //! | Needs a version Studio can't get, or only its core runs | Install firmware | `install-firmware`: Studio's own at one press, or the version its list picks | firmware |
 //! | An older LightPlayer | Update firmware | `update-firmware`, else `flash` (the board pick) | firmware |
-//! | From before the hello, no LightPlayer, download mode, says nothing | Install firmware | `flash` (the board pick) | firmware |
+//! | From before the hello, no LightPlayer, download mode, says nothing (it never said hello) | Install firmware | `flash` (the board pick) | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
 //! | Its port closed | Connect | `connect` | the link's |
 //! | A shader error | Edit project | `edit` (its lock on a play-only link) | edit |

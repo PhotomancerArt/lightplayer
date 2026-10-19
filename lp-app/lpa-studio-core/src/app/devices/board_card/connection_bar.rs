@@ -26,11 +26,11 @@
 //! | A Wi‑Fi connect that failed otherwise | (failed: "Wi‑Fi · connection failed"; why in the details) | Error | Retry |
 //! | A stand-in, linked | "Simulated · running" / "Emulated · running" | Neutral | — |
 //! | A stand-in, off | "Simulated · off" / "Emulated · off" | Neutral | — (Power on is the primary) |
-//! | Not responding | "<link> · not responding" | Attention | Retry |
+//! | Not responding (a board that said hello went quiet) | "<link> · not responding" | Attention | Retry |
 //! | Port there, closed | "<link> · not connected" | Neutral | — (Connect is the primary) |
 //! | Unplugged, and Wi‑Fi or lightplayer.app reaches it | "Wi‑Fi · not connected" / "lightplayer.app · not connected" | Neutral | — (Connect, over that way, is the primary) |
 //! | Offline | "Offline · 2 hours ago" | Neutral | — (the primary reconnects, when anything can) |
-//! | Linked | "<link> · connected" | Neutral | — |
+//! | Linked (a board that never said hello and says nothing too: the link works, and the surface and the Firmware row say the silence) | "<link> · connected" | Neutral | — |
 //!
 //! Work and refusals first (they are news), then what the board is, then
 //! how well it answers. A device that needs you is orange (Attention); a

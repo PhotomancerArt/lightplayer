@@ -37,7 +37,7 @@
 //! | A Wi‑Fi connect failed | wifi · error | "Studio couldn't reach this board over Wi‑Fi." "Make sure this computer is on the same Wi‑Fi, then retry." | Retry |
 //! | …through lightplayer.app | cloud · error | "Studio couldn't reach this board through lightplayer.app." "Retry to connect." | Retry |
 //! | The last Connect failed | link · error | "Studio couldn't connect to this board over USB." "Retry to connect." | Retry |
-//! | Not answering | link · attention | "This board stopped responding over USB." "Retry to reconnect." | Retry |
+//! | Not answering (a board that said hello went quiet) | link · attention | "This board stopped responding over USB." "Retry to reconnect." | Retry |
 //! | A stand-in, off | play · neutral | "This simulated board is off." | Power on |
 //! | Offline, Wi‑Fi or lightplayer.app reaches it | wifi / cloud · neutral | "This board isn't plugged in." "Connect over Wi‑Fi to use it." | Connect |
 //! | Offline | link · neutral | "This board is offline." "It was last seen 2 hours ago." | Connect by its cable, when offered |
@@ -53,7 +53,7 @@
 //! | From before the hello | firmware · attention | "This board is running old firmware." "Install the firmware to connect and edit." | Install firmware |
 //! | No LightPlayer (blank, another firmware) | firmware · neutral | "This board doesn't have LightPlayer firmware." "Install the firmware to use it." | Install firmware |
 //! | In download mode | firmware · neutral | "This board is waiting in download mode." "Install the firmware to use it." | Install firmware |
-//! | Says nothing | firmware · attention | "This board doesn't respond." "Install the firmware to use it." | Install firmware |
+//! | Says nothing (it never said hello) | firmware · attention | "This board doesn't respond." "Install the firmware to use it." | Install firmware |
 //! | Locked | lock · neutral | "This board is locked." "Unlock it to connect." | Unlock |
 //! | Its port closed | link · neutral | "Studio isn't connected to this board." "Connect over USB to use it." | Connect |
 //! | A shader error | project · error | "This board's project has an error." "Edit the project to fix it." | Edit project |
@@ -146,6 +146,9 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     if let BoardConnection::Failed { .. } = input.connection {
         return ConnectFailed;
     }
+    // Only a board that said hello stops responding: one that never did
+    // and says nothing is the model's NeedsAttention, and its face (Silent)
+    // asks for the firmware below (`Device::status`, 2026-10-18).
     if view.status == DeviceStatus::NotResponding {
         return NotAnswering;
     }
