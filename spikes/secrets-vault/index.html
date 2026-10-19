@@ -1,0 +1,1205 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Passwords and Keys</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* =====================================================================
+   Secrets vault, round 1: where Studio keeps passwords and keys, the
+   moment it asks, and the page that says how.
+   Palette: lpa-studio-web/src/style.css :root, via spikes/install-network-setup
+   (which took it from spikes/board-card-surface). Studio is dark-only.
+   Cards: the board card's grammar (docs/ux/anatomy/board-card.md).
+   Throwaway: production never imports spikes/.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28; --raised-strong:#252532; --pic:#07080a;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --faint:#6d6f7a; --heading:#e9e9ef;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-error-stripes:repeating-linear-gradient(135deg, rgba(255,93,93,.09) 0 6px, transparent 6px 12px);
+  --shell-bg:#0b0c0e; --shell-panel:#0e0f12; --shell-mut:#a7a49c; --shell-dim:#7c7a73; --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --lean:#7be0b2; --lean-bd:#365545; --focus:#a5b8ff;
+}
+* { box-sizing:border-box; }
+html { background:var(--shell-bg); }
+body { margin:0; padding-block:28px 120px; padding-inline:max(16px, 2vw); background:var(--shell-bg); color:var(--shell-tx); font:14px/1.5 var(--font); }
+main { max-width:1400px; margin:0 auto; display:grid; gap:44px; }
+p { margin:0; }
+code { font-family:var(--mono); font-size:12px; color:var(--shell-mut); overflow-wrap:anywhere; }
+header { display:grid; gap:12px; }
+.eyebrow { font:700 11px var(--font); letter-spacing:.14em; text-transform:uppercase; color:var(--shell-dim); }
+h1 { font-size:26px; line-height:1.15; letter-spacing:-.01em; margin:0; color:var(--strong); text-wrap:balance; }
+.hint { color:var(--shell-mut); font-size:14px; max-width:98ch; }
+.hint b { color:var(--shell-tx); font-weight:600; }
+q { color:var(--shell-tx); font-style:italic; quotes:"“" "”"; }
+section { display:grid; gap:14px; min-width:0; }
+h2 { margin:0; font-size:18px; color:var(--strong); display:flex; align-items:baseline; gap:12px; text-wrap:balance; }
+h2 .n { font:700 12px var(--mono); color:var(--shell-dim); min-width:16px; }
+.lede { color:var(--shell-mut); max-width:110ch; }
+.lede b { color:var(--shell-tx); font-weight:600; }
+.facts { border:1px solid var(--st-live-bd); border-radius:10px; padding:12px 16px; display:grid; gap:6px; background:#0e1319; max-width:1180px; }
+.facts h3 { margin:0; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--st-live-tx); }
+.facts ul { margin:0; padding-left:18px; display:grid; gap:5px; }
+.facts li { color:var(--shell-mut); font-size:13px; max-width:118ch; }
+.facts li b { color:var(--shell-tx); font-weight:600; }
+
+/* ---- the controls strip -------------------------------------------- */
+.strip { position:sticky; top:env(safe-area-inset-top, 0px); z-index:60; display:grid; gap:9px; border:1px dashed var(--shell-bd-strong); border-radius:10px; padding:11px 14px; background:rgba(11,12,14,.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.strip .line { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.strip .lbl { font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); min-width:58px; }
+.seg { display:inline-flex; flex-wrap:wrap; border:1px solid var(--bd); border-radius:7px; overflow:hidden; flex:none; max-width:100%; }
+.seg button { appearance:none; font:600 12.5px var(--font); color:var(--muted); background:transparent; border:0; padding:5px 11px; cursor:pointer; }
+.seg button + button { border-left:1px solid var(--bd); }
+.seg button[aria-pressed="true"] { background:var(--raised-strong); color:var(--strong); }
+.chip { appearance:none; font:600 12px var(--font); color:var(--muted); background:transparent; border:1px solid var(--bd); border-radius:6px; padding:4px 10px; cursor:pointer; }
+.chip:hover { border-color:var(--bd-strong); color:var(--strong); }
+.strip .note { color:var(--shell-dim); font-size:12.5px; flex:1; min-width:min(280px, 100%); }
+.strip .note b { color:var(--shell-mut); font-weight:600; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+/* ---- the card grammar (spikes/install-network-setup) ----------------- */
+svg.i { width:14px; height:14px; flex:none; }
+.sc { position:relative; width:100%; border-radius:8px; border:1px solid var(--bd); background:var(--panel); color:var(--tx); font-size:13px; }
+.sc.narrow { max-width:362px; }
+.nb { position:relative; display:flex; align-items:center; gap:9px; height:50px; padding:0 8px 0 11px; min-width:0; }
+.nb .nm { flex:1; min-width:0; font-size:13.5px; font-weight:700; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nb .nm small { display:block; font-size:11.5px; font-weight:500; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; }
+.nb .ga { flex:none; color:var(--subtle); font-size:11.5px; white-space:nowrap; }
+.nb .pl { width:28px; height:28px; border-radius:7px; display:grid; place-items:center; flex:none; background:var(--raised-strong); color:var(--muted); }
+.nb .pl svg.i { width:15px; height:15px; }
+.av { width:28px; height:28px; border-radius:50%; flex:none; display:grid; place-items:center; font:800 12px var(--font); color:#17171f; background:linear-gradient(135deg, #7be0b2, #53c6f2 55%, #a58af7); }
+.av.sm { width:22px; height:22px; font-size:10px; }
+.av.none { background:var(--raised-strong); color:var(--subtle); }
+.av.none svg.i { width:14px; height:14px; }
+.gosec { appearance:none; font:inherit; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 15px; border:0; border-left:1px solid var(--bd);
+  background:rgba(255,255,255,.035); color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:6px; cursor:pointer; border-radius:0 7px 0 0; }
+.gosec svg.i { width:12px; height:12px; }
+.gosec:hover { background:rgba(255,255,255,.07); }
+.face > :last-child, .face > :last-child.srow { border-radius:0 0 7px 7px; }
+.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); background:var(--surface); }
+.srow > .s, .srow > .a { overflow:hidden; }
+.ico { display:inline-grid; place-items:center; width:16px; height:16px; flex:none; color:var(--subtle); }
+.ico svg.i { width:12px !important; height:12px !important; }
+.srow .kd { flex:none; width:74px; color:var(--faint); font-weight:500; white-space:nowrap; }
+.srow .s { min-width:0; text-overflow:ellipsis; white-space:nowrap; color:var(--tx); }
+.srow .s.dimv { color:var(--subtle); }
+.srow .spring { flex:1; }
+.srow .a { flex:none; color:var(--subtle); white-space:nowrap; text-overflow:ellipsis; max-width:45%; }
+.srow .chev { color:var(--faint); font-size:12px; flex:none; }
+.srow .mark { display:inline-flex; flex:none; color:var(--subtle); }
+.srow .mark svg.i { width:12px; height:12px; }
+.srow.t-att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
+.srow.t-att svg.i, .srow.t-att .a, .srow.t-att .s, .srow.t-att .kd { color:currentColor; }
+.srow.t-att .a { font-weight:700; }
+.srow.clickable { cursor:pointer; }
+.srow.clickable:hover { background:#191922; }
+.srow.open { z-index:41; background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); }
+.srow.hl { box-shadow:inset 0 0 0 1px var(--focus); }
+.srow.foot { justify-content:flex-end; background:var(--panel); }
+.srow.sentence { height:auto; padding:9px 12px; font-size:12px; color:var(--muted); line-height:1.45; display:block; }
+.wo { appearance:none; font:inherit; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+.wo:hover { background:rgba(255,255,255,.09); }
+.srow.t-att .wo { border-left-color:currentColor; color:inherit; }
+.face > :last-child .wo:last-child { border-bottom-right-radius:7px; }
+
+/* a row's details: Studio's detail card, merged with the row */
+.dpop { position:absolute; left:-1px; right:-1px; top:100%; z-index:40; background:var(--raised); border:1px solid var(--bd-strong);
+  border-radius:0 0 10px 10px; box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; color:var(--muted); font-size:12px; cursor:default; text-align:left; white-space:normal; }
+.frozen .dpop, .dpop.flow { position:relative; top:auto; left:auto; right:auto; box-shadow:none; border-left:0; border-right:0; border-radius:0; }
+.dsec { display:grid; gap:5px; padding:8px 12px; border-top:1px solid var(--bd-mut); min-width:0; }
+.dsec:first-child { border-top:0; }
+.dsec h6 { margin:0; font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); display:flex; align-items:center; gap:7px; }
+.dsec h6 .r { margin-left:auto; text-transform:none; letter-spacing:0; font-weight:600; color:var(--subtle); display:inline-flex; align-items:center; gap:4px; }
+.dsec h6 .r svg.i { width:11px; height:11px; }
+.dsec p { margin:0; color:var(--tx); line-height:1.42; font-size:12.5px; text-wrap:pretty; }
+.dsec p.help { color:var(--subtle); font-size:11.5px; }
+.dsec p.help b { color:var(--muted); font-weight:600; }
+.kvl { display:flex; align-items:baseline; gap:12px; min-width:0; }
+.kvl > span:first-child { color:var(--subtle); width:68px; flex:none; }
+.kvl .v { font:11.5px var(--mono); color:var(--tx); min-width:0; overflow-wrap:anywhere; flex:1; }
+.kvl .v.plain { font:12px var(--font); }
+.kvl .tlink { flex:none; }
+.dsec.tw-err { background-image:var(--st-error-stripes), linear-gradient(90deg,var(--st-error-bg) 0%,transparent 72%); }
+.dsec.tw-err h6 { color:var(--st-error-tx); }
+.dsec.tw-acct { background:linear-gradient(90deg,var(--st-live-bg) 0%,transparent 80%); }
+.dsec.tw-acct h6 { color:var(--st-live-tx); }
+.acts { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding-top:3px; }
+.btn { appearance:none; font:800 11.5px var(--font); height:28px; padding:0 12px; border-radius:6px; border:1px solid var(--bd-strong); background:rgba(255,255,255,.05); color:var(--strong); display:inline-flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; }
+.btn svg.i { width:12px; height:12px; }
+.btn:hover { background:rgba(255,255,255,.09); }
+.btn.go { background:linear-gradient(90deg, rgba(95,224,139,.16), rgba(83,198,242,.16), rgba(165,138,247,.16)); border-color:#5a5a78; }
+.btn.lasting, .btn.undoable { color:var(--st-error-tx); background:rgba(255,93,93,.10); border-color:var(--st-error-bd); }
+.btn.lasting.armed { background:var(--st-error-bg); background-image:var(--st-error-stripes); border-color:#b06060; }
+.tlink { appearance:none; border:0; background:transparent; padding:0; cursor:pointer; font:700 11.5px var(--font); color:var(--muted); text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--faint); white-space:nowrap; }
+.tlink:hover { color:var(--strong); }
+.tlink.quiet { color:var(--subtle); font-weight:600; }
+.tlink.danger { color:var(--st-error-tx); text-decoration-color:var(--st-error-bd); }
+.ext { display:inline-flex; align-items:center; gap:4px; }
+.ext svg.i { width:11px; height:11px; }
+.sw { display:flex; align-items:center; gap:9px; min-width:0; }
+.sw .tg { position:relative; width:28px; height:16px; border-radius:9px; background:var(--strong); flex:none; cursor:pointer; border:0; padding:0; }
+.sw .tg::after { content:""; position:absolute; top:2px; left:14px; width:12px; height:12px; border-radius:50%; background:#1d1d28; transition:left .12s; }
+.sw .tg.off { background:#3a3a4a; } .sw .tg.off::after { left:2px; background:#9c9cab; }
+.sw .lb { color:var(--tx); font-weight:600; font-size:12.5px; min-width:0; }
+.place { appearance:none; font:inherit; display:inline-flex; align-items:center; gap:5px; padding:1px 7px 1px 6px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised-strong); color:var(--strong); font-weight:700; font-size:12px; cursor:pointer; white-space:nowrap; }
+.place svg.i { width:11px; height:11px; }
+.place .caret { color:var(--subtle); font-size:10px; }
+.field { display:grid; gap:3px; }
+.field label { color:var(--subtle); font-size:11px; font-weight:600; }
+.field input { font:13px var(--font); color:var(--strong); background:#121219; border:1px solid var(--bd); border-radius:6px; height:30px; padding:0 9px; width:100%; }
+.menu { border:1px solid var(--bd-strong); border-radius:9px; background:var(--raised); box-shadow:0 14px 40px rgba(0,0,0,.5); display:grid; overflow:hidden; font-size:12.5px; }
+.menu .mi { appearance:none; font:inherit; text-align:left; display:flex; align-items:center; gap:9px; padding:7px 11px; color:var(--tx); border:0; border-top:1px solid var(--bd-mut); background:transparent; cursor:pointer; min-width:0; }
+.menu .mi:first-child { border-top:0; }
+.menu .mi:hover { background:rgba(255,255,255,.04); }
+.menu .mi svg.i { width:13px; height:13px; color:var(--subtle); }
+.menu .mi .ck { width:13px; flex:none; color:var(--strong); }
+.menu .mi .sub { margin-left:auto; color:var(--subtle); font-size:11.5px; white-space:nowrap; }
+.menu .mi.here, .menu .mi.new { background:rgba(255,255,255,.05); font-weight:700; color:var(--strong); }
+.menu .mi.new { box-shadow:inset 2px 0 0 var(--lean); }
+.menu .mi.dim { color:var(--subtle); cursor:default; }
+.menu .gh { padding:7px 11px 3px; font:700 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); border-top:1px solid var(--bd-mut); }
+.menu .who { display:flex; align-items:center; gap:9px; padding:9px 11px; }
+.menu .who small { display:block; color:var(--subtle); font-size:11px; }
+.steps { display:grid; gap:4px; }
+.step { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--subtle); }
+.step .mk { width:14px; display:inline-grid; place-items:center; flex:none; color:var(--st-good-tx); }
+.step .mk svg.i { width:12px; height:12px; }
+.step.now { color:var(--strong); font-weight:600; }
+.spin { width:11px; height:11px; border-radius:50%; flex:none; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); -webkit-mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); animation:spin 1.1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ---- the page mocks ------------------------------------------------- */
+.concepts { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 600px), 1fr)); gap:20px; align-items:start; }
+.concept { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:var(--shell-panel); display:grid; gap:10px; align-content:start; min-width:0; }
+.concept.leanc { border-color:var(--lean-bd); box-shadow:inset 0 0 0 1px var(--lean-bd); }
+.chead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.cl { font:800 20px/1 var(--mono); color:var(--shell-tx); }
+.cn { font-size:14px; font-weight:700; color:var(--shell-tx); }
+.leanb { font-size:11px; font-weight:700; color:var(--lean); border:1px solid var(--lean-bd); border-radius:999px; padding:1px 9px; }
+.todayb { font-size:11px; font-weight:700; color:var(--shell-mut); border:1px solid var(--shell-bd-strong); border-radius:999px; padding:1px 9px; }
+.cw { font-size:12.5px; color:var(--shell-mut); }
+.cw b { color:var(--shell-tx); font-weight:600; }
+.cfa { font-size:12px; color:var(--shell-dim); line-height:1.5; display:grid; gap:3px; }
+.cfa b { color:var(--shell-mut); font-weight:600; }
+.cfa .pro { color:#a9d8c1; } .cfa .con { color:#e5b4b4; }
+.walkbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--shell-dim); min-height:24px; }
+.walkbar b { color:var(--shell-tx); font-weight:600; }
+
+.win { border:1px solid var(--bd); border-radius:10px; background:var(--bg); min-width:0; }
+.wbar { display:flex; align-items:center; gap:14px; height:38px; padding:0 12px; border-bottom:1px solid var(--shell-bd); background:#0f1013; border-radius:10px 10px 0 0; font-size:12px; color:var(--subtle); min-width:0; }
+.wbar .logo { font-weight:800; color:var(--strong); display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.wbar .logo i { width:10px; height:10px; transform:rotate(45deg); background:linear-gradient(135deg, var(--spectrum)); border-radius:2px; display:inline-block; }
+.wbar .tabs { display:flex; gap:12px; white-space:nowrap; overflow:hidden; }
+.wbar .tabs b { color:var(--tx); }
+.wbar .spring { flex:1; }
+.wbar .signin { color:var(--tx); font-weight:700; white-space:nowrap; }
+.wbar .keyb { display:inline-grid; place-items:center; width:24px; height:24px; border-radius:6px; color:var(--muted); border:1px solid var(--bd); }
+.wbar .keyb svg.i { width:13px; height:13px; }
+.wbody { padding:18px 18px 22px; display:grid; gap:14px; min-width:0; }
+.vh { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.vh h3 { margin:0; font-size:19px; color:var(--strong); letter-spacing:-.005em; }
+.vh .ext { margin-left:auto; }
+a.tlink, .vh .tlink { text-decoration:underline; }
+.vlede { color:var(--muted); font-size:13px; max-width:62ch; }
+.remember { border:1px solid var(--bd); border-radius:8px; background:var(--panel); display:grid; }
+.remember .rh { padding:10px 12px; display:grid; gap:8px; }
+.remember .rl { font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); }
+.remember .rhelp { color:var(--subtle); font-size:12px; }
+.seg.big button { padding:6px 13px; display:inline-flex; align-items:center; gap:6px; }
+.seg.big button svg.i { width:12px; height:12px; }
+.seg.big button:disabled { color:var(--faint); cursor:default; }
+.sheet { border-top:1px solid var(--bd); padding:11px 12px 12px; display:grid; gap:8px; background:var(--raised); border-radius:0 0 7px 7px; }
+.sheet h6 { margin:0; font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); display:flex; align-items:center; gap:7px; }
+.sheet h6 svg.i { width:12px; height:12px; }
+.sheet.acct { background:linear-gradient(180deg, #16202b 0%, var(--raised) 100%); }
+.sheet.acct h6 { color:var(--st-live-tx); }
+.sheet.loss h6 { color:var(--st-error-tx); }
+.sheet p { color:var(--tx); font-size:12.5px; line-height:1.45; max-width:64ch; }
+.cb { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--tx); cursor:pointer; }
+.cb .bx { width:15px; height:15px; border-radius:4px; border:1px solid var(--bd-strong); display:grid; place-items:center; background:#121219; flex:none; }
+.cb .bx svg.i { width:11px; height:11px; color:var(--strong); }
+.cb.on .bx { background:var(--raised-strong); }
+.places { display:grid; gap:14px; }
+.hl-flash { animation:hl 1.8s ease-out; }
+@keyframes hl { 0%,40% { box-shadow:0 0 0 2px var(--focus); } 100% { box-shadow:0 0 0 0 transparent; } }
+
+/* B: one table */
+.tbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.tbar .spring { flex:1; }
+.sel { appearance:none; font:600 12.5px var(--font); display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 10px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--panel); color:var(--strong); cursor:pointer; }
+.sel .caret { color:var(--subtle); font-size:10px; }
+.sel svg.i { width:12px; height:12px; }
+.vt { border:1px solid var(--bd); border-radius:8px; overflow:hidden; background:var(--panel); }
+.vt .tr { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(0, .8fr) minmax(0, 1fr) auto; align-items:center; gap:10px; min-height:36px; padding:4px 12px; border-top:1px solid var(--bd-mut); font-size:12.5px; }
+.vt .tr:first-child { border-top:0; }
+.vt .th { min-height:28px; font:700 10.5px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--faint); background:var(--surface); }
+.vt .nmc { display:flex; align-items:center; gap:8px; min-width:0; color:var(--strong); font-weight:600; }
+.vt .nmc span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vt .nmc svg.i { width:13px; height:13px; color:var(--subtle); }
+.vt .kc { color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vt .pc { display:flex; align-items:center; gap:5px; color:var(--muted); white-space:nowrap; overflow:hidden; }
+.vt .pc svg.i { width:12px; height:12px; color:var(--subtle); }
+.vt .ac { display:flex; align-items:center; gap:10px; justify-content:flex-end; }
+.vt .tr.armed { background:var(--st-error-bg); background-image:var(--st-error-stripes); }
+.vt .tr.armed .nmc { color:var(--st-error-tx); }
+.vt .sub { grid-column:1 / -1; font-size:11.5px; color:var(--subtle); padding:0 0 4px 21px; }
+.vt .sub b { color:var(--muted); }
+.fchips { display:inline-flex; gap:6px; }
+.fchips button { appearance:none; font:600 11.5px var(--font); color:var(--subtle); background:transparent; border:1px solid var(--bd); border-radius:999px; padding:2px 10px; cursor:pointer; }
+.fchips button[aria-pressed="true"] { color:var(--strong); background:var(--raised-strong); border-color:var(--bd-strong); }
+
+/* C: a group on /account (the account page's settings rows) */
+.ap { display:grid; gap:18px; max-width:640px; }
+.ap .gt { margin:0 0 6px; font:800 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--subtle); }
+.ap .gt.dim { color:var(--faint); }
+.ap .rows { border:1px solid var(--bd); border-radius:6px; background:var(--panel); overflow:hidden; }
+.ap .r { display:flex; align-items:center; gap:14px; min-height:46px; padding:9px 14px; border-bottom:1px solid var(--bd-mut); min-width:0; }
+.ap .r:last-child { border-bottom:0; }
+.ap .k { width:122px; flex:none; font-size:11.5px; font-weight:700; color:var(--subtle); }
+.ap .v { flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--tx); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ap .v.dim { color:var(--faint); font-weight:500; }
+.ap .x { display:flex; align-items:center; gap:10px; flex:none; }
+.ap .r.inner { background:var(--surface); padding-left:28px; min-height:36px; }
+.ap .r.note { display:block; color:var(--subtle); font-size:12px; font-weight:500; }
+.ap .collapsed { color:var(--faint); font-size:12px; }
+
+/* Today: the home page's fold */
+.fold { display:grid; gap:14px; max-width:448px; }
+.fold .fh { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--strong); }
+.fold .fh .car { color:var(--subtle); }
+.fold .gh { margin:0; font:700 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.fold .opt { display:flex; min-width:0; align-items:center; gap:10px; border:1px solid var(--bd); border-radius:6px; background:var(--surface); padding:9px 12px; font-size:12.5px; }
+.fold .opt .v { flex:1; min-width:0; color:var(--strong); font-weight:700; }
+.fold .opt .v small { display:block; color:var(--subtle); font-weight:500; font-size:11.5px; }
+.fold .grp { display:grid; gap:6px; }
+.fold .help { color:var(--subtle); font-size:11.5px; }
+
+/* ---- section 3: the explainer, in a new tab -------------------------- */
+.newtab { border:1px solid var(--bd); border-radius:10px; background:var(--bg); overflow:hidden; }
+.ntbar { display:flex; align-items:flex-end; gap:6px; height:36px; padding:0 10px; background:#0a0a0d; border-bottom:1px solid var(--shell-bd); }
+.ntbar .tab { display:flex; align-items:center; gap:7px; height:29px; padding:0 12px; border-radius:8px 8px 0 0; font-size:12px; color:var(--subtle); white-space:nowrap; overflow:hidden; }
+.ntbar .tab.on { background:#0f1013; color:var(--tx); border:1px solid var(--shell-bd); border-bottom:0; }
+.ntbar .tab i { width:8px; height:8px; transform:rotate(45deg); background:linear-gradient(135deg, var(--spectrum)); border-radius:2px; display:inline-block; flex:none; }
+.ntbar .badge { margin-left:auto; align-self:center; font:700 10.5px var(--font); color:var(--st-live-tx); border:1px solid var(--st-live-bd); border-radius:999px; padding:1px 8px; white-space:nowrap; }
+.urlbar { display:flex; align-items:center; gap:8px; height:34px; padding:0 12px; background:#0f1013; border-bottom:1px solid var(--shell-bd); font:12px var(--mono); color:var(--muted); }
+.urlbar svg.i { width:12px; height:12px; color:var(--subtle); }
+.doc { display:grid; grid-template-columns:200px minmax(0, 1fr); min-width:0; }
+.doc nav { border-right:1px solid var(--shell-bd); padding:16px 12px; display:grid; gap:2px; align-content:start; font-size:12.5px; }
+.doc nav .gh { font:700 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:8px 8px 4px; }
+.doc nav a { color:var(--subtle); text-decoration:none; padding:4px 8px; border-radius:5px; }
+.doc nav a.on { background:var(--raised-strong); color:var(--strong); font-weight:600; }
+.art { padding:24px 32px 40px; display:grid; gap:14px; max-width:780px; min-width:0; }
+.art h1 { font-size:24px; }
+.art h3 { margin:12px 0 0; font-size:16px; color:var(--strong); }
+.art p, .art li { color:var(--muted); font-size:13.5px; line-height:1.6; max-width:68ch; }
+.art p b, .art li b { color:var(--tx); font-weight:600; }
+.art ul { margin:0; padding-left:20px; display:grid; gap:5px; }
+.art .cta { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.label { border:1px solid var(--bd-strong); border-radius:8px; overflow-x:auto; background:var(--panel); }
+.label table { width:100%; border-collapse:collapse; min-width:560px; }
+.label caption { caption-side:top; text-align:left; padding:9px 12px; font:800 12px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--strong); border-bottom:2px solid var(--bd-strong); }
+.label th { text-align:left; font:700 10.5px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--faint); padding:7px 10px; border-bottom:1px solid var(--bd); white-space:nowrap; }
+.label td { vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--bd-mut); font-size:12.5px; color:var(--muted); line-height:1.4; }
+.label td:first-child { color:var(--strong); font-weight:600; }
+.label tr:last-child td { border-bottom:0; }
+.label .yes { color:var(--st-good-tx); font-weight:700; }
+.label .no { color:var(--st-attention-tx); font-weight:700; }
+figure { margin:0; border:1px solid var(--bd); border-radius:8px; background:var(--surface); padding:12px; display:grid; gap:8px; overflow-x:auto; }
+figcaption { font-size:12px; color:var(--subtle); }
+.rec { font:12px/1.6 var(--mono); color:var(--muted); white-space:pre; }
+.rec b { color:var(--strong); font-weight:600; }
+.rec i { color:var(--st-live-tx); font-style:normal; }
+.rec u { color:var(--faint); text-decoration:none; }
+.diagram svg { width:100%; height:auto; display:block; min-width:520px; }
+.label.compact { max-width:720px; }
+.livepanel { border:1px solid var(--bd); border-radius:8px; background:var(--panel); display:grid; }
+.livepanel .lh { display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid var(--bd); }
+.livepanel .lh b { color:var(--strong); }
+.livepanel .lh span { color:var(--subtle); font-size:12px; }
+.livepanel .lb { padding:12px; overflow-x:auto; }
+
+/* ---- spike shell ---------------------------------------------------- */
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap:26px 18px; align-items:start; }
+.gitem { position:relative; display:grid; gap:7px; min-width:0; }
+.gitem .stage { pointer-events:none; }
+.gcap { display:flex; align-items:baseline; gap:8px; font:700 11px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--shell-dim); min-width:0; }
+.gcap .k { font:700 11px var(--mono); color:var(--shell-mut); letter-spacing:0; }
+.gsub { font-size:12px; color:var(--shell-dim); max-width:70ch; }
+.gsub b { color:var(--shell-mut); font-weight:600; }
+.minis { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap:18px 16px; align-items:start; }
+.mini { display:grid; gap:7px; min-width:0; }
+.mini .cap { font:700 11px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--shell-dim); }
+.mini p.gsub { max-width:362px; }
+.tbl { border:1px solid var(--shell-bd); border-radius:10px; background:#0f1014; overflow-x:auto; max-width:1180px; }
+.tbl table { width:100%; border-collapse:collapse; min-width:760px; }
+.tbl thead th { text-align:left; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); padding:10px 12px; border-bottom:1px solid var(--shell-bd); }
+.tbl tbody td { vertical-align:top; padding:7px 12px; border-bottom:1px solid #1b1d22; font-size:13px; color:var(--shell-mut); }
+.tbl tbody tr:last-child td { border-bottom:0; }
+.tbl td.rw { width:150px; color:var(--shell-tx); font-weight:600; }
+.tbl td.wd { font-family:var(--mono); font-size:12px; color:var(--shell-tx); width:420px; }
+.qs { display:grid; gap:14px; }
+.q { border:1px solid var(--shell-bd); border-radius:10px; padding:14px 16px; display:grid; gap:10px; background:#101115; min-width:0; }
+.q h3 { margin:0; font-size:15px; color:var(--strong); display:flex; gap:10px; align-items:baseline; text-wrap:balance; }
+.q h3 .id { font:700 12px var(--mono); color:var(--lean); flex:none; }
+.q p, .q li { color:var(--shell-mut); max-width:112ch; }
+.q .lean { color:var(--shell-tx); }
+.q .lean b { color:var(--lean); }
+.q ul { margin:0; padding-left:18px; display:grid; gap:6px; }
+.q li b, .q p b { color:var(--shell-tx); font-weight:600; }
+.atbl td:first-child { font:700 12px var(--mono); color:var(--lean); width:46px; }
+.atbl td:last-child { color:var(--shell-tx); width:160px; }
+footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
+.toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:90; background:var(--raised-strong); color:var(--strong); border:1px solid var(--bd-strong); border-radius:9px; padding:9px 14px; font-size:13px; box-shadow:0 12px 40px rgba(0,0,0,.5); opacity:0; transition:opacity .2s; pointer-events:none; max-width:min(560px, calc(100vw - 32px)); }
+.toast.on { opacity:1; }
+@media (max-width: 760px) { .doc { grid-template-columns:minmax(0, 1fr); } .doc nav { display:none; } .art { padding:18px 16px 30px; } }
+@media (max-width: 700px) { .strip { position:static; } .strip .lbl { min-width:0; } .wbar .tabs { display:none; } }
+@media (max-width: 520px) { .srow .kd { width:56px; } .vt .tr { grid-template-columns:minmax(0, 1fr) auto; } .vt .kc, .vt .pc, .vt .th span:nth-child(2), .vt .th span:nth-child(3) { display:none; } .ap .k { width:84px; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+</style>
+
+<main>
+
+<header>
+  <span class="eyebrow">Spike · secrets vault · round 1</span>
+  <h1>Passwords and keys: what Studio keeps, where, and how you delete it</h1>
+  <p class="hint">Sean flashed his first board and nothing remembered his Wi‑Fi. Yona wants the next board to be easy, with no surprises: <q>If I consent (default OFF), lightplayer can store my secrets with minimal friction … I can at any time see what lightplayer stores, delete it, clear it … I can opt for browser-local storage … I can easily opt out.</q> <b>The thesis:</b> one page lists every secret Studio holds, grouped by where it lives, <b>this browser</b> or <b>your account</b>. One choice says where Studio remembers the Wi‑Fi and board passwords you type: <b>This browser</b> (the default, signed in or out), <b>Your account</b> (off until you turn it on, encrypted), or <b>Nowhere</b>. Changing it says what happens to what is already there. The Wi‑Fi form names the place before you press Connect, and every surface that remembers links to one plain page, opened in a new tab, that says exactly how it works.</p>
+</header>
+
+<div class="facts">
+  <h3>What Studio holds today (checked 2026-10-19)</h3>
+  <ul>
+    <li><b>This browser:</b> its own device key <code>lp.access.browser.v1</code> (minted at first start, login-equivalent, never synced); passwords friends shared <code>lp.ble.passwords.v1</code> (typed at a board, or saved by an <code>/unlock</code> link without asking); a copy of the account's keys <code>lp.access.account.v1</code> (so a phone offline still unlocks; removed at sign-out); <b>the app chat's AI keys</b> (Anthropic, OpenAI, OpenRouter, custom) inside <code>lp.settings.v1</code>, which the brief did not list.</li>
+    <li><b>The account (cloud):</b> <code>account_access</code> (<code>0005</code>) holds the account key's 32-byte secret and the play/author passwords, <b>all readable at rest</b>; minted on the account's first ask, with no question. Backups: litestream to Tigris, <b>720 h</b> retention (<code>infra/litestream.yml</code>).</li>
+    <li><b>Wi‑Fi passwords:</b> never kept (<code>network_controller.rs:33-35</code>); the ADR calls account storage <q>later research</q> (<code>2026-10-04-device-wifi-settings.md:250-254</code>). This work supersedes that.</li>
+    <li><b>Where it shows:</b> the home page's fold <q>Unlocking your boards</q> (web-built). The avatar menu is Profile · Switch account · Add another account… · Sign out; signed out, the chrome's slot is the one word <q>Sign in</q>, with no menu. Studio has a docs section (<code>/docs/&lt;page&gt;</code>, markdown in <code>docs/user-guide/</code>): the natural home for the explainer. The repo is public.</li>
+  </ul>
+</div>
+
+<div class="strip" role="region" aria-label="Exploration controls">
+  <div class="line"><span class="lbl">Person</span>
+    <div class="seg" role="group" aria-label="Person"><button type="button" data-set="who" data-v="out">signed out</button><button type="button" data-set="who" data-v="in">signed in</button></div>
+    <span class="lbl">Remember</span>
+    <div class="seg" role="group" aria-label="Remember in"><button type="button" data-set="place" data-v="browser">this browser</button><button type="button" data-set="place" data-v="account">your account</button><button type="button" data-set="place" data-v="nowhere">nowhere</button></div>
+  </div>
+  <div class="line"><span class="lbl">Kept</span>
+    <div class="seg" role="group" aria-label="What is kept"><button type="button" data-set="data" data-v="none">nothing yet</button><button type="button" data-set="data" data-v="few">a few</button><button type="button" data-set="data" data-v="many">many, long names</button></div>
+    <span class="lbl">Account</span>
+    <div class="seg" role="group" aria-label="lightplayer.app"><button type="button" data-set="cloud" data-v="ok">reachable</button><button type="button" data-set="cloud" data-v="down">can’t reach</button></div>
+    <button type="button" class="chip" data-a="reset-all">Reset</button>
+    <span class="note" id="stripnote"></span>
+  </div>
+</div>
+
+<section id="s1">
+  <h2><span class="n">1</span>The page</h2>
+  <p class="lede">Three structures for one page, and today's fold. Each is live: open a row, <b>Show</b> a value, <b>Forget</b> one (two presses: it is Lasting), <b>Clear</b> a place, or change where Studio remembers. Changing the place opens a short sheet that says what happens to what is there; with nothing there it just switches. Section 2's forms add to these pages when you press Connect.</p>
+  <div class="concepts" id="pages"></div>
+</section>
+
+<section id="s2">
+  <h2><span class="n">2</span>The moment it asks</h2>
+  <p class="lede">The board card's Wi‑Fi row, open on its form (the card plan's eight rows, round 3). <b>Default off</b> means the account is never chosen for you; <b>minimal friction</b> means a person who wants it gets there in one pick, without leaving the form; <b>no surprises</b> means the place is named before the password leaves the form. Type nothing: press <b>Connect</b>, then look at section 1.</p>
+  <div class="concepts" id="consent"></div>
+  <p class="lede" style="margin-top:6px"><b>The consent itself</b> is one block, used wherever the account is turned on (the form, the page): what will be kept, how, what it gets you, a link that opens the explainer, and what happens to passwords already in this browser.</p>
+  <div class="minis" id="sheets"></div>
+</section>
+
+<section id="s3">
+  <h2><span class="n">3</span>How it works (opens in a new tab)</h2>
+  <p class="lede">Every <b>How it works ↗</b> opens this. It has one job: say exactly what is kept, where, who can read it, and how to delete it, in words a person reads to the end. <b>It is honest about the one thing a person might not assume:</b> the account's copy is encrypted at rest, not end to end, so lightplayer.app's server can read it when your browser asks. Three takes: the article (with the label first), the label alone, and the live record.</p>
+  <div id="how"></div>
+</section>
+
+<section id="s4">
+  <h2><span class="n">4</span>The doors</h2>
+  <p class="lede">Yona: <q>reached from the account menu</q>. Signed in, that is one new item. <b>Signed out there is no menu</b>: the chrome's slot is the word <q>Sign in</q>, a link straight to the provider. So the signed-out doors are the question. And a card row whose value came from a store says where, with a mark that opens the page at that item.</p>
+  <div id="doors"></div>
+</section>
+
+<section id="s5">
+  <h2><span class="n">5</span>Every state of the lean page</h2>
+  <p class="lede">Section 1's concept A, frozen, so the states scan as a set. The strip doesn't move these.</p>
+  <div class="grid" id="states"></div>
+</section>
+
+<section id="s6">
+  <h2><span class="n">6</span>The words</h2>
+  <p class="lede">Labels in the words other software uses (P6), sentences only where a surface explains (P20), buttons a verb and its object (P12). <b>“Passwords and keys”</b> is the page's name: what a person calls these things (P11), where <q>secrets</q> and <q>vault</q> are ours.</p>
+  <div class="tbl"><table><thead><tr><th>Where</th><th>Words</th><th>Why</th></tr></thead><tbody id="words"></tbody></table></div>
+</section>
+
+<section id="s7">
+  <h2><span class="n">7</span>The gate</h2>
+  <div class="qs" id="qs"></div>
+</section>
+
+<footer>Cards follow <code>docs/ux/anatomy/board-card.md</code> and <code>spikes/install-network-setup</code> (round 3); the account page's rows follow <code>lpa-studio-web/src/app/account/account_page.rs</code>; today's fold is <code>app/home/access_settings_section.rs</code>, its words verbatim. People, networks, boards and ciphertext are made up. Spike only: production never imports <code>spikes/</code>.</footer>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* =====================================================================
+   Icons (spikes/board-card-surface, plus key, browser, sparkle, ext, …)
+   ===================================================================== */
+const IC = {
+  wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
+  usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/>',
+  layers:'<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16 9 4.5 9-4.5"/>',
+  cloud:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  key:'<circle cx="7.5" cy="15.5" r="3.6"/><path d="m10.2 12.8 9.3-9.3"/><path d="m16 7 3 3"/><path d="m13.5 9.5 2 2"/>',
+  browser:'<rect x="3" y="4.5" width="18" height="15" rx="2.2"/><path d="M3 9h18"/><circle cx="6.2" cy="6.8" r=".7" fill="currentColor"/><circle cx="8.6" cy="6.8" r=".7" fill="currentColor"/>',
+  person:'<circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c.9-3.9 3.7-6 7.2-6s6.3 2.1 7.2 6"/>',
+  sparkle:'<path d="M11 3.5 12.8 9 18.5 11 12.8 13 11 18.5 9.2 13 3.5 11 9.2 9z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  ext:'<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  x:'<path d="M6 6l12 12M18 6 6 18"/>',
+  chev:'<path d="M9 6l6 6-6 6"/>',
+  back:'<path d="M15 6l-6 6 6 6"/>',
+  login:'<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l4-4-4-4"/><path d="M14 12H4"/>',
+  logout:'<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M15 16l4-4-4-4"/><path d="M19 12H9"/>',
+  useradd:'<circle cx="10" cy="8.5" r="3.6"/><path d="M3 20c.9-3.9 3.6-6 7-6 1.6 0 3 .4 4.2 1.3"/><path d="M18 14v6M15 17h6"/>',
+  shield:'<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z"/>',
+  eyeoff:'<path d="M3 3l18 18"/><path d="M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.6 3.4"/><path d="M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.2-1"/>',
+  chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+};
+const ic = (n) => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+
+/* =====================================================================
+   The world: a made-up person, browser, boards and networks
+   ===================================================================== */
+const WHO = { name:'River', email:'river@example.com', initial:'R' };
+const BROWSER = 'Chrome on River’s MacBook';
+const ACCT_KEY_NAME = 'River’s account';
+const PLACE = {
+  browser:{ word:'This browser', short:'this browser', icon:'browser' },
+  account:{ word:'Your account', short:'your account', icon:'person' },
+  nowhere:{ word:'Nowhere', short:'nowhere', icon:'eyeoff' },
+};
+const SETS = {
+  none:{ wifi:[], board:[], ai:[], author:null, play:null },
+  few:{ wifi:[['Cedar Lane', '3 d ago', 'sunflower-porch-41']], board:[['Porch eaves', 'author', '2 weeks ago', 'otter-maple-9']],
+    ai:[['OpenRouter', 'sk-or-v1-…a91f']], author:'maple-otter-42', play:null },
+  many:{ wifi:[['Cedar Lane', '3 d ago', 'sunflower-porch-41'], ['Sprinter Hotspot', '2 weeks ago', 'vanlife2026'], ['The Neighbors Upstairs Very Long Network Name 5GHz', '1 month ago', 'correct-horse-battery'], ['Juniper-2G', 'Aug 30', 'juniper-2g-guest']],
+    board:[['Porch eaves', 'author', '2 weeks ago', 'otter-maple-9'], ['Sean’s eave lights', 'play', '5 d ago', 'eaves-play'], ['Garage', 'author', 'Sep 12', 'garage-door-77']],
+    ai:[['OpenRouter', 'sk-or-v1-…a91f'], ['Anthropic', 'sk-ant-…4c2e']], author:'maple-otter-42', play:'sunny-porch' },
+};
+
+/* =====================================================================
+   State: the strip sets the scene; the pages change it live
+   ===================================================================== */
+const ST = { who:'in', place:'browser', data:'few', cloud:'ok' };
+const qs0 = new URLSearchParams(location.search);
+['who','place','data','cloud'].forEach((k) => { if (qs0.get(k)) ST[k] = qs0.get(k); });
+let TYPED = [], ACCTPW = { author:null, play:null }, SEQ = 0;
+const effPlace = () => (ST.place === 'account' && ST.who !== 'in') ? 'browser' : ST.place;
+
+function seed() {
+  const s = SETS[ST.data], where = effPlace();
+  TYPED = [];
+  if (where !== 'nowhere') {
+    s.wifi.forEach(([name, added, pw]) => TYPED.push({ id:'w' + (SEQ++), kind:'wifi', place:where, name, added, value:pw }));
+    s.board.forEach(([name, tier, added, pw]) => TYPED.push({ id:'b' + (SEQ++), kind:'board', place:where, name, tier, added, value:pw }));
+  }
+  s.ai.forEach(([name, value]) => TYPED.push({ id:'a' + (SEQ++), kind:'ai', place:'browser', name, value, added:'Sep 3' }));
+  ACCTPW = { author:s.author, play:s.play };
+}
+
+/* The scene a renderer draws: everything it needs, nothing global. */
+function scene() { return { who:ST.who, place:effPlace(), cloud:ST.cloud, typed:TYPED, acctpw:ACCTPW, boards:4 }; }
+
+/* Every item a scene holds, keys included, in each place's order. */
+const ORDER = { wifi:0, board:1, acctpw:2, key:3, ai:4 };
+function itemsOf(sc) {
+  const out = sc.typed.filter((t) => t.place === 'browser' || sc.who === 'in').map((t) => ({ ...t }));
+  out.push({ id:'k-browser', kind:'key', which:'browser', place:'browser', name:'this browser', aside:'on 4 boards' });
+  if (sc.who === 'in') {
+    out.push({ id:'k-copy', kind:'key', which:'copy', place:'browser', name:ACCT_KEY_NAME, aside:'copy' });
+    out.push({ id:'k-acct', kind:'key', which:'account', place:'account', name:ACCT_KEY_NAME, aside:'on 3 boards' });
+    out.push({ id:'p-author', kind:'acctpw', tier:'author', place:'account', name:'author', value:sc.acctpw.author });
+    out.push({ id:'p-play', kind:'acctpw', tier:'play', place:'account', name:'play', value:sc.acctpw.play });
+  }
+  return out.sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
+}
+const typedIn = (sc, place) => sc.typed.filter((t) => t.place === place && t.kind !== 'ai');
+
+/* Per-concept UI state */
+const CX = {};
+const cx = (id) => (CX[id] ||= { open:null, armed:null, sheet:null, move:true, shown:{}, filter:'all', menu:false, hl:null });
+
+/* =====================================================================
+   Shared pieces: a row, a row's details, the remember block, its sheet
+   ===================================================================== */
+const KIND = { wifi:'Wi‑Fi', board:'Board', acctpw:'Password', key:'Key', ai:'AI' };
+const KICON = { wifi:'wifi', board:'lock', acctpw:'lock', key:'key', ai:'sparkle' };
+function rowAside(it) {
+  if (it.kind === 'board') return it.tier;
+  if (it.kind === 'acctpw') return it.value ? 'on 3 boards' : 'not set';
+  if (it.kind === 'key') return it.aside;
+  if (it.kind === 'ai') return 'app chat';
+  return '';
+}
+function vaultRow(it, c, cid, frozen) {
+  const open = c.open === it.id;
+  const dim = it.kind === 'acctpw' && !it.value;
+  const cls = `srow clickable${open ? ' open' : ''}${c.hl === it.id ? ' hl' : ''}`;
+  const pop = open ? `<div class="dpop">${detailsOf(it, c, cid)}</div>` : '';
+  /* frozen: the details flow under the row (a sibling), so the grid shows them whole */
+  return `<div class="${cls}" data-c="${cid}" data-a="open:${it.id}" id="${frozen ? '' : cid + '-' + it.id}"><span class="ico">${ic(KICON[it.kind])}</span><span class="kd">${KIND[it.kind]}</span><span class="s${dim ? ' dimv' : ''}">${esc(it.name)}</span><span class="spring"></span><span class="a">${esc(rowAside(it))}</span><span class="chev">›</span>${frozen ? '' : pop}</div>${frozen ? pop : ''}`;
+}
+const mask = (v) => '•'.repeat(Math.min(12, Math.max(8, (v || '').length)));
+function valueLine(label, it, c, cid) {
+  const shown = c.shown[it.id];
+  return `<div class="kvl"><span>${label}</span><span class="v">${shown ? esc(it.value) : mask(it.value)}</span><button type="button" class="tlink quiet" data-c="${cid}" data-a="show:${it.id}">${shown ? 'Hide' : 'Show'}</button></div>`;
+}
+function armedBlock(c, key, cid, sentence, confirm) {
+  return `<div class="dsec tw-err"><p>${sentence}</p><div class="acts"><button type="button" class="btn lasting armed" data-c="${cid}" data-a="${key}">${esc(confirm)}</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="disarm">Cancel</button></div></div>`;
+}
+function whereTag(it) { const p = PLACE[it.place]; return `<span class="r">${ic(p.icon)}${it.place === 'account' ? 'your account · encrypted' : p.short}</span>`; }
+function detailsOf(it, c, cid) {
+  const armedForget = c.armed === 'forget:' + it.id;
+  if (it.kind === 'wifi') {
+    return `<div class="dsec"><h6>${ic('wifi')}Wi‑Fi password${whereTag(it)}</h6>${valueLine('Password', it, c, cid)}<div class="kvl"><span>Added</span><span class="v plain">${esc(it.added)}</span></div>`
+      + `<p class="help">A board that joined it keeps its own copy. Forget it on a board in that board’s Wi‑Fi details.</p>`
+      + (armedForget ? '' : `<div class="acts"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:forget:${it.id}">Forget ${esc(it.name)}</button></div>`) + `</div>`
+      + (armedForget ? armedBlock(c, 'forget:' + it.id, cid, `The password will be deleted from ${it.place === 'account' ? 'your account' : 'this browser'}. Boards keep their own copies.`, 'Forget') : '');
+  }
+  if (it.kind === 'board') {
+    return `<div class="dsec"><h6>${ic('lock')}Board password${whereTag(it)}</h6><div class="kvl"><span>Board</span><span class="v plain">${esc(it.name)}</span></div><div class="kvl"><span>Opens</span><span class="v plain">${esc(it.tier)}</span></div>${valueLine('Password', it, c, cid)}<div class="kvl"><span>Added</span><span class="v plain">${esc(it.added)}, from a shared link</span></div>`
+      + (armedForget ? '' : `<div class="acts"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:forget:${it.id}">Forget</button></div>`) + `</div>`
+      + (armedForget ? armedBlock(c, 'forget:' + it.id, cid, `You will need the password again to ${it.tier === 'author' ? 'edit' : 'play'} ${esc(it.name)} from ${it.place === 'account' ? 'any browser' : 'this browser'}.`, 'Forget') : '');
+  }
+  if (it.kind === 'acctpw') {
+    const title = it.tier === 'author' ? 'Author password' : 'Play password';
+    if (!it.value) return `<div class="dsec"><h6>${ic('lock')}${title}${whereTag(it)}</h6><p>Not set. Your account puts it on every board you plug in.</p><div class="acts"><button type="button" class="btn" data-c="${cid}" data-a="flash:set">Set ${title.toLowerCase()}</button></div></div>`;
+    const armed = c.armed === 'forget:' + it.id;
+    return `<div class="dsec"><h6>${ic('lock')}${title}${whereTag(it)}</h6>${valueLine('Password', it, c, cid)}<div class="kvl"><span>On</span><span class="v plain">Porch eaves, Garage, Truck</span></div><p class="help">Your account puts it on every board you plug in.</p>`
+      + (armed ? '' : `<div class="acts"><button type="button" class="tlink" data-c="${cid}" data-a="flash:change">Change</button><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:forget:${it.id}">Remove</button></div>`) + `</div>`
+      + (armed ? armedBlock(c, 'forget:' + it.id, cid, 'Boards drop it the next time you plug them in.', 'Remove') : '');
+  }
+  if (it.kind === 'key') {
+    const armed = c.armed === 'reset:' + it.id;
+    if (it.which === 'copy') return `<div class="dsec"><h6>${ic('key')}Your account’s key, a copy${whereTag(it)}</h6><p>So this browser unlocks your boards when lightplayer.app can’t be reached. Signing out removes it.</p></div>`;
+    if (it.which === 'browser') return `<div class="dsec"><h6>${ic('key')}This browser’s key${whereTag(it)}</h6><p>Your boards recognize this browser by it. Studio made it the first time it opened here.</p><div class="kvl"><span>Name</span><span class="v plain">${esc(BROWSER)}</span><button type="button" class="tlink quiet" data-c="${cid}" data-a="flash:rename">Rename</button></div><div class="kvl"><span>On</span><span class="v plain">Porch eaves, Garage, Truck, Desk lamp</span></div>`
+      + (armed ? '' : `<div class="acts"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:reset:${it.id}">Reset key</button></div>`) + `</div>`
+      + (armed ? armedBlock(c, 'reset:' + it.id, cid, 'Your boards won’t know this browser until you plug each one in again.', 'Reset key') : '');
+    return `<div class="dsec"><h6>${ic('key')}Your account’s key${whereTag(it)}</h6><p>Any browser signed in as you unlocks your boards with it. Studio made it the first time you plugged a board in, signed in.</p><div class="kvl"><span>On</span><span class="v plain">Porch eaves, Garage, Truck</span></div>`
+      + (armed ? '' : `<div class="acts"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:reset:${it.id}">Reset key</button></div>`) + `</div>`
+      + (armed ? armedBlock(c, 'reset:' + it.id, cid, 'Your boards will drop the old key the next time you plug them in.', 'Reset key') : '');
+  }
+  /* ai */
+  return `<div class="dsec"><h6>${ic('sparkle')}${esc(it.name)} key${whereTag(it)}</h6>${valueLine('Key', it, c, cid)}<div class="kvl"><span>Used by</span><span class="v plain">the app chat</span></div><p class="help">Kept in this browser only. It never goes to lightplayer.app.</p>`
+    + (armedForget ? '' : `<div class="acts"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:forget:${it.id}">Forget</button></div>`) + `</div>`
+    + (armedForget ? armedBlock(c, 'forget:' + it.id, cid, 'The app chat will ask for a key again.', 'Forget') : '');
+}
+
+const HELP = {
+  browser:'Passwords you type stay in this browser. lightplayer.app never sees them.',
+  account:'Passwords you type are kept in your account, encrypted. Any browser signed in as you can use them.',
+  nowhere:'Studio forgets a password once the board has it.',
+};
+function howLink(label = 'How it works') { return `<a class="tlink ext" href="#s3" data-a="how">${esc(label)}${ic('ext')}</a>`; }
+
+/* The sheet a change of place opens: what happens to what is there. */
+function sheetFor(sc, c, cid, to) {
+  const from = sc.place;
+  if (to === 'signin') return `<div class="sheet acct"><h6>${ic('person')}Your account</h6><p>Sign in to keep passwords in your account and set up boards from any browser.</p><div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="signin">${ic('login')}Sign in</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="sheet-cancel">Cancel</button></div></div>`;
+  if (to === 'account') {
+    const n = typedIn(sc, 'browser').length;
+    const move = n ? `<div class="cb${c.move ? ' on' : ''}" role="checkbox" aria-checked="${c.move}" tabindex="0" data-c="${cid}" data-a="move-toggle"><span class="bx">${c.move ? ic('check') : ''}</span>Also move the ${plural(n, 'password')} in this browser</div>` : '';
+    return `<div class="sheet acct"><h6>${ic('person')}Remember in your account</h6><p>Your account will keep the Wi‑Fi and board passwords you type, encrypted. Remember them in your account to set up your next board from any browser.</p>${move}<div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="sheet-ok">Remember in my account</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="sheet-cancel">Cancel</button><span style="flex:1"></span>${howLink()}</div></div>`;
+  }
+  const n = typedIn(sc, from).length;
+  if (to === 'browser' && from === 'account') {
+    return `<div class="sheet"><h6>${ic('browser')}Remember in this browser</h6><p>The ${plural(n, 'password')} in your account will move to this browser. Your account will keep none of them.</p><div class="acts"><button type="button" class="btn undoable" data-c="${cid}" data-a="sheet-ok">Move to this browser</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="sheet-cancel">Cancel</button></div></div>`;
+  }
+  /* to nowhere */
+  const where = from === 'account' ? 'your account' : 'this browser';
+  const armed = c.armed === 'sheet';
+  return `<div class="sheet loss"><h6>${ic('eyeoff')}Stop remembering</h6><p>The ${plural(n, 'password')} in ${where} will be deleted. Boards keep their own copies.</p><div class="acts"><button type="button" class="btn lasting${armed ? ' armed' : ''}" data-c="${cid}" data-a="${armed ? 'sheet-ok' : 'arm:sheet'}">${armed ? 'Confirm: delete ' + n : 'Delete ' + plural(n, 'password')}</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="sheet-cancel">Cancel</button></div></div>`;
+}
+function rememberBlock(sc, c, cid) {
+  const opts = ['browser', 'account', 'nowhere'].map((p) => `<button type="button" aria-pressed="${sc.place === p}" data-c="${cid}" data-a="place:${p}">${ic(PLACE[p].icon)}${PLACE[p].word}</button>`).join('');
+  return `<div class="remember"><div class="rh"><span class="rl">Remember Wi‑Fi and board passwords in</span><div class="seg big" role="group" aria-label="Remember in">${opts}</div><p class="rhelp">${HELP[sc.place]}</p></div>${c.sheet ? sheetFor(sc, c, cid, c.sheet) : ''}</div>`;
+}
+
+/* A place as a card: the place's name bar, then its rows. */
+function placeCard(place, sc, c, cid, frozen) {
+  const its = itemsOf(sc).filter((i) => i.place === place);
+  const typed = typedIn(sc, place).length + (place === 'account' ? (sc.acctpw.author ? 1 : 0) + (sc.acctpw.play ? 1 : 0) : 0);
+  let head;
+  if (place === 'browser') head = `<div class="nb"><span class="pl">${ic('browser')}</span><span class="nm">${esc(BROWSER)}<small>This browser</small></span></div>`;
+  else head = `<div class="nb"><span class="av">${WHO.initial}</span><span class="nm">${WHO.name}<small>${WHO.email} · Your account</small></span><span class="ga" style="display:inline-flex;gap:4px;align-items:center">${ic('shield')}encrypted</span></div>`;
+  const rows = its.filter((i) => i.kind === 'wifi' || i.kind === 'board');
+  const rest = its.filter((i) => !(i.kind === 'wifi' || i.kind === 'board'));
+  let none = '';
+  if (!rows.length && sc.place === place) none = `<div class="srow"><span class="ico">${ic('wifi')}</span><span class="kd">Wi‑Fi</span><span class="s dimv">none yet</span></div>`;
+  const armed = c.armed === 'clear:' + place;
+  const foot = typed ? (armed
+    ? `<div class="srow sentence" style="background:var(--st-error-bg);background-image:var(--st-error-stripes)"><span style="color:var(--st-error-tx)">${plural(typed, 'password')} will be deleted from ${place === 'account' ? 'your account' : 'this browser'}. Keys stay.</span><span class="acts" style="padding-top:6px"><button type="button" class="btn lasting armed" data-c="${cid}" data-a="clear:${place}">Clear ${plural(typed, 'password')}</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="disarm">Cancel</button></span></div>`
+    : `<div class="srow foot"><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:clear:${place}">Clear ${place === 'account' ? 'your account' : 'this browser'}…</button></div>`) : '';
+  return `<div class="sc"><div class="face">${head}${rows.map((i) => vaultRow(i, c, cid, frozen)).join('')}${none}${rest.map((i) => vaultRow(i, c, cid, frozen)).join('')}${foot}</div></div>`;
+}
+function accountOut(cid) {
+  return `<div class="sc"><div class="face"><div class="nb"><span class="av none">${ic('person')}</span><span class="nm">Your account<small>Not signed in</small></span><button type="button" class="gosec" data-c="${cid}" data-a="signin">${ic('login')}Sign in</button></div><div class="srow sentence">Sign in to keep passwords in your account and unlock your boards from any browser.</div></div></div>`;
+}
+function accountDown(cid) {
+  return `<div class="sc"><div class="face"><div class="nb"><span class="av">${WHO.initial}</span><span class="nm">${WHO.name}<small>${WHO.email} · Your account</small></span></div><div class="srow t-att"><span class="ico">${ic('cloud')}</span><span class="kd" style="width:auto;margin-right:8px">lightplayer.app</span><span class="s">can’t reach</span><span class="spring"></span><button type="button" class="wo" data-c="${cid}" data-a="flash:retry">Retry</button></div><div class="srow sentence">Your boards still unlock with the keys this browser holds.</div></div></div>`;
+}
+function chrome(sc, body, o = {}) {
+  const slot = sc.who === 'in' ? `<span class="av sm">${WHO.initial}</span>` : '<span class="signin">Sign in</span>';
+  return `<div class="win"><div class="wbar"><span class="logo"><i></i>LightPlayer</span><span class="tabs"><span>Home</span><span>Explore</span><span>Docs</span></span><span class="spring"></span>${o.keyb ? `<span class="keyb" title="Passwords and keys">${ic('key')}</span>` : ''}${slot}</div><div class="wbody">${body}</div></div>`;
+}
+
+/* =====================================================================
+   Section 1, concept A: two places, as cards (the lean)
+   ===================================================================== */
+function pageA(sc, c, cid, frozen) {
+  const acct = sc.who !== 'in' ? accountOut(cid) : sc.cloud === 'down' ? accountDown(cid) : placeCard('account', sc, c, cid, frozen);
+  const body = `<div class="vh"><h3>Passwords and keys</h3>${howLink()}</div>`
+    + `<p class="vlede">Studio keeps these so your boards unlock for you and your next board can join your Wi‑Fi by itself.</p>`
+    + rememberBlock(sc, c, cid)
+    + `<div class="places">${placeCard('browser', sc, c, cid, frozen)}${acct}</div>`;
+  return chrome(sc, body);
+}
+
+/* =====================================================================
+   Concept B: one table, a password manager's list
+   ===================================================================== */
+function pageB(sc, c, cid) {
+  const its = itemsOf(sc).filter((i) => c.filter === 'all' || i.place === c.filter).filter((i) => !(sc.cloud === 'down' && i.place === 'account'));
+  const menu = c.menu ? `<div class="menu" style="position:absolute;z-index:30;top:34px;left:0;min-width:260px">${['browser','account','nowhere'].map((p) => `<button type="button" class="mi" data-c="${cid}" data-a="place:${p}"><span class="ck">${sc.place === p ? ic('check') : ''}</span>${ic(PLACE[p].icon)}${PLACE[p].word}${p === 'account' && sc.who !== 'in' ? '<span class="sub">sign in first</span>' : ''}</button>`).join('')}</div>` : '';
+  const rows = its.map((it) => {
+    const armed = c.armed === 'forget:' + it.id || c.armed === 'reset:' + it.id;
+    const shown = c.shown[it.id];
+    const hasVal = it.value && it.kind !== 'key';
+    const nm = it.kind === 'acctpw' ? (it.tier === 'author' ? 'Author password' : 'Play password') : it.kind === 'key' ? (it.which === 'browser' ? 'This browser’s key' : it.which === 'copy' ? 'Account key (copy)' : 'Account key') : it.name;
+    const kind = { wifi:'Wi‑Fi', board:`Board · ${it.tier || ''}`, acctpw:'Account password', key:'Key', ai:'AI key' }[it.kind];
+    const verb = it.kind === 'key' ? (it.which === 'copy' ? '' : 'Reset') : it.kind === 'acctpw' ? (it.value ? 'Remove' : 'Set') : 'Forget';
+    const act = verb === 'Reset' ? `arm:reset:${it.id}` : verb === 'Set' ? 'flash:set' : `arm:forget:${it.id}`;
+    const acts = armed
+      ? `<button type="button" class="btn lasting armed" data-c="${cid}" data-a="${c.armed}">Confirm ${verb.toLowerCase()}</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="disarm">Cancel</button>`
+      : `${hasVal ? `<button type="button" class="tlink quiet" data-c="${cid}" data-a="show:${it.id}">${shown ? 'Hide' : 'Show'}</button>` : ''}${verb ? `<button type="button" class="tlink${verb === 'Set' ? '' : ' danger'}" data-c="${cid}" data-a="${act}">${verb}</button>` : ''}`;
+    const sub = shown && hasVal ? `<div class="sub"><b>${esc(it.value)}</b> · added ${esc(it.added || 'Oct 2')}</div>` : '';
+    const dimName = it.kind === 'acctpw' && !it.value;
+    return `<div class="tr${armed ? ' armed' : ''}"><span class="nmc">${ic(KICON[it.kind])}<span style="${dimName ? 'color:var(--faint);font-weight:500' : ''}">${esc(nm)}</span></span><span class="kc">${esc(kind)}</span><span class="pc">${ic(PLACE[it.place].icon)}${it.place === 'account' ? 'Your account' : 'This browser'}</span><span class="ac">${acts}</span>${sub}</div>`;
+  }).join('');
+  const down = sc.who === 'in' && sc.cloud === 'down' ? `<div class="tr"><span class="nmc" style="color:var(--st-attention-tx)">${ic('cloud')}<span>Your account’s items: can’t reach lightplayer.app</span></span><span></span><span></span><span class="ac"><button type="button" class="tlink" data-c="${cid}" data-a="flash:retry">Retry</button></span></div>` : '';
+  const filters = sc.who === 'in' ? `<div class="fchips">${[['all','All'],['browser','This browser'],['account','Your account']].map(([v, w]) => `<button type="button" aria-pressed="${c.filter === v}" data-c="${cid}" data-a="filter:${v}">${w}</button>`).join('')}</div>` : '';
+  const clears = ['browser', 'account'].filter((p) => p === 'browser' || (sc.who === 'in' && sc.cloud === 'ok')).filter((p) => typedIn(sc, p).length).map((p) => c.armed === 'clear:' + p
+    ? `<button type="button" class="btn lasting armed" data-c="${cid}" data-a="clear:${p}">Confirm: clear ${p === 'account' ? 'your account' : 'this browser'}</button>`
+    : `<button type="button" class="tlink danger" data-c="${cid}" data-a="arm:clear:${p}">Clear ${p === 'account' ? 'your account' : 'this browser'}…</button>`).join('');
+  const body = `<div class="vh"><h3>Passwords and keys</h3>${howLink()}</div>`
+    + `<div class="tbar"><span style="position:relative"><span style="font-size:12.5px;color:var(--subtle);margin-right:8px">Remember new passwords in</span><button type="button" class="sel" data-c="${cid}" data-a="menu">${ic(PLACE[sc.place].icon)}${PLACE[sc.place].word}<span class="caret">▾</span></button>${menu}</span><span class="spring"></span>${filters}</div>`
+    + (c.sheet ? `<div class="remember">${sheetFor(sc, c, cid, c.sheet)}</div>` : '')
+    + `<div class="vt"><div class="tr th"><span>Name</span><span>Kind</span><span>Kept in</span><span></span></div>${rows}${down}</div>`
+    + (clears ? `<div class="acts">${clears}</div>` : '');
+  return chrome(sc, body);
+}
+
+/* =====================================================================
+   Concept C: a group on /account (its settings rows)
+   ===================================================================== */
+function pageC(sc, c, cid) {
+  const its = itemsOf(sc);
+  const wifi = its.filter((i) => i.kind === 'wifi'), board = its.filter((i) => i.kind === 'board'), ai = its.filter((i) => i.kind === 'ai');
+  const placeSel = `<button type="button" class="sel" data-c="${cid}" data-a="menu">${ic(PLACE[sc.place].icon)}${PLACE[sc.place].word}<span class="caret">▾</span></button>`;
+  const menu = c.menu ? `<div class="r inner"><div class="menu" style="width:100%">${['browser','account','nowhere'].map((p) => `<button type="button" class="mi" data-c="${cid}" data-a="place:${p}"><span class="ck">${sc.place === p ? ic('check') : ''}</span>${ic(PLACE[p].icon)}${PLACE[p].word}<span class="sub">${p === 'account' && sc.who !== 'in' ? 'sign in first' : HELP[p].split('.')[0]}</span></button>`).join('')}</div></div>` : '';
+  const listRow = (key, label, list, summary) => {
+    const open = c.open === key;
+    const inner = open ? list.map((it) => {
+      const armed = c.armed === 'forget:' + it.id;
+      return `<div class="r inner"><span class="v" style="font-weight:500">${esc(it.name)}${it.tier ? ' · ' + it.tier : ''}</span><span class="x" style="color:var(--subtle);font-size:11.5px">${ic(PLACE[it.place].icon)}</span><span class="x">${armed ? `<button type="button" class="btn lasting armed" data-c="${cid}" data-a="forget:${it.id}">Confirm forget</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="disarm">Cancel</button>` : `<button type="button" class="tlink quiet" data-c="${cid}" data-a="show:${it.id}">${c.shown[it.id] ? esc(it.value) : 'Show'}</button><button type="button" class="tlink danger" data-c="${cid}" data-a="arm:forget:${it.id}">Forget</button>`}</span></div>`;
+    }).join('') : '';
+    return `<div class="r"><span class="k">${label}</span><span class="v${list.length ? '' : ' dim'}">${list.length ? esc(summary) : 'none'}</span>${list.length ? `<span class="x"><button type="button" class="tlink quiet" data-c="${cid}" data-a="openc:${key}">${open ? 'Done' : 'Manage'}</button></span>` : ''}</div>${inner}`;
+  };
+  const acctRows = sc.who === 'in' ? `<div class="r"><span class="k">Account passwords</span><span class="v">${sc.acctpw.author ? 'author' : ''}${sc.acctpw.author && sc.acctpw.play ? ' · ' : ''}${sc.acctpw.play ? 'play' : ''}${!sc.acctpw.author && !sc.acctpw.play ? '<span style="color:var(--faint);font-weight:500">none</span>' : ''}</span><span class="x"><button type="button" class="tlink quiet" data-c="${cid}" data-a="flash:change">Change</button></span></div>` : '';
+  const keys = `<div class="r"><span class="k">Keys</span><span class="v">this browser${sc.who === 'in' ? ' · ' + ACCT_KEY_NAME + ' (and a copy here)' : ''}</span><span class="x"><button type="button" class="tlink quiet" data-c="${cid}" data-a="flash:keys">Manage</button></span></div>`;
+  const group = `<div><p class="gt">Passwords and keys</p><div class="rows">`
+    + `<div class="r"><span class="k">Remember in</span><span class="v">${placeSel}</span><span class="x">${howLink()}</span></div>${menu}`
+    + (c.sheet ? `<div class="r inner" style="display:block;padding:0">${sheetFor(sc, c, cid, c.sheet)}</div>` : '')
+    + listRow('wifi', 'Wi‑Fi networks', wifi, wifi.map((w) => w.name).join(', '))
+    + listRow('board', 'Board passwords', board, board.map((w) => w.name).join(', '))
+    + acctRows + keys
+    + listRow('ai', 'AI keys', ai, ai.map((w) => w.name).join(', '))
+    + `<div class="r note">Wi‑Fi and board passwords are kept in <b style="color:var(--muted)">${sc.place === 'account' ? 'your account, encrypted' : sc.place === 'browser' ? 'this browser' : 'neither: Studio forgets them'}</b>. AI keys stay in this browser.</div>`
+    + `</div></div>`;
+  const body = sc.who === 'in'
+    ? `<div class="ap"><div class="vh"><h3>Your profile</h3></div><div><p class="gt dim">Identity</p><div class="rows"><div class="r"><span class="k">Name</span><span class="v">${WHO.name}</span></div><div class="r"><span class="k">Email</span><span class="v">${WHO.email}</span></div></div></div>${group}<div><p class="gt dim">Cloud sync · Sessions</p><p class="collapsed">(unchanged, below)</p></div></div>`
+    : `<div class="ap"><div class="vh"><h3>Sign in to LightPlayer</h3></div><div class="rows"><div class="r"><span class="v" style="white-space:normal;font-weight:500;color:var(--muted)">Sign in to publish projects and keep passwords in your account.</span><span class="x"><button type="button" class="btn go" data-c="${cid}" data-a="signin">${ic('login')}Sign in with Google</button></span></div></div>${group}</div>`;
+  return chrome(sc, body);
+}
+
+/* =====================================================================
+   Today: the home page's fold, "Unlocking your boards"
+   ===================================================================== */
+function pageToday(sc) {
+  const boardN = sc.typed.filter((t) => t.kind === 'board' && t.place === 'browser').length;
+  const remembered = boardN === 0 ? 'None yet. Passwords friends share with you will appear here.' : boardN === 1 ? '1 password friends shared with you.' : `${boardN} passwords friends shared with you.`;
+  const acct = sc.who !== 'in'
+    ? `<div class="opt"><span class="v">Not signed in<small>Sign in and your devices unlock from any browser you sign in on.</small></span><span class="tlink quiet">Sign in</span></div>`
+    : `<div class="opt"><span class="v">${WHO.name}’s account<small>Any browser signed in as you unlocks your devices.</small></span><span class="tlink quiet">Reset account key…</span></div>`
+      + `<p class="gh" style="margin-top:6px">Account passwords · optional</p>`
+      + `<div class="opt"><span class="v">Play password<small>${sc.acctpw.play ? '••••••••' : 'Not set'}</small></span><span class="tlink quiet">${sc.acctpw.play ? 'Show · Change · Remove' : 'Set'}</span></div>`
+      + `<div class="opt"><span class="v">Author password<small>${sc.acctpw.author ? '••••••••' : 'Not set'}</small></span><span class="tlink quiet">${sc.acctpw.author ? 'Show · Change · Remove' : 'Set'}</span></div>`
+      + `<p class="help">Added to every device you set up or plug in, along with your account key. Give friends who don't use LightPlayer the play password.</p>`;
+  const body = `<div class="fold"><div class="fh"><span class="car">▾</span>Unlocking your boards</div>`
+    + `<div class="grp"><p class="gh">This browser</p><div class="opt"><span class="v">River’s MacBook<small>How your devices list this browser. macOS · Chrome.</small></span><span class="tlink quiet">Rename</span></div></div>`
+    + `<div class="grp"><p class="gh">Your account</p>${acct}</div>`
+    + `<div class="grp"><p class="gh">Remembered device passwords</p><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="help">${remembered}</span>${boardN ? '<span class="tlink">Forget them</span>' : ''}</div></div>`
+    + `</div>`;
+  return chrome(sc, `<p class="vlede" style="color:var(--faint);font-size:12px">The home page, below the boards and projects:</p>${body}`);
+}
+
+function renderPages() {
+  const sc = scene();
+  const concepts = [
+    { id:'A', lean:true, n:'Two places, as cards', w:'<b>Where it lives is the first fact</b>, so the page is two cards in the board card’s grammar: <b>This browser</b>, then <b>Your account</b>, always in that order (P3). The remember choice sits above them, one control for one decision.',
+      pro:'+ The transparency fact and the consent are the same axis: you see where each thing is, and <b>Clear</b> belongs to a place. Same rows as the board card (P8).', con:'− “Where’s my Cedar Lane password?” means scanning two cards; fine at a dozen items, weaker at fifty.', html:pageA(sc, cx('A'), 'A') },
+    { id:'B', n:'One table', w:'A password manager’s list: <b>Name · Kind · Kept in</b>, Show and Forget on the row, filter chips for the two places, the remember choice a menu above.',
+      pro:'+ Familiar from 1Password and Chrome; scales to many; Show is one press.', con:'− The place is a column, so the decision about where (the thing Yona asked to make visible) is a dropdown. Reads like a tool, not like Studio.', html:pageB(sc, cx('B'), 'B') },
+    { id:'C', n:'A group on /account', w:'No new page: a <b>Passwords and keys</b> group on the existing account page’s settings rows, between Identity and Cloud sync, by kind with a count. Signed out, /account already asks you in; the group sits under the ask.',
+      pro:'+ Nothing new to find; the account page’s look exists and shipped.', con:'− Signed out, “browser storage” lives on a page named for an account you don’t have. Each kind is a Manage away.', html:pageC(sc, cx('C'), 'C') },
+    { id:'Today', today:true, n:'Today: the home page’s fold', w:'<q>Unlocking your boards</q>, folded under the home page. This browser’s name, the account key, the account’s passwords, and a count of shared passwords with <b>Forget them</b>.',
+      pro:'+ Exists; the words are tested.', con:'− No Wi‑Fi, no AI keys, no where, no Clear for the account, no explainer, and web-built (no offers).', html:pageToday(sc) },
+  ];
+  document.getElementById('pages').innerHTML = concepts.map((k) => `<div class="concept${k.lean ? ' leanc' : ''}" id="concept-${k.id}"><div class="chead"><span class="cl">${k.today ? '—' : k.id}</span><span class="cn">${k.n}</span>${k.lean ? '<span class="leanb">lean</span>' : ''}${k.today ? '<span class="todayb">today</span>' : ''}</div><p class="cw">${k.w}</p><div class="cfa"><span class="pro">${k.pro}</span><span class="con">${k.con}</span></div>${k.html}</div>`).join('');
+}
+
+/* =====================================================================
+   Section 2: the moment it asks, in the board card's Wi‑Fi form
+   ===================================================================== */
+const NEWNET = 'Juniper House';
+const F = {};
+const fx = (id) => (F[id] ||= { page:'form', sw:null, chooser:false, consent:false, move:true, step:0, ask:'none', added:null });
+const STEPS = (ssid) => [`Looking for ${ssid}`, 'Checking the password', 'Getting an address'];
+
+function formCard(id, cid) {
+  const f = fx(id), sc = scene();
+  const place = sc.place;
+  if (f.sw === null) f.sw = place !== 'nowhere';
+  const rowsTop = `<div class="srow"><span class="ico">${ic('layers')}</span><span class="kd">Project</span><span class="s">Holiday Eaves</span><span class="spring"></span><span class="chev">›</span></div>`
+    + `<div class="srow"><span class="ico">${ic('usb')}</span><span class="kd">USB</span><span class="s">connected</span><span class="spring"></span><span class="chev">›</span></div>`;
+  let wifiRow, pop;
+  if (f.page === 'joined') {
+    const mark = f.added ? `<span class="mark" title="${f.added === 'account' ? 'From your account' : 'From this browser'}">${ic(PLACE[f.added].icon)}</span>` : '';
+    wifiRow = `<div class="srow clickable open"><span class="ico">${ic('wifi')}</span><span class="kd">Wi‑Fi</span><span class="s">${NEWNET}</span><span class="spring"></span>${mark}<span class="chev">›</span></div>`;
+    pop = `<div class="dsec"><h6>${ic('wifi')}${NEWNET}${f.added ? `<span class="r">${ic(PLACE[f.added].icon)}${f.added === 'account' ? 'in your account' : 'in this browser'}</span>` : ''}</h6><div class="kvl"><span>Address</span><span class="v">lp-3f2a.local</span></div>${f.added ? `<p class="help">Your next board can join ${NEWNET} by itself. <a class="tlink quiet" href="#concept-A" data-a="goto-A">Passwords and keys</a></p>` : ''}</div>` + askAfter(id, cid, f, sc);
+  } else if (f.page === 'joining') {
+    wifiRow = `<div class="srow open"><span class="ico"><span class="spin"></span></span><span class="kd">Wi‑Fi</span><span class="s" style="color:var(--strong);font-weight:700">${NEWNET}</span><span class="spring"></span><span class="a" style="color:var(--strong);font-weight:700">joining</span></div>`;
+    pop = `<div class="dsec"><h6>${ic('wifi')}${NEWNET}</h6><div class="steps">${STEPS(NEWNET).map((s, i) => `<div class="step${i === f.step ? ' now' : ''}"><span class="mk">${i < f.step ? ic('check') : i === f.step ? '<span class="spin"></span>' : ''}</span>${esc(s)}</div>`).join('')}</div></div>`;
+  } else {
+    wifiRow = `<div class="srow open"><span class="ico">${ic('wifi')}</span><span class="kd">Wi‑Fi</span><span class="s dimv">not connected</span><span class="spring"></span></div>`;
+    pop = `<div class="dsec"><h6>${ic('back')}${NEWNET}</h6><div class="field"><label>Password</label><input type="password" value="made-up-for-spike" autocomplete="current-password" aria-label="Password for ${NEWNET}"></div>${rememberLine(id, cid, f, sc)}<div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="f-connect">${ic('wifi')}Connect</button></div></div>`;
+  }
+  return `<div class="sc narrow"><div class="face"><div class="nb"><span class="nm">Porch eaves</span></div>${rowsTop}${wifiRow}<div class="dpop flow">${pop}</div>`
+    + `<div class="srow"><span class="ico">${ic('lock')}</span><span class="kd">Access</span><span class="s">edit · no password</span><span class="spring"></span><span class="chev">›</span></div></div></div>`;
+}
+function rememberLine(id, cid, f, sc) {
+  const tg = `<button type="button" class="tg${f.sw ? '' : ' off'}" aria-pressed="${f.sw}" aria-label="Remember" data-c="${cid}" data-a="f-sw"></button>`;
+  if (id === 'today') return '';
+  if (id === 'C') {
+    const where = sc.place === 'account' ? 'your account' : 'this browser';
+    return `<div class="sw">${tg}<span class="lb">Remember in ${where}</span></div><p class="help">Your next board can join it by itself. <a class="tlink quiet" href="#concept-A" data-a="goto-A">Passwords and keys</a></p>`;
+  }
+  if (id === 'B') {
+    const where = sc.place === 'account' ? 'your account' : 'this browser';
+    return `<div class="sw">${tg}<span class="lb">Remember in ${where}</span></div><p class="help">Your next board can join it by itself. ${howLink()}</p>`;
+  }
+  /* A: the place named, one pick away */
+  const p = sc.place === 'nowhere' ? 'browser' : sc.place;
+  const chip = `<button type="button" class="place" data-c="${cid}" data-a="f-chooser">${ic(PLACE[p].icon)}${p === 'account' ? 'your account' : 'this browser'}<span class="caret">▾</span></button>`;
+  let under = `<p class="help">${f.sw ? 'Your next board can join it by itself.' : 'Studio will forget it once the board has it.'} ${howLink()}</p>`;
+  if (f.chooser) {
+    under = `<div class="menu">${['browser','account'].map((q) => `<button type="button" class="mi" data-c="${cid}" data-a="f-pick:${q}"><span class="ck">${p === q ? ic('check') : ''}</span>${ic(PLACE[q].icon)}${PLACE[q].word}<span class="sub">${q === 'account' ? (sc.who === 'in' ? (sc.place === 'account' ? 'any browser signed in as you' : 'asks first') : 'sign in first') : 'lightplayer.app never sees it'}</span></button>`).join('')}</div>`;
+  }
+  if (f.consent) {
+    const n = typedIn(sc, 'browser').length;
+    under = `<div class="sheet acct" style="border:1px solid var(--st-live-bd);border-radius:7px"><h6>${ic('person')}Remember in your account</h6><p>Your account will keep the Wi‑Fi and board passwords you type, encrypted. Remember them in your account to set up your next board from any browser.</p>${n ? `<div class="cb${f.move ? ' on' : ''}" role="checkbox" aria-checked="${f.move}" tabindex="0" data-c="${cid}" data-a="f-move"><span class="bx">${f.move ? ic('check') : ''}</span>Also move the ${plural(n, 'password')} in this browser</div>` : ''}<div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="f-consent-ok">Remember in my account</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="f-consent-no">Cancel</button><span style="flex:1"></span>${howLink()}</div></div>`;
+  }
+  return `<div class="sw">${tg}<span class="lb">Remember in</span>${chip}</div>${under}`;
+}
+function askAfter(id, cid, f, sc) {
+  if (id !== 'B' || sc.who !== 'in' || f.ask !== 'shown') return '';
+  return `<div class="dsec tw-acct"><h6>${ic('person')}Your account</h6><p>Your account can keep ${NEWNET} too, encrypted. Remember it in your account to set up your next board from any browser.</p><div class="acts"><button type="button" class="btn go" data-c="${cid}" data-a="f-ask-ok">Remember in my account</button><button type="button" class="tlink quiet" data-c="${cid}" data-a="f-ask-no">Not now</button><span style="flex:1"></span>${howLink()}</div></div>`;
+}
+function renderConsent() {
+  const k = [
+    { id:'A', lean:true, n:'Named in the form', w:'<b>Remember in [this browser ▾]</b> under the password, on by default. The chip names where it goes before you press Connect. Picking <b>your account</b> the first time opens the consent right there, inside the form.',
+      pro:'+ Informed before the password leaves the form; the account is one pick away; nothing asked of someone who doesn’t care.', con:'− A signed-in person who never touches the chip never hears that the account can do this (until the page).' },
+    { id:'B', n:'Asked after it works', w:'The form says <b>Remember in this browser</b>. Once the board has joined, a signed-in person is offered the account, once, with the reason in front of them.',
+      pro:'+ Asks at the moment of value, with context; one decision, never repeated.', con:'− A question after the job is done; the password is already in this browser when it asks. Another “Not now” to press.' },
+    { id:'C', n:'Only on the page', w:'The form says <b>Remember in this browser</b> and links to <b>Passwords and keys</b>. The account is turned on only there, deliberately.',
+      pro:'+ The least pressure; nothing about the cloud near a password field.', con:'− Few people will find it. The card plan wanted this moment to make people think about it.' },
+    { id:'today', today:true, n:'Today', w:'The password and Connect. Nothing is remembered; the next board asks again.', pro:'', con:'' },
+  ];
+  document.getElementById('consent').innerHTML = k.map((c) => `<div class="concept${c.lean ? ' leanc' : ''}"><div class="chead"><span class="cl">${c.today ? '—' : c.id}</span><span class="cn">${c.n}</span>${c.lean ? '<span class="leanb">lean</span>' : ''}${c.today ? '<span class="todayb">today</span>' : ''}</div><p class="cw">${c.w}</p>${c.pro ? `<div class="cfa"><span class="pro">${c.pro}</span><span class="con">${c.con}</span></div>` : ''}<div class="walkbar"><span id="fw-${c.id}">${walkNote(c.id)}</span><span style="flex:1"></span><button type="button" class="chip" data-c="f-${c.id}" data-a="f-reset">Reset</button></div>${formCard(c.id, 'f-' + c.id)}</div>`).join('');
+}
+function walkNote(id) {
+  const f = fx(id);
+  if (f.page === 'joined') return f.added ? `Joined. <b>${NEWNET}</b> is in ${f.added === 'account' ? 'your account' : 'this browser'} now: see section 1.` : 'Joined. Nothing kept.';
+  if (f.page === 'joining') return 'Joining…';
+  if (f.consent) return 'The consent, inside the form.';
+  return 'Press <b>Connect</b>.';
+}
+function renderSheets() {
+  const base = { who:'in', place:'browser', cloud:'ok', acctpw:{ author:'x', play:null } };
+  const t3 = [['Cedar Lane'], ['Sprinter Hotspot'], ['Porch eaves']].map(([n], i) => ({ id:'s' + i, kind:i === 2 ? 'board' : 'wifi', place:'browser', name:n }));
+  const items = [
+    ['Turning it on, nothing here', sheetFor({ ...base, typed:[] }, { move:true }, 'z', 'account'), 'The sentence says what will happen, then the button said aloud (P20). The link opens section 3 in a new tab.'],
+    ['Turning it on, 3 in this browser', sheetFor({ ...base, typed:t3 }, { move:true }, 'z', 'account'), '<b>Also move</b> is on: the person chose the account, so what is here goes too. Off leaves them in this browser.'],
+    ['Signed out', sheetFor({ ...base, who:'out', typed:[] }, {}, 'z', 'signin'), 'Your account, pressed signed out: the step that works (P7).'],
+    ['Back to this browser', sheetFor({ ...base, place:'account', typed:t3.map((t) => ({ ...t, place:'account' })) }, {}, 'z', 'browser'), 'Opting out, keeping them: one press, and they move. Undoable: the error tint, one click.'],
+    ['Nowhere, from the account', sheetFor({ ...base, place:'account', typed:t3.map((t) => ({ ...t, place:'account' })) }, { armed:'sheet' }, 'z', 'nowhere'), 'Opting out, dropping them: Lasting, so two presses (shown armed). Says that boards keep their own copies.'],
+  ];
+  document.getElementById('sheets').innerHTML = items.map(([cap, html, sub]) => `<div class="mini"><span class="cap">${esc(cap)}</span><div class="stage" style="pointer-events:none"><div class="remember">${html}</div></div><p class="gsub">${sub}</p></div>`).join('');
+}
+
+/* =====================================================================
+   Section 3: the explainer
+   ===================================================================== */
+function labelTable(caption = 'At a glance') {
+  return `<div class="label"><table><caption>${esc(caption)}</caption><thead><tr><th>What</th><th>Where</th><th>Encrypted</th><th>Who can read it</th><th>Delete it</th></tr></thead><tbody>
+    <tr><td>Wi‑Fi and board passwords you type</td><td>This browser (the default), your account (if you turn it on), or nowhere</td><td>In your account: <span class="yes">yes</span><br>In this browser: <span class="no">no</span></td><td>You. In your account, also lightplayer.app’s server.</td><td>Forget, or Clear</td></tr>
+    <tr><td>Your account’s play and author passwords</td><td>Your account</td><td><span class="yes">yes</span></td><td>You and lightplayer.app’s server; every board you plug in</td><td>Remove</td></tr>
+    <tr><td>Keys Studio makes</td><td>This browser’s: this browser. Your account’s: your account, and a copy here while you’re signed in</td><td>In your account: <span class="yes">yes</span></td><td>You; boards you plug in keep their own copy</td><td>Reset</td></tr>
+    <tr><td>AI keys for the app chat</td><td>This browser only</td><td><span class="no">no</span></td><td>You</td><td>Forget</td></tr>
+  </tbody></table></div>`;
+}
+function diagram() {
+  return `<figure class="diagram"><svg viewBox="0 0 720 170" role="img" aria-label="Your browser sends a password over HTTPS to lightplayer.app's server, which holds the key and encrypts it; the database and its backups hold only ciphertext.">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#9c9cab"/></marker></defs>
+    <g font-family="Inter, sans-serif" font-size="12.5">
+      <rect x="10" y="40" width="150" height="70" rx="9" fill="#17171f" stroke="#4a4a5e"/><text x="85" y="68" text-anchor="middle" fill="#fffaf0" font-weight="700">Your browser</text><text x="85" y="88" text-anchor="middle" fill="#9c9cab" font-size="11.5">signed in as you</text>
+      <line x1="160" y1="75" x2="252" y2="75" stroke="#9c9cab" stroke-width="1.5" marker-end="url(#ar)"/><text x="206" y="66" text-anchor="middle" fill="#c9c9d2" font-size="11">HTTPS</text>
+      <line x1="252" y1="88" x2="160" y2="88" stroke="#6d6f7a" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar)"/><text x="206" y="104" text-anchor="middle" fill="#6d6f7a" font-size="10.5">when you ask</text>
+      <rect x="254" y="30" width="190" height="90" rx="9" fill="#142330" stroke="#3c5c78"/><text x="349" y="58" text-anchor="middle" fill="#fffaf0" font-weight="700">lightplayer.app server</text><text x="349" y="78" text-anchor="middle" fill="#9cc8ee" font-size="11.5">holds the key, in its own</text><text x="349" y="94" text-anchor="middle" fill="#9cc8ee" font-size="11.5">settings, never the database</text>
+      <line x1="444" y1="75" x2="530" y2="75" stroke="#9c9cab" stroke-width="1.5" marker-end="url(#ar)"/><text x="487" y="66" text-anchor="middle" fill="#c9c9d2" font-size="11">sealed</text>
+      <rect x="532" y="22" width="176" height="56" rx="9" fill="#17171f" stroke="#4a4a5e"/><text x="620" y="45" text-anchor="middle" fill="#fffaf0" font-weight="700">Database</text><text x="620" y="63" text-anchor="middle" fill="#9c9cab" font-size="11.5">ciphertext only</text>
+      <line x1="620" y1="78" x2="620" y2="100" stroke="#6d6f7a" stroke-width="1.2" marker-end="url(#ar)"/>
+      <rect x="532" y="102" width="176" height="56" rx="9" fill="#17171f" stroke="#343444" stroke-dasharray="4 3"/><text x="620" y="125" text-anchor="middle" fill="#c9c9d2" font-weight="600">Backups</text><text x="620" y="143" text-anchor="middle" fill="#9c9cab" font-size="11.5">ciphertext, kept 30 days</text>
+    </g></svg><figcaption>A copy of the database or a backup, alone, can’t be read: the key isn’t in it.</figcaption></figure>`;
+}
+function record() {
+  return `<figure><div class="rec"><b>secret</b>   <i>sec7k2xw…</i>          <u>its id</u>
+<b>kind</b>     wifi
+<b>sealed</b>   9f3c a1d0 77e2 … 0e1a    <u>the network’s name and its password, 61 bytes, AES-256-GCM</u>
+<b>nonce</b>    5b2e 19c4 a0f7 …           <u>12 bytes, new for every write</u>
+<b>key</b>      k1                         <u>which server key sealed it</u>
+<b>added</b>    2026-10-19 14:02 UTC</div><figcaption>One remembered Wi‑Fi network, as the database holds it. Only the kind and the dates are readable.</figcaption></figure>`;
+}
+function article() {
+  return `<div class="newtab"><div class="ntbar"><span class="tab">${ic('key')}Passwords and keys · Studio</span><span class="tab on"><i></i>How Studio keeps your passwords</span><span class="badge">opened in a new tab</span></div><div class="urlbar">${ic('lock')}lightplayer.app/docs/passwords-and-keys</div>
+  <div class="doc"><nav><span class="gh">User guide</span><a>Getting started</a><a>What is a shader?</a><a>The peach</a><a>Patching the dome</a><a>Brightness and smooth fades</a><span class="gh">Your boards</span><a>Setting up a board</a><a class="on">Passwords and keys</a></nav>
+  <article class="art">
+    <h1>How Studio keeps your passwords and keys</h1>
+    <p>Studio remembers a few passwords and keys so your boards unlock for you and your next board can join your Wi‑Fi by itself. This page says exactly what it keeps, where, who can read it, and how to delete it.</p>
+    <div class="cta"><button type="button" class="btn">${ic('key')}See what Studio keeps</button><span style="color:var(--subtle);font-size:12.5px">Opens Passwords and keys</span></div>
+    ${labelTable()}
+    <h3>What Studio keeps</h3>
+    <ul><li><b>Wi‑Fi passwords</b> you type into a board’s Wi‑Fi form, so your next board can join without typing.</li><li><b>Board passwords</b> someone shared with you, so you can play or edit their board.</li><li><b>Your account’s play and author passwords</b>, which your account puts on every board you plug in.</li><li><b>Keys Studio makes</b>: one for this browser and one for your account. Your boards recognize you by them.</li><li><b>AI keys</b> you give the app chat.</li></ul>
+    <h3>In this browser</h3>
+    <p>This is the default, signed in or not. They stay in this browser’s storage on this device, and lightplayer.app’s server never sees them. <b>They are not encrypted:</b> anyone who uses this browser profile can read them, and clearing this site’s data deletes them.</p>
+    <h3>In your account, only if you turn it on</h3>
+    <p>It is off until you choose <b>Your account</b> on Passwords and keys, or in a board’s Wi‑Fi form. Then Studio sends each password to lightplayer.app over HTTPS, and the server encrypts it before it writes it down. Any browser signed in as you can then use it to set up a board.</p>
+    ${diagram()}
+    <p>Each item, its name and its password together, is encrypted with AES-256-GCM under a key kept in the server’s settings, not in the database. The database and its backups hold only ciphertext.</p>
+    ${record()}
+    <h3>Who can read them</h3>
+    <ul><li><b>You</b>, from any browser signed in to your account.</li><li><b>lightplayer.app’s server</b>, when a browser signed in as you asks for one. This is encryption at rest, not end-to-end encryption: the server holds the key, so it could read them, and this page says so.</li><li><b>Someone with both</b> the database and the server’s key.</li><li><b>Nobody else.</b> They are never shared with another account, and never sent to the app chat’s AI.</li></ul>
+    <h3>Boards keep their own copy</h3>
+    <p>A board that joins Cedar Lane keeps the password itself, so it can reconnect after a restart. Deleting it here doesn’t reach into the board: forget the network in that board’s Wi‑Fi details.</p>
+    <h3>Deleting</h3>
+    <ul><li><b>One item:</b> open it on Passwords and keys and press Forget.</li><li><b>A whole place:</b> Clear this browser, or Clear your account.</li><li><b>Stop using your account:</b> choose This browser (they move here) or Nowhere (they are deleted).</li><li>Deleted from the database at once. The encrypted backups age out within 30 days.</li><li>Signing out keeps your account’s passwords, and removes this browser’s copy of your account’s key.</li></ul>
+    <h3>What Studio never keeps</h3>
+    <ul><li>Your Google or GitHub password: you sign in on their page, not ours.</li><li>A password you typed with Remember off.</li></ul>
+    <h3>Read the code</h3>
+    <p>Studio is open source. The decision record and the code that does this are on GitHub: <span class="tlink">docs/adr/2026-10-19-passwords-and-keys.md</span>.</p>
+  </article></div></div>`;
+}
+function livePanel() {
+  const acct = TYPED.filter((t) => t.place === 'account');
+  const hex = (s) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return (h.toString(16) + 'a1d077e2c4').slice(0, 4) + ' ' + ((h >>> 7).toString(16) + '19c4b0').slice(0, 4) + ' … ' + ((h >>> 3).toString(16) + 'e1').slice(-4); };
+  const rows = acct.length
+    ? acct.map((t) => `<b>${t.kind.padEnd(6)}</b> sealed ${hex(t.name + t.value)}   <u>${t.name.length + t.value.length + 28} B · k1 · ${esc(t.added)}</u>`).join('\n')
+    : '<u>(nothing: remembering in your account is off, or nothing has been kept yet)</u>';
+  return `<div class="livepanel"><div class="lh">${ic('person')}<b>What lightplayer.app holds for River</b><span>fetched now, as stored</span></div><div class="lb"><div class="rec">${rows}
+<b>access</b> key sealed ${hex('acct-key')}   <u>48 B · k1</u>
+<b>access</b> author ${ACCTPW.author ? 'sealed ' + hex(ACCTPW.author) : '—'}   play ${ACCTPW.play ? 'sealed ' + hex(ACCTPW.play) : '—'}</div></div></div>`;
+}
+function renderHow() {
+  document.getElementById('how').innerHTML = `<div class="concepts" style="grid-template-columns:minmax(0, 1fr)">
+    <div class="concept leanc"><div class="chead"><span class="cl">A</span><span class="cn">The article, the label first</span><span class="leanb">lean</span></div><p class="cw">A page of the user guide (<code>docs/user-guide/passwords-and-keys.md</code>, served at <code>/docs/passwords-and-keys</code>), so it is versioned and reviewed with the code it describes. <b>The label first</b> for the person who reads one table; the long form under it for the person who reads to the end; one record as the database holds it; a link to the ADR and the code.</p><div class="cfa"><span class="pro">+ A docs page already exists as a place; words change in the same PR as the behavior.</span><span class="con">− Static: it describes the design, not your data (the page itself shows your data).</span></div>${article()}</div></div>
+    <div class="concepts" style="margin-top:20px">
+      <div class="concept"><div class="chead"><span class="cl">B</span><span class="cn">The label alone</span></div><p class="cw">One table, a privacy label. Everything in the article’s first screen and nothing else.</p><div class="cfa"><span class="pro">+ Read in ten seconds.</span><span class="con">− Can’t carry “not end-to-end” or “boards keep their own copy” with the care they need.</span></div>${labelTable('Passwords and keys: what Studio keeps')}</div>
+      <div class="concept"><div class="chead"><span class="cl">C</span><span class="cn">The live record</span></div><p class="cw">What the server holds for you, fetched now: your rows as stored, ciphertext and all. Live with the strip and section 2.</p><div class="cfa"><span class="pro">+ Proof, not a promise: you see that the name and the password are sealed.</span><span class="con">− Ciphertext is theater to most people; a new request (and a new thing to keep honest) for little gain. Better as the article’s one example record.</span></div>${livePanel()}</div>
+    </div>`;
+}
+
+/* =====================================================================
+   Section 4: the doors
+   ===================================================================== */
+function renderDoors() {
+  const menuToday = `<div class="menu" style="width:250px"><div class="who"><span class="av sm">R</span><span>River<small>river@example.com</small></span></div><button type="button" class="mi">${ic('person')}Profile</button><div class="gh">Switch account</div><button type="button" class="mi">${ic('person')}<span>Sign in as River (GitHub)</span></button><button type="button" class="mi">${ic('useradd')}Add another account…</button><button type="button" class="mi" style="border-top:1px solid var(--bd-mut)">${ic('logout')}Sign out</button></div>`;
+  const menuNew = menuToday.replace(`<button type="button" class="mi">${ic('person')}Profile</button>`, `<button type="button" class="mi">${ic('person')}Profile</button><button type="button" class="mi new" data-a="goto-A">${ic('key')}Passwords and keys</button>`);
+  const rowMark = (place, title) => `<div class="sc narrow"><div class="face"><div class="srow clickable" data-a="mark:${place}" title="${title}"><span class="ico">${ic('wifi')}</span><span class="kd">Wi‑Fi</span><span class="s">Cedar Lane</span><span class="spring"></span><span class="mark" title="${title}">${ic(PLACE[place].icon)}</span><span class="chev">›</span></div></div></div>`;
+  const unlock = `<div class="sc narrow"><div class="face"><div class="nb"><span class="pl">${ic('lock')}</span><span class="nm">Porch eaves<small>Author password, shared with you</small></span><button type="button" class="gosec">Connect</button></div><div class="srow sentence">Saved in this browser. <a class="tlink quiet" href="#concept-A" data-a="goto-A">Passwords and keys</a></div></div></div>`;
+  const out = scene(); out.who = 'out';
+  const chromeOnly = (o) => `<div class="win" style="max-width:420px"><div class="wbar"><span class="logo"><i></i>LightPlayer</span><span class="spring"></span>${o}</div></div>`;
+  document.getElementById('doors').innerHTML = `
+  <div class="minis">
+    <div class="mini"><span class="cap">Signed in · today</span>${menuToday}<p class="gsub">The avatar menu as shipped.</p></div>
+    <div class="mini"><span class="cap">Signed in · with the page</span>${menuNew}<p class="gsub">One item under Profile, with the key icon the page’s rows use. <b>Account settings</b> (the card plan’s new-board defaults) would sit beside it; not drawn here.</p></div>
+    <div class="mini"><span class="cap">The mark · from your account</span>${rowMark('account', 'From your account · opens Passwords and keys')}<p class="gsub">The card plan’s account mark: hover says <b>From your account</b>; pressing it opens the page at Cedar Lane, lit. Press it.</p></div>
+    <div class="mini"><span class="cap">The mark · from this browser</span>${rowMark('browser', 'From this browser · opens Passwords and keys')}<p class="gsub">The same mark when this browser kept it (the default). The icon says the place, never a colour alone (P14).</p></div>
+  </div>
+  <h3 style="margin:14px 0 0;font-size:15px;color:var(--strong)">Signed out: three ways in</h3>
+  <div class="concepts">
+    <div class="concept leanc"><div class="chead"><span class="cl">A</span><span class="cn">Where it was kept</span><span class="leanb">lean</span></div><p class="cw">The chrome stays as it is. Every surface that keeps something links to the page at the moment it keeps it: the Wi‑Fi form’s line, the row’s mark, the <code>/unlock</code> landing, the explainer’s <b>See what Studio keeps</b>. And <code>/account</code> signed out shows this browser’s card under the sign-in ask.</p><div class="cfa"><span class="pro">+ You meet it exactly when it matters, and nothing is added to the chrome for a page visited twice a year.</span><span class="con">− No one fixed place to point to when signed out, besides /account.</span></div><div class="minis">${unlock}<div>${rowMark('browser', 'From this browser · opens Passwords and keys')}</div></div></div>
+    <div class="concept"><div class="chead"><span class="cl">B</span><span class="cn">A key in the chrome</span></div><p class="cw">A key icon beside the account slot, always, signed in or out.</p><div class="cfa"><span class="pro">+ One fixed place for everyone.</span><span class="con">− Chrome for a rare page; a second door beside the menu when signed in (P2).</span></div>${chromeOnly(`<span class="keyb">${ic('key')}</span><span class="signin">Sign in</span>`)}${chromeOnly(`<span class="keyb">${ic('key')}</span><span class="av sm">R</span>`)}</div>
+    <div class="concept"><div class="chead"><span class="cl">C</span><span class="cn">“Sign in” grows a menu</span></div><p class="cw">The signed-out word opens a small menu: Sign in, and Passwords and keys.</p><div class="cfa"><span class="pro">+ The account menu is the door in both states, as asked.</span><span class="con">− Signing in costs a click it doesn’t today (the cloud-login spike made it one word, straight to the provider).</span></div><div style="display:grid;gap:8px;max-width:260px">${chromeOnly('<span class="signin">Sign in ▾</span>')}<div class="menu"><button type="button" class="mi">${ic('login')}Sign in with Google</button><button type="button" class="mi">${ic('key')}Passwords and keys</button></div></div></div>
+  </div>`;
+}
+
+/* =====================================================================
+   Section 5: every state, frozen
+   ===================================================================== */
+function renderStates() {
+  const mk = (list, place) => list.map(([kind, name, extra], i) => ({ id:'f' + i + name, kind, place, name, tier:extra, value:'x', added:'3 d ago' }));
+  const few = [['wifi', 'Cedar Lane'], ['board', 'Porch eaves', 'author']];
+  const ai = [{ id:'fai', kind:'ai', place:'browser', name:'OpenRouter', value:'sk', added:'Sep 3' }];
+  const pw = { author:'maple-otter-42', play:null };
+  const S = (o) => ({ who:'in', place:'browser', cloud:'ok', typed:[], acctpw:pw, ...o });
+  const C = (o = {}) => ({ open:null, armed:null, sheet:null, move:true, shown:{}, ...o });
+  const L = [
+    ['1', 'Signed out · nothing yet', S({ who:'out' }), C(), 'A first visit: this browser’s key, and where Wi‑Fi would go (“none yet”, in the place that’s chosen). The account card is the way in.'],
+    ['2', 'Signed out · a few', S({ who:'out', typed:[...mk(few, 'browser'), ...ai] }), C(), 'The default: this browser remembers. <b>Clear this browser…</b> at the card’s foot.'],
+    ['3', 'Signed out · Nowhere', S({ who:'out', place:'nowhere', typed:ai }), C(), 'Opted out. AI keys and the browser’s key remain: they are outside the choice (gate Q6).'],
+    ['4', 'Signed in · this browser', S({ typed:[...mk(few, 'browser'), ...ai] }), C(), 'Signed in, the account off (the default). The account card holds what the account has always had: its key and its passwords.'],
+    ['5', 'Signed in · your account', S({ place:'account', typed:[...mk(few, 'account'), ...ai] }), C(), 'Consented. The passwords moved; this browser keeps its key, a copy of the account’s, and the AI key.'],
+    ['6', 'Signed in · can’t reach the account', S({ place:'account', cloud:'down', typed:[...mk(few, 'account'), ...ai] }), C(), 'Orange, with Retry (P7). No list: the browser keeps no copy of the account’s passwords (card plan Q8).'],
+    ['7', 'Turning the account on', S({ typed:[...mk([...few, ['wifi', 'Sprinter Hotspot']], 'browser'), ...ai] }), C({ sheet:'account' }), 'The consent sheet under the choice, with <b>Also move the 3 passwords</b>.'],
+    ['8', 'Nowhere, from the account (armed)', S({ place:'account', typed:[...mk(few, 'account'), ...ai] }), C({ sheet:'nowhere', armed:'sheet' }), 'Opting out and dropping them: Lasting, two presses, the count in the button.'],
+    ['9', 'A row open', S({ typed:[...mk(few, 'browser'), ...ai] }), C({ open:'f0Cedar Lane', shown:{ 'f0Cedar Lane':false } }), 'The row’s details: the value behind Show, when it was added, where it is kept, and that boards keep their own copy.'],
+    ['10', 'Forget, armed', S({ typed:[...mk(few, 'browser'), ...ai] }), C({ open:'f0Cedar Lane', armed:'forget:f0Cedar Lane' }), 'The detail card’s error section says what is lost, then the second press.'],
+    ['11', 'Many, long names', S({ place:'account', typed:[...mk(SETS.many.wifi.map(([n]) => ['wifi', n]), 'account'), ...mk(SETS.many.board.map(([n, t]) => ['board', n, t]), 'account'), ...ai, { id:'fai2', kind:'ai', place:'browser', name:'Anthropic', value:'sk', added:'Sep 3' }] }), C(), 'Names ellipsize in the row; the details hold the whole name.'],
+    ['12', 'Clear, armed', S({ typed:[...mk(few, 'browser'), ...ai] }), C({ armed:'clear:browser' }), 'The card’s foot becomes the sentence and the second press. Keys stay.'],
+  ];
+  document.getElementById('states').innerHTML = L.map(([k, cap, sc, c, sub]) => `<div class="gitem"><div class="gcap"><span class="k">${k}</span><span>${esc(cap)}</span></div><div class="stage frozen">${pageA(sc, c, 'fz', true)}</div><p class="gsub">${sub}</p></div>`).join('');
+}
+
+/* =====================================================================
+   Section 6: words · Section 7: gate
+   ===================================================================== */
+const WORDS = [
+  ['Page', 'Passwords and keys', 'The name, in the menu, the page title and the explainer. A person’s word (P11); “secrets” and “vault” stay in code.'],
+  ['', 'Studio keeps these so your boards unlock for you and your next board can join your Wi‑Fi by itself.', 'The lede: what is going on, then what it means for you (P20).'],
+  ['Choice', 'Remember Wi‑Fi and board passwords in  [This browser | Your account | Nowhere]', 'One decision, in one place, naming exactly what it governs.'],
+  ['', 'Passwords you type stay in this browser. lightplayer.app never sees them.', 'This browser. Two sentences, the second the reassurance a person would ask for.'],
+  ['', 'Passwords you type are kept in your account, encrypted. Any browser signed in as you can use them.', 'Your account.'],
+  ['', 'Studio forgets a password once the board has it.', 'Nowhere.'],
+  ['Consent', 'Your account will keep the Wi‑Fi and board passwords you type, encrypted. Remember them in your account to set up your next board from any browser.  │ Remember in my account │', '“Will” for the consequence; the second sentence is the button said aloud (P20).'],
+  ['', 'Also move the 3 passwords in this browser', 'On by default: the person chose the account.'],
+  ['Opt out', 'The 4 passwords in your account will be deleted. Boards keep their own copies.  │ Delete 4 passwords │ → │ Confirm: delete 4 │', 'Lasting: two presses, the count in the button.'],
+  ['Rows', 'Wi‑Fi · Cedar Lane', 'Kind and name (P1, P8). No “saved”: the page is the saved things.'],
+  ['', 'Key · this browser · on 4 boards', 'The browser’s key, with where it works.'],
+  ['', 'Key · River’s account · copy', 'The account key’s copy, in this browser’s card.'],
+  ['', 'Password · author · on 3 boards', 'The account’s own passwords; “not set” when not set.'],
+  ['', 'AI · OpenRouter · app chat', 'An AI key, with what uses it.'],
+  ['Details', 'A board that joined it keeps its own copy. Forget it on a board in that board’s Wi‑Fi details.', 'The one surprise worth naming wherever a Wi‑Fi password is.'],
+  ['Form', 'Remember in [this browser ▾]', 'The place named before Connect (concept 2A).'],
+  ['', 'Your next board can join it by itself.', 'What it gets you.'],
+  ['Mark', 'From your account · From this browser', 'The row mark’s hover; pressing opens the page at the item.'],
+  ['Explainer', 'How it works ↗', 'Every link to section 3; opens a new tab.'],
+  ['', 'This is encryption at rest, not end-to-end encryption: the server holds the key, so it could read them, and this page says so.', 'The sentence that makes it honest.'],
+];
+function renderWords() { document.getElementById('words').innerHTML = WORDS.map(([r, w, n]) => `<tr><td class="rw">${esc(r)}</td><td class="wd">${esc(w)}</td><td>${esc(n)}</td></tr>`).join(''); }
+
+function renderQs() {
+  const AS = [
+    ['Q1', 'Signed in or out, Studio remembers in this browser by default; the account is off until you choose it.', 'Yes'],
+    ['Q2', 'One choice (This browser · Your account · Nowhere) sets where; the form’s switch keeps or skips one password.', 'Yes'],
+    ['Q3', 'Changing the place moves what is there: to the account (with consent, move on), to this browser (moves, Undoable), to Nowhere (deletes, Lasting, two presses). With nothing there it just switches.', 'Yes'],
+    ['Q4', 'The account seals each item (name and password together) on the server: AES-256-GCM, the key in the server’s secrets (a fly secret) with a key id for rotation, never in the database. Not end to end, and the explainer says so. The ADR settles it.', 'Yes'],
+    ['Q5', 'Deleting is immediate in the database; litestream’s backups (720 h) age out, and the explainer says “within 30 days”.', 'Yes'],
+    ['Q6', 'Boards keep their own copy; nothing on this page reaches into a board.', 'Yes'],
+    ['Q7', 'In account mode the browser keeps no copy of the account’s passwords (the card plan’s Q8): a board joins with lightplayer.app reachable.', 'Yes'],
+    ['Q8', 'Forget, Clear, Reset and Remove are Lasting offers (two presses, the error tint, saying what is lost); moving to this browser is Undoable.', 'Yes'],
+    ['Q9', 'Every verb on the page is a core offer under a new <code>secrets/…</code> segment (<code>secrets/remember-in</code>, <code>secrets/&lt;item&gt;/forget</code>, <code>secrets/browser/clear</code>); values are <code>secret</code> params, so the agent never sees one.', 'Yes'],
+    ['Q10', 'Board passwords from an <code>/unlock</code> link follow the choice; with Nowhere they last for the visit.', 'Yes'],
+    ['Q11', 'A guest account counts as signed out.', 'Yes'],
+    ['Q12', 'The page replaces the home page’s fold; its rows (this browser’s name, the account key, the account’s passwords) move here.', 'Yes'],
+  ];
+  document.getElementById('qs').innerHTML = `
+  <div class="q"><h3><span class="id">G1</span>The page: two places as cards (1A), one table (1B), or a group on /account (1C)?</h3>
+    <p>What decides it is which fact leads. 1A leads with <b>where</b>, the axis Yona asked to see and choose; 1B with <b>what</b>; 1C with <b>nothing new</b>.</p>
+    <p class="lean"><b>Lean: 1A.</b> The place is the transparency fact and the consent in one; Clear belongs to a place; it is the board card’s grammar, so it reads as Studio. Pass = you’d put this page in front of Sean as is.</p></div>
+  <div class="q"><h3><span class="id">G2</span>The moment: named in the form (2A), asked after it works (2B), or only on the page (2C)?</h3>
+    <p>All three keep the default off and name the place. They differ in when the account is offered.</p>
+    <p class="lean"><b>Lean: 2A.</b> The consent happens before the password leaves the form, the account is one pick away, and nobody is asked a question they didn’t start. 2B is the strong second if you want every signed-in person to hear about it once.</p></div>
+  <div class="q"><h3><span class="id">G3</span>The explainer: the article with the label first (3A), the label alone (3B), or the live record (3C)?</h3>
+    <p class="lean"><b>Lean: 3A,</b> as <code>/docs/passwords-and-keys</code> from <code>docs/user-guide/</code>, so its words change in the same PR as the behavior. Pass = section 3A says nothing you’d object to, and leaves nothing out you’d want said.</p></div>
+  <div class="q"><h3><span class="id">G4</span>Signed out: where it was kept (4A), a key in the chrome (4B), or “Sign in” grows a menu (4C)?</h3>
+    <p class="lean"><b>Lean: 4A,</b> plus <code>/account</code> showing this browser’s card when signed out. Signed in, the menu gets <b>Passwords and keys</b> under Profile.</p></div>
+  <div class="q"><h3><span class="id">G5</span>What the choice governs: Wi‑Fi and board passwords only?</h3>
+    <p>Keys Studio makes (this browser’s, the account’s) and the account’s own play and author passwords stay outside it: the page shows them, the account’s are sealed like everything else, and each can be reset or removed. The account key is what makes “any browser signed in as you unlocks your boards” work, today, with no question; folding it into a default-off consent would turn that off for everyone who doesn’t opt in.</p>
+    <p class="lean"><b>Lean: yes.</b> And AI keys stay in this browser always: a spendable key is a liability in our database, and the agent is per-browser setup anyway.</p></div>
+  <div class="q"><h3><span class="id">G6</span>The account’s existing readable secrets: seal them in place, and count account passwords already set as consented?</h3>
+    <p>Today <code>account_access</code> stores the account key and the play/author passwords readable. Requirement 1 says encrypted at rest. The migration seals them (it needs the server key at boot); a person who set an account password set it for the account to hold.</p>
+    <p class="lean"><b>Lean: yes, both.</b> This is the Lasting part: a cloud migration and a new server secret; the plan’s ship gate is required.</p></div>
+  <div class="q"><h3><span class="id">G7</span>The name: “Passwords and keys”?</h3>
+    <p>Alternatives: Saved passwords (but keys aren’t passwords), Secrets (ours), Keychain (Apple’s), Vault (1Password’s).</p>
+    <p class="lean"><b>Lean: Passwords and keys.</b></p></div>
+  <div class="q"><h3><span class="id">—</span>Assumptions (answer “all yes”, or override by ID)</h3>
+    <div class="tbl atbl"><table><tbody>${AS.map(([id, q, a]) => `<tr><td>${id}</td><td>${q}</td><td>${a}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+/* =====================================================================
+   Wiring
+   ===================================================================== */
+function syncStrip() {
+  document.querySelectorAll('.strip [data-set]').forEach((b) => b.setAttribute('aria-pressed', String(ST[b.dataset.set] === b.dataset.v)));
+  const n = { out:'Signed out: the chrome says Sign in; Your account asks you to sign in first.', in:'Signed in as River.' }[ST.who];
+  document.getElementById('stripnote').innerHTML = `${n} Remembering in <b>${PLACE[effPlace()].short}</b>.`;
+}
+function renderAll() { syncStrip(); renderPages(); renderConsent(); renderSheets(); renderHow(); renderDoors(); renderStates(); }
+let tt;
+function flash(msg) { const t = document.getElementById('toast'); t.innerHTML = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2600); }
+
+/* A change of place, applied: what moves, what goes. */
+function applyPlace(to, move) {
+  const from = effPlace();
+  if (to === 'account') { if (move) TYPED.forEach((t) => { if (t.place === 'browser' && t.kind !== 'ai') t.place = 'account'; }); }
+  else if (to === 'browser' && from === 'account') TYPED.forEach((t) => { if (t.place === 'account') t.place = 'browser'; });
+  else if (to === 'nowhere') TYPED = TYPED.filter((t) => t.kind === 'ai' || t.place !== from);
+  ST.place = to;
+}
+function needsSheet(to) {
+  const from = effPlace();
+  if (to === from) return null;
+  if (to === 'account') return ST.who === 'in' ? 'account' : 'signin';
+  const n = TYPED.filter((t) => t.place === from && t.kind !== 'ai').length;
+  return n ? to : null;
+}
+function forget(id) {
+  if (id === 'p-author') ACCTPW.author = null; else if (id === 'p-play') ACCTPW.play = null;
+  else TYPED = TYPED.filter((t) => t.id !== id);
+}
+
+document.addEventListener('click', (e) => {
+  const set = e.target.closest('[data-set]');
+  if (set) { ST[set.dataset.set] = set.dataset.v; seed(); Object.keys(CX).forEach((k) => delete CX[k]); Object.keys(F).forEach((k) => delete F[k]); renderAll(); return; }
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  const a = el.dataset.a, cid = el.dataset.c;
+  if (a === 'how') { e.preventDefault(); document.getElementById('s3').scrollIntoView({ behavior:'smooth' }); flash('Opens in a new tab: section 3.'); return; }
+  if (a === 'goto-A') { e.preventDefault(); document.getElementById('concept-A').scrollIntoView({ behavior:'smooth', block:'start' }); return; }
+  if (a.startsWith('mark:')) {
+    const want = a.slice(5);
+    if (!TYPED.some((t) => t.kind === 'wifi' && t.name === 'Cedar Lane')) { TYPED.unshift({ id:'w' + (SEQ++), kind:'wifi', place:want === 'account' && ST.who === 'in' ? 'account' : 'browser', name:'Cedar Lane', added:'3 d ago', value:'sunflower-porch-41' }); }
+    const it = TYPED.find((t) => t.kind === 'wifi' && t.name === 'Cedar Lane');
+    const c = cx('A'); c.open = it.id; c.hl = it.id; renderPages(); renderHow();
+    const row = document.getElementById('A-' + it.id);
+    (row || document.getElementById('concept-A')).scrollIntoView({ behavior:'smooth', block:'center' });
+    return;
+  }
+  if (a === 'reset-all') { ST.who = 'in'; ST.place = 'browser'; ST.data = 'few'; ST.cloud = 'ok'; seed(); Object.keys(CX).forEach((k) => delete CX[k]); Object.keys(F).forEach((k) => delete F[k]); renderAll(); return; }
+  if (cid && cid.startsWith('f-')) return formAction(cid.slice(2), a);
+  if (!cid) return;
+  const c = cx(cid);
+  if (a.startsWith('flash:')) { const m = { set:'Set: the existing set-password form, moved here.', change:'Change: the existing form.', rename:'Rename: in place, as today.', retry:'Retrying…', keys:'Keys: this browser’s and the account’s, each with Reset.' }[a.slice(6)]; flash(m || a); return; }
+  if (a.startsWith('open:')) { const id = a.slice(5); if (e.target.closest('.dpop')) return; c.open = c.open === id ? null : id; c.armed = null; c.hl = null; }
+  else if (a.startsWith('openc:')) { const k = a.slice(6); c.open = c.open === k ? null : k; c.armed = null; }
+  else if (a.startsWith('show:')) { const id = a.slice(5); c.shown[id] = !c.shown[id]; }
+  else if (a.startsWith('arm:')) { c.armed = a.slice(4); }
+  else if (a === 'disarm') { c.armed = null; }
+  else if (a.startsWith('forget:')) { forget(a.slice(7)); c.open = null; c.armed = null; flash('Forgotten.'); }
+  else if (a.startsWith('reset:')) { c.armed = null; c.open = null; flash('Key reset. Boards drop the old one the next time you plug them in.'); }
+  else if (a.startsWith('clear:')) { const p = a.slice(6); TYPED = TYPED.filter((t) => t.kind === 'ai' || t.place !== p); if (p === 'account') ACCTPW = { author:null, play:null }; c.armed = null; c.open = null; flash(p === 'account' ? 'Your account’s passwords are deleted.' : 'This browser’s passwords are deleted.'); }
+  else if (a.startsWith('filter:')) { c.filter = a.slice(7); }
+  else if (a === 'menu') { c.menu = !c.menu; }
+  else if (a.startsWith('place:')) {
+    const to = a.slice(6); c.menu = false; c.armed = null;
+    const sh = needsSheet(to);
+    if (sh) { c.sheet = sh; c.move = true; } else if (to !== effPlace()) { applyPlace(to, false); c.sheet = null; renderAll(); return; }
+  }
+  else if (a === 'move-toggle') { c.move = !c.move; }
+  else if (a === 'sheet-cancel') { c.sheet = null; c.armed = null; }
+  else if (a === 'sheet-ok') { const to = c.sheet; applyPlace(to, c.move); c.sheet = null; c.armed = null; renderAll(); flash(to === 'account' ? 'Remembering in your account.' : to === 'browser' ? 'Moved to this browser.' : 'Deleted. Studio remembers nothing you type.'); return; }
+  else if (a === 'signin') { ST.who = 'in'; Object.values(CX).forEach((x) => { x.sheet = null; }); renderAll(); flash('Sign in leaves the page (a redirect); back here, signed in.'); return; }
+  renderPages(); renderHow();
+});
+document.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && e.target.matches('.cb')) { e.preventDefault(); e.target.click(); } });
+
+function formAction(id, a) {
+  const f = fx(id), sc = scene();
+  if (a === 'f-reset') { delete F[id]; }
+  else if (a === 'f-sw') { f.sw = !f.sw; }
+  else if (a === 'f-chooser') { f.chooser = !f.chooser; f.consent = false; }
+  else if (a.startsWith('f-pick:')) {
+    const p = a.slice(7); f.chooser = false;
+    if (p === 'account' && ST.who !== 'in') { flash('Sign in first: the chip’s menu says so, and Sign in is one press from there.'); }
+    else if (p === 'account' && effPlace() !== 'account') { f.consent = true; f.move = true; }
+    else if (p === 'browser' && effPlace() === 'account') { applyPlace('browser', true); renderAll(); return; }
+    f.sw = true;
+  }
+  else if (a === 'f-move') { f.move = !f.move; }
+  else if (a === 'f-consent-no') { f.consent = false; }
+  else if (a === 'f-consent-ok') { applyPlace('account', f.move); f.consent = false; f.sw = true; renderAll(); flash('Remembering in your account.'); return; }
+  else if (a === 'f-ask-ok') {
+    applyPlace('account', true); f.ask = 'done'; f.added = 'account';
+    renderAll(); flash(`${NEWNET} is in your account now.`); return;
+  }
+  else if (a === 'f-ask-no') { f.ask = 'done'; }
+  else if (a === 'f-connect') {
+    f.page = 'joining'; f.step = 0; f.chooser = false; f.consent = false;
+    const tick = () => {
+      if (F[id] !== f) return;
+      f.step++;
+      if (f.step >= 3) {
+        f.page = 'joined';
+        if (id !== 'today' && f.sw) {
+          const where = effPlace() === 'nowhere' ? 'browser' : effPlace();
+          TYPED = TYPED.filter((t) => !(t.kind === 'wifi' && t.name === NEWNET));
+          TYPED.unshift({ id:'w' + (SEQ++), kind:'wifi', place:where, name:NEWNET, added:'just now', value:'made-up-for-spike' });
+          f.added = where;
+          if (id === 'B' && where === 'browser' && ST.who === 'in') f.ask = 'shown';
+        }
+        renderAll(); return;
+      }
+      renderConsent(); setTimeout(tick, 550);
+    };
+    setTimeout(tick, 550);
+  }
+  renderConsent();
+}
+
+seed();
+/* ?demo=1 opens the states a reviewer would press for (2A's consent, 2B's ask,
+   1A's first row); ?only=<section id> shows one section (for gate crops). */
+if (qs0.get('demo')) {
+  Object.assign(fx('A'), { sw:true, consent:true });
+  const w = TYPED.find((t) => t.kind === 'wifi');
+  if (w) cx('A').open = w.id;
+  if (ST.who === 'in') { TYPED.unshift({ id:'w' + (SEQ++), kind:'wifi', place:'browser', name:NEWNET, added:'just now', value:'made-up-for-spike' }); Object.assign(fx('B'), { page:'joined', sw:true, added:'browser', ask:'shown' }); }
+  Object.assign(fx('C'), { page:'joined', sw:true, added:'browser' });
+}
+renderAll();
+renderWords();
+renderQs();
+if (qs0.get('only')) document.querySelectorAll('main > *').forEach((el) => { if (el.id !== qs0.get('only')) el.style.display = 'none'; });
+</script>
+</html>
