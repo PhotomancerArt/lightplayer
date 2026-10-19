@@ -9,9 +9,14 @@
 // Studio's real device stack (`?emu=`: esptool-js over the emulated
 // USB-Serial-JTAG, the ROM and the stub the board ships with):
 //
-//     connect → Factory reset is under Hardware (not Firmware)
+//     connect → a running board's card holds for a minute (same card,
+//         its details open)
+//       → Factory reset is under Hardware (not Firmware)
 //       → Factory reset → the card is the blank board, Install firmware
 //         (no Retry, and the card's top never says "stopped responding")
+//       → three re-enumerations (the cable out and in, standing in for the
+//         erased chip's watchdog): the same card, its details open, still
+//         the blank board
 //       → Install firmware, one press → the board says hello on what
 //         Studio wrote
 //
@@ -59,6 +64,16 @@ const SURFACE_WORDS = `(() => { const card = document.querySelector('[data-board
   return JSON.stringify({ state: card.querySelector('[data-surface]')?.getAttribute('data-surface') ?? null,
                           first: words('[data-surface-first]'), second: words('[data-surface-second]'),
                           primary: words('[data-name-bar] button:last-of-type') }); })()`;
+/// Pin the card's element and whether a bar's details are open, so a
+/// remount (a new element) or a closed popover is read off the page.
+const PIN_CARD = `(() => { window.__lpCardPin = document.querySelector('[data-board-card]'); return Boolean(window.__lpCardPin); })()`;
+const CARD_HELD = (layer) => `(() => { const card = document.querySelector('[data-board-card]');
+  const trigger = card?.querySelector('[data-bar="${layer}"] button[aria-label$=" details"]');
+  return JSON.stringify({ same: Boolean(card) && card === window.__lpCardPin,
+                          open: trigger?.getAttribute('aria-expanded') === 'true' }); })()`;
+const UNHELD = (layer) => `(() => { const held = JSON.parse(${CARD_HELD(layer)}); return !held.same || !held.open; })()`;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /// Every `data-surface` the card's top shows, in order, from now on.
 const WATCH_SURFACE = `(() => {
   window.__lpSurfaceTrail = [];
@@ -164,6 +179,20 @@ async function main() {
       return `the board says it runs ${runs === "empty" ? "nothing" : "a project"}; ${report.firmwareBefore}`;
     });
 
+    // A healthy board's card, watched with its details open: nothing a
+    // board does on its own may remount it or close them.
+    await step("steady", "a running board's card holds: the same card, its Hardware details open, for a minute", async () => {
+      await driver.openBar("hardware", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.evaluate(PIN_CARD);
+      await driver.waitFor(UNHELD("hardware"), { timeoutMs: 60_000, what: "the card to remount or close" }).catch(() => null);
+      const held = JSON.parse(await driver.evaluate(CARD_HELD("hardware")));
+      report.runningCardHeld = held;
+      if (!held.same) throw new Error("the running board's card was remounted");
+      if (!held.open) throw new Error("the running board's Hardware details closed by themselves");
+      await driver.closeDetails();
+      return "same card, details still open after 60 s";
+    });
+
     await step("where", "Factory reset is in the Hardware row's details, and not the Firmware row's", async () => {
       await driver.openBar("hardware", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitOffer("erase", { bar: "hardware", timeoutMs: STEP_DEADLINE_MS });
@@ -219,6 +248,35 @@ async function main() {
       const now = await surface();
       if (now.state !== "no-firmware") throw new Error(`the blank card did not hold: ${held.join(" → ")}`);
       return held.join(" → ");
+    });
+
+    // The erased chip's watchdog re-enumerates its USB every few seconds on
+    // a real C6. The emulator does not re-enumerate on a reset (the shim's
+    // ruling), so the cable stands in: out, and back in a moment later,
+    // three times — the same disconnect/connect edges and new SerialPort
+    // under the same grant. The card must not move, change or close.
+    await step("bootloop", "the blank card holds through three re-enumerations (the cable out and in), its details open", async () => {
+      await driver.openBar("hardware", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.evaluate(PIN_CARD);
+      for (let turn = 1; turn <= 3; turn += 1) {
+        await driver.detach(BOARD);
+        await pause(1_000);
+        await driver.attach(BOARD);
+        await pause(4_000);
+        const held = JSON.parse(await driver.evaluate(CARD_HELD("hardware")));
+        const now = await surface();
+        if (!held.same) throw new Error(`turn ${turn}: the card was remounted`);
+        if (!held.open) throw new Error(`turn ${turn}: the Hardware details closed`);
+        if (now.state !== "no-firmware") throw new Error(`turn ${turn}: the card's top says ${JSON.stringify(now)}`);
+      }
+      const trail = JSON.parse(await driver.evaluate("JSON.stringify(window.__lpSurfaceTrail)"));
+      report.surfaceTrail = trail;
+      // From the first blank card on, the trail has one entry: nothing else
+      // was ever shown (the trail records each change).
+      const since = trail.slice(trail.indexOf("no-firmware"));
+      if (since.length !== 1) throw new Error(`the card's top changed on the way: ${trail.join(" → ")}`);
+      await driver.closeDetails();
+      return `same card, details open, still the blank board; the card's top: ${trail.join(" → ")}`;
     });
 
     await step("words", "the board's own words: the erased chip boots its blank flash", async () => {
