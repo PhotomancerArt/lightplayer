@@ -38,6 +38,7 @@
 // runs as one foreground command; without it, a Studio must be up on this
 // worktree's port.
 
+import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -128,10 +129,27 @@ async function main() {
     logFile: path.join(out, "serve.log"),
     fresh: true,
   });
-  const url = studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl: "http://127.0.0.1:9/none" }).replace(
-    /&record=[^&]*/,
-    "",
-  );
+  // The device events Studio streams (`?record=`), so each step can say
+  // which ones it produced: a link that left and came back is read here.
+  const records = [];
+  const sink = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      for (const line of body.split("\n")) {
+        if (!line.trim()) continue;
+        try { records.push(JSON.parse(line)); } catch { /* not a record */ }
+      }
+      response.writeHead(204, { "access-control-allow-origin": "*" });
+      response.end();
+    });
+  });
+  await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
+  const url = studioUrlFor({
+    studioPort: port,
+    doorAddr: door.addr,
+    sinkUrl: `http://127.0.0.1:${sink.address().port}/ingest`,
+  });
 
   console.log("\nTHE FACTORY RESET WALK");
   console.log(`  emulated board   ${BOARD} (the packaged fw-esp32c6, ROM-up), door http://${door.addr}/boards`);
@@ -141,6 +159,7 @@ async function main() {
   const report = { board: BOARD, url, steps: [] };
   const step = async (name, describe, body) => {
     console.log(`— ${name}: ${describe}`);
+    const from = records.length;
     let error = null;
     let note = null;
     try {
@@ -148,6 +167,9 @@ async function main() {
     } catch (failure) {
       error = failure;
     }
+    const produced = records.slice(from);
+    const census = {};
+    for (const record of produced) census[record.kind] = (census[record.kind] ?? 0) + 1;
     const shot = path.join(shots, `reset-${report.steps.length + 1}-${name}.png`);
     try {
       await driver.screenshot(shot);
@@ -155,8 +177,9 @@ async function main() {
       /* the page may be gone */
     }
     console.log(`  ${error ? "✗ " + error.message.split("\n")[0] : "✓"}${note ? `  ${note}` : ""}`);
+    console.log(`  ${produced.length} device event(s): ${Object.entries(census).map(([k, n]) => `${k}=${n}`).join(" ") || "(none)"}`);
     console.log(`  screenshot → ${shot}`);
-    report.steps.push({ name, describe, ok: !error, error: error?.message ?? null, note, shot });
+    report.steps.push({ name, describe, ok: !error, error: error?.message ?? null, note, shot, records: produced });
     if (error) throw error;
   };
   const surface = async () => JSON.parse((await driver.evaluate(SURFACE_WORDS)) ?? "null");
@@ -196,16 +219,24 @@ async function main() {
     await step("where", "Factory reset is in the Hardware row's details, and not the Firmware row's", async () => {
       await driver.openBar("hardware", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitOffer("erase", { bar: "hardware", timeoutMs: STEP_DEADLINE_MS });
+      // A Lasting button holds its resting and its armed reading in one
+      // cell ("Factory reset", "Confirm reset"): the resting one leads.
       const words = await driver.offerWords("erase", { inDetails: true });
-      if (words !== "Factory reset") throw new Error(`the Hardware details' erase reads ${JSON.stringify(words)}`);
+      if (!words?.startsWith("Factory reset")) throw new Error(`the Hardware details' erase reads ${JSON.stringify(words)}`);
       const shot = path.join(shots, "reset-hardware-details.png");
+      await pause(600); // the popover's entrance, for the picture only
       await driver.screenshot(shot);
       await driver.openBar("firmware", { timeoutMs: STEP_DEADLINE_MS });
-      if (await driver.offered("erase", { inDetails: true })) {
-        throw new Error("Factory reset is still in the Firmware row's details");
-      }
+      // Read inside the Firmware bar's own popover: the Hardware one may
+      // still be fading out over it, Factory reset and all.
+      const inFirmware = await driver.evaluate(`(() => { const bar = document.querySelector('[data-board-card] [data-bar="firmware"]');
+        const panel = bar?.querySelector('[id^="ux-popover-panel"]');
+        if (!panel) return 'no panel';
+        return Boolean(panel.querySelector('[data-offer-path$="/erase"]')); })()`);
+      if (inFirmware === "no panel") throw new Error("the Firmware details did not open");
+      if (inFirmware) throw new Error("Factory reset is still in the Firmware row's details");
       await driver.closeDetails();
-      return `Hardware: "${words}" (danger, beside Forget); Firmware: none; the details → ${shot}`;
+      return `Hardware: Factory reset (danger, beside Forget); Firmware: none; the details → ${shot}`;
     });
 
     await step("reset", "Factory reset: esptool-js erases the chip, then the card is the blank board", async () => {
@@ -279,9 +310,17 @@ async function main() {
       return `same card, details open, still the blank board; the card's top: ${trail.join(" → ")}`;
     });
 
-    await step("words", "the board's own words: the erased chip boots its blank flash", async () => {
-      const line = await driver.boardSaid(/invalid header/, { timeoutMs: STEP_DEADLINE_MS });
-      return `the terminal: ${line}`;
+    // REPORTED, not asserted: a C6 boots its blank flash after the erase's
+    // reset and loops "invalid header"; the emulated chip, as of this walk,
+    // stays in the flasher's stub after esptool-js's hard reset (its console
+    // ends at "OHAI"), so the card is held by what Studio knows, not by
+    // what the board says. Either way the card is the blank board.
+    await step("words", "the board's terminal after the erase (reported)", async () => {
+      const lines = await driver.terminalLines({ timeoutMs: STEP_DEADLINE_MS }).catch(() => []);
+      await driver.closeDetails().catch(() => {});
+      const loop = lines.find((line) => line.includes("invalid header"));
+      report.bootLoopHeard = Boolean(loop);
+      return loop ? `the boot loop: ${loop}` : `no boot loop heard; the terminal ends: ${JSON.stringify(lines.slice(-2))}`;
     });
 
     await step("install", `Install firmware, one press: Studio's flash writes the packaged build (${BOARD_MODEL})`, async () => {
@@ -315,6 +354,7 @@ async function main() {
   await driver.close();
   await stopDoor(door);
   bundle?.close();
+  sink.close();
 
   if (fatal) {
     console.error(`\nThe Factory reset walk did not finish: ${fatal.message}`);

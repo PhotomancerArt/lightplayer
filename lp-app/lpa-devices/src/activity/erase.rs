@@ -20,7 +20,8 @@
 //! lost to its re-enumerations) still reads as the blank chip it is, never
 //! as one that stopped responding. A blank verdict settles at once and
 //! gives the port back, as identify's does: a blank board has nothing more
-//! to say. Identity survives an erase by design — it lives in the efuse
+//! to say. A quiet window gives it back too, for the same reason and one
+//! more: an open port meets the chip's next re-enumeration as a dead port. Identity survives an erase by design — it lives in the efuse
 //! (ADR 2026-08-04), so the entry and its registry row stay.
 //!
 //! Cancel during the wipe is held (esptool cannot abort cleanly) exactly
@@ -129,6 +130,15 @@ impl EraseActivity {
     /// floods the journal.
     fn settle_when_observed(&self, ctx: &ActivityCtx<'_>) -> Option<ActivityStep> {
         let outcome = self.observed_outcome(ctx)?;
+        Some(Self::settle(outcome, ctx))
+    }
+
+    /// End with `outcome`; a success gives the port back. Studio knows the
+    /// board is blank either way, and Install firmware opens the port
+    /// itself: an erased chip's port held open only meets its next
+    /// re-enumeration as a dead port, which takes the board off the page
+    /// until it is back (a closed port re-enumerates unseen).
+    fn settle(outcome: ActivityOutcome, ctx: &ActivityCtx<'_>) -> ActivityStep {
         let commands = match (outcome.is_success(), ctx.link) {
             (true, Some(link)) => vec![Command::Link {
                 link,
@@ -136,7 +146,7 @@ impl EraseActivity {
             }],
             _ => Vec::new(),
         };
-        Some(ActivityStep::Done { outcome, commands })
+        ActivityStep::Done { outcome, commands }
     }
 
     /// What the observation window has seen, if it is conclusive.
@@ -212,11 +222,13 @@ impl EraseActivity {
                 if now >= deadline {
                     // The wipe itself was verified by the effect; only the
                     // classification refresh went quiet. Degrade honestly.
-                    return ActivityStep::done(ActivityOutcome::Succeeded {
-                        summary: "flash erased; the board hasn't shown its boot loop yet — \
-                                  Identify re-checks it"
-                            .to_string(),
-                    });
+                    return Self::settle(
+                        ActivityOutcome::Succeeded {
+                            summary: "flash erased; the board is blank (it said nothing after)"
+                                .to_string(),
+                        },
+                        ctx,
+                    );
                 }
                 if now >= next_poke_at && !ctx.evidence.presence.is_open() {
                     let commands = self.open_port(ctx);

@@ -2069,7 +2069,21 @@ fn a_factory_reset_board_that_says_nothing_is_blank_not_unresponsive() {
     );
     // The observation reopens the port; the erased board says nothing.
     replay.step(Millis(3_100), Step::opened(1));
+    let before = replay.commands().len();
     replay.advance_to(Millis(12_000));
+    assert!(
+        replay.commands()[before..]
+            .iter()
+            .any(|(_, command)| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::Close,
+                    ..
+                }
+            )),
+        "the quiet window gives the port back: an open port meets the chip's \
+         next re-enumeration as a dead port"
+    );
 
     let card = replay.view().devices[0].clone();
     assert!(card.activity.is_none(), "the erase settled: {card:?}");

@@ -63,8 +63,8 @@ Firmware row's details.
   board doesn't have LightPlayer firmware." with Install firmware.
 - The browser erase resets the chip after the wipe (a failed reset is a
   warning: the wipe is done and the model already knows the board is
-  blank). The Erase settles the moment it hears the boot loop and gives the
-  port back, as identify does.
+  blank). The Erase settles the moment it hears the boot loop, and gives
+  the port back whenever it ends well, as identify does on a blank verdict.
 - Factory reset moved to the Hardware row's details (danger, beside
   Forget); same offer path, same rules.
 - The Firmware details no longer repeat a needs-firmware verdict as a
