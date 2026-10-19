@@ -5125,6 +5125,14 @@ phone *args:
 walk-ble-phone *args:
     node scripts/phone/walk-ble-phone.mjs {{ args }}
 
+# The USB walk on a real phone (Chrome on Android, where Studio's USB square
+# speaks WebUSB): the C6 plugged into the PHONE's USB-C port, Chrome's own
+# chooser and Android's access dialog answered by adb taps — card, editor,
+# Play. `--serve-release` serves this checkout's bundle. See
+# scripts/phone/README.md.
+walk-usb-phone *args:
+    node scripts/phone/walk-usb-phone.mjs {{ args }}
+
 # One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
 # profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
 # emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
