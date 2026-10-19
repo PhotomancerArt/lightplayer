@@ -38,40 +38,24 @@ pub enum UiPanelWidget {
     /// mode-adaptive: a held palette is one full-width strip, a cycle is its
     /// member set plus the step rate.
     PaletteSwatch,
-    /// The clock's tape transport, as ONE grouped control (plan
-    /// 2026-08-04-2355-clock-tape-hero, P8).
+    /// The clock's speed on a panel: one knob over the transport's rate
+    /// leaf (`clock.rate`), log ¼×–8× with 1× at the top centre and a detent
+    /// at each octave (the card panel pass, 2026-10-19).
     ///
-    /// The first widget with more than one gesture on its faceplate: a log
-    /// ׼–×8 speed fader, a run/pause button, and a drag-scrub strip. It
-    /// carries **no min/max** — the widget owns that mapping and its octave
-    /// detents ([`crate::UiClockTransport`] is the whole instrument's
-    /// state, and [`lpc_model::CLOCK_TRANSPORT_SHAPE_NAME`] is the model
-    /// shape it presents).
-    ///
-    /// Three facts, three different homes, per the settled grouping
-    /// contract:
-    ///
-    /// - **Rendering is a shape fact** — this variant means "draw the whole
-    ///   faceplate"; wiring never subtracts a dimension from it.
-    /// - **Membership is a wiring fact** — the derivation only emits the
-    ///   control when at least one leaf is panel-public.
-    /// - **Dispatch is a per-leaf fact** — each dimension resolves its own
-    ///   target-or-address through [`crate::UiPanelControl::wires`].
-    Transport {
-        /// The instrument's live values and per-dimension slot addresses —
-        /// the SAME block the clock card's own tape hero renders, so the
-        /// panel copy and the card copy can never disagree.
-        transport: crate::UiClockTransport,
-    },
+    /// It carries **no min/max**: the widget owns that mapping and its
+    /// detents, as the tape's speed fader does. The rest of the transport —
+    /// run/pause and the scrub strip — is not on a panel at all: the clock
+    /// node's own card keeps the whole tape ([`crate::UiClockFace::transport`]),
+    /// the debug tool. On a panel, one control is one widget, over one
+    /// channel: this control is the rate's own, nothing grouped.
+    Speed,
     /// A playlist's Pattern instrument (multi-pattern vision D15): the
     /// set's names with tap-to-play, the cycle switch and step, per-pattern
     /// on/off, next/prev.
     ///
-    /// Like [`Self::Transport`] it is a whole instrument with several
-    /// gestures, but its gestures are not all panel writes — tap and
-    /// next/prev are `PlaylistActivateOp` runtime commands — so each one
-    /// rides the picker as a ready action rather than as a
-    /// [`crate::UiPanelWire`].
+    /// A whole instrument with several gestures, not all of them panel
+    /// writes — tap and next/prev are `PlaylistActivateOp` runtime
+    /// commands — so each one rides the picker as a ready action.
     PatternPicker {
         /// Names, states, cycle and every gesture's action.
         picker: crate::UiPatternPicker,

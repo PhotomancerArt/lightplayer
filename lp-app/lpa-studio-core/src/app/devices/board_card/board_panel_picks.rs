@@ -11,7 +11,7 @@
 //!    first.
 //!
 //! [`BOARD_PANEL_CONTROLS`] at most. Everything else — faders other than the
-//! master, palettes, the clock's transport, the pattern picker, and what did
+//! master, palettes, the pattern picker, and what did
 //! not fit — is the play page's (All controls), and `more` counts it. The
 //! card never draws the panel-wide reset or the auto-save switch (Q12).
 
@@ -79,11 +79,12 @@ fn is_master(view: &UiPanelControlView) -> bool {
     view.channel == MASTER_CHANNEL && matches!(view.control.widget, UiPanelWidget::Fader { .. })
 }
 
-/// A widget the card draws at its own size: a knob or a toggle.
+/// A widget the card draws at its own size: a knob (the clock's Speed knob
+/// among them) or a toggle.
 fn has_card_size(view: &UiPanelControlView) -> bool {
     matches!(
         view.control.widget,
-        UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle
+        UiPanelWidget::Knob { .. } | UiPanelWidget::Speed | UiPanelWidget::Toggle
     )
 }
 
@@ -91,8 +92,7 @@ fn has_card_size(view: &UiPanelControlView) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        OfferPath, PlayState, UiClockTransport, UiPanelControl, UiPanelEmit, UiPatternPicker,
-        UiSlotFieldState, UiSlotValue,
+        OfferPath, UiPanelControl, UiPanelEmit, UiPatternPicker, UiSlotFieldState, UiSlotValue,
     };
 
     #[test]
@@ -170,27 +170,23 @@ mod tests {
     }
 
     #[test]
-    fn a_palette_a_transport_and_a_pattern_picker_are_never_picked() {
+    fn a_palette_and_a_pattern_picker_are_never_picked_and_speed_is() {
         let root = UiPanelGroup::new("Porch", "/")
             .with_controls(vec![
                 control("palette", UiPanelWidget::PaletteSwatch),
                 control("speed", knob()),
             ])
             .with_groups(vec![
-                UiPanelGroup::new("clock", "/clock").with_controls(vec![control(
-                    "transport",
-                    UiPanelWidget::Transport {
-                        transport: transport(),
-                    },
-                )]),
+                UiPanelGroup::new("clock", "/clock")
+                    .with_controls(vec![control("clock.rate", UiPanelWidget::Speed)]),
                 UiPanelGroup::new("Pattern", "/playlist").with_controls(vec![control(
                     "pattern",
                     UiPanelWidget::PatternPicker { picker: picker() },
                 )]),
             ]);
         let panel = board_panel_picks(&root, None);
-        assert_eq!(channels(&panel), ["speed"]);
-        assert_eq!(panel.more, 3, "the palette, the transport, the picker");
+        assert_eq!(channels(&panel), ["speed", "clock.rate"]);
+        assert_eq!(panel.more, 2, "the palette, the picker");
     }
 
     #[test]
@@ -254,24 +250,8 @@ mod tests {
                 unit: None,
                 state: UiSlotFieldState::editable(),
                 aspects: Vec::new(),
-                wires: Vec::new(),
             },
         )
-    }
-
-    fn transport() -> UiClockTransport {
-        UiClockTransport {
-            seconds: 0.0,
-            play_state: PlayState::Playing,
-            rate: 1.0,
-            scrub_offset_seconds: 0.0,
-            play_state_address: None,
-            rate_address: None,
-            scrub_address: None,
-            play_state_override: None,
-            rate_override: None,
-            scrub_override: None,
-        }
     }
 
     fn picker() -> UiPatternPicker {

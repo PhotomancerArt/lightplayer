@@ -731,8 +731,8 @@ fn the_opening_frames_connect_keeps_the_editor_open() {
 
 /// CD6, CD7: Connect on a running board whose project has a root panel.
 /// The card carries the panel in the bars' place: the root panel's own
-/// picks — the master brightness fader, then the shader's knob — with the
-/// clock's transport, the pattern picker and the palette left to All
+/// picks — the master brightness fader, then the clock's Speed knob and
+/// the shader's knob — with the pattern picker and the palette left to All
 /// controls. Done is the primary, and auto-save rides along on USB (the
 /// edit tier). The editor's view is built to pick them, and none of its
 /// verbs are published on the home page.
@@ -744,7 +744,10 @@ fn the_connected_card_carries_the_panel() {
 
     let card = the_card(&bench, id);
     let panel = card.panel.clone().expect("the panel in the bars' place");
-    assert_eq!(channels(&panel), [crate::MASTER_CHANNEL, "glow"]);
+    assert_eq!(
+        channels(&panel),
+        [crate::MASTER_CHANNEL, "clock.rate", "glow"]
+    );
     assert!(
         matches!(
             panel.controls[0].view.control.widget,
@@ -752,10 +755,7 @@ fn the_connected_card_carries_the_panel() {
         ),
         "the master leads"
     );
-    assert_eq!(
-        panel.more, 3,
-        "the transport, the pattern picker and the palette"
-    );
+    assert_eq!(panel.more, 2, "the pattern picker and the palette");
     assert!(panel.target.is_some(), "the root panel's scope");
     assert!(panel.auto_save.is_some(), "USB holds the edit tier");
     let edit = panel.edit.clone().expect("Edit on the All controls row");

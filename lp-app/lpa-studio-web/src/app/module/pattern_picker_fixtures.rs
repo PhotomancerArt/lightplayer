@@ -148,7 +148,6 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         emit: UiPanelEmit::Value,
         live_value: None,
         live_gradient: None,
-        wires: Vec::new(),
         unit: None,
         state: UiSlotFieldState::editable(),
         aspects: Vec::new(),

@@ -65,7 +65,7 @@ use lpa_studio_core::{
 
 use crate::app::node::{
     HFaderField, KnobField, PaletteSwatchField, PanelEmit, SlotDetailButton, SlotUnitSuffix,
-    TapeTransport, ToggleField,
+    ToggleField, speed_words,
 };
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -81,10 +81,9 @@ const LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer t
 /// value string and the whole row shifts mid-drag.
 const FADER_CLASS: &str = "tw:grid tw:w-[184px] tw:flex-none tw:gap-1";
 
-/// The Transport's footprint: a whole instrument, so it takes the panel
+/// An instrument's footprint (the Pattern instrument): it takes the panel
 /// row's full width and wraps onto its own line rather than sharing one
-/// with the knobs. `basis-full` is what makes the phone layout work — the
-/// tape needs its width more than any neighbour does.
+/// with the knobs.
 const INSTRUMENT_CLASS: &str = "tw:grid tw:min-w-0 tw:basis-full tw:gap-1.5";
 
 /// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
@@ -160,13 +159,10 @@ pub fn ModulePanelControl(
         control.widget,
         UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch
     );
-    // The Transport is wider still: a whole instrument, not a control in a
-    // column. It takes the panel row's full width and wraps below the
-    // narrow controls at phone widths rather than squeezing the tape.
-    let is_instrument = matches!(
-        control.widget,
-        UiPanelWidget::Transport { .. } | UiPanelWidget::PatternPicker { .. }
-    );
+    // The Pattern instrument is wider still: a whole instrument, not a
+    // control in a column. It takes the panel row's full width and wraps
+    // below the narrow controls at phone widths.
+    let is_instrument = matches!(control.widget, UiPanelWidget::PatternPicker { .. });
     let compact_fader = compact && matches!(control.widget, UiPanelWidget::Fader { .. });
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
@@ -308,8 +304,14 @@ fn ModulePanelControlBody(
     // strips below say WHICH palette; the full summary stays on hover and
     // in the label's detail popup.
     let palette = control.shown_palette();
+    let speed = matches!(control.widget, UiPanelWidget::Speed);
     let shown_value = if phasor {
         format!("{} s", control.shown_display())
+    } else if speed {
+        speed_words(control.live_numeric().unwrap_or(match control.value.kind {
+            UiSlotValueKind::F32(rate) => rate,
+            _ => 1.0,
+        }))
     } else if let Some(config) = &palette {
         format_gradient_chip(config)
     } else {
@@ -414,19 +416,30 @@ fn ModulePanelControlBody(
                 }
             }
         }
-        // The one GROUPED control (P8): the shared tape instrument, rendered
-        // compactly. It gets no separate readout — the faceplate carries its
-        // own digits, its own ×rate, and its own off-live line — and its
-        // gestures resolve per dimension through `wires` rather than through
-        // the control's single `panel_target`.
-        UiPanelWidget::Transport { transport } => {
+        // The clock's Speed knob: a knob over the rate, its own mapping
+        // (log ¼×–8×, 1× at the top, the octave stops), its value said as a
+        // speed (`2×`).
+        UiPanelWidget::Speed => {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
+                return mismatch(&control.label, &control.value.display);
+            };
             rsx! {
-                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2", {label} }
-                TapeTransport {
-                    transport,
-                    wires: control.wires.clone(),
+                KnobField {
+                    value,
+                    live_value: control.live_numeric(),
+                    min: 0.25,
+                    max: 8.0,
+                    state: control.state.clone(),
+                    bound: following,
+                    engaged,
+                    speed: true,
+                    address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
+                    emit,
                     on_action,
                 }
+                {label}
+                {readout}
             }
         }
         // The playlist's Pattern instrument: the group's legend already
@@ -548,7 +561,6 @@ mod tests {
                 unit: None,
                 state: UiSlotFieldState::editable(),
                 aspects: Vec::new(),
-                wires: Vec::new(),
             },
         )
         .with_state(state, source)

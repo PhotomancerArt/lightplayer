@@ -487,7 +487,6 @@ mod tests {
                     unit: None,
                     state: crate::UiSlotFieldState::editable(),
                     aspects: Vec::new(),
-                    wires: Vec::new(),
                 },
             )
         };
