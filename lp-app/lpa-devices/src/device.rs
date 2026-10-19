@@ -84,6 +84,22 @@ pub struct Device {
     /// activities ago must not be able to look current.
     #[serde(default)]
     next_effect_id: u64,
+    /// Studio wiped this board's flash (a Factory reset that ended well),
+    /// and nothing heard since shows firmware on it: the flash is blank,
+    /// whether or not the board says so.
+    ///
+    /// Studio's own knowledge, not evidence: an erased chip can be silent
+    /// (the flasher's stub, or a boot loop lost to its re-enumerations), and
+    /// silence from a board that once said hello reads as "stopped
+    /// responding", with Retry — a dead end for a board that is waiting
+    /// for firmware (2026-10-19, a real C6:
+    /// docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
+    /// Set when an Erase ends well; cleared by any firmware verdict (a
+    /// hello, a core, other firmware) and by a flash or update that ends
+    /// well. Kept for this session only: what a reload knows is what the
+    /// board shows, and the erase cleared the record's firmware label.
+    #[serde(default)]
+    erased: bool,
 }
 
 impl Device {
@@ -98,6 +114,7 @@ impl Device {
             armed_timer: None,
             identify_retries: 0,
             next_effect_id: 0,
+            erased: false,
         }
     }
 
@@ -342,6 +359,7 @@ impl Device {
             .evidence
             .fold(now, event, &mut self.identity, ctx.config);
         self.journal_notes(now, notes, ctx);
+        self.forget_erase_on_firmware();
         self.rearm(now, ctx)
     }
 
@@ -813,6 +831,7 @@ impl Device {
             )
         });
         self.journal_notes(now, notes, ctx);
+        self.forget_erase_on_firmware();
 
         // 2. Coarse-effect progress lands on the cell (display only).
         if let Event::ActivityMarker {
@@ -971,6 +990,25 @@ impl Device {
                     },
                 );
                 let failed = matches!(outcome, ActivityOutcome::Failed { .. });
+                match cell.kind {
+                    // A Factory reset that went well: the flash is blank,
+                    // and Studio knows it without the board saying so. The
+                    // firmware the record remembers is gone with it, so the
+                    // board is no longer one that "spoke LightPlayer" — its
+                    // silence is a blank chip's, never "stopped responding".
+                    ActivityKind::Erase if outcome.is_success() => {
+                        self.erased = true;
+                        if let Some(record) = &mut self.record {
+                            record.firmware = None;
+                        }
+                    }
+                    // New firmware on the flash: whatever the erase taught
+                    // is over (its hello would say so too).
+                    ActivityKind::Flash | ActivityKind::Update if outcome.is_success() => {
+                        self.erased = false;
+                    }
+                    _ => {}
+                }
                 // An update's typed ending outlives the activity on the
                 // evidence (the card's words are made of it) — the driver's
                 // word, or the model's own when the board never came back.
@@ -1141,7 +1179,8 @@ pub enum DeviceStatus {
     /// "Running" over a black strip).
     Degraded,
     /// Identified as something else: blank, bootloader, foreign,
-    /// incompatible — or silent, from a board that never said hello.
+    /// incompatible — or silent, from a board that never said hello or
+    /// that Studio erased ([`Device::known_blank`]).
     NeedsAttention,
     /// Attached and open, but saying nothing: a board that has spoken
     /// LightPlayer ([`Device::spoke_light_player`]) went quiet, or a
@@ -1189,6 +1228,11 @@ impl Device {
             | Classification::OlderLightPlayer { .. }
             | Classification::Foreign { .. } => DeviceStatus::NeedsAttention,
             Classification::Quiet { .. } | Classification::Unknown => {
+                // A board Studio erased is blank, heard or not: actionable
+                // as stored, like the blank verdict it stands in for.
+                if self.erased {
+                    return DeviceStatus::NeedsAttention;
+                }
                 if !self.evidence.presence.is_open() {
                     return DeviceStatus::Attached;
                 }
@@ -1219,7 +1263,8 @@ impl Device {
     /// window, or ever before — the record keeps the firmware label of the
     /// last hello it heard ([`DeviceRecord::firmware`]), learned on this
     /// link earlier or remembered from another session by the MAC that
-    /// found the record, and never cleared.
+    /// found the record, and cleared only by a Factory reset (the firmware
+    /// that said it is gone).
     ///
     /// Read off the hello and nothing weaker. A MAC is not proof: the flash
     /// preflight learns a blank chip's MAC from its ROM. Nor is the
@@ -1231,6 +1276,37 @@ impl Device {
                 .record
                 .as_ref()
                 .is_some_and(|record| record.firmware.is_some())
+    }
+
+    /// Whether the board's flash is blank because Studio erased it, and
+    /// nothing heard since says otherwise (a Factory reset that ended well,
+    /// this session): what the card
+    /// reads as a blank chip while the board itself says nothing — never
+    /// on a board that is not plugged in, which says nothing about it.
+    pub fn known_blank(&self) -> bool {
+        self.erased
+            && self.evidence.presence.is_attached()
+            && matches!(
+                self.evidence.classification,
+                Classification::Quiet { .. } | Classification::Unknown
+            )
+    }
+
+    /// A firmware verdict ends what an erase taught: the board shows what
+    /// its flash holds now. A blank or download-mode verdict agrees with
+    /// it, and silence says nothing either way.
+    fn forget_erase_on_firmware(&mut self) {
+        if self.erased
+            && !matches!(
+                self.evidence.classification,
+                Classification::Quiet { .. }
+                    | Classification::Unknown
+                    | Classification::Blank
+                    | Classification::Bootloader
+            )
+        {
+            self.erased = false;
+        }
     }
 
     /// The activity kind currently running, if any.

@@ -102,7 +102,14 @@ do:   ▲ Firmware  v2026.07.02 (pre-OTA)   │ Update to v2026.10.16-1 │
 
 bad:  ◆ Out of date                studio     # shipped: the name moved to the right
 bad:  Old LightPlayer firmware                # spike r1: a word in front of the firmware
+bad:  the card leaves Online boards for Offline boards and comes back, every few seconds,
+      its open details closed                 # C6 walk 10-19: an erased board re-enumerating,
+                                              #   "jarring and resets the ui"
 ```
+
+A board's events never reset what someone is doing on its card: open
+details stay open, an armed button stays armed, and the card keeps its
+place.
 
 app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
 
@@ -153,6 +160,8 @@ bad:  Needs your answer               # shipped: answer to what?
 bad:  The board isn't online.         # shipped: say "Offline"
 bad:  Format 3 — too old for this Studio    # sweep 10-17: "Format too old (3)"
 bad:  Changes — 3 unsaved                   # sweep 10-17: "Changes: 3 unsaved"
+bad:  Firmware   No response — try flashing firmware   # C6 walk 10-19: a sentence with a dash where
+                                                       #   "Version  none" goes, on a blank board
 ```
 
 P6 governs labels. P20 says where a sentence is allowed, and how it reads.
@@ -170,6 +179,13 @@ do:   ◆ Project   none  data lost  │ Restore │ Reset │      # the fix, a
 bad:  │ XIAO ESP32-C6        │ Connect         │  (grey)      # card 10-14: "confusing"
 bad:  Its files need restoring                        # card 10-14: "what if I just want to reset it?"
 bad:  Not known yet                                   # card 10-14: what isn't known?
+
+do:   │ This board doesn't have LightPlayer firmware.    │   # Studio erased it, so it knows: no
+      │ Install the firmware to use it.                  │   #   waiting for a board that can't answer
+      │ XIAO ESP32-C6                 │ Install firmware │
+bad:  │ This board stopped responding over USB.          │   # C6 walk 10-19, right after a Factory reset:
+      │ XIAO ESP32-C6                            │ Retry │   #   Retry timed out, only a replug got out,
+                                                           #   "it's basically a dead-end"
 ```
 
 app: `lpa-studio-core/…/board_card/primary_action.rs`

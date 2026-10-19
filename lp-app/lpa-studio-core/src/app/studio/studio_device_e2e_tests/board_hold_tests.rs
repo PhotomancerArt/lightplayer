@@ -1651,6 +1651,7 @@ impl DeskTransport {
             manifest_writes: Rc::new(RefCell::new(Vec::new())),
             push_plan: Rc::clone(&self.push_plan),
             remove_plan: Rc::new(Cell::new(RemovePlan::default())),
+            erase_plan: Rc::new(Cell::new(ErasePlan::default())),
             pushed: Rc::new(RefCell::new(Vec::new())),
         }
     }

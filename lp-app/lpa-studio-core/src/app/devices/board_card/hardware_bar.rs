@@ -15,7 +15,11 @@
 //! the model is the model. A chip name looks like a model, so a board known
 //! only by its chip says so (P1). The details hold the model, the chip, the
 //! board's id (its MAC, shown here once and nowhere else), a stand-in's
-//! speed or tier, Rename, Reset with its reason, and Forget apart.
+//! speed or tier, Rename, Reset with its reason, and apart, the two that
+//! lose something: Factory reset (erases the whole board — firmware,
+//! projects, settings) and Forget. Factory reset is here, not under
+//! Firmware, because it erases the board (Yona, 2026-10-19: "I expect to
+//! find factory reset in the hardware section").
 
 use lpa_devices::view::PendingLinkView;
 
@@ -75,6 +79,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     // Reset stays in details while work runs, refused with its reason
     // (the model refuses a reset under an activity; Cancel is the way out).
     let reset = input.offer("reset-board");
+    let erase = input.offer("erase");
     let forget = input.offer("forget");
     // Identifying: the work's words take the name's place ("◌ Hardware
     // identifying"), as on a new board; the model is back once it is done.
@@ -92,7 +97,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(reset.map(own_words).into_iter().collect()),
-                danger(forget.map(own_words).into_iter().collect()),
+                danger(erase.into_iter().chain(forget).map(own_words).collect()),
             ]),
             panels: rename
                 .map(|rename| UiDetailPanel::Rename {
@@ -215,9 +220,14 @@ mod tests {
             .iter()
             .flat_map(|section| section.affordances.iter().map(|a| a.word.as_str()))
             .collect();
-        assert_eq!(verbs, ["Reset", "Forget"]);
+        assert_eq!(verbs, ["Reset", "Factory reset", "Forget"]);
         let danger = bar.details.sections.last().unwrap();
         assert_eq!(danger.weight, crate::RichWeight::Danger);
+        assert_eq!(
+            danger.affordances.len(),
+            2,
+            "Factory reset and Forget, apart"
+        );
 
         fixture.view.board_id = None;
         let bar = hardware_bar(&fixture.input());
@@ -276,6 +286,49 @@ mod tests {
             .find(|action| action.word == "Reset")
             .expect("Reset");
         assert_eq!(reset.refused.as_deref(), Some(crate::RESET_NEEDS_AUTHOR));
+    }
+
+    /// Factory reset erases the whole board, so it is the Hardware row's
+    /// (Yona, 2026-10-19: "I expect to find factory reset in the hardware
+    /// section"), Lasting, apart with Forget — and never the Firmware
+    /// row's. Over a link that cannot carry firmware it keeps its reason.
+    #[test]
+    fn factory_reset_is_the_hardware_rows_and_keeps_its_reason() {
+        let mut fixture = CardFixture::ready();
+        let bar = hardware_bar(&fixture.input());
+        let danger = bar.details.sections.last().expect("the danger section");
+        assert_eq!(danger.weight, crate::RichWeight::Danger);
+        let reset = danger.affordances.first().expect("Factory reset");
+        assert_eq!(reset.word, "Factory reset");
+        assert!(
+            reset.offer.to_string().ends_with("/erase"),
+            "{}",
+            reset.offer
+        );
+        let firmware = super::super::firmware_bar::firmware_bar(&fixture.input());
+        assert!(
+            firmware
+                .details
+                .sections
+                .iter()
+                .flat_map(|section| section.affordances.iter())
+                .all(|action| action.word != "Factory reset"),
+            "not under Firmware"
+        );
+
+        let mut fixture = CardFixture::ready().over(crate::UiLinkKind::Bluetooth);
+        let bar = hardware_bar(&fixture.input());
+        let reset = bar
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .find(|action| action.word == "Factory reset")
+            .expect("Factory reset, refused");
+        assert_eq!(
+            reset.refused.as_deref(),
+            Some(lpa_devices::view::FIRMWARE_NEEDS_USB)
+        );
     }
 
     #[test]

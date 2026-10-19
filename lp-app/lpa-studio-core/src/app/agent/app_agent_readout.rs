@@ -502,11 +502,18 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
     }
     let mut text = "devices:\n".to_string();
     for device in devices {
+        // What is on the flash, in the row's words: a blank chip (one
+        // Studio erased, too) has no firmware, not "other firmware".
         let firmware = match &device.firmware_face {
             lpa_devices::FirmwareFace::LightPlayer { .. } => "LightPlayer",
             lpa_devices::FirmwareFace::CoreOnly { .. } => "LightPlayer, running only its core",
             lpa_devices::FirmwareFace::Unknown => "not identified yet",
-            _ => "other firmware",
+            lpa_devices::FirmwareFace::Blank => "no firmware",
+            lpa_devices::FirmwareFace::Bootloader => "no firmware running (download mode)",
+            lpa_devices::FirmwareFace::Silent => "firmware unknown (no response)",
+            lpa_devices::FirmwareFace::NoHello
+            | lpa_devices::FirmwareFace::OlderLightPlayer { .. } => "older LightPlayer firmware",
+            lpa_devices::FirmwareFace::Foreign { .. } => "other firmware",
         };
         // What it runs is the board's own report; before its first one,
         // nothing is claimed — but a LightPlayer that has not reported yet

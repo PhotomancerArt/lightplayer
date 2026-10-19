@@ -310,8 +310,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     // The one verdict identify can END in is silence, and the escape from
     // silence must not be a replug: offer the re-ask whenever the link is
     // up, nothing is running, and the evidence still says nothing.
+    // A board Studio erased says nothing because it is blank: its way on
+    // is the firmware, and asking it again is no escape.
     if activity.is_none()
         && device.link().is_some()
+        && !device.known_blank()
         && matches!(
             device.evidence.classification,
             Classification::Quiet { .. } | Classification::Unknown
@@ -373,7 +376,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .as_ref()
                     .and_then(|record| record.board_id.clone())
             }),
-        firmware_face: firmware_face(&device.evidence),
+        firmware_face: device_firmware_face(device),
         remembered_firmware: device
             .record
             .as_ref()
@@ -544,6 +547,16 @@ impl PendingLinkView {
     /// (an unsettled link projects [`FirmwareFace::Unknown`]).
     pub fn needs_firmware(&self) -> bool {
         self.firmware_face.wants_flash()
+    }
+}
+
+/// A device's face: its evidence's, except that a board Studio erased
+/// and that says nothing is the blank chip Studio knows it is
+/// ([`Device::known_blank`]).
+fn device_firmware_face(device: &Device) -> FirmwareFace {
+    match device.known_blank() {
+        true => FirmwareFace::Blank,
+        false => firmware_face(&device.evidence),
     }
 }
 
@@ -808,6 +821,9 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
         DeviceStatus::Ready => "Ready".to_string(),
         DeviceStatus::Degraded => "Degraded".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
+        DeviceStatus::NeedsAttention if device.known_blank() => {
+            classification_label(&Classification::Blank)
+        }
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),
     }
 }

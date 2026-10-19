@@ -5164,6 +5164,20 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# Factory reset end to end (Yona's C6 walk, 2026-10-19): an emulated C6 on the
+# packaged firmware, ROM-up, through Studio's real device stack over `?emu=`.
+# Factory reset is under Hardware (not Firmware); after it the card is the
+# blank board with Install firmware and no Retry, and its top never says
+# "stopped responding" (every `data-surface` it showed is recorded); three
+# re-enumerations (the shim's, with a gap, for the erased chip's watchdog)
+# leave the same card with its details open; Install firmware, one press,
+# brings its hello back. Needs a Studio on this worktree's port, or
+# `--serve-release` (after `just studio-web-story-build`,
+# `just studio-firmware-package-served` and `cargo build -p lp-cli`). Proves
+# Studio's flow on the emulated chip, not a real C6's re-enumeration. Not CI.
+walk-factory-reset-emu *args:
+    node scripts/emu/walk-factory-reset-emu.mjs {{ args }}
+
 # The desk's Android test phone over adb (scripts/phone/README.md):
 # `just phone status|pair <code>|connect|awake|cdp|serve <port>|open <url>|shot <png>|snoop <dir>`.
 phone *args:

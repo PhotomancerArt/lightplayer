@@ -540,8 +540,8 @@ fn a_silent_new_boards_card_offers_install() {
 }
 
 /// The hardware bar's details: Reset says why it waits while work runs
-/// (the offer's own reason), and Forget is Lasting — the second click
-/// forgets the board.
+/// (the offer's own reason), Factory reset and Forget are its danger
+/// section, and Forget is Lasting — the second click forgets the board.
 #[test]
 fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
     let device = empty_light_player("dev000000card000008");
@@ -576,16 +576,17 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
             .is_some_and(|card| card.activity.is_none())
     });
 
-    let forget = card_of(&bench, id)
+    let danger = card_of(&bench, id)
         .bar(crate::BarLayer::Hardware)
         .details
         .sections
         .last()
-        .expect("the danger section")
-        .affordances
-        .first()
         .cloned()
-        .expect("Forget");
+        .expect("the danger section");
+    let words: Vec<&str> = danger.affordances.iter().map(|a| a.word.as_str()).collect();
+    assert_eq!(words, ["Factory reset", "Forget"]);
+    assert_eq!(danger.affordances[0].offer, bench.device_verb(id, "erase"));
+    let forget = danger.affordances[1].clone();
     assert_eq!(forget.word, "Forget");
     assert_eq!(forget.offer, bench.device_verb(id, "forget"));
     bench
@@ -596,6 +597,178 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
         bench.view().devices.iter().all(|card| card.id != id),
         "forgotten"
     );
+}
+
+/// Yona's C6 over USB, 2026-10-19: Factory reset was under Firmware, and
+/// after it the card read "This board stopped responding over USB." with a
+/// Retry that timed out; only a replug reached the blank board. Factory
+/// reset is the Hardware row's now, and after it the card is the blank
+/// board — even when the erased board says nothing (the flasher's stub, or
+/// a boot loop lost to re-enumerating): "This board doesn't have LightPlayer
+/// firmware.", Install firmware as the primary, no Retry. Install firmware
+/// works in one press from there.
+#[test]
+fn a_factory_reset_from_hardware_lands_on_install_firmware_with_no_retry() {
+    let device = light_player("dev_wipesilent");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-reset");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    let erase = bench.device_verb(id, "erase");
+    let card = card_of(&bench, id);
+    let in_bar = |card: &UiBoardCard, layer: crate::BarLayer| {
+        card.bar(layer)
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .any(|action| action.offer == erase)
+    };
+    assert!(in_bar(&card, crate::BarLayer::Hardware), "under Hardware");
+    assert!(
+        !in_bar(&card, crate::BarLayer::Firmware),
+        "not under Firmware"
+    );
+
+    bench.erase_plan.set(ErasePlan::Silent);
+    bench
+        .press_lasting(&erase, OfferArgs::new())
+        .expect("Factory reset, after the arm");
+    bench.run_until(&tasks, "the erase to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = card_of(&bench, id);
+    let notice = card.surface.notice.as_ref().expect("the surface says it");
+    assert_eq!(
+        (notice.first.as_str(), notice.second.as_deref()),
+        (
+            "This board doesn't have LightPlayer firmware.",
+            Some("Install the firmware to use it.")
+        ),
+        "{:?}",
+        card.surface
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer, bench.device_verb(id, "flash"));
+    let retry = bench.device_verb(id, "retry");
+    bench.not_offered(retry);
+    assert_eq!(card.bar(crate::BarLayer::Firmware).summary, "none");
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).action,
+        None,
+        "the Link row offers no Retry either"
+    );
+    every_card_action_is_offered(&mut bench);
+
+    // Install firmware, one press: the flash parks the chip and writes it.
+    let choice = c6_board_choice();
+    bench
+        .press(
+            &install.offer,
+            OfferArgs::new().with("board", &choice.board_id),
+        )
+        .expect("Install firmware starts the flash");
+    bench.run_until(&tasks, "the installed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+}
+
+/// Yona's C6, 2026-10-19: "the card periodically 'refreshes' which is
+/// jarring and resets the ui." An erased native-USB chip re-enumerates on
+/// every watchdog reset of its boot loop; each one took the board offline
+/// and back, and its card moved from Online boards to Offline boards and
+/// back, remounted (open details closed, an armed button disarmed). A port
+/// that comes back within the grace is the same board that never left: the
+/// blank card holds — Online, the blank board, Install firmware — through
+/// every turn of the loop. A board that stays gone is offline after the
+/// grace.
+#[test]
+fn an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone() {
+    let device = light_player("dev_bootloop");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-bootloop");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    bench.erase_plan.set(ErasePlan::Silent);
+    let erase = bench.device_verb(id, "erase");
+    bench
+        .press_lasting(&erase, OfferArgs::new())
+        .expect("Factory reset, after the arm");
+    bench.run_until(&tasks, "the erase to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let blank = |bench: &DeviceBench| {
+        let card = card_of(bench, id);
+        assert_eq!(
+            card.presence,
+            crate::UiBoardPresence::Online,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(
+            card.surface.state,
+            crate::SurfaceState::NoFirmware,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(primary_offer(&card).word, "Install firmware");
+    };
+    blank(&bench);
+
+    // Three turns of the boot loop: the port leaves, and is back (under the
+    // same grant) a moment later. The card never moves or changes.
+    let steps = |seconds: f64| (seconds / STEP_MS) as usize;
+    for _ in 0..3 {
+        bench.granted.set(false);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+        for _ in 0..steps(1.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+        bench.granted.set(true);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+        for _ in 0..steps(4.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+    }
+
+    // Unplugged for good: offline once the grace has passed.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to be offline", |bench| {
+        card_of(bench, id).presence == crate::UiBoardPresence::Offline
+    });
 }
 
 /// The layout question rides the firmware bar: while it is open the bar's

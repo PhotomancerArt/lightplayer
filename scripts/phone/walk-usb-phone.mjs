@@ -293,13 +293,15 @@ async function main() {
 
       await step("reset", "Factory reset from the card: esptool erases the board over WebUSB", async () => {
         // Lasting: the first press arms, the second erases.
-        await driver.pressOffer("erase", { board: mac, bar: "firmware", confirm: true, timeoutMs: STEP_DEADLINE_MS });
+        // Factory reset is the Hardware row's (it erases the board).
+        await driver.pressOffer("erase", { board: mac, bar: "hardware", confirm: true, timeoutMs: STEP_DEADLINE_MS });
         await driver.closeDetails({ board: mac }).catch(() => {});
         await driver.waitFor(`!${ROW_WORKING}`, { timeoutMs: FLASH_DEADLINE_MS, what: "the erase to finish" });
         // The same card, with no reload: the erase reboots the board out of
         // the stub, its ROM loops on the blank flash, and the card reads that
-        // as blank (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`).
-        blank = await driver.waitFor(BLANK_CARD, { timeoutMs: STEP_DEADLINE_MS, what: "a card offering the blank board Install firmware" });
+        // as blank; and the card that erased it knows it is blank, heard or
+        // not (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`).
+        blank = await driver.waitFor(BLANK_CARD, { timeoutMs: STEP_DEADLINE_MS, what: "the same page's card offering the blank board Install firmware" });
         return `was ${report.before}; the blank board is ${blank}, offered Install firmware with no reload`;
       });
 

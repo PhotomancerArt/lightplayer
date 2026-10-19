@@ -74,7 +74,7 @@ pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String 
         FirmwareFace::Foreign { label: None } => {
             "Unrecognized firmware — replace with LightPlayer firmware".to_string()
         }
-        FirmwareFace::Silent => "No response — try flashing firmware".to_string(),
+        FirmwareFace::Silent => "No response — needs firmware".to_string(),
     }
 }
 
