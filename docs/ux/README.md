@@ -153,6 +153,8 @@ bad:  Needs your answer               # shipped: answer to what?
 bad:  The board isn't online.         # shipped: say "Offline"
 bad:  Format 3 — too old for this Studio    # sweep 10-17: "Format too old (3)"
 bad:  Changes — 3 unsaved                   # sweep 10-17: "Changes: 3 unsaved"
+bad:  Firmware   No response — try flashing firmware   # C6 walk 10-19: a sentence with a dash where
+                                                       #   "Version  none" goes, on a blank board
 ```
 
 P6 governs labels. P20 says where a sentence is allowed, and how it reads.
@@ -170,6 +172,13 @@ do:   ◆ Project   none  data lost  │ Restore │ Reset │      # the fix, a
 bad:  │ XIAO ESP32-C6        │ Connect         │  (grey)      # card 10-14: "confusing"
 bad:  Its files need restoring                        # card 10-14: "what if I just want to reset it?"
 bad:  Not known yet                                   # card 10-14: what isn't known?
+
+do:   │ This board doesn't have LightPlayer firmware.    │   # Studio erased it, so it knows: no
+      │ Install the firmware to use it.                  │   #   waiting for a board that can't answer
+      │ XIAO ESP32-C6                 │ Install firmware │
+bad:  │ This board stopped responding over USB.          │   # C6 walk 10-19, right after a Factory reset:
+      │ XIAO ESP32-C6                            │ Retry │   #   Retry timed out, only a replug got out,
+                                                           #   "it's basically a dead-end"
 ```
 
 app: `lpa-studio-core/…/board_card/primary_action.rs`

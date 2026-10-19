@@ -38,7 +38,7 @@ use crate::core::OffersProvider;
 // --- The device card, one row of the table each ---------------------------
 
 #[story(
-    description = "Up to date (information): the firmware bar says the version alone, \"2026.10.05-2\", plain and with no action; its details give the version with its commit and build, Other version… (the store's other releases), and Factory reset apart."
+    description = "Up to date (information): the firmware bar says the version alone, \"2026.10.05-2\", plain and with no action; its details give the version with its commit and build, Other version… (the store's other releases); Factory reset is the hardware bar's."
 )]
 fn device_card_update_up_to_date() -> Element {
     update_card(UpdateFixtureRow::UpToDate, Link::Usb)

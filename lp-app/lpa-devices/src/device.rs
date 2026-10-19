@@ -93,7 +93,7 @@ pub struct Device {
     /// silence from a board that once said hello reads as "stopped
     /// responding", with Retry — a dead end for a board that is waiting
     /// for firmware (2026-10-19, a real C6:
-    /// docs/defects/2026-10-19-a-factory-reset-board-reads-stopped-responding.md).
+    /// docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
     /// Set when an Erase ends well; cleared by any firmware verdict (a
     /// hello, a core, other firmware) and by a flash or update that ends
     /// well. Kept for this session only: what a reload knows is what the

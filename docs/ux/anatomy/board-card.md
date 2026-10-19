@@ -154,8 +154,9 @@ old firmware (an older      This board is running old firmware.
   LightPlayer)              Update the firmware to connect and edit.                       ▲ Update firmware
 from before the hello       This board is running old firmware.
                             Install the firmware to connect and edit.                      ▲ Install firmware
-no firmware                 This board doesn't have LightPlayer firmware.
-                            Install the firmware to use it.                                ▲ Install firmware
+no firmware (blank, other  This board doesn't have LightPlayer firmware.
+  firmware, or erased here) Install the firmware to use it.                                ▲ Install firmware
+                                                                     # was: stopped responding, Retry (a board Studio had just erased, Yona's C6 10-19)
 download mode               This board is waiting in download mode.
                             Install the firmware to use it.                                ▲ Install firmware
 says nothing (it never      This board doesn't respond.  Install the firmware to use it.   ▲ Install firmware
@@ -296,7 +297,8 @@ phone's two), the name is cut at its end and the details hold it whole:
 ▲ Firmware  unknown (pre-2026.07)   │ Install │          # was: Pre-hello firmware; no button when the primary is Install firmware
             # "Update to v2026.10.16-1" does not fit beside the version at the card's width:
             # the button says the verb, and the version it brings is the details' Newest
-▲ Firmware  none                                       # primary: Install firmware
+▲ Firmware  none                                       # blank, or Studio erased it. primary: Install firmware
+▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating · 42%             # was: Updating · 1 of 2 · 42%
 ◌ Firmware  v2026.10.08-9   backing up · 12% │ Cancel │
 ◌ Firmware  installing · 30%                           # was: Flashing firmware…
@@ -309,6 +311,15 @@ phone's two), the name is cut at its end and the details hold it whole:
 ▲ Firmware  v2026.10.08-9                      (dim)   # offline
 ```
 
+The Firmware row's details say what is there in its own words (`Version
+none`, `Version unknown`). On a board with no LightPlayer they carry no
+verdict sentence: the surface says it, and the row (P2).
+
+```text
+bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a dashed label in a sentence's place,
+                                                         #   a third time, on a board that was in fact blank
+```
+
 ### Hardware ■: what the board is
 
 ```text
@@ -317,6 +328,36 @@ phone's two), the name is cut at its end and the details hold it whole:
 ■ Hardware  unknown                              # was: Board not known
 ◌ Hardware  identifying                          # was: chip unknown
 ■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the Link row (P2)
+```
+
+Its details: the model, the chip, the board's id (its MAC, here once), a
+stand-in's speed or tier, Rename and Reset; then, apart, the two verbs that
+lose something:
+
+```text
+│ Board      Model  XIAO ESP32-C6                 │
+│            Chip   ESP32-C6                      │
+│            Id     a0:f2:62:87:b4:8c             │
+│ Name       [ Porch lamp            ] Rename     │
+│ Actions    ↻ Reset                              │
+│ Danger     ✕ Factory reset   ✕ Forget           │   Lasting: arm, then press again
+```
+
+Factory reset erases the whole board (firmware, projects, its Wi‑Fi and
+passwords), so it is the board's, not the firmware's: Yona, 2026-10-19,
+"I expect to find factory reset in the hardware section". Its rules are the
+offer's (`devices/<board>/erase`): USB only (refused with its reason over
+another link), not while firmware is being written, and not where installing
+is the repair (crashing, a version Studio can't get) or on a board with no
+LightPlayer (nothing to erase). Its work runs in the Firmware row
+(`◌ Firmware  erasing · 40%`, then `none`): work narrates where its subject
+changes, so the erase and what it leaves read in one place. After it the
+card is the blank board at once, heard or not: no Retry, no replug.
+
+```text
+bad:  ▲ Firmware  …  details: … Danger: Factory reset    # Yona's C6 10-19: looked for it under Hardware
+bad:  This board stopped responding over USB.  │ Retry │ # Yona's C6 10-19, after the reset:
+                                                        #   "it's basically a dead-end"
 ```
 
 ### Corner: the card's details
@@ -386,4 +427,12 @@ R9  a row's value keeps its width; its state gives way first: cut, then gone   (
 R10 one update, one number: the surface reads the working row's percent       (director's review)
 R11 no dead ends: a fix that isn't offered says why and what to do instead    (director's review)
 R12 a narrow name bar keeps the name's twelve characters; the primary says its verb alone   (director's review)
+```
+
+Yona's C6 install walk, 2026-10-19:
+
+```text
+W1  Factory reset is the Hardware row's: it erases the board, not only its firmware (Yona)
+W2  a board Studio erased is the blank board at once, heard or not: Install firmware, no Retry (Yona)
+W3  the Firmware details say what is there in the row's words; the surface says the sentence (Yona)
 ```

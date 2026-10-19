@@ -313,7 +313,7 @@ impl FakeEsp32Device {
     /// (the flasher's stub), saying nothing — its downloader banner went
     /// by before the erase — until a hard reset boots the blank flash.
     /// What Studio's browser erase did to a C6 before it reset the chip
-    /// (docs/defects/2026-10-19-a-factory-reset-board-reads-stopped-responding.md),
+    /// (docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md),
     /// and what a native-USB chip whose boot loop is lost to its
     /// re-enumerations looks like.
     pub fn fake_erase_without_reset(&self) {
