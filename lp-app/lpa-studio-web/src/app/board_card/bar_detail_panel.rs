@@ -8,7 +8,6 @@
 //! | Access | [`DeviceAccessPanel`] (its own sections) | the access bar's |
 //! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`; its Wi‑Fi and Cloud relay switches are the Wi‑Fi and lightplayer.app rows' Disable and Enable) | the Wi‑Fi row's |
 //! | Link counters | [`LinkCountersSection`] | the row of the link in use |
-//! | Rename | [`DeviceRenameSection`] over the `rename` offer | the hardware bar's |
 //! | Layout | [`DeviceLayoutSheet`]: the question or the refusal | the firmware bar's (raised) |
 //! | Other version | [`OtherVersionForm`], inline | the firmware bar's |
 //! | Restore from file | [`RestoreFromFileButton`] | the firmware bar's |
@@ -33,7 +32,6 @@ use crate::app::agent::AgentMark;
 use crate::app::home::access_ui_context::{access_handler, network_handler};
 use crate::app::home::device_access_panel::DeviceAccessPanel;
 use crate::app::home::device_layout_sheet::DeviceLayoutSheet;
-use crate::app::home::device_rename_section::DeviceRenameSection;
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::wifi_panel::WifiPanel;
 use crate::base::DetailSection;
@@ -69,9 +67,6 @@ pub fn BarDetailPanel(
         },
         UiDetailPanel::Wifi(wifi) => rsx! {
             WifiDetails { wifi, board, on_action }
-        },
-        UiDetailPanel::Rename { offer, title } => rsx! {
-            RenameDetails { offer, title, on_action }
         },
         UiDetailPanel::LinkCounters(counters) => rsx! {
             LinkCountersSection { counters }
@@ -128,19 +123,6 @@ fn WifiDetails(wifi: UiDeviceWifi, board: OfferPath, on_action: EventHandler<UiA
     let on_network = network_handler();
     rsx! {
         WifiPanel { wifi, offers, on_action, on_network, in_card: true }
-    }
-}
-
-/// Rename, over the `rename` offer the tree holds; nothing when it is gone.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RenameDetails(offer: OfferPath, title: String, on_action: EventHandler<UiAction>) -> Element {
-    let Some(rename) = use_offer_at(offer)() else {
-        return rsx! {};
-    };
-    // The section marks its own form with the offer's path.
-    rsx! {
-        DeviceRenameSection { offer: rename, title, on_action }
     }
 }
 
@@ -255,10 +237,6 @@ mod tests {
             },
             UiDetailPanel::Access(UiAccessPanel::reading(DeviceId(7))),
             UiDetailPanel::Wifi(UiDeviceWifi::new(DeviceId(7), true)),
-            UiDetailPanel::Rename {
-                offer: board().child("rename"),
-                title: "Porch".to_string(),
-            },
             UiDetailPanel::LinkCounters(DeviceLinkCounters {
                 resends: 3,
                 damaged: 0,
@@ -301,7 +279,6 @@ mod tests {
             UiDetailPanel::Terminal { .. } => ("3", None),
             UiDetailPanel::Access(_) => ("Access", None),
             UiDetailPanel::Wifi(_) => ("Wi", None),
-            UiDetailPanel::Rename { offer, .. } => ("Rename", Some(offer.clone())),
             UiDetailPanel::LinkCounters(_) => ("Link", None),
             UiDetailPanel::Layout(layout) => (
                 "lays its files out differently",

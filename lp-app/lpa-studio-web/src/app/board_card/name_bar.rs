@@ -6,6 +6,15 @@
 //! The bar carries `data-name-bar`, the walks' hook for the primary (an
 //! empty board's Add a project is pressed there).
 //!
+//! The name is renamed where it is ([`RenamableName`]): while core offers
+//! `rename` ([`UiNameBar::rename`]) the name is a button with a faint pencil
+//! after it, always shown, brighter (and the name underlined) on hover.
+//! Pressing it — a click, or Enter or Space on it — puts a field in the
+//! name's place at the bar's height, its text selected; Enter or clicking
+//! away presses the offer with the new name, and Esc puts the name back.
+//! A blank or unchanged name presses nothing. No Save button: the field is
+//! the page's edit state, and the press is core's.
+//!
 //! The name keeps about twelve characters: on a card too narrow for that
 //! beside the whole primary, the primary drops to its verb alone ("Update"
 //! for "Update firmware"; core's [`UiCardAction::verb_alone`]), since the
@@ -20,10 +29,14 @@
 //! presses nothing, so it is not an action.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiCardAction, UiNameBar, UiPrimary};
+use lpa_studio_core::{OfferPath, UiAction, UiCardAction, UiNameBar, UiPrimary};
 
 use super::card_action::{CardAction, CardActionLook, narrow_tail};
-use crate::base::conic_spinner_class;
+use crate::app::agent::AgentMark;
+use crate::app::home::device_access_panel::select_focused_input;
+use crate::app::home::device_rename_section::rename_press;
+use crate::base::{StudioIcon, StudioIconName, conic_spinner_class};
+use crate::core::use_offer_at;
 
 /// The name bar. See the module doc.
 #[component]
@@ -50,12 +63,129 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         div { class: NAME_BAR_CLASS, "data-name-bar": "true", style: need,
             div { class: NAME_BLOCK_CLASS,
-                h3 { class: TITLE_CLASS, title: "{bar.title}", "{bar.title}" }
+                if let Some(rename) = bar.rename.clone() {
+                    RenamableName { title: bar.title.clone(), rename, on_action }
+                } else {
+                    h3 { class: TITLE_CLASS, title: "{bar.title}", "{bar.title}" }
+                }
                 if let Some(place) = bar.place {
                     p { class: PLACE_CLASS, title: "{place}", "{place}" }
                 }
             }
             {primary}
+        }
+    }
+}
+
+/// The name, renamed where it is: a button with a faint pencil, and while
+/// it is pressed a field in its place. See the module doc.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RenamableName(title: String, rename: OfferPath, on_action: EventHandler<UiAction>) -> Element {
+    let offer = use_offer_at(rename.clone())();
+    let mut editing = use_signal(|| false);
+    let mut value = use_signal(|| title.clone());
+    // Esc puts the name back; the blur that follows must not press.
+    let mut cancelled = use_signal(|| false);
+    let Some(offer) = offer else {
+        return rsx! {
+            h3 { class: TITLE_CLASS, title: "{title}", "{title}" }
+        };
+    };
+    let was = title.clone();
+    let commit = move |end: RenameEnd| {
+        editing.set(false);
+        let end = match std::mem::take(&mut *cancelled.write()) {
+            true => RenameEnd::Escape,
+            false => end,
+        };
+        if let Some(name) = renamed(end, &value.read(), &was)
+            && let Some(action) = rename_press(&offer, &name)
+        {
+            on_action.call(action);
+        }
+    };
+    if editing() {
+        let reset = title.clone();
+        let mut enter = commit.clone();
+        let mut blur = commit;
+        return rsx! {
+            AgentMark { path: rename.clone(),
+                input {
+                    class: RENAME_FIELD_CLASS,
+                    "data-rename-field": "true",
+                    aria_label: "Board name",
+                    value: "{value}",
+                    onmounted: move |event| async move {
+                        let _ = event.set_focus(true).await;
+                        select_focused_input();
+                    },
+                    oninput: move |event| value.set(event.value()),
+                    onkeydown: move |event| match event.key() {
+                        Key::Enter => {
+                            event.prevent_default();
+                            enter(RenameEnd::Enter);
+                        }
+                        Key::Escape => {
+                            event.prevent_default();
+                            cancelled.set(true);
+                            value.set(reset.clone());
+                            editing.set(false);
+                        }
+                        _ => {}
+                    },
+                    onblur: move |_| {
+                        if editing() {
+                            blur(RenameEnd::Blur);
+                        }
+                    },
+                }
+            }
+        };
+    }
+    let start = title.clone();
+    rsx! {
+        AgentMark { path: rename,
+            button {
+                class: NAME_BUTTON_CLASS,
+                r#type: "button",
+                title: "Rename {title}",
+                aria_label: "Rename {title}",
+                "data-rename": "true",
+                onclick: move |_| {
+                    value.set(start.clone());
+                    cancelled.set(false);
+                    editing.set(true);
+                },
+                span { class: "{TITLE_CLASS} ux-board-name-text", "{title}" }
+                span { class: PENCIL_CLASS, aria_hidden: "true",
+                    StudioIcon { name: StudioIconName::Edited, size: 12 }
+                }
+            }
+        }
+    }
+}
+
+/// How a rename ends.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RenameEnd {
+    /// Enter: keep it.
+    Enter,
+    /// Clicking away: keep it.
+    Blur,
+    /// Esc: put the name back.
+    Escape,
+}
+
+/// The name a rename ending in `end` presses, from what was `typed` over
+/// the name that `was`: kept on Enter or a click away, trimmed; nothing on
+/// Esc, and nothing for a blank or unchanged name.
+fn renamed(end: RenameEnd, typed: &str, was: &str) -> Option<String> {
+    let name = typed.trim();
+    match end {
+        RenameEnd::Escape => None,
+        RenameEnd::Enter | RenameEnd::Blur => {
+            (!name.is_empty() && name != was).then(|| name.to_string())
         }
     }
 }
@@ -135,6 +265,18 @@ const NAME_BLOCK_CLASS: &str = "tw:grid tw:min-w-0 tw:flex-1 tw:content-center t
 /// The name: one line, cut.
 const TITLE_CLASS: &str = "tw:m-0 tw:min-w-0 tw:truncate tw:text-[13.5px] tw:font-bold tw:leading-tight tw:text-strong-foreground";
 
+/// The name as a button: the title's look, then the pencil; the cut stays
+/// on the name. Hover brightens the pencil and underlines the name
+/// (style.css `.ux-board-name`).
+const NAME_BUTTON_CLASS: &str = "ux-board-name tw:flex tw:min-w-0 tw:max-w-full tw:cursor-text tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-inherit ux-focus-ring tw:rounded-sm";
+
+/// The pencil after the name: faint, always shown.
+const PENCIL_CLASS: &str = "ux-board-name-pencil tw:inline-flex tw:flex-none tw:text-[color:var(--studio-color-text-faint)]";
+
+/// The field in the name's place: the name's type, the bar's height less
+/// its padding, Studio's input ground.
+const RENAME_FIELD_CLASS: &str = "tw:h-[30px] tw:w-full tw:min-w-0 tw:rounded-[5px] tw:border tw:border-solid tw:border-border-strong tw:bg-terminal tw:px-2 tw:text-[13.5px] tw:font-bold tw:text-strong-foreground ux-focus-ring";
+
 /// The place under the name.
 const PLACE_CLASS: &str =
     "tw:m-0 tw:min-w-0 tw:truncate tw:text-[11.5px] tw:leading-tight tw:text-subtle-foreground";
@@ -170,6 +312,37 @@ mod tests {
         assert!(primary.contains("ux-ir-ring"), "{primary}");
         assert!(!primary.contains("ux-spectrum-cta"), "{primary}");
         assert!(WORKING_CLASS.contains("tw:self-stretch"));
+    }
+
+    /// Enter and a click away keep the typed name (trimmed); Esc puts the
+    /// name back; a blank or unchanged name presses nothing.
+    #[test]
+    fn enter_and_blur_keep_the_name_and_esc_puts_it_back() {
+        for end in [RenameEnd::Enter, RenameEnd::Blur] {
+            assert_eq!(renamed(end, "  Eaves  ", "Porch").as_deref(), Some("Eaves"));
+            assert_eq!(renamed(end, "   ", "Porch"), None, "blank");
+            assert_eq!(renamed(end, "Porch", "Porch"), None, "unchanged");
+        }
+        assert_eq!(renamed(RenameEnd::Escape, "Eaves", "Porch"), None);
+    }
+
+    /// While rename is offered the name is a button with the pencil after
+    /// it, marked with the offer's path; without it, the plain name.
+    #[test]
+    fn the_name_is_pressable_with_a_pencil_while_rename_is_offered() {
+        let (card, tree) = super::super::card_test_fixtures::card_and_tree(
+            &super::super::card_test_fixtures::porch_view(),
+        );
+        let rename = card.name_bar.rename.clone().expect("rename is offered");
+        assert!(rename.to_string().ends_with("/rename"));
+        let html = super::super::card_test_fixtures::render_card(card.clone(), tree.clone(), None);
+        assert!(html.contains("data-rename=\"true\""), "{html}");
+        assert!(html.contains("ux-board-name-pencil"), "{html}");
+        assert!(html.contains("aria-label=\"Rename Porch\""), "{html}");
+        let mut plain = card;
+        plain.name_bar.rename = None;
+        let html = super::super::card_test_fixtures::render_card(plain, tree, None);
+        assert!(!html.contains("data-rename"), "{html}");
     }
 
     /// Connecting or identifying: the spinner alone, named for a screen

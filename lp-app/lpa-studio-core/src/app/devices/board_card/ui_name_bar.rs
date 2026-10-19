@@ -5,8 +5,13 @@
 //! while the board is being reached or identified; or nothing at all when
 //! nothing can be pressed (`docs/ux/anatomy/board-card.md`, "Name bar and
 //! primary"). The card's surface says why, and says the button aloud.
+//!
+//! The name is renamed where it is: pressed, a field takes its place
+//! ([`UiNameBar::rename`], the board's `rename` offer — Studio's own name
+//! for it, never written to the board).
 
 use super::ui_card_action::UiCardAction;
+use crate::OfferPath;
 
 /// The name bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,6 +21,11 @@ pub struct UiNameBar {
     /// Its group or owner, under the name; `None` until the account keeps
     /// boards (Q16).
     pub place: Option<String>,
+    /// `devices/<board>/rename` (its one `name` parameter), when it is
+    /// offered: pressing the name puts a field in its place, and Enter or
+    /// clicking away presses this with the new name. `None` where the board
+    /// has no name to change yet (a new board still saying who it is).
+    pub rename: Option<OfferPath>,
     /// The one primary; `None` when nothing can be pressed (the board is
     /// busy, away with no way in, busy in another tab, has nothing to send,
     /// or has not said yet): no button, never a greyed verb (P7).

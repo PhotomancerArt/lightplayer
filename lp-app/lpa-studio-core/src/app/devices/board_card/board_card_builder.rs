@@ -85,6 +85,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         name_bar: UiNameBar {
             title: input.view.title.clone(),
             place: None,
+            rename: input.offer("rename").map(|rename| rename.path.clone()),
             primary,
         },
         bars,
@@ -212,6 +213,10 @@ pub fn pending_board_card(
         name_bar: UiNameBar {
             title: pending.title.clone(),
             place: None,
+            rename: offers
+                .iter()
+                .find(|offer| offer.path == board.clone().child("rename"))
+                .map(|rename| rename.path.clone()),
             primary,
         },
         bars: std::iter::once(pending_project_bar(pending))

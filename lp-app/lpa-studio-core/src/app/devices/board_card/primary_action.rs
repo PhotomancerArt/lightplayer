@@ -63,12 +63,12 @@
 //! board is connected, the panel foot's.
 
 use lpa_devices::ActivityKind;
-use lpa_devices::device::DeviceStatus;
-use lpa_devices::view::{FirmwareFace, LoadedProject, PendingLinkView};
+
+use lpa_devices::view::{FirmwareFace, PendingLinkView};
 
 use super::bar_work::{board_pick, retry};
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
-use super::board_surface::{offline_road, road_link, surface_state};
+use super::board_surface::{offline_road, road_link, runs_no_project, surface_state};
 use super::project_bar::edit_action;
 use super::ui_bar_work::UiBarWork;
 use super::ui_board_surface::SurfaceState;
@@ -244,14 +244,15 @@ fn done_action(done: &UiOffer) -> UiCardAction {
 }
 
 /// Add a project: the primary of a ready, idle board that runs no project
-/// — `push` with the project pick, as the project bar would draw it (the
-/// bar then does not repeat it). `None` when the board runs something or
-/// has not said, and when `push` is not offered. Refused, it is no
-/// primary, and the surface says the refusal in the button's place.
+/// — `push` with the project pick, the same pick the Project row's Add
+/// opens. Exactly where the surface says "This board has no project yet."
+/// ([`super::board_surface::runs_no_project`]): it said it runs nothing,
+/// or the library knows it plays nothing. `None` when `push` is not
+/// offered. Refused, it is no primary, and the surface says the refusal in
+/// the button's place.
 pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     let view = input.view;
-    let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
-    if !ready || !input.idle() || view.loaded_project != LoadedProject::Empty {
+    if !runs_no_project(input) {
         return None;
     }
     Some(
@@ -324,7 +325,8 @@ fn offer(action: UiCardAction) -> UiPrimary {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use lpa_devices::view::{Escape, FirmwareFace};
+    use lpa_devices::device::DeviceStatus;
+    use lpa_devices::view::{Escape, FirmwareFace, LoadedProject};
     use lpa_devices::{ActivityKind, HoldLevel, HoldVia};
 
     use super::super::board_connection::BoardConnection;
@@ -333,6 +335,37 @@ pub(crate) mod tests {
     use crate::app::access::{UiDeviceAccess, UiUnlockOffer};
     use crate::app::devices::take_over_state::UiTakeOver;
     use crate::app::devices::ui_link_kind::UiLinkKind;
+
+    /// The no-project surface always has its button: a board the library
+    /// knows plays nothing, whatever its last report said, gets Add a
+    /// project too, and the surface says the button aloud (the mismatch
+    /// that left "This board has no project yet." with no primary).
+    #[test]
+    fn a_board_that_runs_no_project_always_gets_add_a_project() {
+        for loaded in [
+            LoadedProject::Empty,
+            LoadedProject::Running {
+                label: "porch".to_string(),
+            },
+        ] {
+            let mut fixture = CardFixture::ready();
+            fixture.view.loaded_project = loaded.clone();
+            fixture.plays = crate::app::devices::board_plays::BoardPlays::Nothing;
+            let card = super::super::board_card_builder::board_card(&fixture.input());
+            assert_eq!(card.surface.state, SurfaceState::NoProject, "{loaded:?}");
+            assert_eq!(
+                card.name_bar.primary.as_ref().and_then(UiPrimary::word),
+                Some(ADD_A_PROJECT),
+                "{loaded:?}"
+            );
+            let notice = card.surface.notice.expect("the surface says it");
+            assert_eq!(notice.first, "This board has no project yet.");
+            assert_eq!(
+                notice.second.as_deref(),
+                Some("Add a project to play on it.")
+            );
+        }
+    }
 
     #[test]
     fn a_connecting_board_says_connecting_with_its_links_icon() {

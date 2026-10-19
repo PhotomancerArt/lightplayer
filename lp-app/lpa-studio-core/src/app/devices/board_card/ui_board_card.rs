@@ -116,6 +116,7 @@ impl UiBoardCard {
         for panel in &self.status.details.panels {
             paths.extend(panel.offer_paths());
         }
+        paths.extend(self.name_bar.rename.iter());
         paths
     }
 }

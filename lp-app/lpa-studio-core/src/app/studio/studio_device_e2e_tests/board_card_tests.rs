@@ -541,6 +541,36 @@ fn a_silent_new_boards_card_offers_install() {
     every_card_action_is_offered(&mut bench);
 }
 
+/// The board is renamed where its name is: the name bar carries the
+/// `rename` offer, pressed by that path with the new name, and the card
+/// wears it; Hardware's details hold no name field.
+#[test]
+fn the_name_bar_renames_the_board_by_its_offer() {
+    let device = empty_light_player("dev000000card000021");
+    let (mut bench, tasks) = identified(&device, "usb-card-21");
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    let rename = card.name_bar.rename.clone().expect("rename is offered");
+    assert_eq!(rename, bench.device_verb(id, "rename"));
+    assert!(
+        card.bar(crate::BarLayer::Hardware)
+            .details
+            .panels
+            .is_empty(),
+        "no name field in Hardware's details"
+    );
+    bench
+        .press(
+            &rename,
+            OfferArgs::new().with(crate::RENAME_NAME_PARAM, "Holiday eaves"),
+        )
+        .expect("the rename presses");
+    bench.run_until(&tasks, "the card to wear the new name", |bench| {
+        card_of(bench, id).name_bar.title == "Holiday eaves"
+    });
+    every_card_action_is_offered(&mut bench);
+}
+
 /// The hardware bar's details: Reset says why it waits while work runs
 /// (the offer's own reason), Factory reset and Forget are its danger
 /// section, and Forget is Lasting — the second click forgets the board.

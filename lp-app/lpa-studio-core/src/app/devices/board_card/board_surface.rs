@@ -57,7 +57,7 @@
 //! | Locked | lock · neutral | "This board is locked." "Unlock it to connect." | Unlock |
 //! | Its port closed | link · neutral | "Studio isn't connected to this board." "Connect over USB to use it." | Connect |
 //! | A shader error | project · error | "This board's project has an error." "Edit the project to fix it." | Edit project |
-//! | Runs no project | project · neutral | "This board has no project yet." | Add a project |
+//! | Runs no project | project · neutral | "This board has no project yet." "Add a project to play on it." | Add a project |
 //! | The editor holds it (its last frame) | edit · neutral | "This board is open in the editor." | Done |
 //! | The session open, or the editor showing it | — | the live picture, no words | Done |
 //! | Frames too large to show over the link | project · neutral | "This board's picture is too large to show over Bluetooth." | Connect |
@@ -381,8 +381,10 @@ fn face_state(face: &FirmwareFace) -> Option<SurfaceState> {
     })
 }
 
-/// A ready, idle board that said it runs nothing.
-fn runs_no_project(input: &BoardCardInput<'_>) -> bool {
+/// A ready, idle board that said it runs nothing: the NoProject surface,
+/// whose primary is Add a project ([`super::primary_action::add_a_project`]
+/// reads the same predicate, so the surface never says it with no button).
+pub(crate) fn runs_no_project(input: &BoardCardInput<'_>) -> bool {
     let ready = matches!(
         input.view.status,
         DeviceStatus::Ready | DeviceStatus::Degraded
@@ -674,7 +676,8 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
             .then_press("Restore them from a backup, or reset the board."),
         ProjectError => Words::new("project", Error, "This board's project has an error.")
             .then_press("Edit the project to fix it."),
-        NoProject => Words::new("project", Neutral, "This board has no project yet."),
+        NoProject => Words::new("project", Neutral, "This board has no project yet.")
+            .then_press("Add a project to play on it."),
         Locked => {
             Words::new("lock", Neutral, "This board is locked.").then_press("Unlock it to connect.")
         }
@@ -1472,7 +1475,7 @@ mod tests {
             empty,
             NoProject,
             "This board has no project yet.",
-            None,
+            Some("Add a project to play on it."),
             Some("Add a project"),
         ));
 
