@@ -28,8 +28,11 @@ export class BrowserEsp32DeviceController {
     return Boolean(globalThis.navigator?.serial);
   }
 
-  static async requestPort() {
-    if (!this.isSupported()) {
+  // `serial` is the `navigator.serial` to ask: the browser's own, or (Chrome
+  // on Android) the WebUSB one `browser_serial.js` picks
+  // (`usb_cdc_serial.js`), which takes the same filters.
+  static async requestPort(serial = globalThis.navigator?.serial) {
+    if (!serial) {
       throw new Error("Web Serial is not supported in this browser.");
     }
     // The chooser admits Espressif native USB AND the serial-bridge chips
@@ -43,7 +46,7 @@ export class BrowserEsp32DeviceController {
     // product-id allowlists; dev-board vendors do not use stable ones.
     // An empty filtered chooser still rejects with NotFoundError, which
     // upstream maps to "cancelled".
-    const port = await navigator.serial.requestPort({
+    const port = await serial.requestPort({
       filters: ESP32_USB_VENDOR_IDS.map((usbVendorId) => ({ usbVendorId })),
     });
     return { port, label: labelForPort(port) };

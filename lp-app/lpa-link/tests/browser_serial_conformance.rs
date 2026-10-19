@@ -235,6 +235,18 @@ extern "C" {
 
     #[wasm_bindgen(js_name = canShadowNavigatorSerial)]
     fn js_can_shadow_navigator_serial() -> String;
+
+    #[wasm_bindgen(js_name = routeOverWebUsb)]
+    fn js_route_over_webusb() -> Promise;
+
+    #[wasm_bindgen(js_name = unrouteWebUsb)]
+    fn js_unroute_webusb();
+
+    #[wasm_bindgen(js_name = serialBackendKind)]
+    fn js_serial_backend_kind() -> Promise;
+
+    #[wasm_bindgen(js_name = webUsbChooserFilters)]
+    fn js_webusb_chooser_filters() -> String;
 }
 
 #[wasm_bindgen]
@@ -1106,6 +1118,147 @@ async fn the_signal_lines_pass_through_undecoded() {
     shim_off().await;
 }
 
+// ---------------------------------------------------------------------------
+// Chrome on Android: the same boards over WebUSB
+// (`docs/adr/2026-10-18-android-usb-over-webusb.md`)
+// ---------------------------------------------------------------------------
+
+/// Put the installed boards behind Chrome-on-Android's facts (see
+/// `routeOverWebUsb` in the support module) and check the shipped
+/// `browser_serial.js` chose WebUSB from them on its own.
+async fn webusb_on() {
+    JsFuture::from(js_route_over_webusb())
+        .await
+        .expect("route the boards over WebUSB");
+    let kind = JsFuture::from(js_serial_backend_kind())
+        .await
+        .expect("serialBackendKind()");
+    assert_eq!(kind.as_string().as_deref(), Some("usb-cdc"));
+}
+
+async fn webusb_off() {
+    drain_sessions().await;
+    js_unroute_webusb();
+    shim_off().await;
+}
+
+/// On Android the USB square is still offered (the provider reads
+/// `isSupported`, and flashing too), its chooser asks `navigator.usb` for CDC
+/// devices of the same vendors Web Serial's filter names, and the port it
+/// returns is the one `getGrantedPorts` enumerates, as the same session.
+#[wasm_bindgen_test]
+async fn on_android_the_usb_chooser_is_webusbs_and_its_port_is_a_session() {
+    if real_backing() {
+        log_skip("the WebUSB double stands on the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    webusb_on().await;
+    assert!(
+        boolean(js_is_supported()).await,
+        "the USB square is offered"
+    );
+    assert!(
+        boolean(js_flash_bridge_is_supported()).await,
+        "flashing is offered"
+    );
+
+    let session = JsFuture::from(js_request_port())
+        .await
+        .expect("requestPort() over WebUSB");
+    let id = number(&session, "id").expect("session id") as u32;
+    assert_eq!(number(&session, "usbVendorId"), Some(f64::from(0x303a)));
+    assert_eq!(number(&session, "usbProductId"), Some(f64::from(0x1001)));
+    let filters = js_webusb_chooser_filters();
+    assert_eq!(
+        filters,
+        r#"[{"classCode":2,"vendorId":12346},{"classCode":2,"vendorId":6790},{"classCode":2,"vendorId":4292},{"classCode":2,"vendorId":1027}]"#,
+        "the chooser asks for CDC devices of the Web Serial filter's vendors"
+    );
+    let granted = granted_sessions().await;
+    assert_eq!(ids(&granted), vec![id], "{granted:?}");
+    assert_eq!(granted[0].label, "ESP32 Serial (303a:1001)");
+    log(&format!("WebUSB chooser filters {filters}; session {id}"));
+    webusb_off().await;
+}
+
+/// CDC sets both lines in one request, so every step of a reset dance reaches
+/// the board as a whole-status write, from the lines the open asserted (both,
+/// as a tty's open does) — and the board decodes ONE reset from it, as it
+/// does from Web Serial's line-by-line writes.
+#[wasm_bindgen_test]
+async fn a_reset_over_webusb_is_whole_status_writes_the_board_decodes_once() {
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    webusb_on().await;
+    let id = granted_sessions().await[0].id;
+
+    open_port(id, true)
+        .await
+        .expect("openPort with a reset, over WebUSB");
+    let log_text = js_control_log(&board);
+    log(&format!(
+        "control channel after a normal reset over WebUSB:\n{log_text}"
+    ));
+    assert_eq!(
+        log_text.lines().collect::<Vec<_>>(),
+        vec![
+            "signals dtr=1 rts=1",
+            "signals dtr=0 rts=1",
+            "signals dtr=0 rts=1",
+            "signals dtr=0 rts=0",
+        ],
+    );
+    assert_eq!(js_reboot_count(&board), 1, "the board decoded one reset");
+    webusb_off().await;
+}
+
+/// The link comes up over WebUSB, on the C6's `usb()` preset (picked from
+/// the vendor id, as over Web Serial), and the board's hello arrives whole.
+#[wasm_bindgen_test]
+async fn over_webusb_the_link_comes_up_and_the_boards_hello_arrives() {
+    let Some(mut bench) = LinkBench::open_on("webusb-link-up", Board::C6, Route::WebUsb).await
+    else {
+        return;
+    };
+    let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    assert_eq!(hello_count(&reads), 1, "{reads:?}");
+    let notes = web_serial_link::take_wire_notes(bench.id);
+    assert!(
+        notes.iter().any(|note| note.starts_with("link: up")),
+        "{notes:?}"
+    );
+    bench.close().await;
+}
+
+/// A request over WebUSB is one link message and its answer comes back
+/// packed, as over Web Serial.
+#[wasm_bindgen_test]
+async fn over_webusb_a_request_is_answered_packed() {
+    let Some(mut bench) = LinkBench::open_on("webusb-request", Board::C6, Route::WebUsb).await
+    else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    bench.exchange_until(|_| bench_board_packs()).await;
+    let request = lpc_wire::ClientMessage {
+        id: 43,
+        msg: lpc_wire::ClientRequest::StopAllProjects,
+    };
+    let request_json = lpc_wire::json::to_string(&request).expect("json");
+    web_serial_link::send_client_json(bench.id, &request_json).expect("the link takes the request");
+    let reads = bench
+        .exchange_until(|reads| answer(reads, 43).is_some())
+        .await;
+    let frame = answer(&reads, 43).expect("the answer");
+    assert!(frame.packed, "the answer came packed: {frame:?}");
+    bench.close().await;
+}
+
 /// Under the shim there is no chooser to show. M2 resolves `requestPort` to
 /// the first board and says so here; M3 replaces the resolution behind
 /// `resolveRequestedPort` without touching the port double. A filter that
@@ -1819,6 +1972,10 @@ impl LinkBench {
     /// page describes it; either way the bench checks the port's link took the
     /// board's preset, through the production vendor-id rule.
     async fn open(name: &str, profile: Board) -> Option<Self> {
+        Self::open_on(name, profile, Route::WebSerial).await
+    }
+
+    async fn open_on(name: &str, profile: Board, route: Route) -> Option<Self> {
         if real_backing() {
             log_skip("the board end here is a Rust lp-link double on the scripted door");
             return None;
@@ -1830,6 +1987,9 @@ impl LinkBench {
             JsFuture::from(js_present_behind_bridge(&board, vendor, product))
                 .await
                 .expect("the port presents as a bridge");
+        }
+        if let Route::WebUsb = route {
+            webusb_on().await;
         }
         let ports = lpa_link::providers::browser_serial_esp32::granted_ports()
             .await
@@ -1896,8 +2056,18 @@ impl LinkBench {
 
     async fn close(self) {
         let _ = web_serial_link::release(self.id).await;
+        drain_sessions().await;
+        js_unroute_webusb();
         shim_off().await;
     }
+}
+
+/// How the page reaches the board: Web Serial, or (Chrome on Android) a
+/// CDC-ACM port over WebUSB (`usb_cdc_serial.js`).
+#[derive(Clone, Copy, Debug)]
+enum Route {
+    WebSerial,
+    WebUsb,
 }
 
 thread_local! {

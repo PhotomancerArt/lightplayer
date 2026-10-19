@@ -1,9 +1,55 @@
 const sessions = new Map();
 let nextSessionId = 1;
 let controllerModulePromise = null;
+let usbCdcModulePromise = null;
+let usbCdcSerial = null;
 
 export function isSupported() {
-  return Boolean(globalThis.navigator?.serial);
+  return serialBackendKind() !== null;
+}
+
+// Which `navigator.serial` this page uses: `"serial"` (the browser's own, or
+// a page polyfill such as `?emu=`'s virtual bus), `"usb-cdc"` (a CDC-ACM port
+// over WebUSB, `/lpa-link/usb_cdc_serial.js`), or `null` (no USB at all).
+//
+// Chrome on Android has a `navigator.serial` that lists Bluetooth RFCOMM
+// ports only, never a wired board, so there the port is spoken over
+// `navigator.usb` instead (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+// A polyfill installed on the page (an own property of `navigator`) always
+// wins: it is the board the page was asked to talk to.
+export function serialBackendKind(nav = globalThis.navigator) {
+  if (!nav) {
+    return null;
+  }
+  if (Object.prototype.hasOwnProperty.call(nav, "serial")) {
+    return "serial";
+  }
+  if (nav.usb && (!nav.serial || isAndroid(nav))) {
+    return "usb-cdc";
+  }
+  return nav.serial ? "serial" : null;
+}
+
+function isAndroid(nav) {
+  const platform = nav.userAgentData?.platform;
+  if (typeof platform === "string" && platform !== "") {
+    return platform === "Android";
+  }
+  return /Android/i.test(String(nav.userAgent ?? ""));
+}
+
+// The `navigator.serial`-shaped object the session map talks to, or null.
+async function serialBackend() {
+  const kind = serialBackendKind();
+  if (kind === "usb-cdc") {
+    usbCdcModulePromise ??= import(usbCdcModulePath());
+    const { UsbCdcSerial } = await usbCdcModulePromise;
+    if (usbCdcSerial?.usb !== globalThis.navigator.usb) {
+      usbCdcSerial = new UsbCdcSerial(globalThis.navigator.usb);
+    }
+    return usbCdcSerial;
+  }
+  return kind === "serial" ? globalThis.navigator.serial : null;
 }
 
 // M6 (D32): hotplug plumbing. `navigator.serial` fires `connect` when a
@@ -12,7 +58,10 @@ export function isSupported() {
 // once; returns whether listeners are live.
 let serialEventsInstalled = false;
 export function installSerialEvents(onConnect, onDisconnect) {
-  const serial = globalThis.navigator?.serial;
+  // Over WebUSB the edges are `navigator.usb`'s, and every USB device's: a
+  // sweep for a device that is not a board finds nothing new, which is cheap.
+  const serial =
+    serialBackendKind() === "usb-cdc" ? globalThis.navigator.usb : globalThis.navigator?.serial;
   if (!serial?.addEventListener || serialEventsInstalled) {
     return serialEventsInstalled;
   }
@@ -28,7 +77,7 @@ export function installSerialEvents(onConnect, onDisconnect) {
 // ids: navigator.serial.getPorts() yields stable SerialPort object
 // identities, and existing sessions are matched by port identity.
 export async function getGrantedPorts() {
-  const serial = globalThis.navigator?.serial;
+  const serial = await serialBackend();
   if (!serial?.getPorts) {
     return [];
   }
@@ -113,7 +162,7 @@ function describeSession(id, session) {
 
 export async function requestPort() {
   const { BrowserEsp32DeviceController } = await loadControllerModule();
-  const { port, label } = await BrowserEsp32DeviceController.requestPort();
+  const { port, label } = await BrowserEsp32DeviceController.requestPort(await serialBackend());
   return sessionForPort(BrowserEsp32DeviceController, port, label);
 }
 
@@ -233,7 +282,7 @@ export async function getPort(id) {
 // One adoption pass over what `getPorts()` enumerates now, for every path
 // that is about to open a session's port.
 async function adoptFromLiveGrants() {
-  const serial = globalThis.navigator?.serial;
+  const serial = await serialBackend();
   if (!serial?.getPorts) {
     return;
   }
@@ -260,4 +309,8 @@ function loadControllerModule() {
 
 function controllerModulePath() {
   return "/lpa-link/browser_esp32_device_controller.js";
+}
+
+function usbCdcModulePath() {
+  return "/lpa-link/usb_cdc_serial.js";
 }

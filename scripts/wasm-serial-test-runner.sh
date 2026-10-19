@@ -38,6 +38,7 @@ for required in \
     "$public/virtual_serial.js" \
     "$public/virtual_bluetooth.js" \
     "$public/emulator_port.js" \
+    "$public/usb_cdc_serial.js" \
     "$provider/browser_serial.js" \
     "$provider/browser_esp32_flash.js"; do
     if [ ! -f "$required" ]; then

@@ -1,4 +1,4 @@
-import { getPort, releasePort } from "./browser_serial.js";
+import { getPort, isSupported as serialIsSupported, releasePort } from "./browser_serial.js";
 
 const ESPTOOL_TRANSPORT_TRACING = false;
 
@@ -7,7 +7,7 @@ const ESPTOOL_TRANSPORT_TRACING = false;
 const FIRMWARE_MANIFEST_SCHEMA_VERSION = 2;
 
 export function isSupported() {
-  return Boolean(globalThis.navigator?.serial && globalThis.fetch);
+  return Boolean(serialIsSupported() && globalThis.fetch);
 }
 
 export async function loadManifest(manifestPath) {

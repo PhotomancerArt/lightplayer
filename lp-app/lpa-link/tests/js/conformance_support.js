@@ -776,6 +776,183 @@ export function canShadowNavigatorSerial() {
   return JSON.stringify({ shadowed, removedAgain: removed });
 }
 
+// --- Chrome on Android: the same boards over WebUSB ------------------------
+//
+// Chrome on Android lists no wired board in Web Serial, so `browser_serial.js`
+// speaks to one over `navigator.usb` instead, through `usb_cdc_serial.js`
+// (`docs/adr/2026-10-18-android-usb-over-webusb.md`). `routeOverWebUsb` makes
+// this page look like that browser — no `navigator.serial` of the page's own,
+// a `navigator.usb`, and `userAgentData.platform` "Android" — and puts each
+// board the polyfill holds behind a `USBDevice` double. `browser_serial.js`
+// picks its backend from those facts itself; nothing tells it to.
+//
+// The double is CDC-ACM on the outside and the polyfill's own port inside, so
+// the board, its lines and its decoded reset dances are the scripted door's,
+// unchanged: SET_LINE_CODING opens the port, SET_CONTROL_LINE_STATE is one
+// `setSignals` naming both lines (as CDC sends them), and the bulk endpoints
+// are the port's byte streams.
+
+class UsbDeviceOverSerialPort {
+  constructor(port) {
+    this.port = port;
+    const info = port.getInfo();
+    this.vendorId = info.usbVendorId;
+    this.productId = info.usbProductId;
+    this.opened = false;
+    this.configuration = null;
+    this.reader = null;
+    this.writer = null;
+    this.forgotten = false;
+  }
+
+  async open() {
+    this.opened = true;
+  }
+
+  async selectConfiguration(configurationValue) {
+    const endpoint = (endpointNumber, direction, type) => ({ endpointNumber, direction, type, packetSize: 64 });
+    const iface = (interfaceNumber, interfaceClass, endpoints) => ({
+      interfaceNumber,
+      alternates: [{ alternateSetting: 0, interfaceClass, endpoints }],
+    });
+    this.configuration = {
+      configurationValue,
+      interfaces: [
+        iface(0, 0x02, [endpoint(2, "in", "interrupt")]),
+        iface(1, 0x0a, [endpoint(1, "in", "bulk"), endpoint(1, "out", "bulk")]),
+        iface(2, 0xff, [endpoint(2, "out", "bulk"), endpoint(3, "in", "bulk")]),
+      ],
+    };
+  }
+
+  async claimInterface() {}
+
+  async controlTransferOut(setup, data) {
+    if (setup.request === 0x20) {
+      const baudRate = new DataView(data.buffer, data.byteOffset).getUint32(0, true);
+      if (!this.port.opened) {
+        await this.port.open({ baudRate });
+        this.reader = this.port.readable.getReader();
+        this.writer = this.port.writable.getWriter();
+      }
+    } else if (setup.request === 0x22) {
+      await this.port.setSignals({
+        dataTerminalReady: Boolean(setup.value & 1),
+        requestToSend: Boolean(setup.value & 2),
+      });
+    }
+    return { status: "ok" };
+  }
+
+  async transferIn(_endpointNumber, length) {
+    if (!this.reader) {
+      throw new DOMException("The device must be opened first.", "InvalidStateError");
+    }
+    let result;
+    try {
+      result = await this.reader.read();
+    } catch (error) {
+      throw new DOMException(`The transfer failed: ${error?.message ?? error}`, "NetworkError");
+    }
+    if (result.done) {
+      throw new DOMException("The transfer was cancelled.", "AbortError");
+    }
+    const bytes = result.value.slice(0, length);
+    return { status: "ok", data: new DataView(bytes.buffer) };
+  }
+
+  async transferOut(_endpointNumber, data) {
+    await this.writer.write(new Uint8Array(data).slice());
+    return { status: "ok", bytesWritten: data.byteLength };
+  }
+
+  async clearHalt() {}
+
+  async close() {
+    this.opened = false;
+    const { reader, writer } = this;
+    this.reader = null;
+    this.writer = null;
+    await reader?.cancel().catch(() => {});
+    reader?.releaseLock();
+    writer?.releaseLock();
+    if (this.port.opened) {
+      await this.port.close().catch(() => {});
+    }
+  }
+
+  async forget() {
+    this.forgotten = true;
+  }
+}
+
+class FakeNavigatorUsb extends EventTarget {
+  constructor(devices) {
+    super();
+    this.devices = devices;
+    this.lastFilters = null;
+  }
+
+  async requestDevice({ filters }) {
+    this.lastFilters = filters;
+    const device = this.devices.find((candidate) => !candidate.forgotten);
+    if (!device) throw new DOMException("No device selected.", "NotFoundError");
+    return device;
+  }
+
+  async getDevices() {
+    return this.devices.filter((device) => !device.forgotten);
+  }
+}
+
+let webUsbRoute = null;
+
+/// Put this page behind Chrome-on-Android's facts, every board the installed
+/// polyfill holds on a `USBDevice` double. Call after `installScripted` and
+/// before anything enumerates; `unrouteWebUsb` puts the page back.
+export async function routeOverWebUsb() {
+  const { bus } = await polyfill();
+  const nav = globalThis.navigator;
+  const serial = Object.getOwnPropertyDescriptor(nav, "serial");
+  const devices = bus().boardIds.map((id) => new UsbDeviceOverSerialPort(bus().livePortFor(id)));
+  const usb = new FakeNavigatorUsb(devices);
+  webUsbRoute = {
+    serial,
+    usb: Object.getOwnPropertyDescriptor(nav, "usb"),
+    userAgentData: Object.getOwnPropertyDescriptor(nav, "userAgentData"),
+    fake: usb,
+  };
+  delete nav.serial;
+  Object.defineProperty(nav, "usb", { value: usb, configurable: true });
+  Object.defineProperty(nav, "userAgentData", { value: { platform: "Android" }, configurable: true });
+}
+
+export function unrouteWebUsb() {
+  if (!webUsbRoute) return;
+  const nav = globalThis.navigator;
+  const restore = (name, descriptor) => {
+    if (descriptor) {
+      Object.defineProperty(nav, name, descriptor);
+    } else {
+      delete nav[name];
+    }
+  };
+  restore("usb", webUsbRoute.usb);
+  restore("userAgentData", webUsbRoute.userAgentData);
+  restore("serial", webUsbRoute.serial);
+  webUsbRoute = null;
+}
+
+/// Which backend the shipped `browser_serial.js` says this page has.
+export async function serialBackendKind() {
+  return (await load()).serial.serialBackendKind();
+}
+
+/// The filters the shipped chooser asked `navigator.usb` for, as JSON.
+export function webUsbChooserFilters() {
+  return JSON.stringify(webUsbRoute?.fake.lastFilters ?? null);
+}
+
 // --- the Bluetooth half (`tests/browser_ble_conformance.rs`, M5) -----------
 //
 // `?ble=emu`'s polyfill (`/lpa-link/virtual_bluetooth.js`) over the SAME
