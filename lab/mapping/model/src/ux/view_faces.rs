@@ -9,6 +9,7 @@ use crate::domain::node::{Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::placement::Frame;
 use crate::domain::port_runs::PortRun;
+use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::card_geometry::{CARD_WIDTH, card_row};
 use crate::ux::editor::{Editor, Tool};
@@ -96,6 +97,7 @@ impl Editor {
                 ui
             })
             .collect();
+        let pitch = lamp_pitch(p, id);
         let not_shown = p.fixture(id).and_then(|f| f.unsupported.as_ref()).map(|u| {
             format!(
                 "The Graph can't show {} yet. Edit it in {}.",
@@ -114,6 +116,7 @@ impl Editor {
                 samples: None,
                 render_size: None,
                 not_shown,
+                pitch,
             };
         }
         let dp = p.data_path(id);
@@ -137,6 +140,7 @@ impl Editor {
             samples: p.visual_source(id),
             render_size: p.fixture(id).and_then(|f| f.render_size),
             not_shown,
+            pitch,
         }
     }
 
@@ -333,3 +337,30 @@ pub(crate) fn direction_arrow(shape: &UiShape, lamps: &[Vec2]) -> Option<(Vec2, 
     let len = dir.length();
     (len > 1e-9).then(|| (at, dir * (1.0 / len)))
 }
+
+/// A fixture's usual lamp spacing, in its own units: the median gap
+/// between one lamp and the next along its objects. A fixture with no two
+/// lamps in a row takes the drawing tools' spacing.
+fn lamp_pitch(p: &Project, fixture: &NodeId) -> f64 {
+    let frame = p.frame(fixture);
+    let mut gaps: Vec<f64> = p
+        .objects_in(fixture)
+        .iter()
+        .flat_map(|o| {
+            o.lamps
+                .windows(2)
+                .map(|w| frame.to_local(w[0].pos).distance(frame.to_local(w[1].pos)))
+                .collect::<Vec<_>>()
+        })
+        .filter(|d| *d > 1e-9)
+        .collect();
+    if gaps.is_empty() {
+        return DEFAULT_PITCH;
+    }
+    let mid = gaps.len() / 2;
+    gaps.select_nth_unstable_by(mid, f64::total_cmp);
+    gaps[mid]
+}
+
+/// The drawing tools' lamp spacing (`Editor::spacing`'s default).
+pub const DEFAULT_PITCH: f64 = 2.4;

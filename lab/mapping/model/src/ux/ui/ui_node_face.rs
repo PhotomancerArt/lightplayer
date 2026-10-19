@@ -44,6 +44,11 @@ pub struct UiFixtureFace {
     /// Why nothing is drawn in it: what it holds that the lab can't show
     /// yet, in a sentence.
     pub not_shown: Option<String>,
+    /// How far apart its lamps are, in its own units: the usual gap
+    /// between one lamp and the next along an object. Its lamps are drawn
+    /// as a share of it, so they are as big as they can be without
+    /// touching, however the fixture is spaced.
+    pub pitch: f64,
 }
 
 /// How a fixture's face is drawn.

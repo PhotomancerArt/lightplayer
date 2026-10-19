@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use lab_mapping_model::{BoardFrame, NodeId};
 
 use crate::dense_canvas::{Raster, canvas_id, put_when_mounted};
-use crate::faces::{lamp_radius_px, rgb};
+use crate::faces::{DRAFT_PITCH, lamp_radius_px, rgb};
 use crate::graph_editor::GraphEditor;
 use crate::lamp_cells::CellMap;
 
@@ -77,7 +77,7 @@ pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
                 });
             }
         }
-        let r = lamp_radius_px(zoom) * crate::dense_canvas::device_pixel_ratio();
+        let r = lamp_radius_px(zoom, DRAFT_PITCH) * crate::dense_canvas::device_pixel_ratio();
         CellMap::new(raster.w, raster.h, &seeds, r).paint(&mut raster, &colours);
         drop((e, frame));
         put_when_mounted(raster, canvas).await;
