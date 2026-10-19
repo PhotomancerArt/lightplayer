@@ -76,7 +76,7 @@ use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
 use crate::{OfferPath, UiOffer};
 
-/// The Link row's state while a Connect is under way ("USB · connecting");
+/// A link row's state while a Connect is under way ("USB connecting");
 /// the primary is the spinner alone then.
 pub const CONNECTING: &str = "connecting";
 
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         assert_eq!(path(&offered(&mut offline)), "take-over");
     }
 
-    /// Busy in the other tab: no button; the Link row says it.
+    /// Busy in the other tab: no button; the USB row says it.
     #[test]
     fn a_board_the_holder_is_busy_with_has_no_primary() {
         let mut fixture = CardFixture::held(HoldLevel::Busy("Updating \u{b7} 42%".to_string()));
@@ -769,7 +769,7 @@ pub(crate) mod tests {
     #[test]
     fn a_held_board_with_nobody_to_ask_has_no_primary() {
         // The controller offers `take-over` only with a hold edge; without
-        // one the card has nothing to press, and the Link row says who has
+        // one the card has nothing to press, and the USB row says who has
         // the board.
         let mut fixture = CardFixture::held(HoldLevel::Watching);
         fixture.without_offer("take-over");

@@ -197,7 +197,8 @@ app. Find the pattern, name it, reuse it. A one-off needs a reason.
 
 ```text
 do:   ◆ Project   studio
-      ↔ USB · connected
+      ⏚ USB       connected
+      ≋ Wi‑Fi     Cedar Lane
       ○ Access    edit · USB
       ▲ Firmware  v2026.10.16-1
       ■ Hardware  XIAO ESP32-C6
@@ -223,7 +224,7 @@ do:   ┌──────────────────────┐  
       │ Porch lamp           │              │ ┌ Board ───────────┐ │
       ├──────────────────────┤              │ │ ┌ Info ────────┐ │ │
       │ ◆ Project   studio   │              │ │ │ ◆ studio     │ │ │
-      │ ↔ USB · connected    │              │ │ └──────────────┘ │ │
+      │ ⏚ USB       connected│              │ │ └──────────────┘ │ │
       └──────────────────────┘              │ └──────────────────┘ │
                                             └──────────────────────┘
 ```
@@ -327,7 +328,7 @@ something else.
 
 ```text
 do:   ▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone: the button carries it
-do:   ↔ USB · not responding      │ Retry │   ← orange           # orange: a device needs you
+do:   ⏚ USB       not responding  │ Retry │   ← orange           # orange: a device needs you
 
 bad:  ○ You can edit · anyone can edit         ← yellow   # shipped: yellow means an unsaved edit
 bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue means live

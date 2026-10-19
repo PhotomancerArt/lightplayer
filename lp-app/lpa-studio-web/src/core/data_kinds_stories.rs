@@ -16,7 +16,7 @@ const DAY: f64 = 86_400.0;
 const OCT_16_2026: f64 = 1_792_152_000.0;
 
 #[story(
-    description = "Every data kind Studio shows and every case of it, as core says it: ages, durations, an age in a sentence (the board card's surface and its Link row), byte sizes, percentages, dates and firmware versions."
+    description = "Every data kind Studio shows and every case of it, as core says it: ages, durations, an age in a sentence (the board card's surface and its rows' details), byte sizes, percentages, dates and firmware versions."
 )]
 fn every_kind() -> Element {
     let ages: Vec<(String, String)> = [0.0, 12.0, 89.0, 90.0, 2.0 * 3_600.0, 3.0 * DAY, 14.0 * DAY]

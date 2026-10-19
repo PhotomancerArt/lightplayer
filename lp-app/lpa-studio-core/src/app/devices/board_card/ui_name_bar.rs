@@ -38,7 +38,7 @@ pub enum UiPrimary {
     /// An offer to press.
     Offer(UiCardAction),
     /// The board is being reached or identified: the spinner alone, no
-    /// words — the Link row (or the Hardware row) says how. `label` is the
+    /// words — the link row (or the Hardware row) says how. `label` is the
     /// spinner's accessible name ("Connecting", "Identifying").
     Working { label: String },
 }

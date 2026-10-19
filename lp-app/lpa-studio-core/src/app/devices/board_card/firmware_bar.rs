@@ -190,7 +190,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     } else if let (IdentityFirmware::Remembered(_), FirmwareFace::Unknown) =
         (&identity.firmware, &view.firmware_face)
     {
-        // Last known, dimmed (P13); only the Link row says since when.
+        // Last known, dimmed (P13); the surface says since when.
         stale = true;
         (version.clone(), None, UiStatusKind::Neutral, None)
     } else if view.firmware_face.wants_flash() {

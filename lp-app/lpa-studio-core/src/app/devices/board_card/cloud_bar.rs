@@ -23,7 +23,8 @@
 //! `devices/<board>/wifi/cloud-relay`) — after which the row says
 //! "disabled", for privacy, and its details offer "Enable lightplayer.app".
 //!
-//! The struck cloud mark the Link row carried is gone: this row says it.
+//! The struck cloud mark the old Link row carried is gone: this row says
+//! it.
 //! The account is the signed-in one, named as its key is on every board
 //! ("Yona's account", [`super::board_links::account_words`]).
 

@@ -250,11 +250,11 @@ async function main() {
 
     await step("card-done", "Done: the session closes and the card shows its facts", async () => {
       await driver.pressOffer("done", { board: mac, timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 5`, {
+      await driver.waitFor(`Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 8`, {
         timeoutMs: STEP_DEADLINE_MS,
-        what: "the card's five bars",
+        what: "the card's eight rows",
       });
-      return "the card's five bars again";
+      return "the card's eight rows again";
     });
 
     await step("card", `the card's picture at the Bluetooth pace, moving over ${CARD_WINDOW_MS / 1000} s`, async () => {

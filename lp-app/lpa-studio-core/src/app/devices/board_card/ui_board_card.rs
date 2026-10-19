@@ -1,7 +1,7 @@
 //! [`UiBoardCard`]: one board, as the card draws it — the surface (its
 //! picture, and over it what matters now), the status corner, the name bar
-//! and its primary, then the five bars (or, connected, the board's panel in
-//! their place). Built in
+//! and its primary, then the eight rows (or, connected, the board's panel
+//! in their place). Built in
 //! core ([`super::board_card`], [`super::pending_board_card`]) from the
 //! roster's facts and the board's own offers, so the web decides how a bar
 //! looks and never what it says or which offer it carries

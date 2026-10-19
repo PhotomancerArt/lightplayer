@@ -103,7 +103,7 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     let view = input.view;
     let connect = input.wifi_connect;
     // A board that stopped answering says so, with its Retry, rather than
-    // a spinner over it (the Link row does the same).
+    // a spinner over it (its link row does the same).
     let answering = view.status != DeviceStatus::NotResponding;
     if answering
         && (*input.connection == BoardConnection::Connecting

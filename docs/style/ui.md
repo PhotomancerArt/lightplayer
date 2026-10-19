@@ -265,7 +265,10 @@ From the top:
   What needs you is the surface's to say, and so is the editor holding the
   board.
 - **The name bar.** The board's name, its group or owner under it, and one
-  primary action: the most likely thing the person wants to do, even when
+  primary action. The name is renamed where it is: a faint pencil after
+  it, always shown, brighter (and the name underlined) on hover; pressed, a
+  field takes its place at the bar's height. The primary is the most likely
+  thing the person wants to do, even when
   it repeats a row's own button. The action is a plain, flush section of
   the bar with an icon leading its verb and object: the link's icon before
   Connect, a lock before Unlock, ✓ before Done, + before Add a project, the
@@ -278,11 +281,14 @@ From the top:
   characters: on a card too narrow for that beside the whole primary, the
   primary says its verb alone (Update, Install, Reinstall), and the
   surface's sentence names the object.
-- **The rows,** always in this order: project · link · access · firmware ·
-  hardware. Each is one line in one grammar (`docs/ux/anatomy/board-card.md`):
-  **icon · kind · name · state · action**. The icon is the kind's own in
-  every state (layers for a project); the kind is a fixed, muted 56 px
-  column, so the names line up down the card; the name is the thing itself
+- **The rows,** always in this order: project · USB · Wi‑Fi · Bluetooth ·
+  lightplayer.app · access · firmware · hardware, the links in the middle.
+  For a new board they are its setup list. Each is one line in one grammar
+  (`docs/ux/anatomy/board-card.md`): **icon · kind · name · state ·
+  action**. The icon is the kind's own in every state (layers for a
+  project); the kind is a fixed, muted 84 px column (58 px on a phone's
+  narrow card, where a longer link name is cut at its end), so the names
+  line up down the card; the name is the thing itself
   and never moves, and it keeps its width: short of room, the state gives
   way first, cut at its end and then gone, before the name is cut (a
   name still too long beside its button is cut at its end, and the
@@ -290,8 +296,9 @@ From the top:
   reads alike); the
   state follows only when it is not normal; at most
   one action fixes it, with a way out beside it where the fix needs one
-  (Restore · Reset). The Link row has no kind word: the link's name is its
-  kind.
+  (Restore · Reset). A link row's kind is the link's own name (`USB`,
+  `Wi‑Fi`, `Bluetooth`, `lightplayer.app`), a step brighter than the other
+  kinds; "connected" beside its value marks the link this tab is using.
 
 The rules:
 
@@ -310,27 +317,39 @@ The rules:
   cloud's alone: an update on offer is untinted, and its button carries
   it. In a toned row the kind takes the row's colour, quieter. The rest of
   the card stays neutral.
+- **A row with something left to do is lit.** The whole row on a lighter
+  flat ground (the raised ground, `--studio-color-surface-raised-strong`),
+  its icon, kind and name at full strength, its button on the same ground
+  with no fill of its own; hover is one step lighter still. It is a state
+  with no hue: never a gradient, never a dot, never on a toned row (orange
+  and red keep their tone), a disabled one, one whose fix is another row's,
+  or one at work.
+- **A row is hushed by disabling its thing,** from its details (Disable
+  Wi‑Fi, Disable lightplayer.app, Disable Bluetooth): the row then says
+  `disabled`, plain, and wants nothing.
 - **The rows go quiet** while the surface says their problem: the row keeps
   its state word and its own button, and loses its orange or red. The
   surface is the card's one loud place.
-- **"Someone has it" is orange,** on the surface's icon. The Link row says
+- **"Someone has it" is orange,** on the surface's icon. The row of the
+  link it is held on says
   **Open in another tab**, **Taken by another tab** or **Someone else
   connected**, quietly. A take-over under way is the row's work, and one
   that failed carries Retry.
 - **Old looks old.** An offline board's rows keep the last thing known,
-  dimmed, their words unchanged; only the Link row says since when.
+  dimmed, their words unchanged; the surface says since when.
 - **A bar's action sits flush at its end,** as a section of the bar, not a
   chip floating inside it.
 - **A mark is an icon alone at a row's end,** after the state, with its
-  words as its accessible name and hover: the cloud on a board also
-  reachable through lightplayer.app, filled in the live tone while it is,
-  struck through while Cloud relay is on and the board isn't there. Its
-  shape says the fact, not its colour alone. A fact a mark carries is not
-  repeated in words on the row.
+  words as its accessible name and hover. Its shape says the fact, not its
+  colour alone, and a fact a mark carries is not repeated in words on the
+  row. No row draws one today: the struck cloud is gone (lightplayer.app's
+  row says it), and the account mark ("From your account") waits for a
+  store that can say a value came from the account.
 - **Every row names its subject,** with its kind word: `Project none`,
   `Project not known`, `Firmware unknown`, never a bare "Not known yet"
-  and never a false "none". A stand-in's Link row
-  says what it is, and only it: "Simulated · running", "Emulated · off".
+  and never a false "none". A stand-in's USB row
+  says what it is, and only it: "Simulated · running", "Emulated · off";
+  its radio rows say "—".
 - **Details open as Studio's detail card, merged with the bar that opened
   it** (the merged-outline popover). Every fact the bar's summary leaves
   out lives there; nothing on the card is lost, only moved.
@@ -345,7 +364,7 @@ The rules:
   failed ("send failed"), and offers Retry, the reason the first thing in
   its details. The corner doesn't change; the surface says the work over
   the dimmed picture, with its bar and percent.
-- **Connected, the bars become the panel.** Connect turns the card's bars
+- **Connected, the rows become the panel.** Connect turns the card's rows
   into the board's whole panel, drawn with Studio's existing panel widgets,
   and the card grows once to hold it. Done turns them back. Top to bottom:
   - **the root's controls, the master first** (the project's brightness, a
@@ -362,8 +381,8 @@ The rules:
   held state, the let-go glyph, the detail popover. Nothing links away: no
   All controls, no "· N more". The panel's reset and auto-save switch are in
   the card's ⋯. The name bar's primary is Done (✓) while connected. A card
-  that is connecting, reconnecting or failed to connect keeps its bars, and
-  the connection bar carries the work.
+  that is connecting, reconnecting or failed to connect keeps its rows, and
+  the row of the link it is reaching by carries the work.
 
 The card is built in core, as a name bar and bars, and drawn by a few
 generic pieces. The web decides how a bar looks, never what it says or

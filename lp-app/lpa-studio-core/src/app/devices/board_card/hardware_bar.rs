@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use crate::{UiRuntimeBand, UiStatusKind};
 
-    /// "Simulated" is said once, on the Link row (P2): the Hardware row
+    /// "Simulated" is said once, on the USB row (P2): the Hardware row
     /// names the model.
     #[test]
     fn a_stand_in_names_its_model_alone() {

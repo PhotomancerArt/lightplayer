@@ -33,7 +33,7 @@
 //! line's words, so it can never name the wrong link: nothing here says
 //! "Bluetooth" on a LAN or relay link. A stand-in's access is known whether
 //! it runs or not: it lives in this tab, and "simulated" is said once, on
-//! the Link row (P2).
+//! the USB row (P2).
 
 use lpc_access::{OpenTo, Tier};
 
@@ -348,7 +348,7 @@ mod tests {
     }
 
     /// A stand-in lives in this tab: its access is known even while it is
-    /// off, and it says "edit" alone — "simulated" is the Link row's.
+    /// off, and it says "edit" alone — "simulated" is the USB row's.
     #[test]
     fn a_stand_in_edits_on_or_off() {
         let mut off = CardFixture::offline();
