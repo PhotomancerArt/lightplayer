@@ -6,7 +6,7 @@
 //! | Board says | Name · state | Tone |
 //! |---|---|---|
 //! | nothing yet (no firmware, not read, a stand-in) | "—" | Neutral |
-//! | on | its advertised name, `LP-<project>` or `LP-xxxx`; "connected" when this tab's link is Bluetooth | Neutral |
+//! | on | its advertised name, `LP-<project>` or `LP-xxxx` ("on" when Studio knows no MAC); "connected" when this tab's link is Bluetooth | Neutral |
 //! | off | "disabled" | Neutral |
 //!
 //! The advertised name is the firmware's rule
@@ -55,6 +55,9 @@ pub const BLUETOOTH_DISABLED_SENTENCE: &str =
 pub const OPEN_BOARD_SENTENCE: &str =
     "No password yet: anyone nearby or on the same Wi\u{2011}Fi can connect and edit it.";
 
+/// The row's name for a radio that is on when Studio can't say its name.
+const ON: &str = "on";
+
 /// The longest advertised name: the firmware's `ADV_NAME_MAX` (a 31-byte
 /// advertisement less its flags and the name structure's own two bytes).
 const ADV_NAME_MAX: usize = 26;
@@ -64,11 +67,11 @@ pub(crate) fn bluetooth_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let on = input.bluetooth_on().filter(|_| !input.stand_in());
     let name = advertised_name(input);
     let mut facts = match (on, &name) {
-        (Some(true), Some(name)) => LinkFacts {
+        (Some(true), name) => LinkFacts {
             aside: input
                 .reached_over(UiLinkKind::Bluetooth)
                 .then(|| CONNECTED.to_string()),
-            ..LinkFacts::new("bluetooth", name.clone()).named()
+            ..LinkFacts::new("bluetooth", name.clone().unwrap_or_else(|| ON.to_string())).named()
         },
         (Some(false), _) => LinkFacts::new("bluetooth", DISABLED),
         _ => LinkFacts::new("bluetooth", NOT_KNOWN),
@@ -79,7 +82,8 @@ pub(crate) fn bluetooth_bar(input: &BoardCardInput<'_>) -> UiStackBar {
 }
 
 /// The name the board advertises: `LP-<project folder>`, else `LP-xxxx`
-/// from its MAC; `None` for a board Studio knows no MAC of.
+/// from its MAC (its board ref's, else the one it said); `None` for a
+/// board Studio knows no MAC of.
 pub(crate) fn advertised_name(input: &BoardCardInput<'_>) -> Option<String> {
     if let LoadedProject::Running { label } = &input.view.loaded_project {
         let mut name = String::from("LP-");
@@ -95,7 +99,14 @@ pub(crate) fn advertised_name(input: &BoardCardInput<'_>) -> Option<String> {
         .board
         .last()
         .and_then(|segment| BoardRef::parse(segment).ok())
-        .and_then(|board| board.key())?;
+        .and_then(|board| board.key())
+        .or_else(|| {
+            input
+                .view
+                .identity_label
+                .as_deref()
+                .and_then(|label| lpa_devices::BoardKey::parse(label).ok())
+        })?;
     let octets = key.octets();
     Some(format!("LP-{:02x}{:02x}", octets[4], octets[5]))
 }
@@ -125,35 +136,35 @@ fn details(input: &BoardCardInput<'_>, on: Option<bool>, name: Option<&str>) -> 
             ))
         });
     match (on, name) {
-        (Some(true), Some(name)) => {
-            details
-                .sections
-                .push(facts("Bluetooth", vec![RichLine::new("Name", name)]));
-            details
-                .sections
-                .push(help("Bluetooth", BLUETOOTH_NAME_SENTENCE));
+        (Some(true), name) => {
+            // One section: the name a phone sees, and what it is for.
+            let mut named = facts(
+                "Bluetooth",
+                name.map(|name| RichLine::new("Name", name))
+                    .into_iter()
+                    .collect(),
+            );
+            named.sentence = Some(BLUETOOTH_NAME_SENTENCE.to_string());
+            details.sections.push(named);
             if open_to_edit(input) {
                 details
                     .sections
-                    .push(help("Anyone can edit", OPEN_BOARD_SENTENCE));
+                    .push(help("No password", OPEN_BOARD_SENTENCE));
             }
             details
                 .sections
-                .extend(applying.map(|words| help("Bluetooth", words)));
+                .extend(applying.map(|words| help("Restarting", words)));
             details.sections.push(verbs(
                 switch(false, DISABLE_BLUETOOTH).into_iter().collect(),
             ));
         }
         (Some(false), _) => {
+            let mut off = help("Bluetooth", BLUETOOTH_DISABLED_SENTENCE);
+            off.affordances.extend(switch(true, ENABLE_BLUETOOTH));
+            details.sections.push(off);
             details
                 .sections
-                .push(help("Bluetooth", BLUETOOTH_DISABLED_SENTENCE));
-            details
-                .sections
-                .extend(applying.map(|words| help("Bluetooth", words)));
-            details
-                .sections
-                .push(verbs(switch(true, ENABLE_BLUETOOTH).into_iter().collect()));
+                .extend(applying.map(|words| help("Restarting", words)));
         }
         _ => {}
     }

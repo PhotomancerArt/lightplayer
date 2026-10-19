@@ -31,7 +31,7 @@
 use lpc_wire::server::{NetworkStatus, RelayRefusal, RelayState, StationState};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{facts, help, verbs};
+use super::detail_sections::{facts, help};
 use super::link_bar::{LinkFacts, connect_verb, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_CONNECTED, NOT_KNOWN};
 use super::ui_card_action::UiCardAction;
@@ -156,14 +156,14 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
         return details;
     };
     if !status.cloud_relay {
-        details
-            .sections
-            .push(help("lightplayer.app", card::CLOUD_DISABLED));
-        let enable = relay_switch(input, true, card::ENABLE_CLOUD);
-        if enable.is_none() {
+        let mut off = help("lightplayer.app", card::CLOUD_DISABLED);
+        off.affordances
+            .extend(relay_switch(input, true, card::ENABLE_CLOUD));
+        let refused = off.affordances.is_empty();
+        details.sections.push(off);
+        if refused {
             details.sections.extend(cannot_change(input));
         }
-        details.sections.push(verbs(enable.into_iter().collect()));
         return details;
     }
     let Some(account) = input.links.account_words() else {
@@ -175,18 +175,22 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
         details.sections.push(ask);
         details
             .sections
-            .push(help("lightplayer.app", NOTHING_GOES_SENTENCE));
+            .push(help("Privacy", NOTHING_GOES_SENTENCE));
         return details;
     };
     let mut lines = vec![RichLine::new("Account", account)];
     if let Some((line, _)) = relay::line(status) {
         lines.push(RichLine::new("Now", line));
     }
-    details.sections.push(facts("lightplayer.app", lines));
-    if let Some(note) = relay::note(status.relay) {
-        details.sections.push(help("lightplayer.app", note));
-    }
-    details.sections.push(help("Cloud relay", CLOUD_RELAY_HELP));
+    // One section: the account, how the board stands, and what the relay
+    // is for — or, when the board can't use it, why.
+    let mut reach = facts("lightplayer.app", lines);
+    reach.sentence = Some(
+        relay::note(status.relay)
+            .unwrap_or(CLOUD_RELAY_HELP)
+            .to_string(),
+    );
+    details.sections.push(reach);
     details
 }
 

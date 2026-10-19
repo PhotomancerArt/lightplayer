@@ -2,8 +2,9 @@
 //! is measured here, AC5), each bar's details open, the corner's, a tall
 //! details card over its own bar, the narrow card — and today's panels in
 //! the details they moved to (access, Wi‑Fi, Bluetooth, link counters,
-//! other version, the layout question and its refusal, rename, a Lasting
-//! verb armed in place, the terminal).
+//! other version, the layout question and its refusal, a Lasting verb
+//! armed in place, the terminal). The rows as a new board's setup list are
+//! [`super::board_card_setup_stories`].
 //!
 //! The details stories leave room under the card, but a details card taller
 //! than the capture's 760 px viewport is placed where the shared popover
@@ -1158,9 +1159,9 @@ fn board_card_firmware_layout_refused() -> Element {
 }
 
 #[story(
-    description = "The hardware bar's details with Rename (moved from today's ⋯ menu): the name field prefilled with what the board is called now, and Rename pressing the board's own rename offer."
+    description = "The Hardware row's details: the model, the chip, the board's id, Reset, and apart Factory reset and Forget. No name field: the board is renamed in its name bar (board_card_rename_in_place)."
 )]
-fn board_card_hardware_details_rename() -> Element {
+fn board_card_hardware_details() -> Element {
     details_open(BarLayer::Hardware)
 }
 

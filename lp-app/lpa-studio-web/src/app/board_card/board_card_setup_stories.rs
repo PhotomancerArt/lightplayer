@@ -464,7 +464,7 @@ fn saved(ssid: &str) -> SavedNetworkInfo {
 fn details_story(card: Element) -> Element {
     rsx! {
         section { class: "tw:min-h-[900px] tw:p-4",
-            div { class: "tw:w-[300px] tw:max-w-full", {card} }
+            div { class: "tw:w-[340px] tw:max-w-full", {card} }
         }
     }
 }
@@ -481,9 +481,10 @@ fn Cell(caption: String, children: Element) -> Element {
     }
 }
 
-/// The states grid: as many 244 px cards as fit.
+/// The states grid: the home page's own (`device_grid_class`), as many
+/// 320 px cards as fit.
 const GRID_CLASS: &str =
-    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(244px,1fr))] tw:items-start tw:gap-3.5 tw:p-4";
+    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:items-start tw:gap-3.5 tw:p-4";
 
 /// A cell's caption.
 const CAPTION_CLASS: &str =
