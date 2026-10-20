@@ -686,6 +686,17 @@ impl StudioController {
         }
     }
 
+    /// Let a failed Wi‑Fi or lightplayer.app connect's words go once a link
+    /// of this tab reaches the board by any road: plugged in after it
+    /// failed, the card would otherwise keep saying Studio couldn't reach it.
+    pub(super) fn settle_wifi_connect_failures(&mut self) {
+        let mut connects = core::mem::take(&mut self.wifi_connects);
+        if connects.settle_reached(|key| self.reaches_board(key)) {
+            self.mark_dirty();
+        }
+        self.wifi_connects = connects;
+    }
+
     /// A held open (a project card or an address waiting for its board)
     /// is over when a Connect opens a session elsewhere: the lens would
     /// otherwise land with the open's project to send.

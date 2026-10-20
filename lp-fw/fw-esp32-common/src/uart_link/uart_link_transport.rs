@@ -44,7 +44,8 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 use embassy_time::{Duration, Instant, Timer};
-use lp_link::{LinkEvent, LinkState, ResetReason, SendError};
+use lp_link::{LinkEvent, LinkState, Micros, ResetReason, SendError};
+use lpa_server::LpServer;
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
@@ -55,9 +56,13 @@ use super::uart_link_task::now_us;
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_payload::serialize_server_payload;
+use crate::server_loop::TICK_WAIT_LIMIT_MS;
 
 /// Longest a reply waits for the frame buffer while the host is draining.
-/// Past it the reply is dropped as if the host had stalled.
+/// Past it the reply is dropped as if the host had stalled. Per frame: the
+/// whole pass is bounded too, by [`TICK_WAIT_LIMIT_MS`] (see
+/// `UartLinkTransport::pass_wait_until`), and the wait ends at whichever
+/// comes first.
 pub const SEND_ROOM_WAIT: Duration = Duration::from_secs(3);
 
 /// How often a waiting reply looks for room again.
@@ -81,6 +86,14 @@ pub struct UartLinkTransport {
     /// ([`ServerTransport::take_reset_links`]): what the old session left
     /// open on the server (an fs batch) is dropped.
     session_changed: bool,
+    /// Until when the current server pass may wait on this link's send path:
+    /// the last upkeep (the end of the previous pass) plus
+    /// [`TICK_WAIT_LIMIT_MS`], the radio links' own deadline from the same
+    /// moment. [`SEND_ROOM_WAIT`] is per frame; a pass sends several (a
+    /// `ProjectRead` streams a frame per batch, then the heartbeats), and
+    /// without this bound their waits add up past the 8 s watchdog. `MAX`
+    /// until the first upkeep.
+    pass_wait_until: Micros,
 }
 
 /// What queueing one payload came to.
@@ -103,7 +116,14 @@ impl UartLinkTransport {
             inbox: VecDeque::new(),
             hello_owed: false,
             session_changed: false,
+            pass_wait_until: Micros::MAX,
         }
+    }
+
+    /// Whether this pass has spent its send-wait budget
+    /// ([`Self::pass_wait_until`]).
+    fn pass_wait_spent(&self) -> bool {
+        now_us() >= self.pass_wait_until
     }
 
     /// Take the link's events: client messages into the inbox, lifecycle
@@ -195,7 +215,7 @@ impl UartLinkTransport {
             if !in_flight {
                 break;
             }
-            if stalled || started.elapsed() >= SEND_ROOM_WAIT {
+            if stalled || started.elapsed() >= SEND_ROOM_WAIT || self.pass_wait_spent() {
                 return Ok(Queued::Full);
             }
             // The host is draining: let the link task cut frames, then look
@@ -376,6 +396,13 @@ impl LinkUpkeep for UartLinkTransport {
         } else {
             Vec::new()
         }
+    }
+
+    /// The end of a pass: the next one's send-wait budget starts here. The
+    /// classic has no watchdog on this loop, but a slow host would freeze
+    /// its rendering for the sum of the pass's waits instead.
+    fn upkeep(&mut self, _server: &LpServer, _now_ms: u64) {
+        self.pass_wait_until = now_us() + u64::from(TICK_WAIT_LIMIT_MS) * 1_000;
     }
 }
 

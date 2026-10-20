@@ -1,5 +1,6 @@
 ---
-status: open
+status: fixed
+fixed: this change   # the firmware half; the walk's half was ticket 2026-10-17-drop-walk-door-editor-deterministic (2026-10-20)
 found: 2026-10-09      # how: e2e (walk-drop-emu, emulated, lp-emu:esp32c6:t1)
 area: fw-esp32-common `usb_link_transport` (SEND_ROOM_WAIT) × a `?emu=ws://…` host paced by the Mac serial model × the emulated clock
 class: fixed-budget-over-variable-work
@@ -189,3 +190,25 @@ make the firmware tolerate a slow host. Two follow-ups, each its own ticket:
 
 The other cause the investigation found, the Play curtain wait (red on both
 lanes), was a walk defect and is fixed on `main` by #1208 (`waitSettled`).
+
+**The firmware half is fixed, 2026-10-20** (ticket
+`2026-10-20-send-room-wait-starves-watchdog`, `lp-emu:esp32c6:t1`, emulated
+only). The watchdog reset in the 2026-10-19 entries was reproduced by a host
+that reads the board's output at 5,500 B/s (`lp-cli/tests/emu_slow_host_read.rs`,
+JSON replies, the choker's full read): the RTC watchdog (stage 0, 8,000 ms)
+fired 8.0 s into the read, after 2 of its 4 frames. A `ProjectRead` is one
+server pass that sends a frame per batch, each frame waited up to
+`SEND_ROOM_WAIT` (3 s) for the one before it, and the heartbeats waited again;
+nothing bounded the pass, and the watchdog is fed once per pass. Now one
+per-pass deadline, `TICK_WAIT_LIMIT_MS` (5 s) after the last upkeep, ends every
+send wait of the USB and UART links, as it already did the radio links';
+`SEND_ROOM_WAIT` is unchanged per frame and only shortens under it. The feed is
+also stamped with the clock after the heartbeat sends, not before, so a long
+pass no longer makes the next one withhold it for a false "io task silent".
+The same read now ends in 6.6 s without a reset: the frames past the deadline
+are dropped with the drop notice, which is this defect's other, cosmetic half
+(the notice is seq 0, so a client mid-stream reports `expected project read
+frame seq 2, got 0`) and unchanged. With the walk's board held to wall time
+(above) the editor opens, and the firmware no longer resets on a slow host.
+`2026-10-20-drop-walk-switch-off-flake` is a separate cause and stays its own
+ticket.

@@ -285,6 +285,91 @@ fn a_connect_that_fails_says_why_on_the_tile_and_can_be_pressed_again() {
 }
 
 #[test]
+fn a_failed_wifi_connect_goes_quiet_once_the_board_is_plugged_in() {
+    let device = joined_light_player("dev000000wificon04");
+    let (mut bench, tasks) = identified(&device, "usb-wifi-connect-4");
+    let rig = with_lan(&mut bench, &device);
+    let target = bench.view().devices[0].id;
+    let key = lpa_devices::BoardKey::parse(KEY).unwrap();
+    bench.run_until(&tasks, "the board's address to be learned", |bench| {
+        bench.controller.wifi_addresses().get(&key).is_some()
+    });
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to go offline", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == target && card.status == crate::DeviceStatus::Offline)
+    });
+
+    // The board is off: Wi‑Fi can't reach it, and the card says so.
+    *rig.refuse.borrow_mut() = Some("wi-fi connect timed out after 10 s".to_string());
+    let connect = bench.device_verb(target, "connect-wifi");
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("the connect starts");
+    bench.run_until(&tasks, "the connect to fail", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .get(&target)
+            .is_some_and(|connect| connect.error.is_some())
+    });
+    assert_eq!(
+        home_card(&bench, target).surface.state,
+        crate::SurfaceState::NetworkFailed
+    );
+
+    // Plugged in over USB, the board is reached: the Wi‑Fi failure is no
+    // longer true, and the card stops saying it.
+    bench.granted.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the board to come back over USB", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == target && card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty(),
+        "a board reached by another road keeps no Wi‑Fi failure"
+    );
+    assert_ne!(
+        home_card(&bench, target).surface.state,
+        crate::SurfaceState::NetworkFailed
+    );
+
+    // Unplugged again, the old failure does not come back.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to go offline again", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == target && card.status == crate::DeviceStatus::Offline)
+    });
+    assert_eq!(
+        home_card(&bench, target).surface.state,
+        crate::SurfaceState::OfflineReachable
+    );
+}
+
+#[test]
 fn a_board_never_seen_is_reached_by_its_address_and_remembered_by_its_mac() {
     let device = joined_light_player("dev000000wificon03");
     // No USB grant: the board is only ever reached over the LAN.
@@ -390,4 +475,18 @@ fn typed_key() -> lpa_link::providers::network_link::LinkKey {
         key_id: [7; 16],
         psk: [7; 32],
     }
+}
+
+/// The home page's card for `device`.
+fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard {
+    bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .unwrap_or_else(|| panic!("no card for {device:?}"))
 }
