@@ -70,6 +70,68 @@ fn an_atomic_board_takes_the_push_in_its_own_folder() {
     assert_eq!(board.running(), Some("/projects/demo".into()));
 }
 
+/// Wire 44: a file body is text as itself or `{"base64":"…"}`, so a text file
+/// that spells base64 (`abcd`) is stored and read back as text. Before, the
+/// board took it for three binary bytes. The loopback carries every message
+/// as the wire's JSON, so this is the encoding a link carries.
+#[test]
+fn text_that_spells_base64_is_pushed_and_read_back_as_text() {
+    let binary: Vec<u8> = vec![0xfb, 0xef, 0xbe, 0xef, 0xff];
+    let extras: [(&str, &[u8]); 6] = [
+        ("abcd.txt", b"abcd"),
+        ("nested/1234.txt", b"1234"),
+        ("plus.txt", b"++++7/8="),
+        ("empty.txt", b""),
+        ("blob.bin", &[0xfb, 0xef, 0xbe, 0xef, 0xff]),
+        ("long.txt", &[b'q'; 300]),
+    ];
+    let mut files = project_files(PROJECT);
+    for (path, bytes) in extras {
+        files.push((path.into(), bytes.to_vec()));
+    }
+    let board = Board::tree(formatted());
+    let report = board.push(&files).expect("push");
+    assert_eq!(report.hash, host_hash(&files));
+    board.settle();
+
+    let stored = board.remounted();
+    let mut client = board.client();
+    for (path, bytes) in extras {
+        let path = format!("/projects/demo/{path}");
+        assert_eq!(
+            stored.read_file(path.as_str().as_path()).unwrap(),
+            bytes,
+            "{path} as stored"
+        );
+        let answer = board.request(
+            &mut client,
+            ClientRequest::Filesystem(FsRequest::Read {
+                path: path.as_str().as_path_buf(),
+            }),
+        );
+        let WireServerMsgBody::Filesystem(FsResponse::Read { data, error, .. }) = answer else {
+            panic!("{path}: {answer:?}");
+        };
+        assert_eq!((data.as_deref(), error), (Some(bytes), None), "{path} as read");
+    }
+
+    // A short write (under the deflate threshold) of each, by hand.
+    for (path, bytes) in [("/projects/demo/w1.txt", &b"abcd"[..]), ("/w2.bin", &binary[..])] {
+        let answer = board.request(
+            &mut client,
+            ClientRequest::Filesystem(FsRequest::Write {
+                path: path.as_path_buf(),
+                data: bytes.to_vec(),
+            }),
+        );
+        assert!(matches!(
+            answer,
+            WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
+        ));
+        assert_eq!(board.remounted().read_file(path.as_path()).unwrap(), bytes);
+    }
+}
+
 #[test]
 fn a_board_without_batches_takes_the_two_slot_push() {
     let board = Board::memory();
@@ -695,6 +757,10 @@ struct Loopback {
 #[async_trait(?Send)]
 impl ClientIo for Loopback {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
+        // Over the wire's own JSON, as a link carries it: what the board
+        // decodes is what the client encoded, file bodies included.
+        let json = lpc_wire::json::to_string(&msg).expect("a request encodes");
+        let msg: ClientMessage = lpc_wire::json::from_str(&json).expect("a request decodes");
         self.pending.push(Incoming::on(Link::PRIMARY, msg));
         Ok(())
     }
@@ -714,7 +780,10 @@ impl ClientIo for Loopback {
                 .await
                 .map_err(|e| TransportError::Other(format!("{e}")))?;
             self.answers
-                .extend(transport.sent.drain(..).map(|(_, message)| message));
+                .extend(transport.sent.drain(..).map(|(_, message)| {
+                    let json = lpc_wire::json::to_string(&message).expect("an answer encodes");
+                    lpc_wire::json::from_str::<WireServerMessage>(&json).expect("an answer decodes")
+                }));
         }
         self.answers
             .pop_front()
