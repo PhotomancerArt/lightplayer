@@ -30,7 +30,8 @@
 //!    is gone, and Bob through the relay is told busy;
 //! 5. a deploy (the server going away and back on its port): the board
 //!    comes back by itself (the time printed, never gated: it is wall time);
-//!    **P5**: the new hub holds no picture until the board is back with one;
+//!    **P5**: until the board is back, the new hub answers the picture the
+//!    old one wrote behind to the account's board list, offline;
 //! 6. Cloud relay off over USB: the board leaves the hub and says `off`; on
 //!    again, it comes back; **P6**: while it is off the hub keeps its
 //!    picture (`online: false`); back on, the picture is online and newer;
@@ -493,22 +494,27 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     // `lpc-relay`'s rules and on the host in `relay_link.rs`.
     let restarted = Instant::now();
     cloud.restart();
-    // P5. A new hub has no cache: no picture until the board is back. A
-    // session does not survive the deploy (the store keeps the accounts,
-    // not their sessions), so Alice signs in again.
+    // P5, as the account's board list amends it: a new hub has no cache,
+    // but the old one wrote the board's last picture behind as it went away
+    // (docs/adr/2026-10-20-the-account-board-list.md), so until the board is
+    // back the new hub answers that one, offline. A session does not
+    // survive the deploy (the store keeps the accounts, not their
+    // sessions), so Alice signs in again.
     let alice_session = cloud.session_for(alice.uid);
     let away = cloud.board_count() == 0;
     let fresh = cloud.board_pictures(&alice_session, &known, false);
     if away && cloud.board_count() == 0 {
         assert!(
-            fresh.pictures.is_empty(),
-            "a new hub holds no picture: {fresh:?}"
+            fresh.pictures.len() == 1 && !fresh.pictures[0].online,
+            "a new hub answers the stored picture, offline: {fresh:?}"
         );
-        eprintln!("emu_relay_link: right after the deploy the new hub holds no picture");
+        eprintln!(
+            "emu_relay_link: right after the deploy the new hub answers the stored picture, offline"
+        );
     } else {
         eprintln!(
-            "emu_relay_link: the board was back before the new hub could be asked; its empty \
-             cache was not checked"
+            "emu_relay_link: the board was back before the new hub could be asked; its stored \
+             picture was not checked"
         );
     }
     assert!(
