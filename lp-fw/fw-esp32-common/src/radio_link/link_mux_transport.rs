@@ -145,13 +145,12 @@ pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
 /// slow path's bound, [`RADIO_WRITE_DEADLINE_MS`].
 pub const LAN_WRITE_DEADLINE_MS: u32 = 1_000;
 
-/// The most one server tick may spend waiting for radio links to let go of
-/// the frame buffer, counted from the tick's start (the last upkeep) and
-/// including whatever the tick did first — a project load, a shader
-/// compile. Below the 8 s watchdog with room for the rest of the tick: a
-/// load followed by a stalled peer's 5 s wait reset the emulated C6 in a
-/// loop (PR C's walk, 12 watchdog resets).
-pub const TICK_WAIT_LIMIT_MS: u32 = 5_000;
+/// The most one server tick may spend waiting on a link's send path — the
+/// radio links' waits for the frame buffer here, the USB link's own too
+/// (they share this one deadline, from the one moment the last upkeep sets).
+/// Defined beside the watchdog feed it protects, in
+/// [`crate::server_loop::TICK_WAIT_LIMIT_MS`].
+pub use crate::server_loop::TICK_WAIT_LIMIT_MS;
 
 /// How long an untrusted radio link may stay open without logging in (PQ6).
 pub const LOGIN_DEADLINE_MS: u64 = 10_000;

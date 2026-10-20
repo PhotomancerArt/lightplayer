@@ -357,6 +357,13 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     pub ota_cut: bool,
     /// Called with the board after every slice ([`Self::set_slice_observer`]).
     slice_observer: Option<Box<dyn FnMut(&B)>>,
+    /// The host application's read rate, in bytes per emulated second
+    /// ([`Self::set_read_rate`]); `None` reads what the board wrote at once.
+    read_rate: Option<u64>,
+    /// What the board wrote that the throttled host has not read yet.
+    read_backlog: VecDeque<u8>,
+    /// Bytes the throttled host may read: earned each slice, spent as it reads.
+    read_credit: f64,
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
@@ -383,7 +390,19 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             ota: None,
             ota_cut: false,
             slice_observer: None,
+            read_rate: None,
+            read_backlog: VecDeque::new(),
+            read_credit: 0.0,
         }
+    }
+
+    /// Read the board's output at `rate` bytes per emulated second, the way
+    /// a slow host application drains a USB serial port; the rest waits in
+    /// the host's backlog, and the board's send path sees a full link.
+    /// `None` is the default: everything the board wrote is read at once.
+    /// What was backlogged when the rate is lifted is read on the next slice.
+    pub fn set_read_rate(&mut self, rate: Option<u64>) {
+        self.read_rate = rate;
     }
 
     /// Look at the board after every slice, between the board's run and
@@ -464,7 +483,10 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             observer(&self.board);
         }
         let now = self.now_us();
-        let bytes = self.board.take_usb_output();
+        let mut bytes = self.board.take_usb_output();
+        if self.read_rate.is_some() || !self.read_backlog.is_empty() {
+            bytes = self.throttled_read(bytes);
+        }
         if !bytes.is_empty() {
             self.port.on_bytes(now, &bytes);
         }
@@ -509,6 +531,23 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
         }
         self.service_ota(now);
         Ok(())
+    }
+
+    /// The part of this slice's output (and the backlog before it) the host
+    /// application gets to read at [`Self::set_read_rate`]'s rate.
+    fn throttled_read(&mut self, written: Vec<u8>) -> Vec<u8> {
+        self.read_backlog.extend(written);
+        let Some(rate) = self.read_rate else {
+            return self.read_backlog.drain(..).collect();
+        };
+        self.read_credit += rate as f64 * SLICE_US as f64 / 1e6;
+        let n = (self.read_credit as usize).min(self.read_backlog.len());
+        self.read_credit -= n as f64;
+        if self.read_backlog.is_empty() {
+            // An idle host does not bank credit for a burst.
+            self.read_credit = self.read_credit.min(64.0);
+        }
+        self.read_backlog.drain(..n).collect()
     }
 
     /// The update on channel 3: the board's messages in, the host's out,
