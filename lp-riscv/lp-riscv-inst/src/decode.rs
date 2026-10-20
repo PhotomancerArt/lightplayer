@@ -526,6 +526,10 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                 0x04 => Ok(Inst::AmoxorW { rd, rs1, rs2 }),
                 0x0c => Ok(Inst::AmoandW { rd, rs1, rs2 }),
                 0x08 => Ok(Inst::AmoorW { rd, rs1, rs2 }),
+                0x10 => Ok(Inst::AmominW { rd, rs1, rs2 }),
+                0x14 => Ok(Inst::AmomaxW { rd, rs1, rs2 }),
+                0x18 => Ok(Inst::AmominuW { rd, rs1, rs2 }),
+                0x1c => Ok(Inst::AmomaxuW { rd, rs1, rs2 }),
                 _ => Err(format!("Unknown atomic instruction: funct5=0x{funct5:x}")),
             }
         }
