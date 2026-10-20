@@ -15,7 +15,7 @@
 //! packed gets), the choker deployed, Studio's first sync, then the editor's
 //! full read with the host reading the board's output at [`READ_RATE`] B/s.
 //! Either a finished read or a drop notice is acceptable; a board reset (a
-//! second boot banner) is not. Numbers are `lp-emu:esp32c6:t1`.
+//! second boot banner, or the chip's own "asked to reset") is not. Numbers are `lp-emu:esp32c6:t1`.
 //!
 //! `#[ignore]`d: it needs a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`), and
 //! `just test-emu-c6-cli` runs it.
@@ -129,7 +129,15 @@ fn a_slow_host_does_not_reset_the_board_during_a_full_read() {
     );
     println!("{report}");
 
-    assert_eq!(boots, 1, "the board reset (the watchdog): {report}");
+    // The emulated chip stops at a reset and says who asked, which the
+    // read's error carries; a console with a second banner is the other way
+    // a reset shows.
+    let reset_error = read
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("chip asked to reset"));
+    assert!(!reset_error, "the watchdog reset the board: {report}");
+    assert_eq!(boots, 1, "the board reset: {report}");
     assert!(
         read.ended || read.error.is_some(),
         "the read neither finished nor was told it was dropped: {report}"
