@@ -507,8 +507,16 @@ async function main() {
       driver = await StudioDriver.launch({ width: 1100, height: 900 });
       await driver.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false }, driver.sessionId);
       await signIn(true);
+      // AC1's number: from Studio loaded to the board's card under Online
+      // boards, which must be within one poll of the list (30 s).
+      const navigatedAt = Date.now();
       await load(plainUrl);
+      const loadedAt = Date.now();
       await openOnline();
+      seen.seenAfterMs = Date.now() - loadedAt;
+      seen.loadMs = loadedAt - navigatedAt;
+      if (seen.seenAfterMs > 30_000) throw new Error(`the card took ${seen.seenAfterMs} ms, more than one 30 s poll`);
+      console.log(`  AC1: a profile that never met ${A} saw it under Online boards ${seen.seenAfterMs} ms after Studio loaded (${seen.loadMs} ms to load)`);
       seen.online = await driver.waitBar("cloud", WORDS.onlineLine, { board: mac, timeoutMs: STEP_MS });
       seen.picture = await driver.waitFor(
         `${await driver.card({ board: mac })}?.querySelector('[data-picture="cloud"][data-picture-frame="true"]') ? 'cloud' : false`,
@@ -521,7 +529,7 @@ async function main() {
       seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
       seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
       const line = await readyOnRelay();
-      return { online: seen.online, picture: seen.picture, hub: seen.hub, board: seen.board, line };
+      return { seenAfterMs: seen.seenAfterMs, loadMs: seen.loadMs, online: seen.online, picture: seen.picture, hub: seen.hub, board: seen.board, line };
     });
   } catch (error) {
     fatal = error;
