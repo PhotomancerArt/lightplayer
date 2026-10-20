@@ -272,6 +272,64 @@ window.__lpWait = window.__lpWait || function (source, timeoutMs) {
     check();
   });
 };
+
+// The one exception to "no interval, no rAF": a wait for a style to SETTLE.
+// A CSS transition ending mutates nothing, so the observer above sleeps
+// through it (a quiet page, such as Play, makes no other mutations). Here the
+// wake-ups are events, never a poll: the running animations' "finished"
+// promises, plus a DOM mutation or a transition/animation starting. Each
+// round re-reads the animations, so one that started meanwhile is awaited
+// too, and only a round that finds none running tests the predicate.
+window.__lpWaitSettled = window.__lpWaitSettled || function (selector, source, timeoutMs, allowNone) {
+  const test = new Function("return (" + source + ")")();
+  return new Promise((resolve, reject) => {
+    let done = false;
+    let wake = () => {};
+    const poke = () => wake();
+    const settle = (ok, value) => {
+      if (done) return;
+      done = true;
+      observer.disconnect();
+      document.removeEventListener("transitionrun", poke, true);
+      document.removeEventListener("animationstart", poke, true);
+      clearTimeout(timer);
+      wake();
+      ok ? resolve(value) : reject(new Error(value));
+    };
+    const observer = new MutationObserver(poke);
+    observer.observe(document.documentElement, {
+      subtree: true, childList: true, characterData: true, attributes: true,
+    });
+    document.addEventListener("transitionrun", poke, true);
+    document.addEventListener("animationstart", poke, true);
+    const timer = setTimeout(() => settle(false, "wait deadline"), timeoutMs);
+    (async () => {
+      while (!done) {
+        const els = [...document.querySelectorAll(selector)];
+        if (els.length === 0 && !allowNone) {
+          await new Promise((r) => { wake = r; });
+          continue;
+        }
+        // Finite, live animations only: a spinner never finishes.
+        const running = els.flatMap((el) => el.getAnimations()).filter((a) =>
+          (a.playState === "running" || a.playState === "pending")
+          && a.effect.getComputedTiming().iterations !== Infinity);
+        if (running.length > 0) {
+          // A cancelled animation rejects: swallow it and re-read.
+          await Promise.race([
+            Promise.all(running.map((a) => a.finished.catch(() => {}))),
+            new Promise((r) => { wake = r; }),
+          ]);
+          continue;
+        }
+        let value;
+        try { value = test(els); } catch (error) { value = false; }
+        if (value) return settle(true, JSON.stringify(value === true ? true : value));
+        await new Promise((r) => { wake = r; });
+      }
+    })();
+  });
+};
 true`;
 
 export class StudioDriver {
@@ -421,6 +479,26 @@ export class StudioDriver {
     try {
       const json = await this.evaluate(
         `window.__lpWait(${JSON.stringify(source)}, ${timeoutMs})`,
+        { awaitPromise: true, timeoutMs: timeoutMs + 5_000 },
+      );
+      return JSON.parse(json);
+    } catch (error) {
+      throw new Error(`waiting for ${what}: ${error.message}`);
+    }
+  }
+
+  /// Wait for `selector`'s elements to stop animating, then test a predicate
+  /// on what they settled to. For a style that a CSS transition decides (a
+  /// curtain's `opacity`, its `visibility`), where `waitFor` would sleep until
+  /// some unrelated DOM change: a transition's end mutates nothing.
+  /// `predicateSource` is a page-side function expression taking the matching
+  /// elements, `(els) => getComputedStyle(els[0]).opacity === '1'`. Waits for
+  /// at least one match unless `allowNone` (a predicate over "all of them",
+  /// true of none). Honours `timeoutMs`.
+  async waitSettled(selector, predicateSource, { timeoutMs = DEFAULT_WAIT_MS, what = selector, allowNone = false } = {}) {
+    try {
+      const json = await this.evaluate(
+        `window.__lpWaitSettled(${JSON.stringify(selector)}, ${JSON.stringify(predicateSource)}, ${timeoutMs}, ${allowNone})`,
         { awaitPromise: true, timeoutMs: timeoutMs + 5_000 },
       );
       return JSON.parse(json);

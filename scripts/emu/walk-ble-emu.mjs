@@ -476,8 +476,9 @@ async function main() {
             what: "the Reconnecting strip",
           });
           // Settled, not mid-fade: the curtain has faded all the way in.
-          await driver.waitFor(
-            `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+          await driver.waitSettled(
+            '[data-reconnecting="true"]',
+            `(els) => getComputedStyle(els[0]).opacity === '1'`,
             { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
           );
         } else {
@@ -503,9 +504,10 @@ async function main() {
           timeoutMs: STEP_DEADLINE_MS,
           what: "the strip to go (the board back)",
         });
-        await driver.waitFor(
-          `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
-          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+        await driver.waitSettled(
+          "[data-reconnecting]",
+          `(els) => els.every((c) => getComputedStyle(c).visibility === 'hidden')`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out", allowNone: true },
         );
         // Back on a new link, not merely a strip that went: a link the
         // board opened after the drop.
