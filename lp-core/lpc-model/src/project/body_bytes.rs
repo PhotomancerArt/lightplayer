@@ -18,7 +18,14 @@
 //! letters, never three binary bytes). Which form a body takes is decided by
 //! its bytes alone, so each body has exactly one encoding.
 //!
+//! Since wire 44 the filesystem messages carry their files the same way
+//! (`FsRequest::Write`, `WriteChunk`, `FsResponse::Read` and a changes page's
+//! `FileChunk`), so one rule holds for every file body on the wire; before,
+//! they shared one string slot between text and base64 and a text file
+//! spelling base64 (`abcd`) read back as binary.
+//!
 //! Use as `#[serde(with = "lpc_model::body_bytes")]` on a `Vec<u8>`, or
+//! `#[serde(with = "lpc_model::body_bytes::option")]` on an `Option<Vec<u8>>`, or
 //! [`BodyRef`]/[`BodyBuf`] where the bytes sit inside another container.
 
 use alloc::string::String;
@@ -51,6 +58,30 @@ pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S:
 /// copy of a borrowed one; an object is decoded from base64.
 pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
     deserializer.deserialize_any(BodyVisitor)
+}
+
+/// An optional body (`null` for none), for `#[serde(with =
+/// "lpc_model::body_bytes::option")]` on an `Option<Vec<u8>>`: a file read
+/// that found nothing.
+pub mod option {
+    use super::{BodyBuf, BodyRef};
+    use alloc::vec::Vec;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// `None` as `null`, else the body as [`super::serialize`] writes it.
+    pub fn serialize<S: Serializer>(
+        bytes: &Option<Vec<u8>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        bytes.as_deref().map(BodyRef).serialize(serializer)
+    }
+
+    /// `null` as `None`, else a body read by [`super::deserialize`].
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<u8>>, D::Error> {
+        Ok(Option::<BodyBuf>::deserialize(deserializer)?.map(|body| body.0))
+    }
 }
 
 /// The length of `bytes` as [`serialize`] writes it with `serde_json`,
@@ -231,6 +262,25 @@ mod tests {
             r#"{"body":7}"#,
         ] {
             assert!(serde_json::from_str::<Holder>(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_optional_body_is_null_text_or_an_object() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Maybe {
+            #[serde(with = "crate::body_bytes::option")]
+            body: Option<Vec<u8>>,
+        }
+        for (body, json) in [
+            (None, r#"{"body":null}"#),
+            (Some(b"abcd".to_vec()), r#"{"body":"abcd"}"#),
+            (Some(Vec::new()), r#"{"body":""}"#),
+            (Some(vec![0xff]), r#"{"body":{"base64":"/w=="}}"#),
+        ] {
+            let maybe = Maybe { body };
+            assert_eq!(serde_json::to_string(&maybe).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Maybe>(json).unwrap(), maybe);
         }
     }
 

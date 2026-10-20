@@ -284,6 +284,34 @@ mod tests {
         assert!(steady * 2 < first, "{heartbeats:?}");
     }
 
+    /// A file read's body (wire 44: text as a string, binary as
+    /// `{"base64":"…"}`) packs and decodes to the byte-identical JSON.
+    #[test]
+    fn a_file_read_packs_and_decodes_byte_for_byte() {
+        use crate::WireServerMsgBody;
+        use crate::server::FsResponse;
+        use lpc_model::AsLpPathBuf;
+        let mut buf = vec![0u8; 1 << 12];
+        let mut board = LearnedTable::NEW;
+        let mut host = LearnedTable::NEW;
+        let bodies: [&[u8]; 4] = [b"abcd", b"", &[0xfb, 0xef, 0xbe, 0xef, 0xff], b"a\nb\"c"];
+        for (i, body) in bodies.into_iter().enumerate() {
+            let msg = WireServerMessage::new(
+                i as u64,
+                WireServerMsgBody::Filesystem(FsResponse::Read {
+                    path: "/f".as_path_buf(),
+                    data: Some(body.to_vec()),
+                    error: None,
+                }),
+            );
+            let n = ser_learned_to(&mut buf, &mut board, &msg).unwrap();
+            assert_eq!(
+                decode(&mut host, &buf[..n]),
+                crate::json::to_string(&msg).unwrap()
+            );
+        }
+    }
+
     fn decode(host: &mut LearnedTable, packed: &[u8]) -> String {
         let mut out = Vec::new();
         decode_learned(&WIRE_SEED, host, packed, &mut out).unwrap();
