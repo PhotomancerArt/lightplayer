@@ -19,6 +19,7 @@
 use crate::app::access::account_keys::tests::account;
 
 use super::relay_connect_tests::{BOARD, relay_light_player, unplug, with_relay};
+use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
 
 #[test]
@@ -176,6 +177,43 @@ fn a_remembered_board_moves_to_online_boards_while_the_list_names_it() {
     assert_eq!(
         home_card(&bench, target).presence,
         crate::UiBoardPresence::Offline
+    );
+}
+
+/// The walk's board: met over USB with its Wi‑Fi joined (so this browser
+/// remembers its address, and Connect takes the Wi‑Fi road first), then
+/// unplugged and listed. lightplayer.app's row still offers its own way in.
+#[test]
+fn a_remembered_board_with_a_wifi_address_keeps_connect_relay_on_its_row() {
+    let device = joined_light_player("dev00000acctbrd05");
+    let (mut bench, tasks) = identified(&device, "usb-account-boards-5");
+    let _lan = with_lan(&mut bench, &device);
+    let _rig = with_relay(&mut bench, &device);
+    sign_in(&mut bench, &tasks);
+    let target = bench.view().devices[0].id;
+    let key = lpa_devices::BoardKey::parse(KEY).unwrap();
+    bench.run_until(&tasks, "the board's address to be learned", |bench| {
+        bench.controller.wifi_addresses().get(&key).is_some()
+    });
+    unplug(&mut bench, &tasks, target);
+    list(&mut bench, &tasks, &[KEY]);
+    let relay = bench.device_verb(target, "connect-relay");
+    bench.offered(&relay);
+    let card = home_card(&bench, target);
+    assert_eq!(card.surface.state, crate::SurfaceState::OnlineAtCloud);
+    let cloud = card
+        .bars
+        .iter()
+        .find(|bar| bar.layer == crate::BarLayer::Cloud)
+        .unwrap();
+    assert!(
+        cloud
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .any(|verb| verb.offer == relay),
+        "the lightplayer.app row offers it: {cloud:?}"
     );
 }
 

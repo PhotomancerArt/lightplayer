@@ -319,18 +319,37 @@ async function main() {
   /// opens nothing. Waits for the card to show its way back; returns the
   /// pressed button's words.
   const pressConnectRelay = async () => {
-    const scope = await driver.card({ board: mac });
-    const where = await driver.waitFor(
-      `(() => { const card = ${scope}; if (!card) return false;
-                const face = (verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
-                  .some((mark) => !mark.closest('.ux-popover-layer'));
-                return face('connect-relay') ? 'face' : face('connect') || face('connect-wifi') ? 'cloud' : false; })()`,
-      { timeoutMs: STEP_MS, what: "the card to offer `connect-relay` (or `connect` / `connect-wifi` ahead of it)" },
-    );
-    const bar = where === "face" ? null : "cloud";
-    const pressed = await driver.pressOffer("connect-relay", { board: mac, bar, timeoutMs: STEP_MS });
-    if (bar) await driver.closeDetails({ board: mac }).catch(() => {});
-    return `${pressed} (${bar ? "the link row's details" : "the card's face"})`;
+    // Where it is drawn can move while the page settles (the face's
+    // primary is `connect-relay` until the library names the board and
+    // `connect` takes its place), so look again on every try: the face
+    // first, then the lightplayer.app row's details.
+    const deadline = Date.now() + STEP_MS;
+    for (;;) {
+      if (await driver.offered("connect-relay", { board: mac, enabled: true })) {
+        try {
+          return `${await driver.pressOffer("connect-relay", { board: mac, timeoutMs: 5_000 })} (the card's face)`;
+        } catch {
+          // it moved: look again
+        }
+      } else {
+        await driver.openBar("cloud", { board: mac, timeoutMs: STEP_MS }).catch(() => {});
+        if (await driver.offered("connect-relay", { board: mac, enabled: true, inDetails: true })) {
+          try {
+            const pressed = await driver.pressOffer("connect-relay", { board: mac, bar: "cloud", timeoutMs: 5_000 });
+            await driver.closeDetails({ board: mac }).catch(() => {});
+            return `${pressed} (the link row's details)`;
+          } catch {
+            // it moved: look again
+          }
+        }
+        await driver.closeDetails({ board: mac }).catch(() => {});
+      }
+      if (Date.now() > deadline) {
+        const verbs = await cardVerbs().catch(() => null);
+        throw new Error(`the card never offered \`connect-relay\` (enabled): its verbs ${JSON.stringify(verbs)}`);
+      }
+      await delay(1_000);
+    }
   };
   /// The board's card back on the relay and ready: its link row reads
   /// the relay link, and core offers it a project or the editor. Returns the
@@ -384,6 +403,10 @@ async function main() {
         throw new Error(`before Studio, the board's relay is ${JSON.stringify(before.relay)}, not noAccount`);
       }
       configuration = (await boardRegistry(door.addr)).find((b) => b.id === A)?.configuration ?? configuration;
+      // A project on the board, so its pictures through lightplayer.app
+      // carry colours (nothing loaded is 0 lamps: no picture to draw).
+      const upload = await lpCli(["upload", path.join(ROOT, "projects/test/basic"), usb], { timeoutMs: STEP_MS });
+      if (upload.code !== 0) throw new Error(`upload → exit ${upload.code}: ${upload.stderr.trim().split("\n").slice(-3).join(" | ")}`);
 
       driver = await StudioDriver.launch({ width: 1100, height: 900 });
       await driver.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false }, driver.sessionId);
@@ -525,7 +548,7 @@ async function main() {
       await driver.screenshot(path.join(shots, "studio-relay-T5-never-met.png"));
       const hubFrom = cloud.log().length;
       const from = hold.console.mark();
-      seen.pressed = await driver.pressOffer("connect-relay", { board: mac, timeoutMs: STEP_MS });
+      seen.pressed = await pressConnectRelay();
       seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
       seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
       const line = await readyOnRelay();
