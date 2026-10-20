@@ -36,6 +36,7 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+pub mod account_board_request;
 pub mod account_boards;
 pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
@@ -117,6 +118,8 @@ pub mod edit_offer;
 pub mod emu_transport;
 pub mod firmware_file_build;
 pub mod firmware_lookup_op;
+pub mod forget_from_account_offer;
+pub mod forget_from_account_op;
 pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
@@ -158,8 +161,12 @@ pub mod wifi_connect_op;
 pub mod wifi_connects;
 pub mod wire_conversation;
 
+pub use account_board_request::{
+    AccountBoardAnswer, AccountBoardLink, AccountBoardReport, AccountBoardRequest,
+};
 pub use account_boards::{
-    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, account_board_device,
+    AccountBoardNote, AccountBoardPicture, AccountBoardPresence, AccountBoardRow, AccountBoardRows,
+    AccountBoards, account_board_device,
 };
 pub use activity_ends::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS};
 pub use add_device_offers::{
@@ -289,6 +296,10 @@ pub use firmware_file_build::{
     PickedFirmwareFile, firmware_file_action, read_firmware_files,
 };
 pub use firmware_lookup_op::FirmwareLookupOp;
+pub use forget_from_account_offer::{
+    FORGET_FROM_ACCOUNT_VERB, forget_from_account_offer, forget_on_this_browser_copy,
+};
+pub use forget_from_account_op::{ForgetFromAccountOp, REMOVE_FROM_YOUR_ACCOUNT};
 pub use install_choice::{
     InstallChoice, InstallChoiceInputs, RECENT_CHOICES, index_for, install_choices,
 };

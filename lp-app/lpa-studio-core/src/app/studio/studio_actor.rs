@@ -322,6 +322,9 @@ where
         if let Some(rows) = plan.account_boards {
             self.controller.set_account_boards(rows);
         }
+        for answer in plan.account_answers {
+            self.controller.account_board_answered(answer);
+        }
         if !plan.account_pictures.is_empty() {
             self.controller
                 .take_account_board_pictures(plan.account_pictures);
@@ -770,6 +773,8 @@ struct CommandPlan {
     account_boards: Option<Option<crate::AccountBoardRows>>,
     /// The account boards' pictures in the batch, in queue order.
     account_pictures: Vec<crate::AccountBoardPicture>,
+    /// lightplayer.app's answers to the list's requests, in queue order.
+    account_answers: Vec<crate::AccountBoardAnswer>,
     /// The page's place reports in the batch, in queue order. Never
     /// coalesced: a waiting Edit ends at the first report that moves the
     /// user to another page (`ConnectedBoard::note_page_moved`), so a move
@@ -805,6 +810,7 @@ impl CommandPlan {
         let mut bluetooth_reach = None;
         let mut account_boards = None;
         let mut account_pictures = Vec::new();
+        let mut account_answers = Vec::new();
         let mut places = Vec::new();
         for command in batch {
             match command {
@@ -818,6 +824,7 @@ impl CommandPlan {
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
                 StudioCommand::AccountBoards(rows) => account_boards = Some(rows),
                 StudioCommand::AccountBoardPictures(pictures) => account_pictures.extend(pictures),
+                StudioCommand::AccountBoardAnswered(answer) => account_answers.push(answer),
                 StudioCommand::Place(reported) => places.push(reported),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
@@ -870,6 +877,7 @@ impl CommandPlan {
             bluetooth_reach,
             account_boards,
             account_pictures,
+            account_answers,
             places,
         }
     }

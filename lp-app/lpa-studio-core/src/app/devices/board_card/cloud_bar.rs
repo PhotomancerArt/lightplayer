@@ -17,7 +17,8 @@
 //! | signed in, lightplayer.app refused the board | "river@example.com · can't reach" (why in the details) | — | Attention |
 //! | the board dialling | "river@example.com · connecting" | — | Neutral |
 //! | reachable | "river@example.com · online", and "connected" when this tab's link is the relay | — | Neutral |
-//! | no link here, and the account's list says it is online (`ListBoards`) | "river@example.com · online" | — (Connect through lightplayer.app is the card's primary) | Neutral |
+//! | no link here, and the account's list says it is online (`ListAccountBoards`) | "river@example.com · online" | — (Connect through lightplayer.app is the card's primary) | Neutral |
+//! | no link here, and the account's list holds it, offline | "river@example.com · last seen 2 h ago" (dimmed: last known) | — | Neutral |
 //!
 //! An offline card keeps what the board last said about its Wi‑Fi and its
 //! key, dimmed, but never "connecting" or "can't reach": this tab can't
@@ -45,10 +46,12 @@ use super::link_session::{CONNECTED, DISABLED, NOT_CONNECTED, NOT_KNOWN};
 use super::row_switch::{SwitchOffer, row_switch};
 use super::ui_card_action::UiCardAction;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use crate::app::devices::account_boards::AccountBoardNote;
 use crate::app::devices::sign_in_offer::SIGN_IN_VERB;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::network::WIFI_ENABLED_PARAM;
 use crate::app::network::wifi_words::{CLOUD_RELAY_HELP, card, relay};
+use crate::core::data_kinds::age_words;
 use crate::{RichLine, RichSection, UiStatusKind};
 
 /// The details' line while nobody is signed in.
@@ -62,8 +65,11 @@ pub const NOTHING_GOES_SENTENCE: &str = "Nothing goes to lightplayer.app until y
 pub(crate) fn cloud_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let status = input.network_status().filter(|_| !input.stand_in());
     let mut facts = relay_facts(input, status);
-    facts.stale =
-        input.offline() && !input.online_at_cloud() && status.is_some() && facts.action.is_none();
+    let listed_offline = input.links.cloud.is_some_and(|cloud| !cloud.online);
+    facts.stale = input.offline()
+        && !input.online_at_cloud()
+        && (status.is_some() || listed_offline)
+        && facts.action.is_none();
     facts.details = details(input, status);
     facts.verbs = connect_verb(
         input,
@@ -93,6 +99,32 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
     if let Some(account) = account.as_deref().filter(|_| input.online_at_cloud()) {
         return LinkFacts {
             aside: Some(card::ONLINE.to_string()),
+            ..row(account).named()
+        };
+    }
+    // The board holds the account's key and the account's list is full:
+    // it is not on it, and the card says so (its details say why).
+    if let Some(account) = account.as_deref()
+        && matches!(
+            input.links.account_note,
+            Some(AccountBoardNote::ListFull { .. })
+        )
+    {
+        return LinkFacts {
+            aside: Some(card::LIST_FULL.to_string()),
+            tone: UiStatusKind::Attention,
+            ..row(account).named()
+        };
+    }
+    // No link here, and the account's list holds the board, offline: when
+    // anything last saw it, which says more than what it last said here.
+    if let Some(account) = account.as_deref().filter(|_| input.offline())
+        && let Some(cloud) = input.links.cloud.filter(|cloud| !cloud.online)
+    {
+        return LinkFacts {
+            aside: cloud
+                .last_seen
+                .map(|seen| card::last_seen(&age_words((input.now - seen).max(0.0)))),
             ..row(account).named()
         };
     }
@@ -173,6 +205,11 @@ fn sign_in(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
 /// board stands with lightplayer.app.
 fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
+    // What lightplayer.app's last answer about the account's list left to
+    // say, first.
+    if let Some(note) = input.links.account_note {
+        details.sections.push(help("", note.sentence()));
+    }
     let Some(status) = status else {
         return details;
     };

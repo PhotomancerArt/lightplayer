@@ -139,6 +139,12 @@ pub struct AccessController {
     restarts: BTreeMap<DeviceId, Option<Millis>>,
     /// The connection window each device's list was last read on.
     synced: BTreeMap<DeviceId, LoginWindow>,
+    /// The link window each board was last found holding the account's
+    /// current key on: one sighting per link per connection.
+    sighted: BTreeMap<DeviceId, LoginWindow>,
+    /// Boards found holding the account's current key, not yet taken
+    /// ([`Self::take_account_sightings`]).
+    sightings: Vec<AccountKeySighting>,
     /// What the last USB sync added to each device, for Undo.
     undo: BTreeMap<DeviceId, Vec<[u8; SALT_BYTES]>>,
     /// Devices (by record key) whose automatic add was undone: not added to
@@ -177,6 +183,8 @@ impl AccessController {
             account_refused: BTreeMap::new(),
             restarts: BTreeMap::new(),
             synced: BTreeMap::new(),
+            sighted: BTreeMap::new(),
+            sightings: Vec::new(),
             undo: BTreeMap::new(),
             declined: BTreeSet::new(),
             added: None,
@@ -325,8 +333,16 @@ impl AccessController {
         let live: BTreeSet<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
         self.sessions.retain(|device, _| live.contains(device));
         self.synced.retain(|device, _| live.contains(device));
+        self.sighted.retain(|device, _| live.contains(device));
         self.account_refused
             .retain(|device, _| live.contains(device));
+    }
+
+    /// The boards found holding the account's current key since the last
+    /// call, each with the link it was found on: the studio controller
+    /// reports them to the account's list.
+    pub fn take_account_sightings(&mut self) -> Vec<AccountKeySighting> {
+        std::mem::take(&mut self.sightings)
     }
 
     /// `address`: the board's socket URL when its link is a KEYED one (a
@@ -670,10 +686,27 @@ impl AccessController {
             }
             AccessCommand::Synced {
                 device,
-                window: _,
+                window,
                 result,
             } => match result {
                 Ok(synced) => {
+                    // The board holds the account's current key: it belongs
+                    // on the account's list (once per link per connection;
+                    // the relay's own link never says, the relay writes it).
+                    let holds_account_key = self.account.as_ref().is_some_and(|account| {
+                        synced
+                            .listing
+                            .entries
+                            .iter()
+                            .any(|entry| entry.salt == account.key_salt)
+                    });
+                    if holds_account_key
+                        && self.sighted.get(&device) != Some(&window)
+                        && let Some(link) = roster.device(device).and_then(sighting_link)
+                    {
+                        self.sighted.insert(device, window);
+                        self.sightings.push(AccountKeySighting { device, link });
+                    }
                     // When an add that did not happen is the account's key,
                     // the card says what that costs: the board cannot be
                     // reached through lightplayer.app.
@@ -1200,6 +1233,29 @@ pub(crate) fn lan_address(device: &Device) -> Option<&str> {
 }
 
 /// Whether `device` is reached through lightplayer.app's relay right now.
+/// The link a board was found holding the account's key on, as the
+/// account's list names it; `None` through the relay (the relay writes its
+/// own sightings).
+fn sighting_link(device: &Device) -> Option<crate::AccountBoardLink> {
+    if is_relayed(device) {
+        return None;
+    }
+    Some(match () {
+        _ if is_bluetooth(device) => crate::AccountBoardLink::Ble,
+        _ if lan_address(device).is_some() => crate::AccountBoardLink::Lan,
+        _ => crate::AccountBoardLink::Usb,
+    })
+}
+
+/// A board found holding the account's current key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountKeySighting {
+    /// The board.
+    pub device: DeviceId,
+    /// The link its list was read over.
+    pub link: crate::AccountBoardLink,
+}
+
 pub(crate) fn is_relayed(device: &Device) -> bool {
     device
         .identity

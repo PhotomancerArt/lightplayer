@@ -192,7 +192,7 @@ impl<'a> BoardCardInput<'a> {
     /// and no link of this tab reaches it (nor does another tab hold it):
     /// the card's online-at-lightplayer.app state, its picture the cloud's.
     pub fn online_at_cloud(&self) -> bool {
-        self.links.cloud.is_some()
+        self.links.cloud.is_some_and(|cloud| cloud.online)
             && self.offline()
             && self.view.held_elsewhere.is_none()
             && !self.stand_in()

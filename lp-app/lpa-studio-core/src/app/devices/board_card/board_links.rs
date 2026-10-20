@@ -6,7 +6,7 @@
 //! the facts that outlive a link — what the board last said about its Wi‑Fi
 //! and its Bluetooth, which an offline card keeps saying, dimmed (P13) — and
 //! who is signed in, which lightplayer.app's row names, and whether the
-//! account's list says the board is online at lightplayer.app.
+//! account's list holds the board, online at lightplayer.app or not.
 //!
 //! Joined by the controller (`DeviceRosterView`): the network controller
 //! keeps each board's last status while it is on the roster, the access
@@ -16,6 +16,7 @@
 
 use lpc_wire::server::NetworkStatus;
 
+use crate::app::devices::account_boards::AccountBoardNote;
 use crate::app::devices::ui_cloud_board::UiCloudBoard;
 
 /// See the module doc.
@@ -29,10 +30,14 @@ pub struct BoardLinks<'a> {
     pub remembered_network: Option<&'a NetworkStatus>,
     /// Bluetooth on or off, as the board's access file last said.
     pub remembered_bluetooth: Option<bool>,
-    /// The account's list says the board is online at lightplayer.app
-    /// (`ListBoards`), with its last picture there. `None` while it is not
-    /// listed, or nobody is signed in.
+    /// The account's list holds the board (`ListAccountBoards`), online at
+    /// lightplayer.app or not, with its last picture there. `None` while it
+    /// is not listed, or nobody is signed in.
     pub cloud: Option<&'a UiCloudBoard>,
+    /// What lightplayer.app's last answer about the account's list left to
+    /// say on this card (a full list, a Remove from your account that did
+    /// not go through).
+    pub account_note: Option<&'a AccountBoardNote>,
 }
 
 impl BoardLinks<'_> {

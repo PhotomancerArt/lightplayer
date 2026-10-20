@@ -30,6 +30,10 @@ pub enum DeviceFace {
     Sim,
 }
 
+/// The card's Forget: this browser's memory of the board, never the
+/// account's list (Remove from your account is that,
+/// [`crate::REMOVE_FROM_YOUR_ACCOUNT`]).
+pub const FORGET_ON_THIS_BROWSER: &str = "Forget on this browser";
 impl DeviceFace {
     /// The face for a device whose registry row records `transport`.
     pub fn from_transport(transport: &str) -> Self {
@@ -115,7 +119,7 @@ impl ControllerOp for DevicesOp {
             // (D46: a sim is a thin record, and this is the record).
             (Action::Forget { .. }, DeviceFace::Sim) => {
                 return ActionMeta::new(
-                    "Forget",
+                    FORGET_ON_THIS_BROWSER,
                     "Remove this sim and the name you gave it. There is nothing else to remove.",
                     ActionPriority::Tertiary,
                 )
@@ -189,7 +193,7 @@ impl ControllerOp for DevicesOp {
                 ActionPriority::Secondary,
             ),
             Action::Forget { .. } => ActionMeta::new(
-                "Forget",
+                FORGET_ON_THIS_BROWSER,
                 "Remove this device, what Studio remembers about it, and the \
                  browser's permission for its port.",
                 ActionPriority::Tertiary,

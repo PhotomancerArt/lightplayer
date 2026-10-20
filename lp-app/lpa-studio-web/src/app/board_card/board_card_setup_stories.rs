@@ -24,12 +24,14 @@ use lpc_wire::RelayState;
 use lpc_wire::server::StationFailure;
 
 use super::board_card_stories::{
-    DAY, PORCH_UID, emulated, last_picture, live_feed, needs_firmware, offline, over_network,
+    DAY, HOUR, PORCH_UID, emulated, last_picture, live_feed, needs_firmware, offline, over_network,
     porch, running,
 };
 use super::{CardPart, CardPreviews};
 use crate::app::home::ble_access_stories::usb_access;
-use crate::app::home::device_offer_story_fixtures::{STORY_BOARD_NOW, StoryBoardCard};
+use crate::app::home::device_offer_story_fixtures::{
+    STORY_BOARD_NOW, StoryBoardCard, story_board_prefix,
+};
 
 // --- A new board's first minutes --------------------------------------------
 
@@ -103,7 +105,7 @@ fn board_card_setup_rows() -> Element {
 // --- Every state of the link rows --------------------------------------------
 
 #[story(
-    description = "A board online through lightplayer.app (your boards on every computer, M1): the signed-in account's list (ListBoards) says it is online, and no link of this tab reaches it. NEVER MET HERE: set up on a phone (Yona's \"Fabric Test\", 10-19), it is in Online boards all the same — its surface is its picture from lightplayer.app, one row of lamps per output, not dimmed and with no words; Connect, the cloud icon, is the primary; lightplayer.app says river@example.com · online; Project says what it told lightplayer.app it plays, Firmware its version; the radio rows say — (nothing here has heard it); Connect is its only verb (no rename: nothing here can reach it yet). MET HERE: a board this browser remembers, unplugged, moves to Online boards the same way: lightplayer.app's picture over its saved one, its rows its last facts dimmed, lightplayer.app online and not dimmed. NO PICTURE (relay protocol 1, or none yet): the dark, no words, Connect — nothing is said about the missing picture."
+    description = "A board online through lightplayer.app (your boards on every computer, M1): the signed-in account's list (ListAccountBoards) says it is online, and no link of this tab reaches it. NEVER MET HERE: set up on a phone (Yona's \"Fabric Test\", 10-19), it is in Online boards all the same — its surface is its picture from lightplayer.app, one row of lamps per output, not dimmed and with no words; Connect, the cloud icon, is the primary; lightplayer.app says river@example.com · online; Project says what it told lightplayer.app it plays, Firmware its version; the radio rows say — (nothing here has heard it); Connect is its only verb (no rename: nothing here can reach it yet). MET HERE: a board this browser remembers, unplugged, moves to Online boards the same way: lightplayer.app's picture over its saved one, its rows its last facts dimmed, lightplayer.app online and not dimmed. NO PICTURE (relay protocol 1, or none yet): the dark, no words, Connect — nothing is said about the missing picture."
 )]
 fn board_card_online_through_lightplayer_app() -> Element {
     rsx! {
@@ -437,6 +439,135 @@ fn board_card_rename_in_place() -> Element {
     }
 }
 
+// --- The account's board list (M2) ----------------------------------------------
+
+#[story(
+    description = "A board on your account, offline everywhere (the account's board list, M2): signed in on a computer that never met it, it is in Offline boards all the same. NEVER MET HERE, ITS LAST PICTURE: the last picture lightplayer.app kept of it, dimmed under \"This board is offline. It was last seen 2 hours ago.\"; lightplayer.app says river@example.com · last seen 2 h ago, dimmed; Project and Firmware its last known, dimmed; Hardware its model, from the Studio that reported it; no Connect (nothing reaches it), and Remove from your account is its one verb. NEVER MET HERE, NO PICTURE: the same on the dark. MET HERE: a board this browser remembers keeps its own saved picture; the account's record only freshens its facts and its lightplayer.app row."
+)]
+fn board_card_offline_on_your_account() -> Element {
+    rsx! {
+        section { class: GRID_CLASS,
+            Cell { caption: "never met here · its last picture",
+                StoryBoardCard {
+                    card: never_met_offline(),
+                    never_met: true,
+                    on_account: true,
+                    link: Some(UiLinkKind::Relay),
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(kept_cloud_board(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "never met here · no picture",
+                StoryBoardCard {
+                    card: never_met_offline(),
+                    never_met: true,
+                    on_account: true,
+                    link: Some(UiLinkKind::Relay),
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(kept_cloud_board(false)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "met here · unplugged",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    relay: true,
+                    on_account: true,
+                    remembered_network: joined(RelayState::Connected).status,
+                    remembered_bluetooth: Some(true),
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(kept_cloud_board(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Remove from your account, armed in the open Hardware details (the account's board list, M2, D10): the danger zone holds Factory reset, Forget on this browser, then Remove from your account — Lasting, two clicks, and the agent never presses it; its words say the board leaves your account's list on every computer, keeps its keys, and comes back the next time it reaches lightplayer.app."
+)]
+fn board_card_remove_from_your_account_armed() -> Element {
+    let remove = story_board_prefix(offline().id).child("forget-from-account");
+    rsx! {
+        section { class: DETAILS_FRAME_CLASS,
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    on_account: true,
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(kept_cloud_board(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    details_open: Some(CardPart::Bar(BarLayer::Hardware)),
+                    armed_preview: Some(remove),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Forget on this browser, armed, on a board your account holds (M2, D10): the card's Forget is this browser's only — the board still shows from your account on every computer, and its words say so; Remove from your account, beside it, is the account's."
+)]
+fn board_card_forget_on_this_browser_on_your_account() -> Element {
+    let forget = story_board_prefix(offline().id).child("forget");
+    rsx! {
+        section { class: DETAILS_FRAME_CLASS,
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    on_account: true,
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(kept_cloud_board(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    details_open: Some(CardPart::Bar(BarLayer::Hardware)),
+                    armed_preview: Some(forget),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A full list (M2, D3): the board holds your account's key, and your account already holds 64 boards, so lightplayer.app did not add it. lightplayer.app says river@example.com · list full, orange; its details say \"Your account holds 64 boards. Remove one to add this one.\" — once, with no button of its own: a board leaves the list from its own card."
+)]
+fn board_card_account_list_full() -> Element {
+    rsx! {
+        section { class: DETAILS_FRAME_CLASS,
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    wifi: Some(joined(RelayState::Connected)),
+                    access: Some(usb_access(Some(true), false)),
+                    account: Some(ACCOUNT.to_string()),
+                    account_note: Some(lpa_studio_core::AccountBoardNote::ListFull { max: 64 }),
+                    details_open: Some(CardPart::Bar(BarLayer::Cloud)),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+/// A details card's frame, and the card's width in it.
+const DETAILS_FRAME_CLASS: &str = "tw:min-h-[900px] tw:p-4";
+const CARD_WIDTH_CLASS: &str = "tw:w-[300px] tw:max-w-full";
+
 // --- Fixtures --------------------------------------------------------------------
 
 /// A board this browser never met, as core's roster holds it from the
@@ -475,11 +606,58 @@ fn cloud_board(picture: bool) -> UiCloudBoard {
     UiCloudBoard {
         key: lpa_studio_core::BoardKey::parse("10bda3b08e30").expect("a MAC"),
         label: "Fabric Test".to_string(),
+        model: None,
         firmware: Some("2026.10.19-1".to_string()),
         project: Some("rainbow".to_string()),
+        online: true,
+        last_seen: Some(STORY_BOARD_NOW - 0.4),
         relay_proto: if picture { 2 } else { 1 },
         picture: picture.then(|| cloud_picture_preview(&shown)).flatten(),
         picture_at: picture.then_some(shown.at),
+    }
+}
+
+/// The account's record of "Porch", offline everywhere, last seen two hours
+/// ago, with the last picture lightplayer.app kept of it or without one.
+fn kept_cloud_board(picture: bool) -> UiCloudBoard {
+    let samples = 40usize;
+    let colors: Vec<u8> = (0..samples)
+        .flat_map(|sample| rainbow(0.55 + 0.2 * sample as f32 / samples as f32))
+        .collect();
+    let kept = CloudBoardPicture {
+        seq: 1_760_000_000_000,
+        at: STORY_BOARD_NOW - 2.0 * HOUR,
+        outputs: vec![40],
+        colors,
+    };
+    UiCloudBoard {
+        key: lpa_studio_core::BoardKey::parse("10bda3b08e31").expect("a MAC"),
+        label: "Porch".to_string(),
+        model: Some("seeed-xiao-esp32c6".to_string()),
+        firmware: Some("2026.10.17-2".to_string()),
+        project: Some("rocaille".to_string()),
+        online: false,
+        last_seen: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+        relay_proto: 0,
+        picture: picture.then(|| cloud_picture_preview(&kept)).flatten(),
+        picture_at: picture.then_some(kept.at),
+    }
+}
+
+/// A board this browser never met, on the account's list and offline
+/// everywhere, as core's roster holds it: named by the record, its model,
+/// firmware and project the last a Studio or the relay heard.
+fn never_met_offline() -> DeviceView {
+    DeviceView {
+        id: DeviceId(12),
+        title: "Porch".to_string(),
+        state_label: "Offline".to_string(),
+        board_id: Some("seeed-xiao-esp32c6".to_string()),
+        remembered_firmware: Some("2026.10.17-2".to_string()),
+        loaded_project: DeviceLoadedProject::Running {
+            label: "rocaille".to_string(),
+        },
+        ..never_met()
     }
 }
 
