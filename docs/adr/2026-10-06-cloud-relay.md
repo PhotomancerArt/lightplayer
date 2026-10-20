@@ -607,6 +607,36 @@ frame-rate cost on silicon (the radio budget's idle row) is queued for a
 desk sitting and does not block; the radio budget ADR is not amended, as no
 silicon number lands here.
 
+## Amendment (2026-10-19): Studio reads `ListBoards`; a board need not have been met here
+
+Plan `lp2025/2026-10-19-2300-your-boards-follow-you`, M1. Yona set up
+"Fabric Test" on his phone and it never showed on his computer: Studio
+offered the relay only to boards its browser had met, and never asked for
+the account's boards.
+
+- **Studio asks.** Signed in (not a guest), the web edge calls `ListBoards`
+  at page load and every 30 s while the page is visible, and `BoardPictures`
+  with `watch: true` every 500 ms (the watched pace above) for the cards
+  that draw a picture from the cloud: the home page's listed boards that no
+  link of the tab reaches. A hidden page asks nothing; an answer that does
+  not come keeps nothing.
+- **By MAC, in memory.** Core joins the rows onto its roster by MAC. A board
+  this browser knows is "online at lightplayer.app"; one it never met is a
+  roster entry under `mac-<12 hex>` that is never written to the browser's
+  `/registry.json`, until its hello over the relay makes it a remembered
+  board. Nothing is persisted, here or in the cloud: an offline board is
+  still absent (the stored board list is M2's, with its own ADR).
+- **The live link wins.** "Connect through lightplayer.app" is offered on a
+  listed board, met or not, only while no USB, Bluetooth or LAN link of the
+  tab reaches it and no other tab holds its network slot.
+- **The picture.** Studio draws the cache's samples one row of lamps per
+  output (the cache carries no geometry). A protocol 1 board has none, and
+  the card says nothing about it.
+
+The Follow-ups' "draw a board's cloud picture on its card" and M8's "the
+board list" (for online boards) are done by this; the stored list, the
+automatic LAN move and the share link remain.
+
 ## Consequences
 
 - lightplayer.app serves one plain-HTTP path, and the redirect that keeps

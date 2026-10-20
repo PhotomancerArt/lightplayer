@@ -582,6 +582,10 @@ pub(crate) fn StoryBoardCard(
     /// Bluetooth on or off, as its access file last said.
     #[props(default)]
     remembered_bluetooth: Option<bool>,
+    /// The account's list says the board is online at lightplayer.app,
+    /// with its picture there.
+    #[props(default)]
+    cloud: Option<lpa_studio_core::UiCloudBoard>,
     #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
     #[props(default)] armed_preview: Option<OfferPath>,
     #[props(default)] previews: crate::app::board_card::CardPreviews,
@@ -704,6 +708,7 @@ pub(crate) fn StoryBoardCard(
             account: account.as_deref(),
             remembered_network: remembered_network.as_ref(),
             remembered_bluetooth,
+            cloud: cloud.as_ref(),
         },
     });
     // A story that opens a part's details (or whose layout question raises

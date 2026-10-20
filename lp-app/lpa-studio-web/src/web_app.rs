@@ -1403,6 +1403,9 @@ pub fn App() -> Element {
     // The account's device key and passwords, from the cloud into core
     // (and this browser's default key name), following the session.
     crate::cloud::account_access::use_account_access_provider(on_access_command);
+    // The account's boards online at lightplayer.app, and the pictures of
+    // those no link here reaches, from the cloud into core.
+    crate::cloud::account_boards::use_account_boards(bridge.tx.clone(), view);
     if *device_settings.peek() != current_view.settings.devices {
         device_settings.set(current_view.settings.devices.clone());
     }

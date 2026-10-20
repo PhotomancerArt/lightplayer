@@ -21,8 +21,8 @@ use crate::app::access::account_keys::tests::account;
 use super::*;
 
 /// The board's base MAC, and the same as its relay id.
-const MAC: &str = "a0:f2:62:87:b4:9a";
-const BOARD: &str = "a0f26287b49a";
+pub(super) const MAC: &str = "a0:f2:62:87:b4:9a";
+pub(super) const BOARD: &str = "a0f26287b49a";
 
 /// How `browser_websocket.js` says the relay turned a connect away because
 /// the board is not connected to it.
@@ -93,14 +93,14 @@ impl crate::RelayLinkSource for ConnectableRelayBoard {
 }
 
 /// The relay half and what the test reads back from it.
-struct RelayRig {
-    refuse: Rc<RefCell<Option<String>>>,
-    asked: Rc<RefCell<Vec<String>>>,
+pub(super) struct RelayRig {
+    pub(super) refuse: Rc<RefCell<Option<String>>>,
+    pub(super) asked: Rc<RefCell<Vec<String>>>,
 }
 
 /// Install the shipped build's halves beside the bench's USB: a sim half
 /// (none is created) and the relay half over [`ConnectableRelayBoard`].
-fn with_relay(bench: &mut DeviceBench, device: &FakeEsp32Device) -> RelayRig {
+pub(super) fn with_relay(bench: &mut DeviceBench, device: &FakeEsp32Device) -> RelayRig {
     let rig = RelayRig {
         refuse: Rc::default(),
         asked: Rc::default(),
@@ -275,7 +275,7 @@ fn a_board_the_relay_says_is_offline_says_so_on_its_tile_and_can_be_pressed_agai
 }
 
 /// Pull the bench's USB cable and wait for the card to go offline.
-fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, target: crate::DeviceId) {
+pub(super) fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, target: crate::DeviceId) {
     bench.granted.set(false);
     bench
         .controller
@@ -290,7 +290,7 @@ fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, target: crate::DeviceId) {
 }
 
 /// A LightPlayer board with a base MAC (its relay id).
-fn relay_light_player(uid: &str) -> FakeEsp32Device {
+pub(super) fn relay_light_player(uid: &str) -> FakeEsp32Device {
     FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new()
             .with_identity(FakeDeviceIdentity::new(uid, "Relay board"))
