@@ -831,7 +831,7 @@ fn the_auto_rule_fills_ports_in_order() {
     assert!(patch.unpatched.is_empty() && patch.problems.is_empty());
     // The ring display's lamps: r1 then r2, in data order, from pixel 0.
     let d0: Vec<(String, std::ops::Range<u32>, u32)> = patch
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| s.output == main && s.port == "0")
         .map(|s| (s.object.key.clone(), s.lamps.clone(), s.start_pixel))
@@ -976,7 +976,12 @@ fn deleting_an_output_leaves_problems_not_retargets() {
         vec![auto_onto(&main)],
         "the placement still names main"
     );
-    assert!(patch.spans.iter().all(|s| s.fixture == node_id(&e, "tail")));
+    assert!(
+        patch
+            .pixel_runs
+            .iter()
+            .all(|s| s.fixture == node_id(&e, "tail"))
+    );
     // The notice says so.
     let n = e.notice.clone().unwrap();
     assert!(n.why.unwrap().contains("ring display and strip"));
@@ -1930,7 +1935,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     let landed: Vec<usize> = e
         .project
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| s.object.component == id)
         .flat_map(|s| s.start_pixel as usize..(s.start_pixel + s.lamps.len() as u32) as usize)
@@ -2058,7 +2063,7 @@ fn every_lamp_shows_its_control_products_colour() {
         e.select(selection.clone());
         let frame = e.board_frame(t);
         let patch = e.project.effective_patch();
-        for s in &patch.spans {
+        for s in &patch.pixel_runs {
             let pixels = frame.port(&s.output, &s.port).unwrap();
             let product = frame.control_product(&s.fixture).unwrap();
             for lamp in s.lamps.clone() {
@@ -2899,7 +2904,7 @@ fn a_run_carries_on_into_the_next_port() {
     p.auto_patch(&f, &out);
     let spans: Vec<(String, std::ops::Range<u32>, u32)> = p
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .map(|s| (s.port.clone(), s.lamps.clone(), s.start_pixel))
         .collect();
@@ -2951,7 +2956,7 @@ fn auto_flows_after_placed_runs() {
     p.auto_patch(&b, &out);
     let at = |c: &ComponentId| {
         p.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .find(|s| &s.object.component == c)
             .map(|s| s.start_pixel)
@@ -2984,7 +2989,7 @@ fn without_an_auto_rule_unplaced_lamps_are_dark() {
         0,
     )];
     let patch = p.effective_patch();
-    assert_eq!(patch.spans.len(), 1);
+    assert_eq!(patch.pixel_runs.len(), 1);
     assert_eq!(patch.unpatched.len(), 1);
     assert_eq!(patch.unpatched[0].object, ObjectId::new(&a1, "path"));
 }
@@ -3007,7 +3012,7 @@ fn fixtures_share_an_output_in_name_order() {
     }
     let start = |f: &NodeId| {
         p.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .find(|s| &s.fixture == f)
             .map(|s| s.start_pixel)
@@ -3039,7 +3044,7 @@ fn a_rule_on_a_gone_port_is_a_problem() {
             port: "7".into()
         }
     );
-    assert_eq!(patch.spans.len(), 1, "auto still places it");
+    assert_eq!(patch.pixel_runs.len(), 1, "auto still places it");
     assert!(patch.problems[0].notice(&p).why.is_some());
 }
 

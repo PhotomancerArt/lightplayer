@@ -50,7 +50,7 @@ use crate::domain::project::Project;
 /// Some lamps of one object, landing on consecutive pixels of one port —
 /// up the port, or down it when `reversed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Span {
+pub struct PixelRun {
     pub fixture: NodeId,
     pub object: ObjectId,
     /// Lamp indices, in data order.
@@ -63,7 +63,7 @@ pub struct Span {
     pub reversed: bool,
 }
 
-impl Span {
+impl PixelRun {
     pub fn len(&self) -> u32 {
         self.lamps.len() as u32
     }
@@ -165,7 +165,7 @@ pub struct Landing {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EffectivePatch {
-    pub spans: Vec<Span>,
+    pub pixel_runs: Vec<PixelRun>,
     pub unpatched: Vec<Unpatched>,
     pub problems: Vec<PatchProblem>,
     pub overlaps: Vec<Overlap>,
@@ -179,7 +179,7 @@ pub struct EffectivePatch {
 impl EffectivePatch {
     /// Pixels used on one port.
     pub fn used(&self, output: &NodeId, port: &str) -> u32 {
-        self.on_port(output, port).map(Span::len).sum()
+        self.on_port(output, port).map(PixelRun::len).sum()
     }
 
     /// How far a port's strip reaches: one past its highest lit pixel.
@@ -190,20 +190,26 @@ impl EffectivePatch {
             .unwrap_or(0)
     }
 
-    fn on_port<'a>(&'a self, output: &'a NodeId, port: &'a str) -> impl Iterator<Item = &'a Span> {
-        self.spans
+    fn on_port<'a>(
+        &'a self,
+        output: &'a NodeId,
+        port: &'a str,
+    ) -> impl Iterator<Item = &'a PixelRun> {
+        self.pixel_runs
             .iter()
             .filter(move |s| &s.output == output && s.port == port)
     }
 
     /// An object's spans, in lamp order.
-    pub fn spans_of<'a>(&'a self, object: &'a ObjectId) -> impl Iterator<Item = &'a Span> {
-        self.spans.iter().filter(move |s| &s.object == object)
+    pub fn pixel_runs_of<'a>(&'a self, object: &'a ObjectId) -> impl Iterator<Item = &'a PixelRun> {
+        self.pixel_runs.iter().filter(move |s| &s.object == object)
     }
 
     /// Where one of an object's lamps lands, if anywhere.
     pub fn landing(&self, object: &ObjectId, lamp: u32) -> Option<Landing> {
-        let s = self.spans_of(object).find(|s| s.lamps.contains(&lamp))?;
+        let s = self
+            .pixel_runs_of(object)
+            .find(|s| s.lamps.contains(&lamp))?;
         Some(Landing {
             output: s.output.clone(),
             port: s.port.clone(),
@@ -213,7 +219,7 @@ impl EffectivePatch {
 
     /// Whether any of an object's lamps lands on a pixel.
     pub fn lands(&self, object: &ObjectId) -> bool {
-        self.spans_of(object).next().is_some()
+        self.pixel_runs_of(object).next().is_some()
     }
 
     /// An object's settings, and where each came from.
@@ -223,8 +229,8 @@ impl EffectivePatch {
 
     /// Where two spans on one port share pixels.
     fn find_overlaps(&mut self) {
-        let mut by_port: BTreeMap<(&NodeId, &str), Vec<&Span>> = BTreeMap::new();
-        for s in &self.spans {
+        let mut by_port: BTreeMap<(&NodeId, &str), Vec<&PixelRun>> = BTreeMap::new();
+        for s in &self.pixel_runs {
             by_port.entry((&s.output, &s.port)).or_default().push(s);
         }
         let mut found = Vec::new();
@@ -378,7 +384,7 @@ impl Project {
         ignore: &[ObjectId],
     ) -> Vec<Range<u32>> {
         let size = size.max(1);
-        let spans: Vec<&Span> = self
+        let spans: Vec<&PixelRun> = self
             .effective_patch()
             .on_port(output, port)
             .filter(|s| !ignore.contains(&s.object))
@@ -528,7 +534,7 @@ impl Project {
                 .and_then(|o| o.ports.get(*port))
                 .map(|p| p.key.clone())
                 .unwrap_or_default();
-            patch.spans.push(Span {
+            patch.pixel_runs.push(PixelRun {
                 fixture: f.id.clone(),
                 object: object.clone(),
                 lamps: i as u32..end as u32,
@@ -576,7 +582,7 @@ impl Project {
     /// patch order: one is the usual; two on one strip is worth a look.
     pub fn color_orders_on(&self, output: &NodeId, port: &str) -> Vec<ColorOrder> {
         let mut out = Vec::new();
-        for s in &self.effective_patch().spans {
+        for s in &self.effective_patch().pixel_runs {
             if &s.output == output
                 && s.port == port
                 && let Some(f) = self.fixture(&s.fixture)

@@ -188,8 +188,8 @@ fn j2_seans_eaves_across_two_ports() {
     );
     let again = reopen(&EAVES, &saved.writes).project;
     assert_eq!(
-        again.effective_patch().spans,
-        e.project.effective_patch().spans
+        again.effective_patch().pixel_runs,
+        e.project.effective_patch().pixel_runs
     );
 }
 

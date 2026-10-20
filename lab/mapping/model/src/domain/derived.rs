@@ -40,7 +40,7 @@ pub(crate) struct Derived {
     placed: OnceLock<Arc<Placed>>,
     patch: OnceLock<Arc<EffectivePatch>>,
     wiring: OnceLock<Arc<Wiring>>,
-    spans: OnceLock<Arc<SpanOutlines>>,
+    pixel_runs: OnceLock<Arc<SpanOutlines>>,
 }
 
 /// Each span's outline on its output, in world units: plain boxes, worked
@@ -63,7 +63,7 @@ impl Default for Derived {
             placed: OnceLock::new(),
             patch: OnceLock::new(),
             wiring: OnceLock::new(),
-            spans: OnceLock::new(),
+            pixel_runs: OnceLock::new(),
         }
     }
 }
@@ -168,7 +168,7 @@ pub struct Wiring {
     /// Per span of the effective patch (same index): the port it lands on
     /// (an index into `ports`), and each of its lamps that lands on one of
     /// that port's pixels, as (lamp index, pixel).
-    pub spans: Vec<Option<SpanWiring>>,
+    pub pixel_runs: Vec<Option<SpanWiring>>,
     /// Per lamp, in [`Placed`] order: the (port, pixel) it lands on — only
     /// lamps that are patched to a real pixel.
     pub lit: Vec<Option<(u32, u32)>>,
@@ -237,7 +237,7 @@ impl Project {
         &self,
         work_out: impl FnOnce() -> SpanOutlines,
     ) -> &SpanOutlines {
-        self.derived.spans.get_or_init(|| Arc::new(work_out()))
+        self.derived.pixel_runs.get_or_init(|| Arc::new(work_out()))
     }
 
     /// Which pixel each lamp lands on, kept. Shared with every board frame
@@ -301,9 +301,9 @@ impl Project {
         for (i, (_, o)) in placed.list.iter().enumerate() {
             w.first_lamp.insert(o.id.clone(), placed.first_lamp(i));
         }
-        for s in &patch.spans {
+        for s in &patch.pixel_runs {
             let Some(at) = placed.index_of(&s.object) else {
-                w.spans.push(None);
+                w.pixel_runs.push(None);
                 continue;
             };
             let Some(port) = w
@@ -311,7 +311,7 @@ impl Project {
                 .iter()
                 .position(|(o, k, _)| *o == s.output && *k == s.port)
             else {
-                w.spans.push(None);
+                w.pixel_runs.push(None);
                 continue;
             };
             let len = w.ports[port].2;
@@ -327,7 +327,7 @@ impl Project {
                     *slot = Some((port as u32, pixel));
                 }
             }
-            w.spans.push(Some(SpanWiring {
+            w.pixel_runs.push(Some(SpanWiring {
                 port,
                 first_lamp: first,
                 lamps,

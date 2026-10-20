@@ -54,9 +54,9 @@ fn a_wiring_edit_moves_only_what_it_edits() {
 fn pinning_moves_nothing() {
     let (mut p, f, out, objects) = paths(&[("D0", 4), ("D1", 40)], &[3, 4]);
     p.auto_patch(&f, &out);
-    let before = p.effective_patch().spans.clone();
+    let before = p.effective_patch().pixel_runs.clone();
     p.pin_object(&objects[1]).unwrap();
-    assert_eq!(p.effective_patch().spans, before);
+    assert_eq!(p.effective_patch().pixel_runs, before);
     assert!(matches!(p.on_wire(&objects[1]), OnWire::Placed { .. }));
 }
 
@@ -136,7 +136,7 @@ fn unpatch_all_then_auto() {
     p.patch_object(&objects[0], &out, "0", 5).unwrap();
     p.patch_object(&objects[1], &out, "0", 20).unwrap();
     assert_eq!(p.unpatch_all(&f), 2);
-    assert!(p.effective_patch().spans.is_empty());
+    assert!(p.effective_patch().pixel_runs.is_empty());
     assert!(!p.is_auto(&f));
     assert_eq!(p.set_auto(&f, true), Some(out.clone()));
     assert_eq!(pixels(&p, &objects[1]), vec![3, 4, 5, 6]);
@@ -634,8 +634,8 @@ fn turn_in_the_section_is_the_turn_key() {
         by: 1,
     });
     assert_eq!(
-        by_key.project.effective_patch().spans,
-        by_row.project.effective_patch().spans
+        by_key.project.effective_patch().pixel_runs,
+        by_row.project.effective_patch().pixel_runs
     );
 }
 

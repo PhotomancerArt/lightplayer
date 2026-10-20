@@ -280,7 +280,7 @@ fn the_desk_saves_as_a_new_project() {
     // where the lamp is in its fixture). Names as the product spells them.
     let wire = |p: &Project| {
         let mut w: Vec<(String, String, u32, String, i64, i64)> = Vec::new();
-        for s in &p.effective_patch().spans {
+        for s in &p.effective_patch().pixel_runs {
             let origin = p.origin(&s.fixture);
             let lamps = &p.object(&s.object).unwrap().lamps;
             for lamp in s.lamps.clone() {

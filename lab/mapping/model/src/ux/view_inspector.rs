@@ -229,7 +229,7 @@ fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
     }
     let lines: Vec<UiItem> = p
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| objects.contains(&s.object))
         .map(|s| {
@@ -427,7 +427,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
             )));
             let mut by: Vec<UiItem> = Vec::new();
             for s in patch
-                .spans
+                .pixel_runs
                 .iter()
                 .filter(|s| &s.output == output && &s.port == key)
             {

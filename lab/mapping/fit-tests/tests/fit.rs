@@ -165,8 +165,8 @@ fn the_radiance_dome_loads_in_the_product_as_specified() {
     let lamps = resolve(&doc).unwrap();
     assert_eq!(doc.objects.len(), 55);
     assert_eq!(lamps.lamps.len(), 22_000);
-    assert_eq!(lamps.spans.len(), 275);
-    assert!(lamps.spans.iter().all(|s| s.count == 80));
+    assert_eq!(lamps.pixel_runs.len(), 275);
+    assert!(lamps.pixel_runs.iter().all(|s| s.count == 80));
     let mut ports = 0;
     for k in 1..=10 {
         let def = NodeDef::from_json_str(&read(&dir.join(format!("out_{k}.json")))).unwrap();
@@ -365,8 +365,8 @@ fn placed_still_fits(dir: &Path, edit: impl Fn(&mut Project)) {
         std::fs::write(copy.join(path), text).unwrap();
     }
     assert_eq!(
-        open(&copy).project.effective_patch().spans,
-        p.effective_patch().spans
+        open(&copy).project.effective_patch().pixel_runs,
+        p.effective_patch().pixel_runs
     );
     lamps_are_the_products(&copy);
     every_output_carries_the_same_lamps(&copy);
@@ -617,7 +617,7 @@ fn lab_wire(opened: &Opened) -> Wire {
         }
     }
     let mut wire = Wire::new();
-    for s in &p.effective_patch().spans {
+    for s in &p.effective_patch().pixel_runs {
         let out = p.output(&s.output).unwrap();
         let port_start = out.port_start(&s.port).unwrap();
         let first = starts[&(s.fixture.clone(), s.object.clone())];

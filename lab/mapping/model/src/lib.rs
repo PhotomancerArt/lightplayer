@@ -101,7 +101,7 @@ pub use domain::object::{Lamp, Object, ObjectId, ObjectShape};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
 pub use domain::patch::{
-    EffectivePatch, Gone, Landing, ObjectRun, Overlap, PatchProblem, Span, Unpatched,
+    EffectivePatch, Gone, Landing, ObjectRun, Overlap, PatchProblem, PixelRun, Unpatched,
 };
 pub use domain::patch_edits::{OnWire, PatchEdit, PortEdge};
 pub use domain::patch_place::{Direction, PatchPlace, PatchTarget, Wire};

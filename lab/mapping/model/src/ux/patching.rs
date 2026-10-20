@@ -305,7 +305,7 @@ impl Editor {
         let Some((output, port)) = self
             .project
             .effective_patch()
-            .spans_of(object)
+            .pixel_runs_of(object)
             .next()
             .map(|s| (s.output.clone(), s.port.clone()))
         else {
@@ -655,7 +655,7 @@ impl Editor {
             PairEnd::Object(o) => self
                 .project
                 .effective_patch()
-                .spans_of(o)
+                .pixel_runs_of(o)
                 .next()
                 .map(|s| (&s.output, &s.port)),
         }
@@ -677,7 +677,7 @@ impl Editor {
                 .and_then(|o| {
                     self.project
                         .effective_patch()
-                        .spans_of(o)
+                        .pixel_runs_of(o)
                         .filter(|s| &s.output == output && s.port == port)
                         .map(|s| s.pixels().end)
                         .max()
@@ -732,7 +732,7 @@ impl Editor {
             let mut seen: Vec<&ObjectId> = Vec::new();
             for s in p
                 .effective_patch()
-                .spans
+                .pixel_runs
                 .iter()
                 .filter(|s| s.output == output && s.port == port)
             {
@@ -868,7 +868,7 @@ impl Editor {
             }
             t => {
                 let o = self.object_of(t)?;
-                let s = self.project.effective_patch().spans_of(&o).next()?;
+                let s = self.project.effective_patch().pixel_runs_of(&o).next()?;
                 Some((s.output.clone(), s.port.clone()))
             }
         }

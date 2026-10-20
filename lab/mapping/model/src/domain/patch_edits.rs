@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
-use crate::domain::patch::{ObjectRun, Span};
+use crate::domain::patch::{ObjectRun, PixelRun};
 use crate::domain::patch_place::{Direction, PatchTarget, Wire};
 use crate::domain::project::Project;
 
@@ -421,7 +421,7 @@ impl Project {
     /// Run an edit to the placements, then pin every object it moved that
     /// it wasn't asked to move, where it was, until nothing else has moved.
     fn hand_edit(&mut self, edited: &[ObjectId], edit: impl FnOnce(&mut Project)) -> PatchEdit {
-        let before = spans_by_object(&self.effective_patch().spans);
+        let before = spans_by_object(&self.effective_patch().pixel_runs);
         // Only what auto flowed is held still: a placed component's
         // objects close up behind one that leaves it (plan D10).
         let flowing: Vec<ObjectId> = self
@@ -444,7 +444,7 @@ impl Project {
         // Each round pins, or gives up on, at least one more object, so
         // this ends.
         loop {
-            let after = spans_by_object(&self.effective_patch().spans);
+            let after = spans_by_object(&self.effective_patch().pixel_runs);
             let moved: Vec<ObjectId> = before
                 .iter()
                 .filter(|(o, was)| !edited.contains(o) && after.get(*o) != Some(*was))
@@ -472,8 +472,8 @@ impl Project {
     }
 }
 
-fn spans_by_object(spans: &[Span]) -> HashMap<ObjectId, Vec<Span>> {
-    let mut out: HashMap<ObjectId, Vec<Span>> = HashMap::new();
+fn spans_by_object(spans: &[PixelRun]) -> HashMap<ObjectId, Vec<PixelRun>> {
+    let mut out: HashMap<ObjectId, Vec<PixelRun>> = HashMap::new();
     for s in spans {
         out.entry(s.object.clone()).or_default().push(s.clone());
     }

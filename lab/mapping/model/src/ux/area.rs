@@ -376,7 +376,7 @@ impl Project {
         self.kept_span_outlines(|| {
             let mut kept = SpanOutlines::default();
             let mut grids: HashMap<(NodeId, String), Option<(PixelGrid, u32)>> = HashMap::new();
-            for s in &self.effective_patch().spans {
+            for s in &self.effective_patch().pixel_runs {
                 let grid = grids
                     .entry((s.output.clone(), s.port.clone()))
                     .or_insert_with(|| {

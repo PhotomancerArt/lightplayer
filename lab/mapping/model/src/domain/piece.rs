@@ -55,7 +55,7 @@ impl Piece {
     /// A piece wired as `truth` says.
     pub fn wired(truth: EffectivePatch, wired_as: impl Into<String>) -> Self {
         let mut by_object: HashMap<ObjectId, Vec<usize>> = HashMap::new();
-        for (i, s) in truth.spans.iter().enumerate() {
+        for (i, s) in truth.pixel_runs.iter().enumerate() {
             by_object.entry(s.object.clone()).or_default().push(i);
         }
         Piece {
@@ -85,7 +85,7 @@ impl Piece {
         // Each object on the output, and where its first span starts.
         let mut objects: Vec<ObjectId> = Vec::new();
         let mut places: Vec<(String, u32)> = Vec::new();
-        for s in patch.spans.iter().filter(|s| &s.output == output) {
+        for s in patch.pixel_runs.iter().filter(|s| &s.output == output) {
             if objects.contains(&s.object) {
                 continue;
             }
@@ -118,7 +118,7 @@ impl Piece {
             .by_object
             .get(object)?
             .iter()
-            .map(|&i| &self.truth.spans[i])
+            .map(|&i| &self.truth.pixel_runs[i])
             .find(|s| s.lamps.contains(&lamp))?;
         Some(Landing {
             output: s.output.clone(),

@@ -8,7 +8,7 @@
 
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
-use crate::domain::patch::Span;
+use crate::domain::patch::PixelRun;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
@@ -18,7 +18,7 @@ impl Project {
     pub fn lamps_on_port(&self, output: &NodeId, key: &str) -> Vec<(ObjectId, u32)> {
         let mut on: Vec<(u32, ObjectId, u32)> = self
             .effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .filter(|s| &s.output == output && s.port == key)
             .flat_map(|s| {
@@ -35,7 +35,7 @@ impl Project {
     /// output lands on nothing.
     pub fn ports_of(&self, t: &Target) -> Vec<Target> {
         let mut out: Vec<Target> = Vec::new();
-        for s in &self.effective_patch().spans {
+        for s in &self.effective_patch().pixel_runs {
             if !self.span_belongs_to(s, t) {
                 continue;
             }
@@ -53,7 +53,7 @@ impl Project {
     /// The outputs a fixture's lamps land on, in patch order.
     pub fn outputs_of(&self, fixture: &NodeId) -> Vec<NodeId> {
         let mut out: Vec<NodeId> = Vec::new();
-        for s in &self.effective_patch().spans {
+        for s in &self.effective_patch().pixel_runs {
             if &s.fixture == fixture && !out.contains(&s.output) {
                 out.push(s.output.clone());
             }
@@ -64,7 +64,7 @@ impl Project {
     /// The pixel a lamp lands on, if it is patched.
     pub fn pixel_of_lamp(&self, object: &ObjectId, index: u32) -> Option<Target> {
         self.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .find(|s| &s.object == object && s.lamps.contains(&index))
             .map(|s| Target::Pixel {
@@ -77,7 +77,7 @@ impl Project {
     /// The lamp patched to a pixel, if any.
     pub fn lamp_on_pixel(&self, output: &NodeId, key: &str, index: u32) -> Option<Target> {
         self.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .filter(|s| &s.output == output && s.port == key)
             .find_map(|s| {
@@ -88,7 +88,7 @@ impl Project {
             })
     }
 
-    fn span_belongs_to(&self, s: &Span, t: &Target) -> bool {
+    fn span_belongs_to(&self, s: &PixelRun, t: &Target) -> bool {
         match t {
             Target::Lamp { object, index } => &s.object == object && s.lamps.contains(index),
             Target::Port { .. } | Target::Pixel { .. } => false,
