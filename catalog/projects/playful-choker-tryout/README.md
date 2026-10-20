@@ -73,8 +73,9 @@ All of these are remembered on the choker, like the other knobs: pull the
 power and it comes back on the pattern you picked, from its first frame.
 The authored defaults in `playlist.json` (Soft Noise picked, cycle on, 30 s,
 nothing skipped) are what a fresh upload starts from. A picked pattern holds
-for as long as the cycle is off; the entries have no `duration`, because a
-duration only times a pattern a button starts (there is no button here).
+for as long as the cycle is off. The entries' `"duration": 30` is left over
+from before the cycle existed and does nothing now: a duration only times a
+pattern a button starts, and there is no button here.
 
 There is no button on the choker (the playlist's `trigger` input is left
 unbound).

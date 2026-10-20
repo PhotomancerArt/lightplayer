@@ -97,6 +97,11 @@ pub struct PlaylistNode {
     override_pick: Option<u32>,
     /// A trigger started an entry: it plays, then the playlist comes back.
     excursion: Option<PlaylistExcursion>,
+    /// The pick as last resolved, at the structure epoch it was resolved
+    /// at. A panel write, a clear and an edit all move the epoch, so a
+    /// steady frame reuses it and resolves nothing — unless a NODE writes
+    /// the pick, whose value can move without the epoch.
+    pick_cache: Option<PickCache>,
     default_fade: f32,
     /// Every authored entry, loaded or not (plan PD4), sorted by key.
     entries: Vec<PlaylistRuntimeEntry>,
@@ -151,6 +156,15 @@ pub struct PlaylistNode {
     /// parsed once. Parsing them per frame was four `SlotPath`s built and
     /// dropped per tick for constants.
     published_paths: PublishedPaths,
+}
+
+/// The pick as last resolved (see `PlaylistNode::pick_cache`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PickCache {
+    epoch: u64,
+    pick: (u32, Option<u64>),
+    /// A node writes it: resolve every frame.
+    live: bool,
 }
 
 /// A trigger-started entry playing away from the picked entry (vision D7,
@@ -212,6 +226,7 @@ impl PlaylistNode {
             pick_seen: None,
             override_pick: None,
             excursion: None,
+            pick_cache: None,
             default_fade,
             entries,
             next_trigger_ids: Vec::new(),
@@ -496,7 +511,19 @@ impl PlaylistNode {
 
     /// The consumed pick: the authored entry, or what Play mode (or any
     /// writer) put on its channel, with the panel write that supplied it.
-    fn read_pick(&self, ctx: &mut TickContext<'_>) -> Result<(u32, Option<u64>), NodeError> {
+    ///
+    /// Resolved again only when the graph changed shape — every panel
+    /// write, clear and edit moves the structure epoch — or every frame
+    /// while a node (not the panel) writes it. Resolving an unwritten pick
+    /// falls back to the authored def, which a steady frame must not pay.
+    fn read_pick(&mut self, ctx: &mut TickContext<'_>) -> Result<(u32, Option<u64>), NodeError> {
+        let epoch = ctx.structure_epoch();
+        if let Some(cache) = self.pick_cache
+            && cache.epoch == epoch
+            && !cache.live
+        {
+            return Ok(cache.pick);
+        }
         let production = ctx.resolve_static_consumed("idle_entry").map_err(|error| {
             NodeError::msg(format!("resolve playlist idle_entry: {}", error.message))
         })?;
@@ -505,8 +532,20 @@ impl PlaylistNode {
             .ok_or_else(|| NodeError::msg("playlist idle_entry is not a value"))?;
         let entry = u32::from_lp_value(value.value())
             .map_err(|error| NodeError::msg(format!("playlist idle_entry: {error}")))?;
-        let write = ctx.consumed_slot_panel_write(&self.published_paths.idle_entry);
-        Ok((entry, write))
+        let (write, live) = match self.pick_cache {
+            Some(cache) if cache.epoch == epoch => (cache.pick.1, cache.live),
+            _ => {
+                let write = ctx.consumed_slot_panel_write(&self.published_paths.idle_entry);
+                let written = write.is_none()
+                    && ctx
+                        .consumed_slot_bus_provenance(&self.published_paths.idle_entry)
+                        .is_some();
+                (write, written)
+            }
+        };
+        let pick = (entry, write);
+        self.pick_cache = Some(PickCache { epoch, pick, live });
+        Ok(pick)
     }
 
     /// The consumed `cycle` and `skip`: the authored defaults, or what Play

@@ -31,7 +31,10 @@ one shape that needed it.
 only by the cycle and by a trigger's excursion: a trigger starts an entry,
 it plays its `duration`, and it comes back to the picked entry. The chained
 walk is gone, and a duration means only "how long this entry plays when a
-trigger starts it". The tryout's leftover durations are removed.
+trigger starts it". The tryout's leftover durations stay, inert (it has no
+trigger): removing them moved a PowerButton open retry into the heap
+ratchet's steady-render window
+(`docs/debt/steady-render-window-catches-a-power-button-retry.md`).
 
 **Regression coverage** — `playlist_cycle.rs`
 `frozen_hold_and_absent_cycles_hold_the_pick` (a pick holds past its
