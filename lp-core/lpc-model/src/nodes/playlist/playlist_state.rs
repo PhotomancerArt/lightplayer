@@ -14,7 +14,8 @@ pub struct PlaylistState {
     #[slot(produced)]
     pub entry_time: ValueSlot<f32>,
 
-    /// Normalized progress through the current timed entry, or -1.0 for untimed entries.
+    /// Normalized progress through a trigger's timed excursion, or -1.0 when
+    /// the playlist rests on its pick, cycles, or plays an untimed entry.
     #[slot(produced)]
     pub entry_progress: ValueSlot<f32>,
 

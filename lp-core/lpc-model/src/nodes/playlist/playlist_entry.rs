@@ -17,7 +17,9 @@ pub struct PlaylistEntry {
     /// the same id, the lowest entry index wins.
     pub trigger_ids: OptionSlot<U32ListSlot>,
 
-    /// Duration in seconds before the playlist advances.
+    /// How long this entry plays when a trigger starts it, in seconds;
+    /// then the playlist returns to its picked entry (playlists-on-the-bus
+    /// D7). A picked entry ignores it: a pick holds.
     pub duration: OptionSlot<PositiveF32Slot>,
 
     /// Outgoing crossfade duration override in seconds.

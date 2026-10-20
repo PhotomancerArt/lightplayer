@@ -53,7 +53,7 @@ pub struct PatternPickerEntryFacts {
 /// Everything [`derive_pattern_picker`] needs, gathered by the controller.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatternPickerFacts {
-    /// The playlist node, for its activates.
+    /// The playlist node, for its picks.
     pub playlist: ProjectNodeAddress,
     /// The set in authored (key) order.
     pub entries: Vec<PatternPickerEntryFacts>,

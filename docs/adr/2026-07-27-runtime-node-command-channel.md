@@ -1,10 +1,12 @@
 # ADR: Runtime node-command channel (the first non-overlay client→engine write)
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-07-27
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** `2026-10-20-the-picked-pattern-is-a-bus-setting.md` — its one
+  command, the playlist activate, became a panel write on `playlist.entry`,
+  and the channel was deleted (wire 44)
 - **Relates:** `2026-07-26-node-card-faces.md` (names the activate-entry
   gap); `2026-07-14-wire-hello-versioning.md` (the version bump this
   change spends); `2026-07-04-studio-editing-model.md` (the overlay write

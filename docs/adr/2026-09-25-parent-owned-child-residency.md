@@ -228,3 +228,25 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
   pair.
 - An absent option read through a compiled def-view reader still formats a
   `NodeError` per read; only the by-path reads are allocation-free.
+
+## Amendment, 2026-10-20: the picked entry, and durations
+
+`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`. The idle
+entry is now the playlist's *picked* entry, consumed from
+`bus:playlist.entry`: a panel write holds it, persists it and Clear returns
+the authored one. Two changes to this ADR's playlist:
+
+- **Boot loads the restored pick.** The registry still makes the authored
+  entry resident at load (decision 4), but after panel restore the engine
+  settles a restored pick into the playlist before the first tick, so the
+  first tick's residency request swaps the authored entry out before
+  anything renders. The authored entry's load is the only cost; it is never
+  sampled or compiled.
+- **Durations time only a trigger's excursion.** With the cycle held, a
+  picked entry holds; the chained timed walk ("each entry plays its
+  duration, then back to idle") is gone. An entry a trigger starts plays
+  its duration and returns to the picked entry. Activation is a panel write,
+  not `PlaylistActivateEntry` (deleted), so "activating a failed entry
+  retries it" is now "picking a failed entry retries it".
+- Two playlists in one module now share `playlist.entry` too: one playlist
+  per module, warned at load and on save.

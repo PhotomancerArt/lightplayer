@@ -322,7 +322,8 @@ source before a run ends) from the same live sessions.
 The activate-entry work landed as its own decision —
 `2026-07-27-runtime-node-command-channel.md`, the first non-overlay
 client→engine write. It deliberately does NOT touch the agent's write
-surface; the agent still owns exactly the overlay door.
+surface; the agent still owns exactly the overlay door. (2026-10-20: that channel is
+gone; a pick is a panel write, `2026-10-20-the-picked-pattern-is-a-bus-setting.md`.)
 
 ### Addendum follow-ups
 

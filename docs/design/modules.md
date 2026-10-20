@@ -668,7 +668,10 @@ somebody owes. Recorded 2026-08-03 at the close of
   `docs/debt/clock-transport-has-no-transport-ui.md`.
 - **Playlist edit-vs-play, and entry progress.** A playlist card is both
   an authoring surface and a live transport; the two readings collide,
-  and an entry's progress has no presentation. Spun off at GV2.
+  and an entry's progress has no presentation. Spun off at GV2. Since
+  2026-10-20 a picked entry holds (the pick is `bus:playlist.entry`), which
+  the parked spike's direction A needed; `entry_progress` is progress
+  through a trigger's excursion.
 - **Parenthood rules.** Add-node should only offer kinds that make sense
   at the site — one `can_attach(parent_kind, child_kind)` legality
   function shared by the picker, drag-reparent, and wrap. Belongs with
@@ -677,7 +680,11 @@ somebody owes. Recorded 2026-08-03 at the close of
   (the closed #218 spike's `controls{}`), as an additive override on the
   derived default. See the rejected-alternatives section of
   `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
-- **Data-driven playlist activation** (R2.2 carve-out), an **input
+- **Data-driven playlist activation** — DONE 2026-10-20 as ordinary
+  wiring: the pick is the playlist's `idle_entry` on `bus:playlist.entry`,
+  so a node that writes that channel picks the pattern, the panel takes it
+  over and Clear hands it back
+  (`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`). An **input
   design doc** (R13's external sources), **vocabulary lock-down** (§7),
   and a **module registry** (§6 import/vendor flows) — carried from the
   predecessor plan's register, unchanged.
