@@ -1396,7 +1396,8 @@ board-info` loops (both idioms have flashed the wrong board or hung on a
 wedged port before; the resolver probes with per-port timeouts instead):
 
 ```bash
-just hardware-list                  # passive: never opens a port, cannot hang
+just hardware-list                  # passive: never opens a port; may first wait on cargo's build lock or a rebuild
+./target/debug/lp-cli hardware list # the same list, once built: no cargo, no wait
 just hardware-list --probe          # identify chips (resets idle boards)
 just hardware-list --chip esp32s3   # only boards probing as that chip; --json to script
 cargo run -q -p lp-cli -- fwcheck port --chip esp32c6   # resolve exactly one port
