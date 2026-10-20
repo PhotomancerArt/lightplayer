@@ -239,7 +239,7 @@ any computer saw it; under it, dimmed, the last picture lightplayer.app kept
 of it (kept across a deploy, written behind by the relay), or the dark when
 there is none. Its rows say their last known values, dimmed: Project and
 Firmware as the board last reported them, Hardware its model when a Studio
-reported one, lightplayer.app `river@example.com · last seen 2 h ago`.
+reported one, lightplayer.app `river@example.com · 2 h ago`.
 Nothing reaches it, so there is no Connect; a board it never met offers
 Remove from your account and nothing else. A board this browser remembers
 takes the record's facts only where the record saw it more recently, and
@@ -258,7 +258,7 @@ keeps its own saved picture.
 │ ⏚ USB              —                    › │
 │ ≋ Wi‑Fi            —                    › │
 │ ᛒ Bluetooth        —                    › │
-│ ☁ lightplayer.app  river@example.com  last seen 2 h ago │   dimmed
+│ ☁ lightplayer.app  river@example.com  2 h ago │   dimmed: when it was last seen
 │ ○ Access           —                    › │
 │ ▲ Firmware         2026.10.17-2         › │   last known, dimmed
 │ ■ Hardware         XIAO ESP32-C6        › │   the model a Studio reported
@@ -468,8 +468,8 @@ connect by it."
 ☁ lightplayer.app  river@example.com   not added     # the board doesn't hold the account's key
 ☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it; with no
                                                     #   link here, the account's list says it (ListAccountBoards)
-☁ lightplayer.app  river@example.com   last seen 2 h ago   # on the account's list, offline everywhere, no link
-                                                          #   here: when any computer last saw it. dimmed
+☁ lightplayer.app  river@example.com   2 h ago       # on the account's list, offline everywhere, no link
+                                                    #   here: when any computer last saw it. dimmed
 ☁ lightplayer.app  river@example.com   list full     # the board holds the account's key and the account's list
                                                     #   holds 64 boards: it is not on it. orange; the details
                                                     #   say "Your account holds 64 boards. Remove one to add
@@ -498,6 +498,8 @@ bad:  ☁ lightplayer.app  Yona's account     # Yona's phone, 10-19: no Wi‑Fi 
                                             #   "this will work". Name the account by its email, then the state
 bad:  ☁ lightplayer.app  river@example.com   Wi‑Fi not s…    # story, 10-19: at the grid's width the state was cut;
                                                             #   a state beside an email stays short
+bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20: the same cut; the surface says
+                                                            #   "last seen" in words, the row just the age
 ```
 
 ### Access ○: what you can do

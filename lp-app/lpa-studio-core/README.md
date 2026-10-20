@@ -614,7 +614,7 @@ controller joins them onto the roster (`studio_controller/account_boards_flow.rs
   online;
 - a board offline everywhere is in Offline boards: the offline card, its
   last picture the one lightplayer.app kept (dimmed), lightplayer.app
-  "<email> · last seen 2 h ago", no Connect. A board this browser remembers
+  "<email> · 2 h ago", no Connect. A board this browser remembers
   takes the record's name, firmware, project and last-seen time only where
   the record saw it more recently;
 - a board it never met is an in-memory roster entry under `mac-<12 hex>`

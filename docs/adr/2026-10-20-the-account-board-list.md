@@ -118,7 +118,7 @@ caller moved, in the same change. `CLOUD_API_VERSION` is 7.
 **Studio (D10, D13).** An account board offline everywhere is an offline
 card in Offline boards on every computer: "This board is offline. It was
 last seen 2 hours ago." over its kept picture, dimmed; its rows the last
-known facts, dimmed; lightplayer.app `<email> · last seen 2 h ago`; no
+known facts, dimmed; lightplayer.app `<email> · 2 h ago`; no
 Connect. A board this browser remembers takes the record's facts only where
 the record saw it more recently. On an account board the card has two
 forgets: **Forget on this browser** (the existing `forget`, its copy saying

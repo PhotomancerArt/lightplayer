@@ -442,7 +442,7 @@ fn board_card_rename_in_place() -> Element {
 // --- The account's board list (M2) ----------------------------------------------
 
 #[story(
-    description = "A board on your account, offline everywhere (the account's board list, M2): signed in on a computer that never met it, it is in Offline boards all the same. NEVER MET HERE, ITS LAST PICTURE: the last picture lightplayer.app kept of it, dimmed under \"This board is offline. It was last seen 2 hours ago.\"; lightplayer.app says river@example.com · last seen 2 h ago, dimmed; Project and Firmware its last known, dimmed; Hardware its model, from the Studio that reported it; no Connect (nothing reaches it), and Remove from your account is its one verb. NEVER MET HERE, NO PICTURE: the same on the dark. MET HERE: a board this browser remembers keeps its own saved picture; the account's record only freshens its facts and its lightplayer.app row."
+    description = "A board on your account, offline everywhere (the account's board list, M2): signed in on a computer that never met it, it is in Offline boards all the same. NEVER MET HERE, ITS LAST PICTURE: the last picture lightplayer.app kept of it, dimmed under \"This board is offline. It was last seen 2 hours ago.\"; lightplayer.app says river@example.com · 2 h ago, dimmed (the age alone: a state beside an email stays short); Project and Firmware its last known, dimmed; Hardware its model, from the Studio that reported it; no Connect (nothing reaches it), and Remove from your account is its one verb. NEVER MET HERE, NO PICTURE: the same on the dark. MET HERE: a board this browser remembers keeps its own saved picture; the account's record only freshens its facts and its lightplayer.app row."
 )]
 fn board_card_offline_on_your_account() -> Element {
     rsx! {
@@ -633,7 +633,7 @@ fn kept_cloud_board(picture: bool) -> UiCloudBoard {
     UiCloudBoard {
         key: lpa_studio_core::BoardKey::parse("10bda3b08e31").expect("a MAC"),
         label: "Porch".to_string(),
-        model: Some("seeed-xiao-esp32c6".to_string()),
+        model: Some("seeed/xiao-esp32-c6".to_string()),
         firmware: Some("2026.10.17-2".to_string()),
         project: Some("rocaille".to_string()),
         online: false,
@@ -652,7 +652,7 @@ fn never_met_offline() -> DeviceView {
         id: DeviceId(12),
         title: "Porch".to_string(),
         state_label: "Offline".to_string(),
-        board_id: Some("seeed-xiao-esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
         remembered_firmware: Some("2026.10.17-2".to_string()),
         loaded_project: DeviceLoadedProject::Running {
             label: "rocaille".to_string(),

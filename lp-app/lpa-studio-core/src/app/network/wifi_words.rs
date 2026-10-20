@@ -216,9 +216,11 @@ pub mod card {
         format!("{count} networks")
     }
     /// An account board offline everywhere: when anything last saw it, a
-    /// reading ("last seen 2 h ago").
+    /// reading ("2 h ago"). Just the age: a state beside an email stays
+    /// short (the card at the home grid's width cut "last seen 2 h ago"),
+    /// and the surface says "It was last seen 2 hours ago." in words.
     pub fn last_seen(age: &str) -> String {
-        format!("last seen {age}")
+        age.to_string()
     }
 }
 

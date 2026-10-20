@@ -18,7 +18,7 @@
 //! | the board dialling | "river@example.com · connecting" | — | Neutral |
 //! | reachable | "river@example.com · online", and "connected" when this tab's link is the relay | — | Neutral |
 //! | no link here, and the account's list says it is online (`ListAccountBoards`) | "river@example.com · online" | — (Connect through lightplayer.app is the card's primary) | Neutral |
-//! | no link here, and the account's list holds it, offline | "river@example.com · last seen 2 h ago" (dimmed: last known) | — | Neutral |
+//! | no link here, and the account's list holds it, offline | "river@example.com · 2 h ago" (dimmed: last known; the surface says "It was last seen 2 hours ago.") | — | Neutral |
 //!
 //! An offline card keeps what the board last said about its Wi‑Fi and its
 //! key, dimmed, but never "connecting" or "can't reach": this tab can't

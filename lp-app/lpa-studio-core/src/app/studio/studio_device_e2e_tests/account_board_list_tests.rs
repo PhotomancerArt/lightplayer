@@ -64,7 +64,7 @@ fn an_offline_record_for_a_board_never_met_here_shows_in_offline_boards() {
     );
     let cloud = bar(&card, crate::BarLayer::Cloud);
     assert_eq!(cloud.summary, "yona@example.com");
-    assert_eq!(cloud.aside.as_deref(), Some("last seen 2 h ago"));
+    assert_eq!(cloud.aside.as_deref(), Some("2 h ago"));
     assert!(cloud.stale, "last known: dimmed");
     let firmware = bar(&card, crate::BarLayer::Firmware);
     assert!(
