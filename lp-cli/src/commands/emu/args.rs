@@ -284,6 +284,27 @@ pub struct RunArgs {
     #[arg(long, requires = "host_link")]
     pub request: Vec<String>,
 
+    /// With `--host-link` and `--upload`: draw on the board the way Studio
+    /// does while someone drags on its picture — momentary touch-set writes
+    /// on the project's `touches` channel, ≤ 30 a second, ttl 400 ms, in
+    /// EMULATED time. A built-in (`line`: one finger sweeping left and right;
+    /// `circle`: one finger circling; `two`: two fingers circling) or a
+    /// `.json` stroke script (`{"ttl_ms": 400, "samples": [{"at_ms": 0,
+    /// "touches": [[1, 0.0, 0.5]]}, …]}`, positions in pattern space). The
+    /// stroke ends with an empty set, so the board lets go on its own.
+    #[arg(long, requires = "upload", value_name = "line|circle|two|FILE.json")]
+    pub strokes: Option<String>,
+
+    /// With `--strokes`: how long after the project is running the stroke
+    /// starts, in emulated time (`5s`, `1500ms`).
+    #[arg(long = "strokes-after", requires = "strokes", default_value = "5s")]
+    pub strokes_after: String,
+
+    /// With `--strokes` and a built-in: how long the stroke lasts, in
+    /// emulated time. A script file carries its own length.
+    #[arg(long = "strokes-for", requires = "strokes", default_value = "20s")]
+    pub strokes_for: String,
+
     /// With `--host-link`: an over-the-air update on the link's channel 3.
     #[command(flatten)]
     pub ota: crate::commands::ota_host::OtaArgs,
