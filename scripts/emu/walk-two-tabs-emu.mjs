@@ -425,8 +425,11 @@ async function main() {
       await driverB.waitBar("usb", "Open in another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       // The port B picked was a chooser grant, which registers it without
       // the sweep's gate (it may be another board of the kind): B asks the
-      // door for it and is refused, and reads that refusal against A's claim
-      // the moment it arrives, folding the port onto the board's own card.
+      // door for it and is refused (retrying every 250 ms), and reads that
+      // refusal against A's claim the moment it arrives, folding the port
+      // onto the board's own card. A retry may land after A has closed, so
+      // not every attempt is refused: step 3 checks only that none succeeded
+      // before A began to close.
       // Nothing here waits for that reading: step 3 presses Connect at once,
       // the order a person in a hurry presses it in (defect
       // 2026-10-09-a-chooser-pick-of-a-held-usb-port-is-not-gated).
@@ -446,8 +449,8 @@ async function main() {
       // What B's pick cost: the chooser registers the port it picks without
       // the sweep's gate (`request_grant` in `device_effects.rs`), so B may
       // have asked the door for the held port and been refused (or may still
-      // be asking). Step 3 checks that none of its opens SUCCEEDED while A
-      // held the board.
+      // be asking). Step 3 checks that none of its opens SUCCEEDED before A
+      // began to close.
       const attempts = await openAttempts(driverB);
       report.bAttemptsAfterPick = attempts;
       return `B: Online boards, "Open in another tab", Connect here = take-over, surface ${picture.surface}, picture ${picture.source}${picture.dim ? " (dimmed)" : ""}; B's open() ran ${untouched} time(s) before the pick and ${attempts} after it; B reads A's lock`;
@@ -472,30 +475,39 @@ async function main() {
       const a = await logOf(driverA);
       const b = await logOf(driverB);
       const closed = a.filter((e) => e.ev === "close-end" && e.board === BOARD && e.ok).at(-1);
+      // The close that released the door's claim began at A's last
+      // close-start before its successful close-end.
+      const closing = closed && a.slice(0, a.indexOf(closed)).filter((e) => e.ev === "close-start" && e.board === BOARD).at(-1);
       const released = b.find((e) => e.ev === "note" && e.note?.answer?.outcome === "released");
       const opens = b.filter((e) => e.board === BOARD && (e.ev === "open-start" || e.ev === "open-end"));
       const firstOk = opens.find((e) => e.ev === "open-end" && e.ok);
       const opened = firstOk && opens.filter((e) => e.ev === "open-start" && e.at <= firstOk.at).at(-1);
-      if (!closed || !released || !opened) {
-        throw new Error(`the order could not be read: A closed ${Boolean(closed)}, released note ${Boolean(released)}, B open ${Boolean(opened)}`);
+      if (!closing || !closed || !released || !opened) {
+        throw new Error(`the order could not be read: A close-start ${Boolean(closing)}, A closed ${Boolean(closed)}, released note ${Boolean(released)}, B open ${Boolean(opened)}`);
       }
-      // A closed its port before it said so, and before B opened. (B's page
-      // hears the release on two channel objects — its edge and this log's —
-      // in no promised order, so B's open may start a millisecond before the
-      // log hears the note: the claim is A's close first, not the log's.)
-      if (!(closed.at <= released.at && closed.at <= opened.at)) {
-        throw new Error(`wrong order: A closed @${closed.at}, released @${released.at}, B opened @${opened.at}`);
-      }
+      // A closed its port before it said so (the note and the close are both
+      // A's), and B's first successful open did not end before A began to
+      // close. The bound is A's close-start, not the release note: the note's
+      // timing is not promised. B's pick retries its open every 250 ms
+      // (`openPortWithRetry`), so a retry can land in the gap between the
+      // door freeing A's claim and B hearing the note, and succeed
+      // legitimately before the note. Before close-start A's socket certainly
+      // still holds the door's claim; after close-end the claim may already
+      // be free (the door can free it just before A's page hears its socket
+      // close), so close-end is no bound for B's open.
       // While A held the board, none of B's opens got it: each was refused.
-      const early = opens.filter((e) => e.ev === "open-end" && e.at < released.at);
+      const early = opens.filter((e) => e.ev === "open-end" && e.at < closing.at);
       if (early.some((e) => e.ok)) throw new Error("one of tab B's opens SUCCEEDED while tab A held the board");
-      report.order = { aClosedAt: closed.at, releasedAt: released.at, bOpenedAt: opened.at };
-      report.bRefusedBeforeRelease = early.map((e) => e.error);
+      if (!(closed.at <= released.at && closing.at <= firstOk.at)) {
+        throw new Error(`wrong order: A began closing @${closing.at}, closed @${closed.at}, released @${released.at}, B first opened (open-end) @${firstOk.at}`);
+      }
+      report.order = { aClosingAt: closing.at, aClosedAt: closed.at, releasedAt: released.at, bOpenedAt: opened.at };
+      report.bRefusedBeforeClose = early.map((e) => e.error);
       // How long the holder took to answer (the asker's patience is 5 s).
       const asked = b.find((e) => e.ev === "note" && e.note?.ask);
       report.answerMs = { ...report.answerMs, bTookFromA: asked ? released.at - asked.at : null };
       noteSlowAnswer(report, "A", report.answerMs.bTookFromA);
-      return `A "Taken by another tab"; B ready (${face}), the board said "${hello.slice(0, 60)}"; asked → released in ${report.answerMs.bTookFromA} ms; A closed → released (+${released.at - closed.at} ms) → B opened (${opened.at - released.at >= 0 ? "+" : ""}${opened.at - released.at} ms from the release heard); B's ${early.length} earlier open(s) all refused${early.length ? ` (${early.map((e) => e.error).join(", ")})` : ""}`;
+      return `A "Taken by another tab"; B ready (${face}), the board said "${hello.slice(0, 60)}"; asked → released in ${report.answerMs.bTookFromA} ms; A closed → released (+${released.at - closed.at} ms) → B opened (${opened.at - released.at >= 0 ? "+" : ""}${opened.at - released.at} ms from the release heard); B's ${early.length} open(s) before A began to close all refused${early.length ? ` (${early.map((e) => e.error).join(", ")})` : ""}`;
     });
 
     // ---------------------------------------------------------------- 4
@@ -646,7 +658,7 @@ function markdown(report) {
 |---|---|---|---|
 ${rows.join("\n")}
 
-${report.order ? `Order in step 3 (page clocks, ms): A closed its port at ${report.order.aClosedAt}, the release was heard at ${report.order.releasedAt}, B opened at ${report.order.bOpenedAt}.\n` : ""}${report.answerMs ? `Holder's answer time (ask → released, ms; the asker waits 5000): ${JSON.stringify(report.answerMs)}.\n` : ""}${report.bAttemptsAfterPick !== undefined ? `Tab B's open() ran ${report.bAttemptsAfterPick} time(s) after its chooser pick, all refused (${(report.bRefusedBeforeRelease ?? []).join(", ") || "n/a"}): a chooser grant registers a port without the sweep's gate. The sweep's gate (a port granted at load) is core's T1/T3: zero opens.\n` : ""}
+${report.order ? `Order in step 3 (page clocks, ms): A began closing its port at ${report.order.aClosingAt} and closed it at ${report.order.aClosedAt}, the release was heard at ${report.order.releasedAt}, B opened at ${report.order.bOpenedAt}.\n` : ""}${report.answerMs ? `Holder's answer time (ask → released, ms; the asker waits 5000): ${JSON.stringify(report.answerMs)}.\n` : ""}${report.bAttemptsAfterPick !== undefined ? `Tab B's open() ran ${report.bAttemptsAfterPick} time(s) after its chooser pick; the opens that ended before A began to close were all refused (${(report.bRefusedBeforeClose ?? []).join(", ") || "n/a"}): a chooser grant registers a port without the sweep's gate. The sweep's gate (a port granted at load) is core's T1/T3: zero opens.\n` : ""}
 ${report.notes.length ? "Notes:\n" + report.notes.map((n) => `- ${n}`).join("\n") + "\n" : ""}`;
 }
 
