@@ -52,7 +52,12 @@
         }
       },
       {
+        "default_bind": "bus:playlist.entry",
         "name": "idle_entry",
+        "panel": "show",
+        "semantics": {
+          "direction": "consumed"
+        },
         "shape": {
           "value": {
             "shape": {
