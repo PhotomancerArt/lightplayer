@@ -14,6 +14,7 @@ use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::editor::{Button, Editor, Key, Mods, Tool};
 use crate::ux::graph_verb::GraphVerb;
+use crate::ux::patch_section::PatchInput;
 use crate::ux::port_grouping::PortGrouping;
 use crate::ux::props::PropEdit;
 use crate::ux::ui::{LayoutKind, SizeClass};
@@ -101,6 +102,8 @@ pub enum GraphInput {
     Verb(GraphVerb),
     /// How output cards group a port's pixels.
     Grouping(PortGrouping),
+    /// The inspector's Patch section edited the selection's placements.
+    Patch(PatchInput),
 }
 
 impl Editor {
@@ -138,6 +141,7 @@ impl Editor {
             GraphInput::ForceSizeClass(class) => self.force_size_class(class),
             GraphInput::Verb(verb) => return self.press(verb),
             GraphInput::Grouping(g) => self.grouping = g,
+            GraphInput::Patch(input) => self.patch_input(input),
         }
         true
     }

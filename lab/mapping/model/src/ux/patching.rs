@@ -125,7 +125,7 @@ impl Editor {
                 p.wire_ports()
                     .into_iter()
                     .flat_map(|(output, port)| {
-                        p.free_segments_for(&output, &port, n, Some(o))
+                        p.free_segments_for(&output, &port, n, std::slice::from_ref(o))
                             .into_iter()
                             .map(move |pixels| PairEnd::Segment {
                                 output: output.clone(),
@@ -419,11 +419,20 @@ impl Editor {
             .iter()
             .find(|o| matches!(self.project.on_wire(o), OnWire::Flowing))
         {
-            let fixture = self.fixture_words(o);
+            let follows =
+                self.project
+                    .effective_patch()
+                    .resolved(o)
+                    .and_then(|r| r.wire_from.clone())
+                    .zip(self.project.fixture_of_place(
+                        &crate::domain::patch_place::PatchTarget::Object(o.clone()),
+                    ))
+                    .map(|(t, f)| self.project.target_words(&f, &t))
+                    .unwrap_or_else(|| self.fixture_words(o));
             self.notice = Some(Notice::refused(
-                format!("{} flows on by auto", self.object_words(o)),
-                format!("{fixture} puts every object no rule places on the wire by itself"),
-                format!("turn auto off for {fixture} (⇧A), then unpatch it"),
+                format!("{} already follows {follows}", self.object_words(o)),
+                "U puts a thing back to following what's above it, and it does already",
+                "to take it off the wire, choose Not on the wire in its Patch section",
             ));
             return;
         }

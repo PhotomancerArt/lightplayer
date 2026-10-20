@@ -4,6 +4,7 @@
 use crate::domain::notice::Notice;
 use crate::domain::target::Target;
 use crate::ux::graph_verb::GraphVerb;
+use crate::ux::patch_section::PatchField;
 use crate::ux::props::Prop;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,5 +58,20 @@ pub enum UiItem {
     Action {
         text: String,
         verb: GraphVerb,
+    },
+    /// A Patch row with a choice (`patch_section.rs`): `chosen` is `None`
+    /// when the selection doesn't share one.
+    PatchChoice {
+        label: &'static str,
+        options: Vec<String>,
+        chosen: Option<usize>,
+        field: PatchField,
+    },
+    /// A Patch row with a number and − + (`None` when mixed).
+    PatchNumber {
+        label: &'static str,
+        value: Option<i64>,
+        note: Option<String>,
+        field: PatchField,
     },
 }

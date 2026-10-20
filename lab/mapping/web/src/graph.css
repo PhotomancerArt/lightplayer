@@ -261,6 +261,9 @@
     /* A fact with the verb that changes it (the inspector). */
     .action-fact { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .action-fact-button { flex: none; }
+    /* A Patch row's number between its − and +. */
+    .num-value { min-width: 2.5em; text-align: center; font-variant-numeric: tabular-nums; }
+    .num-note { color: var(--text-subtle); margin-left: 4px; }
 
     /* A shader's GLSL in the inspector: shown, never run. */
     .glsl { margin: 6px 0 0; padding: 6px 8px; max-height: 240px; overflow: auto; font: 10px/1.35 var(--mono); color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; white-space: pre; }

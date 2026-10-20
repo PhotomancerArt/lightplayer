@@ -128,6 +128,7 @@ pub use ux::graph_input::GraphInput;
 pub use ux::graph_verb::GraphVerb;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
 pub use ux::hints::{Hint, HintBar, HintKind};
+pub use ux::patch_section::{PatchField, PatchInput, PatchOption};
 pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;

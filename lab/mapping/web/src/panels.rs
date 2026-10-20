@@ -4,8 +4,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind,
-    PropValue, UiInspector, UiItem, UiTree,
+    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchInput, Prop, PropEdit,
+    PropKind, PropValue, UiInspector, UiItem, UiTree,
 };
 
 use crate::graph_editor::GraphEditor;
@@ -134,6 +134,67 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
             }
         },
         UiItem::Prop { prop, locked } => rsx! { PropRow { ed: ed.clone(), prop, locked } },
+        UiItem::PatchChoice {
+            label,
+            options,
+            chosen,
+            field,
+        } => rsx! {
+            div { class: "prop",
+                span { class: "prop-label", "{label}" }
+                select {
+                    class: "choice",
+                    onkeydown: move |evt| evt.stop_propagation(),
+                    onchange: move |evt| {
+                        if let Ok(option) = evt.value().parse::<usize>() {
+                            ed.input(GraphInput::Patch(PatchInput::Choose { field, option }));
+                        }
+                    },
+                    if chosen.is_none() {
+                        option { value: "", selected: true, disabled: true, "mixed" }
+                    }
+                    for (i, word) in options.iter().enumerate() {
+                        option { value: "{i}", selected: chosen == Some(i), "{word}" }
+                    }
+                }
+            }
+        },
+        UiItem::PatchNumber {
+            label,
+            value,
+            note,
+            field,
+        } => {
+            let (down, up) = (ed.clone(), ed.clone());
+            let shown = value.map_or_else(|| "mixed".to_string(), |v| v.to_string());
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "num",
+                        button {
+                            tabindex: "-1",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                down.input(GraphInput::Patch(PatchInput::Nudge { field, by: -1 }));
+                            },
+                            "−"
+                        }
+                        span { class: "num-value", "{shown}" }
+                        button {
+                            tabindex: "-1",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                up.input(GraphInput::Patch(PatchInput::Nudge { field, by: 1 }));
+                            },
+                            "+"
+                        }
+                        if let Some(note) = note {
+                            span { class: "num-note", "{note}" }
+                        }
+                    }
+                }
+            }
+        }
         UiItem::Action { text, verb } => rsx! {
             div { class: "fact action-fact",
                 span { "{text}" }

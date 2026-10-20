@@ -333,9 +333,10 @@ fn r_reverses_the_placement_with_move_and_draw_off() {
     );
 }
 
-/// U on an object auto flows on is refused, and says to turn auto off.
+/// U on an object that already follows is refused, and says how to take
+/// it off the wire.
 #[test]
-fn unpatching_a_flowing_object_says_turn_auto_off() {
+fn unpatching_what_already_follows_says_how_to_take_it_off() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3]);
     p.auto_patch(&f, &out);
     let mut e = editor_of(p);
@@ -343,7 +344,7 @@ fn unpatching_a_flowing_object_says_turn_auto_off() {
     key(&mut e, Key::Char('u'), none());
     let n = e.notice.clone().unwrap();
     assert_eq!(n.kind, NoticeKind::Refused);
-    assert!(n.help.unwrap().contains("⇧A"));
+    assert!(n.help.unwrap().contains("Not on the wire"));
 }
 
 /// ⇧→ walks the wire: the objects on it and its free segments, in pixel
@@ -515,6 +516,129 @@ fn turn_is_an_objects_alone() {
     assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
 }
 
+// ---- the Patch section (plan P6) ----------------------------------------------
+
+/// Selecting an object, a component or a fixture shows the same Patch
+/// rows, each with its own value; a ring says what it follows.
+#[test]
+fn the_patch_section_is_the_same_at_every_level() {
+    let (p, f, _, circle) = circle(&[("D0", 40)]);
+    let mut e = editor_of(p);
+    let labels = |e: &Editor| -> Vec<&'static str> {
+        e.patch_section()
+            .unwrap()
+            .iter()
+            .filter_map(|i| match i {
+                UiItem::PatchChoice { label, .. } | UiItem::PatchNumber { label, .. } => {
+                    Some(*label)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
+    assert_eq!(labels(&e), vec!["Wire", "Direction", "Turn"]);
+    let wire = choice(&e, "Wire");
+    assert_eq!(wire.0[wire.1.unwrap()], "Follows circle1");
+    e.select(vec![Target::Component(circle.clone())]);
+    assert_eq!(labels(&e), vec!["Wire", "Direction"]);
+    e.select(vec![Target::Node(f.clone())]);
+    assert_eq!(labels(&e), vec!["Wire", "Direction"]);
+}
+
+/// Choosing a port in Wire places the thing there; − + move its start.
+#[test]
+fn choosing_a_port_places_it_and_start_moves_it() {
+    let (p, _, out, circle) = circle(&[("D0", 40)]);
+    let mut e = editor_of(p);
+    e.select(vec![Target::Component(circle.clone())]);
+    let (options, _) = choice(&e, "Wire");
+    let d0 = options.iter().position(|o| o.starts_with("D0")).unwrap();
+    e.patch_input(PatchInput::Choose {
+        field: PatchField::Wire,
+        option: d0,
+    });
+    let r1 = ObjectId::new(&circle, "r1");
+    assert_eq!(landing(&e.project, &r1, 0), Some(("0".into(), 0)));
+    e.patch_input(PatchInput::Nudge {
+        field: PatchField::Start,
+        by: 3,
+    });
+    assert_eq!(landing(&e.project, &r1, 0), Some(("0".into(), 3)));
+    let _ = out;
+}
+
+/// Direction "Reversed" on one ring, chosen in its Patch section, leaves its
+/// address alone.
+#[test]
+fn reversing_one_ring_from_the_section_keeps_its_address() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        10,
+    );
+    let mut e = editor_of(p);
+    let r2 = ObjectId::new(&circle, "r2");
+    e.select(vec![Target::Object(r2.clone())]);
+    let (options, _) = choice(&e, "Direction");
+    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    e.patch_input(PatchInput::Choose {
+        field: PatchField::Direction,
+        option: reversed,
+    });
+    assert_eq!(pixels(&e.project, &r2), vec![21, 20, 19, 18]);
+}
+
+/// Two objects selected edit together; a Wire they don't share is mixed.
+#[test]
+fn two_objects_edit_together_and_say_mixed() {
+    let (mut p, f, out, objects) = paths(&[("D0", 40), ("D1", 40)], &[3, 3]);
+    p.auto_patch(&f, &out);
+    p.patch_object(&objects[1], &out, "1", 20).unwrap();
+    let mut e = editor_of(p);
+    e.select(
+        objects
+            .iter()
+            .map(|o| Target::Component(o.component.clone()))
+            .collect(),
+    );
+    assert_eq!(choice(&e, "Wire").1, None, "mixed");
+    let (options, _) = choice(&e, "Direction");
+    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    e.patch_input(PatchInput::Choose {
+        field: PatchField::Direction,
+        option: reversed,
+    });
+    assert_eq!(pixels(&e.project, &objects[0]), vec![2, 1, 0]);
+    assert_eq!(pixels(&e.project, &objects[1]), vec![22, 21, 20]);
+    assert_eq!(landing(&e.project, &objects[1], 0), Some(("1".into(), 22)));
+}
+
+/// Turn's − + do what L and K do: one undo step each.
+#[test]
+fn turn_in_the_section_is_the_turn_key() {
+    let (mut p, f, out, objects) = paths(&[("D0", 40)], &[5]);
+    p.auto_patch(&f, &out);
+    let mut by_key = editor_of(p.clone());
+    let mut by_row = editor_of(p);
+    let t = Target::Component(objects[0].component.clone());
+    by_key.select(vec![t.clone()]);
+    by_row.select(vec![t]);
+    key(&mut by_key, Key::Char('k'), none());
+    by_row.patch_input(PatchInput::Nudge {
+        field: PatchField::Turn,
+        by: 1,
+    });
+    assert_eq!(
+        by_key.project.effective_patch().spans,
+        by_row.project.effective_patch().spans
+    );
+}
+
 // ---- the piece ------------------------------------------------------------
 
 /// The piece shows the board's pixels through its true wiring, not the
@@ -678,6 +802,23 @@ fn place(p: &mut Project, f: &NodeId, t: &PatchTarget, out: &NodeId, port: &str,
         pixel,
     };
     p.set_wire(f, t, Some(wire)).unwrap();
+}
+
+/// A Patch choice row's options and what is chosen.
+fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
+    e.patch_section()
+        .unwrap()
+        .into_iter()
+        .find_map(|i| match i {
+            UiItem::PatchChoice {
+                label: l,
+                options,
+                chosen,
+                ..
+            } if l == label => Some((options, chosen)),
+            _ => None,
+        })
+        .unwrap()
 }
 
 /// The project as the page has it: laid out, so its lamps sit in their

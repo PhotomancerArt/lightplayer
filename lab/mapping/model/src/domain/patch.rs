@@ -365,23 +365,23 @@ impl Project {
     /// patch can still put an object. A last port with no count takes the
     /// rest, so it always has one more run of `size` past its end.
     pub fn free_segments(&self, output: &NodeId, port: &str, size: u32) -> Vec<Range<u32>> {
-        self.free_segments_for(output, port, size, None)
+        self.free_segments_for(output, port, size, &[])
     }
 
-    /// The same, counting `ignore`'s own pixels as free: where an object
-    /// could go, including where it partly is now.
+    /// The same, counting `ignore`'s own pixels as free: where objects
+    /// could go, including where they partly are now.
     pub fn free_segments_for(
         &self,
         output: &NodeId,
         port: &str,
         size: u32,
-        ignore: Option<&ObjectId>,
+        ignore: &[ObjectId],
     ) -> Vec<Range<u32>> {
         let size = size.max(1);
         let spans: Vec<&Span> = self
             .effective_patch()
             .on_port(output, port)
-            .filter(|s| Some(&s.object) != ignore)
+            .filter(|s| !ignore.contains(&s.object))
             .collect();
         let rest = self
             .output(output)

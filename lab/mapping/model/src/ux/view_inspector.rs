@@ -3,7 +3,6 @@
 //! and patch, a lamp's place, and the properties you can edit.
 
 use crate::domain::node::{NodeId, NodeKind};
-use crate::domain::object::ObjectId;
 use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -77,14 +76,24 @@ impl Editor {
             out.push(section(&format!("{} selected", selection.len()), items));
         }
         if let [t] = selection.as_slice()
-            && let Some(facts) = node_facts(p, t, self.runs_for_real)
+            && let Some(mut facts) = node_facts(p, t, self.runs_for_real)
         {
+            // A fixture's Patch section leads with the same rows as a
+            // component's or an object's (`patch_section.rs`).
+            if let Some(rows) = self.patch_section()
+                && let Some(patch) = facts
+                    .iter_mut()
+                    .find(|x| x.title.as_deref() == Some("Patch"))
+            {
+                patch.items.splice(0..0, rows);
+            }
             out.extend(facts);
         }
-        if let Some(o) = self.selected_object()
-            && p.object(&o).is_some_and(|o| !o.lamps.is_empty())
-        {
-            out.push(section("Wire", wire_facts(p, &o)));
+        let fixtures_only = selection
+            .iter()
+            .all(|t| matches!(t, Target::Node(id) if p.fixture(id).is_some()));
+        if !fixtures_only && let Some(rows) = self.patch_section() {
+            out.push(section("Patch", rows));
         }
         if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice()
             && let Some(spans) = span_facts(p, t)
@@ -176,45 +185,6 @@ fn project_facts(p: &Project) -> Vec<String> {
     facts
 }
 
-/// How one object is on the wire, with what changes it (patching by hand,
-/// `patching.rs`).
-fn wire_facts(p: &Project, o: &ObjectId) -> Vec<UiItem> {
-    match p.on_wire(o) {
-        OnWire::Placed {
-            output,
-            port,
-            pixel,
-            reversed,
-            rotation,
-        } => {
-            let port = p.long_label(&Target::Port { output, key: port });
-            let mut out = vec![
-                UiItem::Action {
-                    text: format!("On {port} at {pixel}"),
-                    verb: GraphVerb::Unpatch,
-                },
-                UiItem::Action {
-                    text: if reversed {
-                        "Runs reversed".into()
-                    } else {
-                        "Runs forward".into()
-                    },
-                    verb: GraphVerb::Reverse,
-                },
-            ];
-            if rotation > 0 {
-                out.push(UiItem::Fact(format!("Turned {rotation} lamps")));
-            }
-            out
-        }
-        OnWire::Flowing => vec![UiItem::Fact("Flows on by its fixture's auto".into())],
-        OnWire::Nowhere => vec![UiItem::Action {
-            text: "Not on the wire".into(),
-            verb: GraphVerb::Patch,
-        }],
-    }
-}
-
 /// A fixture's patch at a glance: auto, and how many of its objects are
 /// on the wire.
 fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
@@ -229,21 +199,11 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
         .iter()
         .filter(|o| matches!(p.on_wire(&o.id), OnWire::Placed { .. }))
         .count();
-    let auto = match p.auto_output(fixture) {
-        Some(o) => format!("Auto onto {}", p.node_name(&o)),
-        None => "Auto off".to_string(),
-    };
-    let mut out = vec![
-        UiItem::Action {
-            text: auto,
-            verb: GraphVerb::Auto,
-        },
-        UiItem::Fact(format!(
-            "{on} of {} on the wire · {} waiting",
-            objects.len(),
-            objects.len() - on
-        )),
-    ];
+    let mut out = vec![UiItem::Fact(format!(
+        "{on} of {} on the wire · {} waiting",
+        objects.len(),
+        objects.len() - on
+    ))];
     if by_hand > 0 {
         out.push(UiItem::Action {
             text: format!("{by_hand} patched by hand"),
