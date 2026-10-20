@@ -724,3 +724,34 @@ hours), and neither is an exit path on its own.
   remembers a Wi‑Fi board (`walk-wifi-emu studio-lan`'s S2), and the 140
   build does not start at all. `CHROME_BIN="/Applications/Brave
   Browser.app/Contents/MacOS/Brave Browser"` ran every walk.
+
+- 2026-10-20 — **the sibling `--dump-dom` hang reached the deploy: "Deploy
+  Cloud Service" → "Build artifact and deploy to fly.io" lost a deploy to
+  it twice in one day.** The step runs `just studio-web-smoke
+  target/pages/studio` (`deploy-cloud.yml`), i.e.
+  `scripts/pages/static-site-smoke.mjs`, whose one headless Chrome
+  (`--headless=new --disable-gpu --virtual-time-budget=8000 --dump-dom`,
+  20 s `spawnSync` bound) printed nothing and was killed:
+  - run 39382461943 on 560f26d58: `stdout: 0 chars … status=0 signal=null
+    error.code=ETIMEDOUT elapsedMs=20081`;
+  - run 39432455475 on 7e002f2a6: the same line, `elapsedMs=21042`.
+  Neither merge touched the shipped bundle (a walk script, a story file), and
+  five deploys in between passed, so this is the discovery Chrome's
+  unidentified hang above, not a regression. A failed smoke skips the deploy
+  until the next merge or a re-run. `describeBrowserSmokeMismatch` already
+  carried the evidence; *why* Chrome hangs is still unidentified.
+  **Workaround, in the script (not a root-cause fix):** a hang — `ETIMEDOUT`,
+  or a zero exit with an empty stdout — is retried once, on a fresh process
+  and a fresh throwaway `--user-data-dir`, and the log says so
+  (`Browser DOM smoke: Chrome hung (…); retrying once …`). Two hangs fail,
+  with the second attempt's `describeBrowserSmokeMismatch` plus a note that
+  the first also hung. A Chrome that answers with non-HTML, or exits non-zero
+  in `required` mode, still fails at once; the 20 s bound and the HTML check
+  are unchanged. If a run logs the retry line, that is one more hang for this
+  log — append it. If the retry stops being enough (two hangs in a row), the
+  deploy smoke deserves its own entry.
+  **Desk note:** on the desk (macOS 26, sandboxed or not) Brave as
+  `CHROME_BIN` hangs on this page under `--dump-dom` every time (stderr only
+  `CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670`), which is what
+  two-hangs-fail looks like for real; Chrome for Testing from puppeteer's
+  cache (path in the 2026-10-17 note above) passed `just studio-web-smoke`.
