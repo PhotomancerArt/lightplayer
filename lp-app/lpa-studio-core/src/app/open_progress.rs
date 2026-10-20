@@ -94,7 +94,14 @@ pub struct OpenFailure {
     /// wording the console entry carries.
     pub message: String,
     /// Re-dispatching this action retries exactly the open that failed.
-    pub retry: UiAction,
+    /// `None` when the open was REFUSED outright — a format/content issue
+    /// the open pre-flight classified (`refuse_open`,
+    /// `project_controller.rs`) rather than a transient condition. Retrying
+    /// a refusal re-runs the same classifier against the same bytes and
+    /// fails the exact same way, so the notice has no Retry to offer; the
+    /// way out is whatever the classified issue names instead (Yona,
+    /// 2026-10-03).
+    pub retry: Option<UiAction>,
     /// The board the open was on when it failed, when it was on one — the
     /// failure page then offers to reset it.
     pub device: Option<OpenDevice>,
@@ -187,6 +194,13 @@ thread_local! {
     static RUNNING: Cell<u64> = const { Cell::new(0) };
     /// Bumped by [`cancel_open`] only.
     static CANCEL_EPOCH: Cell<u64> = const { Cell::new(0) };
+    /// Set by [`note_open_refused`] when `refuse_open`
+    /// (`project_controller.rs`) classified the open in flight as refused
+    /// rather than failed transiently. Read and cleared by [`fail`], so it
+    /// only ever speaks for the attempt that is failing right now — see
+    /// [`note_open_started`], which clears it for every new attempt before
+    /// that attempt's own pre-flight can set it again.
+    static OPEN_REFUSED: Cell<bool> = const { Cell::new(false) };
     /// Requests parked on a cancel that has not come.
     static CANCEL_WAKERS: RefCell<Vec<Waker>> = const { RefCell::new(Vec::new()) };
     /// The session recorder's stage feed ([`record_open_stages`]), and the
@@ -237,7 +251,22 @@ pub fn note_open_requested() -> u64 {
 /// The running open has begun: it adopts the newest requested generation.
 pub(crate) fn note_open_started() {
     RUNNING.with(|running| running.set(current_open_generation()));
+    // A refusal from the PREVIOUS attempt (a reload's pre-flight, say —
+    // `reload_active_from_library` runs the same `migrate_package_on_open`
+    // outside this signal's reach entirely) must not survive to colour this
+    // one; only a refusal this attempt's own pre-flight raises counts.
+    OPEN_REFUSED.with(|refused| refused.set(false));
     set_stage(OpenStage::Starting);
+}
+
+/// The open pre-flight classified the open in flight as REFUSED — a
+/// format/content issue (`refuse_open`, `project_controller.rs`) rather
+/// than a transient condition. The next [`note_open_failed`] or
+/// [`note_open_failed_with`] for this attempt reports no Retry: retrying
+/// would re-run the same classifier against the same bytes and fail the
+/// same way.
+pub(crate) fn note_open_refused() {
+    OPEN_REFUSED.with(|refused| refused.set(true));
 }
 
 /// Whether the open the actor is running has been superseded by a newer
@@ -341,9 +370,12 @@ fn fail(message: String, retry: UiAction, needs_unlock: bool) {
         OpenStage::WaitingForDevice(wait) => (message, Some(wait.device)),
         _ => (message, None),
     };
+    // Taken, not just read: this attempt's refusal, if any, has now been
+    // reported, and must not bleed into whatever fails next.
+    let refused = OPEN_REFUSED.with(|refused| refused.replace(false));
     set_stage(OpenStage::Failed(OpenFailure {
         message,
-        retry,
+        retry: if refused { None } else { Some(retry) },
         device,
         needs_unlock,
     }));
@@ -510,8 +542,19 @@ pub(crate) fn reset_for_test() {
     CANCEL_WAKERS.with(|wakers| wakers.borrow_mut().clear());
     REQUESTED.with(|generation| generation.set(0));
     RUNNING.with(|running| running.set(0));
+    OPEN_REFUSED.with(|refused| refused.set(false));
     STAGE_RECORDER.with(|slot| *slot.borrow_mut() = None);
     RELOAD.with(|cell| cell.set((0, None)));
+}
+
+/// Whether [`note_open_refused`] has fired for the attempt in flight,
+/// without consuming it (test-only peek; [`fail`] is what actually takes
+/// it). Lets a caller's own tests (`project_controller.rs`'s `refuse_open`)
+/// check that they raised the flag without having to build a `UiAction`
+/// just to drive it through to an `OpenFailure`.
+#[cfg(test)]
+pub(crate) fn open_refused_for_test() -> bool {
+    OPEN_REFUSED.with(Cell::get)
 }
 
 #[cfg(test)]
@@ -640,7 +683,7 @@ mod tests {
             panic!("failed stage expected");
         };
         assert_eq!(failure.message, "the device did not start");
-        assert_eq!(failure.retry, open_action("prjx"));
+        assert_eq!(failure.retry, Some(open_action("prjx")));
 
         // The REQUEST clears it, not the start: the action can sit in the
         // queue, and a stale error must not colour the new click's route.
@@ -648,6 +691,37 @@ mod tests {
         assert_eq!(open_stage(), OpenStage::Idle, "Retry clears the error");
         note_open_started();
         assert_eq!(open_stage(), OpenStage::Starting);
+    }
+
+    /// The refusal path (D11's `refuse_open`, surfaced here through
+    /// [`note_open_refused`]) offers no Retry: re-dispatching the same
+    /// action would re-run the same classifier against the same bytes and
+    /// fail the exact same way. A failure with no refusal in the middle —
+    /// a fetch, a sim that would not boot — keeps its Retry.
+    #[test]
+    fn a_refused_open_drops_retry_but_a_transient_failure_keeps_it() {
+        reset_for_test();
+        note_open_requested();
+        note_open_started();
+        note_open_refused();
+        note_open_failed("Format 3 — too old for this Studio", open_action("prjx"));
+        let OpenStage::Failed(failure) = open_stage() else {
+            panic!("failed stage expected");
+        };
+        assert_eq!(failure.retry, None, "retrying a refusal fails the same way");
+
+        reset_for_test();
+        note_open_requested();
+        note_open_started();
+        note_open_failed("device did not respond within 20.0s", open_action("prjx"));
+        let OpenStage::Failed(failure) = open_stage() else {
+            panic!("failed stage expected");
+        };
+        assert_eq!(
+            failure.retry,
+            Some(open_action("prjx")),
+            "a transient failure is still worth retrying"
+        );
     }
 
     /// A tier refusal is not a broken board: the page offers Unlock, and
