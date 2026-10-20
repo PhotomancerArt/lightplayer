@@ -12,8 +12,8 @@
 use std::rc::Rc;
 
 use lpc_model::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlSampleLayout,
-    Revision,
+    ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -84,7 +84,19 @@ pub fn cloud_picture_preview(picture: &CloudBoardPicture) -> Option<UiControlPro
         revision,
         extent: ControlExtent::new(1, (count * 3) as u32),
         sample_format: UiControlSampleFormat::Srgb8,
-        sample_layout: ControlSampleLayout::default(),
+        // The samples are R, G, B display codes: one run of RGB lamps, so a
+        // lamp view reads their colours (it colours only what a span names).
+        sample_layout: ControlSampleLayout {
+            spans: vec![ControlSampleSpan {
+                row: 0,
+                start: 0,
+                len: (count * 3) as u32,
+                encoding: ControlSampleEncoding::RgbPixels {
+                    count: count as u32,
+                    color_order: ColorOrder::Rgb,
+                },
+            }],
+        },
         display_layout: Some(Rc::new(ControlDisplayLayout::Layout2d(layout))),
         bytes: Rc::from(&picture.colors[..count * 3]),
     })
@@ -105,6 +117,17 @@ mod tests {
         assert_eq!(preview.sample_format, UiControlSampleFormat::Srgb8);
         assert_eq!(preview.unorm16_sample(15), Some(u16::MAX));
         assert_eq!(preview.revision, 9);
+        assert!(
+            preview.sample_layout.spans.iter().any(|span| span.len == 18
+                && matches!(
+                    span.encoding,
+                    ControlSampleEncoding::RgbPixels {
+                        count: 6,
+                        color_order: ColorOrder::Rgb
+                    }
+                )),
+            "the samples are named RGB lamps, or a lamp view draws them black"
+        );
     }
 
     #[test]

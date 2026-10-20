@@ -545,6 +545,17 @@ async function main() {
         `${await driver.card({ board: mac })}?.querySelector('[data-picture="cloud"][data-picture-frame="true"]') ? 'cloud' : false`,
         { timeoutMs: STEP_MS, what: "the card to draw lightplayer.app's picture" },
       );
+      // Lit, not just present: the picture's canvas has a pixel that is not
+      // black (the board plays Basic, whose lamps are never all off).
+      seen.lit = await driver.waitFor(
+        `(() => { const canvas = ${await driver.card({ board: mac })}?.querySelector('[data-picture="cloud"] canvas');
+                  if (!canvas || !canvas.width || !canvas.height) return false;
+                  const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+                  let lit = 0;
+                  for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0 && data[i] + data[i + 1] + data[i + 2] > 60) lit += 1;
+                  return lit > 0 ? lit : false; })()`,
+        { timeoutMs: STEP_MS, what: "lightplayer.app's picture to light some lamps" },
+      );
       await driver.screenshot(path.join(shots, "studio-relay-T5-never-met.png"));
       const hubFrom = cloud.log().length;
       const from = hold.console.mark();
@@ -552,7 +563,7 @@ async function main() {
       seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
       seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
       const line = await readyOnRelay();
-      return { seenAfterMs: seen.seenAfterMs, loadMs: seen.loadMs, online: seen.online, picture: seen.picture, hub: seen.hub, board: seen.board, line };
+      return { seenAfterMs: seen.seenAfterMs, loadMs: seen.loadMs, online: seen.online, picture: seen.picture, litPixels: seen.lit, hub: seen.hub, board: seen.board, line };
     });
   } catch (error) {
     fatal = error;
