@@ -15,8 +15,8 @@
 //! 42%" (one number for the whole update, never "1 of 2"), "backing up ·
 //! 12%", "installing · 30%", "identifying".
 
-use lpa_devices::ActivityKind;
 use lpa_devices::view::ActivityView;
+use lpa_devices::{ActivityKind, UpdateStageFacts};
 
 use super::board_card_input::BoardCardInput;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
@@ -105,6 +105,24 @@ pub(crate) fn update_work(standing: &UpdateStanding) -> Option<(&'static str, Op
         _ => return None,
     };
     Some((verb, standing.whole_percent()))
+}
+
+/// The one number an update says everywhere: `percent` of the current
+/// `stage`, as a percent of the whole update. The new firmware's core is
+/// 0–49 % and its engine (finishing) 50–100 %; a backup, a restore and
+/// another device's update are one step each. The card's words
+/// ([`UpdateStanding::whole_percent`]) and the terminal's "at N%" and
+/// "· N%" ([`crate::app::devices::update_narration`]) say this number, so
+/// one moment of one update never reads as two (a test pins them equal).
+pub(crate) fn whole_update_percent(stage: UpdateStageFacts, percent: u8) -> u8 {
+    let percent = percent.min(100);
+    match stage {
+        UpdateStageFacts::Updating => percent / 2,
+        UpdateStageFacts::Finishing => percent / 2 + 50,
+        UpdateStageFacts::BackingUp | UpdateStageFacts::Restoring | UpdateStageFacts::Waiting => {
+            percent
+        }
+    }
 }
 
 /// Work under way on a row: `verb` and `percent`, the one number its words
@@ -335,6 +353,72 @@ mod tests {
         };
         assert_eq!(update_work(&backing_up), Some(("backing up", Some(12))));
         assert_eq!(update_work(&UpdateStanding::UpToDate { version: x }), None);
+    }
+
+    /// The terminal's number and the card's are one: for every stage and
+    /// every part-percent, [`whole_update_percent`] says what the standing
+    /// the card is built from says.
+    #[test]
+    fn the_terminals_number_is_the_cards() {
+        let x = UpdateVersion::new("2026.10.08-9");
+        let y = UpdateVersion::new("2026.10.16-1");
+        for percent in 0..=100u8 {
+            let some = Some(percent);
+            let standings = [
+                (
+                    UpdateStageFacts::BackingUp,
+                    UpdateStanding::BackingUp {
+                        board: x.clone(),
+                        to: y.clone(),
+                        percent: some,
+                    },
+                ),
+                (
+                    UpdateStageFacts::Updating,
+                    UpdateStanding::Updating {
+                        board: x.clone(),
+                        to: y.clone(),
+                        link: crate::app::devices::device_update_route::UpdateLink::Usb,
+                        percent: some,
+                    },
+                ),
+                (
+                    UpdateStageFacts::Restoring,
+                    UpdateStanding::Restoring {
+                        board: x.clone(),
+                        percent: some,
+                        running: true,
+                    },
+                ),
+                (
+                    UpdateStageFacts::Finishing,
+                    UpdateStanding::Finishing {
+                        board: x.clone(),
+                        to: y.clone(),
+                        percent: some,
+                        running: true,
+                        resumed: false,
+                    },
+                ),
+                (
+                    UpdateStageFacts::Waiting,
+                    UpdateStanding::AnotherDevice {
+                        board: x.clone(),
+                        to: Some(y.clone()),
+                        percent: some,
+                    },
+                ),
+            ];
+            for (stage, standing) in standings {
+                assert_eq!(
+                    Some(whole_update_percent(stage, percent)),
+                    standing.whole_percent(),
+                    "{stage:?} at {percent}%"
+                );
+            }
+        }
+        assert_eq!(whole_update_percent(UpdateStageFacts::Updating, 99), 49);
+        assert_eq!(whole_update_percent(UpdateStageFacts::Finishing, 0), 50);
     }
 
     #[test]

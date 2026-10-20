@@ -473,6 +473,19 @@ fn a_link_drop_mid_core_finishes_on_reconnect_with_no_click() {
         bench.outcome(device) == Some(UpdateOutcomeFacts::BoardDidNotComeBack)
     });
     assert!(bench.said_starting("link dropped during update at "));
+    // The number is the whole update's, as the card says it: a drop in the
+    // core is under 50 %.
+    let dropped = bench
+        .lines
+        .iter()
+        .find_map(|line| line.strip_prefix("link dropped during update at "))
+        .and_then(|rest| rest.strip_suffix('%'))
+        .and_then(|number| number.parse::<u8>().ok())
+        .expect("the drop line names its percent");
+    assert!(
+        dropped < 50,
+        "a drop in the core reads under 50%: {dropped}"
+    );
     let presses = bench.presses;
 
     let starts = bench.update_starts;
