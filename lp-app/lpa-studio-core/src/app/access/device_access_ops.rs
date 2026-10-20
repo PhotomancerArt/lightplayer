@@ -346,7 +346,7 @@ async fn send<Io: ClientIo>(
         Err(ClientError::NotPermitted { needs }) => {
             Err(super::not_permitted_sentence(needs).to_string())
         }
-        Err(ClientError::Server(error)) => Err(error),
+        Err(ClientError::Server(error)) => Err(super::board_refusal::board_refusal_words(&error)),
         Err(error) => Err(format!("the device did not answer: {error}")),
     }
 }
@@ -501,6 +501,36 @@ mod tests {
         assert_eq!(synced.refused.as_deref(), Some(FULL_SENTENCE));
         assert_eq!(synced.listing.entries.len(), MAX_SECRETS_PER_FILE);
         assert_eq!(board.store().secrets.len(), MAX_SECRETS_PER_FILE);
+    }
+
+    /// The REAL store answers (the fake board runs `lpa-server`'s access
+    /// store). With the client's own room rule out of the way, a key that
+    /// reaches a board at its cap and a key the store refuses outright are
+    /// said in words, not in the store's.
+    #[test]
+    fn the_real_stores_refusals_come_out_in_words() {
+        use crate::app::access::board_refusal::WONT_TAKE_SENTENCE;
+        let entries: Vec<_> = (1..=16u8)
+            .map(|salt| {
+                let mut key = held("friends", salt).key;
+                key.kind = SecretKind::Password;
+                key.entry(1)
+            })
+            .collect();
+        let board = FakeBoard::with_entries(entries);
+        let mut usb = board.usb();
+        let at_cap = ClientRequest::AccessAdd {
+            entry: held("Mine", 40).key.entry(9),
+        };
+        let error = block_on(send(&mut usb, at_cap)).expect_err("the board is full");
+        assert_eq!(error, FULL_SENTENCE);
+        assert_eq!(board.store().secrets.len(), MAX_SECRETS_PER_FILE);
+
+        let zero_salt = ClientRequest::AccessAdd {
+            entry: held("Mine", 0).key.entry(9),
+        };
+        let error = block_on(send(&mut usb, zero_salt)).expect_err("the anonymous key's salt");
+        assert_eq!(error, WONT_TAKE_SENTENCE);
     }
 
     #[test]
