@@ -366,7 +366,9 @@ fn a_playlist_cycle_and_skip_list_survive_a_reboot() {
     let mut restored: Vec<(String, LpValue)> = engine
         .panel_writers()
         .iter()
-        .map(|((_, channel), writer)| (channel.0.clone(), writer.value.clone()))
+        .filter_map(|((_, channel), writer)| {
+            Some((channel.0.clone(), writer.value.as_value()?.clone()))
+        })
         .collect();
     restored.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(
