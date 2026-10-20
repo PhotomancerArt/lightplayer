@@ -16,7 +16,7 @@ at their second step, every run, on the page branch `claude/one-home-page`
 reproduced 2026-10-09):
 
 ```
-— open: open the Wi‑Fi row: nothing saved, so it opens on adding a network by name
+— open: open the Wi‑Fi panel (the Wi‑Fi row's details): nothing saved, so it opens on adding a network by name
   ✗ waiting for the connect page (Not set up., type the name): page evaluation failed: Error: wait deadline
 ```
 
@@ -45,8 +45,10 @@ access points). The walk picks `lp-walk-net` from the board's scan, types
 its password and presses Connect (the board joins; the row shows its own
 lease), adds `lp-back-office` by name through "Other network…" (no access
 point has it: Not in range, and the board stays joined), checks the chip
-file, reloads (both read back, still joined), turns the cloud relay off and
-forgets `lp-back-office`. Every claim keys off the board: its status over
+file, reloads (both read back, still joined), turns lightplayer.app off (the
+switch at the top of its row's details; the board says Cloud relay off) and
+forgets `lp-back-office`. The walk reads the card by its hooks, as the card
+rework (#1200) left them: the Wi‑Fi panel is inside the Wi‑Fi row's details. Every claim keys off the board: its status over
 its LAN forward (`lp-cli wifi status lan:<fwd>`, a path the page never
 touches), the networks its scan heard, and the chip file. The password
 check stays, for both passwords. A connect page that says "can't list
@@ -55,9 +57,10 @@ Wi‑Fi … this lane needs a firmware with a station") rather than as a wait
 deadline.
 
 **Regression coverage** — none automated: the walk is not CI (headless
-Chrome over the release bundle). Both lanes ran green on this change, twice
-each, 9 of 9 steps, about 50 s a lane, on `lp-emu:esp32c6:t1+net=lan` (lp-emu
-`d6c445a05`): the board joined `lp-walk-net` at `192.168.4.100`, reported
+Chrome over the release bundle). Both lanes ran green on this change, 9 of 9
+steps, about 50 s a lane, on `lp-emu:esp32c6:t1+net=lan` (lp-emu `d6c445a05`
+at the first fix; again 2026-10-19 on the merge with #1200, lp-emu
+`04cb9d95d`): the board joined `lp-walk-net` at `192.168.4.100`, reported
 `lp-back-office` `last: notFound` while staying joined, read both back after
 a reload, turned the relay off and kept `lp-walk-net` after the Forget. No
 password on the page or in its console. The `lan`, `studio-lan`,
