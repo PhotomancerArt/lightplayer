@@ -1100,36 +1100,28 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     );
     let brightness = control_for_channel(&face, "brightness");
     assert!(
-        matches!(brightness.control.widget, crate::UiPanelWidget::Knob { .. }),
-        "on a panel the fixture's brightness is a knob, got {:?}",
+        matches!(
+            brightness.control.widget,
+            crate::UiPanelWidget::Fader { .. }
+        ),
+        "on a panel the fixture's brightness is its own fader, got {:?}",
         brightness.control.widget
     );
     assert_eq!(
         brightness.state,
         crate::UiPanelControlState::ReadDefault,
-        "nothing writes bus:brightness, so the knob reads the fixture's \
+        "nothing writes bus:brightness, so the fader reads the fixture's \
          authored default (R6)"
     );
-    // The fixture's own card keeps its fader, the face's hero: one control,
-    // two presentations, the same range, channel and address.
+    // One control, one presentation: the fixture's own card and the panel
+    // draw the same `UiPanelControl`, brightness being a fader on both.
     let fixture = node_by_kind(&snapshot, "Fixture");
     let Some(UiNodeFace::Fixture(fixture_face)) = &fixture.face else {
         panic!("the fixture card keeps its face");
     };
-    let crate::UiPanelWidget::Fader { min, max, step } = fixture_face.brightness.widget else {
-        panic!(
-            "the fixture's own card draws a fader, got {:?}",
-            fixture_face.brightness.widget
-        );
-    };
     assert_eq!(
-        brightness.control.widget,
-        crate::UiPanelWidget::Knob { min, max, step }
-    );
-    assert_eq!(brightness.control.address, fixture_face.brightness.address);
-    assert_eq!(
-        brightness.control.panel_target,
-        fixture_face.brightness.panel_target
+        brightness.control, fixture_face.brightness,
+        "the panel's brightness is the fixture card's own control"
     );
     let glow = control_for_channel(&face, "glow");
     assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
@@ -3877,6 +3869,93 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             "{id}: the selection is core state, not view-local"
         );
     }
+}
+
+/// The real small-dome on the connected card (the card panel layout plan):
+/// the root holds the clock's Speed and no brightness, and Dome and Doors
+/// are modules, each with its own fixture, so each section is led by its own
+/// brightness fader. Nothing is hoisted to the card's front as if it were
+/// the whole project's.
+#[test]
+fn small_domes_card_panel_leads_each_module_with_its_own_brightness() {
+    let example =
+        crate::app::home::embedded_example("catalog/small-dome").expect("example embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    connect_running_project(&handle.tx);
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let panel = crate::board_panel_picks(&face.panel, None);
+
+    // The band: the root's own controls, no heading. Only the clock's Speed
+    // is the whole project's; no brightness is.
+    let band = &panel.sections[0];
+    assert_eq!(band.heading, None, "the root's section is the band");
+    assert_eq!(
+        band.controls
+            .iter()
+            .map(|control| control.view.channel.as_str())
+            .collect::<Vec<_>>(),
+        ["clock.rate"],
+        "the band holds the clock's Speed and no brightness"
+    );
+
+    // Dome and Doors: each a module under its own name and kind, each led by
+    // its own brightness (a strip), then its cells in the walk's order.
+    let rest: Vec<_> = panel.sections[1..]
+        .iter()
+        .map(|section| {
+            let heading = section.heading.as_ref().expect("a nested group's heading");
+            (
+                heading.name.as_str(),
+                heading.kind.as_str(),
+                section
+                    .controls
+                    .iter()
+                    .map(|control| {
+                        (
+                            control.view.channel.as_str(),
+                            control.view.control.widget.shape(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    use crate::UiPanelShape::{Cell, Strip};
+    assert_eq!(
+        rest,
+        [
+            (
+                "Dome",
+                "Module",
+                vec![("brightness", Strip), ("bands", Cell), ("speed", Cell)]
+            ),
+            (
+                "Doors",
+                "Module",
+                vec![("brightness", Strip), ("speed", Cell), ("warmth", Cell)]
+            ),
+        ],
+        "each module leads with its own brightness: {:?}",
+        panel.sections
+    );
+    assert_eq!(panel.sections.len(), 3, "the band, Dome and Doors");
+    assert_ne!(
+        panel.sections[1].controls[0].scope, panel.sections[2].controls[0].scope,
+        "the two brightness faders are two different modules' controls"
+    );
 }
 
 /// The G1 acceptance run, headless: author the small-dome's as-built

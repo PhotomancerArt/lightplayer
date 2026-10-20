@@ -10,6 +10,7 @@
 
 use crate::{UiPanelControlState, UiPanelControlView};
 
+use super::ui_board_panel_heading::UiBoardPanelHeading;
 use super::ui_card_action::UiCardAction;
 
 /// The board's panel, as the connected card draws it.
@@ -18,8 +19,11 @@ pub struct UiBoardPanel {
     /// The root panel's scope target: what the ⋯ menu's panel reset clears
     /// (its details, [`crate::UiDetailPanel::PanelSettings`]).
     pub target: Option<lpc_wire::WireScopeRef>,
-    /// Every control on the panel, in panel order: the root's own first,
-    /// the master leading, then each nested group's under its heading.
+    /// Every control on the panel, in panel order: the root's own first
+    /// (the band, no heading), then each nested group's under its heading.
+    /// Each section's controls are ordered by shape, then the bus's
+    /// registry, then the walk ([`crate::panel_order_key`]); nothing is
+    /// pulled forward by name.
     pub sections: Vec<UiBoardPanelSection>,
     /// Panel-state auto-save, only at the edit tier (`None` below it): the
     /// ⋯ menu's switch, never drawn on the panel.
@@ -47,13 +51,14 @@ impl UiBoardPanel {
     }
 }
 
-/// One run of the panel's controls: the root's own (no heading), or one
-/// nested group's (an effect's), under that group's name.
+/// One run of the panel's controls: the root's own (no heading; the card
+/// draws it as the band), or one nested group's (an effect's), under that
+/// group's name and kind.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiBoardPanelSection {
-    /// The nested group's name, drawn as a quiet heading; `None` for the
-    /// root's own controls.
-    pub heading: Option<String>,
+    /// The nested group's name and kind, drawn as its heading; `None` for
+    /// the root's own controls.
+    pub heading: Option<UiBoardPanelHeading>,
     pub controls: Vec<UiCardControl>,
 }
 

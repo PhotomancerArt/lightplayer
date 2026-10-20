@@ -727,13 +727,15 @@ fn the_opening_frames_connect_keeps_the_editor_open() {
 // ---------------------------------------------------------------------
 
 /// CD6, CD7: Connect on a running board whose project has a root panel.
-/// The card carries the whole panel in the bars' place: the master
-/// brightness (a knob on a panel) and the clock's Speed knob, then the
-/// Pattern instrument and the playing pattern's knob and palette, each
-/// group under its name — the root panel's own controls, every one. Done is the primary, and the ⋯
-/// holds the panel's reset and, on USB (the edit tier), auto-save. The
-/// editor's view is built to draw them, and none of its verbs are published
-/// on the home page.
+/// The card carries the whole panel in the bars' place: the root's band
+/// (the fixture's brightness fader, a strip, then the clock's Speed knob, a
+/// cell), then the Pattern instrument (a block) and the playing pattern's
+/// palette (a strip, so it leads its group) and knob, each group under its
+/// name — the root panel's own controls, every one, ordered by shape and
+/// then the bus's registry. Done is the primary, and the ⋯ holds the
+/// panel's reset and, on USB (the edit tier), auto-save. The editor's view
+/// is built to draw them, and none of its verbs are published on the home
+/// page.
 #[test]
 fn the_connected_card_carries_the_panel() {
     let (mut bench, _tasks, _device, id, _uid) =
@@ -745,11 +747,11 @@ fn the_connected_card_carries_the_panel() {
     assert_eq!(
         channels(&panel),
         [
-            crate::MASTER_CHANNEL,
+            "brightness",
             "clock.rate",
             "playlist.cycle",
-            "glow",
-            "palette"
+            "palette",
+            "glow"
         ]
         .map(String::from)
     );
@@ -764,14 +766,15 @@ fn the_connected_card_carries_the_panel() {
          groups under their names: {:?}",
         panel.sections
     );
-    let master = panel.controls().next().expect("the master");
+    let first = panel.controls().next().expect("the first control");
+    assert_eq!(first.view.channel, "brightness");
     assert!(
         matches!(
-            master.view.control.widget,
-            crate::UiPanelWidget::Knob { .. }
+            first.view.control.widget,
+            crate::UiPanelWidget::Fader { .. }
         ),
-        "the master leads, a knob on a panel: {:?}",
-        master.view.control.widget
+        "the first control is the brightness fader: {:?}",
+        first.view.control.widget
     );
     assert!(panel.target.is_some(), "the root panel's scope");
     assert!(panel.auto_save.is_some(), "USB holds the edit tier");

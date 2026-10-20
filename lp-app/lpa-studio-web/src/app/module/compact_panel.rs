@@ -4,12 +4,13 @@
 //! connected).
 //!
 //! Core laid out what it shows ([`UiBoardPanel`]: every control, in
-//! sections — the root's own with the master leading, then each nested
-//! group's under its name); this piece decides only how it looks:
+//! sections — the root's own, then each nested group's under its name and
+//! kind); this piece decides only how it looks:
 //!
-//! 1. each section's controls in a grid, in panel order: knobs and toggles
-//!    as many to a row as the card's width holds, a palette, a fader or the
-//!    Pattern instrument across the whole row;
+//! 1. each section's controls in a grid, in panel order: a cell (a knob, the
+//!    Speed knob, a toggle) as many to a row as the card's width holds, a
+//!    strip or a block (a fader, a palette, the Pattern instrument) across
+//!    the whole row; it lays out by [`UiPanelShape`], never by widget;
 //! 2. a nested group's section under a quiet heading, its name on a
 //!    hairline;
 //! 3. the foot: a bar with the panel's action — Edit, or its lock on a
@@ -31,7 +32,7 @@
 //! `data-panel-state`: [`ModulePanelControl`]).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiBoardPanel, UiBoardPanelSection, UiCardControl, UiPanelWidget};
+use lpa_studio_core::{UiAction, UiBoardPanel, UiBoardPanelSection, UiCardControl, UiPanelShape};
 
 use super::{ModulePanelControl, panel_gesture_actions};
 use crate::app::board_card::{CardAction, CardActionLook};
@@ -81,7 +82,7 @@ fn PanelSection(
         div { class: SECTION_CLASS,
             if let Some(heading) = section.heading {
                 div { class: HEADING_CLASS, "data-board-panel-heading": "",
-                    span { class: HEADING_WORDS_CLASS, title: "{heading}", "{heading}" }
+                    span { class: HEADING_WORDS_CLASS, title: "{heading.name}", "{heading.name}" }
                     span { class: HEADING_RULE_CLASS, aria_hidden: "true" }
                 }
             }
@@ -100,7 +101,8 @@ fn PanelSection(
 }
 
 /// One control: the panel's own control at card size, in a grid cell, or
-/// across the grid's row when it is a strip (its walk hooks are its own).
+/// across the grid's row when its shape is a strip or a block (its walk
+/// hooks are its own).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn CardControl(
@@ -108,9 +110,9 @@ fn CardControl(
     on_panel: EventHandler<super::PanelGesture>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let cell = match is_strip(&control.view.control.widget) {
-        true => STRIP_CELL_CLASS,
-        false => CELL_CLASS,
+    let cell = match control.view.control.widget.shape() {
+        UiPanelShape::Strip | UiPanelShape::Block => STRIP_CELL_CLASS,
+        UiPanelShape::Cell => CELL_CLASS,
     };
     rsx! {
         div { class: cell,
@@ -122,17 +124,6 @@ fn CardControl(
                 on_action: Some(on_action),
             }
         }
-    }
-}
-
-/// A widget that takes the whole row: a palette, a fader, the Pattern
-/// instrument. A knob (the Speed knob among them) or a toggle is a cell.
-fn is_strip(widget: &UiPanelWidget) -> bool {
-    match widget {
-        UiPanelWidget::Fader { .. }
-        | UiPanelWidget::PaletteSwatch
-        | UiPanelWidget::PatternPicker { .. } => true,
-        UiPanelWidget::Knob { .. } | UiPanelWidget::Speed | UiPanelWidget::Toggle => false,
     }
 }
 
@@ -174,8 +165,8 @@ const EMPTY_CLASS: &str = "tw:m-0 tw:border-0 tw:border-t tw:border-solid tw:bor
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiSlotFieldState,
-        UiSlotValue,
+        UiBoardPanelHeading, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit,
+        UiPanelWidget, UiSlotFieldState, UiSlotValue,
     };
 
     use super::*;
@@ -201,24 +192,37 @@ mod tests {
         assert!(speed_at < heading_at && heading_at < hue_at, "{html}");
     }
 
-    /// A palette, a fader or the Pattern instrument takes the whole row; a
-    /// knob, the Speed knob and a toggle are cells.
+    /// A strip (a fader, a palette) takes the whole row; a cell (a knob, the
+    /// Speed knob, a toggle) takes one unit of it. The shape decides, never
+    /// the widget.
     #[test]
-    fn strips_span_the_row_and_knobs_are_cells() {
-        assert!(is_strip(&UiPanelWidget::PaletteSwatch));
-        assert!(is_strip(&fader("level").control.widget));
-        assert!(!is_strip(&UiPanelWidget::Speed));
-        assert!(!is_strip(&UiPanelWidget::Toggle));
-        assert!(!is_strip(&knob("hue").control.widget));
+    fn strips_span_the_row_and_cells_do_not() {
         let html = render(panel(vec![section(
             None,
-            vec![knob("speed"), fader("level")],
+            vec![
+                control("speed", UiPanelWidget::Speed),
+                control("sparkle", UiPanelWidget::Toggle),
+                fader("level"),
+                control("palette", UiPanelWidget::PaletteSwatch),
+            ],
         )]));
-        let level = html
-            .find(r#"data-panel-channel="level""#)
-            .expect("the fader");
-        let cell = &html[html[..level].rfind(STRIP_CELL_CLASS).expect("its cell")..level];
-        assert!(!cell.contains(CELL_CLASS), "the fader is in a strip cell");
+        let wrapper = |channel: &str| {
+            let at = html
+                .find(&format!(r#"data-panel-channel="{channel}""#))
+                .unwrap_or_else(|| panic!("{channel} missing from {html}"));
+            let strip = html[..at].rfind(STRIP_CELL_CLASS);
+            let cell = html[..at].rfind(CELL_CLASS);
+            // The nearest wrapper before the control is its own.
+            match (strip, cell) {
+                (Some(strip), Some(cell)) => strip > cell,
+                (Some(_), None) => true,
+                _ => false,
+            }
+        };
+        assert!(!wrapper("speed"), "the Speed knob is a cell");
+        assert!(!wrapper("sparkle"), "a toggle is a cell");
+        assert!(wrapper("level"), "a fader is a strip");
+        assert!(wrapper("palette"), "a palette is a strip");
     }
 
     /// The card grows to fit: no fixed height, nothing clipped.
@@ -280,7 +284,10 @@ mod tests {
 
     fn section(heading: Option<&str>, views: Vec<UiPanelControlView>) -> UiBoardPanelSection {
         UiBoardPanelSection {
-            heading: heading.map(str::to_string),
+            heading: heading.map(|name| UiBoardPanelHeading {
+                name: name.to_string(),
+                kind: "Module".to_string(),
+            }),
             controls: views
                 .into_iter()
                 .map(|view| UiCardControl {

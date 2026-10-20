@@ -1,5 +1,7 @@
 //! Widget families for node face panel controls.
 
+use super::ui_panel_shape::UiPanelShape;
+
 /// The interactive widget family a panel control renders as.
 ///
 /// Ranges ride the widget (not the slot row) because the face's panel is the
@@ -60,4 +62,58 @@ pub enum UiPanelWidget {
         /// Names, states, cycle and every gesture's action.
         picker: crate::UiPatternPicker,
     },
+}
+
+impl UiPanelWidget {
+    /// How this widget takes its room on a panel. The match is exhaustive
+    /// on purpose: a new widget must say its shape.
+    #[must_use]
+    pub fn shape(&self) -> UiPanelShape {
+        match self {
+            Self::Knob { .. } | Self::Toggle | Self::Speed => UiPanelShape::Cell,
+            Self::Fader { .. } | Self::PaletteSwatch => UiPanelShape::Strip,
+            Self::PatternPicker { .. } => UiPanelShape::Block,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_widget_names_its_shape() {
+        let knob = UiPanelWidget::Knob {
+            min: 0.0,
+            max: 1.0,
+            step: None,
+        };
+        let stepped = UiPanelWidget::Knob {
+            min: 0.0,
+            max: 8.0,
+            step: Some(1.0),
+        };
+        let fader = UiPanelWidget::Fader {
+            min: 0.0,
+            max: 1.0,
+            step: None,
+        };
+        let picker = UiPanelWidget::PatternPicker {
+            picker: crate::UiPatternPicker {
+                verbs: crate::OfferPath::root("project"),
+                entries: Vec::new(),
+                active: None,
+                cycle: lpc_model::PlaylistCycle::Hold,
+                cycle_target: None,
+                skip_target: None,
+            },
+        };
+        assert_eq!(knob.shape(), UiPanelShape::Cell);
+        assert_eq!(stepped.shape(), UiPanelShape::Cell);
+        assert_eq!(UiPanelWidget::Toggle.shape(), UiPanelShape::Cell);
+        assert_eq!(UiPanelWidget::Speed.shape(), UiPanelShape::Cell);
+        assert_eq!(fader.shape(), UiPanelShape::Strip);
+        assert_eq!(UiPanelWidget::PaletteSwatch.shape(), UiPanelShape::Strip);
+        assert_eq!(picker.shape(), UiPanelShape::Block);
+    }
 }
