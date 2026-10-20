@@ -8,8 +8,14 @@ Shown on the home page and the Boards tab. Built in core
 Status: **shipped** (the eight rows as a new board's setup list,
 2026-10-19, plan `lp2025/2026-10-19-1350-board-setup-rows`, spike
 `spikes/install-network-setup`; round 3, the card's top as its main
-surface, was PR #1176; round 2 of the card's words was PR #1159). Where a line changed what
-shipped before, its comment says `was:`. ◆ is the layers icon (O2).
+surface, was PR #1176; round 2 of the card's words was PR #1159). The
+connected panel's layout (Whole, Panel, and L1–L10 under Decided) is
+**drawn, not built yet**: 2026-10-19, plan
+`lp2025/2026-10-19-2255-board-card-panel-layout`, spike `spikes/panel-layout`,
+PR #1206, [the study](../studies/panel-layout/README.md). Until it lands the
+card draws #1196's panel, and the play page and the editor keep their own
+layouts until their plans. Where a line changed what shipped before, its
+comment says `was:`. ◆ is the layers icon (O2).
 
 ## Whole
 
@@ -50,32 +56,149 @@ likely action a user wants to take". The surface explains; the primary
 gives the thing to do. There are no buttons on the surface.
 
 Connected, the rows become the board's whole panel and the primary becomes
-Done. The card grows once to hold it, and shrinks back on Done:
+Done. The card grows once to hold it, and shrinks back on Done. The panel
+lays out by shape and by the bus, never by a control's name; the parts are
+drawn under Panel, below. `▒` is the band's tint; `◎` a knob; `━━●━` a fader;
+`▬▬▬` a palette band; `(↺)` let go; `(ⓘ)` details; `▭` a module's kind icon.
+
+The PLAYFUL choker, 300 px. The board lists its controls Speed, Brightness,
+Palette, Scale. By shape and the bus: the strips (Brightness, then Palette),
+then the cells (Speed, then Scale):
 
 ```text
 ├────────────────────────────┬─────────────┤
 │ Playful choker             │ ✓ Done      │
 ├────────────────────────────┴─────────────┤
-│    ◎            ◎            ◎           │   knobs and toggles, as many to a row
-│ BRIGHTNESS    SPEED        SCALE         │   as the card is wide; the master first
-│    128          1×          1.6          │   # was: the master fader across the card
-│ PALETTE                    ↻ 4 · 20 s    │   a palette across the card
-│ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ │
-│ PLASMA 1 ─────────────────────────────── │   a nested group under a quiet heading
-│    ◎ Hue        ◎ Width                  │
-├────────────────────────────────┬─────────┤
-│                                │ ✎ Edit  │   the foot: Edit, or its lock
-└────────────────────────────────┴─────────┘   # was: All controls · 3 more │ Edit
+▒ BRIGHTNESS                           128 ▒   1 band     the root's controls, on a tint, no word
+▒ ━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━ ▒   2 strip    label and value above; the track the width
+▒──────────────────────────────────────────▒   3 lines    light, edge to edge
+▒ PALETTE                       ↻ 5 · 16 s ▒
+▒ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ ▒
+▒─────────────┬─────────────┬──────────────▒
+▒      ◎      │      ◎      │              ▒   4 cells    three to a line
+▒    SPEED    │    SCALE    │              ▒
+▒     1×      │    1.60     │              ▒
+├─────────────┴─────────────┴────┬─────────┤
+│                                │ ✎ Edit  │   5 foot     unchanged
+└────────────────────────────────┴─────────┘
+```
+
+```text
+was: BRIGHTNESS, SPEED, PALETTE, SCALE   brightness pulled first by name, then the walk: Scale alone under the palette
+```
+
+small-dome, 300 px. The root has the clock's Speed. The dome and the doors
+are modules, each with its own fixture, so each has its own brightness:
+
+```text
+├────────────────────────────┴─────────────┤
+▒      ◎      │             │              ▒   the band: the clock's Speed, which reaches both
+▒    SPEED    │             │              ▒
+▒     1×      │             │              ▒
+├─────────────┴─────────────┴──────────────┤   6 group    its own line, a step stronger than the light ones
+│ ▭ DOME                                   │   7 heading  the node's name and its kind icon
+│ BRIGHTNESS                           100 │   the dome's brightness leads the dome
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━ │
+│─────────────┬─────────────┬──────────────│
+│      ◎      │      ◎      │              │
+│    BANDS    │    PHASE    │              │
+│    3.00     │    24 s     │              │
+├─────────────┴─────────────┴──────────────┤
+│ ▭ DOORS                                  │
+│ BRIGHTNESS                           100 │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━ │
+│ …                                        │
+```
+
+```text
+was: the dome's BRIGHTNESS first, at the card's front with no heading, as if it were the whole project's
 ```
 
 ```text
 Speed      the clock, one knob: log ¼×–8×, 1× at the top, the octave
            stops marked. the clock's own card keeps the whole tape.     # was: the tape, on the play page
-Brightness a knob on the panel; the fixture's own card keeps its fader. # was: a fader across the card
+Brightness a fader on the panel, a strip; the fixture's own card draws the same fader.   # was: a knob on the panel
 ```
 
 Nothing on the card links away: every control is here, and the play page
 is an address (phones, shared links, the editor's Play), not a row.
+
+## Panel
+
+The connected card's panel: every panel control, laid out by shape. The
+drawings were reviewed with the plan; the study
+([panel layout](../studies/panel-layout/README.md)) has what was tried and
+passed over. The card is the only surface drawn so far.
+
+### The order
+
+```text
+a group      its strips · its blocks · its cells
+each run     the bus's registry order: brightness · palette · clock.rate · …
+             then the walk's order (nodes and slots as the tree lists them)
+nothing      in panel code names a channel
+```
+
+A group is the root's controls or one node's. A control's shape (a cell, a
+strip or a block) decides its run; the bus's own order decides its place in
+the run, so the project's brightness leads the project and a module's leads
+that module, and no channel is named in the card's code. A channel the
+registry doesn't list ranks after every one it does, and the walk's order
+breaks every tie.
+
+### A cell
+
+```text
+┌─────────────┐
+│(↺)       (ⓘ)│   corners   24 px circles, 4 px in from the top corners, over the knob's empty corners
+│      ◎      │             ↺ let go: only while held, gold
+│    SPEED    │             ⓘ details: on hover, or while focused; a toggle's always, on touch
+│     1×      │   hit area  the whole cell; hover lightens it
+└─────────────┘   knob      drag up or down from anywhere
+                  toggle    flips from anywhere
+                  a tap     (no drag) opens details; Speed's double-click is still 1×
+```
+
+On the phone's narrow card (178 px) the cells are 50 px and the two circles
+nearly touch. They show together only on a held control under the pointer.
+Cells stay three to a line on a 300 px card.
+
+A knob drags up or down from anywhere in its cell, a toggle flips from
+anywhere in its cell, and a tap that doesn't move opens details; Speed's
+double-click is still 1×, so its details open a moment after a tap. On a
+device with no hover a toggle's ⓘ always shows, because its tap is its flip
+(L9), and a vertical swipe on a knob's cell turns the knob (L10).
+
+### A strip
+
+```text
+│(↺) BRIGHTNESS                   128 (ⓘ)│   label row  ↺ before the label, ⓘ after the value;
+│ ━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━ │              both ends kept free, so nothing moves
+                                              fader      press the track to jump; drag sideways from anywhere
+                                              palette    the band opens its chooser
+                                              a tap      on the label row opens details
+```
+
+A fader strip jumps to a press on its track and drags sideways from
+anywhere; a drag that starts on the label row moves the value from where it
+was, and a tap there opens details. A palette strip's band opens its chooser
+and a tap on its label row opens details. The label row keeps both ends
+whether or not a circle shows, so a circle never moves the label or the
+value (P3). On touch a strip lets a vertical swipe scroll the page (L10).
+
+### A group's heading
+
+```text
+├──────────────────────────────────────────┤   a group's own line
+│ ▭ PLASMA 1                               │   name and kind icon; no box, no hairline after the name
+│ ≡ PATTERN                                │   a playlist's (ListMusic): today's group, kept until the playlist zone is settled
+```
+
+The root's controls sit on the band, a tint with no word: "global" is never
+said. A nested group is a child module's, under a heading of its node's name
+and its kind icon, flat and depth first. No boxes (P9). The playlist's groups
+keep their place and contents, with the new heading and look, until the
+playlist zone is settled.
 
 ## Surface
 
@@ -583,7 +706,7 @@ The card panel pass, 2026-10-19 (PR #1196, plan `lp2025/2026-10-19-0826-card-pan
 ```text
 C1  connected, the card holds every panel control; it grows once, on connect   (Yona)
 C2  on a panel the clock is one Speed knob, 1× at the top; its card keeps the tape   (Yona)
-C3  on a panel brightness is a knob, still first; its fixture's card keeps the fader   (Yona)
+C3  on a panel brightness is a knob, still first; its fixture's card keeps the fader   (Yona) (was; L3 reverses it)
 C4  the panel's reset and auto-save live in the ⋯                  (director's call, pending Yona's veto)
 C5  Edit, or its lock, stays at the bottom, at the panel's foot    (director's call, pending Yona's veto)
 ```
@@ -608,4 +731,19 @@ S5  the board is renamed where its name is, a faint pencil always shown   (Yona)
 S6  the primary is Install firmware, Add a project, Connect; Wi‑Fi and lightplayer.app ask through their rows   (Yona)
 S7  the struck cloud mark is gone: lightplayer.app's row says it   (Yona)
 S8  stand-ins keep the eight rows, "—" on the radio rows   (Yona)
+```
+
+The panel's layout, 2026-10-19 (spike `spikes/panel-layout`, plan `lp2025/2026-10-19-2255-board-card-panel-layout`):
+
+```text
+L1  three shapes: a cell (knob, Speed, stepped knob, toggle), a strip (fader, palette), a block (the Pattern instrument)   (Yona)
+L2  a group: strips, then blocks, then cells; each run in the bus's registry order, then the walk's; nothing named   (Yona)
+L3  brightness is a fader on the panel again, a strip: it leads every group that has one   (Yona; was C3)
+L4  a strip's label and value above its track; the track the line's whole width   (Yona)
+L5  light lines between controls, edge to edge, a step lighter than a group's line   (Yona)
+L6  the whole cell is the target, with a hover; a tap opens details   (Yona)
+L7  let go and details are 24 px circles in the cell's top corners: ↺ while held, ⓘ on hover   (Yona)
+L8  the root's controls on a tint with no word; a group under its node's name and kind icon; no boxes   (Yona)
+L9  a toggle's ⓘ always shows on touch, where its tap is its flip   (director's call, pending Yona at the gate)
+L10 on touch, a vertical swipe on a knob's cell turns it; a strip lets the page scroll   (director's call, pending Yona at the gate)
 ```
