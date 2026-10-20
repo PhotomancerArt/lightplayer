@@ -120,7 +120,8 @@ said aloud**: its verb and object, then what it gets you.
 - A link in a sentence is "over USB", "over Wi‑Fi", "over Bluetooth",
   "through lightplayer.app".
 - An age in a sentence spells its unit out ("It was last seen 2 hours
-  ago."), and the Link row beside it says it the same way.
+  ago."), and a row's details say it the same way ("Last heard 2 hours
+  ago").
 - When the button isn't there (its link refuses it, or the editor holds
   the board and Done is the primary), the second sentence isn't either; a
   refusal is said in its place ("Firmware updates need USB.").
@@ -194,10 +195,10 @@ cannot be done right now: …".
 its state word and its own button, and loses its orange or red. The
 surface is the card's one loud place.
 
-While Connect works, the Link row carries it, naming the link: **USB ·
-connecting**, **USB · reconnecting** when the connected board's link
-dropped and Studio is holding on for it, and **USB · connection failed**,
-red and striped, with Retry, when it failed (the reason is in the details;
+While Connect works, the row of the link it reaches by carries it: **USB
+connecting**, **USB reconnecting** when the connected board's link dropped
+and Studio is holding on for it, and **USB connection failed**, red and
+striped, with Retry, when it failed (the reason is in the details;
 a board that never answered is "The board didn't answer in time"). The
 failure goes once the board is reached another way. A chooser closed with
 nothing picked is not a failure: the card is back at Connect. Connect on a
@@ -207,12 +208,31 @@ Every row reads **icon · kind · name · state · action**
 (`docs/ux/anatomy/board-card.md`): the kind is a muted word ("Project",
 "Access", "Firmware", "Hardware"), the name is the thing itself and stays
 in place in every state, and the state is said only when it is not normal.
-The Link row has no kind word: the link's name is its kind.
+The four link rows' kind is the link's own name: "USB", "Wi‑Fi",
+"Bluetooth", "lightplayer.app". **The state says the fact; the button
+says the fix**: "not connected", never "not set up", with **Set up** or
+**Sign in** as the button. "connected" after a link row's value marks the
+link this tab is using.
+
+For a new board the rows are its setup list. A row with something left to
+do is lit and carries the verb that does it: Project **Add** (the same
+project pick as the primary's Add a project), Wi‑Fi **Set up** (its
+details, at the network list), lightplayer.app **Sign in**, Firmware
+**Install** (the primary's own board pick). **Hushing a row is switching
+it off**, with the switch at the top of its details, named as the row is
+(**Wi‑Fi**, **Bluetooth**, **lightplayer.app**); the row then says
+**disabled** and wants nothing. A flip's own words, for the agent and the
+switch's hover, are **Disable Wi‑Fi** / **Enable Wi‑Fi**, **Disable
+Bluetooth** / **Enable Bluetooth**, **Disable lightplayer.app** / **Enable
+lightplayer.app**.
 
 | Row | Name · state | Examples |
 |---|---|---|
-| Project | what the board plays, and how it stands | `studio`, `studio · 2 boards`, `none`, `not known`, `studio · sending · 40%`, `studio · out of date` (Send latest), `studio · error`, `hidden`, `none · data lost` (Restore, Reset) |
-| Link | the link and how it stands | `USB · connected`, `Bluetooth · connected`, `lightplayer.app · connected`, `USB · connecting`, `USB · not responding`, `USB · connection failed`, `Offline · 2 hours ago`, `Wi‑Fi · not connected` (unplugged, Wi‑Fi reaches it), `Simulated · running`, `Emulated · off`, `Open in another tab` |
+| Project | what the board plays, and how it stands | `studio`, `studio · 2 boards`, `none` (Add), `not known`, `studio · sending · 40%`, `studio · out of date` (Send latest), `studio · error`, `hidden`, `none · data lost` (Restore, Reset) |
+| USB | the cable | `connected`, `not connected`, `connecting`, `reconnecting`, `not responding` (Retry), `connection failed` (Retry), `Open in another tab`, `Taken by another tab`; a stand-in `Simulated · running`, `Emulated · off` |
+| Wi‑Fi | the network the board joins | `—`, `not connected` (Set up), `Cedar Lane`, `Cedar Lane · connected`, `Cedar Lane · joining`, `Cedar Lane · wrong password` (Change), `Cedar Lane · not connected`, `2 networks · saved`, `disabled` |
+| Bluetooth | the name a phone sees | `—`, `LP-3f2a`, `LP-3f2a · connected`, `disabled` |
+| lightplayer.app | the account it reaches the board through | `—`, `not connected` (Sign in), `not connected` (signed in, not on Wi‑Fi), `River's account`, `River's account · connected`, `River's account · can't reach`, `disabled` |
 | Access | the tier, and how it is held | `edit · USB`, `edit · password`, `edit · no password`, `play only` (Unlock), `locked`, `checking`, `USB only · no password`, `edit` (a stand-in) |
 | Firmware | the version, Studio's one way | `v2026.10.16-1`, `dev c688c99`, `v2026.10.02-1 (pre-OTA)`, `unknown (pre-2026.07)`, `none`, `v2026.10.08-9 · updating · 42%`, `· crashing` (Reinstall), `· incomplete` (Install), `· confirmation required` (Review), `· update interrupted` (Resume), `· data unreadable` |
 | Hardware | the board model | `XIAO ESP32-C6`, `ESP32-C6 · model not set`, `unknown`, `identifying` |
@@ -222,13 +242,16 @@ A version is always Studio's one firmware version: a release as its tag
 prefix (`fw-esp32c6 …`: the details' "Build"). An update reads one number
 for the whole of it, never "1 of 2".
 
-A board reached through lightplayer.app names that link, **lightplayer.app**,
-with the cloud icon. A board reached directly that is also reachable
-through lightplayer.app shows the cloud icon alone at the Link row's end,
-no words: filled while lightplayer.app can reach it, struck through while
-Cloud relay is on and it can't, its label and hover "Also reachable through
-lightplayer.app". A board reached only directly shows nothing. Neither
-appears until the board has said whether its Cloud relay is on.
+**lightplayer.app has its own row**, with the cloud icon: it names the
+signed-in account as its key is named on every board ("River's account")
+while lightplayer.app can reach the board, "connected" when that is this
+tab's link, "can't reach" (orange) when the board is on Wi‑Fi and
+lightplayer.app didn't answer, and "disabled" when Cloud relay is off.
+Signed out it says "not connected" with **Sign in**, and its details say
+"Sign in to reach this board from any browser, through lightplayer.app."
+and "Nothing goes to lightplayer.app until you sign in." It says nothing
+until the board has said whether its Cloud relay is on. The struck cloud
+mark is gone.
 
 **Every row names its subject**, with its kind word: `Project none` only
 where the board said it runs nothing, or has no LightPlayer to run
@@ -238,11 +261,13 @@ LightPlayer, a board from before the hello, a core alone, a board that
 hasn't said and won't. Never a false "none": the desk C6 played `studio`
 while its card said "Project none" (2026-10-17). Never a bare "Not known
 yet". **Old looks old:** an offline board's rows keep the last thing
-known, dimmed, and only the Link row says since when.
+known, dimmed (its last network, its Bluetooth name), and the surface says
+since when.
 
-**A stand-in says what it is, once.** A simulated board's Link row reads
+**A stand-in says what it is, once.** A simulated board's USB row reads
 **Simulated · running** or **Simulated · off**; a board emulated in this
-tab, **Emulated · running** or **Emulated · off**. Its Hardware row names
+tab, **Emulated · running** or **Emulated · off**; its radio rows say
+"—". Its Hardware row names
 the model alone, and its access is known whether it runs or not:
 **edit**.
 
@@ -253,7 +278,9 @@ installed board never says so. When it is real, the Project row says
 hold Restore from a backup file… and Download backup.
 
 A new board is named after its model ("XIAO ESP32-C6"), with no date; a
-second of the same model gets a number ("XIAO ESP32-C6 2").
+second of the same model gets a number ("XIAO ESP32-C6 2"). It is renamed
+where its name is, in the name bar (press it, type, Enter); the name is
+Studio's own, never written to the board.
 
 **Cloud connected** names a board that talks to lightplayer.app through
 the relay; it's a property of the board, not of the link in use. A board
@@ -277,7 +304,7 @@ is open in another tab. Connect here to move it to this tab."). Its tint
 says what it closes over there (the error tint when that tab has the
 editor open). While that tab is flashing, updating or pushing there is
 nothing to press: no primary at all, the surface says "This board is busy
-in another tab.", and the Link row's state says what that tab is busy
+in another tab.", and the USB row's state says what that tab is busy
 with. While the take-over runs the primary is the spinner alone and the
 surface says "Moving this board to this tab.". A tab that doesn't answer in
 5 s is "That tab didn't answer", with Retry.

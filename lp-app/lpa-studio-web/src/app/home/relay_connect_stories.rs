@@ -18,7 +18,7 @@ use crate::app::home::ble_access_stories::usb_card;
 use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 
 #[story(
-    description = "A board Studio met over USB, unplugged, while someone is signed in: its connection details offer \"Connect through lightplayer.app\" (`devices/<board>/connect-relay`, a core offer the app agent sees too) beside the cable's Connect; the primary goes over Wi‑Fi (this browser knows its address). The relay is on for everyone — no `?relay=` flag. Signed out, it is not there: only the account's key, put on the board when plugged in signed in, opens it through lightplayer.app."
+    description = "A board Studio met over USB, unplugged, while someone is signed in: its link row's details offer \"Connect through lightplayer.app\" (`devices/<board>/connect-relay`, a core offer the app agent sees too) beside the cable's Connect; the primary goes over Wi‑Fi (this browser knows its address). The relay is on for everyone — no `?relay=` flag. Signed out, it is not there: only the account's key, put on the board when plugged in signed in, opens it through lightplayer.app."
 )]
 fn relay_remembered_board_offers_connect() -> Element {
     remembered_tile(None, true)
@@ -32,7 +32,7 @@ fn relay_remembered_board_without_an_address() -> Element {
 }
 
 #[story(
-    description = "Just after \"Connect through lightplayer.app\" was pressed: it waits (disabled) and the connection bar's work says \"Connecting over Wi‑Fi via lightplayer.app…\". The connect waits for the board to accept one of this browser's keys, not just for lightplayer.app to answer; on success the board comes back under Online boards, the SAME device (merged by its MAC), \"Wi‑Fi via lightplayer.app\" on its connection bar."
+    description = "Just after \"Connect through lightplayer.app\" was pressed: it waits (disabled) and the link row's work says \"Connecting over Wi‑Fi via lightplayer.app…\". The connect waits for the board to accept one of this browser's keys, not just for lightplayer.app to answer; on success the board comes back under Online boards, the SAME device (merged by its MAC), \"Wi‑Fi via lightplayer.app\" on its link row."
 )]
 fn relay_remembered_board_connecting() -> Element {
     remembered_tile(
@@ -48,21 +48,21 @@ fn relay_remembered_board_connecting() -> Element {
 }
 
 #[story(
-    description = "lightplayer.app answered that the board is not connected to it (close 4404): it is off, off its network, or its Cloud relay is off. The connection bar says so plainly, striped — \"The board isn't online.\" — with Retry. Studio does not keep redialling a board the relay turned away."
+    description = "lightplayer.app answered that the board is not connected to it (close 4404): it is off, off its network, or its Cloud relay is off. The link row says so plainly, striped — \"The board isn't online.\" — with Retry. Studio does not keep redialling a board the relay turned away."
 )]
 fn relay_remembered_board_offline() -> Element {
     remembered_tile(Some(failed(RELAY_OFFLINE_WORDS)), true)
 }
 
 #[story(
-    description = "No key this browser holds opens the board through lightplayer.app (never plugged in signed in, or its account key removed): the connection bar, striped, says \"Sign in to Studio and plug this board in once to reach it through lightplayer.app.\" No password is ever typed through the relay."
+    description = "No key this browser holds opens the board through lightplayer.app (never plugged in signed in, or its account key removed): the link row, striped, says \"Sign in to Studio and plug this board in once to reach it through lightplayer.app.\" No password is ever typed through the relay."
 )]
 fn relay_remembered_board_no_key() -> Element {
     remembered_tile(Some(failed(RELAY_NO_HELD_KEY_WORDS)), true)
 }
 
 #[story(
-    description = "The board's one network connection is taken (Studio in another browser, or lp-cli, on the LAN or through the relay): the connection bar says \"Someone else connected\" in orange — someone has it — not a failure."
+    description = "The board's one network connection is taken (Studio in another browser, or lp-cli, on the LAN or through the relay): the link row says \"Someone else connected\" in orange — someone has it — not a failure."
 )]
 fn relay_remembered_board_busy() -> Element {
     // Core marks a relay connect turned away busy as busy, not failed.

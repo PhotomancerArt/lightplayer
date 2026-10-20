@@ -4,7 +4,7 @@
 //!
 //! The state, the facts and the verb exist already (`DeviceView.held_elsewhere`,
 //! `DeviceRosterView.take_overs`, the offer `devices/<board>/take-over`); this
-//! file only arranges them. The connection bar, the picture's line and the
+//! file only arranges them. The link row, the picture's line and the
 //! corner's state line each ask it for their words, so a held card says one
 //! thing everywhere; the surface and the primary
 //! ([`super::board_surface`], [`super::primary_action`]) say the state in
@@ -18,7 +18,7 @@
 //! | an ask out, or the board opening | work, running: "Asking the other tab…" / "Opening…" | "Moving this board to this tab." | the spinner |
 //! | a take-over that failed | work, striped: the reason, with Retry | "Studio couldn't move this board to this tab." | **Connect here** (`take-over`) |
 //!
-//! The Link row says "someone has it" quietly now: the surface is the one
+//! The row of the link it is held on says "someone has it" quietly now: the surface is the one
 //! loud place (the rows go quiet). The words name facts only: no tab id, no
 //! key, no browser.
 
@@ -29,7 +29,7 @@ use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::UiCardAction;
 use crate::app::devices::take_over_offer::busy_in_the_other_tab;
 
-/// The connection bar's summary for a board another tab holds.
+/// The link row's summary for a board another tab holds.
 pub const OPEN_IN_ANOTHER_TAB: &str = "Open in another tab";
 /// … for a board this tab let go because the other tab asked.
 pub const TAKEN_BY_ANOTHER_TAB: &str = "Taken by another tab";
@@ -46,7 +46,7 @@ const TOOK_IT_SENTENCE: &str = "Another tab of this browser took this board from
 const TAKE_OVER_CLOSES_SENTENCE: &str =
     "Taking it over closes it there. You can take it back the same way.";
 
-/// The connection bar's summary: who has the board.
+/// The link row's summary: who has the board.
 pub fn held_summary(held: &HeldElsewhere) -> &'static str {
     match held.taken_from_here {
         true => TAKEN_BY_ANOTHER_TAB,
@@ -86,7 +86,7 @@ pub fn held_sentence(held: &HeldElsewhere, undoable: bool) -> String {
     sentence
 }
 
-/// The connection bar's work for a take-over: running while the other tab
+/// The link row's work for a take-over: running while the other tab
 /// is asked and while the board opens here; striped, with Retry on the same
 /// `take-over`, when it ended without the board.
 pub(crate) fn take_over_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {

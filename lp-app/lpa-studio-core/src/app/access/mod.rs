@@ -36,6 +36,8 @@ pub mod access_command;
 pub mod access_controller;
 pub mod access_session;
 pub mod account_keys;
+pub mod bluetooth_offer;
+pub mod bluetooth_switch_op;
 pub mod browser_key;
 pub mod device_access_ops;
 pub mod device_access_record;
@@ -63,6 +65,11 @@ pub use access_session::{
     TypedPassword,
 };
 pub use account_keys::AccountKeys;
+pub use bluetooth_offer::{
+    BLUETOOTH_ENABLED_PARAM, OFF_OVER_BLUETOOTH, bluetooth_offer, bluetooth_path,
+    bluetooth_restart_words,
+};
+pub use bluetooth_switch_op::{BluetoothSwitchOp, DISABLE_BLUETOOTH, ENABLE_BLUETOOTH};
 pub use browser_key::BrowserKey;
 pub use device_access_ops::{AccessListing, AccessOp, DroppedKey};
 pub use device_access_record::{

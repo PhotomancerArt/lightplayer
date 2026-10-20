@@ -129,3 +129,16 @@ the panel never reaching the card, each with `expected project read frame seq
 N, got 0` repeating in the page's errors. `flash`, `connect`, `identify` and
 `upload` passed every time. The same walk on the tab backing passed all 13
 steps both ways. Now a second walk that meets it.
+
+**Seen again 2026-10-19** (`claude/beautiful-chatterjee-2a46fb`, the board
+card's eight rows, `lp-emu:esp32c6:t1`, `just walk-no-board` against the dev
+server, door backing, Chrome headless). `card-connect` failed 2 runs of 2,
+once each way: no frame rate in the corner's details, then the panel never
+reaching the card, with `expected project read frame seq 1|2|3, got 0` in the
+page's errors. A new fact: both runs' board consoles show the board itself
+**resetting on its hardware watchdog** during that step (`rst:0x10
+(LP_WDT_SYS)`, then `[RECOVERY] last run crashed (watchdog): at <no frame>:
+hang detected by hardware watchdog`, twice in the second run), so the
+mid-read `got 0` is a rebooted board answering, not only a stalled link. The
+first run shared the machine with a release `dx build`. `just walk-no-board
+--tab` passed all 13 steps on the same build.

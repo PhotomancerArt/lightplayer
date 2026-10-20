@@ -252,9 +252,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board's Project row says "none", and its primary is "Add a project":
-/// the `push` offer, drawn as the picker, which the project bar does not
-/// repeat; pressed by path with a source, the push runs.
+/// An empty board's Project row says "none" with Add, lit as a to-do, and
+/// its primary is "Add a project": the same `push` offer, drawn as the
+/// picker; pressed by path with a source, the push runs.
 #[test]
 fn an_empty_boards_primary_adds_a_project_by_path() {
     let device = empty_light_player("dev000000card000005");
@@ -270,8 +270,13 @@ fn an_empty_boards_primary_adds_a_project_by_path() {
     let card = card_of(&bench, id);
     let bar = card.bar(crate::BarLayer::Project).clone();
     assert_eq!(bar.summary, "none");
-    assert_eq!(bar.action, None, "the primary carries it, once");
+    assert!(bar.todo, "lit: something left to do");
     let add = primary_offer(&card);
+    assert_eq!(
+        bar.action.as_ref().map(|row| (&row.offer, &row.draw)),
+        Some((&add.offer, &add.draw)),
+        "the row's Add is the primary's pick"
+    );
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(id, "push"));
     assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));
@@ -377,7 +382,7 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
     assert_eq!(bar.tone, crate::UiStatusKind::Neutral);
 }
 
-/// A board on a live wire that never answers: the connection bar says it is
+/// A board on a live wire that never answers: the USB row says it is
 /// not responding, in Warning, and Retry presses `retry` by path.
 #[test]
 fn a_not_responding_boards_retry_presses_retry_by_path() {
@@ -405,8 +410,8 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     });
     let id = bench.view().devices[0].id;
     let card = card_of(&bench, id);
-    let bar = card.bar(crate::BarLayer::Connection).clone();
-    assert_eq!(bar.summary, "USB · not responding");
+    let bar = card.bar(crate::BarLayer::Usb).clone();
+    assert_eq!(bar.summary, "not responding");
     assert_eq!(
         bar.tone,
         crate::UiStatusKind::Neutral,
@@ -435,7 +440,7 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     bench
         .press(&retry.offer, retry.args.clone())
         .expect("Retry asks again");
-    let identifying = card_of(&bench, id).bar(crate::BarLayer::Connection).clone();
+    let identifying = card_of(&bench, id).bar(crate::BarLayer::Usb).clone();
     assert!(
         identifying.work.is_some(),
         "asking again is the bar's work: {identifying:?}"
@@ -447,7 +452,7 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
 /// read "This board stopped responding over USB." with Retry — "duh, I'm
 /// trying to program it". A board that never said hello and says nothing
 /// is a board to install: the surface says it doesn't respond, the primary
-/// is Install firmware (`flash`), pressed by path, and the Link row says
+/// is Install firmware (`flash`), pressed by path, and the USB row says
 /// nothing loud.
 #[test]
 fn a_silent_board_that_never_said_hello_offers_install_not_retry() {
@@ -484,10 +489,10 @@ fn a_silent_board_that_never_said_hello_offers_install_not_retry() {
     let install = primary_offer(&card);
     assert_eq!(install.word, "Install firmware");
     assert_eq!(install.offer, bench.device_verb(id, "flash"));
-    let link = card.bar(crate::BarLayer::Connection).clone();
-    assert_eq!(link.summary, "USB · connected");
+    let link = card.bar(crate::BarLayer::Usb).clone();
+    assert_eq!(link.summary, "connected");
     assert_eq!(link.tone, crate::UiStatusKind::Neutral);
-    assert_eq!(link.action, None, "no Retry on the Link row");
+    assert_eq!(link.action, None, "no Retry on the USB row");
     every_card_action_is_offered(&mut bench);
 
     // Over firmware that will not say what it is, the flash is Lasting:
@@ -532,10 +537,37 @@ fn a_silent_new_boards_card_offers_install() {
     let install = primary_offer(&card);
     assert_eq!(install.word, "Install firmware");
     assert_eq!(install.offer.to_string(), "devices/new-1/flash");
-    assert_eq!(
-        card.bar(crate::BarLayer::Connection).summary,
-        "USB · connected"
+    assert_eq!(card.bar(crate::BarLayer::Usb).summary, "connected");
+    every_card_action_is_offered(&mut bench);
+}
+
+/// The board is renamed where its name is: the name bar carries the
+/// `rename` offer, pressed by that path with the new name, and the card
+/// wears it; Hardware's details hold no name field.
+#[test]
+fn the_name_bar_renames_the_board_by_its_offer() {
+    let device = empty_light_player("dev000000card000021");
+    let (mut bench, tasks) = identified(&device, "usb-card-21");
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    let rename = card.name_bar.rename.clone().expect("rename is offered");
+    assert_eq!(rename, bench.device_verb(id, "rename"));
+    assert!(
+        card.bar(crate::BarLayer::Hardware)
+            .details
+            .panels
+            .is_empty(),
+        "no name field in Hardware's details"
     );
+    bench
+        .press(
+            &rename,
+            OfferArgs::new().with(crate::RENAME_NAME_PARAM, "Holiday eaves"),
+        )
+        .expect("the rename presses");
+    bench.run_until(&tasks, "the card to wear the new name", |bench| {
+        card_of(bench, id).name_bar.title == "Holiday eaves"
+    });
     every_card_action_is_offered(&mut bench);
 }
 
@@ -665,9 +697,9 @@ fn a_factory_reset_from_hardware_lands_on_install_firmware_with_no_retry() {
     bench.not_offered(retry);
     assert_eq!(card.bar(crate::BarLayer::Firmware).summary, "none");
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).action,
+        card.bar(crate::BarLayer::Usb).action,
         None,
-        "the Link row offers no Retry either"
+        "the USB row offers no Retry either"
     );
     every_card_action_is_offered(&mut bench);
 
@@ -1302,9 +1334,10 @@ fn a_running_sim_with_no_project_offers_add_a_project() {
     });
     let card = card_of(&bench, sim);
     assert_eq!(card.bar(crate::BarLayer::Project).summary, "none");
+    let usb = card.bar(crate::BarLayer::Usb);
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).summary,
-        "Simulated · running"
+        (usb.kind, usb.summary.as_str()),
+        (Some("Simulated"), "running")
     );
     let add = primary_offer(&card);
     assert_eq!(add.word, "Add a project");

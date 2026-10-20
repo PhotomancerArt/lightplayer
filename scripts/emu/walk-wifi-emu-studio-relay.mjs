@@ -21,17 +21,17 @@
 //       the board is a card under Offline boards, and it does NOT offer
 //       "Connect through lightplayer.app" (`connect-relay`) anywhere on it
 //   T3  signed in again, still no cable: the card offers `connect-relay`
-//       (its primary, or in its connection details when Connect over Wi‑Fi
+//       (its primary, or in its link row's details when Connect over Wi‑Fi
 //       leads, `primary_action.rs`); pressed, the hub opens a member session
 //       to the board, the BOARD says a relay route's secure session opened,
 //       and the SAME device (its card, keyed by its MAC) comes back ready on
-//       the relay: its connection bar reads "Wi‑Fi via lightplayer.app" and
-//       names neither Bluetooth nor USB, and its connection details hold no
+//       the relay: its link row reads "Wi‑Fi via lightplayer.app" and
+//       names neither Bluetooth nor USB, and its link row's details hold no
 //       USB line
 //   T4  the board cannot reach the relay (the walk drops its device leg and
 //       refuses new ones): the page's session ends, the card is a card under
 //       Offline boards again, and a press says "The board isn't online." on
-//       its connection bar (the connect's failed work; the hub's 4404); once
+//       its link row (the connect's failed work; the hub's 4404); once
 //       the board is back on the relay (its own `[relay] leg open`), a press
 //       brings the card back ready
 //
@@ -93,23 +93,21 @@ const A = "c6-a";
 const JOIN_MS = 420_000;
 
 /// Core's words (`relay_connect_op.rs`, `relay_connect_failure.rs`,
-/// `ui_link_kind.rs`, `board_card/connection_bar.rs`). The connect and the
+/// `ui_link_kind.rs`, `board_card/link_bar.rs`). The connect and the
 /// link line are what this PR adds; the board's words say what happened.
 const WORDS = {
-  // `connect-relay`'s own words, where the connection details draw it; as
+  // `connect-relay`'s own words, where the link row's details draw it; as
   // the offline card's primary it reads "Connect". Pressed by its offer.
   connectRelay: "Connect through lightplayer.app",
-  // `UiLinkKind::Relay.label()`: the connection bar's line on a relay link
-  // (`<link> · connected` or `· live`).
-  relayLine: "lightplayer.app · ",
+  // The lightplayer.app row on a relay link: the row's kind
+  // (`UiLinkKind::Relay.label()`), the account, then "connected", this
+  // tab's link (`cloud_bar.rs`).
+  relayLine: /^lightplayer\.app .*(?<!not )connected$/,
   // `RELAY_OFFLINE_WORDS`: a relay connect the hub refused (4404), the
-  // connection bar's failed work.
+  // lightplayer.app row's failed work's reason, first in its details.
   offline: "The board isn't online.",
-  // The other links' words (`UiLinkKind::label`), which a relay card's
-  // connection bar must not say; and the connection details' USB line
-  // (`Links` → "USB", drawn only on a USB link).
-  bluetooth: "Bluetooth",
-  usb: "USB",
+  // The USB row of a board reached through the relay: not its link.
+  usbRow: "USB not connected",
 };
 
 function usage() {
@@ -140,7 +138,7 @@ function prerequisites() {
 }
 
 /// The bars of a board card, by their `data-bar` layer.
-const BARS = ["project", "connection", "access", "firmware", "hardware"];
+const BARS = ["project", "usb", "wifi", "bluetooth", "cloud", "access", "firmware", "hardware"];
 
 async function main() {
   let options;
@@ -167,9 +165,9 @@ async function main() {
   if (options.dryRun) {
     const steps = [
       `T1 lp-cli wifi add <usb door> ${NET.ssid} → status connected, relay noAccount; Studio signed in, ?emu= → the USB square → ${A}'s card ready (push or edit offered) → status relay connected`,
-      `T2 no cookie, no ?emu= → ${A}'s card under Offline boards, and no connect-relay ("${WORDS.connectRelay}") on it, face or connection details`,
-      `T3 signed in, no ?emu= → ${A}'s offline card → connect-relay → hub: member session open; board: [relay] route … secure session opening → its card (${A}'s MAC) ready, connection bar "${WORDS.relayLine} · …", one device`,
-      `T4 the device leg cut and refused → card offline → connect-relay → connection bar "${WORDS.offline}" (failed); leg allowed → board: [relay] leg open → press → ready`,
+      `T2 no cookie, no ?emu= → ${A}'s card under Offline boards, and no connect-relay ("${WORDS.connectRelay}") on it, face or link row's details`,
+      `T3 signed in, no ?emu= → ${A}'s offline card → connect-relay → hub: member session open; board: [relay] route … secure session opening → its card (${A}'s MAC) ready, lightplayer.app row "lightplayer.app … connected", one device`,
+      `T4 the device leg cut and refused → card offline → connect-relay → link row "${WORDS.offline}" (failed); leg allowed → board: [relay] leg open → press → ready`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, board: boardSpec, steps, prerequisites: needs, chrome }, null, 2));
     console.log("THE EMULATED STUDIO-RELAY WALK — dry run: nothing started");
@@ -290,7 +288,7 @@ async function main() {
   };
   /// Press `connect-relay` where core put it on the offline card: on its
   /// face when it is the card's way back (a failed connect's Retry, on the
-  /// connection bar's face, is the same offer), else in the connection
+  /// link row's face, is the same offer), else in the connection
   /// details — the primary is Connect (`connect`, one meaning since the
   /// connected card: it reaches the board Wi‑Fi first, then the cloud, then
   /// the cable, and opens its panel), or, for a board with no registry row,
@@ -304,19 +302,19 @@ async function main() {
       `(() => { const card = ${scope}; if (!card) return false;
                 const face = (verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
                   .some((mark) => !mark.closest('.ux-popover-layer'));
-                return face('connect-relay') ? 'face' : face('connect') || face('connect-wifi') ? 'connection' : false; })()`,
+                return face('connect-relay') ? 'face' : face('connect') || face('connect-wifi') ? 'cloud' : false; })()`,
       { timeoutMs: STEP_MS, what: "the card to offer `connect-relay` (or `connect` / `connect-wifi` ahead of it)" },
     );
-    const bar = where === "face" ? null : "connection";
+    const bar = where === "face" ? null : "cloud";
     const pressed = await driver.pressOffer("connect-relay", { board: mac, bar, timeoutMs: STEP_MS });
     if (bar) await driver.closeDetails({ board: mac }).catch(() => {});
-    return `${pressed} (${bar ? "the connection details" : "the card's face"})`;
+    return `${pressed} (${bar ? "the link row's details" : "the card's face"})`;
   };
-  /// The board's card back on the relay and ready: its connection bar reads
+  /// The board's card back on the relay and ready: its link row reads
   /// the relay link, and core offers it a project or the editor. Returns the
-  /// connection bar's line.
+  /// link row's line.
   const readyOnRelay = async () => {
-    const line = await driver.waitBar("connection", WORDS.relayLine, { board: mac, timeoutMs: STEP_MS });
+    const line = await driver.waitBar("cloud", WORDS.relayLine, { board: mac, timeoutMs: STEP_MS });
     await driver.boardRuns({ board: mac, timeoutMs: STEP_MS });
     return line;
   };
@@ -404,7 +402,7 @@ async function main() {
       await openRemembered();
       // Cached account keys may draw it for a moment at boot; it goes once
       // the page knows nobody is signed in, and stays gone — from the card's
-      // face here, and from its connection details below, where it stands
+      // face here, and from its link row's details below, where it stands
       // when Connect over Wi‑Fi leads.
       const drawn = await relayDrawn();
       await driver.waitFor(`!${drawn}`, {
@@ -412,7 +410,7 @@ async function main() {
         what: "no relay connect while signed out",
       });
       await delay(8_000);
-      await driver.openBar("connection", { board: mac, timeoutMs: STEP_MS });
+      await driver.openBar("cloud", { board: mac, timeoutMs: STEP_MS });
       const still = await driver.evaluate(drawn);
       seen.tile = await cardVerbs();
       await driver.closeDetails({ board: mac });
@@ -437,18 +435,14 @@ async function main() {
       seen.card = card;
       const shown = macOfPath(ref);
       if (shown !== mac) throw new Error(`the relay card is ${ref} (${shown}), not ${A}'s ${mac}`);
-      // No other link named: the connection bar says neither Bluetooth nor
-      // USB, and its details hold no USB line (drawn only on a USB link).
-      for (const wrong of [WORDS.bluetooth, WORDS.usb]) {
-        if (line.includes(wrong)) throw new Error(`the relay card's connection bar says ${JSON.stringify(wrong)}: ${line}`);
-      }
-      const usbLine = await driver.detailsFact("connection", WORDS.usb, { board: mac, timeoutMs: STEP_MS });
-      if (usbLine !== null) throw new Error(`the relay card's connection details have a USB line: ${JSON.stringify(usbLine)}`);
+      // No other link named: the lightplayer.app row is the link in use,
+      // and the USB row says only its own fact.
+      if (card.usb !== WORDS.usbRow) throw new Error(`the relay card's USB row says ${JSON.stringify(card.usb)}, not ${JSON.stringify(WORDS.usbRow)}`);
       // The same device: no card left under Offline boards for it (it was the
       // only remembered board, so the whole section is gone).
       const offline = await driver.evaluate(`Boolean(document.querySelector('#home-offline-boards'))`);
       if (offline) throw new Error(`Offline boards is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
-      return { hub: seen.hub, board: seen.board, line: card.connection };
+      return { hub: seen.hub, board: seen.board, line };
     }, { fatal: true });
 
     await step("T4", `${A} off the relay: the tile says "${WORDS.offline}"; back on, a press brings it back`, async (seen) => {
@@ -460,10 +454,16 @@ async function main() {
       seen.hubEnded = hubSince(0).split("\n").filter((line) => line.includes(board) && /ended|refused/.test(line)).slice(-2);
       const hubFrom = cloud.log().length;
       seen.pressed = await pressConnectRelay();
-      // The refusal is the connect's failed work on the connection bar,
-      // striped, in core's words (`connection_bar.rs`, `failed_connect`).
-      seen.said = await driver.waitBar("connection", WORDS.offline, { board: mac, timeoutMs: STEP_MS });
-      seen.work = await driver.waitWork("connection", "failed", { board: mac, timeoutMs: STEP_MS });
+      // The refusal is the connect's failed work on the link row,
+      // striped, in core's words (`link_bar.rs`, `failed_connect`).
+      seen.work = await driver.waitWork("cloud", "failed", { board: mac, timeoutMs: STEP_MS });
+      await driver.openBar("cloud", { board: mac, timeoutMs: STEP_MS });
+      seen.said = await driver.waitFor(
+        `(() => { const t = (${await driver.card({ board: mac })}?.querySelector('[data-bar="cloud"] [id^="ux-popover-panel"]')?.innerText || '');
+                  return t.includes(${JSON.stringify(WORDS.offline)}) ? ${JSON.stringify(WORDS.offline)} : false; })()`,
+        { timeoutMs: STEP_MS, what: "the lightplayer.app row's details to say why" },
+      );
+      await driver.closeDetails({ board: mac });
       seen.hub = hubSince(hubFrom).split("\n").filter((line) => line.includes(board)).slice(-3);
       await driver.screenshot(path.join(shots, "studio-relay-T4-offline.png"));
 

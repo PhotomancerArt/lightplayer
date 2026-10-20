@@ -638,13 +638,13 @@ async function main() {
       console.log(`  nothing links away; the ⋯ holds Reset and Auto-save (${autoSave})`);
     });
 
-    await step("card-done", "Done: the session closes and the card shows its five bars", async () => {
+    await step("card-done", "Done: the session closes and the card shows its eight rows", async () => {
       const before = sink.records.length;
       await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(() => { const c = ${card}; return Boolean(c) && !c.querySelector('[data-board-panel]')
-                  && c.querySelectorAll('[data-bar]').length === 5; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the card's five bars" },
+                  && c.querySelectorAll('[data-bar]').length === 8; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's eight rows" },
       );
       await sink.awaitRecord(poolRecord("remove"), 30_000, before, "the session's `pool remove`");
     });
@@ -719,8 +719,8 @@ async function main() {
       await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(() => { const c = ${card}; return location.pathname === '/' && Boolean(c)
-                  && !c.querySelector('[data-board-panel]') && c.querySelectorAll('[data-bar]').length === 5; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "home, the card's five bars" },
+                  && !c.querySelector('[data-board-panel]') && c.querySelectorAll('[data-bar]').length === 8; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "home, the card's eight rows" },
       );
       console.log(`  ${pressed} at the foot → ${at}: no opening frame, no pool install; let go; Done → / and the card's facts`);
     });
@@ -753,12 +753,12 @@ async function main() {
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
       // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
-      // Since that fix the card's Link row should read the port open ("USB ·
-      // connected") once its work is over; "USB · not connected" here is a
+      // Since that fix the card's USB row should read the port open ("USB
+      // connected") once its work is over; "USB not connected" here is a
       // regression worth chasing, not the expected answer.
       const settled = await driver
-        .waitWork("connection", ["none", "failed"], { timeoutMs: 60_000 })
-        .then(() => driver.barText("connection"))
+        .waitWork("usb", ["none", "failed"], { timeoutMs: 60_000 })
+        .then(() => driver.barText("usb"))
         .catch(() => "(the card never settled)");
       console.log(`  after the replug the card reads: ${JSON.stringify(settled)}`);
       steps.replugSettled = settled;

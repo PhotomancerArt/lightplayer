@@ -15,16 +15,17 @@
 // Bluetooth polyfill (`ble`):
 //
 //     connect (ready when the card offers the board a project or Edit) →
-//       open the card's connection details, where the Wi‑Fi panel sits
+//       open the card's Wi‑Fi row's details, where the Wi‑Fi panel sits
 //       (nothing saved: it opens on "Add a network by name") → type a
 //       made-up network and password → Save → back on the list, the new row
 //       says "Saved · this firmware can't connect…" → Done → "+ Connect to a
 //       network" → a second network → Save
 //       → the board's own flash holds the network file
 //       → reload the page, connect again → both networks read back from the
-//         board, the connection details' Wi‑Fi line says "2 saved" (Studio
-//         never stores a password)
-//       → Cloud relay off (on by default) → open the first network's page →
+//         board, the Wi‑Fi row says "2 networks · saved" (Studio never
+//         stores a password)
+//       → lightplayer.app's switch off (Cloud relay, on by default) in its
+//         row's details → open the first network's page →
 //         Forget (two clicks) → only the second is left
 //
 // ⚠️ WHAT THIS PROVES: the transport, the UI and the board's store. NOT
@@ -39,7 +40,7 @@
 // and the board's card is read only by its hooks
 // (`lp-app/lpa-studio-web/src/app/board_card/mod.rs`, "Walk hooks"): ready
 // by the offer core publishes, and the Wi‑Fi panel inside the card's
-// connection details (`UiDetailPanel::Wifi`), never the card's face.
+// Wi‑Fi row's details (`UiDetailPanel::Wifi`), never the card's face.
 //
 // NOT CI. Made-up values only (lp-walk-net / correct-horse-42). Needs: the
 // release Studio bundle (`just studio-web-story-build`), the packaged C6
@@ -60,7 +61,6 @@ const SSID = "lp-walk-net";
 const PASSWORD = "correct-horse-42";
 const SECOND_SSID = "lp-back-office";
 const SECOND_PASSWORD = "staple-battery-7";
-const WIFI = "Wi‑Fi";
 const STUDIO_LOAD_MS = 420_000;
 const STEP_MS = 180_000;
 
@@ -78,24 +78,14 @@ function card() {
     : `document.querySelector('[data-board-card]')`;
 }
 
-/// Page-side: the card's open connection details, where the Wi‑Fi panel
+/// Page-side: the card's open Wi‑Fi row's details, where the Wi‑Fi panel
 /// sits (`UiDetailPanel::Wifi`, `app/home/wifi_panel.rs` drawn in the card).
 function panel() {
-  return `(${card()}?.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]') ?? null)`;
+  return `(${card()}?.querySelector('[data-bar="wifi"] [id^="ux-popover-panel"]') ?? null)`;
 }
 
 function panelText() {
   return `(${panel()}?.innerText || '')`;
-}
-
-/// Page-side: the connection details' Wi‑Fi line — the "Links" fact core
-/// labels "Wi‑Fi" (`connection_bar.rs`; its value is
-/// `UiDeviceWifi::row_value`) — or null.
-function wifiLine() {
-  return `(() => { const dt = [...(${panel()}?.querySelectorAll('dt') ?? [])]
-      .find((el) => (el.textContent || '').trim() === ${JSON.stringify(WIFI)});
-    const dd = dt?.nextElementSibling;
-    return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`;
 }
 
 function args() {
@@ -223,13 +213,13 @@ async function main() {
   const typeNetwork = (ssid, password) => typeNetworkWith(driver, ssid, password);
   const save = () => saveWith(driver);
   const openWifi = async () => {
-    // The Wi‑Fi panel is a section of the card's connection details;
+    // The Wi‑Fi panel is a section of the card's Wi‑Fi row's details;
     // opening them asks the board for its networks again.
-    await driver.openBar("connection", { board: CARD, timeoutMs: STEP_MS });
-    // Every root page ends on the Cloud relay switch.
-    await driver.waitFor(`${panelText()}.includes('Cloud relay')`, {
+    await driver.openBar("wifi", { board: CARD, timeoutMs: STEP_MS });
+    // Under the list, the row's hush: Disable Wi‑Fi.
+    await driver.waitFor(`${panelText()}.includes('Disable Wi\u2011Fi')`, {
       timeoutMs: STEP_MS,
-      what: "the Wi‑Fi panel in the connection details",
+      what: "the Wi‑Fi panel in the Wi‑Fi row's details",
     });
     // Settled, not mid-fade, so the step's screenshot reads.
     await driver.waitFor(`getComputedStyle(${panel()}).opacity === '1'`, {
@@ -254,7 +244,7 @@ async function main() {
 
     await step("connect", `connect the emulated board over ${lane === "usb" ? "the USB shim" : "?ble=emu"}`, connect);
 
-    await step("open", "open the Wi‑Fi panel (the connection details): nothing saved, so it opens on adding a network by name", async () => {
+    await step("open", "open the Wi‑Fi panel (the Wi‑Fi row's details): nothing saved, so it opens on adding a network by name", async () => {
       await openWifi();
       // Core's words for a firmware that cannot connect (every M5 image):
       // `NOT_SET_UP_UNSUPPORTED` and `CANNOT_LIST` (`wifi_words.rs`). A board
@@ -320,38 +310,24 @@ async function main() {
     await step("reloaded", "reload the page and connect again: both networks read back from the board", async () => {
       await load();
       const how = await connect();
-      // The connection details' Wi‑Fi line: "2 saved" is core's
-      // `UiDeviceWifi::row_value` for two networks on a firmware that cannot
-      // connect.
-      await driver.openBar("connection", { board: CARD, timeoutMs: STEP_MS });
-      await driver.waitFor(`(${wifiLine()} || '').includes('2 saved')`, {
-        timeoutMs: STEP_MS,
-        what: "the connection details' Wi‑Fi line to say 2 saved",
-      });
+      // The Wi‑Fi row: "2 networks · saved" is core's `wifi_bar` for two
+      // networks on a firmware that cannot connect.
+      await driver.waitBar("wifi", "2 networks saved", { board: CARD, timeoutMs: STEP_MS });
       await openWifi();
       await driver.waitFor(`${panelText()}.includes("this firmware can't connect to Wi‑Fi yet") && ${panelText()}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
         what: "the list after the reload",
       });
-      return `${how}; the Wi‑Fi line says 2 saved; both listed`;
+      return `${how}; the Wi‑Fi row says 2 networks saved; both listed`;
     });
 
-    await step("relay-off", "turn the cloud relay off (it is on by default): the board's answer says so", async () => {
-      const relay = `${panel()}?.querySelector('button[role="switch"][aria-label="Cloud relay"]')`;
-      const before = await driver.evaluate(`${relay}?.getAttribute('aria-checked')`);
-      if (before !== "true") throw new Error(`the Cloud relay switch starts ${before}, not on`);
-      // Drawn locked while a read is in flight (opening the panel asks the
-      // board again); a click on a locked switch does nothing.
-      await driver.waitFor(`${relay} && !${relay}.disabled`, {
-        timeoutMs: STEP_MS,
-        what: "the Cloud relay switch to be pressable",
-      });
-      await driver.evaluate(`${relay}.click()`);
-      await driver.waitFor(`${relay}?.getAttribute('aria-checked') === 'false' && !${relay}.disabled`, {
-        timeoutMs: STEP_MS,
-        what: "the board's status (relay off)",
-      });
-      return "Cloud relay on → off";
+    await step("relay-off", "lightplayer.app's switch off, at the top of its row's details (Cloud relay is on by default): the board's answer says so", async () => {
+      await driver.waitBar("cloud", /^lightplayer\.app (?!disabled)/, { board: CARD, timeoutMs: STEP_MS });
+      await driver.pressOffer("wifi/cloud-relay", { board: CARD, bar: "cloud", timeoutMs: STEP_MS });
+      await driver.waitBar("cloud", "lightplayer.app disabled", { board: CARD, timeoutMs: STEP_MS });
+      await driver.closeDetails({ board: CARD });
+      await openWifi();
+      return "lightplayer.app on → disabled";
     });
 
     await step("forget", "the first network's page → Forget (Lasting: arm, then confirm): only the second is left", async () => {
@@ -371,10 +347,8 @@ async function main() {
         timeoutMs: STEP_MS,
         what: "the list without the first network",
       });
-      const relayOff = await driver.evaluate(
-        `${panel()}?.querySelector('button[role="switch"][aria-label="Cloud relay"]')?.getAttribute('aria-checked') === 'false'`,
-      );
-      if (!relayOff) throw new Error("the cloud relay came back on");
+      const relay = await driver.barText("cloud", { board: CARD });
+      if (relay !== "lightplayer.app disabled") throw new Error(`the cloud relay came back on: ${JSON.stringify(relay)}`);
       return `${SECOND_SSID} left; the relay stays off`;
     });
   } catch (error) {

@@ -1,4 +1,4 @@
-//! [`UiBoardPanel`]: the board's whole panel, drawn in the five bars' place
+//! [`UiBoardPanel`]: the board's whole panel, drawn in the eight rows' place
 //! while the board is connected (the board card ADR, §4 and its 2026-10-19
 //! amendment; CD6, CD15).
 //!

@@ -1,75 +1,88 @@
 //! The board card, built in core
 //! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`): one board as
 //! a surface (its picture, and over it what matters now), a status corner,
-//! a name bar with one primary action, and five bars — project, connection,
-//! access, firmware, hardware — each with its summary, aside, tone, one
-//! action, work in progress and details.
+//! a name bar with one primary action, and eight rows — project, USB,
+//! Wi‑Fi, Bluetooth, lightplayer.app, access, firmware, hardware — each with
+//! its summary, aside, tone, one action, work in progress and details. For
+//! a new board the rows are its setup list.
 //!
 //! The card is data. Its builder reads the roster's facts and the board's
 //! own offers ([`BoardCardInput`]) and decides every word, tone and action;
 //! the web only draws it, so the app agent sees the same card and presses
 //! the same offers.
 //!
-//! Connected (the ADR's §4), the card carries the board's panel in the five
-//! bars' place ([`ui_board_panel`]), picked from the project's root panel
+//! Connected (the ADR's §4), the card carries the board's panel in the
+//! rows' place ([`ui_board_panel`]), picked from the project's root panel
 //! ([`board_panel_picks`]), and its primary is Done; where the session
 //! stands on each board is [`board_connection`].
 //!
 //! - Types: [`ui_board_card`], [`ui_board_picture`], [`ui_board_surface`],
 //!   [`ui_status_corner`], [`ui_name_bar`], [`ui_stack_bar`], [`ui_bar_work`],
-//!   [`ui_card_action`], [`ui_detail_panel`], [`ui_board_panel`],
+//!   [`ui_card_action`], [`ui_detail_panel`], [`ui_detail_switch`], [`ui_board_panel`],
 //!   [`board_connection`].
-//! - Building: [`board_card_input`], [`board_card_builder`], and one file
+//! - Building: [`board_card_input`] (with [`board_links`], what the link
+//!   rows know beyond the link in use), [`board_card_builder`], and one file
 //!   per decision: [`board_picture`], [`board_surface`] (the state the
 //!   surface says, which the primary presses), [`status_corner`],
 //!   [`primary_action`],
 //!   [`bar_work`], [`held_board`] (a board another tab holds),
-//!   [`board_panel_picks`], and one per bar — [`project_bar`],
-//!   [`connection_bar`], [`access_bar`], [`firmware_bar`],
-//!   [`hardware_bar`] — with [`ui_bluetooth_switch`];
+//!   [`link_session`] (this tab's session, on the row of the link it is
+//!   about) and [`link_bar`] (a link row from its facts),
+//!   [`board_panel_picks`], and one per row — [`project_bar`], [`usb_bar`],
+//!   [`wifi_bar`], [`bluetooth_bar`], [`cloud_bar`], [`access_bar`],
+//!   [`firmware_bar`], [`hardware_bar`];
 //!   [`roster_board_cards`] builds every card on a roster.
 
 pub mod access_bar;
 pub mod bar_work;
+pub mod bluetooth_bar;
 pub mod board_card_builder;
 pub mod board_card_input;
 pub mod board_connection;
+pub mod board_links;
 pub mod board_panel_picks;
 pub mod board_picture;
 pub mod board_surface;
 #[cfg(test)]
 pub(crate) mod card_fixtures;
-pub mod connection_bar;
+pub mod cloud_bar;
 pub(crate) mod detail_sections;
 pub mod firmware_bar;
 pub mod hardware_bar;
 pub mod held_board;
+pub(crate) mod link_bar;
+pub(crate) mod link_session;
 pub mod primary_action;
 pub mod project_bar;
 pub mod roster_board_cards;
+pub(crate) mod row_switch;
 pub mod status_corner;
 pub mod ui_bar_work;
-pub mod ui_bluetooth_switch;
 pub mod ui_board_card;
 pub mod ui_board_panel;
 pub mod ui_board_picture;
 pub mod ui_board_surface;
 pub mod ui_card_action;
 pub mod ui_detail_panel;
+pub mod ui_detail_switch;
 pub mod ui_name_bar;
 pub mod ui_stack_bar;
 pub mod ui_status_corner;
+pub mod usb_bar;
+pub mod wifi_bar;
 
 pub use access_bar::ANYONE_CAN_EDIT_SENTENCE;
 pub use bar_work::{activity_bar, activity_words};
+pub use bluetooth_bar::{
+    BLUETOOTH_DISABLED_SENTENCE, BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE,
+};
 pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
+pub use board_links::{BoardLinks, account_words};
 pub use board_panel_picks::{MASTER_CHANNEL, board_panel_picks};
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
-pub use connection_bar::{
-    ALSO_THROUGH_THE_CLOUD, CLOUD_NOT_YET, CONNECTION_FAILED, RECONNECTING, SOMEONE_ELSE_SENTENCE,
-};
+pub use cloud_bar::{NOTHING_GOES_SENTENCE, SIGN_IN_SENTENCE};
 pub use firmware_bar::{
     CONFIRMATION_REQUIRED, DATA_UNREADABLE, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
 };
@@ -78,11 +91,14 @@ pub use held_board::{
     EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
     TAKEN_BY_ANOTHER_TAB,
 };
+pub use link_session::{
+    CONNECTED, CONNECTION_FAILED, DISABLED, NOT_CONNECTED, NOT_KNOWN, RECONNECTING,
+    SOMEONE_ELSE_SENTENCE,
+};
 pub use primary_action::{ADD_A_PROJECT, CONNECT_HERE, CONNECTING};
 pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE, PROJECT_UNKNOWN};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
 pub use ui_bar_work::{BarWorkState, UiBarWork};
-pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
 pub use ui_board_panel::{UiBoardPanel, UiBoardPanelSection, UiCardControl};
 pub use ui_board_picture::{PictureSource, UiBoardPicture};
@@ -91,6 +107,7 @@ pub use ui_board_surface::{
 };
 pub use ui_card_action::{UiActionDraw, UiCardAction};
 pub use ui_detail_panel::UiDetailPanel;
+pub use ui_detail_switch::UiDetailSwitch;
 pub use ui_name_bar::{UiNameBar, UiPrimary};
 pub use ui_stack_bar::{BarLayer, UiBarDetails, UiBarMark, UiStackBar};
 pub use ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};

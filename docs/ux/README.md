@@ -197,7 +197,8 @@ app. Find the pattern, name it, reuse it. A one-off needs a reason.
 
 ```text
 do:   ◆ Project   studio
-      ↔ USB · connected
+      ⏚ USB       connected
+      ≋ Wi‑Fi     Cedar Lane
       ○ Access    edit · USB
       ▲ Firmware  v2026.10.16-1
       ■ Hardware  XIAO ESP32-C6
@@ -213,6 +214,19 @@ The card's bars share one shape in code (icon · summary · aside · tone ·
 action). Their words had no shared grammar until the anatomy gave them one:
 [board card](anatomy/board-card.md).
 
+The same holds for one control across siblings. Three radio rows that can
+each be turned off turn off the same way, in the same place:
+
+```text
+do:   ≋ Wi‑Fi              (●━━)    # the first line of each row's details: icon, name,
+      ᛒ Bluetooth          (●━━)    #   the board's own switch at the line's end,
+      ☁ lightplayer.app    (●━━)    #   as macOS draws the top of its Wi‑Fi and Bluetooth menus
+
+bad:  Disable Wi‑Fi under the network list · Disable lightplayer.app beside Sign in ·
+      a red Disable Bluetooth in an Actions list
+                                    # Yona 10-19: "rendered differently in each of the three sections"
+```
+
 ## P9. useful structure
 
 Every line, box, icon and word is there to say something. If you can't
@@ -223,7 +237,7 @@ do:   ┌──────────────────────┐  
       │ Porch lamp           │              │ ┌ Board ───────────┐ │
       ├──────────────────────┤              │ │ ┌ Info ────────┐ │ │
       │ ◆ Project   studio   │              │ │ │ ◆ studio     │ │ │
-      │ ↔ USB · connected    │              │ │ └──────────────┘ │ │
+      │ ⏚ USB       connected│              │ │ └──────────────┘ │ │
       └──────────────────────┘              │ └──────────────────┘ │
                                             └──────────────────────┘
 ```
@@ -327,7 +341,7 @@ something else.
 
 ```text
 do:   ▲ Firmware  v2026.10.08-9   │ Update to v2026.10.16-1 │   # no tone: the button carries it
-do:   ↔ USB · not responding      │ Retry │   ← orange           # orange: a device needs you
+do:   ⏚ USB       not responding  │ Retry │   ← orange           # orange: a device needs you
 
 bad:  ○ You can edit · anyone can edit         ← yellow   # shipped: yellow means an unsaved edit
 bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue means live

@@ -63,21 +63,20 @@
 //! board is connected, the panel foot's.
 
 use lpa_devices::ActivityKind;
-use lpa_devices::device::DeviceStatus;
-use lpa_devices::view::{FirmwareFace, LoadedProject, PendingLinkView};
+
+use lpa_devices::view::{FirmwareFace, PendingLinkView};
 
 use super::bar_work::{board_pick, retry};
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
-use super::board_surface::{offline_road, road_link, surface_state};
+use super::board_surface::{offline_road, road_link, runs_no_project, surface_state};
 use super::project_bar::edit_action;
 use super::ui_bar_work::UiBarWork;
 use super::ui_board_surface::SurfaceState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use crate::core::data_kinds::age_spoken;
 use crate::{OfferPath, UiOffer};
 
-/// The Link row's state while a Connect is under way ("USB · connecting");
+/// A link row's state while a Connect is under way ("USB connecting");
 /// the primary is the spinner alone then.
 pub const CONNECTING: &str = "connecting";
 
@@ -182,15 +181,14 @@ pub(crate) fn state_action(
                 ..install(flash).drawn(board_pick(input))
             })
         }),
-        PreHelloFirmware | NoFirmware | DownloadMode | Silent => input
-            .offer("flash")
-            .map(|flash| install(flash).drawn(board_pick(input)))
-            .or_else(|| {
+        PreHelloFirmware | NoFirmware | DownloadMode | Silent => {
+            install_firmware(input).or_else(|| {
                 update_firmware(input).map(|update| UiCardAction {
                     word: INSTALL_FIRMWARE.to_string(),
                     ..update
                 })
-            }),
+            })
+        }
         Locked => input.offer("unlock").map(|unlock| {
             UiCardAction::press(unlock, "Unlock")
                 .with_icon("lock")
@@ -246,14 +244,15 @@ fn done_action(done: &UiOffer) -> UiCardAction {
 }
 
 /// Add a project: the primary of a ready, idle board that runs no project
-/// — `push` with the project pick, as the project bar would draw it (the
-/// bar then does not repeat it). `None` when the board runs something or
-/// has not said, and when `push` is not offered. Refused, it is no
-/// primary, and the surface says the refusal in the button's place.
+/// — `push` with the project pick, the same pick the Project row's Add
+/// opens. Exactly where the surface says "This board has no project yet."
+/// ([`super::board_surface::runs_no_project`]): it said it runs nothing,
+/// or the library knows it plays nothing. `None` when `push` is not
+/// offered. Refused, it is no primary, and the surface says the refusal in
+/// the button's place.
 pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     let view = input.view;
-    let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
-    if !ready || !input.idle() || view.loaded_project != LoadedProject::Empty {
+    if !runs_no_project(input) {
         return None;
     }
     Some(
@@ -263,16 +262,6 @@ pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> 
                 board_id: view.board_id.clone(),
             }),
     )
-}
-
-/// "Offline · 2 hours ago", from the registry's last sighting, in the
-/// words the surface's sentence uses for the same age (P17); "Offline"
-/// when Studio has none.
-pub(crate) fn offline_words(last_seen_at: Option<f64>, now: f64) -> String {
-    match last_seen_at {
-        Some(seen) => format!("Offline · {}", age_spoken(now - seen)),
-        None => "Offline".to_string(),
-    }
 }
 
 /// A new board's primary: Install firmware once it settled on needing
@@ -310,6 +299,15 @@ pub(crate) fn pending_action(
     })
 }
 
+/// Install firmware on a board with no LightPlayer: the `flash` offer with
+/// the board pick — the primary's, and the Firmware row's to-do ("none ·
+/// Install").
+pub(crate) fn install_firmware(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
+    input
+        .offer("flash")
+        .map(|flash| install(flash).drawn(board_pick(input)))
+}
+
 /// Install firmware: the `flash` offer, in the card's words (P12: install
 /// what?).
 fn install(flash: &UiOffer) -> UiCardAction {
@@ -327,7 +325,8 @@ fn offer(action: UiCardAction) -> UiPrimary {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use lpa_devices::view::{Escape, FirmwareFace};
+    use lpa_devices::device::DeviceStatus;
+    use lpa_devices::view::{Escape, FirmwareFace, LoadedProject};
     use lpa_devices::{ActivityKind, HoldLevel, HoldVia};
 
     use super::super::board_connection::BoardConnection;
@@ -336,6 +335,37 @@ pub(crate) mod tests {
     use crate::app::access::{UiDeviceAccess, UiUnlockOffer};
     use crate::app::devices::take_over_state::UiTakeOver;
     use crate::app::devices::ui_link_kind::UiLinkKind;
+
+    /// The no-project surface always has its button: a board the library
+    /// knows plays nothing, whatever its last report said, gets Add a
+    /// project too, and the surface says the button aloud (the mismatch
+    /// that left "This board has no project yet." with no primary).
+    #[test]
+    fn a_board_that_runs_no_project_always_gets_add_a_project() {
+        for loaded in [
+            LoadedProject::Empty,
+            LoadedProject::Running {
+                label: "porch".to_string(),
+            },
+        ] {
+            let mut fixture = CardFixture::ready();
+            fixture.view.loaded_project = loaded.clone();
+            fixture.plays = crate::app::devices::board_plays::BoardPlays::Nothing;
+            let card = super::super::board_card_builder::board_card(&fixture.input());
+            assert_eq!(card.surface.state, SurfaceState::NoProject, "{loaded:?}");
+            assert_eq!(
+                card.name_bar.primary.as_ref().and_then(UiPrimary::word),
+                Some(ADD_A_PROJECT),
+                "{loaded:?}"
+            );
+            let notice = card.surface.notice.expect("the surface says it");
+            assert_eq!(notice.first, "This board has no project yet.");
+            assert_eq!(
+                notice.second.as_deref(),
+                Some("Add a project to play on it.")
+            );
+        }
+    }
 
     #[test]
     fn a_connecting_board_says_connecting_with_its_links_icon() {
@@ -474,7 +504,7 @@ pub(crate) mod tests {
         assert_eq!(path(&action), "reconnect");
     }
 
-    /// Offline with no way in: no button; the Link row says how long it
+    /// Offline with no way in: no button; the surface says how long it
     /// has been away.
     #[test]
     fn an_offline_board_nothing_reaches_has_no_primary() {
@@ -482,10 +512,6 @@ pub(crate) mod tests {
         fixture.view.escapes = vec![Escape::Forget];
         fixture.last_seen_at = Some(fixture.now - 15.0 * 86_400.0);
         assert_eq!(primary_action(&fixture.input(), None), None);
-        assert_eq!(
-            offline_words(fixture.last_seen_at, fixture.now),
-            "Offline · 2 weeks ago"
-        );
     }
 
     /// The dead end of 2026-10-17: an older LightPlayer on USB, its board
@@ -695,7 +721,7 @@ pub(crate) mod tests {
         assert_eq!(path(&offered(&mut offline)), "take-over");
     }
 
-    /// Busy in the other tab: no button; the Link row says it.
+    /// Busy in the other tab: no button; the USB row says it.
     #[test]
     fn a_board_the_holder_is_busy_with_has_no_primary() {
         let mut fixture = CardFixture::held(HoldLevel::Busy("Updating \u{b7} 42%".to_string()));
@@ -743,7 +769,7 @@ pub(crate) mod tests {
     #[test]
     fn a_held_board_with_nobody_to_ask_has_no_primary() {
         // The controller offers `take-over` only with a hold edge; without
-        // one the card has nothing to press, and the Link row says who has
+        // one the card has nothing to press, and the USB row says who has
         // the board.
         let mut fixture = CardFixture::held(HoldLevel::Watching);
         fixture.without_offer("take-over");

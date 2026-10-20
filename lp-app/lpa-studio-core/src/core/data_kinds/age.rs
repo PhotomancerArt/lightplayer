@@ -7,8 +7,8 @@
 //! (`Last heard` · `12 s ago`, `Last frame` · `12 s ago`); a "for how
 //! long" is [`duration_words`] ("2 h"). An age said in a sentence, and
 //! anywhere on a card beside one, is [`age_spoken`] ("It was last seen 2
-//! hours ago.", "Offline · 2 hours ago"): the same units, spelled out, so
-//! the board card's surface and its Link row say one age one way. A stale
+//! hours ago.", "Last heard 2 hours ago"): the same units, spelled out, so
+//! the board card's surface and its rows' details say one age one way. A stale
 //! picture counting "412 s" is arithmetic homework; a remembered board's
 //! picture can be a month old.
 
@@ -43,7 +43,7 @@ pub fn duration_words(age_secs: f64) -> String {
 /// An age as a sentence says it, its unit spelled out: "just now", "1
 /// second ago", "2 minutes ago", "2 hours ago", "3 days ago", "2 weeks
 /// ago". The board card's surface ("It was last seen 2 hours ago.") and
-/// the Link row beside it ("Offline · 2 hours ago") say an age this way.
+/// the row details beside it ("Last heard 2 hours ago") say an age this way.
 pub fn age_spoken(age_secs: f64) -> String {
     let (count, unit) = age_units(age_secs);
     if count == 0 {

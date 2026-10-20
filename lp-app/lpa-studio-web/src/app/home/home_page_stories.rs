@@ -119,7 +119,7 @@ fn home_page_only_offline_boards() -> Element {
 }
 
 #[story(
-    description = "Connect on a second board hands the session over: one board is connected at a time. BEFORE, on the Boards tab: Luna's porch sign is connected — its bars are its whole panel (the master brightness, then speed, hue, palette, a toggle and a fader, Edit at the foot), the card grown to hold it, and Done is its primary; the Desk sim offers Connect. AFTER pressing Connect on the Desk sim: Luna's card is back to its facts at once (its five bars, Connect), and the Desk sim's connection bar says \"Connecting…\", its primary \"Connecting…\", disabled. Every other card keeps its height."
+    description = "Connect on a second board hands the session over: one board is connected at a time. BEFORE, on the Boards tab: Luna's porch sign is connected — its bars are its whole panel (the master brightness, then speed, hue, palette, a toggle and a fader, Edit at the foot), the card grown to hold it, and Done is its primary; the Desk sim offers Connect. AFTER pressing Connect on the Desk sim: Luna's card is back to its facts at once (its eight rows, Connect), and the Desk sim's link row says \"Connecting…\", its primary \"Connecting…\", disabled. Every other card keeps its height."
 )]
 fn home_page_hand_over() -> Element {
     let luna = DeviceId(1);
