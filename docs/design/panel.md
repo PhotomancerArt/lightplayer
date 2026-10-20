@@ -410,8 +410,13 @@ this document never specifies resolution.
   clears with everything else. "Reset means reset"; a reset that leaves
   values latched in scopes the user cannot currently see is a haunting,
   not a safety feature. Implemented and pinned by test.
-- **P-Q5:** the touch-set value shape (per-touch id, position,
+- **P-Q5:** ~~the touch-set value shape (per-touch id, position,
   pressure/z, velocity — carried or derived?) and the multi-XY pad
-  widget spec. Prior art: old lightPlayer's `MultiTouchInput.Touch`
+  widget spec.~~ **Closed 2026-10-20** (ADR
+  `2026-10-20-touch-sets-are-momentary-map-panel-writes`): a `u32`-keyed
+  map of `lp::touch::Touch { id, pos }` by pointer id, `pos` in pattern
+  space; velocity and direction derived by the consumer; pressure later,
+  as an added field. The first "widget" is the board's live picture
+  itself (drawable when a pattern reads `touches`), not a pad. Prior art: old lightPlayer's `MultiTouchInput.Touch`
   (id, initial/current x·y, z, velocity, interpolation). Vocabulary
   item — modules.md §7.
