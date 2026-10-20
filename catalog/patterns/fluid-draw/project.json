@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Fluid",
+  "description": "A fluid you draw in: drag on the board's picture and dye swirls after your finger; leave it and three drifting emitters stir it alone.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}
