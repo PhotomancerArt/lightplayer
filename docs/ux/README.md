@@ -48,9 +48,11 @@ P17  one way per kind of data      times, sizes, versions, names, status
 P18  the main surface says what matters  cards, pictures, the top of a page
 P19  the primary is the likely next step  the button beside a name
 P20  voice by role                 any words: labels, sentences, buttons
+P21  targets fit the hand          controls, actions on controls
 ```
 
 P1–P10, P16–P20: Yona (P18–P20 set 10-17). P11–P15: the director's, accepted 10-16.
+P21: proposed 10-19 (the board card's panel); Yona approves it at that plan's gate.
 
 ---
 
@@ -110,6 +112,20 @@ bad:  the card leaves Online boards for Offline boards and comes back, every few
 A board's events never reset what someone is doing on its card: open
 details stay open, an armed button stays armed, and the card keeps its
 place.
+
+A control's small actions never move its label or its value. A circle may
+come and go; the room it takes is always kept:
+
+```text
+do:   │(↺) BRIGHTNESS               128 (ⓘ)│   # a strip's label row keeps both ends free:
+      │ ━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━ │   #   ↺ shows while held, ⓘ on hover, and nothing moves
+
+bad:  │     ◎     │  # card 10-19: the let-go glyph hangs off the label's edge,
+      │   SPEED↺  │  #   a 10 px mark that moves nothing only because it is absolutely placed
+```
+
+app: `lpa-studio-web/…/module/panel_corners.rs` (the circles float over the control) ·
+`lpa-studio-web/…/module/panel_strip.rs` (the label row keeps both ends)
 
 app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
 
@@ -244,6 +260,25 @@ do:   ┌──────────────────────┐  
 
 `›` at a row's end is structure with a reason: the row opens its details.
 
+A panel's groups say what they are, once. The root's controls sit on a
+tint with no word; a group under it is its node's name and its kind icon,
+nothing more:
+
+```text
+do:   ▒ BRIGHTNESS                 128 ▒
+      ▒ ━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━ ▒   # the root's controls: the tint alone says they reach everything
+      ├────────────────────────────────┤
+      │ ▭ DOME                         │   # a module's controls: its name and its kind icon
+
+bad:  ▒ GLOBAL                         ▒   # spike r3, Q7: no "global"; the tint already says it
+bad:  ▒ ALL PATTERNS                   ▒   # spike r2: a band named for its reach
+bad:  │ SCANNER · THIS PATTERN         │   # spike r2: the G2 heading; r4 picked the name and the kind icon
+```
+
+anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/compact_panel.rs` (the band, the headings) ·
+`lpa-studio-core/…/board_card/board_panel_picks.rs`
+
 ## P10. coherence over css ease
 
 Draw what the design means, not what CSS made easy. A line that divides a
@@ -260,6 +295,22 @@ do:   │ ◌ Updating · 42%                   │
 bad:  │ ◌ Updating · 42%                   │
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  # card 10-14: the bar escaped its row
 ```
+
+A panel's lines follow the same rule. The light lines between its controls
+run edge to edge, a step lighter than a group's own line. A strip's label
+and value sit above its track, so the track keeps the line's whole width:
+
+```text
+do:   │ BRIGHTNESS                     128 │
+      │ ━━━━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━ │
+      ├────────────────────────────────────┤   # a light line, edge to edge
+      │ PALETTE                 ↻ 5 · 16 s │
+bad:  │ BRIGHTNESS ━━━━━━●━━━━━━━━━ 128    │   # spike r2: #1196's strip, on one line; the label ate the track
+```
+
+anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/compact_panel.rs` (`ux-panel-lines`) ·
+`lpa-studio-web/…/module/panel_strip.rs`
 
 app: `lpa-studio-web/src/base/detail_popover.rs`
 
@@ -352,6 +403,27 @@ do:   ⏚ USB       not responding  │ Retry │   ← orange           # orang
 bad:  ○ You can edit · anyone can edit         ← yellow   # shipped: yellow means an unsaved edit
 bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue means live
 ```
+
+A control is a meaning too: one widget wherever it is drawn, ranked the same
+way in every group.
+
+```text
+do:   │ BRIGHTNESS                 128 │   # a fader on the panel, and the same fader on its fixture's card
+      │ ━━━━━━━━━━━━━━━━━━━━━━━━●━━━━━ │
+
+bad:  │      ◎      │   # card 10-19 (#1196): a knob on the panel and a fader on
+      │  BRIGHTNESS │   #   the fixture's own card: two widgets for one control
+
+bad:  the card pulls the first `brightness` to its front by name
+                                          # card 10-19: on small-dome that is the dome's, first with
+                                          #   no heading, so it reads as the project's
+do:   the bus's own order ranks it in every group that has one
+                                          # Yona r2: "shouldn't be special cased … the bus should handle this?"
+```
+
+anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-core/…/node/face/panel_order.rs` (shape, then the bus, then the walk) ·
+`lpa-studio-core/…/node/face/ui_panel_shape.rs`
 
 app: `lpa-studio-core/src/core/status.rs` (`UiStatusKind`) ·
 `lpa-studio-web/src/base/icon.rs` (`StudioIconName`) ·
@@ -468,6 +540,31 @@ bad:  Fork — make it yours                # sweep 10-17: a dash in a button, a
 bad:  Something else drives this channel; turning the control takes it over.
                                           # sweep 10-17: present for a consequence
 ```
+
+## P21. targets fit the hand
+
+*Proposed 10-19; not approved yet.* A control's target is its whole cell,
+not the small shape drawn in it. Its small actions are 24 px circles (the
+WCAG 2.2 minimum), never a glyph. Where there is no hover, a tap that
+doesn't move opens a control's details.
+
+```text
+do:   ┌─────────────┐
+      │(↺)       (ⓘ)│   # let go while held, details on hover: 24 px circles, in the cell's top corners
+      │      ◎      │   #   the whole cell drags, flips and lights on hover
+      │    SPEED    │   #   a tap with no drag opens details
+      │     1×      │
+      └─────────────┘
+
+bad:  SPEED↺                            # card 10-19 (#1196): let go is a 10 px glyph
+bad:  the label opens details, the knob alone drags
+                                        # card 10-19 (#1196): the small targets; spike r3: Yona asked for
+                                        #   corners "clearly delineated"
+```
+
+anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/panel_cell.rs` · `lpa-studio-web/…/module/panel_strip.rs` ·
+`lpa-studio-web/…/module/panel_corners.rs` · `lpa-studio-web/…/node/panel/panel_tap.rs`
 
 ---
 

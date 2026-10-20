@@ -84,6 +84,13 @@
     --studio-color-border-subtle: #30303d;
     --studio-color-border-strong: #4a4a5e;
     --studio-color-panel-primary-border: #3a3a4c;
+    /* A panel laid out by shape (the board card's, 2026-10-19): the light
+       line between two controls, a step lighter than a group's own
+       `--studio-color-border`; the band the root's controls sit on, with no
+       word; a control's cell under the pointer. */
+    --studio-color-panel-line: #262633;
+    --studio-color-panel-band: #1e1e2b;
+    --studio-color-panel-hover: rgb(255 255 255 / 0.04);
 
     --studio-color-text: #f2f0e8;
     --studio-color-text-strong: #fffaf0;
@@ -1052,6 +1059,106 @@ label:has(> input:not(:disabled)) {
        its end, and the row's hover holds it whole. */
     .ux-board-bar-kind {
         width: 58px;
+    }
+}
+
+/* The connected card's panel, laid out by shape (`compact_panel.rs`,
+   `panel_cell.rs`, `panel_strip.rs`, `panel_corners.rs`; the study is
+   docs/ux/studies/panel-layout/). The root's controls sit on the band, with
+   no word; each nested group under its own line and heading. */
+.ux-panel-band {
+    background: var(--studio-color-panel-band);
+}
+
+/* A section's controls, with light lines between every two, edge to edge:
+   each control draws its own right and bottom line, and the grid hangs one
+   pixel past the clip on both, so no line lands on the card's outer edge or
+   under the last row. No gaps: the lines are the gaps. */
+.ux-panel-lines {
+    overflow: hidden;
+}
+
+.ux-panel-lines > .ux-panel-grid {
+    margin: 0 -1px -1px 0;
+}
+
+.ux-panel-grid > * {
+    box-shadow:
+        inset -1px 0 0 var(--studio-color-panel-line),
+        inset 0 -1px 0 var(--studio-color-panel-line);
+}
+
+/* One control's cell (a knob, the Speed knob, a stepped knob, a toggle) or
+   strip (a fader, a palette): the whole of it is the control's target, and
+   it lightens under the pointer, a little more while it is dragged. */
+.ux-panel-cell {
+    position: relative;
+    min-width: 0;
+    transition: background-color 80ms;
+}
+
+@media (hover: hover) {
+    .ux-panel-cell:hover {
+        background: var(--studio-color-panel-hover);
+    }
+}
+
+.ux-panel-cell.is-hovered {
+    background: var(--studio-color-panel-hover);
+}
+
+.ux-panel-cell:has(> .ux-panel-surface:active) {
+    background: rgb(255 255 255 / 0.06);
+}
+
+/* The two corner actions, 24 px targets holding 22 px circles, 4 px in
+   from the top corners: let go (↺) top-left while the control is held,
+   details (ⓘ) top-right on hover, while the control has focus, and while its
+   details are open. They float over the control and never move it. */
+.ux-panel-corner {
+    position: absolute;
+    top: 3px;
+    z-index: 1;
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+}
+
+.ux-panel-corner-let-go {
+    left: 3px;
+}
+
+.ux-panel-corner-details {
+    right: 3px;
+    opacity: 0;
+    transition: opacity 80ms;
+}
+
+@media (hover: hover) {
+    .ux-panel-cell:hover .ux-panel-corner-details {
+        opacity: 1;
+    }
+}
+
+.ux-panel-cell:focus-within .ux-panel-corner-details,
+.ux-panel-cell.is-hovered .ux-panel-corner-details,
+.ux-panel-cell.is-details-open .ux-panel-corner-details {
+    opacity: 1;
+}
+
+/* Where nothing hovers, a toggle's details stay in view: its tap is its
+   flip, so its ⓘ is the only way in. */
+@media (hover: none) {
+    .ux-panel-cell.is-toggle .ux-panel-corner-details {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-panel-cell,
+    .ux-panel-corner-details {
+        transition: none;
     }
 }
 

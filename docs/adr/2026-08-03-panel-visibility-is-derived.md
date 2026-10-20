@@ -185,3 +185,20 @@ too — was not taken, because the fixture card's fader is that card's hero
 (the clock's tape is the same kind of exception, amended the same day in
 `2026-08-07-clock-transport-is-a-panel-instrument.md`).
 
+## Amendment (2026-10-20): brightness is a fader on a panel again
+
+Plan `lp2025/2026-10-19-2255-board-card-panel-layout`;
+`2026-10-20-panel-controls-lay-out-by-shape-and-the-bus.md`. The 2026-10-19
+amendment's bend is undone: the leaf card and the panel draw the same
+`UiPanelControl` once more, and for the fixture's brightness that is its
+fader, on its card and on every panel (the module panel, the play page, the
+connected board card). `UiFixtureFace::panel_brightness` is gone; the panel
+borrows `fixture.brightness` like any other face's controls.
+
+The knob was for room. The room now comes from shape: a fader is a strip, a
+line of its own with its label and value above a track the card's width,
+and a panel orders its strips before its cells by the bus's registry, so a
+group's brightness leads it without a rule that names it. Yona, round 2 of
+the spike: brightness "shouldn't be special cased ... the bus should handle
+this?"
+

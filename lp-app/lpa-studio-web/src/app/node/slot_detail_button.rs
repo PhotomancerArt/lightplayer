@@ -38,6 +38,11 @@ pub fn SlotDetailButton(
     label: String,
     aspects: Vec<UiSlotAspect>,
     #[props(default = false)] initially_open: bool,
+    /// Controlled-open pass-through (see `PopoverButton`): the caller owns
+    /// the open state, so the control itself can open its details (the
+    /// board card's tap). Custom `trigger` mode only.
+    #[props(default = None)]
+    open_signal: Option<Signal<bool>>,
     #[props(default = None)] revert: Option<SlotDetailRevert>,
     /// Dispatch conduit for aspect rows that carry actions (navigation
     /// affordances — roadmap D11). Rows render as plain text without it.
@@ -122,6 +127,7 @@ pub fn SlotDetailButton(
                 placement,
                 active: style.active,
                 initially_open,
+                open_signal,
                 trigger,
                 trigger_class,
                 trigger_open_class,

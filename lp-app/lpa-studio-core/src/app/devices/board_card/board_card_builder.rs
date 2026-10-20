@@ -622,7 +622,7 @@ mod tests {
     }
 
     /// `fixture`, connected on its card with its project's panel: the
-    /// master, a fader and a palette.
+    /// brightness, a fader and a palette.
     fn connected(mut fixture: CardFixture) -> CardFixture {
         fixture.editor_holds_it = true;
         fixture.connection = BoardConnection::Connected;
@@ -655,7 +655,7 @@ mod tests {
                 owner: lpc_model::NodeId::new(1),
             })
             .with_controls(vec![
-                control(super::super::MASTER_CHANNEL, fader()),
+                control("brightness", fader()),
                 control("level", fader()),
                 control("palette", crate::UiPanelWidget::PaletteSwatch),
             ]);

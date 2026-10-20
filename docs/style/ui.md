@@ -149,6 +149,14 @@ neutral tone or the spectrum before it reaches for a status hue — status
 hues are load bearing, and test-enforced (see `inline_button.rs`'s
 `violet_stays_the_binding_convention`).
 
+**A panel laid out by shape** (the connected board card's, 2026-10-20;
+`docs/ux/studies/panel-layout/`) adds three neutral tokens, no hue:
+`--studio-color-panel-line` (`#262633`), the light line between two controls,
+a step lighter than a group's own `--studio-color-border`;
+`--studio-color-panel-band` (`#1e1e2b`), the tint the root's controls sit on;
+and `--studio-color-panel-hover` (white at 4 %), a control's cell under the
+pointer.
+
 **The selection grammar** (spike `spikes/spectrum-selection`, ruled
 2026-08-30): selection and navigation are separate concepts and never share
 a mark.
@@ -368,18 +376,32 @@ The rules:
 - **Connected, the rows become the panel.** Connect turns the card's rows
   into the board's whole panel, drawn with Studio's existing panel widgets,
   and the card grows once to hold it. Done turns them back. Top to bottom:
-  - **the root's controls, the master first** (the project's brightness, a
-    knob on a panel): knobs and toggles in rows, as many to a row as the
-    card is wide (three on a phone's narrow card); a palette, a fader or
-    the Pattern instrument across the card;
-  - **each nested group's controls** under a quiet heading, its name on a
-    hairline;
+  - **the root's controls on the band** (`--studio-color-panel-band`), a
+    tint with no word;
+  - **each nested group's controls** under its own line and a heading of
+    its node's kind icon and its name, no box;
   - **the foot**: a bar with **Edit** (or Edit with a lock, on a board you
     can only play) flush at its end.
 
+  Inside the band and each group the controls lay out by **shape**, then by
+  the bus's registry order, then the walk's: the **strips** first (a fader,
+  a palette; the brightness leads because it is a strip the bus ranks
+  first), each a line of its own with its label and value on a row above a
+  track the card's width; then the **block** (the Pattern instrument)
+  across the card; then the **cells** (a knob, the Speed knob, a toggle),
+  three to a line on a 300 px card, 50 px each on a phone's narrow card.
+  **Light lines** (`--studio-color-panel-line`) run between every two
+  controls, edge to edge, a step lighter than a group's own line
+  (`--studio-color-border`); none on the card's edge or under the last row.
+
+  The whole cell (or strip) is the control's target and lightens under the
+  pointer (`--studio-color-panel-hover`). Its let go (↺, the engaged
+  family) and details (ⓘ) are 24 px circles in its top corners, at a
+  strip's label row's ends: ↺ while held, ⓘ on hover, focus, or always on a
+  toggle where nothing hovers. A tap that doesn't move opens the details.
   The clock is one **Speed** knob there (1× at the top); its own card keeps
-  the tape. The controls keep the panel's own look and gestures: the gold
-  held state, the let-go glyph, the detail popover. Nothing links away: no
+  the tape. The controls keep the panel's own widgets and states: the gold
+  held state, the detail popover. Nothing links away: no
   All controls, no "· N more". The panel's reset and auto-save switch are in
   the card's ⋯. The name bar's primary is Done (✓) while connected. A card
   that is connecting, reconnecting or failed to connect keeps its rows, and
