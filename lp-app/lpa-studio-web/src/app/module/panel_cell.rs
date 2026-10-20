@@ -82,7 +82,7 @@ pub(crate) fn PanelCell(
     } = view;
     let look = use_panel_story_look();
     // The details' open state: the ⓘ toggles it, a tap on the cell opens it.
-    let mut open = use_signal(|| look.opens(&channel));
+    let mut open = use_signal(|| look.opens(&scope, &channel));
     let on_tap = use_callback(move |()| open.set(true));
     // The whole cell is the details' outline anchor.
     let anchor_id = use_hook(|| {
@@ -90,7 +90,7 @@ pub(crate) fn PanelCell(
         format!("ux-panel-cell-{id}")
     });
     let toggle = matches!(control.widget, UiPanelWidget::Toggle);
-    let class = cell_class(CELL_CLASS, look.hovers(&channel), open(), toggle);
+    let class = cell_class(CELL_CLASS, look.hovers(&scope, &channel), open(), toggle);
     rsx! {
         div {
             id: "{anchor_id}",

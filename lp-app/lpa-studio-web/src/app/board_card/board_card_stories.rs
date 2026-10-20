@@ -42,8 +42,8 @@ use crate::app::home::device_offer_story_fixtures::{
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 use crate::app::module::PanelStoryLook;
 use crate::app::module::module_fixtures::{
-    card_few_controls_panel, card_many_controls_panel, card_playful_panel, card_root_panel,
-    card_root_panel_held, card_small_dome_panel, held_at,
+    ROOT_SCOPE, card_few_controls_panel, card_many_controls_panel, card_playful_panel,
+    card_root_panel, card_root_panel_held, card_small_dome_panel, held_at,
 };
 use crate::app::module::pattern_picker_fixtures::{
     CHOKER_SET, picker_offers, piece_panel, set_facts,
@@ -786,7 +786,7 @@ fn board_card_connected_details_open() -> Element {
         StoryPanelLook {
             look: PanelStoryLook {
                 hovered: Vec::new(),
-                details_open: Some("scale".to_string()),
+                details_open: Some((ROOT_SCOPE.to_string(), "scale".to_string())),
             },
             section { class: "tw:h-[760px] tw:p-4",
                 div { class: CARD_WIDTH_CLASS,
@@ -1809,10 +1809,13 @@ fn StoryPanelLook(look: PanelStoryLook, children: Element) -> Element {
     }
 }
 
-/// A look with `channels` drawn under the pointer.
+/// A look with the root's `channels` drawn under the pointer.
 fn hovering(channels: &[&str]) -> PanelStoryLook {
     PanelStoryLook {
-        hovered: channels.iter().map(|channel| channel.to_string()).collect(),
+        hovered: channels
+            .iter()
+            .map(|channel| (ROOT_SCOPE.to_string(), channel.to_string()))
+            .collect(),
         details_open: None,
     }
 }

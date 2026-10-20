@@ -5,24 +5,31 @@
 
 use dioxus::prelude::*;
 
-/// Story-only looks for the card's panel, by channel.
+/// Story-only looks for the card's panel, by control: its `(scope,
+/// channel)`, the panel's identity for a control (two effects' `hue` are
+/// two controls).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PanelStoryLook {
-    /// Channels drawn as if under the pointer: lightened, their ⓘ in view.
-    pub hovered: Vec<String>,
-    /// The channel whose details are open on first render.
-    pub details_open: Option<String>,
+    /// Controls drawn as if under the pointer: lightened, their ⓘ in view.
+    pub hovered: Vec<(String, String)>,
+    /// The control whose details are open on first render.
+    pub details_open: Option<(String, String)>,
 }
 
 impl PanelStoryLook {
-    /// Whether `channel` is drawn hovered.
-    pub(crate) fn hovers(&self, channel: &str) -> bool {
-        self.hovered.iter().any(|hovered| hovered == channel)
+    /// Whether the control at `(scope, channel)` is drawn hovered.
+    pub(crate) fn hovers(&self, scope: &str, channel: &str) -> bool {
+        self.hovered
+            .iter()
+            .any(|(hovered_scope, hovered)| hovered_scope == scope && hovered == channel)
     }
 
-    /// Whether `channel`'s details open on first render.
-    pub(crate) fn opens(&self, channel: &str) -> bool {
-        self.details_open.as_deref() == Some(channel)
+    /// Whether the control at `(scope, channel)` opens its details on first
+    /// render.
+    pub(crate) fn opens(&self, scope: &str, channel: &str) -> bool {
+        self.details_open
+            .as_ref()
+            .is_some_and(|(open_scope, open)| open_scope == scope && open == channel)
     }
 }
 

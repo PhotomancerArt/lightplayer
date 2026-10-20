@@ -724,3 +724,13 @@ hours), and neither is an exit path on its own.
   remembers a Wi‑Fi board (`walk-wifi-emu studio-lan`'s S2), and the 140
   build does not start at all. `CHROME_BIN="/Applications/Brave
   Browser.app/Contents/MacOS/Brave Browser"` ran every walk.
+
+- 2026-10-20 — **the same at teardown, Brave too** (the board card's panel
+  layout, `just studio-story-pngs board-card-connected`). Google Chrome 155
+  now writes the `--dump-dom` page and then exits 2 ("Teardown watchdog
+  expired"), which the script reads as a failed discovery; Brave fails the
+  same way. Either the 2026-10-17 line's Chrome for Testing, or a
+  `CHROME_BIN` wrapper that runs the desk's Chrome and turns exactly "exit 2
+  with `Teardown watchdog expired` on stderr" into 0, captures stories. The
+  hourly target cleaner also removed `target/dx/…/public` between a build
+  and its capture once: rebuild and capture in one sitting.

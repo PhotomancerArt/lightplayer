@@ -82,14 +82,14 @@ pub(crate) fn PanelStrip(
     let look = use_panel_story_look();
     // The details' open state: the ⓘ toggles it, a tap on the label row
     // opens it.
-    let mut open = use_signal(|| look.opens(&channel));
+    let mut open = use_signal(|| look.opens(&scope, &channel));
     let on_tap = use_callback(move |()| open.set(true));
     // The whole strip is the details' outline anchor.
     let anchor_id = use_hook(|| {
         let id = NEXT_PANEL_STRIP_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-panel-strip-{id}")
     });
-    let class = cell_class(STRIP_CLASS, look.hovers(&channel), open(), false);
+    let class = cell_class(STRIP_CLASS, look.hovers(&scope, &channel), open(), false);
     rsx! {
         div {
             id: "{anchor_id}",
