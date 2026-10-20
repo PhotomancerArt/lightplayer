@@ -27,19 +27,16 @@
 //! only), not the blue live family (transient edits), and deliberately not
 //! attention-orange — that stays device/roster health.
 //!
-//! The **label is the detail trigger**, reusing the node face's
-//! [`SlotDetailButton`] machinery verbatim: the whole control is the
+//! The **label is the detail trigger** and the let-go glyph hangs off it
+//! while engaged ([`PanelLabelTrigger`]): the whole control is the
 //! popover's outline anchor, so opening merges the control's outline into
 //! the aspect card and reads as diving into it, and a live top-layer copy
 //! of the control paints over the anchor while the popup is open. Sections
 //! come from [`UiPanelControlView::detail_aspects`].
 //!
-//! **Reset** (P2 clear) stays on the face: the small revert glyph sits
-//! beside the label ONLY while engaged. It is a gesture, not a detail, so
-//! it must not cost a popup to reach.
-//!
-//! Values render in **tabular numerals inside a reserved slot**, because a
-//! panel whose row reflows while you drag a fader is not a control panel.
+//! Values render in **tabular numerals inside a reserved slot**
+//! ([`PanelReadout`]), because a panel whose row reflows while you drag a
+//! fader is not a control panel.
 //!
 //! **Walk hooks**, on the control wherever a panel draws it (the editor,
 //! the play page, the board card): `data-panel-scope` and
@@ -48,34 +45,29 @@
 //! written in one session as held in the next — the board's own word, since
 //! a fresh session has no local echo.
 //!
-//! **At card size** (`compact`, the connected board card's panel — the
-//! card's five 28 px bars give way to it) the same control lays out
-//! tighter, never as another widget: a fader is one row across the card,
-//! label · fader · value; a palette is a strip across the card; a knob or a
-//! toggle keeps its column with its label and value close under it.
+//! The connected board card lays its panel out by shape with its own
+//! pieces ([`super::PanelCell`], [`super::PanelStrip`]); this control draws
+//! the editor's and the play page's panel, and the card's block (the
+//! Pattern instrument).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
-use lpa_studio_core::app::project::format_gradient_chip;
 use lpa_studio_core::{
     UiAction, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget,
     UiSlotValueKind,
 };
 
-use crate::app::node::{
-    HFaderField, KnobField, PaletteSwatchField, PanelEmit, SlotDetailButton, SlotUnitSuffix,
-    ToggleField, speed_words,
-};
-use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
+use crate::app::node::{HFaderField, KnobField, PaletteSwatchField, PanelEmit, ToggleField};
 
 use super::PanelGesture;
+use super::panel_label_trigger::{PanelLabelTrigger, label_visual};
+use super::panel_readout::PanelReadout;
+use super::panel_state_look::{
+    panel_state_hook, panel_state_label_class, panel_state_readout_class,
+};
 
 static NEXT_MODULE_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
-
-/// Bare text button for the label trigger; the state color rides the inner
-/// visual and the hover affordance is a dotted underline.
-const LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:decoration-dotted tw:underline-offset-2 tw:hover:underline";
 
 /// A fader's fixed footprint. Without it the control's width tracks its
 /// value string and the whole row shifts mid-drag.
@@ -85,27 +77,6 @@ const FADER_CLASS: &str = "tw:grid tw:w-[184px] tw:flex-none tw:gap-1";
 /// row's full width and wraps onto its own line rather than sharing one
 /// with the knobs.
 const INSTRUMENT_CLASS: &str = "tw:grid tw:min-w-0 tw:basis-full tw:gap-1.5";
-
-/// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
-/// all occupy the same width and nothing moves during a drag.
-const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:flex-none tw:items-baseline tw:justify-center tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:tabular-nums";
-
-/// A fader at card size: one row across the card — label, fader, value —
-/// so the master fits a strip of the card's height. The label takes at
-/// most 38% of the row and truncates there (its trigger button may not
-/// outgrow the popover wrapper that centres it), so the fader keeps its
-/// reach on a phone's narrow card.
-const COMPACT_FADER_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:grid-cols-[fit-content(38%)_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:[&_button]:max-w-full";
-
-/// A palette at card size: the whole row, label over its strip.
-const COMPACT_STRIP_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:gap-1";
-
-/// A knob or a toggle at card size: an equal share of the row, the label
-/// and value close under the widget, the label truncating to the share.
-const COMPACT_COLUMN_CLASS: &str = "tw:flex tw:min-w-0 tw:flex-1 tw:basis-0 tw:flex-col tw:items-center tw:gap-0.5 tw:[&>span]:max-w-full tw:[&_button]:max-w-full";
-
-/// The value slot at card size sits on its own line box: no leading.
-const COMPACT_READOUT_CLASS: &str = "tw:leading-none";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -119,10 +90,6 @@ pub fn ModulePanelControl(
     /// Play mode renders the same control at a roomier size.
     #[props(default = false)]
     play: bool,
-    /// The board card renders the same control at card size (the module
-    /// doc's "At card size").
-    #[props(default = false)]
-    compact: bool,
     /// Panel gestures (reset). Absent = the control is display-only.
     #[props(default = None)]
     on_panel: Option<EventHandler<PanelGesture>>,
@@ -166,20 +133,10 @@ pub fn ModulePanelControl(
     // control in a column. It takes the panel row's full width and wraps
     // below the narrow controls at phone widths.
     let is_instrument = matches!(control.widget, UiPanelWidget::PatternPicker { .. });
-    let compact_fader = compact && matches!(control.widget, UiPanelWidget::Fader { .. });
-    // A palette at card size is a strip across the card, not the panel's
-    // fixed footprint.
-    let compact_strip = compact && matches!(control.widget, UiPanelWidget::PaletteSwatch);
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
-    } else if compact_fader {
-        COMPACT_FADER_CLASS
-    } else if compact_strip {
-        COMPACT_STRIP_CLASS
     } else if is_wide {
         FADER_CLASS
-    } else if compact {
-        COMPACT_COLUMN_CLASS
     } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
@@ -187,73 +144,34 @@ pub fn ModulePanelControl(
     };
     let anchor_class = if is_instrument {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1.5"
-    } else if compact_fader {
-        COMPACT_FADER_CLASS
-    } else if compact {
-        "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-0.5"
     } else if is_wide {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
     } else {
         "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-1"
     };
 
-    let reset_target = control.panel_target.clone();
-    let reset_label = control.label.clone();
-    // Reset is a GESTURE, so it sits beside the label on the face rather
-    // than inside the popup — one click, always. It needs a real
-    // `(scope, channel)` target to dispatch against, so a fixture control
-    // without one renders no reset even when staged as engaged.
-    let reset = rsx! {
-        if engaged && let Some(target) = reset_target && let Some(handler) = on_panel {
-            button {
-                class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",
-                r#type: "button",
-                title: "Reset {reset_label} and let the project control it again",
-                aria_label: "Reset {reset_label}",
-                onclick: move |event| {
-                    event.stop_propagation();
-                    handler.call(PanelGesture::ClearControl {
-                        target: target.clone(),
-                    });
-                },
-                StudioIcon { name: StudioIconName::Revert, size: 10 }
-            }
-        }
-    };
-
-    let anchor_control = control.clone();
-    let anchor_label = label_visual(&control.label, label_class);
-
     let label = rsx! {
-        // `relative` so the engaged reset can hang off the label's right
-        // edge WITHOUT occupying layout — its appearance must not reflow
-        // the control (GV2).
-        span { class: "tw:relative tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
-            SlotDetailButton {
-                label: control.label.clone(),
-                aspects,
-                name_override: Some(control.label.clone()),
-                initially_open: detail_initially_open,
-                placement: PopoverPlacement::BottomMiddle,
-                anchor_id: Some(anchor_id.clone()),
-                anchor_visual: rsx! {
-                    div { class: anchor_class,
-                        ModulePanelControlBody {
-                            control: anchor_control,
-                            state,
-                            readout_class,
-                            label: anchor_label,
-                            compact,
-                            on_action,
-                        }
+        PanelLabelTrigger {
+            label: control.label.clone(),
+            aspects,
+            color_class: label_class,
+            anchor_id: anchor_id.clone(),
+            anchor_visual: rsx! {
+                div { class: anchor_class,
+                    ModulePanelControlBody {
+                        control: control.clone(),
+                        state,
+                        readout_class,
+                        label: label_visual(&control.label, label_class),
+                        on_action,
                     }
-                },
-                trigger: Some(label_visual(&control.label, label_class)),
-                trigger_class: LABEL_TRIGGER_CLASS.to_string(),
-                trigger_open_class: LABEL_TRIGGER_CLASS.to_string(),
-                on_action,
-            }
-            {reset}
+                }
+            },
+            initially_open: detail_initially_open,
+            engaged,
+            target: control.panel_target.clone(),
+            on_panel,
+            on_action,
         }
     };
 
@@ -269,7 +187,6 @@ pub fn ModulePanelControl(
                 state,
                 readout_class,
                 label,
-                compact,
                 on_action,
                 on_panel,
             }
@@ -289,9 +206,6 @@ fn ModulePanelControlBody(
     /// The label element: the interactive trigger in flow, a static copy in
     /// the top-layer visual.
     label: Element,
-    /// At card size: a fader is one row, the value slot has no leading.
-    #[props(default)]
-    compact: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// Panel gestures (reset) for an instrument that carries its own resets
     /// (the Pattern instrument); `None` on the popup's top-layer copy.
@@ -301,45 +215,15 @@ fn ModulePanelControlBody(
     let engaged = state.engaged();
     let following = matches!(state, UiPanelControlState::ReadFollowing);
 
-    // A phasor speed knob presents its stored period as a reciprocal and
-    // drags on an inverted axis (up = faster) — same treatment as the
-    // node-face control (G2 feedback; provisional pending the UX spike).
+    // A phasor speed knob drags on an inverted axis (up = faster) — same
+    // treatment as the node-face control (G2 feedback).
     let phasor = matches!(
         control.emit,
         lpa_studio_core::UiPanelEmit::PhasorPeriod { .. }
     );
-    // A palette reads as its compact chip (`5 stops`, `↻ 4 · 20 s`) — the
-    // strips below say WHICH palette; the full summary stays on hover and
-    // in the label's detail popup.
     let palette = control.shown_palette();
-    let speed = matches!(control.widget, UiPanelWidget::Speed);
-    let shown_value = if phasor {
-        format!("{} s", control.shown_display())
-    } else if speed {
-        speed_words(control.live_numeric().unwrap_or(match control.value.kind {
-            UiSlotValueKind::F32(rate) => rate,
-            _ => 1.0,
-        }))
-    } else if let Some(config) = &palette {
-        format_gradient_chip(config)
-    } else {
-        control.shown_display().to_string()
-    };
-    // Hovering a palette keeps the full summary reachable — the chip
-    // deliberately drops the space, method, and fade the dense line states.
-    let readout_title = match &palette {
-        Some(_) => control
-            .live_value
-            .clone()
-            .unwrap_or_else(|| control.value.display.clone()),
-        None => String::new(),
-    };
-    let readout_size = if compact { COMPACT_READOUT_CLASS } else { "" };
     let readout = rsx! {
-        span { class: "{READOUT_CLASS} {readout_class} {readout_size}",
-            span { title: readout_title, "{shown_value}" }
-            SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
-        }
+        PanelReadout { control: control.clone(), color_class: readout_class }
     };
 
     match control.widget.clone() {
@@ -387,15 +271,6 @@ fn ModulePanelControlBody(
                     on_action,
                 }
             };
-            // At card size the fader is one row: the column's grid places
-            // label, fader and value side by side.
-            if compact {
-                return rsx! {
-                    {label}
-                    {fader}
-                    {readout}
-                };
-            }
             rsx! {
                 div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
                     {label}
@@ -482,53 +357,9 @@ fn ModulePanelControlBody(
     }
 }
 
-/// The label visual shared by the trigger and its top-layer copy: the
-/// control name in the panel's label typography plus the small info glyph
-/// that stands for "this opens details", both in the state color.
-fn label_visual(label: &str, color_class: &'static str) -> Element {
-    rsx! {
-        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1 {color_class}",
-            span { class: "tw:truncate tw:text-[0.66rem] tw:font-bold tw:uppercase tw:leading-none tw:tracking-[0.08em]",
-                "{label}"
-            }
-            span { class: "tw:inline-flex tw:flex-none tw:opacity-60",
-                StudioIcon { name: StudioIconName::InfoBare, size: 9 }
-            }
-        }
-    }
-}
-
-/// The walk hook's name for a panel state (`data-panel-state`): what a walk
-/// reads to tell the board's held control from one it only follows.
-pub(crate) fn panel_state_hook(state: UiPanelControlState) -> &'static str {
-    match state {
-        UiPanelControlState::ReadDefault => "read-default",
-        UiPanelControlState::ReadFollowing => "read-following",
-        UiPanelControlState::Engaged => "engaged",
-    }
-}
-
-/// Label color per panel state. Three families, none of them green.
-fn panel_state_label_class(state: UiPanelControlState) -> &'static str {
-    match state {
-        UiPanelControlState::ReadDefault => "tw:text-subtle-foreground",
-        UiPanelControlState::ReadFollowing => "tw:text-status-bound-foreground",
-        UiPanelControlState::Engaged => "tw:text-status-engaged-foreground",
-    }
-}
-
-/// Readout color per panel state: the held value leads in engaged gold, a followed
-/// value in violet, an untouched default stays quiet.
-fn panel_state_readout_class(state: UiPanelControlState) -> &'static str {
-    match state {
-        UiPanelControlState::ReadDefault => "tw:text-dim-foreground",
-        UiPanelControlState::ReadFollowing => "tw:text-status-bound-foreground",
-        UiPanelControlState::Engaged => "tw:text-status-engaged-foreground",
-    }
-}
-
-/// Read-only fallback when the widget family and the value family disagree.
-fn mismatch(label: &str, display: &str) -> Element {
+/// Read-only fallback when the widget family and the value family disagree
+/// (the card's cells and strips use it too).
+pub(super) fn mismatch(label: &str, display: &str) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-w-[64px] tw:flex-none tw:flex-col tw:items-center tw:gap-1",
             span { class: "tw:text-[0.66rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground",
@@ -547,8 +378,6 @@ mod tests {
         UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelWidget,
         UiSlotAspectKind, UiSlotFieldState, UiSlotValue,
     };
-
-    use super::{panel_state_label_class, panel_state_readout_class};
 
     fn view(state: UiPanelControlState, source: Option<&str>) -> UiPanelControlView {
         UiPanelControlView::new(
@@ -572,39 +401,6 @@ mod tests {
             },
         )
         .with_state(state, source)
-    }
-
-    #[test]
-    fn the_three_panel_states_wear_three_different_families() {
-        let families: Vec<&str> = [
-            UiPanelControlState::ReadDefault,
-            UiPanelControlState::ReadFollowing,
-            UiPanelControlState::Engaged,
-        ]
-        .into_iter()
-        .map(panel_state_label_class)
-        .collect();
-
-        // P-Q2's requirement, pinned: three visibly distinct states.
-        assert_eq!(families.len(), 3);
-        assert_ne!(families[0], families[1]);
-        assert_ne!(families[1], families[2]);
-        assert_ne!(families[0], families[2]);
-        // Engaged must NOT reuse the bound-violet family (P6).
-        assert!(families[1].contains("bound"));
-        assert!(!families[2].contains("bound"));
-        assert!(families[2].contains("engaged"));
-        // And green stays valid-only, everywhere.
-        for family in families.iter().chain(
-            [
-                panel_state_readout_class(UiPanelControlState::ReadDefault),
-                panel_state_readout_class(UiPanelControlState::ReadFollowing),
-                panel_state_readout_class(UiPanelControlState::Engaged),
-            ]
-            .iter(),
-        ) {
-            assert!(!family.contains("good"), "green is valid-only: {family}");
-        }
     }
 
     /// GV fix 3: one value on the face, in every state — the live reading

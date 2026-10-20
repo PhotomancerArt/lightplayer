@@ -49,6 +49,11 @@ pub(crate) const COMMON_SCOPE: &str = "/aurora.module/common.module";
 /// bind in (multi-pattern P7, director ruling 2).
 pub(crate) const PIECE_SCOPE: &str = "/playful.module";
 pub(crate) const PLAYING_PATTERN_SCOPE: &str = "/playful.module/playlist.playlist/aurora.module";
+/// The small dome (`catalog/projects/small-dome`): its root, and its two
+/// modules, each with its own fixture.
+pub(crate) const SMALL_DOME_SCOPE: &str = "/small_dome.module";
+pub(crate) const DOME_SCOPE: &str = "/small_dome.module/dome.module";
+pub(crate) const DOORS_SCOPE: &str = "/small_dome.module/doors.module";
 
 /// The structured scope behind each fixture scope path — what the real
 /// derivation carries on `UiPanelGroup::target` and every control's
@@ -74,6 +79,9 @@ pub(crate) fn scope_target(scope: &str) -> lpc_wire::WireScopeRef {
         COMMON_SCOPE => module(14),
         PIECE_SCOPE => module(21),
         PLAYING_PATTERN_SCOPE => module(22),
+        SMALL_DOME_SCOPE => module(31),
+        DOME_SCOPE => module(32),
+        DOORS_SCOPE => module(33),
         "/aurora.module/set.playlist/drift.shader" => sink(0),
         "/aurora.module/set.playlist/whirl.shader" => sink(1),
         other => panic!("unknown fixture scope {other}"),
@@ -94,6 +102,9 @@ pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
             14 => COMMON_SCOPE,
             21 => PIECE_SCOPE,
             22 => PLAYING_PATTERN_SCOPE,
+            31 => SMALL_DOME_SCOPE,
+            32 => DOME_SCOPE,
+            33 => DOORS_SCOPE,
             other => panic!("unknown fixture scope owner {other}"),
         },
         lpc_wire::WireScopeRef::Sink { entry: 0, .. } => "/aurora.module/set.playlist/drift.shader",
@@ -177,18 +188,10 @@ pub(crate) fn fader(
     )
 }
 
-/// The fixture's brightness as a panel draws it: a knob over 0–255 (the
-/// fixture's own card keeps its fader; the card panel pass, 2026-10-19).
+/// The fixture's brightness: its own fader over 0–255, step 1, the same
+/// control on its card and on every panel (a strip on the board card).
 pub(crate) fn brightness(scope: &str, value: f32) -> UiPanelControlView {
-    knob(
-        scope,
-        "brightness",
-        "brightness",
-        value,
-        0.0,
-        255.0,
-        Some(1.0),
-    )
+    fader(scope, "brightness", "brightness", value, 255.0)
 }
 
 /// One pill toggle control.
@@ -357,6 +360,7 @@ fn plasma_panel(scope: &str, speed: UiPanelControlView) -> UiPanelGroup {
     // path has moved into the heading's detail popup — two copies of one
     // effect have to be tellable apart from the rule alone.
     UiPanelGroup::new(instance_label(scope), scope)
+        .with_kind("Module")
         .with_target(scope_target(scope))
         .with_controls(vec![
             speed,
@@ -1178,8 +1182,9 @@ pub(crate) fn entry_held_panel(entry: u32) -> UiPanelGroup {
 // ------------------------------------------------- the board card's panel
 
 /// The root panel a connected board card draws whole
-/// (`lpa_studio_core::board_panel_picks`): the master (brightness), three
-/// knobs, a toggle and a fader.
+/// (`lpa_studio_core::board_panel_picks`): the brightness and level faders,
+/// three knobs and a toggle, in the walk's order (the card sorts them:
+/// strips, then cells, each by the bus's registry, then the walk).
 pub(crate) fn card_root_panel() -> UiPanelGroup {
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
         .with_target(scope_target(ROOT_SCOPE))
@@ -1216,24 +1221,87 @@ fn card_root_controls() -> Vec<UiPanelControlView> {
 }
 
 /// The PLAYFUL choker's root panel (`catalog/projects/playful-choker`), in
-/// its panel order: the clock's Speed knob, the fixture's brightness, the
-/// shader's scale knob and its palette, cycling.
+/// the order the board's walk gives it: the clock's Speed knob, the
+/// fixture's brightness, the shader's palette (cycling), then its scale.
+/// The card's panel order sorts it (strips, then cells): the order that
+/// once left Scale alone under the palette.
 pub(crate) fn card_playful_panel() -> UiPanelGroup {
     use crate::app::node::node_story_fixtures::palette_cycle;
     UiPanelGroup::new("Playful Choker", ROOT_SCOPE)
+        .with_kind("Module")
         .with_target(scope_target(ROOT_SCOPE))
         .with_controls(vec![
             at_default(speed_control(ROOT_SCOPE, 1.0), "the clock's own rate"),
             at_default(brightness(ROOT_SCOPE, 128.0), "authored 128"),
             at_default(
-                knob(ROOT_SCOPE, "scale", "scale", 1.6, 0.5, 4.0, None),
-                "authored default",
-            ),
-            at_default(
                 swatch(ROOT_SCOPE, "palette", "palette", &palette_cycle()),
                 "authored default",
             ),
+            at_default(
+                knob(ROOT_SCOPE, "scale", "scale", 1.6, 0.5, 4.0, None),
+                "authored default",
+            ),
         ])
+}
+
+/// The small dome's root panel (`catalog/projects/small-dome`), as the
+/// board's walk gives it: the clock's Speed at the root, then the dome's and
+/// the doors' modules, each with its own fixture (its own brightness) and
+/// its shader's knobs. The root's band holds Speed alone; each module leads
+/// with its own brightness.
+pub(crate) fn card_small_dome_panel() -> UiPanelGroup {
+    const DOME: &str = DOME_SCOPE;
+    const DOORS: &str = DOORS_SCOPE;
+    let module = |label: &str, scope: &str, controls| {
+        UiPanelGroup::new(label, scope)
+            .with_kind("Module")
+            .with_target(scope_target(scope))
+            .with_controls(controls)
+    };
+    UiPanelGroup::new("Small Dome", SMALL_DOME_SCOPE)
+        .with_kind("Module")
+        .with_target(scope_target(SMALL_DOME_SCOPE))
+        .with_controls(vec![at_default(
+            speed_control(SMALL_DOME_SCOPE, 1.0),
+            "the clock's own rate",
+        )])
+        .with_groups(vec![
+            module(
+                "Dome",
+                DOME,
+                vec![
+                    at_default(
+                        knob(DOME, "bands", "Bands", 3.0, 1.0, 8.0, None),
+                        "authored default",
+                    ),
+                    at_default(brightness(DOME, 255.0), "authored 255"),
+                    at_default(phase_knob(DOME, 24.0), "authored 24 s"),
+                ],
+            ),
+            module(
+                "Doors",
+                DOORS,
+                vec![
+                    at_default(brightness(DOORS, 255.0), "authored 255"),
+                    at_default(phase_knob(DOORS, 24.0), "authored 24 s"),
+                    at_default(
+                        knob(DOORS, "warmth", "Warmth", 0.8, 0.2, 1.0, None),
+                        "authored default",
+                    ),
+                ],
+            ),
+        ])
+}
+
+/// A shader's Phase knob on the `speed` channel: a phasor's period, in
+/// seconds, dragged as a speed (up = faster).
+fn phase_knob(scope: &str, seconds: f32) -> UiPanelControlView {
+    let mut view = knob(scope, "speed", "Phase", seconds, 0.0, 120.0, None);
+    view.control.emit = UiPanelEmit::PhasorPeriod {
+        waveform: lpa_studio_core::Waveform::Ramp,
+        phase_offset: 0.0,
+    };
+    view
 }
 
 /// [`card_root_panel`] with `channel` held at `value` (gold, its let-go):
@@ -1254,6 +1322,7 @@ pub(crate) fn card_root_panel_held(channel: &str, value: f32) -> UiPanelGroup {
 pub(crate) fn card_many_controls_panel() -> UiPanelGroup {
     let effect = |scope: &str, channels: &[&str]| {
         UiPanelGroup::new(instance_label(scope), scope)
+            .with_kind("Module")
             .with_target(scope_target(scope))
             .with_controls(
                 channels
@@ -1275,7 +1344,7 @@ pub(crate) fn card_many_controls_panel() -> UiPanelGroup {
     ])
 }
 
-/// A small project's root panel: one knob, no master.
+/// A small project's root panel: one knob, no brightness.
 pub(crate) fn card_few_controls_panel() -> UiPanelGroup {
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
         .with_target(scope_target(ROOT_SCOPE))
