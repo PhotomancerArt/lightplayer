@@ -5,14 +5,15 @@
 //! [`meta_store_conformance_tests!`].
 
 use lp_cloud_domain::{
-    AccountAccess, CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord,
+    AccountAccess, BoardRecord, CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord,
 };
 use lpc_cloud_api::Access;
 use lpc_history::ContentHash;
 
 use crate::conformance::fixtures::{
-    project_uid, sample_account_access, sample_event, sample_head, sample_member, sample_refs,
-    sample_session, sample_sidecar, sample_user, seed_project, seed_user, user_uid,
+    board_id, full_board_record, minimal_board_record, project_uid, sample_account_access,
+    sample_event, sample_head, sample_member, sample_refs, sample_session, sample_sidecar,
+    sample_user, seed_project, seed_user, user_uid,
 };
 
 /// Generate the whole `MetaStore` battery as `#[test]` functions.
@@ -38,6 +39,11 @@ macro_rules! meta_store_conformance_tests {
             replacing_account_access_overwrites_every_field,
             account_by_key_salt_finds_only_the_current_key,
             account_by_key_salt_follows_a_key_reset,
+            board_records_round_trip_full_and_minimal,
+            putting_a_board_record_replaces_it_by_account_and_board,
+            an_accounts_board_records_are_ordered_by_joining_then_board,
+            board_records_for_board_spans_accounts,
+            deleting_a_board_record_says_whether_it_was_there,
             projects_round_trip_by_uid,
             projects_round_trip_every_access_level_and_the_archive_stamp,
             replacing_a_project_keeps_its_members_refs_events_and_sidecar,
@@ -299,6 +305,96 @@ pub fn account_by_key_salt_follows_a_key_reset(store: &mut dyn MetaStore) {
 
     assert_eq!(store.account_by_key_salt(&old_salt), None);
     assert_eq!(store.account_by_key_salt(&[0x13; 16]), Some(access));
+}
+
+// ---- board list -------------------------------------------------------
+
+/// Every field comes back as it went in, with all of it set and with as
+/// little as a record can hold.
+pub fn board_records_round_trip_full_and_minimal(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let full = full_board_record(alice, 1);
+    let minimal = minimal_board_record(alice, 2, 3.0);
+    store.put_board_record(full.clone());
+    store.put_board_record(minimal.clone());
+
+    assert_eq!(store.board_record(alice, board_id(1)), Some(full));
+    assert_eq!(store.board_record(alice, board_id(2)), Some(minimal));
+    assert_eq!(store.board_record(alice, board_id(3)), None);
+    assert_eq!(store.board_record(user_uid(9), board_id(1)), None);
+}
+
+/// A second put of the same `(account, board)` replaces the whole record:
+/// a cleared model and picture come back cleared.
+pub fn putting_a_board_record_replaces_it_by_account_and_board(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    store.put_board_record(full_board_record(alice, 1));
+    let replaced = BoardRecord {
+        label: "Porch".to_string(),
+        model: None,
+        picture: None,
+        ..minimal_board_record(alice, 1, 99.0)
+    };
+    store.put_board_record(replaced.clone());
+
+    assert_eq!(store.board_record(alice, board_id(1)), Some(replaced));
+    assert_eq!(store.board_records_for_user(alice).len(), 1);
+}
+
+pub fn an_accounts_board_records_are_ordered_by_joining_then_board(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    store.put_board_record(minimal_board_record(alice, 3, 5.0));
+    store.put_board_record(minimal_board_record(alice, 2, 7.0));
+    store.put_board_record(minimal_board_record(alice, 1, 5.0));
+    store.put_board_record(minimal_board_record(bob, 4, 1.0));
+
+    let boards: Vec<_> = store
+        .board_records_for_user(alice)
+        .into_iter()
+        .map(|record| record.board)
+        .collect();
+    assert_eq!(boards, vec![board_id(1), board_id(3), board_id(2)]);
+    assert!(store.board_records_for_user(user_uid(9)).is_empty());
+}
+
+/// The relay's lookup: one board's records on every list that holds it,
+/// in account order, each its own.
+pub fn board_records_for_board_spans_accounts(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    store.put_board_record(full_board_record(alice, 1));
+    store.put_board_record(minimal_board_record(bob, 1, 2.0));
+    store.put_board_record(minimal_board_record(bob, 2, 2.0));
+
+    let records = store.board_records_for_board(board_id(1));
+    assert_eq!(
+        records,
+        vec![
+            full_board_record(alice, 1),
+            minimal_board_record(bob, 1, 2.0)
+        ]
+    );
+    assert!(store.board_records_for_board(board_id(9)).is_empty());
+}
+
+pub fn deleting_a_board_record_says_whether_it_was_there(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    store.put_board_record(full_board_record(alice, 1));
+    store.put_board_record(full_board_record(bob, 1));
+
+    assert!(store.delete_board_record(alice, board_id(1)));
+    assert!(
+        !store.delete_board_record(alice, board_id(1)),
+        "already gone"
+    );
+    assert_eq!(store.board_record(alice, board_id(1)), None);
+    assert_eq!(
+        store.board_record(bob, board_id(1)),
+        Some(full_board_record(bob, 1)),
+        "another account's record of the board stays"
+    );
 }
 
 // ---- projects ---------------------------------------------------------
