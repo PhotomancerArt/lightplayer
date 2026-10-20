@@ -462,7 +462,8 @@ pub struct RunArgs {
 
     /// The run's pace: `realtime` (1×, never ahead of wall time) or `max` (as
     /// fast as possible, never paced). Left out, the board runs at 1× only
-    /// while a host is connected through its `--lan` forward. A set pace is
+    /// while a host is connected through its `--lan` forward or uplink, or
+    /// holds its `--link` byte socket. A set pace is
     /// in the run's label (`…+net=lan@pace=realtime`). The C6 only.
     #[arg(long, value_enum)]
     pub pace: Option<PaceArg>,
@@ -666,7 +667,8 @@ pub struct ServeArgs {
     /// Every board's pace, unless its `--board` says `pace=`: `realtime` (1×,
     /// never ahead of wall time) or `max` (as fast as possible, never paced).
     /// Left out, a board runs at 1× only while a host is connected through
-    /// its LAN forward. A set pace is in the board's label (`GET /boards`).
+    /// its LAN forward or uplink, or holds its USB byte socket. A set pace is
+    /// in the board's label (`GET /boards`).
     #[arg(long, value_enum)]
     pub pace: Option<PaceArg>,
 }

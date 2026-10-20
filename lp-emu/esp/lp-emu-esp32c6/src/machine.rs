@@ -4369,6 +4369,12 @@ impl Esp32C6Machine {
         self.hook_calls
     }
 
+    /// Whether a client holds the USB byte socket (the coupling rule's
+    /// reading), for the network seam's pace.
+    pub(crate) fn usb_client_is_connected(&self) -> bool {
+        self.usb_client_connected
+    }
+
     /// How many times the hart parked in `wfi` and the machine moved guest
     /// time to the next event — the deterministic idle skip. The count is
     /// the evidence that the idle hook was reached.
@@ -5963,6 +5969,8 @@ impl Esp32C6Machine {
             && connected != self.usb_client_connected
         {
             self.usb_client_connected = connected;
+            // A byte-socket client reads on wall time: it holds an unset pace.
+            self.net_host_attached(connected);
             if self.usb_sj_drain == UsbSjDrain::Auto {
                 let command = if connected {
                     ControlCommand::Open
