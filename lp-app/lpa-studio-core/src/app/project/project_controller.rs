@@ -7039,10 +7039,17 @@ impl ProjectController {
         // refusal: a work-in-progress must still save.
         if pulled {
             if let Some(active) = self.library.as_ref().and_then(|ctx| ctx.active.as_ref()) {
-                let issues = crate::app::project::entry_check::entries_failing_to_load(
+                let check = crate::app::project::entry_check::save_check(
                     &*active.handle.package_fs.borrow(),
                 );
-                if let Some(notice) = crate::app::project::entry_check::issues_notice(&issues) {
+                if let Some(notice) =
+                    crate::app::project::entry_check::issues_notice(&check.failing)
+                {
+                    notices = notices.with_notice(notice);
+                }
+                if let Some(notice) = crate::app::project::entry_check::shared_playlists_notice(
+                    &check.shared_playlists,
+                ) {
                     notices = notices.with_notice(notice);
                 }
             }
