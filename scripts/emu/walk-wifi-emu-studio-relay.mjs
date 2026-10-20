@@ -20,7 +20,10 @@
 //   T2  the cable is gone and nobody is signed in (no `?emu=`, no cookie):
 //       the board is a card under Offline boards, and it does NOT offer
 //       "Connect through lightplayer.app" (`connect-relay`) anywhere on it
-//   T3  signed in again, still no cable: the card offers `connect-relay`
+//   T3  signed in again, still no cable: the account's list (`ListBoards`)
+//       says the board is online at lightplayer.app, so its card stands
+//       under Online boards with its picture from lightplayer.app; it
+//       offers `connect-relay`
 //       (its primary, or in its link row's details when Connect over Wi‑Fi
 //       leads, `primary_action.rs`); pressed, the hub opens a member session
 //       to the board, the BOARD says a relay route's secure session opened,
@@ -34,6 +37,13 @@
 //       its link row (the connect's failed work; the hub's 4404); once
 //       the board is back on the relay (its own `[relay] leg open`), a press
 //       brings the card back ready
+//   T5  a SECOND browser that never met the board (a fresh profile, as on
+//       another computer), signed in: the board is a card under Online
+//       boards (`mac-<hex>`, from the account's list alone), its
+//       lightplayer.app row says the account and "online", its picture is
+//       lightplayer.app's, and Connect through lightplayer.app (its
+//       primary) brings it up ready on the relay, the board saying a relay
+//       route's secure session opened (your boards follow you, M1)
 //
 // THE BOARD'S WORDS DECIDE EVERY STEP: its status answers over its USB door
 // (T1), then its console (its USB link held by `lp-cli link capture` once
@@ -108,6 +118,9 @@ const WORDS = {
   offline: "The board isn't online.",
   // The USB row of a board reached through the relay: not its link.
   usbRow: "USB not connected",
+  // The lightplayer.app row of a board online at lightplayer.app that no
+  // link of the tab reaches (`cloud_bar.rs`): the account, then "online".
+  onlineLine: /^lightplayer\.app .*online$/,
 };
 
 function usage() {
@@ -168,6 +181,7 @@ async function main() {
       `T2 no cookie, no ?emu= → ${A}'s card under Offline boards, and no connect-relay ("${WORDS.connectRelay}") on it, face or link row's details`,
       `T3 signed in, no ?emu= → ${A}'s offline card → connect-relay → hub: member session open; board: [relay] route … secure session opening → its card (${A}'s MAC) ready, lightplayer.app row "lightplayer.app … connected", one device`,
       `T4 the device leg cut and refused → card offline → connect-relay → link row "${WORDS.offline}" (failed); leg allowed → board: [relay] leg open → press → ready`,
+      `T5 a fresh profile, signed in, never met ${A} → its card under Online boards (data-picture=cloud, lightplayer.app … online) → connect-relay (the primary) → board: [relay] route … secure session opening → ready`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, board: boardSpec, steps, prerequisites: needs, chrome }, null, 2));
     console.log("THE EMULATED STUDIO-RELAY WALK — dry run: nothing started");
@@ -269,6 +283,14 @@ async function main() {
     await driver.waitFor(
       `Boolean(document.querySelector(${JSON.stringify(`#home-offline-boards [data-board-card="${boardPath(mac)}"]`)}))`,
       { timeoutMs: STEP_MS, what: "the board's card under Offline boards" },
+    );
+  };
+  /// The board's card under Online boards: a board the account's list says
+  /// is online at lightplayer.app, that no link here reaches.
+  const openOnline = async () => {
+    await driver.waitFor(
+      `Boolean(document.querySelector(${JSON.stringify(`#home-online-boards [data-board-card="${boardPath(mac)}"]`)}))`,
+      { timeoutMs: STEP_MS, what: "the board's card under Online boards" },
     );
   };
   /// Page-side: whether the board's card draws `connect-relay` anywhere —
@@ -418,10 +440,11 @@ async function main() {
       return seen.tile;
     });
 
-    await step("T3", `signed in, no cable: "${WORDS.connectRelay}" brings ${A} back as the same device`, async (seen) => {
+    await step("T3", `signed in, no cable: ${A} is online at lightplayer.app; "${WORDS.connectRelay}" brings it back as the same device`, async (seen) => {
       await signIn(true);
       await load(plainUrl);
-      await openRemembered();
+      await openOnline();
+      seen.online = await driver.waitBar("cloud", WORDS.onlineLine, { board: mac, timeoutMs: STEP_MS });
       const hubFrom = cloud.log().length;
       const from = hold.console.mark();
       seen.pressed = await pressConnectRelay();
@@ -438,8 +461,8 @@ async function main() {
       // No other link named: the lightplayer.app row is the link in use,
       // and the USB row says only its own fact.
       if (card.usb !== WORDS.usbRow) throw new Error(`the relay card's USB row says ${JSON.stringify(card.usb)}, not ${JSON.stringify(WORDS.usbRow)}`);
-      // The same device: no card left under Offline boards for it (it was the
-      // only remembered board, so the whole section is gone).
+      // The same device: no card left under Offline boards for it (it was
+      // the only remembered board, and it was online all along).
       const offline = await driver.evaluate(`Boolean(document.querySelector('#home-offline-boards'))`);
       if (offline) throw new Error(`Offline boards is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
       return { hub: seen.hub, board: seen.board, line };
@@ -449,7 +472,8 @@ async function main() {
       const from = hold.console.mark();
       cloud.refuseDeviceLeg(true);
       seen.cut = cloud.cutDeviceLeg();
-      // The card leaves Online boards for Offline boards: ITS card, there.
+      // The card leaves Online boards for Offline boards: ITS card, there,
+      // once the account's list (asked every 30 s) no longer names it.
       await openRemembered();
       seen.hubEnded = hubSince(0).split("\n").filter((line) => line.includes(board) && /ended|refused/.test(line)).slice(-2);
       const hubFrom = cloud.log().length;
@@ -474,6 +498,30 @@ async function main() {
       seen.pressedAgain = await pressConnectRelay();
       await readyOnRelay();
       return { cut: seen.cut, said: seen.said, back: seen.back };
+    });
+
+    await step("T5", `a browser that never met ${A}, signed in: its card is in Online boards, and connects through lightplayer.app`, async (seen) => {
+      // The first browser lets go of the board (its one network slot), and
+      // a fresh profile — another computer, as far as Studio knows — opens.
+      await driver.close();
+      driver = await StudioDriver.launch({ width: 1100, height: 900 });
+      await driver.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false }, driver.sessionId);
+      await signIn(true);
+      await load(plainUrl);
+      await openOnline();
+      seen.online = await driver.waitBar("cloud", WORDS.onlineLine, { board: mac, timeoutMs: STEP_MS });
+      seen.picture = await driver.waitFor(
+        `${await driver.card({ board: mac })}?.querySelector('[data-picture="cloud"][data-picture-frame="true"]') ? 'cloud' : false`,
+        { timeoutMs: STEP_MS, what: "the card to draw lightplayer.app's picture" },
+      );
+      await driver.screenshot(path.join(shots, "studio-relay-T5-never-met.png"));
+      const hubFrom = cloud.log().length;
+      const from = hold.console.mark();
+      seen.pressed = await driver.pressOffer("connect-relay", { board: mac, timeoutMs: STEP_MS });
+      seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
+      seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
+      const line = await readyOnRelay();
+      return { online: seen.online, picture: seen.picture, hub: seen.hub, board: seen.board, line };
     });
   } catch (error) {
     fatal = error;
@@ -504,7 +552,7 @@ async function main() {
     console.error(`\nThe studio-relay walk ran to the end, but ${failed.map((s) => s.id).join(", ")} failed.`);
     process.exit(1);
   }
-  console.log(`\n✓ the studio-relay walk finished T1–T4 (${configuration}, lp-emu ${commit}).`);
+  console.log(`\n✓ the studio-relay walk finished T1–T5 (${configuration}, lp-emu ${commit}).`);
 }
 
 await main();

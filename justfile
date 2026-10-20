@@ -5284,7 +5284,10 @@ walk-two-tabs-emu *args:
 # the board (`relay noAccount` → `connected`); signed out its remembered
 # tile offers no relay connect; signed in, "Connect through lightplayer.app"
 # brings the same board back as a "Wi‑Fi via lightplayer.app" card; off the
-# relay, the tile says "The board isn't online.". Needs `cargo build -p
+# relay, the tile says "The board isn't online."; a fresh browser profile
+# that never met the board sees it under Online boards from the account's
+# list (`ListBoards`), with lightplayer.app's picture, and connects through
+# lightplayer.app (T5, your boards follow you M1). Needs `cargo build -p
 # lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
 # studio-firmware-package-esp32c6`. Not CI.
 walk-wifi-emu lane *args:
