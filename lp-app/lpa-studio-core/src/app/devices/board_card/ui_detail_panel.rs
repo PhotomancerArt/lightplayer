@@ -5,7 +5,6 @@
 use lpa_devices::LinkCounterFacts;
 use lpa_devices::evidence::TerminalLine;
 
-use super::ui_bluetooth_switch::UiBluetoothSwitch;
 use crate::OfferPath;
 use crate::app::access::UiAccessPanel;
 use crate::app::devices::device_layout_view::UiLayoutPanel;
@@ -24,14 +23,9 @@ pub enum UiDetailPanel {
     /// Who has access: the play and edit passwords and the keys (the access
     /// panel), where this link may see them.
     Access(UiAccessPanel),
-    /// The board's Bluetooth switch.
-    Bluetooth(UiBluetoothSwitch),
     /// The board's Wi‑Fi: its networks, the form, the test, Cloud relay
     /// (the Wi‑Fi panel). Its verbs are offers at `devices/<board>/wifi/…`.
     Wifi(UiDeviceWifi),
-    /// Rename: the `rename` offer's one text field, starting at the board's
-    /// name now.
-    Rename { offer: OfferPath, title: String },
     /// How the link is doing: the board's link counters off its heartbeat.
     LinkCounters(LinkCounterFacts),
     /// The layout question (or its refusal) before a board's files move:
@@ -65,9 +59,7 @@ impl UiDetailPanel {
     /// The offers this panel's controls press.
     pub fn offer_paths(&self) -> Vec<&OfferPath> {
         match self {
-            UiDetailPanel::Rename { offer, .. } | UiDetailPanel::RestoreFromFile { offer, .. } => {
-                vec![offer]
-            }
+            UiDetailPanel::RestoreFromFile { offer, .. } => vec![offer],
             UiDetailPanel::OtherVersion { install, from_file } => {
                 std::iter::once(install).chain(from_file).collect()
             }
@@ -78,7 +70,6 @@ impl UiDetailPanel {
             UiDetailPanel::Terminal { .. }
             | UiDetailPanel::PanelSettings { .. }
             | UiDetailPanel::Access(_)
-            | UiDetailPanel::Bluetooth(_)
             | UiDetailPanel::Wifi(_)
             | UiDetailPanel::LinkCounters(_) => Vec::new(),
         }

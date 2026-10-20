@@ -422,7 +422,7 @@ async function main() {
       await driverB.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driverB.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
       await driverB.waitCard({ board: state.mac, timeoutMs: STEP_DEADLINE_MS });
-      await driverB.waitBar("connection", "Open in another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
+      await driverB.waitBar("usb", "Open in another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       // The port B picked was a chooser grant, which registers it without
       // the sweep's gate (it may be another board of the kind): B asks the
       // door for it and is refused, and reads that refusal against A's claim
@@ -456,8 +456,8 @@ async function main() {
     // ---------------------------------------------------------------- 3
     await step(3, async () => {
       await driverB.pressOffer("take-over", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
-      await driverA.waitBar("connection", "Taken by another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
-      await driverB.waitBar("connection", /^USB/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
+      await driverA.waitBar("usb", "Taken by another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
+      await driverB.waitBar("usb", /^USB connected\b/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       const face = await driverB.boardRuns({ board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       if (face !== "running") throw new Error(`the board B opened should still run its project; B reads ${face}`);
       const hello = await driverB.boardSaid(/hello/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
@@ -501,8 +501,8 @@ async function main() {
     // ---------------------------------------------------------------- 4
     await step(4, async () => {
       await driverA.pressOffer("take-over", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
-      await driverB.waitBar("connection", "Taken by another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
-      await driverA.waitBar("connection", /^USB/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
+      await driverB.waitBar("usb", "Taken by another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
+      await driverA.waitBar("usb", /^USB connected\b/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       const face = await driverA.boardRuns({ board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       if (face !== "running") throw new Error(`A has the board back but reads ${face}`);
       const held = await locksHeld(driverA);
@@ -524,10 +524,10 @@ async function main() {
       // open anything by itself.
       await driverB.waitFor(
         `(() => { const card = document.querySelector(${JSON.stringify(`[data-board-card="${state.path}"]`)}); if (!card) return false;
-                  const el = card.querySelector('[data-bar="connection"] button[aria-label="Connection details"]'); if (!el) return false;
+                  const el = card.querySelector('[data-bar="usb"] button[aria-label="USB details"]'); if (!el) return false;
                   const text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
                   return !/another tab/i.test(text) ? text : false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "B's connection bar to lose \"another tab\"" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "B's USB row to lose \"another tab\"" },
       );
       const after = await openAttempts(driverB);
       if (after !== before) throw new Error(`tab B opened the port on its own (open attempts ${before} → ${after})`);

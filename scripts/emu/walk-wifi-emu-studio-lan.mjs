@@ -99,18 +99,18 @@ const WALK_PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 const NOWHERE = "127.0.0.1:9";
 
 /// Core's words (`wifi_connect_failure.rs`, `wifi_connect_op.rs`,
-/// `board_card/connection_bar.rs`). They say where to look; the boards'
+/// `board_card/link_bar.rs`). They say where to look; the boards'
 /// consoles say what happened.
 const WORDS = {
-  // The verb's own words, where the connection details draw it. An
+  // The verb's own words, where the link row's details draw it. An
   // offline card's primary is Connect (`connect`, reaching over Wi‑Fi
   // first, `primary_action.rs`), which the walk presses by its offer.
   connectOverWifi: "Connect over Wi‑Fi",
   busy: "Busy with another connection — try again",
   unreachable: (host) => `Couldn't reach the board at ${host}. Is it on this network?`,
-  // The Link row on a LAN link ("Wi‑Fi · connected"), and its details'
-  // Address: what the plan line names.
-  wifiLine: (address) => `Wi‑Fi · …, Address ${address}`,
+  // The Wi‑Fi row on a LAN link ("Wi‑Fi <network> connected"), and its
+  // details' Address: what the plan line names.
+  wifiLine: (address) => `Wi‑Fi … connected, Address ${address}`,
 };
 
 /// The offline card of `board` (a MAC): its card under Offline boards

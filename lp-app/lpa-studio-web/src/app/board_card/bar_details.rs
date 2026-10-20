@@ -10,9 +10,11 @@
 //! shared popover is what keeps a tall details card readable over its own
 //! bar (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`).
 //!
-//! Inside, core's sections render in the order core gave them
-//! ([`RichDetailSection`]), then the panels ([`BarDetailPanel`]), then the
-//! Danger section, which always comes last. While core raises the details
+//! Inside, a radio row's switch comes first ([`DetailSwitchHead`]: its icon
+//! and name, and the board's on/off switch at the line's end), then core's
+//! sections in the order core gave them ([`RichDetailSection`]), then the
+//! panels ([`BarDetailPanel`]), then the Danger section, which always comes
+//! last. While core raises the details
 //! (`raised`: a question that must be answered now, Q40) they open by
 //! themselves and stay open until core lowers them — or, for a refusal,
 //! until its Close closes it, which the details remember until core's panel
@@ -27,11 +29,12 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     NetworkCommand, OfferPath, RichSection, RichWeight, UiAction, UiCardAction, UiDetailPanel,
-    UiLayoutPanel,
+    UiDetailSwitch, UiLayoutPanel,
 };
 
 use super::bar_detail_panel::BarDetailPanel;
 use super::card_action::{AnchoredPick, DetailsPick};
+use super::detail_switch_head::DetailSwitchHead;
 use crate::app::home::access_ui_context::network_handler;
 use crate::base::{DetailPopover, PopoverPlacement, StudioIconName};
 use crate::core::RichDetailSection;
@@ -40,6 +43,9 @@ use crate::core::RichDetailSection;
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn BarDetails(
+    /// The row's own on/off switch, first (`UiBarDetails::switch`).
+    #[props(default)]
+    switch: Option<UiDetailSwitch>,
     sections: Vec<RichSection<UiCardAction>>,
     panels: Vec<UiDetailPanel>,
     /// Core asks for these details now: open them, and keep them open.
@@ -127,6 +133,9 @@ pub fn BarDetails(
             trigger_class,
             trigger_open_class,
             div { class: DETAILS_BODY_CLASS,
+                if let Some(switch) = switch {
+                    DetailSwitchHead { switch, on_action }
+                }
                 // Keyed by place: two sections may share a title (a bar's
                 // notice and its facts are both "Firmware").
                 for (index, section) in rest.into_iter().enumerate() {

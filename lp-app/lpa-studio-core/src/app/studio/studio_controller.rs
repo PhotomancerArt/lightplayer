@@ -230,6 +230,9 @@ pub struct StudioController {
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
     play_views: u32,
+    /// How many times a card's Sign in was pressed: the shell leaves for
+    /// sign-in when the count it sees advances (`UiStudioView::sign_in_requests`).
+    sign_in_seq: u64,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -548,6 +551,7 @@ impl StudioController {
             place: None,
             graph: crate::app::graph::GraphController::default(),
             play_views: 0,
+            sign_in_seq: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -2350,6 +2354,18 @@ impl StudioController {
                     .map(|wifi| (device.id, wifi))
             })
             .collect();
+        for device in self.devices.roster().devices() {
+            if let Some(status) = self.network.remembered_status(device.id) {
+                view.remembered_networks.insert(device.id, status.clone());
+            }
+            if let Some(on) = self.access.remembered_bluetooth(device) {
+                view.remembered_bluetooth.insert(device.id, on);
+            }
+        }
+        view.account_name = self
+            .access
+            .account_keys()
+            .map(|keys| keys.account_name.clone());
         let updates = view
             .roster
             .devices
@@ -3402,6 +3418,7 @@ impl StudioController {
                     self.access.access_added().cloned(),
                 )
                 .with_app_agent(app_agent)
+                .with_sign_in_requests(self.sign_in_seq)
                 .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -3468,6 +3485,7 @@ impl StudioController {
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
             .with_app_agent(app_agent)
+            .with_sign_in_requests(self.sign_in_seq)
             .with_offers(offers)
             .with_graph(graph)
     }
@@ -3750,6 +3768,9 @@ impl StudioController {
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.sign_in_offer(&facts) {
+                offers.publish(offer);
+            }
             if let Some(offer) = self.take_over_offer_for(view, &facts) {
                 offers.publish(offer);
             }
@@ -3767,6 +3788,18 @@ impl StudioController {
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
             if let Some(wifi) = roster.wifi.get(&view.id) {
                 for offer in crate::app::network::wifi_offers(&facts.prefix, wifi) {
+                    offers.publish(offer);
+                }
+            }
+            // The Bluetooth switch (`<board>/bluetooth/enabled`), where the
+            // board's access list says it; "on Bluetooth" is the link's
+            // own kind, read off the endpoint.
+            if let Some(access) = roster.access.get(&view.id) {
+                let over_bluetooth = view.status != crate::DeviceStatus::Offline
+                    && roster.link_kinds.get(&view.id) == Some(&crate::UiLinkKind::Bluetooth);
+                if let Some(offer) =
+                    crate::bluetooth_offer(&facts.prefix, view.id, access, over_bluetooth)
+                {
                     offers.publish(offer);
                 }
             }
@@ -3855,6 +3888,16 @@ impl StudioController {
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
+    }
+
+    /// `devices/<board>/sign-in`: the lightplayer.app row's Sign in, on a
+    /// board that is not a runtime, while this page can reach lightplayer.app
+    /// (its relay transport is installed) and nobody is signed in.
+    fn sign_in_offer(&self, facts: &crate::DeviceOfferFacts<'_>) -> Option<crate::UiOffer> {
+        (self.relay_transport.is_some()
+            && self.access.account_keys().is_none()
+            && facts.face == crate::DeviceFace::Wire)
+            .then(|| crate::sign_in_offer(&facts.prefix))
     }
 
     /// Whether another tab of this browser holds the network slot of the
@@ -4606,6 +4649,11 @@ impl StudioController {
             self.apply_access_command(op.into_access_command());
             return Ok(UiNotices::new());
         }
+        if node_id.as_str() == crate::BluetoothSwitchOp::NODE_ID {
+            let op = action.into_op::<crate::BluetoothSwitchOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
+        }
         if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
             let op = action.into_op::<crate::WifiConnectOp>()?;
             return self.start_wifi_connect(op);
@@ -4640,6 +4688,12 @@ impl StudioController {
                 log::debug!("start fresh on {:?}: nothing to remember", op.device);
             }
             self.keep_fresh_starts();
+            self.mark_dirty();
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::SignInOp::NODE_ID {
+            let _op = action.into_op::<crate::SignInOp>()?;
+            self.sign_in_seq += 1;
             self.mark_dirty();
             return Ok(UiNotices::new());
         }

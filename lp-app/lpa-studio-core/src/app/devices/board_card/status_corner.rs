@@ -67,7 +67,10 @@ fn panel_settings(panel: &UiBoardPanel) -> Option<UiDetailPanel> {
 pub(crate) fn layer_title(layer: BarLayer) -> &'static str {
     match layer {
         BarLayer::Project => "Project",
-        BarLayer::Connection => "Connection",
+        BarLayer::Usb => "USB",
+        BarLayer::Wifi => "Wi\u{2011}Fi",
+        BarLayer::Bluetooth => "Bluetooth",
+        BarLayer::Cloud => "lightplayer.app",
         BarLayer::Access => "Access",
         BarLayer::Firmware => "Firmware",
         BarLayer::Hardware => "Hardware",
@@ -251,6 +254,7 @@ mod tests {
         UiStackBar {
             tone,
             details: UiBarDetails {
+                switch: None,
                 sections: vec![RichSection {
                     title: layer_title(layer).to_string(),
                     tone,

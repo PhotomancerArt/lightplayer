@@ -82,7 +82,7 @@
 // end and channel 3) against the `navigator.bluetooth` polyfill, which
 // translates its datagrams to the board's USB stream and models every reset
 // of the board as a GATT drop (the board's radio goes with its CPU). The
-// card's connection bar must say "Bluetooth" while it updates, and Studio's
+// card's link row must say "Bluetooth" while it updates, and Studio's
 // lines in the board's terminal must time every reconnect:
 //
 //   cut-backup    the board goes out of range mid-BACKUP (an empty engine
@@ -103,7 +103,7 @@
 // NO `?emu=` at all — `?lan=ws://<its forward>/link`, Studio's real LAN
 // stack (`browser_websocket.js`, its secure lp-link and channel 3) against
 // the board's own LAN endpoint, through core-only and its three resets. The
-// card's connection bar must say "Wi‑Fi" while it updates, and Studio's lines
+// card's link row must say "Wi‑Fi" while it updates, and Studio's lines
 // in the board's terminal must time the reconnects:
 //
 //   update        X → Y with one press, as on USB, every reset a socket close
@@ -134,7 +134,7 @@
 // is served on the walk's own origin with `/api`, `/auth` and `/relay`
 // forwarded to the server (one origin, as on lightplayer.app, so the
 // session cookie rides the relay's browser leg) and opened with
-// `?relay=<board>` — no `?emu=`, no `?lan=`. The card's connection bar must
+// `?relay=<board>` — no `?emu=`, no `?lan=`. The card's link row must
 // say "Wi‑Fi via lightplayer.app" while it updates:
 //
 //   update        X → Y with one press through the relay, every reset the
@@ -229,10 +229,10 @@ const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_S
 const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
 /// The link this lane updates over, in the steps' words.
 const LINK_WORD = BLE ? "Bluetooth" : ON_LAN ? "Wi\u2011Fi" : "USB";
-/// The link the card must name: its Link row leads with the link's name
-/// (`UiLinkKind::label`, `ui_link_kind.rs`), then " · " and how it is going
-/// ("USB · connected", "Bluetooth · connecting" — `connection_bar.rs`).
-/// Through the relay it is "lightplayer.app".
+/// The link the card must name: the row of the link in use leads with the
+/// link's name, its kind (`UiLinkKind::label`, `ui_link_kind.rs`), then
+/// how it is going ("USB connected", "Bluetooth LP-b48c connected" —
+/// `link_bar.rs`). Through the relay it is "lightplayer.app".
 const LINK_LABEL = BLE ? "Bluetooth" : RELAY_LANE ? "lightplayer.app" : LAN_LANE ? "Wi\u2011Fi" : "USB";
 if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
@@ -316,7 +316,7 @@ const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 /// The card's update lines, for the record: the first time each kind showed.
 /// Each is matched against the step's board's firmware bar as it reads (its
 /// work while the update runs, else its summary) and, on a new board's card,
-/// against its connection details' `State`.
+/// against its link row's details' `State`.
 ///
 /// - The firmware bar's work while an update runs is the update's short line
 ///   (the board card's copy pass, `device_update_words.rs`; `firmware_bar.rs`
@@ -325,7 +325,7 @@ const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 ///   40%" (the new core), "Updating · 2 of 2 · 70%" (its engine: the old
 ///   "Finishing the update"), "Resuming · 2 of 2 · 70%" (the same, found
 ///   half-way), "Restoring · 35%", "Another device is updating it · 40%".
-///   The link is no longer in the line: the connection bar says it.
+///   The link is no longer in the line: the link row says it.
 /// - A new board's card (`pending_board_card`: a core-only board says no
 ///   hello, so it is not kept) tells no update story: its connection
 ///   details' `State` carries the model's own stage words
@@ -692,11 +692,11 @@ async function main() {
   /// its own card offline. For that card: its path; the corner's mark
   /// (`blank`: a new board's card, `pending_board_card`); whether it sits in
   /// the home page's Offline boards (`#home-offline-boards`); the firmware and
-  /// connection bars' lines (a bar's pieces joined, as the driver's
+  /// link rows' lines (a bar's pieces joined, as the driver's
   /// `barText`) and work (`data-bar-work`); the verbs on its face this walk
   /// reads (`data-offer-path`: enabled, and whether a press arms — a
   /// Lasting button carries `.ux-armed-label-armed`); and, while its
-  /// connection details are open, their `State` fact.
+  /// link row's details are open, their `State` fact.
   const snapshotExpr = () => `(() => {
     const hex = ${JSON.stringify(macHex(here?.mac))};
     const words = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
@@ -735,15 +735,22 @@ async function main() {
         .find((el) => words(el).toLowerCase() === label.toLowerCase());
       return dt?.nextElementSibling ? words(dt.nextElementSibling) : null;
     };
+    // The row of the link in use: the one link row that says "connected"
+    // (the USB row's name, another link's state), else the one at work,
+    // else USB's (link_bar.rs).
+    const links = [['usb', 'USB'], ['wifi', 'Wi\u2011Fi'], ['bluetooth', 'Bluetooth'], ['cloud', 'lightplayer.app']]
+      .map(([layer, name]) => ({ layer, ...(bar(layer, name) ?? { line: null, work: 'none' }) }));
+    const inUse = links.find((row) => /(?<!not )connected$/.test(row.line ?? ''))
+      ?? links.find((row) => row.work !== 'none') ?? links[0];
     return JSON.stringify({
       board: {
         path: pathOf(card),
         corner: cornerOf(card),
         offlineBoards: Boolean(card.closest('#home-offline-boards')),
         firmware: bar('firmware', 'Firmware'),
-        connection: bar('connection', 'Connection'),
+        connection: inUse,
         offers: { 'update-firmware': face('update-firmware'), 'install-firmware': face('install-firmware'), edit: face('edit') },
-        state: fact('connection', 'State'),
+        state: links.map((row) => fact(row.layer, 'State')).find(Boolean) ?? null,
       },
       cards: cards.map(pathOf),
     });
@@ -759,7 +766,7 @@ async function main() {
   /// `snapshotExpr`), else its own.
   const boardPathNow = async () => (await cardSnapshot()).board?.path ?? here.path;
   /// The update lines the snapshot's card shows (`CARD_LINES`): its firmware
-  /// bar, and a new board's connection details' `State`; and "available"
+  /// bar, and a new board's link row's details' `State`; and "available"
   /// while the firmware bar's action is the over-the-air `update-firmware`
   /// (Routine: it does not arm — the USB flash at the same path does).
   const cardLines = (snap) => {
@@ -799,7 +806,7 @@ async function main() {
   /// Watch the step's board's card until `done(snapshot, lines, order)`
   /// holds, noting every update line it shows on the way (the order they
   /// first appeared in). While the board is on a new board's card, its
-  /// connection details stay open: their `State` is where that card says how
+  /// link row's details stay open: their `State` is where that card says how
   /// its update goes.
   const watchCard = async (done, what, timeoutMs = UPDATE_MS, onTick = null) => {
     const order = [];
@@ -811,7 +818,7 @@ async function main() {
       await refreshTab();
       const snap = await cardSnapshot();
       if (snap.board?.corner === "blank") {
-        await driver.openBar("connection", { board: snap.board.path, timeoutMs: 3_000 }).catch(() => {});
+        await driver.openBar(snap.board.connection?.layer ?? "usb", { board: snap.board.path, timeoutMs: 3_000 }).catch(() => {});
       }
       const lines = cardLines(snap);
       for (const [kind, line] of Object.entries(lines)) {
@@ -1048,13 +1055,13 @@ async function main() {
   };
   /// The card must name this lane's link while the board updates. The
   /// update's line no longer carries it (`device_update_words.rs`: the link
-  /// is in the sentence); the connection bar does — its summary, read on
+  /// is in the sentence); the link row does — its summary, read on
   /// every tick the firmware bar said "Updating · 1 of 2", leads with the
   /// link's label (`LINK_LABEL`).
   const checkLinkWord = (ran) => {
     if (!ran.order.some((entry) => entry.kind === "updating")) throw new Error("the card never said updating (the new firmware)");
-    if (!ran.links.some((line) => line.startsWith(`${LINK_LABEL} · `))) {
-      throw new Error(`while it updated, the card's connection bar said ${JSON.stringify(ran.links)}, never ${LINK_LABEL}`);
+    if (!ran.links.some((line) => line.startsWith(`${LINK_LABEL} `))) {
+      throw new Error(`while it updated, the card's link rows said ${JSON.stringify(ran.links)}, never ${LINK_LABEL}`);
     }
   };
   /// Put the walk's project on the board, by its card's offers: a board
@@ -1201,8 +1208,8 @@ async function main() {
     let lowAfterCut = Infinity;
     let lastAir = "";
     let lastAirAt = 0;
-    /// The connection bar's lines while the firmware bar said "Updating · 1
-    /// of 2": what `checkLinkWord` reads the link from.
+    /// The link-in-use row's lines while the firmware bar said "Updating ·
+    /// 1 of 2": what `checkLinkWord` reads the link from.
     const links = [];
     const order = await watchCard(upToDate(), "up to date on Y", UPDATE_MS, async (lines, snap) => {
       const link = snap.board?.connection?.line;
@@ -1288,9 +1295,9 @@ async function main() {
         }
         // The cable stays out until Studio has seen it go — the board's card
         // stops saying its link is up — then goes back in, as a person
-        // re-seating it would. The card's connection bar leaves "<link> ·
-        // live" / "<link> · connected" ("USB · not connected", "Offline · …",
-        // or its work: `connection_bar.rs`), or the card goes quiet
+        // re-seating it would. The card's link rows stop saying
+        // "connected" ("USB not connected", or its work: `link_bar.rs`), or
+        // the card goes quiet
         // (`data-board-corner="quiet"`: a board Studio is not watching), or
         // it moves to Offline boards (`#home-offline-boards`, the home
         // page's own section — where a core-only board's card may go).
@@ -1766,7 +1773,7 @@ async function main() {
               writeFileSync(path.join(out, "restoring-page.txt"), await driver.evaluate("document.body.innerText"));
               const air0 = await bleStats(board);
               // The restore runs on the new board's card (a core-only board
-              // says no hello, so it is not kept): its connection details'
+              // says no hello, so it is not kept): its link row's details'
               // State says "Restoring firmware… N%" (`watchCard` keeps them
               // open). X running again: the board said who it is — its card
               // kept and live — and runs its project (its project bar's Edit can be

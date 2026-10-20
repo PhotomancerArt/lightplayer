@@ -161,15 +161,24 @@ const CONNECT_SCOPE = "document.querySelector('#home-connect-board')";
 /// project pick), or any other panel. One popover is open at a time.
 export const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
 
-/// A bar's layer, as `data-bar` names it, to the name its details trigger
-/// carries ("Project details").
+/// A row's layer, as `data-bar` names it, to the name its details trigger
+/// carries ("Project details"). The four link rows are named for their
+/// link (`BarLayer::as_str`): `usb`, `wifi`, `bluetooth`, `cloud`
+/// (lightplayer.app).
 const BAR_NAMES = {
   project: "Project",
-  connection: "Connection",
+  usb: "USB",
+  wifi: "Wi\u2011Fi",
+  bluetooth: "Bluetooth",
+  cloud: "lightplayer.app",
   access: "Access",
   firmware: "Firmware",
   hardware: "Hardware",
 };
+
+/// The row of the link a board is reached by: `usb`, `wifi`, `bluetooth`,
+/// or `cloud` for a board reached through lightplayer.app.
+export const LINK_BARS = ["usb", "wifi", "bluetooth", "cloud"];
 
 /// `devices/<board ref>` for `board`: a MAC (any case, with or without
 /// colons) is `mac-<12 lowercase hex>` (`BoardRef`); a ref (`mac-…`,
@@ -213,11 +222,15 @@ const FIND_MARK = `((card, verb, inDetails) => card ? [...card.querySelectorAll(
 /// after its params).
 const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySelectorAll('button'); return all.length ? all[all.length - 1] : null; })`;
 
-/// Page-side: a bar's line as it reads — its pieces (summary, aside, or the
-/// work's words) each trimmed and joined by one space, so "USB · connected"
-/// and its aside "editor open" read "Open in another tab editor open". A
-/// mark (the cloud) is an icon with no text, and reads as nothing.
-const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
+/// Page-side: a row's line as it reads — its pieces (kind, summary, aside,
+/// or the work's words) each trimmed and joined by one space, so the USB
+/// row reads "USB connected", and held with its aside "USB Open in another
+/// tab editor open". A mark is an icon with no text, and reads as nothing.
+/// The name and its state share one wrapper (`.ux-board-bar-words`, so the
+/// state gives way first), read as its two pieces: "Bluetooth LP-0000
+/// connected", never "LP-0000connected".
+const LINE_TEXT = `((el) => [...el.children].flatMap((c) => c.classList.contains('ux-board-bar-words') ? [...c.children] : [c])
+  .map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
 
 /// The Firmware row of a board with no LightPlayer on it: "Firmware none"
 /// (`firmware_bar.rs`; the row's kind word, then its name).
@@ -697,8 +710,9 @@ export class StudioDriver {
     );
   }
 
-  /// Open a bar's details ("project", "connection", "access", "firmware",
-  /// "hardware"): any other details on the card are closed first — one
+  /// Open a row's details ("project", "usb", "wifi", "bluetooth", "cloud",
+  /// "access", "firmware", "hardware"): any other details on the card are
+  /// closed first — one
   /// popover at a time. Waits for the details card to be drawn. The details
   /// render inside the card's DOM, so reads stay scoped to the card.
   async openBar(layer, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {

@@ -323,7 +323,7 @@ fn segment_class(pressed: bool) -> &'static str {
 }
 
 /// Select the focused input's whole text.
-fn select_focused_input() {
+pub(crate) fn select_focused_input() {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;

@@ -109,6 +109,7 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
         now: 1_000_000.0,
         connection: &lpa_studio_core::BoardConnection::Watched,
         panel: None,
+        links: Default::default(),
     });
     (card, tree)
 }

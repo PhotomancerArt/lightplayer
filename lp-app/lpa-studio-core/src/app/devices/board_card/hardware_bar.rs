@@ -11,15 +11,16 @@
 //! | Only its chip is known | the chip ("ESP32-C6") | "model not set" |
 //! | Nothing | "unknown" | — |
 //!
-//! Neutral, with no action. "Simulated" is said once, on the Link row (P2):
+//! Neutral, with no action. "Simulated" is said once, on the USB row (P2):
 //! the model is the model. A chip name looks like a model, so a board known
 //! only by its chip says so (P1). The details hold the model, the chip, the
 //! board's id (its MAC, shown here once and nowhere else), a stand-in's
-//! speed or tier, Rename, Reset with its reason, and apart, the two that
+//! speed or tier, Reset with its reason, and apart, the two that
 //! lose something: Factory reset (erases the whole board — firmware,
 //! projects, settings) and Forget. Factory reset is here, not under
 //! Firmware, because it erases the board (Yona, 2026-10-19: "I expect to
-//! find factory reset in the hardware section").
+//! find factory reset in the hardware section"). The board is renamed where
+//! its name is, in the name bar ([`super::UiNameBar::rename`]), not here.
 
 use lpa_devices::view::PendingLinkView;
 
@@ -28,7 +29,6 @@ use super::board_card_input::{BoardCardInput, offer_at};
 use super::detail_sections::{danger, facts, verbs, without_empty};
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::UiCardAction;
-use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::device_identity::device_identity_line;
 use crate::{OfferPath, RichLine, UiOffer};
@@ -75,7 +75,6 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             lines.push(RichLine::new("Tier", tier));
         }
     }
-    let rename = input.offer("rename");
     // Reset stays in details while work runs, refused with its reason
     // (the model refuses a reset under an activity; Cancel is the way out).
     let reset = input.offer("reset-board");
@@ -94,18 +93,13 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         aside: aside.filter(|_| work.is_none()),
         work,
         details: UiBarDetails {
+            switch: None,
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(reset.map(own_words).into_iter().collect()),
                 danger(erase.into_iter().chain(forget).map(own_words).collect()),
             ]),
-            panels: rename
-                .map(|rename| UiDetailPanel::Rename {
-                    offer: rename.path.clone(),
-                    title: input.view.title.clone(),
-                })
-                .into_iter()
-                .collect(),
+            panels: Vec::new(),
             raised: false,
         },
         ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
@@ -142,6 +136,7 @@ pub(crate) fn pending_hardware_bar(
         aside,
         work: identifying.then(|| UiBarWork::running("identifying", None)),
         details: UiBarDetails {
+            switch: None,
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(
@@ -181,7 +176,7 @@ mod tests {
     use super::*;
     use crate::{UiRuntimeBand, UiStatusKind};
 
-    /// "Simulated" is said once, on the Link row (P2): the Hardware row
+    /// "Simulated" is said once, on the USB row (P2): the Hardware row
     /// names the model.
     #[test]
     fn a_stand_in_names_its_model_alone() {
@@ -210,10 +205,10 @@ mod tests {
         assert_eq!(line(&bar, "Chip").as_deref(), Some("ESP32-C6"));
         assert_eq!(line(&bar, "Id").as_deref(), Some("a0:f2:62:87:b4:8c"));
         assert!(!bar.summary.contains("a0:f2"), "never a MAC on the face");
-        assert!(matches!(
-            bar.details.panels.as_slice(),
-            [UiDetailPanel::Rename { title, .. }] if title == "Porch"
-        ));
+        assert!(
+            bar.details.panels.is_empty(),
+            "the name is renamed in the name bar"
+        );
         let verbs: Vec<&str> = bar
             .details
             .sections

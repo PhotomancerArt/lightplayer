@@ -62,6 +62,8 @@ pub fn StudioShell(
         open_project_transient: _,
         open_transient_example: _,
         transient_fork_generation: _,
+        // consumed by the web shell's view loop, which leaves for sign-in
+        sign_in_requests: _,
         // the chrome renders the header session·project control (web_app
         // builds it from the editor pane's own view and this field)
         open_project_name: _,

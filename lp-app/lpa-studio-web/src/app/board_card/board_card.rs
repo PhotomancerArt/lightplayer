@@ -1,13 +1,15 @@
 //! [`BoardCard`]: one board, drawn from core's [`UiBoardCard`] — the
 //! picture with the surface over it ([`BoardSurface`]: what matters now,
 //! when anything does) and the status corner cut out of it, the name bar
-//! and its one primary, then the five bars, always project · connection · access ·
-//! firmware · hardware. Connected, the board's whole panel stands in the
-//! bars' place ([`CompactPanel`]: `card.panel`), Edit at its foot.
+//! and its one primary, then the eight rows, always project · USB · Wi‑Fi ·
+//! Bluetooth · lightplayer.app · access · firmware · hardware — for a new
+//! board, its setup list, the rows with something left to do lit.
+//! Connected, the board's whole panel stands in the rows' place
+//! ([`CompactPanel`]: `card.panel`), Edit at its foot.
 //!
 //! **One height in every state but one** (AC5, `docs/style/ui.md` "Stable
 //! Layout"): the card is an explicit grid — the picture's row (138 px, or
-//! 108 px when the card is narrow), the 50 px name bar, five 28 px bars —
+//! 108 px when the card is narrow), the 50 px name bar, eight 28 px rows —
 //! so a board's events never move it. Work, notices and details live inside
 //! those rows or float above them. **Connected, the card grows once**, to
 //! hold the panel (its last row is as tall as the panel), and shrinks back
@@ -151,11 +153,11 @@ fn lease_change(
     }
 }
 
-/// The card: an explicit grid — the picture's row, the 50 px name bar, five
-/// 28 px bars — in one border, on the panel ground. `ux-board-card` makes
+/// The card: an explicit grid — the picture's row, the 50 px name bar,
+/// eight 28 px rows — in one border, on the panel ground. `ux-board-card` makes
 /// it the query container the picture's narrow height reads (style.css).
 /// It clips nothing: the primary's glow reaches past its section.
-const CARD_CLASS: &str = "ux-board-card tw:relative tw:grid tw:min-w-0 tw:grid-rows-[auto_50px_repeat(5,28px)] tw:rounded-[8px] tw:border tw:border-solid tw:border-border tw:bg-panel-primary tw:text-[11.5px] tw:text-muted-foreground";
+const CARD_CLASS: &str = "ux-board-card tw:relative tw:grid tw:min-w-0 tw:grid-rows-[auto_50px_repeat(8,28px)] tw:rounded-[8px] tw:border tw:border-solid tw:border-border tw:bg-panel-primary tw:text-[11.5px] tw:text-muted-foreground";
 
 /// The connected card: the same grid, its last row the board's panel at the
 /// panel's own height — the card grows once, on connect.
@@ -175,11 +177,11 @@ mod tests {
 
     /// Every bar, the name bar and the picture have fixed heights, so the
     /// card is one height in every state: an explicit grid of a picture row
-    /// (138 px, 108 px narrow), the 50 px name bar and five 28 px bars.
+    /// (138 px, 108 px narrow), the 50 px name bar and eight 28 px rows.
     #[test]
     fn every_bar_the_name_bar_and_the_picture_have_fixed_heights() {
         assert!(
-            CARD_CLASS.contains("tw:grid-rows-[auto_50px_repeat(5,28px)]"),
+            CARD_CLASS.contains("tw:grid-rows-[auto_50px_repeat(8,28px)]"),
             "{CARD_CLASS}"
         );
         assert!(css_rule(".ux-board-picture-slot").contains("height: 138px"));
@@ -224,7 +226,7 @@ mod tests {
     }
 
     /// The walk hooks are on the DOM: the card's board, the corner's mark,
-    /// the five bars in their order, and the offer path on every action the
+    /// the eight rows in their order, and the offer path on every action the
     /// face draws — the primary and each bar's action.
     #[test]
     fn the_walk_hooks_are_on_the_dom() {
@@ -265,13 +267,13 @@ mod tests {
 
     /// Connected (`panel: Some`), the card draws the board's panel in the
     /// bars' place and no bar, its last row as tall as the panel (the card
-    /// grows once); watched (`None`), the five bars at their fixed height.
+    /// grows once); watched (`None`), the eight rows at their fixed height.
     #[test]
     fn a_connected_card_draws_its_panel_in_the_bars_place() {
         let (watched, tree) = card_and_tree(&porch_view());
         assert_eq!(watched.panel, None);
         let html = render_card(watched.clone(), tree.clone(), None);
-        assert_eq!(attribute_values(&html, "data-bar").len(), 5);
+        assert_eq!(attribute_values(&html, "data-bar").len(), 8);
         assert!(!html.contains("data-board-panel"), "{html}");
         assert!(html.contains(CARD_CLASS), "{html}");
 

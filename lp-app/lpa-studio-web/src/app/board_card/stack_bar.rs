@@ -1,7 +1,9 @@
-//! [`StackBar`]: one of the card's five rows, one 28 px line in the card's
+//! [`StackBar`]: one of the card's eight rows, one 28 px line in the card's
 //! one grammar (`docs/ux/anatomy/board-card.md`, "The row"): **icon · kind
 //! · name · state · action**. The icon is the kind's own in every state;
-//! the kind is a fixed muted column, so the names line up down the card;
+//! the kind is a fixed muted column, so the names line up down the card —
+//! on a link row the link's own name ("USB", "lightplayer.app"), a step
+//! brighter, since the link is the thing;
 //! the name is the thing itself; the state follows only when it is not
 //! normal; the action sits flush at the end. The name is the row's value
 //! and keeps its width: where the row is short of room the state gives
@@ -17,10 +19,17 @@
 //! opens the details; a row whose end only opens its details ("Review")
 //! draws that section inside the trigger, because that is all it does.
 //!
+//! A row with something left to do (`UiStackBar::todo`: a new board's
+//! setup list) is lit: the whole row on a lighter flat ground, its icon,
+//! kind and name at full strength, its button on the same ground with no
+//! fill of its own (style.css `.ux-board-bar-todo`). Never a gradient, never
+//! a dot; core never lights a toned, disabled or working row.
+//!
 //! A mark ([`UiBarMark`]) is an icon alone at the line's end, after the
-//! state — the cloud on a board also reachable through lightplayer.app —
-//! with its words as its accessible name and hover: filled in the live tone
-//! while it holds, struck through while it doesn't (never colour alone).
+//! state, with its words as its accessible name and hover: filled in the
+//! live tone while it holds, struck through while it doesn't (never colour
+//! alone). No row draws one today; the account mark ("From your account")
+//! is the secrets vault's.
 //!
 //! The row's tone tints it in its status family (`docs/style/ui.md`):
 //! Attention (a device needs you), Error (broken, striped), Good (work that
@@ -90,16 +99,19 @@ pub fn StackBar(
         BarWorkState::Running => Some((work.percent, work.other_device)),
         BarWorkState::Done | BarWorkState::Failed { .. } => None,
     });
+    let lit = bar.todo && tone == UiStatusKind::Neutral && bar.work.is_none();
     rsx! {
         div {
-            class: bar_class(tone),
+            class: if lit { format!("{} {TODO_CLASS}", bar_class(tone)) } else { bar_class(tone) },
             "data-bar": "{layer}",
             "data-bar-work": work_state,
             "data-stale": if bar.stale { "true" },
+            "data-todo": if lit { "true" },
             div { class: TRIGGER_SLOT_CLASS,
                 BarDetails {
                     sections: details.sections,
                     panels: details.panels,
+                    switch: details.switch,
                     raised: details.raised,
                     board,
                     label,
@@ -139,13 +151,13 @@ pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
 }
 
 /// The row's name and state, as drawn: at rest the summary and the aside;
-/// while it works, the name stays and the work's words are its state. On
-/// the Link row (no kind) the work's words are the whole line ("USB ·
-/// connecting"), and a row with no name yet puts them where the name goes
-/// ("installing · 30%").
+/// while it works, the name stays and the work's words are its state. A
+/// row with no name while it works puts them where the name goes:
+/// "installing · 30%", and a link row whose state the work says
+/// ("connecting").
 pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
     match &bar.work {
-        Some(work) if bar.kind.is_none() || bar.summary.is_empty() => (work.words.clone(), None),
+        Some(work) if bar.summary.is_empty() => (work.words.clone(), None),
         Some(work) => (
             bar.summary.clone(),
             Some(work.words.clone()).filter(|words| !words.is_empty()),
@@ -193,7 +205,11 @@ fn bar_line(bar: &UiStackBar) -> Element {
     );
     let kind_class = format!(
         "{} {dim}",
-        if toned { KIND_TONED_CLASS } else { KIND_CLASS }
+        match (toned, bar.layer.is_link()) {
+            (true, _) => KIND_TONED_CLASS,
+            (false, true) => KIND_LINK_CLASS,
+            (false, false) => KIND_CLASS,
+        }
     );
     let state_class = format!(
         "{} {dim}",
@@ -259,13 +275,9 @@ fn bar_line(bar: &UiStackBar) -> Element {
 }
 
 /// The mark: its icon alone, its words the accessible name and the hover;
-/// filled in the live tone while lit, struck through while it isn't.
+/// in the live tone while lit, dim while it isn't.
 fn bar_mark(mark: UiBarMark) -> Element {
-    let icon = match (mark.icon.as_str(), mark.lit) {
-        ("cloud", true) => Some(StudioIconName::CloudFilled),
-        ("cloud", false) => Some(StudioIconName::CloudOff),
-        (other, _) => action_icon_name(Some(other)),
-    };
+    let icon = action_icon_name(Some(mark.icon.as_str()));
     let Some(icon) = icon else {
         return rsx! {};
     };
@@ -303,7 +315,10 @@ fn bar_title(bar: &UiStackBar) -> String {
 fn layer_name(layer: lpa_studio_core::BarLayer) -> &'static str {
     match layer {
         lpa_studio_core::BarLayer::Project => "Project",
-        lpa_studio_core::BarLayer::Connection => "Connection",
+        lpa_studio_core::BarLayer::Usb => "USB",
+        lpa_studio_core::BarLayer::Wifi => "Wi\u{2011}Fi",
+        lpa_studio_core::BarLayer::Bluetooth => "Bluetooth",
+        lpa_studio_core::BarLayer::Cloud => "lightplayer.app",
         lpa_studio_core::BarLayer::Access => "Access",
         lpa_studio_core::BarLayer::Firmware => "Firmware",
         lpa_studio_core::BarLayer::Hardware => "Hardware",
@@ -362,12 +377,18 @@ const TRIGGER_OPEN_CLASS: &str = "tw:flex tw:h-full tw:w-full tw:min-w-0 tw:curs
 
 const ICON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-subtle-foreground";
 const ICON_TONED_CLASS: &str = "tw:inline-flex tw:flex-none";
-/// The kind: a fixed column (56 px) so the names line up down the card,
-/// muted — it teaches, it isn't news.
+/// The kind: a fixed column (style.css `.ux-board-bar-kind`, wide enough
+/// for "lightplayer.app") so the names line up down the card, muted — it
+/// teaches, it isn't news.
 const KIND_CLASS: &str =
-    "tw:w-14 tw:flex-none tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
+    "ux-board-bar-kind tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
+/// …on a link row, the link's own name: a step brighter, the link is the
+/// thing.
+const KIND_LINK_CLASS: &str = "ux-board-bar-kind tw:font-semibold tw:text-muted-foreground";
 /// …in a toned row: the row's own colour, quieter.
-const KIND_TONED_CLASS: &str = "tw:w-14 tw:flex-none tw:font-medium tw:opacity-70";
+const KIND_TONED_CLASS: &str = "ux-board-bar-kind tw:font-medium tw:opacity-70";
+/// A lit row (style.css): something left to do here.
+const TODO_CLASS: &str = "ux-board-bar-todo";
 /// The name and the state: one 28 px line that the state wraps off when
 /// it can't fit beside the whole name (style.css).
 const WORDS_CLASS: &str = "ux-board-bar-words";
@@ -391,10 +412,9 @@ const CHEVRON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-dim-foreground"
 /// flush section, inside the trigger because opening the details is all it
 /// does.
 const OPENS_DETAILS_CLASS: &str = "tw:-mr-2.5 tw:ml-1 tw:inline-flex tw:h-full tw:flex-none tw:items-center tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:border-[color:var(--ux-row-flush-edge,var(--studio-color-border))] tw:bg-white/[0.035] tw:px-[11px] tw:text-[11px] tw:font-extrabold tw:text-strong-foreground";
-/// A mark not holding: struck through, dim.
+/// A mark not holding: dim.
 const MARK_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:text-dim-foreground";
-/// A lit mark: filled, the live tone (the board reachable through
-/// lightplayer.app).
+/// A lit mark: the live tone.
 const MARK_LIT_CLASS: &str =
     "tw:inline-flex tw:flex-none tw:items-center tw:text-status-live-foreground";
 
@@ -402,56 +422,64 @@ const MARK_LIT_CLASS: &str =
 mod tests {
     use super::*;
 
-    /// The cloud mark is the icon alone: no words on the row, its label the
-    /// accessible name and the hover, lit in the live tone when the board is
-    /// reachable through lightplayer.app.
+    /// A mark is the icon alone: no words on the row, its label the
+    /// accessible name and the hover (the account mark, the secrets vault's
+    /// to draw; no row carries one yet).
     #[test]
     fn a_mark_is_an_icon_alone_with_its_words_as_its_name() {
         let bar = link_row(Some(UiBarMark {
-            icon: "cloud".to_string(),
-            label: lpa_studio_core::ALSO_THROUGH_THE_CLOUD.to_string(),
+            icon: "lock".to_string(),
+            label: "From your account".to_string(),
             lit: true,
         }));
         let html = dioxus_ssr::render_element(bar_line(&bar));
-        assert!(html.contains("data-bar-mark=\"cloud\""), "{html}");
-        assert!(html.contains("data-lit=\"true\""), "{html}");
-        assert!(
-            html.contains("aria-label=\"Also reachable through lightplayer.app\""),
-            "{html}"
-        );
-        assert!(!html.contains(">also cloud<"), "no words: {html}");
+        assert!(html.contains("data-bar-mark=\"lock\""), "{html}");
+        assert!(html.contains("aria-label=\"From your account\""), "{html}");
         assert!(MARK_LIT_CLASS.contains("status-live"));
-        assert_eq!(
-            bar_title(&bar),
-            "USB · connected · Also reachable through lightplayer.app"
-        );
+        assert_eq!(bar_title(&bar), "USB connected · From your account");
     }
 
-    /// P14: lit and not lit differ in shape, not only in colour — filled
-    /// against struck through.
+    /// AC4: a row with something left to do is lit — its own class and
+    /// hook, no gradient — and a toned or working row never is.
     #[test]
-    fn a_lit_cloud_is_filled_and_an_unreachable_one_struck_through() {
-        let lit = dioxus_ssr::render_element(bar_mark(UiBarMark {
-            icon: "cloud".to_string(),
-            label: "lit".to_string(),
-            lit: true,
-        }));
-        let off = dioxus_ssr::render_element(bar_mark(UiBarMark {
-            icon: "cloud".to_string(),
-            label: "off".to_string(),
-            lit: false,
-        }));
-        assert!(lit.contains("fill=\"currentColor\""), "{lit}");
-        assert!(!off.contains("fill=\"currentColor\""), "{off}");
-        assert_ne!(
-            lit.matches("<path").count(),
-            off.matches("<path").count(),
-            "struck through draws the strike: {off}"
+    fn a_to_do_row_is_lit_and_a_toned_one_never() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Wifi,
+            "wifi",
+            "not connected",
         );
+        row.todo = true;
+        let html = render_row(row.clone());
+        assert!(html.contains("data-todo=\"true\""), "{html}");
+        assert!(html.contains(TODO_CLASS), "{html}");
+        let css = include_str!("../../style.css");
+        let rule = css_block(css, ".ux-board-bar-todo {");
+        assert!(!rule.contains("gradient"), "a flat ground: {rule}");
+        row.tone = UiStatusKind::Attention;
+        assert!(!render_row(row.clone()).contains("data-todo"), "toned");
+        row.tone = UiStatusKind::Neutral;
+        row.work = Some(running("connecting"));
+        assert!(!render_row(row).contains("data-todo"), "working");
+    }
+
+    /// A link row's kind is the link's own name, a step brighter than the
+    /// other kinds.
+    #[test]
+    fn a_link_rows_kind_is_brighter() {
+        let link = dioxus_ssr::render_element(bar_line(&link_row(None)));
+        assert!(link.contains(KIND_LINK_CLASS), "{link}");
+        let firmware = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.08-9",
+        );
+        let html = dioxus_ssr::render_element(bar_line(&firmware));
+        assert!(html.contains(KIND_CLASS), "{html}");
+        assert!(!html.contains(KIND_LINK_CLASS), "{html}");
     }
 
     /// The row's grammar: the kind's word in its own column after the icon,
-    /// then the name, then the state; the Link row has no kind.
+    /// then the name, then the state; a link row's kind is the link's name.
     #[test]
     fn a_row_reads_icon_kind_name_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -469,7 +497,9 @@ mod tests {
 
         let link = link_row(None);
         let html = dioxus_ssr::render_element(bar_line(&link));
-        assert!(!html.contains("data-bar-kind"), "{html}");
+        let kind = html.find("data-bar-kind=\"USB\"").expect("the link's name");
+        let name = html.find(">connected<").expect("how it stands");
+        assert!(kind < name, "{html}");
     }
 
     /// The name is the row's value and keeps its width: it and the state
@@ -507,7 +537,7 @@ mod tests {
     }
 
     /// While a row works its name stays and the work's words are its
-    /// state; on the Link row they are the whole line.
+    /// state; a row with no name while it works says them in its place.
     #[test]
     fn work_keeps_the_name_and_says_its_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -524,8 +554,9 @@ mod tests {
             )
         );
         let mut link = link_row(None);
-        link.work = Some(running("USB · connecting"));
-        assert_eq!(row_words(&link), ("USB · connecting".to_string(), None));
+        link.summary = String::new();
+        link.work = Some(running("connecting"));
+        assert_eq!(row_words(&link), ("connecting".to_string(), None));
         let mut nameless =
             lpa_studio_core::UiStackBar::new(lpa_studio_core::BarLayer::Firmware, "firmware", "");
         nameless.work = Some(running("installing · 30%"));
@@ -625,7 +656,9 @@ mod tests {
         }
         assert!(TRIGGER_CLASS.contains("tw:h-full"));
         assert!(TRIGGER_OPEN_CLASS.contains("tw:h-full"));
-        assert!(KIND_CLASS.contains("tw:w-14") && KIND_TONED_CLASS.contains("tw:w-14"));
+        for class in [KIND_CLASS, KIND_LINK_CLASS, KIND_TONED_CLASS] {
+            assert!(class.contains("ux-board-bar-kind"), "{class}");
+        }
     }
 
     /// The rows' hairlines: every row carries the full-bleed top border,
@@ -649,14 +682,36 @@ mod tests {
         }
     }
 
+    fn render_row(bar: UiStackBar) -> String {
+        super::super::card_test_fixtures::render(Row, RowProps { bar })
+    }
+
+    #[component]
+    #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+    fn Row(bar: UiStackBar) -> Element {
+        let tree = lpa_studio_core::UiOfferTree::new();
+        rsx! {
+            crate::core::OffersProvider { offers: tree,
+                StackBar {
+                    bar,
+                    board: super::super::card_test_fixtures::board(),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+
+    /// The body of the CSS rule that opens with `head`.
+    fn css_block<'a>(css: &'a str, head: &str) -> &'a str {
+        let start = css.find(head).unwrap_or_else(|| panic!("no `{head}`"));
+        let rest = &css[start..];
+        &rest[..rest.find('}').expect("a closed rule")]
+    }
+
     fn link_row(mark: Option<UiBarMark>) -> UiStackBar {
         UiStackBar {
             mark,
-            ..UiStackBar::new(
-                lpa_studio_core::BarLayer::Connection,
-                "usb",
-                "USB · connected",
-            )
+            ..UiStackBar::new(lpa_studio_core::BarLayer::Usb, "usb", "connected")
         }
     }
 

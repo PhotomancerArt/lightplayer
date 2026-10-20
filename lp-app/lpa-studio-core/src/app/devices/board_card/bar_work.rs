@@ -7,7 +7,8 @@
 //! that moves says what kind of work it is: a push or a removal changes
 //! what the board plays (Project); a flash, an erase or an update changes
 //! what runs it (Firmware); identifying finds out what the board is
-//! (Hardware); a Wi‑Fi or relay connect is the board being reached (Link).
+//! (Hardware); a connect is the board being reached, on the row of the link
+//! it takes ([`super::link_session`]).
 //!
 //! The words are the row's state, in label voice, with one number when it
 //! has one (`docs/ux/anatomy/board-card.md`): "sending · 40%", "updating ·
@@ -24,7 +25,6 @@ use super::ui_stack_bar::BarLayer;
 use crate::app::devices::device_identity::device_chip;
 use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
-use crate::app::devices::ui_link_kind::UiLinkKind;
 
 /// The row an activity of `kind` narrates in.
 pub fn activity_bar(kind: ActivityKind) -> BarLayer {
@@ -115,8 +115,8 @@ pub(crate) fn running_work(verb: &str, percent: Option<u8>) -> UiBarWork {
 }
 
 /// The work `layer` shows on this board: the running activity when it is
-/// this row's, a Wi‑Fi or relay connect under way on the Link row, else how
-/// this row's last work ended.
+/// this row's, else how this row's last work ended. A link row's work is
+/// the session's ([`super::link_session::session_work`]).
 pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> {
     if let Some(activity) = &input.view.activity
         && activity_bar(activity.kind) == layer
@@ -142,18 +142,6 @@ pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<Ui
             ..work
         });
     }
-    if layer == BarLayer::Connection
-        && let Some(connect) = input.wifi_connect.filter(|connect| connect.connecting)
-    {
-        let link = match connect.through_relay {
-            true => UiLinkKind::Relay,
-            false => UiLinkKind::Wifi,
-        };
-        return Some(UiBarWork::running(
-            format!("{} · connecting", link.label()),
-            None,
-        ));
-    }
     ended_work(input, layer)
 }
 
@@ -162,7 +150,7 @@ pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<Ui
 /// activity clears it), the outcome's words in its details.
 ///
 /// A failed identify is not striped: how it ended is the board's own state
-/// now (not responding, needs firmware), and the Link row's state for that
+/// now (not responding, needs firmware), and the link row's state for that
 /// says it, with Retry.
 fn ended_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> {
     let end = input.ended.filter(|end| activity_bar(end.kind) == layer)?;
@@ -366,7 +354,7 @@ mod tests {
             Some("devices/mac-a0f26287b48c/cancel")
         );
         assert_eq!(bar_work(&input, BarLayer::Firmware), None);
-        assert_eq!(bar_work(&input, BarLayer::Connection), None);
+        assert_eq!(bar_work(&input, BarLayer::Usb), None);
     }
 
     #[test]
@@ -424,26 +412,5 @@ mod tests {
         // The next activity clears the model's outcome: no more stripes.
         fixture.view.last_outcome = None;
         assert_eq!(bar_work(&fixture.input(), BarLayer::Project), None);
-    }
-
-    #[test]
-    fn a_wifi_connect_under_way_is_link_work_naming_the_link() {
-        let mut fixture = CardFixture::offline();
-        fixture.wifi_connect = Some(crate::UiWifiConnect {
-            host: "10.0.0.5".to_string(),
-            through_relay: false,
-            connecting: true,
-            error: None,
-            busy: false,
-        });
-        let work = bar_work(&fixture.input(), BarLayer::Connection).expect("connecting");
-        assert_eq!(work.words, "Wi\u{2011}Fi · connecting");
-        fixture.wifi_connect.as_mut().unwrap().through_relay = true;
-        assert_eq!(
-            bar_work(&fixture.input(), BarLayer::Connection)
-                .unwrap()
-                .words,
-            "lightplayer.app · connecting"
-        );
     }
 }

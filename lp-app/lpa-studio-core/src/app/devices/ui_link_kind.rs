@@ -37,7 +37,7 @@ impl UiLinkKind {
         }
     }
 
-    /// Its name, the Link row's kind and its name in a sentence: "USB",
+    /// Its name, its row's kind and its name in a sentence: "USB",
     /// "Bluetooth", "Wi‑Fi", "lightplayer.app".
     pub fn label(self) -> &'static str {
         match self {

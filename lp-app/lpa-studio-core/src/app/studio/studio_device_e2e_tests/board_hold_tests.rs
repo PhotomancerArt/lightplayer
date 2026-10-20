@@ -21,7 +21,7 @@ use super::*;
 use crate::app::studio::studio_actor::StudioActor;
 
 /// The card's words for a board another tab holds (P6): the primary, the
-/// connection bar, the picture, pressed by path.
+/// USB row, the picture, pressed by path.
 mod card_words_tests;
 /// The same over a board's one network slot (P5): network holds, the
 /// take-over through Wi‑Fi or the relay, the yield, a stranger's busy.
@@ -1359,7 +1359,7 @@ fn g1_a_picked_port_another_tab_holds_reads_as_held_at_once() {
     assert_eq!(desk.log_of(&["refused:B", "open:B"]), ["refused:B"]);
     let card = b.ui_card(MAC_A);
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).summary,
+        card.bar(crate::BarLayer::Usb).summary,
         "Open in another tab"
     );
     assert_eq!(b.fact(MAC_A), Some(held(HoldLevel::Watching, false)));

@@ -254,18 +254,21 @@ async function main() {
       if (reason !== "Firmware updates need USB") {
         throw new Error(`the firmware details do not say \`Firmware updates need USB\` (they say ${JSON.stringify(reason)})`);
       }
-      // The connection details: over the link it is on, Bluetooth is locked
-      // on and the switch's line says how to turn it off instead.
-      await driver.openBar("connection", { timeoutMs: STEP_DEADLINE_MS });
+      // The Bluetooth row is the link in use, and over it its switch is
+      // locked on, saying why: it is the link you are on.
+      await driver.waitBar("bluetooth", /^Bluetooth \S+ connected$/, { timeoutMs: STEP_DEADLINE_MS });
+      await driver.openBar("bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const locked = await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
-                  const panel = card.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]');
-                  return Boolean(panel) && (panel.innerText || '').includes('turn off by USB')
-                    && Boolean(panel.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled')); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the connection details' locked Bluetooth switch" },
+                  const panel = card.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
+                  const head = panel?.querySelector('[data-detail-switch="bluetooth"]');
+                  const sw = head?.querySelector('[data-offer-path$="/bluetooth/enabled"] [role="switch"]');
+                  const why = head?.querySelector('[data-detail-switch-refused]')?.textContent || '';
+                  return Boolean(sw) && sw.disabled && sw.getAttribute('aria-checked') === 'true' && why.includes('turned off by USB'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's switch, locked on over Bluetooth, saying why" },
       );
       await driver.closeDetails();
-      if (!locked) throw new Error("the card has no locked Bluetooth switch");
+      if (!locked) throw new Error("the card's Bluetooth switch is not locked over Bluetooth");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
       );
@@ -352,10 +355,10 @@ async function main() {
     await step("card-done", "Done: the session closes and the card shows its facts", async () => {
       await driver.pressOffer("done", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
-        `Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 5`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the card's five bars" },
+        `Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 8`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's eight rows" },
       );
-      return "the card's five bars again";
+      return "the card's eight rows again";
     });
 
     // The card's picture over Bluetooth (2026-10-08): the feed runs at its

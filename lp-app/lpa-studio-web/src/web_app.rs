@@ -275,6 +275,9 @@ pub fn App() -> Element {
     let last_transient = use_hook(|| Rc::new(Cell::new(false)));
     let loop_last_transient = Rc::clone(&last_transient);
     let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
+    // A card's Sign in (`devices/<board>/sign-in`): core counts the
+    // presses; the page leaves for sign-in when the count advances.
+    let loop_sign_ins = use_hook(|| Rc::new(Cell::new(0u64)));
     let mut loop_toasts = toasts;
     // The anonymous-fork hook (examples vision D3/D8): a fork by a browser
     // with no session mints a GUEST account, then refreshes the session —
@@ -585,6 +588,13 @@ pub fn App() -> Element {
                     }
                 }
                 loop_fork_generation.set(next.transient_fork_generation);
+                if next.sign_in_requests > loop_sign_ins.get() {
+                    #[cfg(target_arch = "wasm32")]
+                    crate::app::layout::cloud_account::leave_for_sign_in(
+                        &loop_cloud_session.peek(),
+                    );
+                }
+                loop_sign_ins.set(next.sign_in_requests);
                 loop_last_transient.set(next.open_project_transient);
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation

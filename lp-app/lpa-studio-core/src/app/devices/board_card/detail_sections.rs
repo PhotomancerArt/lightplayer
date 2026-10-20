@@ -38,6 +38,12 @@ pub(crate) fn caution(
     }
 }
 
+/// A plain sentence under `title`: what the row's thing is for, or a
+/// standing fact, said once and not as news.
+pub(crate) fn help(title: &str, sentence: impl Into<String>) -> RichSection<UiCardAction> {
+    caution(title, UiStatusKind::Neutral, sentence)
+}
+
 /// Label→value facts under `title`.
 pub(crate) fn facts(title: &str, lines: Vec<RichLine>) -> RichSection<UiCardAction> {
     RichSection {

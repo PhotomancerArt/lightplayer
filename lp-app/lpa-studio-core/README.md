@@ -650,14 +650,18 @@ A card (`UiBoardCard`) is:
   Done; never a greyed verb: when nothing can be pressed, its word is the
   reason ("Connecting…", "Updating · 42%", "Offline · 2 weeks";
   `primary_action.rs` has the order);
-- **five bars** (`UiStackBar`), always project · connection · access ·
-  firmware · hardware, each one line: a summary, an aside, a tone (blue is
-  Update, orange is attention or someone else has it), at most one action,
-  and the bar's work while an activity runs in it. Each bar has its own file
-  (`project_bar.rs` …), whose doc is the table of what it says.
+- **eight rows** (`UiStackBar`), always project · USB · Wi‑Fi · Bluetooth ·
+  lightplayer.app · access · firmware · hardware, each one line: a kind, a
+  summary, an aside, a tone (orange is attention or someone else has it),
+  at most one action, the row's work while an activity runs in it, and
+  `todo` when something is left to do (a new board's setup list, drawn
+  lit). Each row has its own file (`project_bar.rs`, `usb_bar.rs`,
+  `wifi_bar.rs` …), whose doc is the table of what it says; a link row is
+  assembled by `link_bar.rs` with this tab's session laid over it
+  (`link_session.rs`).
 
-**Connected**, the card carries the board's whole **panel** in the five
-bars' place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while
+**Connected**, the card carries the board's whole **panel** in the eight
+rows' place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while
 the session is connected with its project ready): every control of the
 project's root panel in sections (`board_panel_picks.rs`: the root's own
 with the master, the `brightness` channel, leading; then each nested
@@ -669,7 +673,7 @@ it and the panel's reset are drawn in the status corner's details
 or Edit with a lock (`unlock`) on a play-only board.
 The root face is `ProjectEditorView::root_module_face`, which the play page
 and the docs embed read too. The session's state while it is not open is
-the connection bar's work (`BoardConnection`, per board on
+the work of the row of its link (`BoardConnection`, per board on
 `DeviceRosterView.connections`): "Connecting…", "Reconnecting…", or
 "Couldn't connect" striped with Retry (`connect`). The picture is the
 lens's own frames (`PictureSource::Lens`, `LensFrameSource`).
@@ -717,7 +721,7 @@ board another tab holds counts as online (`split_roster`), and its picture
 follows the holder's sidecar: a newer sidecar frame replaces a frame that
 is not live here (`CardFeedState::seed_if_newer`). The card says all of
 this in `devices/board_card/held_board.rs`: Connect is the primary and
-presses `take-over`; the connection bar reads "Open in another tab" (with
+presses `take-over`; the USB row reads "Open in another tab" (with
 "editor open" or what the holder is busy with), "Taken by another tab" for a
 tab that let go, or the take-over's own work ("Asking the other tab…",
 "Opening…", or striped with Retry), all in the orange "someone has it" tone;

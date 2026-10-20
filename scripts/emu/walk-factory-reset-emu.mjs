@@ -260,7 +260,7 @@ async function main() {
       if (!install || !install.includes("Install")) throw new Error(`the primary is not Install firmware: ${JSON.stringify(install)}`);
       if (await driver.offered("retry")) throw new Error("the card offers Retry on the blank board");
       report.firmwareAfterReset = await driver.barText("firmware");
-      report.linkAfterReset = await driver.barText("connection");
+      report.linkAfterReset = await driver.barText("usb");
       return `"${said.first}" "${said.second}", primary ${JSON.stringify(install)}; ${report.firmwareAfterReset}; ${report.linkAfterReset}`;
     });
 

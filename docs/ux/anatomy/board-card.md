@@ -5,9 +5,10 @@ Shown on the home page and the Boards tab. Built in core
 (`lpa-studio-core/…/board_card/`), drawn by the web
 (`lpa-studio-web/…/board_card/`).
 
-Status: **shipped** (round 3, the card's top as its main surface,
-2026-10-17, PR #1176; plan `lp2025/2026-10-17-0315-card-surface-round-3`;
-round 2 of the card's words was PR #1159). Where a line changed what
+Status: **shipped** (the eight rows as a new board's setup list,
+2026-10-19, plan `lp2025/2026-10-19-1350-board-setup-rows`, spike
+`spikes/install-network-setup`; round 3, the card's top as its main
+surface, was PR #1176; round 2 of the card's words was PR #1159). Where a line changed what
 shipped before, its comment says `was:`. ◆ is the layers icon (O2).
 
 ## Whole
@@ -19,14 +20,17 @@ shipped before, its comment says `was:`. ◆ is the layers icon (O2).
 │   firmware. Update the firmware   ╰──────┤
 │   to connect and edit.                   │
 ├────────────────────────────┬─────────────┤
-│ XIAO ESP32-C6              │ ▲ Update    │   3 name · 4 primary
+│ XIAO ESP32-C6 ✎            │ ▲ Update    │   3 name · 4 primary
 │                            │   firmware  │
 ├────────────────────────────┴─────────────┤
-│ ◆ Project   not known                  › │   5 rows
-│ ↔ USB · connected                      › │
-│ ○ Access    edit · USB                 › │
-│ ▲ Firmware  unknown  older LightPlayer │ Update │
-│ ■ Hardware  XIAO ESP32-C6              › │
+│ ◆ Project          not known           › │   5 rows
+│ ⏚ USB              connected           › │
+│ ≋ Wi‑Fi            Cedar Lane          › │
+│ ᛒ Bluetooth        LP-3f2a             › │
+│ ☁ lightplayer.app  River's account     › │
+│ ○ Access           edit · USB          › │
+│ ▲ Firmware         unknown  older LightPlayer │ Update │
+│ ■ Hardware         XIAO ESP32-C6       › │
 └──────────────────────────────────────────┘
 ```
 
@@ -34,9 +38,10 @@ shipped before, its comment says `was:`. ◆ is the layers icon (O2).
 1 surface   what matters now: the live picture while the board is well,
             else the state's icon and plain sentences over it.        P18 · was: the picture, black when it showed none
 2 corner    a quiet ⋯: the card's details, one press away.            P4 · was: the picture's state, a notice's mark, "Editing"
-3 name      the board's own name. rename lives in Hardware's details.
+3 name      the board's own name, renamed where it is: a faint ✎.   # was: rename in Hardware's details
 4 primary   the most likely thing to do, or nothing at all.          P19 · was: the one next step
-5 rows      one fact each, always in this order.                     P8
+5 rows      one fact each, always in this order: for a new board,    P8
+            its setup list, the rows with something left to do lit.  # was: five rows, one Link row
 ```
 
 Yona, 2026-10-17: "the primary surface should always give the most
@@ -232,9 +237,57 @@ working    ◌ takes the icon's place; progress runs along the row's foot ━━
 stale      the row dims; its words don't change
 ```
 
-The Link row is the one exception: the link's own icon and name are its
-kind (`USB`, `Wi‑Fi`, `Bluetooth`, `lightplayer.app`), as a version
-number is.
+The four link rows' kind is the link's own name (`USB`, `Wi‑Fi`,
+`Bluetooth`, `lightplayer.app`), drawn a step brighter than the other kinds:
+the link is the thing, as a version number is. Each says what its link
+reaches or how it stands, and "connected" beside a network, a name or an
+account marks the link this tab is using. What this tab is doing about
+reaching the board (connecting, reconnecting, a Connect that failed,
+another tab or a stranger holding it, a board that stopped answering) is
+said on the row of the link it is about.   # was: one Link row, "USB · connected"
+
+**A row with something left to do is lit** (a new board's setup list): the
+whole row on a lighter flat ground, its icon, kind and name at full
+strength, its button on the same ground with no fill of its own. No
+gradient, no dot. Never on a toned row (orange and red keep their tone),
+never on a disabled one, never on a row whose fix is another row's
+(lightplayer.app waiting on Wi‑Fi), never while it works.
+
+```text
+│ ◆ Project          none                 │ + Add │     lit: something to do, and the button that does it
+│ ≋ Wi‑Fi            not connected       │ Set up │    the state says the fact; the button says the fix
+│ ☁ lightplayer.app  not connected      │ Sign in │
+│ ▲ Firmware         none              │ Install │
+```
+
+```text
+bad:  Wi‑Fi   not set up   │ Set up │      # Yona 10-19: "isn't dry": the state is the fact, the button the fix
+bad:  a gradient across the lit row, or a dot  # Yona 10-19: "the lit row alone"
+```
+
+**Hushing a row is switching it off, at the top of its details.** Wi‑Fi,
+Bluetooth and lightplayer.app each open on one line, drawn alike, as macOS
+draws the top of its Wi‑Fi and Bluetooth menus: the row's icon and name,
+and the board's own switch at the line's end (on in the good tone). Each is
+the board's own setting, so the choice holds across browsers and is true.
+Off, the row says `disabled`, plain, with no button, and the same switch
+turns it back on. Where this link may not flip it the switch is dimmed, and
+a refusal says why under the line ("Bluetooth can only be turned off by
+USB…"); its hover says what a flip does, in the offer's words (Bluetooth's
+restarts the board).
+
+```text
+ᛒ Bluetooth        LP-3f2a                 › │   the row, which opened them
+──────────────────────────────────────────────
+ᛒ Bluetooth                         (●━━)    │   the switch line: icon, name, the board's switch
+  A phone or laptop nearby can connect to it by this name.
+  NAME   LP-3f2a
+```
+
+```text
+bad:  ACTIONS · Disable Wi‑Fi under the list; Disable lightplayer.app beside Sign in; a red Disable Bluetooth   # Yona 10-19: "rendered differently in each of the three sections"
+do:   one switch line atop each: icon, name, switch — the same in all three
+```
 
 Short of room, a row's state gives way first (cut at its end, then gone).
 The kind column stays, so every card in a grid reads alike (P8, P1); where
@@ -254,7 +307,8 @@ phone's two), the name is cut at its end and the details hold it whole:
 ```text
 ◆ Project   studio                                   # was: studio, with no kind word
 ◆ Project   studio         2 boards
-◆ Project   none                                     # it said it runs nothing, or has no LightPlayer. primary: + Add a project
+◆ Project   none          │ Add │                    # it said it runs nothing: lit, the primary's pick. primary: + Add a project
+◆ Project   none                                     # no LightPlayer on it: Install firmware is the primary
 ◆ Project   not known                                # an older LightPlayer, a board from before the hello, a core alone. was: none (the desk C6, 10-17)
 ◌ Project   studio         sending · 40%             # bar along the foot
 ◆ Project   studio         out of date │ Send latest │      # no tone (P16). was: Out of date · studio, orange
@@ -266,26 +320,90 @@ phone's two), the name is cut at its end and the details hold it whole:
 ◌ Project                                            # a LightPlayer that hasn't said yet
 ```
 
-### Link ↔: how Studio reaches the board
+### USB ⏚: the board's cable
 
 ```text
-↔ USB · connected                    # was: USB · live
-↔ USB · connected                    # a board that never said hello and says nothing: the surface and Firmware say it. was: USB · not responding, orange (10-18)
-↔ USB · not connected
-◌ USB · connecting
-◌ USB · reconnecting
-↔ USB · not responding     │ Retry │   # a board that said hello went quiet. orange; quiet while the surface says it
-↔ USB · connection failed  │ Retry │   # red; quiet while the surface says it
-↔ Wi‑Fi · connected   ☁              # ☁ lit: lightplayer.app reaches it too
-↔ Bluetooth · connected
-↔ lightplayer.app · connected        # was: Wi‑Fi via lightplayer.app · live
-↔ Offline · 2 hours ago              # the surface's sentence says the age the same way. was: Offline · 2 h
-↔ Wi‑Fi · not connected              # unplugged, and Wi‑Fi reaches it (lightplayer.app · not connected the same). was: Offline · 2 h
-↔ Open in another tab · editor open  # quiet: the surface says it. was: orange
-↔ Taken by another tab               # quiet: the surface says it. was: orange
-↔ Someone else connected   │ Retry │   # quiet: the surface says it. was: orange
-▶ Simulated · running
-▶ Simulated · off
+⏚ USB              connected                 # this tab reaches it by its cable
+⏚ USB              not connected             # port closed, unplugged, or reached another way. quiet: normal for a board on a house
+⏚ USB              not connected     (dim)   # offline; the surface says since when
+◌ USB              connecting
+◌ USB              reconnecting
+⏚ USB              not responding    │ Retry │   # a board that said hello went quiet. orange; quiet while the surface says it
+⏚ USB              connection failed │ Retry │   # red; quiet while the surface says it
+⏚ USB              Open in another tab  editor open   # quiet: the surface says it
+⏚ USB              Taken by another tab
+▶ Simulated        running                   # a stand-in keeps the row and says what it is
+▶ Emulated         off
+```
+
+Its details, while it is the link in use: how it reaches the board (now,
+last heard, the board's own words), Identify again, Connect, Disconnect,
+and its link counters.
+
+### Wi‑Fi ≋: the networks the board joins
+
+```text
+≋ Wi‑Fi            —                         # no firmware yet, not answered, a stand-in
+≋ Wi‑Fi            not connected    │ Set up │   # nothing saved: lit. Set up opens the details at the list
+◌ Wi‑Fi            Cedar Lane   joining
+≋ Wi‑Fi            Cedar Lane                # joined
+≋ Wi‑Fi            Cedar Lane   connected    # joined, and this tab's link
+≋ Wi‑Fi            Cedar Lane   wrong password  │ Change │   # orange
+≋ Wi‑Fi            Cedar Lane   not connected    # saved, not in range: it joins when it is
+≋ Wi‑Fi            2 networks   saved        # a firmware that saves networks and can't join yet
+≋ Wi‑Fi            disabled                  # hushed: no button
+≋ Wi‑Fi            Cedar Lane        (dim)   # offline: the network it last said
+```
+
+Its details: the switch line (Wi‑Fi and the board's switch), then the
+Wi‑Fi panel (its networks, adding one), and Connect over Wi‑Fi where the
+primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi is
+disabled on this board. It reaches Studio over USB and Bluetooth only."
+The panel draws no heading or switches of its own on the card: the switch
+line is both, and lightplayer.app's switch is its own row's.
+
+### Bluetooth ᛒ: the board's own radio
+
+```text
+ᛒ Bluetooth        —                         # nothing read yet, a stand-in
+ᛒ Bluetooth        LP-3f2a                   # the name a phone sees: LP-<project>, else LP-<MAC's last two bytes>
+ᛒ Bluetooth        LP-3f2a   connected       # this tab's link
+ᛒ Bluetooth        on                        # on, but what it runs is not known (offline, or before its first report), so neither is the name
+ᛒ Bluetooth        disabled
+```
+
+Its details: the switch line (Bluetooth and the board's switch: a flip
+restarts the board to apply it, so it is Undoable, and off is refused over
+Bluetooth, the link you are on), then the name, "A phone or laptop nearby
+can connect to it by this name.", and on an open board "No password yet:
+anyone nearby or on the same Wi‑Fi can connect and edit it." Off: the switch
+stands off over "Bluetooth is disabled on this board: nothing nearby can
+connect by it."
+
+### lightplayer.app ☁: the board through the cloud
+
+```text
+☁ lightplayer.app  —                         # no firmware, not answered, no relay on this firmware
+☁ lightplayer.app  not connected   │ Sign in │   # signed out: lit
+☁ lightplayer.app  not connected             # signed in, the board not on Wi‑Fi: its fix is Wi‑Fi's. not lit
+☁ lightplayer.app  River's account           # reachable, named as the account's key is
+☁ lightplayer.app  River's account   connected   # this tab's link
+☁ lightplayer.app  River's account   connecting
+☁ lightplayer.app  River's account   can't reach   # joined, and it didn't answer (or refused it). orange
+☁ lightplayer.app  disabled                  # hushed, for privacy
+```
+
+Its details open on the switch line (lightplayer.app and the board's Cloud
+relay switch). Signed out, then "Sign in to reach this board from any
+browser, through lightplayer.app." with Sign in (the person's own click: it
+leaves the page), and "Nothing goes to lightplayer.app until you sign in."
+Signed in: the account, how it stands now, and "Lets lightplayer.app reach
+this board through the cloud." Off: the switch stands off over
+"lightplayer.app is disabled for this board: it never connects to the
+cloud."
+
+```text
+bad:  USB · connected  ☁̸        # the struck cloud: Yona's desk, 10-19. lightplayer.app's row says it now
 ```
 
 ### Access ○: what you can do
@@ -313,7 +431,7 @@ phone's two), the name is cut at its end and the details hold it whole:
 ▲ Firmware  unknown (pre-2026.07)   │ Install │          # was: Pre-hello firmware; no button when the primary is Install firmware
             # "Update to v2026.10.16-1" does not fit beside the version at the card's width:
             # the button says the verb, and the version it brings is the details' Newest
-▲ Firmware  none                                       # blank, or Studio erased it. primary: Install firmware
+▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, the primary's board pick. primary: Install firmware
 ▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating · 42%             # was: Updating · 1 of 2 · 42%
 ◌ Firmware  v2026.10.08-9   backing up · 12% │ Cancel │
@@ -343,18 +461,17 @@ bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a 
 ■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
 ■ Hardware  unknown                              # was: Board not known
 ◌ Hardware  identifying                          # was: chip unknown
-■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the Link row (P2)
+■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the USB row (P2)
 ```
 
 Its details: the model, the chip, the board's id (its MAC, here once), a
-stand-in's speed or tier, Rename and Reset; then, apart, the two verbs that
-lose something:
+stand-in's speed or tier and Reset; then, apart, the two verbs that lose
+something. The name is renamed in the name bar, not here:
 
 ```text
 │ Board      Model  XIAO ESP32-C6                 │
 │            Chip   ESP32-C6                      │
 │            Id     a0:f2:62:87:b4:8c             │
-│ Name       [ Porch lamp            ] Rename     │
 │ Actions    ↻ Reset                              │
 │ Danger     ✕ Factory reset   ✕ Forget           │   Lasting: arm, then press again
 ```
@@ -412,6 +529,17 @@ bad:  This board stopped responding over USB.  │ Retry │ # Yona's C6 10-19, 
 │ XIAO ESP32-…  │ ▲ Update │                      a narrow card   # was: XIAO ES… │ Update firmware
 ```
 
+**The name is renamed where it is.** A faint pencil after it, always
+shown, brighter (and the name underlined) on hover. Pressed, a field takes
+the name's place at the bar's height, its text selected; Enter or clicking
+away keeps it, Esc puts it back; a blank or unchanged name changes nothing.
+No Save button.
+
+```text
+│ XIAO ESP32-C6 ✎        │ + Add a project     │   the name, pressable
+│ [ Holiday Eaves      ] │ + Add a project     │   renaming
+```
+
 The name keeps about twelve characters. On a card too narrow for that
 beside the whole primary, the primary says its verb alone ("Update",
 "Install", "Reinstall", "Resume", "Edit", "Add", "Connect"): the surface's
@@ -440,7 +568,8 @@ R3  the primary holds the most likely action, even when it repeats a row's butto
 R4  the rows go quiet while the surface says their problem        (director's call, pending Yona's veto)
 R5  B covers a picture: it dims under the notice, one dim          (director's call, pending Yona's veto)
 R6  the tone is the icon's alone; the sentences stay plain         (director's call, pending Yona's veto)
-R7  offline, another way reaches it: the Link row names that way  (director's call, pending Yona's veto)
+R7  offline, another way reaches it: the surface names that way; each row keeps its last value, dimmed
+    (director's call; amended 10-19: the Link row is gone)
 R8  a project's name in running text is quoted                     (director's call, pending Yona's veto)
 R9  a row's value keeps its width; its state gives way first: cut, then gone   (director's review)
     (the kind column stays: one layout in one grid; a value still too long is cut at its end)
@@ -465,4 +594,18 @@ Yona's C6 install walk, 2026-10-19:
 W1  Factory reset is the Hardware row's: it erases the board, not only its firmware (Yona)
 W2  a board Studio erased is the blank board at once, heard or not: Install firmware, no Retry (Yona)
 W3  the Firmware details say what is there in the row's words; the surface says the sentence (Yona)
+```
+
+The setup rows, 2026-10-19 (plan `lp2025/2026-10-19-1350-board-setup-rows`, spike `spikes/install-network-setup`):
+
+```text
+S1  the rows are a new board's setup list: eight rows, the links in the middle   (Yona)
+S2  a row with something left to do is lit: the whole row, flat, no gradient, no dot   (Yona: "the lit row alone")
+S3  the state says the fact, the button the fix: "not connected" on USB, Wi‑Fi and lightplayer.app   (Yona)
+S4  hushing a row is disabling it from its details; the row then says "disabled"   (Yona)
+S4a …with one switch line atop the details, the same for Wi‑Fi, Bluetooth and lightplayer.app, as macOS draws it   (Yona, the gate)
+S5  the board is renamed where its name is, a faint pencil always shown   (Yona)
+S6  the primary is Install firmware, Add a project, Connect; Wi‑Fi and lightplayer.app ask through their rows   (Yona)
+S7  the struck cloud mark is gone: lightplayer.app's row says it   (Yona)
+S8  stand-ins keep the eight rows, "—" on the radio rows   (Yona)
 ```

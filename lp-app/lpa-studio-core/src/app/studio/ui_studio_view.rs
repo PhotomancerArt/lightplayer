@@ -147,6 +147,11 @@ pub struct UiStudioView {
     /// shell watches it to raise the fork toast — a state transition
     /// alone cannot distinguish "forked" from "opened another project".
     pub transient_fork_generation: u64,
+    /// How many times a card's Sign in was pressed this page
+    /// (`devices/<board>/sign-in`, [`crate::SignInOp`]): the web shell
+    /// leaves for sign-in when it sees this advance. Core does not know the
+    /// cloud; the shell holds its sign-in options.
+    pub sign_in_requests: u64,
     /// The LENS session's card, for the editor layout (D43: the grown
     /// runtime card IS the editor's right-side pane). Same construction
     /// as the gallery roster's live card; `None` while no lens session
@@ -206,6 +211,7 @@ impl UiStudioView {
             open_project_transient: false,
             open_transient_example: None,
             transient_fork_generation: 0,
+            sign_in_requests: 0,
             lens_card: None,
             session: None,
             open_mismatch: None,
@@ -289,6 +295,13 @@ impl UiStudioView {
         self.open_project_transient = transient;
         self.open_transient_example = example_id;
         self.transient_fork_generation = fork_generation;
+        self
+    }
+
+    /// How many times a card's Sign in was pressed (see
+    /// [`Self::sign_in_requests`]).
+    pub fn with_sign_in_requests(mut self, requests: u64) -> Self {
+        self.sign_in_requests = requests;
         self
     }
 

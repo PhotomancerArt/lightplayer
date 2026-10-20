@@ -33,7 +33,7 @@ pub fn RichDetailSection(
             // The wrapper's red border is the hard separator; the section's
             // own divider drops via its `first:` rule inside the wrapper.
             div { class: DANGER_SEPARATOR_CLASS,
-                DetailSection { title: section.title, tint: DetailSectionTint::Error,
+                DetailSection { title: shown_title(section.title), tint: DetailSectionTint::Error,
                     if let Some(sentence) = section.sentence {
                         p { class: SENTENCE_CLASS, "{sentence}" }
                     }
@@ -53,7 +53,7 @@ pub fn RichDetailSection(
     }
 
     rsx! {
-        DetailSection { title: section.title, tint: rich_section_tint(section.tone),
+        DetailSection { title: shown_title(section.title), tint: rich_section_tint(section.tone),
             if let Some(sentence) = section.sentence {
                 p { class: SENTENCE_CLASS, "{sentence}" }
             }
@@ -94,6 +94,12 @@ pub fn RichDetailSection(
 }
 
 /// The hard red line above a Danger section.
+/// A section's heading, or none for an untitled one: a radio row's
+/// sections under its switch line, which already names the row.
+fn shown_title(title: String) -> Option<String> {
+    (!title.is_empty()).then_some(title)
+}
+
 const DANGER_SEPARATOR_CLASS: &str = "tw:border-t tw:border-status-error-border";
 
 /// A section's sentence: a notice's words or a fact the rows cannot carry,
@@ -190,6 +196,17 @@ mod tests {
         assert!(DANGER_SEPARATOR_CLASS.contains("tw:border-status-error-border"));
         assert!(SENTENCE_CLASS.contains("tw:break-words"));
         assert!(!SENTENCE_CLASS.contains("truncate"));
+    }
+
+    /// An untitled section draws no heading: under a radio row's switch
+    /// line, which names the row, a repeated name would be noise.
+    #[test]
+    fn an_untitled_section_draws_no_heading() {
+        assert_eq!(shown_title(String::new()), None);
+        assert_eq!(
+            shown_title("Privacy".to_string()).as_deref(),
+            Some("Privacy")
+        );
     }
 
     /// Rendered: a section's sentence reads above its lines, and a Danger

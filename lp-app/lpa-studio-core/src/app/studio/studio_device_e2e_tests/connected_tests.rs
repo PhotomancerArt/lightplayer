@@ -10,7 +10,7 @@
 //! first — a closed port, a board offline on its cable or on Wi‑Fi — then
 //! opens its session, holding the intent for a minute at most. Connected,
 //! the card carries the board's panel, Done, the session's own moving
-//! picture, and the session's state in its connection bar. Every verb is
+//! picture, and the session's state on the row of its link. Every verb is
 //! pressed by its offer path, as the card and the app agent press it.
 
 use super::ble_drop_tests::{
@@ -568,7 +568,7 @@ fn a_chooser_closed_with_nothing_picked_lets_the_connect_go_at_once() {
     assert!(bench.offered(&connect).is_enabled(), "Connect again");
     let card = the_card(&bench, id);
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).work,
+        card.bar(crate::BarLayer::Usb).work,
         None,
         "no Connecting… left on the card"
     );
@@ -598,15 +598,12 @@ fn a_failed_connect_clears_once_the_board_is_reached_another_way() {
     assert!(bench.controller.connect_failure().is_some(), "gave up");
     let words = |bench: &DeviceBench| {
         the_card(bench, id)
-            .bar(crate::BarLayer::Connection)
+            .bar(crate::BarLayer::Bluetooth)
             .work
             .clone()
             .map(|work| work.words)
     };
-    assert_eq!(
-        words(&bench).as_deref(),
-        Some("Bluetooth · connection failed")
-    );
+    assert_eq!(words(&bench).as_deref(), Some(crate::CONNECTION_FAILED));
 
     // Back in range: a fresh link, and the board ready on it.
     present.set(true);
@@ -796,7 +793,7 @@ fn the_connected_card_carries_the_panel() {
             .and_then(|primary| primary.word()),
         Some("Done")
     );
-    assert_eq!(card.bars.len(), 5, "the bars are still built");
+    assert_eq!(card.bars.len(), 8, "the rows are still built");
     assert_card_offers(&bench, id);
     bench.not_offered("project/add-node");
 
@@ -1111,7 +1108,7 @@ fn a_bluetooth_card_reads_at_least_as_often_as_a_watched_one() {
 
 /// CD7: the connected session's link drops (the cable out) and the lens
 /// holds on for the board. The home page stays; the card says
-/// "Reconnecting…" as its connection bar's work, with Done its primary.
+/// "Reconnecting…" as its USB row's work, with Done its primary.
 /// When the hold runs out the session ends and the card is back to its
 /// facts.
 #[test]
@@ -1133,11 +1130,11 @@ fn a_dropped_link_reads_reconnecting_on_the_card() {
     );
     let card = the_card(&bench, id);
     let work = card
-        .bar(crate::BarLayer::Connection)
+        .bar(crate::BarLayer::Usb)
         .work
         .clone()
         .expect("the session's work");
-    assert_eq!(work.words, format!("USB · {}", crate::RECONNECTING));
+    assert_eq!(work.words, crate::RECONNECTING);
     assert_eq!(work.state, crate::BarWorkState::Running);
     assert_eq!(
         card.name_bar
@@ -1162,7 +1159,7 @@ fn a_dropped_link_reads_reconnecting_on_the_card() {
     bench.step(&tasks);
     let card = the_card(&bench, id);
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).work,
+        card.bar(crate::BarLayer::Usb).work,
         None,
         "back to its facts"
     );
@@ -1225,7 +1222,7 @@ fn done_with_unsaved_edits_is_routine_and_connect_reads_them_unsaved() {
     );
 }
 
-/// A Connect that cannot open says so: the card's connection bar says
+/// A Connect that cannot open says so: the card's USB row says
 /// "Couldn't connect" with the reason in its details, and the console line
 /// is a Connect's, in plain words — not "could not open the board in the
 /// editor".
@@ -1261,9 +1258,7 @@ fn a_failed_connect_says_so_on_the_card_in_plain_words() {
         "a Connect is not an editor open"
     );
 
-    let bar = the_card(&bench, id)
-        .bar(crate::BarLayer::Connection)
-        .clone();
+    let bar = the_card(&bench, id).bar(crate::BarLayer::Usb).clone();
     let work = bar.work.expect("the failure");
     assert!(
         work.words.ends_with(crate::CONNECTION_FAILED),

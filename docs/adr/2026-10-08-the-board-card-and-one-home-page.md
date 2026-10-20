@@ -657,3 +657,75 @@ controls at most", "· N more", "the card keeps one height"):
   editor's Play toggle); the card no longer links there, and the router's
   `play_address` went with the link.
 
+
+## Amendment 2026-10-19: the rows are a new board's setup list
+
+Plan `lp2025/2026-10-19-1350-board-setup-rows`; the spike
+`spikes/install-network-setup` (converged at `2b83061f6`). Sean flashed his
+first board from lightplayer.app on 2026-10-18 and nothing asked for his
+Wi‑Fi, and he couldn't find where to add it. Yona: "the rows of the card
+are actually a great benefit here. its almost a todo list. all we have to
+do is call out each item", and three principles for a new board's setup:
+make it obvious what to do; teach the UI and keep things in place, so setup
+isn't a one-off; minimize decisions, especially repeat decisions. This
+changes §2's "stack of bars" and §3's bar model:
+
+- **Eight rows, the links in the middle:** Project, USB, Wi‑Fi,
+  Bluetooth, lightplayer.app, Access, Firmware, Hardware (`BarLayer::ALL`).
+  The Link row is gone: each link has its own row, whose kind is the link's
+  own name, and each says what that link reaches or how it stands — USB
+  "connected" / "not connected", Wi‑Fi the network it joined, Bluetooth the
+  name a phone sees, lightplayer.app the account. "connected" beside a
+  network, a name or an account marks the link this tab is using. What this
+  tab is doing about reaching the board (connecting, reconnecting, a Connect
+  that failed, a board held by another tab or a stranger, a board that
+  stopped answering) is said on the row of the link it is about
+  (`link_session.rs`), and the surface quiets that row. lightplayer.app has
+  its own row for privacy ("lightplayer.app · disabled" is a clean thing to
+  say) and for its journey. Every resting card is still one height, now
+  eight 28 px rows; a stand-in keeps the rows ("Simulated · running" on
+  USB, "—" on the radios). Offline, every row keeps its last value, dimmed:
+  the controllers keep a board's last network status and Bluetooth switch
+  while it is on the roster (`BoardLinks`).
+- **A row with something left to do is lit** (`UiStackBar::todo`): the
+  whole row on a lighter flat ground, its words at full strength, its
+  button on the same ground. No gradient, no dot. Project none · Add, Wi‑Fi
+  not connected · Set up, lightplayer.app not connected · Sign in, Firmware
+  none · Install. Never on a toned, disabled or working row, nor on a row
+  whose fix is another row's (lightplayer.app waiting on Wi‑Fi). The
+  Project row's Add and the Firmware row's Install repeat the primary's
+  pick: the row teaches where the thing lives, the primary says what is
+  next.
+- **The state says the fact, the button says the fix:** "not connected" on
+  USB, Wi‑Fi and lightplayer.app alike, with Set up or Sign in as the fix.
+- **Hushing a row is switching it off, at the top of its details:** Wi‑Fi,
+  Bluetooth and lightplayer.app each lead their details with one switch
+  line, drawn alike (`UiBarDetails::switch`, a `UiDetailSwitch`: the row's
+  icon and name, and the board's own switch), as macOS draws the top of its
+  Wi‑Fi and Bluetooth menus. The switches are the board's own:
+  `wifi/enabled`, `wifi/cloud-relay`, and `devices/<board>/bluetooth/enabled`
+  (a new core offer, which replaced the Bluetooth switch the web built). At
+  the gate Yona turned down the first draft — Disable buttons in three
+  places with three looks — for this one line. The row then says
+  "disabled", plain, and wants nothing; the same switch turns it back on.
+  The choice lives on the board, so it holds across browsers and is true.
+- **Sign in is a core offer,** `devices/<board>/sign-in`: the controller
+  counts the presses (`UiStudioView::sign_in_requests`) and the page leaves
+  for sign-in when the count moves. It needs the person's own click.
+- **The primary is the likely next step:** Install firmware, then Add a
+  project, then Connect. Wi‑Fi and lightplayer.app never take it ("'Set up
+  Wi-Fi' probably shouldn't be the primary CTA"). A board that runs no
+  project always offers Add a project, and the surface says it aloud.
+- **The board is renamed where its name is:** the name bar's name, with a
+  faint pencil always shown; pressing it puts a field in its place, Enter
+  or clicking away keeps it, Esc doesn't (`UiNameBar::rename`). Hardware's
+  details no longer hold a name field.
+- **The struck cloud mark is gone;** lightplayer.app's row says it.
+
+Out of this amendment, in the secrets-vault plan: where Studio keeps
+secrets (the account's and the browser's), the "Remember…" switch on the
+Wi‑Fi form, the second board joining a remembered network with no press,
+new-board defaults for lightplayer.app and Bluetooth, and account settings.
+This change leaves the seams: no "Remember…" switch yet, and a row's
+account mark (`UiBarMark`) is drawn only once a store says a value came
+from the account.

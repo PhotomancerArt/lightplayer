@@ -569,6 +569,19 @@ pub(crate) fn StoryBoardCard(
     /// `connection` is Connected.
     #[props(default)]
     panel: Option<lpa_studio_core::UiBoardPanel>,
+    /// The signed-in account's name ("River"): lightplayer.app's row
+    /// names "River's account". `None` is signed out, and the card offers
+    /// Sign in, as the controller does on a page that reaches
+    /// lightplayer.app.
+    #[props(default)]
+    account: Option<String>,
+    /// The board's network status as it last answered (an offline card's
+    /// Wi‑Fi and lightplayer.app rows).
+    #[props(default)]
+    remembered_network: Option<lpa_studio_core::NetworkStatus>,
+    /// Bluetooth on or off, as its access file last said.
+    #[props(default)]
+    remembered_bluetooth: Option<bool>,
     #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
     #[props(default)] armed_preview: Option<OfferPath>,
     #[props(default)] previews: crate::app::board_card::CardPreviews,
@@ -638,6 +651,18 @@ pub(crate) fn StoryBoardCard(
             tree.publish(offer);
         }
     }
+    // The Bluetooth switch where the access list says it, and Sign in while
+    // nobody is signed in, as the controller publishes them.
+    if let Some(offer) = access.as_ref().and_then(|access| {
+        let over_bluetooth = link == Some(lpa_studio_core::UiLinkKind::Bluetooth)
+            && card.status != lpa_studio_core::DeviceStatus::Offline;
+        lpa_studio_core::bluetooth_offer(&prefix, card.id, access, over_bluetooth)
+    }) {
+        tree.publish(offer);
+    }
+    if account.is_none() && face == DeviceFace::Wire {
+        tree.publish(lpa_studio_core::sign_in_offer(&prefix));
+    }
     if let Some(extra) = extra_offers {
         tree.append(extra);
     }
@@ -675,6 +700,11 @@ pub(crate) fn StoryBoardCard(
         now,
         connection: &connection,
         panel: panel.as_ref(),
+        links: lpa_studio_core::BoardLinks {
+            account: account.as_deref(),
+            remembered_network: remembered_network.as_ref(),
+            remembered_bluetooth,
+        },
     });
     // A story that opens a part's details (or whose layout question raises
     // them) keeps the room they float in, so a capture holds the whole
