@@ -52,7 +52,7 @@ mod ws_wire;
 
 pub use browser_websocket::{
     LanSession, connect_and_settle, connect_until_up, forget, hold, install_websocket_events,
-    is_supported, open_relay_session, open_session, present_sessions,
+    is_supported, open_relay_session, open_session, park, present_sessions, unpark,
 };
 pub use ws_client_io::{WsClientIo, WsTapLine};
 pub use ws_link_keys::set_link_keys;
