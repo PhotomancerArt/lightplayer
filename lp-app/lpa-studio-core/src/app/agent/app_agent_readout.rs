@@ -557,6 +557,13 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
     text
 }
 
+/// One line for a picture a finger can draw on (plan
+/// `drawing-on-the-picture`): the agent reads that it is drawable, and that
+/// drawing is the user's hand on it — there is no verb to press.
+pub fn drawable_line(subject: &str) -> String {
+    format!("- {subject}'s picture is drawable: a finger dragged on it draws (no verb to press)\n")
+}
+
 /// The home page the way a person sees it (PD14): its tabs, then each
 /// section's contents by name — the boards online and off with what they
 /// play, the offers that connect a board, the projects no board plays, the

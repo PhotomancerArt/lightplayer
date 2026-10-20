@@ -238,6 +238,15 @@ impl ProjectEditorView {
         }
     }
 
+    /// [`Self::root_module_face`], for the studio controller's facts the
+    /// project walk cannot know (whether its hero is drawable).
+    pub fn root_module_face_mut(&mut self) -> Option<&mut crate::UiModuleFace> {
+        match self.nodes.first_mut()?.face.as_mut()? {
+            crate::UiNodeFace::Module(face) => Some(face),
+            _ => None,
+        }
+    }
+
     /// The project pane's one chrome affordance: the priority merge of the
     /// controller's pane status, the project-level dirty summary, and Busy
     /// while buffered edits await their acknowledgement (genuine activity).

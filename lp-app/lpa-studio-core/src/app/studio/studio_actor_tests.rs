@@ -928,7 +928,7 @@ fn set_value_action(path: &str, value: f32) -> StudioCommand {
         ControllerId::new(ProjectController::NODE_ID),
         crate::SlotEditOp::SetValue {
             address: slot_address(path),
-            value: LpValue::F32(value),
+            value: LpValue::F32(value).into(),
         },
     ))
 }
@@ -1082,7 +1082,7 @@ fn panel_write_action(owner: u32, channel: &str, value: f32) -> StudioCommand {
         crate::PanelWriteOp {
             scope: panel_scope(owner),
             channel: channel.to_string(),
-            value: LpValue::F32(value),
+            value: LpValue::F32(value).into(),
             ttl_ms: None,
         },
     ))
@@ -1094,8 +1094,8 @@ fn planned_panel_writes(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
         .map(|action| match action.op_as::<crate::PanelWriteOp>() {
             Some(op) => (
                 op.channel.clone(),
-                match &op.value {
-                    LpValue::F32(value) => Some(*value),
+                match op.value.as_value() {
+                    Some(LpValue::F32(value)) => Some(*value),
                     _ => None,
                 },
             ),

@@ -3,6 +3,7 @@ pub mod agent;
 pub mod bus;
 pub mod devices;
 pub mod docs_host;
+pub mod draw;
 pub mod frame_feed;
 pub mod graph;
 pub mod home;

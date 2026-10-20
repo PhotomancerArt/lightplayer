@@ -39,6 +39,7 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
             frame: Some(frame.clone()),
             dim: false,
             light: None,
+            drawable: None,
         };
     }
     let feed = picture_feed(input).filter(|_| !runs_nothing(input));
@@ -70,6 +71,9 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
             PictureSource::Link | PictureSource::Cloud | PictureSource::None => false,
         },
         light: input.update.and_then(|update| update.light),
+        // The studio controller marks the connected card (it knows the
+        // session's graph).
+        drawable: None,
     }
 }
 

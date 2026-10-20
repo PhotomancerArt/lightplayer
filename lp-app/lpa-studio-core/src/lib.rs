@@ -10,8 +10,8 @@ pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
     ControlSampleSpan, ExportFinding, ExportSeverity, LampType, LpFeature, LpValue, NodeId,
-    NodeKind, PhasorConfig, PlayState, Revision, SlotMapKey, SlotPath, SlotPathSegment, ToLpValue,
-    Waveform,
+    NodeKind, PanelWriteValue, PhasorConfig, PlayState, Revision, SlotMapKey, SlotPath,
+    SlotPathSegment, ToLpValue, Waveform,
 };
 
 pub mod app;
@@ -165,6 +165,10 @@ pub use app::devices::{
     connect_wifi_offer,
 };
 pub use app::docs_host::DocsSimHost;
+pub use app::draw::{
+    LampPictureFrame, PictureFit, StrokeController, UiDrawSurface, UiDrawTarget, UiDrawable,
+    UiStroke, UiStrokePointer,
+};
 pub use app::studio::PlayViewOp;
 pub use app::studio::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
 pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};

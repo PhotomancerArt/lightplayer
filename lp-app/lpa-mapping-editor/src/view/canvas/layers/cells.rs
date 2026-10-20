@@ -203,16 +203,28 @@ pub fn lamp_cells(
 /// position, in input order.
 #[must_use]
 pub fn point_cells(positions: &[[f32; 2]], floor_radius: f32) -> Vec<LampCell> {
-    let positions: Vec<[f64; 2]> = positions
+    let seeds: Vec<[f64; 2]> = positions
         .iter()
         .map(|p| [f64::from(p[0]), f64::from(p[1])])
         .collect();
     let floor = f64::from(floor_radius).max(f64::EPSILON);
-    let radius =
-        median_nearest_neighbour(&positions).map_or(floor, |nn| (NN_FRACTION * nn).max(floor));
+    let radius = median_nearest_neighbour(&seeds).map_or(floor, |nn| (NN_FRACTION * nn).max(floor));
+    point_cells_with_radius(positions, radius)
+}
+
+/// [`point_cells`] with the shared radius already decided: the product
+/// preview (`lamp_view.rs`) takes it from `lpa_studio_core`'s
+/// `LampPictureFrame`, which also frames the picture and maps a point on it
+/// back to pattern space — so the cells drawn and the box a finger lands in
+/// come from one radius.
+#[must_use]
+pub fn point_cells_with_radius(positions: &[[f32; 2]], radius: f64) -> Vec<LampCell> {
     let seeds: Vec<Seed> = positions
-        .into_iter()
-        .map(|center| Seed { center, radius })
+        .iter()
+        .map(|p| Seed {
+            center: [f64::from(p[0]), f64::from(p[1])],
+            radius,
+        })
         .collect();
     cells_from_seeds(&seeds)
 }

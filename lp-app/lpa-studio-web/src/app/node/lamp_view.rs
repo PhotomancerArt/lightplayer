@@ -38,10 +38,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{neutral_lamp_rgb, point_cells};
+use lpa_mapping_editor::{neutral_lamp_rgb, point_cells_with_radius};
+use lpa_studio_core::app::draw::lamp_hint_position;
 use lpa_studio_core::{
-    ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
-    UiPatchSurface, UiPatchSurfaceFixture,
+    ColorOrder, ControlDisplayLayout, ControlSampleEncoding, LampPictureFrame,
+    UiControlProductPreview, UiPatchSurface, UiPatchSurfaceFixture,
 };
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -241,17 +242,19 @@ pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -
 
 /// One lamp field's cell geometry: seam-inset voronoi polygons in the
 /// layout's hint space, each carrying the `sample_start` its live colour
-/// decodes from. Pure data — the `Path2d` form the painter fills is built
-/// from this by [`LampCellPaths`].
+/// decodes from, and the picture's frame. Pure data — the `Path2d` form the
+/// painter fills is built from this by [`LampCellPaths`].
 pub(crate) struct LampFieldGeometry {
-    /// Hint-space bbox over every cell VERTEX (`[min_x, min_y, width,
-    /// height]`) — what the draw-time transform aspect-FITS into the
-    /// canvas box (G1 rulings): framing the polygons rather than the
-    /// `[0, hint]` extent means an edge lamp's cell can never be cut off
-    /// by the canvas border, and a field that occupies a sliver of its
-    /// texture (the fyeah sign in a square texture) fills its box.
-    /// All-zero when the layout has no drawable cell.
-    pub bounds: [f64; 4],
+    /// The picture's frame ([`LampPictureFrame`], shared with Studio core):
+    /// the cells' radius, the hint-space box every cell vertex lies in, and
+    /// the transform that aspect-FITS it into the canvas box (G1 rulings).
+    /// Framing the polygons rather than the `[0, hint]` extent means an edge
+    /// lamp's cell can never be cut off by the canvas border, and a field
+    /// that occupies a sliver of its texture (the fyeah sign in a square
+    /// texture) fills its box. The same frame maps a point on the drawn
+    /// picture back to pattern space, so a finger lands where this draws.
+    /// `None` when the layout has no lamp.
+    pub frame: Option<LampPictureFrame>,
     /// Per displayed lamp: its sample offset and its cell polygon
     /// (possibly empty when coincident lamps shared all its territory).
     pub cells: Vec<(u32, Vec<[f32; 2]>)>,
@@ -262,56 +265,32 @@ pub(crate) struct LampFieldGeometry {
 /// Positions leave normalized space for **hint space** (`x·width_hint`,
 /// `y·height_hint`) so distances mean one thing on both axes, and every
 /// length derives from the field's own numbers: cell radius is 0.92 × the
-/// median nearest-neighbour distance ([`point_cells`]), floored by the
-/// footprint the layout itself declares (`ControlLamp2d::radius` is
-/// normalized against the larger hint dimension). No absolute clamps —
-/// the old dot renderer's %-of-box diameter and 5 px floor assumed a
-/// scale the layout never promised.
+/// median nearest-neighbour distance, floored by the footprint the layout
+/// itself declares (`ControlLamp2d::radius` is normalized against the larger
+/// hint dimension) — [`LampPictureFrame::cell_radius`], the one place that
+/// rule lives. No absolute clamps — the old dot renderer's %-of-box
+/// diameter and 5 px floor assumed a scale the layout never promised.
 pub(crate) fn lamp_field_geometry(layout: &lpa_studio_core::ControlLayout2d) -> LampFieldGeometry {
-    let hint = [
-        f64::from(layout.width_hint.max(1)),
-        f64::from(layout.height_hint.max(1)),
-    ];
+    let Some(frame) = LampPictureFrame::of(layout) else {
+        return LampFieldGeometry {
+            frame: None,
+            cells: Vec::new(),
+        };
+    };
     let positions: Vec<[f32; 2]> = layout
         .lamps
         .iter()
-        .map(|lamp| {
-            [
-                lamp.center[0].clamp(0.0, 1.0) * hint[0] as f32,
-                lamp.center[1].clamp(0.0, 1.0) * hint[1] as f32,
-            ]
-        })
+        .map(|lamp| lamp_hint_position(layout, lamp.center))
         .collect();
-    // The footprint floor in hint units. Median across lamps: today every
-    // producer declares one uniform radius, and a mixed field should not
-    // let one outsized declaration inflate everyone else's floor.
-    let floor = {
-        let mut radii: Vec<f32> = layout.lamps.iter().map(|lamp| lamp.radius).collect();
-        radii.sort_by(f32::total_cmp);
-        let max_hint = hint[0].max(hint[1]) as f32;
-        radii
-            .get(radii.len() / 2)
-            .map_or(f32::EPSILON, |radius| (radius * max_hint).max(f32::EPSILON))
-    };
-    let cells: Vec<(u32, Vec<[f32; 2]>)> = point_cells(&positions, floor)
+    let cells: Vec<(u32, Vec<[f32; 2]>)> = point_cells_with_radius(&positions, frame.cell_radius())
         .into_iter()
         .zip(&layout.lamps)
         .map(|(cell, lamp)| (lamp.sample_start, cell.polygon))
         .collect();
-    let mut min = [f64::INFINITY; 2];
-    let mut max = [f64::NEG_INFINITY; 2];
-    for vertex in cells.iter().flat_map(|(_, polygon)| polygon) {
-        min[0] = min[0].min(f64::from(vertex[0]));
-        min[1] = min[1].min(f64::from(vertex[1]));
-        max[0] = max[0].max(f64::from(vertex[0]));
-        max[1] = max[1].max(f64::from(vertex[1]));
+    LampFieldGeometry {
+        frame: Some(frame),
+        cells,
     }
-    let bounds = if min[0].is_finite() {
-        [min[0], min[1], max[0] - min[0], max[1] - min[1]]
-    } else {
-        [0.0; 4]
-    };
-    LampFieldGeometry { bounds, cells }
 }
 
 /// A layout's cells as ready-to-fill `Path2d`s, keyed by the layout
@@ -321,9 +300,8 @@ pub(crate) struct LampCellPaths {
     /// `Rc::as_ptr` of the `ControlDisplayLayout` these paths were built
     /// from (identity, not contents — same contract as [`LampPaintKey`]).
     layout_key: usize,
-    /// Hint-space bbox of every cell vertex — see
-    /// [`LampFieldGeometry::bounds`].
-    bounds: [f64; 4],
+    /// The picture's frame — see [`LampFieldGeometry::frame`].
+    frame: Option<LampPictureFrame>,
     cells: Vec<(u32, web_sys::Path2d)>,
 }
 
@@ -359,7 +337,7 @@ impl LampCellPaths {
             }
             *slot = Some(LampCellPaths {
                 layout_key,
-                bounds: geometry.bounds,
+                frame: geometry.frame,
                 cells,
             });
         }
@@ -382,21 +360,14 @@ impl LampCellPaths {
         live: bool,
         dest: [f64; 4],
     ) -> Result<(), String> {
-        let [x, y, width, height] = dest;
-        let [bounds_x, bounds_y, bounds_w, bounds_h] = self.bounds;
-        if bounds_w <= 0.0 || bounds_h <= 0.0 {
+        let Some(frame) = &self.frame else {
             return Ok(());
-        }
-        let scale = (width / bounds_w).min(height / bounds_h);
+        };
+        // The frame's forward fit: the transform a stroke's pointer is
+        // normalized against too (`PictureFit::picture_point`).
+        let fit = frame.fit(dest);
         context
-            .set_transform(
-                scale,
-                0.0,
-                0.0,
-                scale,
-                x + (width - scale * bounds_w) / 2.0 - scale * bounds_x,
-                y + (height - scale * bounds_h) / 2.0 - scale * bounds_y,
-            )
+            .set_transform(fit.scale, 0.0, 0.0, fit.scale, fit.offset[0], fit.offset[1])
             .map_err(|error| format!("set transform: {error:?}"))?;
         let neutral = neutral_lamp_rgb();
         let mut style = String::new();
@@ -665,7 +636,8 @@ mod tests {
         // The bounds frame the CELLS, not the [0, hint] extent: seeds
         // span x 0..150 at y 50, radius 0.92 × 50 — the bbox reaches
         // (inset) beyond the first and last seed on both axes.
-        let [bounds_x, bounds_y, bounds_w, bounds_h] = geometry.bounds;
+        let [bounds_x, bounds_y, bounds_w, bounds_h] =
+            geometry.frame.as_ref().expect("lamps").bounds();
         assert!(bounds_x < 0.0 && bounds_x > -50.0, "bx {bounds_x}");
         assert!(bounds_y < 50.0 && bounds_y > 0.0, "by {bounds_y}");
         assert!(
@@ -707,6 +679,56 @@ mod tests {
             let dy = f64::from(v[1] - 50.0);
             let d = (dx * dx + dy * dy).sqrt();
             assert!((d - 4.0 * 0.9).abs() < 1e-3, "footprint floor, got {d}");
+        }
+    }
+
+    /// The picture's frame (Studio core's `LampPictureFrame`, which a stroke
+    /// converts back through) is exactly the box the drawn cells fill: its
+    /// bounds touch the outermost cell vertex on every side, on a dense
+    /// grid, a jittered field and a lone lamp.
+    #[test]
+    fn the_frames_bounds_are_the_drawn_cells_bounds() {
+        let lamp = |index: u32, center: [f32; 2]| lpa_studio_core::ControlLamp2d {
+            lamp_index: index,
+            sample_start: index * 3,
+            center,
+            radius: 0.01,
+        };
+        let grid: Vec<_> = (0..15)
+            .map(|i| lamp(i, [0.1 + 0.2 * (i % 5) as f32, 0.3 + 0.2 * (i / 5) as f32]))
+            .collect();
+        let jitter: Vec<_> = (0..40)
+            .map(|i| {
+                let f = i as f32;
+                lamp(i, [(f * 0.137) % 0.9 + 0.05, (f * 0.291) % 0.8 + 0.1])
+            })
+            .collect();
+        let lone = vec![lamp(0, [0.5, 0.5])];
+        for lamps in [grid, jitter, lone] {
+            let layout = lpa_studio_core::ControlLayout2d::new(
+                lpa_studio_core::Revision(3),
+                200,
+                100,
+                lamps,
+            );
+            let geometry = lamp_field_geometry(&layout);
+            let mut min = [f64::INFINITY; 2];
+            let mut max = [f64::NEG_INFINITY; 2];
+            for vertex in geometry.cells.iter().flat_map(|(_, polygon)| polygon) {
+                for axis in 0..2 {
+                    min[axis] = min[axis].min(f64::from(vertex[axis]));
+                    max[axis] = max[axis].max(f64::from(vertex[axis]));
+                }
+            }
+            let [x, y, width, height] = geometry.frame.as_ref().expect("lamps").bounds();
+            for (got, want) in [
+                (x, min[0]),
+                (y, min[1]),
+                (x + width, max[0]),
+                (y + height, max[1]),
+            ] {
+                assert!((got - want).abs() < 1e-3, "frame {got} vs cells {want}");
+            }
         }
     }
 

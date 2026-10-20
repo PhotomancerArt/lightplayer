@@ -32,6 +32,11 @@ pub(crate) mod studio_device_e2e_tests;
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]
 mod studio_docs_e2e_tests;
+/// End-to-end drawing tests (drawing-on-the-picture P5): the open
+/// session's picture is drawable while a `touches` reader is loaded, and a
+/// stroke reaches the engine as paced momentary touch writes.
+#[cfg(test)]
+mod studio_draw_e2e_tests;
 #[cfg(test)]
 pub(crate) mod studio_edit_e2e_tests;
 /// End-to-end export designation tests (module authoring unit, P3): the

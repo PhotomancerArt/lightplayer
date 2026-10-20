@@ -8,6 +8,7 @@
   "Xy": 1477692922,
   "lp::control::Message": 2014621053,
   "lp::fluid::Emitter": 2405894887,
+  "lp::touch::Touch": 2175778215,
   "lpc_model::binding::binding_def::BindingDef": 1885459118,
   "lpc_model::nodes::button::button_def::ButtonDef": 1018556980,
   "lpc_model::nodes::button::button_def::ButtonState": 4166558174,

@@ -296,15 +296,19 @@ fn a_pattern_that_fails_to_compile_reads_failed() {
 }
 
 /// One connected Studio over the fixture server, with the latest snapshot.
-struct Session {
-    actor: StudioActor<NoTimer>,
+/// Shared with the drawing tests (`studio_draw_e2e_tests`), which connect
+/// it to servers of their own.
+pub(super) struct Session {
+    pub(super) actor: StudioActor<NoTimer>,
     tx: crate::app::studio::studio_view_channel::CommandSender,
     views: crate::app::studio::studio_view_channel::StudioViewReceiver,
-    view: UiStudioView,
+    pub(super) view: UiStudioView,
+    /// Every message the studio sent the server, in order.
+    pub(super) sent: Rc<RefCell<Vec<lpc_wire::ClientMessage>>>,
 }
 
 /// The actor's timer factory, nameable: these tests never wait on a timer.
-type NoTimer = fn(core::time::Duration) -> core::future::Ready<()>;
+pub(super) type NoTimer = fn(core::time::Duration) -> core::future::Ready<()>;
 
 fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
     core::future::ready(())
@@ -312,14 +316,27 @@ fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
 
 impl Session {
     fn connect() -> Self {
-        let server = Rc::new(RefCell::new(pattern_set_e2e_server()));
+        Self::connect_to(
+            pattern_set_e2e_server(),
+            StudioController::connected_with_client_for_test,
+        )
+    }
+
+    /// Connect a studio built by `controller` (over the in-process client)
+    /// to `server`, running its loaded project.
+    pub(super) fn connect_to(
+        server: LpServer,
+        controller: fn(StudioServerClient) -> StudioController,
+    ) -> Self {
+        let server = Rc::new(RefCell::new(server));
+        let sent = Rc::new(RefCell::new(Vec::new()));
         let io = InProcessServerIo {
             server,
             inbox: Rc::new(RefCell::new(VecDeque::new())),
-            sent: Rc::new(RefCell::new(Vec::new())),
+            sent: Rc::clone(&sent),
         };
         let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-        let controller = StudioController::connected_with_client_for_test(client);
+        let controller = controller(client);
         let (mut actor, handle) = StudioActor::new(controller, no_timer as NoTimer);
         let mut views = handle.view;
         handle
@@ -332,6 +349,25 @@ impl Session {
             tx: handle.tx,
             views,
             view,
+            sent,
+        }
+    }
+
+    /// Send `command` and run the batch it lands in, keeping any view it
+    /// emits.
+    pub(super) fn send(&mut self, command: StudioCommand) {
+        self.send_batch(vec![command]);
+    }
+
+    /// Queue `commands` and run them as ONE batch, as a burst the actor
+    /// wakes to, keeping any view it emits.
+    pub(super) fn send_batch(&mut self, commands: Vec<StudioCommand>) {
+        for command in commands {
+            self.tx.send(command);
+        }
+        drive(self.actor.run_one_batch_for_test());
+        if let Some(view) = self.views.try_recv() {
+            self.view = view;
         }
     }
 
@@ -348,7 +384,7 @@ impl Session {
 
     /// Press the playlist's verb `verb` with `args`, as the instrument's
     /// click does.
-    fn press(&mut self, verb: &str, args: OfferArgs) {
+    pub(super) fn press(&mut self, verb: &str, args: OfferArgs) {
         let action = self
             .verb(verb)
             .press(&args)
@@ -357,31 +393,30 @@ impl Session {
     }
 
     fn act(&mut self, action: UiAction) {
-        self.tx.send(StudioCommand::Action(action));
-        drive(self.actor.run_one_batch_for_test());
-        if let Some(view) = self.views.try_recv() {
-            self.view = view;
-        }
+        self.send(StudioCommand::Action(action));
     }
 
     /// Refresh (each read ticks the engine a frame) until `done` holds.
     fn refresh_until(&mut self, what: &str, done: impl Fn(&UiStudioView) -> bool) {
+        if !self.try_refresh_until(done) {
+            panic!("{what}: never happened; picker = {:#?}", picker(&self.view));
+        }
+    }
+
+    /// Refresh until `done` holds, at most 40 reads; whether it came to.
+    pub(super) fn try_refresh_until(&mut self, done: impl Fn(&UiStudioView) -> bool) -> bool {
         for _ in 0..40 {
             if done(&self.view) {
-                return;
+                return true;
             }
-            self.tx.send(project_action(ProjectOp::RefreshProject));
-            drive(self.actor.run_one_batch_for_test());
-            if let Some(view) = self.views.try_recv() {
-                self.view = view;
-            }
+            self.send(project_action(ProjectOp::RefreshProject));
         }
-        panic!("{what}: never happened; picker = {:#?}", picker(&self.view));
+        done(&self.view)
     }
 }
 
 /// The root module card's panel.
-fn root_panel(view: &UiStudioView) -> UiPanelGroup {
+pub(super) fn root_panel(view: &UiStudioView) -> UiPanelGroup {
     let Some(UiNodeFace::Module(face)) = project_editor(view)
         .nodes
         .first()
@@ -395,7 +430,7 @@ fn root_panel(view: &UiStudioView) -> UiPanelGroup {
 }
 
 /// The Pattern group's instrument.
-fn picker(view: &UiStudioView) -> UiPatternPicker {
+pub(super) fn picker(view: &UiStudioView) -> UiPatternPicker {
     let panel = root_panel(view);
     let group = panel
         .groups

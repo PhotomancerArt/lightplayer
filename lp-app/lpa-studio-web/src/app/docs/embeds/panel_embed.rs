@@ -267,7 +267,7 @@ mod tests {
                 owner: lpa_studio_core::NodeId::new(1),
             },
             channel: "scale".to_string(),
-            value: lpa_studio_core::LpValue::F32(1.0),
+            value: lpa_studio_core::LpValue::F32(1.0).into(),
             ttl_ms: None,
         })));
         assert!(fans_out(&project_action(PanelClearOp {
