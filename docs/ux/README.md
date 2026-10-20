@@ -124,6 +124,9 @@ bad:  │     ◎     │  # card 10-19: the let-go glyph hangs off the label's 
       │   SPEED↺  │  #   a 10 px mark that moves nothing only because it is absolutely placed
 ```
 
+app: `lpa-studio-web/…/module/panel_corners.rs` (the circles float over the control) ·
+`lpa-studio-web/…/module/panel_strip.rs` (the label row keeps both ends)
+
 app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
 
 ## P4. quiet when good, loud when bad
@@ -273,6 +276,8 @@ bad:  │ SCANNER · THIS PATTERN         │   # spike r2: the G2 heading; r4 p
 ```
 
 anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/compact_panel.rs` (the band, the headings) ·
+`lpa-studio-core/…/board_card/board_panel_picks.rs`
 
 ## P10. coherence over css ease
 
@@ -304,6 +309,8 @@ bad:  │ BRIGHTNESS ━━━━━━●━━━━━━━━━ 128    │
 ```
 
 anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/compact_panel.rs` (`ux-panel-lines`) ·
+`lpa-studio-web/…/module/panel_strip.rs`
 
 app: `lpa-studio-web/src/base/detail_popover.rs`
 
@@ -409,6 +416,8 @@ do:   the bus's own order ranks it in every group that has one
 ```
 
 anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-core/…/node/face/panel_order.rs` (shape, then the bus, then the walk) ·
+`lpa-studio-core/…/node/face/ui_panel_shape.rs`
 
 app: `lpa-studio-core/src/core/status.rs` (`UiStatusKind`) ·
 `lpa-studio-web/src/base/icon.rs` (`StudioIconName`) ·
@@ -548,6 +557,8 @@ bad:  the label opens details, the knob alone drags
 ```
 
 anatomy: [board card](anatomy/board-card.md) · study: [panel layout](studies/panel-layout/)
+app: `lpa-studio-web/…/module/panel_cell.rs` · `lpa-studio-web/…/module/panel_strip.rs` ·
+`lpa-studio-web/…/module/panel_corners.rs` · `lpa-studio-web/…/node/panel/panel_tap.rs`
 
 ---
 

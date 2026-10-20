@@ -10,11 +10,10 @@ Status: **shipped** (the eight rows as a new board's setup list,
 `spikes/install-network-setup`; round 3, the card's top as its main
 surface, was PR #1176; round 2 of the card's words was PR #1159). The
 connected panel's layout (Whole, Panel, and L1–L10 under Decided) is
-**drawn, not built yet**: 2026-10-19, plan
-`lp2025/2026-10-19-2255-board-card-panel-layout`, spike `spikes/panel-layout`,
-PR #1206, [the study](../studies/panel-layout/README.md). Until it lands the
-card draws #1196's panel, and the play page and the editor keep their own
-layouts until their plans. Where a line changed what shipped before, its
+**built** (plan `lp2025/2026-10-19-2255-board-card-panel-layout`, spike
+`spikes/panel-layout`, PR #1206, [the study](../studies/panel-layout/README.md),
+ADR `2026-10-20-panel-controls-lay-out-by-shape-and-the-bus`); the play page
+and the editor keep their own layouts until their plans. Where a line changed what shipped before, its
 comment says `was:`. ◆ is the layers icon (O2).
 
 ## Whole
