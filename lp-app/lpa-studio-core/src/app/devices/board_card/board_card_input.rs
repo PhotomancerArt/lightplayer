@@ -188,6 +188,16 @@ impl<'a> BoardCardInput<'a> {
             .or(self.links.remembered_bluetooth)
     }
 
+    /// The account's list says the board is online at lightplayer.app,
+    /// and no link of this tab reaches it (nor does another tab hold it):
+    /// the card's online-at-lightplayer.app state, its picture the cloud's.
+    pub fn online_at_cloud(&self) -> bool {
+        self.links.cloud.is_some()
+            && self.offline()
+            && self.view.held_elsewhere.is_none()
+            && !self.stand_in()
+    }
+
     /// This tab has no open link to the board: it is offline, or its port
     /// is there and closed (a port the hold kept shut is the second).
     ///

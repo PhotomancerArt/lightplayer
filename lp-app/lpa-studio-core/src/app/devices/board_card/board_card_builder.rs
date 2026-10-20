@@ -75,7 +75,10 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         device: input.view.id,
         // A board another tab holds is plugged in and running: Online,
         // whatever it is here (`split_roster` says the same).
-        presence: match input.offline() && input.view.held_elsewhere.is_none() {
+        presence: match input.offline()
+            && input.view.held_elsewhere.is_none()
+            && !input.online_at_cloud()
+        {
             true => UiBoardPresence::Offline,
             false => UiBoardPresence::Online,
         },
@@ -455,6 +458,79 @@ mod tests {
         let card = board_card(&CardFixture::offline().input());
         assert_eq!(card.presence, UiBoardPresence::Offline);
         assert_eq!(card.status.mark, CornerMark::Quiet);
+    }
+
+    /// A board of the account online at lightplayer.app, that no link here
+    /// reaches (Yona's "Fabric Test", set up on a phone, 10-19): an Online
+    /// card whose surface is its picture from lightplayer.app, current,
+    /// with no words; Connect through lightplayer.app is the primary; its
+    /// lightplayer.app row says online; the details say where the picture
+    /// is from and how old it is.
+    #[test]
+    fn a_board_online_at_lightplayer_app_is_an_online_card_with_its_cloud_picture() {
+        let mut fixture = CardFixture::online_at_cloud();
+        fixture.now = 1_003.0;
+        let card = board_card(&fixture.input());
+        use crate::UiPrimary;
+        assert_eq!(card.presence, UiBoardPresence::Online);
+        assert_eq!(card.surface.state, crate::SurfaceState::OnlineAtCloud);
+        assert_eq!(card.surface.notice, None);
+        assert_eq!(card.surface.picture, crate::SurfacePicture::Live);
+        assert_eq!(card.picture.source, PictureSource::Cloud);
+        assert!(!card.picture.dim);
+        assert!(card.picture.frame.is_some());
+        let Some(UiPrimary::Offer(primary)) = card.name_bar.primary.clone() else {
+            panic!("a primary: {:?}", card.name_bar.primary);
+        };
+        assert_eq!(primary.word, "Connect");
+        assert_eq!(primary.icon.as_deref(), Some("cloud"));
+        // A board this browser remembers connects by its own `connect`,
+        // through lightplayer.app; one it never met has no registry row,
+        // and presses `connect-relay` itself.
+        assert!(primary.offer.to_string().ends_with("/connect"));
+        let mut never_met = CardFixture::online_at_cloud();
+        never_met.uid = None;
+        let Some(UiPrimary::Offer(primary)) = board_card(&never_met.input()).name_bar.primary
+        else {
+            panic!("a primary for a board never met");
+        };
+        assert!(primary.offer.to_string().ends_with("/connect-relay"));
+        assert_eq!(primary.icon.as_deref(), Some("cloud"));
+        let cloud = card
+            .bars
+            .iter()
+            .find(|bar| bar.layer == BarLayer::Cloud)
+            .unwrap();
+        assert_eq!(cloud.aside.as_deref(), Some("online"));
+        let running = card
+            .status
+            .details
+            .sections
+            .iter()
+            .find(|section| section.title == "Running")
+            .unwrap();
+        let line = |label: &str| {
+            running
+                .lines
+                .iter()
+                .find(|line| line.label == label)
+                .map(|line| line.value.clone())
+        };
+        assert_eq!(line("Picture").as_deref(), Some("From lightplayer.app."));
+        assert_eq!(line("State").as_deref(), Some("Online at lightplayer.app"));
+    }
+
+    /// A board on relay protocol 1 sends lightplayer.app no picture: the
+    /// card says nothing about that, and its surface is the dark, no words.
+    #[test]
+    fn a_board_with_no_cloud_picture_is_dark_and_says_nothing() {
+        let mut fixture = CardFixture::online_at_cloud();
+        fixture.cloud = Some(super::super::card_fixtures::cloud_board(false));
+        let card = board_card(&fixture.input());
+        assert_eq!(card.surface.state, crate::SurfaceState::OnlineAtCloud);
+        assert_eq!(card.surface.notice, None);
+        assert_eq!(card.picture.source, PictureSource::None);
+        assert!(card.picture.frame.is_none());
     }
 
     /// A board another tab holds is an Online card (A3: it is plugged in

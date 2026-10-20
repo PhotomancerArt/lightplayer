@@ -57,6 +57,9 @@ use crate::{
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
+/// The account's boards on every computer: lightplayer.app's rows joined
+/// onto the roster by MAC.
+mod account_boards_flow;
 /// One tab holds a board: the holder's flows (priming, claims, the gate's
 /// claims, the answer to an ask, the sentinels, the facts on the boards).
 mod board_hold_flow;
@@ -211,6 +214,11 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
+    /// The signed-in account's boards online at lightplayer.app, and their
+    /// pictures, as the web edge last heard them (`ListBoards`,
+    /// `BoardPictures`). In memory only: a board this browser never met is
+    /// a roster entry here until it says hello over a link.
+    account_boards: crate::AccountBoards,
     /// This Studio's own build and the store's latest, by their facts: what
     /// every card's update standing is read against. Empty until the update
     /// host fills it, and with it empty no card changes.
@@ -546,6 +554,7 @@ impl StudioController {
             take_overs: crate::TakeOvers::default(),
             sending: std::collections::BTreeMap::new(),
             bluetooth_reach: crate::BluetoothReach::Checking,
+            account_boards: crate::AccountBoards::default(),
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
             place: None,
@@ -874,13 +883,15 @@ impl StudioController {
 
     /// The MAC a roster device answers to, once it has said.
     fn board_key(&self, device: crate::DeviceId) -> Option<lpa_devices::BoardKey> {
-        self.devices
-            .roster()
-            .device(device)?
-            .identity
-            .mac
-            .as_ref()
-            .and_then(lpa_devices::BoardKey::from_mac)
+        match self.devices.roster().device(device) {
+            Some(device) => device
+                .identity
+                .mac
+                .as_ref()
+                .and_then(lpa_devices::BoardKey::from_mac),
+            // A board this browser never met, known by the account's row.
+            None => self.account_board_key(device),
+        }
     }
 
     /// Start the connect over Wi‑Fi `op` asks for: open the board's session
@@ -1078,6 +1089,19 @@ impl StudioController {
             self.bluetooth_reach = reach;
             self.mark_dirty();
         }
+    }
+
+    /// The account's boards online at lightplayer.app, as `ListBoards` last
+    /// answered; `None` (signed out, or no answer) keeps nothing.
+    pub fn set_account_boards(&mut self, rows: Option<crate::AccountBoardRows>) {
+        self.account_boards.replace(rows);
+        self.mark_dirty();
+    }
+
+    /// Their pictures, as `BoardPictures` answered.
+    pub fn take_account_board_pictures(&mut self, pictures: Vec<crate::AccountBoardPicture>) {
+        self.account_boards.take_pictures(pictures);
+        self.mark_dirty();
     }
 
     /// Where the user is, as the web reports it: the page and the panels
@@ -1535,6 +1559,13 @@ impl StudioController {
     /// Apply one access command (the password sheet, the access panel, a
     /// finished conversation), then drive every login again.
     pub fn apply_access_command(&mut self, command: crate::app::access::AccessCommand) {
+        // Signed out: the account's boards go with its keys.
+        if matches!(
+            command,
+            crate::app::access::AccessCommand::AccountKeys(None)
+        ) {
+            self.account_boards.replace(None);
+        }
         let now = self.device_now();
         let now_secs = (self.now_secs)();
         let random = Rc::clone(&self.random);
@@ -2411,6 +2442,7 @@ impl StudioController {
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
         self.hide_accounted_held_links(&mut view);
+        self.join_account_boards(&mut view);
         view.board_projects = self.board_projects(&view);
         view.last_seen = self.registry_last_seen(&view);
         view
@@ -3739,6 +3771,16 @@ impl StudioController {
             offers.place_device(pending.device, prefix);
         }
         for view in &roster.roster.devices {
+            // A board this browser never met has one way in: through
+            // lightplayer.app, whose row is all Studio knows of it.
+            if self.is_account_entry(view.id) {
+                let prefix = prefixes[&view.id].clone();
+                if let Some(offer) = self.relay_offer_at(view, &prefix, crate::DeviceFace::Wire) {
+                    offers.publish(offer);
+                }
+                offers.place_device(view.id, prefix);
+                continue;
+            }
             let device = self.devices.roster().device(view.id);
             let facts = crate::DeviceOfferFacts {
                 prefix: prefixes[&view.id].clone(),
@@ -3856,34 +3898,47 @@ impl StudioController {
     }
 
     /// `devices/<board>/connect-relay`: "Connect through lightplayer.app"
-    /// on the card of a board Studio has met (it said its MAC), while
-    /// nothing reaches it, on a page that reaches the relay, while someone
-    /// is signed in (the account's keys are what open a board through the
-    /// relay). Not on a runtime. Disabled while it is being reached.
+    /// on the card of a board Studio knows by its MAC — one it has met (it
+    /// said its MAC here), or one the account's list says is online at
+    /// lightplayer.app though this browser never met it
+    /// (`account_boards_flow.rs`) — while no link of this tab reaches it,
+    /// on a page that reaches the relay, while someone is signed in (the
+    /// account's keys are what open a board through the relay). Not on a
+    /// runtime. Disabled while it is being reached.
     ///
-    /// No list of the account's boards stands behind it, and nothing asks
-    /// lightplayer.app whether the board is online first: the press finds
-    /// out, and an offline board says so on its tile. Not while another tab
-    /// of this browser holds the board's network slot (Connect is then
-    /// `take-over`).
+    /// A remembered board is offered it whether or not the list names it:
+    /// the press finds out, and an offline board says so on its tile. Not
+    /// while a USB, Bluetooth or LAN link reaches the board (it keeps that
+    /// link), and not while another tab of this browser holds the board's
+    /// network slot (Connect is then `take-over`).
     fn connect_relay_offer(
         &self,
         view: &crate::DeviceView,
         facts: &crate::DeviceOfferFacts<'_>,
     ) -> Option<crate::UiOffer> {
+        self.relay_offer_at(view, &facts.prefix, facts.face)
+    }
+
+    /// [`Self::connect_relay_offer`] under `prefix`, for a board of `face`.
+    fn relay_offer_at(
+        &self,
+        view: &crate::DeviceView,
+        prefix: &crate::OfferPath,
+        face: crate::DeviceFace,
+    ) -> Option<crate::UiOffer> {
         if self.relay_transport.is_none()
             || self.access.account_keys().is_none()
-            || facts.face != crate::DeviceFace::Wire
+            || face != crate::DeviceFace::Wire
             || view.status != crate::DeviceStatus::Offline
         {
             return None;
         }
         let key = self.board_key(view.id)?;
-        if self.network_slot_held_elsewhere(key) {
+        if self.reaches_board(key) || self.network_slot_held_elsewhere(key) {
             return None;
         }
         Some(crate::connect_relay_offer(
-            &facts.prefix,
+            prefix,
             view.id,
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
@@ -3958,11 +4013,11 @@ impl StudioController {
         let known: Vec<(crate::DeviceId, Option<crate::BoardRef>)> = entries
             .iter()
             .map(|device| {
-                let board = self
-                    .devices
-                    .roster()
-                    .identity(*device)
-                    .and_then(crate::BoardRef::known);
+                let board = match self.devices.roster().identity(*device) {
+                    Some(identity) => crate::BoardRef::known(identity),
+                    // A board this browser never met: its MAC.
+                    None => self.account_board_key(*device).map(crate::BoardRef::Mac),
+                };
                 match board {
                     Some(board) if !taken.insert(board) => {
                         log::warn!(

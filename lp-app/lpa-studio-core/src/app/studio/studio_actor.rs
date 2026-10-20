@@ -319,6 +319,13 @@ where
         if let Some(visible) = plan.page_visibility {
             self.controller.set_device_feeds_page_visible(visible);
         }
+        if let Some(rows) = plan.account_boards {
+            self.controller.set_account_boards(rows);
+        }
+        if !plan.account_pictures.is_empty() {
+            self.controller
+                .take_account_board_pictures(plan.account_pictures);
+        }
         if let Some(reach) = plan.bluetooth_reach {
             self.controller.set_bluetooth_reach(reach);
         }
@@ -758,6 +765,11 @@ struct CommandPlan {
     page_visibility: Option<bool>,
     /// The browser's latest Bluetooth answer in the batch (latest wins).
     bluetooth_reach: Option<crate::BluetoothReach>,
+    /// The account's latest `ListBoards` answer in the batch (latest wins;
+    /// `Some(None)` is signed out).
+    account_boards: Option<Option<crate::AccountBoardRows>>,
+    /// The account boards' pictures in the batch, in queue order.
+    account_pictures: Vec<crate::AccountBoardPicture>,
     /// The page's place reports in the batch, in queue order. Never
     /// coalesced: a waiting Edit ends at the first report that moves the
     /// user to another page (`ConnectedBoard::note_page_moved`), so a move
@@ -791,6 +803,8 @@ impl CommandPlan {
         let mut library_changed = false;
         let mut page_visibility = None;
         let mut bluetooth_reach = None;
+        let mut account_boards = None;
+        let mut account_pictures = Vec::new();
         let mut places = Vec::new();
         for command in batch {
             match command {
@@ -802,6 +816,8 @@ impl CommandPlan {
                 StudioCommand::HoldEdge(event) => hold_edge.push(event),
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
+                StudioCommand::AccountBoards(rows) => account_boards = Some(rows),
+                StudioCommand::AccountBoardPictures(pictures) => account_pictures.extend(pictures),
                 StudioCommand::Place(reported) => places.push(reported),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
@@ -852,6 +868,8 @@ impl CommandPlan {
             library_changed,
             page_visibility,
             bluetooth_reach,
+            account_boards,
+            account_pictures,
             places,
         }
     }

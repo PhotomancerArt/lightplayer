@@ -39,6 +39,7 @@
 //! | The last Connect failed | link · error | "Studio couldn't connect to this board over USB." "Retry to connect." | Retry |
 //! | Not answering (a board that said hello went quiet) | link · attention | "This board stopped responding over USB." "Retry to reconnect." | Retry |
 //! | A stand-in, off | play · neutral | "This simulated board is off." | Power on |
+//! | No link here, and the account's list says it is online at lightplayer.app | — | its picture from lightplayer.app, no words | Connect |
 //! | Offline, Wi‑Fi or lightplayer.app reaches it | wifi / cloud · neutral | "This board isn't plugged in." "Connect over Wi‑Fi to use it." | Connect |
 //! | Offline | link · neutral | "This board is offline." "It was last seen 2 hours ago." | Connect by its cable, when offered |
 //! | Its files wait for newer firmware | firmware · attention | "This board's files need newer firmware." "Update the firmware to read them." | Update firmware |
@@ -152,6 +153,10 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     // asks for the firmware below (`Device::status`, 2026-10-18).
     if view.status == DeviceStatus::NotResponding {
         return NotAnswering;
+    }
+    // Well, and reached through lightplayer.app: its picture there.
+    if input.online_at_cloud() {
+        return OnlineAtCloud;
     }
     if input.offline() {
         return match (input.stand_in(), offline_road(input).map(|(road, _)| road)) {
@@ -295,7 +300,8 @@ pub(crate) fn carried_layer(input: &BoardCardInput<'_>, state: SurfaceState) -> 
         DataLost | ProjectError | SendFailed | RemoveFailed => Some(BarLayer::Project),
         AllWell | Connected | Connecting | Reconnecting | MovingHere | Updating | Installing
         | Erasing | Sending | Removing | Identifying | Offline | OfflineReachable
-        | Disconnected | PoweredOff | Locked | NoProject | InTheEditor | PictureTooLarge => None,
+        | OnlineAtCloud | Disconnected | PoweredOff | Locked | NoProject | InTheEditor
+        | PictureTooLarge => None,
     }
 }
 
@@ -537,7 +543,7 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
         });
     let held_icon = link_icon(input.held_link());
     Some(match state {
-        AllWell | Connected => return None,
+        AllWell | Connected | OnlineAtCloud => return None,
         Connecting => {
             let link = connect_link
                 .filter(|_| input.wifi_connect.is_some_and(|c| c.connecting))

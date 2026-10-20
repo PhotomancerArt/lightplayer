@@ -78,6 +78,15 @@ pub enum StudioCommand {
     /// the ⌘K ranking — never a request: core does not navigate. Latest
     /// wins.
     Place(crate::UiPlace),
+    /// The signed-in account's boards online at lightplayer.app, as its
+    /// relay last answered `ListBoards` (the web edge asks at load and every
+    /// 30 s while the page is visible). `None` is signed out, or
+    /// lightplayer.app did not answer: keep nothing. Latest wins.
+    AccountBoards(Option<crate::AccountBoardRows>),
+    /// Their last pictures, as lightplayer.app answered `BoardPictures`.
+    /// Applied in queue order; a picture of a board no longer listed is
+    /// dropped.
+    AccountBoardPictures(Vec<crate::AccountBoardPicture>),
     /// The library changed under us (another tab's catalog transaction or
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.

@@ -19,10 +19,13 @@
 //! | signed in, lightplayer.app refused the board | "river@example.com · can't reach" (why in the details) | — | Attention |
 //! | the board dialling | "river@example.com · connecting" | — | Neutral |
 //! | reachable | "river@example.com · online", and "connected" when this tab's link is the relay | — | Neutral |
+//! | no link here, and the account's list says it is online (`ListBoards`) | "river@example.com · online" | — (Connect through lightplayer.app is the card's primary) | Neutral |
 //!
 //! An offline card keeps what the board last said about its Wi‑Fi and its
-//! key, dimmed, but never "online", "connecting" or "can't reach": this tab
-//! can't know how the board stands with lightplayer.app now.
+//! key, dimmed, but never "connecting" or "can't reach": this tab can't
+//! know how the board stands with lightplayer.app now. It says "online"
+//! only when the signed-in account's list says so, and then nothing is
+//! dimmed: the list is current.
 //!
 //! Signed out is a new board's to-do: the row is lit, with Sign in. Hushing
 //! it is turning Cloud relay off with the switch at the top of its details
@@ -61,7 +64,8 @@ pub const NOTHING_GOES_SENTENCE: &str = "Nothing goes to lightplayer.app until y
 pub(crate) fn cloud_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let status = input.network_status().filter(|_| !input.stand_in());
     let mut facts = relay_facts(input, status);
-    facts.stale = input.offline() && status.is_some() && facts.action.is_none();
+    facts.stale =
+        input.offline() && !input.online_at_cloud() && status.is_some() && facts.action.is_none();
     facts.details = details(input, status);
     facts.verbs = connect_verb(
         input,
@@ -84,6 +88,14 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
         return LinkFacts {
             aside: Some(CONNECTED.to_string()),
             ..row(account.as_deref().unwrap_or(UiLinkKind::Relay.label())).named()
+        };
+    }
+    // No link here, and the account's list says lightplayer.app reaches it
+    // now: that is current, whatever the board last said here.
+    if let Some(account) = account.as_deref().filter(|_| input.online_at_cloud()) {
+        return LinkFacts {
+            aside: Some(card::ONLINE.to_string()),
+            ..row(account).named()
         };
     }
     let Some(status) = status else {
@@ -281,14 +293,26 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, false, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    false,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 false,
                 "not connected",
                 None,
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, false, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    false,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("Wi\u{2011}Fi not set up"),
@@ -302,14 +326,26 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, true, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("Wi\u{2011}Fi not connected"),
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, false, true, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    false,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("Wi\u{2011}Fi disabled"),
@@ -323,7 +359,13 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, true, joined.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    true,
+                    joined.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("can't reach"),
@@ -361,17 +403,15 @@ mod tests {
         for (status, signed_in, summary, aside, tone) in table {
             let mut fixture = CardFixture::ready();
             fixture.account = signed_in.then(|| EMAIL.to_string());
-            fixture.wifi = status
-                .clone()
-                .map(|(on, wifi_on, saved, station, relay)| {
-                    let mut wifi = wifi(on, station, relay);
-                    let status = wifi.status.as_mut().unwrap();
-                    status.wifi = wifi_on;
-                    if !saved {
-                        status.networks.clear();
-                    }
-                    wifi
-                });
+            fixture.wifi = status.clone().map(|(on, wifi_on, saved, station, relay)| {
+                let mut wifi = wifi(on, station, relay);
+                let status = wifi.status.as_mut().unwrap();
+                status.wifi = wifi_on;
+                if !saved {
+                    status.networks.clear();
+                }
+                wifi
+            });
             let bar = cloud_bar(&fixture.input());
             assert_eq!(bar.kind, Some("lightplayer.app"));
             assert_eq!(
@@ -412,8 +452,26 @@ mod tests {
         assert_eq!(sentences, [relay::NO_WIFI]);
     }
 
+    /// No link here, and the account's list says the board is online at
+    /// lightplayer.app: the row says so, not dimmed — for a board this
+    /// browser never met too, which has no status of its own to read.
+    #[test]
+    fn the_accounts_list_says_an_offline_card_is_online() {
+        let mut fixture = CardFixture::online_at_cloud();
+        let bar = cloud_bar(&fixture.input());
+        assert_eq!(
+            (bar.summary.as_str(), bar.aside.as_deref()),
+            ("river@example.com", Some(card::ONLINE))
+        );
+        assert!(!bar.stale);
+        fixture.view.remembered_firmware = None;
+        fixture.remembered_network = None;
+        let never_met = cloud_bar(&fixture.input());
+        assert_eq!(never_met.aside.as_deref(), Some(card::ONLINE));
+    }
+
     /// Offline, the card keeps the board's last Wi‑Fi facts but never
-    /// claims it is online at lightplayer.app.
+    /// claims it is online at lightplayer.app on its own say.
     #[test]
     fn an_offline_card_never_says_online() {
         let mut fixture = CardFixture::offline();
