@@ -38,6 +38,7 @@ pub mod access_session;
 pub mod account_keys;
 pub mod bluetooth_offer;
 pub mod bluetooth_switch_op;
+pub mod board_refusal;
 pub mod browser_key;
 pub mod device_access_ops;
 pub mod device_access_record;
