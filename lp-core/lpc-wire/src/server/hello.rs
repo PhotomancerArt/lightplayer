@@ -43,7 +43,9 @@ use crate::server::hello_auth::HelloAuth;
 ///   `{"map": [[key, <LpValue>], …]}` instead of a bare `LpValue`. A map is
 ///   accepted on a momentary write only (a touch set on `touches`); a
 ///   latched one is refused. `.lp/panel.json` and `LpValue` are unchanged.
-///   `PACK_FORMAT_VERSION` is unchanged.
+///   The same train adds the Fluid def's optional `coords` key (an old peer
+///   refuses a def with a field it does not know, as with the shader's in
+///   25). `PACK_FORMAT_VERSION` is unchanged.
 /// - 43: `FsBootState::Refused` (`fs: refused`; plan
 ///   `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D1) — an
 ///   `fs-tree` board that found a newer or damaged tree-store header

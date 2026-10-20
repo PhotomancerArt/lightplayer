@@ -6,8 +6,9 @@ use alloc::vec::Vec;
 
 use lp_gfx::TextureHandle;
 use lpc_model::{
-    Dim2u, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, SlotAccess, SlotData,
-    SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct, VisualProduct,
+    Dim2u, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, ShaderCoords, SlotAccess,
+    SlotData, SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct,
+    VisualProduct,
 };
 use lps_q32::Q32;
 use lps_shared::TextureStorageFormat;
@@ -17,12 +18,16 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
+use crate::products::visual::coordinates::Q16_ONE;
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualSampleStream, pixel_q16_to_normalized_q16,
-    texel_center_to_uv_q16,
+    RenderTextureRequest, ScopeGeometry, TextureRenderProduct, VisualSampleStream, VisualSpace,
+    pixel_q16_to_normalized_q16, texel_center_to_uv_q16,
 };
 
-use super::{MsaFluidSolver, sample_rgba16_bilinear_q16, stamp_emitter};
+use super::{
+    MsaFluidSolver, PatternGridFit, PatternRequestFit, sample_rgba16_bilinear_centred_q16,
+    sample_rgba16_bilinear_q16, stamp_emitter, stamp_emitter_pattern,
+};
 
 /// Runtime node for `kind = "Fluid"` artifacts.
 pub struct FluidNode {
@@ -34,6 +39,22 @@ pub struct FluidNode {
     /// One sample-stream batch of RGBA16 words, kept for the node's life so a
     /// per-frame sample allocates nothing (`node::scratch`).
     sample_scratch: Vec<u16>,
+    /// The authored frame (`coords`), read each `produce`; sampling reads it
+    /// here because a render has no tick context.
+    coords: ShaderCoords,
+    /// Pattern mode: the scope seen at the last sample or texture render,
+    /// which `produce` places the next step's emitters through — emitters
+    /// are stamped before this frame's consumers have asked for anything.
+    /// See [`Self::note_scope`] for which request wins.
+    seen_scope: Option<SeenScope>,
+}
+
+/// A scope a pattern-mode request stood for, and whether lamps were behind
+/// it (see [`PatternRequestFit::has_lamps`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SeenScope {
+    scope: ScopeGeometry,
+    has_lamps: bool,
 }
 
 impl FluidNode {
@@ -45,6 +66,53 @@ impl FluidNode {
             solver_config: None,
             last_step_time_seconds: None,
             sample_scratch: Vec::new(),
+            coords: ShaderCoords::Pixels,
+            seen_scope: None,
+        }
+    }
+
+    /// Remember the scope a pattern-mode request stood for. Lamps win: a
+    /// request with lamps behind it (a fixture's box, a strip) always
+    /// replaces the memory, and the texel-centre stand-in of a request with
+    /// none (a Studio canvas, a preview) only fills it while no lamps have
+    /// been seen — so a preview rendered beside a fixture never moves the
+    /// emitters off the lamps. With several fixtures, the last one sampled
+    /// wins.
+    fn note_scope(seen_scope: &mut Option<SeenScope>, request: &PatternRequestFit) {
+        if request.has_lamps || !seen_scope.is_some_and(|seen| seen.has_lamps) {
+            *seen_scope = Some(SeenScope {
+                scope: request.scope,
+                has_lamps: request.has_lamps,
+            });
+        }
+    }
+
+    /// Pattern mode: the grid's fit for this step's emitters — the last scope
+    /// seen at sample time, or, before the first sample, the grid's own texel
+    /// centres (so the first step's emitters still land; nothing is skipped).
+    fn emitter_fit(&self, config: FluidSolverConfig) -> PatternGridFit {
+        let scope = self.seen_scope.map_or_else(
+            || ScopeGeometry::texel_centres(config.width, config.height),
+            |seen| seen.scope,
+        );
+        PatternGridFit::from_scope(&scope)
+    }
+
+    /// Fill a texture request's RGBA16 bytes (left zero with no solver yet).
+    /// Pixels mode is the old path, untouched; pattern mode places every
+    /// texel centre through the request's lamp-box fit.
+    fn write_request_pixels(&mut self, request: &RenderTextureRequest, pixels: &mut [u8]) {
+        if !self.coords.is_pattern() {
+            if let Some(solver) = &self.solver {
+                write_texture_pixels(solver, request.width, request.height, pixels);
+            }
+            return;
+        }
+        let fit =
+            PatternRequestFit::new(request.space, request.width, request.height, request.scope);
+        Self::note_scope(&mut self.seen_scope, &fit);
+        if let Some(solver) = &self.solver {
+            write_pattern_texture_pixels(solver, &fit, request.width, request.height, pixels);
         }
     }
 
@@ -99,6 +167,9 @@ impl NodeRuntime for FluidNode {
             fade_speed: def.fade_speed().get::<_, f32>(ctx)?.clamp(0.0, 1.0),
             viscosity: def.viscosity().get::<_, f32>(ctx)?.max(0.0),
         };
+        // Absent reads as Pixels: removing the key is a real gesture back to
+        // the old frame.
+        let coords = def.coords().get_or(ctx, ShaderCoords::Pixels)?;
 
         let emitters = resolve_emitters(ctx)?;
         // `bus:time` carries a queryable product, not a number: resolve the
@@ -107,6 +178,7 @@ impl NodeRuntime for FluidNode {
         // not a per-tick delta.
         let product: TimeProduct = def.time().get(ctx)?;
         let now = ctx.time_product_seconds(product)?;
+        self.coords = coords;
         let should_step = match self.last_step_time_seconds {
             None => true,
             Some(last) if now < last => {
@@ -116,9 +188,13 @@ impl NodeRuntime for FluidNode {
             Some(last) => now - last >= 1.0 / config.step_hz,
         };
         if should_step {
+            let pattern_fit = self.coords.is_pattern().then(|| self.emitter_fit(config));
             let solver = self.ensure_solver(config)?;
             for emitter in &emitters {
-                stamp_emitter(solver, emitter);
+                match &pattern_fit {
+                    None => stamp_emitter(solver, emitter),
+                    Some(fit) => stamp_emitter_pattern(solver, emitter, fit),
+                }
             }
             solver.update();
             self.last_step_time_seconds = Some(now);
@@ -182,9 +258,7 @@ impl RenderNode for FluidNode {
             return Err(NodeError::msg("fluid only renders RGBA16 unorm textures"));
         }
         let mut pixels = vec![0u8; request.width as usize * request.height as usize * 8];
-        if let Some(solver) = &self.solver {
-            write_texture_pixels(solver, request.width, request.height, &mut pixels);
-        }
+        self.write_request_pixels(request, &mut pixels);
         TextureRenderProduct::rgba16_unorm(request.width, request.height, pixels)
             .map_err(err_ctx("fluid texture product"))
     }
@@ -206,9 +280,7 @@ impl RenderNode for FluidNode {
         // Texel-upload path: fluid frames are CPU-produced, so build the
         // texel bytes and upload them into the target in one write.
         let mut pixels = vec![0u8; request.width as usize * request.height as usize * 8];
-        if let Some(solver) = &self.solver {
-            write_texture_pixels(solver, request.width, request.height, &mut pixels);
-        }
+        self.write_request_pixels(request, &mut pixels);
         ctx.graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?
             .write_texture(target, &pixels)
@@ -228,8 +300,21 @@ impl RenderNode for FluidNode {
         let Self {
             solver,
             sample_scratch,
+            coords,
+            seen_scope,
             ..
         } = self;
+        let pattern = coords.is_pattern().then(|| {
+            PatternRequestFit::new(
+                stream.space,
+                stream.output_width,
+                stream.output_height,
+                stream.scope,
+            )
+        });
+        if let Some(fit) = &pattern {
+            Self::note_scope(seen_scope, fit);
+        }
         let Some(solver) = solver else {
             return stream
                 .drive_cleared(graphics)
@@ -244,18 +329,37 @@ impl RenderNode for FluidNode {
             "fluid sample scratch",
         )?;
         let (output_width, output_height) = (stream.output_width, stream.output_height);
+        // Lanes per point in pattern mode: the request's packing. (Pixels
+        // mode reads `[x, y]` pairs whatever the request, as it always has.)
+        let lanes = match stream.space {
+            VisualSpace::TwoD => 2,
+            VisualSpace::OneD => 1,
+        };
         stream.drive(graphics, |points, samples, n| {
             let n = n as usize;
             let coords = graphics
                 .sample_points_data_mut(points)
                 .map_err(err_ctx("fluid sample points"))?;
-            for (point, sample) in coords[..n * 2]
-                .chunks_exact(2)
-                .zip(sample_scratch.chunks_exact_mut(4))
-            {
-                let x = pixel_q16_to_normalized_q16(point[0], output_width);
-                let y = pixel_q16_to_normalized_q16(point[1], output_height);
-                sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
+            match &pattern {
+                None => {
+                    for (point, sample) in coords[..n * 2]
+                        .chunks_exact(2)
+                        .zip(sample_scratch.chunks_exact_mut(4))
+                    {
+                        let x = pixel_q16_to_normalized_q16(point[0], output_width);
+                        let y = pixel_q16_to_normalized_q16(point[1], output_height);
+                        sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
+                    }
+                }
+                Some(fit) => {
+                    for (point, sample) in coords[..n * lanes]
+                        .chunks_exact(lanes)
+                        .zip(sample_scratch.chunks_exact_mut(4))
+                    {
+                        let [u, v] = fit.uv_q16(point);
+                        sample.copy_from_slice(&sample_rgba16_bilinear_centred_q16(solver, u, v));
+                    }
+                }
             }
             graphics
                 .write_sample_out(samples, sample_scratch)
@@ -312,6 +416,35 @@ fn write_texture_pixels(solver: &MsaFluidSolver, width: u32, height: u32, pixels
             pixels[offset + 2..offset + 4].copy_from_slice(&rgba[1].to_le_bytes());
             pixels[offset + 4..offset + 6].copy_from_slice(&rgba[2].to_le_bytes());
             pixels[offset + 6..offset + 8].copy_from_slice(&rgba[3].to_le_bytes());
+        }
+    }
+}
+
+/// Pattern mode's texture fill: every texel centre of the request, packed as
+/// the request packs its points, placed through the request's lamp-box fit
+/// and read at cell centres.
+fn write_pattern_texture_pixels(
+    solver: &MsaFluidSolver,
+    fit: &PatternRequestFit,
+    width: u32,
+    height: u32,
+    pixels: &mut [u8],
+) {
+    let centre = |texel: u32| -> i32 {
+        let value = (i64::from(texel) << 16) + i64::from(Q16_ONE / 2);
+        value.min(i64::from(i32::MAX)) as i32
+    };
+    for y in 0..height {
+        let y_q16 = centre(y);
+        for x in 0..width {
+            // A 1D request reads only the first word.
+            let [u, v] = fit.uv_q16(&[centre(x), y_q16]);
+            let rgba = sample_rgba16_bilinear_centred_q16(solver, u, v);
+            let offset = ((y * width + x) as usize) * 8;
+            for (lane, word) in rgba.iter().enumerate() {
+                pixels[offset + lane * 2..offset + lane * 2 + 2]
+                    .copy_from_slice(&word.to_le_bytes());
+            }
         }
     }
 }
