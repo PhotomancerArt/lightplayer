@@ -11,9 +11,7 @@
 //! | nothing yet (no firmware, not answered, a stand-in, a board with no relay) | "—" | — | Neutral |
 //! | its Cloud relay switch off | "disabled" | — | Neutral |
 //! | signed out | "not connected" | Sign in | Neutral |
-//! | signed in, nothing saved on the board's Wi‑Fi | "river@example.com · Wi‑Fi not set up" | — (its fix is the Wi‑Fi row's) | Neutral |
-//! | signed in, networks saved, none joined | "river@example.com · Wi‑Fi not connected" | — | Neutral |
-//! | signed in, the board's Wi‑Fi off | "river@example.com · Wi‑Fi disabled" | — | Neutral |
+//! | signed in, the board not on Wi‑Fi (nothing saved, nothing joined, or its Wi‑Fi off) | "river@example.com · no Wi‑Fi" (which, in the details) | — (its fix is the Wi‑Fi row's) | Neutral |
 //! | signed in, the board holds no account key | "river@example.com · not added" (why in the details) | — | Neutral |
 //! | signed in, joined, lightplayer.app didn't answer | "river@example.com · can't reach" | — | Attention |
 //! | signed in, lightplayer.app refused the board | "river@example.com · can't reach" (why in the details) | — | Attention |
@@ -122,8 +120,8 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
         tone,
         ..row(&account).named()
     };
-    if let Some(why) = no_wifi(status) {
-        return named(why, UiStatusKind::Neutral);
+    if no_wifi(status).is_some() {
+        return named(card::NO_WIFI, UiStatusKind::Neutral);
     }
     if status.relay == RelayState::NoAccount {
         return named(card::NOT_ADDED, UiStatusKind::Neutral);
@@ -148,25 +146,16 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
     }
 }
 
-/// Why lightplayer.app can't reach the board because of its Wi‑Fi: its
-/// Wi‑Fi off, nothing saved, or nothing joined. `None` once it is joined.
+/// Why lightplayer.app can't reach the board because of its Wi‑Fi, as
+/// the details say it: its Wi‑Fi off, nothing saved, or nothing joined.
+/// `None` once it is joined. The row says "no Wi‑Fi" for each.
 fn no_wifi(status: &NetworkStatus) -> Option<&'static str> {
     match () {
         _ if matches!(status.station, StationState::Connected { .. }) => None,
-        _ if !status.wifi => Some(card::WIFI_OFF),
-        _ if status.networks.is_empty() => Some(card::WIFI_NOT_SET_UP),
-        _ => Some(card::WIFI_NOT_CONNECTED),
+        _ if !status.wifi => Some(relay::WIFI_OFF),
+        _ if status.networks.is_empty() => Some(relay::NO_WIFI),
+        _ => Some(relay::WIFI_DOWN),
     }
-}
-
-/// The details' sentence for a board that can't reach lightplayer.app
-/// because of its Wi‑Fi (what [`no_wifi`] says on the row).
-fn no_wifi_sentence(status: &NetworkStatus) -> Option<&'static str> {
-    no_wifi(status).map(|why| match why {
-        card::WIFI_OFF => relay::WIFI_OFF,
-        card::WIFI_NOT_SET_UP => relay::NO_WIFI,
-        _ => relay::WIFI_DOWN,
-    })
 }
 
 /// Sign in, when it is offered here (nobody is signed in).
@@ -230,7 +219,7 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
     // is for — or, when the board can't use it, why.
     let mut reach = facts("", lines);
     reach.sentence = Some(
-        no_wifi_sentence(status)
+        no_wifi(status)
             .or_else(|| relay::note(status.relay))
             .unwrap_or(CLOUD_RELAY_HELP)
             .to_string(),
@@ -315,14 +304,14 @@ mod tests {
                 )),
                 true,
                 EMAIL,
-                Some("Wi\u{2011}Fi not set up"),
+                Some("no Wi\u{2011}Fi"),
                 UiStatusKind::Neutral,
             ),
             (
                 Some((true, true, false, off.clone(), RelayState::NoAccount)),
                 true,
                 EMAIL,
-                Some("Wi\u{2011}Fi not set up"),
+                Some("no Wi\u{2011}Fi"),
                 UiStatusKind::Neutral,
             ),
             (
@@ -335,7 +324,7 @@ mod tests {
                 )),
                 true,
                 EMAIL,
-                Some("Wi\u{2011}Fi not connected"),
+                Some("no Wi\u{2011}Fi"),
                 UiStatusKind::Neutral,
             ),
             (
@@ -348,7 +337,7 @@ mod tests {
                 )),
                 true,
                 EMAIL,
-                Some("Wi\u{2011}Fi disabled"),
+                Some("no Wi\u{2011}Fi"),
                 UiStatusKind::Neutral,
             ),
             (
@@ -439,7 +428,7 @@ mod tests {
         let bar = cloud_bar(&fixture.input());
         assert_eq!(
             (bar.summary.as_str(), bar.aside.as_deref()),
-            (EMAIL, Some("Wi\u{2011}Fi not set up"))
+            (EMAIL, Some("no Wi\u{2011}Fi"))
         );
         assert!(!bar.todo, "its fix is the Wi\u{2011}Fi row's");
         assert_eq!(line(&bar, "Account").as_deref(), Some(EMAIL));

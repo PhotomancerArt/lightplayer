@@ -285,7 +285,7 @@ bad:  no writer — authored default (R6)                  # sweep 10-17: a plan
 ```
 
 ```text
-do:   ☁ lightplayer.app  hypher@gmail.com   Wi‑Fi not set up
+do:   ☁ lightplayer.app  hypher@gmail.com   no Wi‑Fi
 bad:  ☁ lightplayer.app  Yona's account      # Yona's phone, 10-19: a board with no Wi‑Fi. The
                                              #   name it signed in with, and the state, not a promise
 ```

@@ -421,9 +421,8 @@ connect by it."
 ```text
 ☁ lightplayer.app  —                         # no firmware, not answered, no relay on this firmware
 ☁ lightplayer.app  not connected   │ Sign in │   # signed out: lit
-☁ lightplayer.app  river@example.com   Wi‑Fi not set up     # signed in, nothing saved: its fix is Wi‑Fi's. not lit
-☁ lightplayer.app  river@example.com   Wi‑Fi not connected  # networks saved, none joined
-☁ lightplayer.app  river@example.com   Wi‑Fi disabled
+☁ lightplayer.app  river@example.com   no Wi‑Fi      # signed in, the board not on Wi‑Fi (nothing saved, none joined, or off;
+                                                     #   the details say which): its fix is Wi‑Fi's. not lit
 ☁ lightplayer.app  river@example.com   not added     # the board doesn't hold the account's key
 ☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it; with no
                                                     #   link here, the account's list says it (ListBoards)
@@ -449,6 +448,8 @@ cloud."
 bad:  USB · connected  ☁̸        # the struck cloud: Yona's desk, 10-19. lightplayer.app's row says it now
 bad:  ☁ lightplayer.app  Yona's account     # Yona's phone, 10-19: no Wi‑Fi set up, and it read as
                                             #   "this will work". Name the account by its email, then the state
+bad:  ☁ lightplayer.app  river@example.com   Wi‑Fi not s…    # story, 10-19: at the grid's width the state was cut;
+                                                            #   a state beside an email stays short
 ```
 
 ### Access ○: what you can do
