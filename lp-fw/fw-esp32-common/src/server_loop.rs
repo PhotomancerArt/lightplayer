@@ -375,8 +375,11 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
         // Link policy that needs the server and the clock (the radio links'
-        // login deadline).
-        transport.upkeep(&server, current_time);
+        // login deadline). The clock now, not the pass's `current_time`: the
+        // heartbeat sends above can wait seconds, and the mux judges its
+        // login deadlines against what it is given. (The per-pass send
+        // deadline the transports start here reads their own clock.)
+        transport.upkeep(&server, time_provider.now_ms());
         run_frame_hook(&server);
 
         // The clock now, not the pass's `current_time`: the heartbeat sends
@@ -769,8 +772,11 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
         // Link policy that needs the server and the clock (the radio links'
-        // login deadline).
-        transport.upkeep(&server, current_time);
+        // login deadline). The clock now, not the pass's `current_time`: the
+        // heartbeat sends above can wait seconds, and the mux judges its
+        // login deadlines against what it is given. (The per-pass send
+        // deadline the transports start here reads their own clock.)
+        transport.upkeep(&server, time_provider.now_ms());
         run_frame_hook(&server);
 
         // The clock now, not the pass's `current_time`: the heartbeat sends
