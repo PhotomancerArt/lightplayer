@@ -186,10 +186,10 @@ pub mod card {
     /// Signed in, and the board doesn't hold the account's key.
     pub const NOT_ADDED: &str = "not added";
     /// Signed in, and the board can't reach lightplayer.app without Wi‑Fi:
-    /// nothing saved, nothing joined, or its Wi‑Fi off.
-    pub const WIFI_NOT_SET_UP: &str = "Wi\u{2011}Fi not set up";
-    pub const WIFI_NOT_CONNECTED: &str = "Wi\u{2011}Fi not connected";
-    pub const WIFI_OFF: &str = "Wi\u{2011}Fi disabled";
+    /// nothing saved, nothing joined, or its Wi‑Fi off. Short enough to be
+    /// shown whole beside the email (a card at the home grid's width cut
+    /// "Wi‑Fi not set up" to "Wi‑Fi not s…"); the details say which.
+    pub const NO_WIFI: &str = "no Wi\u{2011}Fi";
     /// Networks a firmware saved and cannot join yet.
     pub const SAVED: &str = "saved";
     /// The Wi‑Fi row's fix for a board with nothing saved: its details.
