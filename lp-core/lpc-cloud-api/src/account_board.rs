@@ -122,7 +122,8 @@ pub struct ReportBoard {
     /// The firmware version it runs, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware: Option<String>,
-    /// The project it is playing; absent when none is loaded.
+    /// The project it is playing, when known (absent says nothing: the
+    /// record keeps what it had).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     /// The link the key was found on.

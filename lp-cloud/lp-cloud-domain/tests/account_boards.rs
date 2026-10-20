@@ -71,7 +71,11 @@ fn a_later_report_freshens_the_record_by_the_merge_rules() {
         Some("2026.10.20-1"),
         "an unknown firmware keeps the last one"
     );
-    assert_eq!(board.project, None, "no project loaded is the newer fact");
+    assert_eq!(
+        board.project.as_deref(),
+        Some("Rocaille"),
+        "a report that names no project keeps the last one"
+    );
     assert_eq!(board.joined_at, START, "joining is once");
     assert_eq!(
         board.seen,

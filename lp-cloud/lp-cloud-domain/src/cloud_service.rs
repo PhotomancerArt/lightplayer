@@ -790,8 +790,8 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
 
     /// A Studio found the caller's current account key on a board over
     /// `seen_on`: put the board on the caller's list, or freshen its
-    /// record. Label, firmware and project take the report's word (cut to
-    /// the relay's own limits); the model only when the report names one;
+    /// record. The label takes the report's word, and firmware, project and
+    /// model where the report names them (cut to the relay's own limits);
     /// `seen_on`'s sighting is now. A board new to a full list
     /// ([`MAX_ACCOUNT_BOARDS`]) is refused `BoardListFull`; a board
     /// already on it always updates. It grants nothing: only the caller's
@@ -814,11 +814,11 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             firmware: report
                 .firmware
                 .map(|firmware| cut_utf8(&firmware, MAX_FIRMWARE_BYTES).into()),
-            project: Some(
-                report
-                    .project
-                    .map(|project| cut_utf8(&project, MAX_PROJECT_NAME_BYTES).into()),
-            ),
+            // A report says what it knows: no project named is silence (the
+            // board's report may not have come yet), never "none loaded".
+            project: report
+                .project
+                .map(|project| Some(cut_utf8(&project, MAX_PROJECT_NAME_BYTES).into())),
             seen,
         };
         let record = match self.store.board_record(user.uid, board) {
