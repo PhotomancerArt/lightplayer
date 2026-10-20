@@ -6,10 +6,11 @@
 //!
 //! The lab's page mounts it at the foot of the right column, under the
 //! inspector; Studio has the real install instead. It
-//! shows the selection's fixture, or the first fixture the piece wires.
+//! shows the selection's fixture (a span's object's), or the first
+//! fixture the piece wires.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, NodeId};
+use lab_mapping_model::{BoardFrame, NodeId, PatchTarget, Target};
 
 use crate::dense_canvas::{Raster, canvas_id, put_when_mounted};
 use crate::faces::{DRAFT_PITCH, lamp_radius_px, rgb};
@@ -31,7 +32,13 @@ pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
     let shown: Option<NodeId> = e
         .selection
         .first()
-        .and_then(|t| p.fixture_of_target(t))
+        .and_then(|t| match t {
+            // A span shows the fixture of the object on it.
+            Target::Span {
+                object: Some(o), ..
+            } => p.fixture_of_place(&PatchTarget::Object(o.clone())),
+            t => p.fixture_of_target(t),
+        })
         .or_else(|| {
             p.fixtures()
                 .iter()
