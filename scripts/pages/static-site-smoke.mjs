@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -158,13 +159,27 @@ async function maybeRunBrowserSmoke() {
     console.log("Chrome not found; skipped browser DOM smoke.");
     return;
   }
-  const startedAt = Date.now();
-  const result = spawnSync(
-    chrome,
-    ["--headless=new", "--disable-gpu", "--virtual-time-budget=8000", "--dump-dom", baseUrl],
-    { encoding: "utf8", timeout: 20_000 },
-  );
-  const elapsedMs = Date.now() - startedAt;
+  // A headless Chrome sometimes hangs and prints nothing (twice on
+  // 2026-10-20, each costing a deploy: docs/debt/story-capture-pipeline.md).
+  // A hang is retried once on a fresh process and profile; a Chrome that
+  // answers, however wrongly, is judged on that answer at once.
+  let attempt = dumpDom(chrome);
+  if (isChromeHang(attempt.result)) {
+    console.log(
+      `Browser DOM smoke: Chrome hung (error.code=${attempt.result.error?.code ?? "(none)"} ` +
+        `status=${attempt.result.status} stdout=${(attempt.result.stdout ?? "").length} chars ` +
+        `elapsedMs=${attempt.elapsedMs}); retrying once with a fresh process and profile.`,
+    );
+    const first = attempt;
+    attempt = dumpDom(chrome);
+    if (isChromeHang(attempt.result)) {
+      throw new Error(
+        `${describeBrowserSmokeMismatch(attempt.result, attempt.elapsedMs)}; ` +
+          `the first attempt also hung (error.code=${first.result.error?.code ?? "(none)"} elapsedMs=${first.elapsedMs})`,
+      );
+    }
+  }
+  const { result, elapsedMs } = attempt;
   if (result.status !== 0) {
     const message = result.stderr || result.stdout || `Chrome exited with ${result.status}`;
     if (browserMode === "required") {
@@ -176,6 +191,39 @@ async function maybeRunBrowserSmoke() {
   if (!result.stdout.includes("<html") && !result.stdout.includes("<!DOCTYPE html")) {
     throw new Error(describeBrowserSmokeMismatch(result, elapsedMs));
   }
+}
+
+// One headless Chrome, one `--dump-dom`, under a 20 s bound, on a throwaway
+// profile (removed afterwards) so a retry shares nothing with a hung attempt.
+function dumpDom(chrome) {
+  const profileDir = mkdtempSync(path.join(tmpdir(), "lp-smoke-chrome-"));
+  const startedAt = Date.now();
+  try {
+    const result = spawnSync(
+      chrome,
+      [
+        "--headless=new",
+        "--disable-gpu",
+        `--user-data-dir=${profileDir}`,
+        "--virtual-time-budget=8000",
+        "--dump-dom",
+        baseUrl,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+    return { result, elapsedMs: Date.now() - startedAt };
+  } finally {
+    rmSync(profileDir, { recursive: true, force: true });
+  }
+}
+
+// A hang is Chrome killed by our timeout, or Chrome "succeeding" with no
+// output at all. Anything else (non-HTML, a non-zero exit) is an answer.
+function isChromeHang(result) {
+  return (
+    result.error?.code === "ETIMEDOUT" ||
+    (result.status === 0 && (result.stdout ?? "").length === 0)
+  );
 }
 
 // The thrown message is the only record a CI run leaves of what Chrome
