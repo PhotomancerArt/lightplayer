@@ -4,8 +4,8 @@
 //!
 //! - [`fetch_cloud_port`] — the browser's `CloudPort`: `fetch` over the two
 //!   deployed planes, same-origin so the session cookie rides along.
-//! - [`account_boards`] — the account's boards online at lightplayer.app
-//!   (`ListBoards`, `BoardPictures`), handed to core.
+//! - [`account_boards`] — the account's board list and the calls that change it
+//!   (`ListAccountBoards`, `BoardPictures`, `ReportBoard`, `ForgetBoard`), handed to core.
 //! - [`session_state`] — one `Signal<CloudSession>` in context, fed once at
 //!   boot and re-fed on demand: pending → anonymous / signed-in /
 //!   unreachable.

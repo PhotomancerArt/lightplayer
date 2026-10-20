@@ -229,8 +229,8 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
-    /// The signed-in account's boards online at lightplayer.app, and their
-    /// pictures, as the web edge last heard them (`ListBoards`,
+    /// The signed-in account's board list, online at lightplayer.app or not, and their
+    /// pictures, as the web edge last heard them (`ListAccountBoards`,
     /// `BoardPictures`). In memory only: a board this browser never met is
     /// a roster entry here until it says hello over a link.
     account_boards: crate::AccountBoards,
@@ -1107,7 +1107,7 @@ impl StudioController {
         }
     }
 
-    /// The account's boards online at lightplayer.app, as `ListBoards` last
+    /// The account's board list, as `ListAccountBoards` last
     /// answered; `None` (signed out, or no answer) keeps nothing.
     pub fn set_account_boards(&mut self, rows: Option<crate::AccountBoardRows>) {
         self.account_boards.replace(rows);

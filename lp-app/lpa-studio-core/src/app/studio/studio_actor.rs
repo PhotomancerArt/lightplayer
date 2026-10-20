@@ -768,7 +768,7 @@ struct CommandPlan {
     page_visibility: Option<bool>,
     /// The browser's latest Bluetooth answer in the batch (latest wins).
     bluetooth_reach: Option<crate::BluetoothReach>,
-    /// The account's latest `ListBoards` answer in the batch (latest wins;
+    /// The account's latest `ListAccountBoards` answer in the batch (latest wins;
     /// `Some(None)` is signed out).
     account_boards: Option<Option<crate::AccountBoardRows>>,
     /// The account boards' pictures in the batch, in queue order.

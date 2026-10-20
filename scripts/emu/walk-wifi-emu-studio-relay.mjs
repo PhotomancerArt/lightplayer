@@ -20,7 +20,7 @@
 //   T2  the cable is gone and nobody is signed in (no `?emu=`, no cookie):
 //       the board is a card under Offline boards, and it does NOT offer
 //       "Connect through lightplayer.app" (`connect-relay`) anywhere on it
-//   T3  signed in again, still no cable: the account's list (`ListBoards`)
+//   T3  signed in again, still no cable: the account's list (`ListAccountBoards`)
 //       says the board is online at lightplayer.app, so its card stands
 //       under Online boards with its picture from lightplayer.app; it
 //       offers `connect-relay`

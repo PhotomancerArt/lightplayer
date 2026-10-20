@@ -9,8 +9,9 @@ supporting building blocks (`Access`, `Actor`, `ProjectMeta`,
 `MemberInfo`/`MemberRole`, `HeadInfo`/`PushOutcome`, `SidecarMeta`, `MeInfo`,
 `SessionInfo`/`SessionList`,
 `Ack`, `LoginOptionsInfo`/`OidcOption`/`DevPickerOptions`/`DevChoice`,
-`AccountAccessInfo`/`AccountPasswordTier`, the relay's
-`BoardPresence`/`BoardList` and `BoardPicture`/`BoardPictureList`). It
+`AccountAccessInfo`/`AccountPasswordTier`, the account's board list
+`AccountBoard`/`AccountBoardList`/`BoardSeen`/`ReportBoard`/`ForgetBoard`,
+and the relay's `BoardPresence` and `BoardPicture`/`BoardPictureList`). It
 carries no transport, no IO, and no logic beyond the version-refusal helper
 in `version.rs`. The blob *transfer* encoding is out of scope entirely —
 blobs move over a separate plain-HTTP plane — this crate only carries the
@@ -23,7 +24,7 @@ byte fields of `AccountAccessInfo` (STANDARD, padded — `lpc-access`'s spelling
 
 ## Every message is a struct; the pairing is a compile-time fact
 
-Each of the twenty-three requests is a struct in `request.rs` (`GetProject { uid }`,
+Each of the twenty-five requests is a struct, in `request.rs` or (the board list's and the pictures') its own concept file (`GetProject { uid }`,
 `PushCommit { .. }`, and the payload-free `WhoAmI` / `ListMyProjects` /
 `GetMe` / `ListSessions` / `LoginOptions` / `GetAccountAccess` /
 `ResetAccountKey`); each response is a struct — most directly in
@@ -37,7 +38,7 @@ rather than being re-exported at the crate root: `Events` and `Heads` only
 read unambiguously with their module in front.
 
 `CloudCallSpec` (in `call_spec.rs`) is the pairing table — one hand-written
-impl per request naming its `Response` and how to `extract` it. Twenty-three
+impl per request naming its `Response` and how to `extract` it. Twenty-five
 impls in one greppable file, deliberately not a macro. It is what lets a client
 write `call(port, GetProject { uid })` and get a `ProjectInfo` back, and what
 lets the service's handlers return the concrete response type; the "what if
@@ -75,7 +76,7 @@ alias, or a best-effort partial-compat decode. `version::check_version` is
 the one place that decision is made; both client and server call it before
 trusting a call or reply body.
 
-`CLOUD_API_VERSION` is `6` as of 2026-10-08: v2 added the account/session/
+`CLOUD_API_VERSION` is `7` as of 2026-10-20: v2 added the account/session/
 login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
 `LoginOptions`); v3 replaced `Visibility { Private, Link }` with
 `Access { None, View, Edit }` (`SetVisibility` → `SetAccess`), added
@@ -88,4 +89,11 @@ answered by `BoardList` (the signed-in account's boards online at the
 relay); v6 (2026-10-08, relay protocol 2) added `BoardPictures`, answered by
 `BoardPictureList` (a board's last picture as the relay keeps it, read only
 by the board's own accounts; `watch` keeps the board fast for a short
-lease), and `BoardPresence.relayProto` / `firmware` / `project`.
+lease), and `BoardPresence.relayProto` / `firmware` / `project`; v7
+(2026-10-20) replaced `ListBoards`/`BoardList` with the account's board list:
+`ListAccountBoards`, answered by `AccountBoardList` (every board on the
+account's list, online or not, `online` carrying its `BoardPresence`),
+`ReportBoard` and `ForgetBoard` (both answered by `Ack`), and
+`CloudError::BoardListFull { max }`; `MAX_ACCOUNT_BOARDS` (64) is the list's
+cap, the answer's size and the relay's online cap
+(`docs/adr/2026-10-20-the-account-board-list.md`).

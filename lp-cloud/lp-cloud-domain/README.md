@@ -22,7 +22,7 @@ other direction.
 
 | Port | What it is |
 |---|---|
-| `MetaStore` | All service state: users, their account device access, sessions, projects, membership, head refs, sidecars, the per-project event log, the blob index |
+| `MetaStore` | All service state: users, their account device access, their board lists (`BoardRecord`, one per board an account holds: the account board list ADR), sessions, projects, membership, head refs, sidecars, the per-project event log, the blob index |
 | `BlobStore` | Content-addressed bytes. Defined here, *not* held by `CloudService` — blob transfer is edge-level |
 | `Clock` | `now() -> f64` epoch seconds |
 | `IdMint` | Random bytes for `usr` uids, session tokens, and account device keys |
@@ -100,6 +100,19 @@ was given; publishing a uid someone else owns answers `NotFound`, so the
 endpoint cannot be walked to discover which uids exist. The service mints
 only `usr` uids, session tokens, and account device keys (`GetAccountAccess`),
 all from `IdMint` bytes.
+
+**The account's board list grants nothing**
+(`docs/adr/2026-10-20-the-account-board-list.md`). `ReportBoard` adds or
+freshens a board on the caller's own list (signed in, not a guest; a board
+new to a full list, 64, is `BoardListFull`); `ForgetBoard` removes the
+caller's own record (and acknowledges one that was not there);
+`ListAccountBoards` reads the caller's records, which the server edge joins
+with the relay's presence (`account_board_list::with_presence`). Facts merge
+by `BoardRecord::absorb`: label, firmware and project take what a source
+says, the model only from a report that names one, each sighting keeps its
+newer time. The relay's writes (`relay_board_records.rs`,
+`BoardRecordWrite`) land the same way, never touching a model, and join no
+account whose list is full.
 
 ## Beyond `handle`
 
