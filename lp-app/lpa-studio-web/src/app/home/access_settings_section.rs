@@ -175,15 +175,17 @@ fn AccountGroup(
                 }
             };
         }
-        AccountAccessState::Loading { name } => (name.clone(), None, Some("Reading your account…")),
-        AccountAccessState::Unavailable { name } => (
+        AccountAccessState::Loading { name, .. } => {
+            (name.clone(), None, Some("Reading your account…"))
+        }
+        AccountAccessState::Unavailable { name, .. } => (
             name.clone(),
             None,
             Some(
                 "Can't reach your account right now. Your devices still unlock with the key this browser remembers.",
             ),
         ),
-        AccountAccessState::Ready { name, info } => (name.clone(), Some(info.clone()), None),
+        AccountAccessState::Ready { name, info, .. } => (name.clone(), Some(info.clone()), None),
     };
     let initial = name
         .chars()

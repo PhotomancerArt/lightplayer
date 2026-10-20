@@ -594,6 +594,34 @@ here"). `connect-wifi` and `connect-relay` are not offered while another tab
 holds the board's network slot. The progress is
 `DeviceRosterView.take_overs` (`UiTakeOver`).
 
+### The account's boards, on every computer
+
+Signed in, the web edge (`lpa-studio-web/src/cloud/account_boards.rs`) asks
+lightplayer.app's relay for the account's online boards (`ListBoards`, at
+load and every 30 s while the page is visible) and hands them in as
+`StudioCommand::AccountBoards` (`None`: signed out, or no answer — keep
+nothing); core holds them by MAC (`AccountBoards`, sans-IO) and the
+controller joins them onto the roster (`studio_controller/account_boards_flow.rs`,
+`DeviceRosterView.cloud_boards`):
+
+- a board this browser knows that no link of the tab reaches is in Online
+  boards, "Online at lightplayer.app"; a board with a USB, Bluetooth or LAN
+  link keeps it, and the list only lets its lightplayer.app row say online;
+- a board it never met is an in-memory roster entry under `mac-<12 hex>`
+  (handle `account_board_device`), named by the row and offered
+  `connect-relay` alone. It is never written to `/registry.json`: once its
+  hello comes over the relay it is a stranger the roster remembers as
+  usual, and the entry folds into that board.
+
+`connect-relay` is offered on either while someone is signed in and no link
+of this tab reaches the board. The cards that draw lightplayer.app's picture
+(`DeviceRosterView.cloud_picture_asks`, home page only) are what the web asks
+`BoardPictures` for, watching, every half second; the pictures come back as
+`StudioCommand::AccountBoardPictures` and draw as `PictureSource::Cloud`, one
+row of lamps per output (`cloud_board_picture.rs`). The card's state is
+`SurfaceState::OnlineAtCloud`: the picture, no words, Connect
+(`docs/ux/anatomy/board-card.md`).
+
 ### Which board plays which project
 
 A board's heartbeat says that something runs, never which library project it

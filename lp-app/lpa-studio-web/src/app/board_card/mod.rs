@@ -42,7 +42,7 @@
 //!   ⋯ whose details hold the board's terminal;
 //! - `data-bar="project|connection|access|firmware|hardware"` on each bar;
 //! - `data-bar-work="running|done|failed"` on a bar while it carries work;
-//! - `data-picture="link|lens|saved|none"` on the picture, with
+//! - `data-picture="link|lens|saved|cloud|none"` on the picture, with
 //!   `data-picture-frame="true|false"` for whether it draws a frame: a board
 //!   another tab holds shows `saved`, the picture that tab left behind;
 //! - `data-offer-path="devices/<board ref>/<verb>"` on every action

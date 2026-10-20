@@ -77,6 +77,17 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
         StudioCommand::BluetoothReach(reach) => {
             ("BluetoothReach".to_string(), format!("{reach:?}"))
         }
+        StudioCommand::AccountBoards(rows) => (
+            "AccountBoards".to_string(),
+            match rows {
+                Some(rows) => format!("{} online", rows.boards.len()),
+                None => "none".to_string(),
+            },
+        ),
+        StudioCommand::AccountBoardPictures(pictures) => (
+            "AccountBoardPictures".to_string(),
+            format!("{} pictures", pictures.len()),
+        ),
         StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
         // A selection box or a drag sends one per move: the timeline keeps
         // what they changed, not every one.

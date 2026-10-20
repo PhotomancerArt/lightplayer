@@ -4,7 +4,9 @@
 //! well nothing covers it; otherwise the card's surface does, and dims it
 //! ([`super::board_surface`]). Where it comes from is its source: the board's link (live, stale,
 //! or waiting for its first frame), the editor's lens (the last frame it
-//! left, dimmed), the last saved picture (dimmed), or nothing. While an
+//! left, dimmed), lightplayer.app (a board of the account that no link here
+//! reaches: its last picture there, current), the last saved picture
+//! (dimmed), or nothing. While an
 //! update holds the board's lights, the picture is their one colour. A
 //! board that runs nothing has no picture: a fresh install never shows the
 //! last project's lights (`docs/ux/anatomy/board-card.md`, "Corner").
@@ -31,6 +33,14 @@ pub const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it r
 
 /// The card's picture.
 pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
+    if let Some(frame) = cloud_picture(input) {
+        return UiBoardPicture {
+            source: PictureSource::Cloud,
+            frame: Some(frame.clone()),
+            dim: false,
+            light: None,
+        };
+    }
     let feed = picture_feed(input).filter(|_| !runs_nothing(input));
     let lens_live = feed.is_some_and(lens_is_live);
     let source = match feed.map(|feed| feed.liveness) {
@@ -57,10 +67,22 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
         dim: match source {
             PictureSource::Saved => true,
             PictureSource::Lens => !lens_live,
-            PictureSource::Link | PictureSource::None => false,
+            PictureSource::Link | PictureSource::Cloud | PictureSource::None => false,
         },
         light: input.update.and_then(|update| update.light),
     }
+}
+
+/// lightplayer.app's picture of the board, while the card draws it: the
+/// account's list says the board is online, no link here reaches it, and
+/// lightplayer.app holds a picture of it (relay protocol 1 sends none, and
+/// nothing is said about that).
+fn cloud_picture<'a>(input: &BoardCardInput<'a>) -> Option<&'a crate::UiControlProductPreview> {
+    input
+        .links
+        .cloud
+        .filter(|_| input.online_at_cloud() && !input.locked())
+        .and_then(|cloud| cloud.picture.as_ref())
 }
 
 /// The picture is the lens session's own and current: live, or stale on a
@@ -87,6 +109,9 @@ pub(crate) fn picture_line(input: &BoardCardInput<'_>) -> Option<String> {
         .filter(|_| !input.update.is_some_and(|update| update.light.is_none()));
     if input.locked() && activity.is_none() {
         return Some(LOCKED_PREVIEW_SENTENCE.to_string());
+    }
+    if cloud_picture(input).is_some() {
+        return Some(CLOUD_PICTURE_WORDS.to_string());
     }
     let feed = picture_feed(input);
     // The picture of a board another tab holds is the one that tab saved.
@@ -123,6 +148,10 @@ pub(crate) fn frame_rate(input: &BoardCardInput<'_>) -> Option<String> {
 /// The status corner's "Last frame" fact: how old the picture is when it
 /// is not live (stale, saved, the lens's last), in Studio's one age.
 pub(crate) fn last_frame(input: &BoardCardInput<'_>) -> Option<String> {
+    if cloud_picture(input).is_some() {
+        let at = input.links.cloud.and_then(|cloud| cloud.picture_at)?;
+        return Some(age_words((input.now - at).max(0.0)));
+    }
     let feed = picture_feed(input).filter(|_| !runs_nothing(input))?;
     feed.frame.as_ref()?;
     let live = match feed.liveness {
@@ -185,6 +214,9 @@ pub(crate) fn source_words(
 
 /// How often a Bluetooth card's picture moves (see [`source_words`]).
 const BLUETOOTH_PICTURE_PACE: &str = "Shown once or twice a second over Bluetooth.";
+
+/// lightplayer.app's picture of a board no link here reaches.
+const CLOUD_PICTURE_WORDS: &str = "From lightplayer.app.";
 
 /// A picture saved before the board went away.
 const SAVED_PICTURE_WORDS: &str = "Saved before the board went away.";

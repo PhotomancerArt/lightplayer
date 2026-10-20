@@ -110,8 +110,14 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
     }
 }
 
-/// A handle on an editor holding the embedded example, laid out on the
-/// canvas, with the story's selection.
+/// A handle on an editor holding the embedded example, with its layout
+/// pinned and the story's selection.
+///
+/// Every story chooses its layout: the canvas, or the stack for the one
+/// that is about it. Left unchosen, the layout follows the size class the
+/// canvas reports on its first resize, and which one a capture sees then
+/// depends on whether that report lands before the shot. A chosen layout
+/// is never undone by a size report (`Editor::layout`).
 fn story_handle(example: &str, setup: Setup) -> GraphHandle {
     let example = lpa_studio_core::app::home::embedded_example(example).expect("embedded");
     let files = MemFiles::new(example.files.iter().filter_map(|(path, bytes)| {
@@ -127,6 +133,11 @@ fn story_handle(example: &str, setup: Setup) -> GraphHandle {
         e.set_placement(&placement);
         e.fit();
     }
+    let layout = match setup {
+        Setup::Stack => LayoutKind::Stack,
+        _ => LayoutKind::Canvas,
+    };
+    handle.input(GraphInput::SetLayout(Some(layout)));
     let fixture = NodeId::new("fixture");
     match setup {
         Setup::Nothing => {}
@@ -144,10 +155,7 @@ fn story_handle(example: &str, setup: Setup) -> GraphHandle {
                 handle.input(GraphInput::Select(vec![Target::Component(id)]));
             }
         }
-        Setup::Stack => {
-            handle.input(GraphInput::SetLayout(Some(LayoutKind::Stack)));
-        }
-        Setup::Refused => {}
+        Setup::Stack | Setup::Refused => {}
     }
     handle
 }

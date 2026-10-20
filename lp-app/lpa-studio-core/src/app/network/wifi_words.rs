@@ -105,6 +105,16 @@ pub mod relay {
     pub const REFRESH_ACCOUNT: &str = "Plug this board into Studio once to refresh its account";
     /// lightplayer.app no longer takes the board's relay protocol.
     pub const UPDATE_FIRMWARE: &str = "Update this board's firmware to use lightplayer.app";
+    /// The board has no network saved: lightplayer.app reaches a board only
+    /// over its Wi‑Fi.
+    pub const NO_WIFI: &str = "This board isn't set up on Wi\u{2011}Fi, so lightplayer.app can't reach it. \
+         Set up Wi\u{2011}Fi to reach it from any browser.";
+    /// Networks saved, none joined right now.
+    pub const WIFI_DOWN: &str =
+        "This board isn't on Wi\u{2011}Fi right now, so lightplayer.app can't reach it.";
+    /// The board's Wi‑Fi switched off.
+    pub const WIFI_OFF: &str =
+        "Wi\u{2011}Fi is disabled on this board, so lightplayer.app can't reach it.";
 
     /// The line under the Cloud relay switch, when there is one: nothing
     /// with the switch off, on a board with no relay, or while the hub is
@@ -170,6 +180,16 @@ pub mod card {
     pub const CANT_REACH: &str = "can't reach";
     /// The board dialling lightplayer.app.
     pub const CONNECTING: &str = "connecting";
+    /// The board is at lightplayer.app: any browser signed in to the
+    /// account can reach it.
+    pub const ONLINE: &str = "online";
+    /// Signed in, and the board doesn't hold the account's key.
+    pub const NOT_ADDED: &str = "not added";
+    /// Signed in, and the board can't reach lightplayer.app without Wi‑Fi:
+    /// nothing saved, nothing joined, or its Wi‑Fi off. Short enough to be
+    /// shown whole beside the email (a card at the home grid's width cut
+    /// "Wi‑Fi not set up" to "Wi‑Fi not s…"); the details say which.
+    pub const NO_WIFI: &str = "no Wi\u{2011}Fi";
     /// Networks a firmware saved and cannot join yet.
     pub const SAVED: &str = "saved";
     /// The Wi‑Fi row's fix for a board with nothing saved: its details.

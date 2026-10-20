@@ -489,6 +489,7 @@ fn ble_settings_signed_in_passwords() -> Element {
         SettingsAs {
             account: AccountAccessState::Ready {
                 name: "Yona".to_string(),
+                email: "yona@example.com".to_string(),
                 info: account_info(Some("camp-fire-17"), Some("dome-crew-88")),
             },
             passwords_shown: true,
@@ -504,6 +505,7 @@ fn ble_settings_signed_in_none() -> Element {
         SettingsAs {
             account: AccountAccessState::Ready {
                 name: "Yona".to_string(),
+                email: "yona@example.com".to_string(),
                 info: account_info(None, None),
             },
         }

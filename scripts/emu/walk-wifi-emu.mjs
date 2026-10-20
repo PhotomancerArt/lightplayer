@@ -128,6 +128,11 @@ function panel() {
   return `(${card()}?.querySelector('[data-bar="wifi"] [id^="ux-popover-panel"]') ?? null)`;
 }
 
+/// The same panel as a CSS selector, for `waitSettled`.
+function panelSelector() {
+  return `${CARD ? `[data-board-card="${CARD}"]` : "[data-board-card]"} [data-bar="wifi"] [id^="ux-popover-panel"]`;
+}
+
 function panelText() {
   return `(${panel()}?.innerText || '')`;
 }
@@ -291,7 +296,7 @@ async function main() {
     // opening them asks the board for its networks again.
     await driver.openBar("wifi", { board: CARD, timeoutMs: STEP_MS });
     // Settled, not mid-fade, so the step's screenshot reads.
-    await driver.waitFor(`getComputedStyle(${panel()}).opacity === '1'`, {
+    await driver.waitSettled(panelSelector(), `(els) => getComputedStyle(els[0]).opacity === '1'`, {
       timeoutMs: 10_000,
       what: "the panel to finish fading in",
     }).catch(() => null);

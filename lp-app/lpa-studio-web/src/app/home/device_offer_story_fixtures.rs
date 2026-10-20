@@ -569,8 +569,8 @@ pub(crate) fn StoryBoardCard(
     /// `connection` is Connected.
     #[props(default)]
     panel: Option<lpa_studio_core::UiBoardPanel>,
-    /// The signed-in account's name ("River"): lightplayer.app's row
-    /// names "River's account". `None` is signed out, and the card offers
+    /// The signed-in account as lightplayer.app's row names it
+    /// ("river@example.com"). `None` is signed out, and the card offers
     /// Sign in, as the controller does on a page that reaches
     /// lightplayer.app.
     #[props(default)]
@@ -582,6 +582,14 @@ pub(crate) fn StoryBoardCard(
     /// Bluetooth on or off, as its access file last said.
     #[props(default)]
     remembered_bluetooth: Option<bool>,
+    /// The account's list says the board is online at lightplayer.app,
+    /// with its picture there.
+    #[props(default)]
+    cloud: Option<lpa_studio_core::UiCloudBoard>,
+    /// A board this browser never met, known only by the account's list:
+    /// core publishes `connect-relay` for it and nothing else.
+    #[props(default)]
+    never_met: bool,
     #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
     #[props(default)] armed_preview: Option<OfferPath>,
     #[props(default)] previews: crate::app::board_card::CardPreviews,
@@ -592,7 +600,14 @@ pub(crate) fn StoryBoardCard(
         false => DeviceFace::Wire,
     };
     let unlock = access.as_ref().and_then(|access| access.unlock);
-    let mut tree = card_tree_unlocked(&card, face, unlock, &projects, &examples, update_facts);
+    let mut tree = match never_met {
+        true => {
+            let mut tree = UiOfferTree::new();
+            tree.place_device(card.id, story_board_prefix(card.id));
+            tree
+        }
+        false => card_tree_unlocked(&card, face, unlock, &projects, &examples, update_facts),
+    };
     let prefix = story_board_prefix(card.id);
     let offline_wire =
         face == DeviceFace::Wire && card.status == lpa_studio_core::DeviceStatus::Offline;
@@ -704,6 +719,7 @@ pub(crate) fn StoryBoardCard(
             account: account.as_deref(),
             remembered_network: remembered_network.as_ref(),
             remembered_bluetooth,
+            cloud: cloud.as_ref(),
         },
     });
     // A story that opens a part's details (or whose layout question raises

@@ -90,9 +90,10 @@ pub struct DeviceRosterView {
         std::collections::BTreeMap<lpa_devices::DeviceId, lpc_wire::server::NetworkStatus>,
     /// Each board's Bluetooth switch, as its access file last said.
     pub remembered_bluetooth: std::collections::BTreeMap<lpa_devices::DeviceId, bool>,
-    /// The signed-in account's name ("Yona"): the card's lightplayer.app
-    /// row names "Yona's account". `None` while nobody is signed in.
-    pub account_name: Option<String>,
+    /// The signed-in account as the card's lightplayer.app row names it:
+    /// its email ("hypher@gmail.com", [`crate::account_words`]). `None`
+    /// while nobody is signed in.
+    pub account: Option<String>,
     /// Each board reached on the LAN right now (Wi-Fi M6 P07): the
     /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
     pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
@@ -152,6 +153,15 @@ pub struct DeviceRosterView {
     /// How each board's last activity ended, and when
     /// ([`super::ActivityEnds`]): a bar's Done and Failed.
     pub ends: std::collections::BTreeMap<lpa_devices::DeviceId, super::ActivityEnd>,
+    /// Each board the signed-in account's list says is online at
+    /// lightplayer.app (`ListBoards`), by its roster handle — a board this
+    /// browser knows, or the in-memory entry of one it never met
+    /// (`account_boards_flow.rs`). Absent = not listed, or nobody signed in.
+    pub cloud_boards: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiCloudBoard>,
+    /// The listed boards no link of this tab reaches, whose cards draw
+    /// lightplayer.app's picture: what the web edge asks `BoardPictures`
+    /// for.
+    pub cloud_picture_asks: Vec<super::CloudPictureAsk>,
     /// Every board's card, built in core: new boards first, then the
     /// roster's boards in order. Filled by the controller once the view's
     /// offers are published (a card points only at offered verbs); empty in
@@ -175,7 +185,7 @@ impl Default for DeviceRosterView {
             wifi: std::collections::BTreeMap::new(),
             remembered_networks: std::collections::BTreeMap::new(),
             remembered_bluetooth: std::collections::BTreeMap::new(),
-            account_name: None,
+            account: None,
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
@@ -190,6 +200,8 @@ impl Default for DeviceRosterView {
             link_kinds: std::collections::BTreeMap::new(),
             last_seen: std::collections::BTreeMap::new(),
             ends: std::collections::BTreeMap::new(),
+            cloud_boards: std::collections::BTreeMap::new(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         }
     }
@@ -251,8 +263,11 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
     let mut connected = Vec::new();
     let mut remembered = Vec::new();
     for device in &roster.roster.devices {
+        // A board online at lightplayer.app is online, whatever this tab
+        // reaches.
         if device.status == lpa_devices::device::DeviceStatus::Offline
             && device.held_elsewhere.is_none()
+            && !roster.cloud_boards.contains_key(&device.id)
         {
             remembered.push(RememberedView {
                 id: device.id,
@@ -564,7 +579,7 @@ impl DeviceRoster {
             // controllers.
             remembered_networks: std::collections::BTreeMap::new(),
             remembered_bluetooth: std::collections::BTreeMap::new(),
-            account_name: None,
+            account: None,
             lan_links: self
                 .roster
                 .devices()
@@ -577,6 +592,9 @@ impl DeviceRoster {
             chooser_failure: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
+            // Joined by the controller, which holds the account's list.
+            cloud_boards: std::collections::BTreeMap::new(),
+            cloud_picture_asks: Vec::new(),
             // Joined by the controller, which staged the pushes.
             sending: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
@@ -1108,7 +1126,7 @@ mod tests {
             wifi: Default::default(),
             remembered_networks: Default::default(),
             remembered_bluetooth: Default::default(),
-            account_name: None,
+            account: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
@@ -1146,6 +1164,8 @@ mod tests {
             link_kinds: Default::default(),
             last_seen: Default::default(),
             ends: Default::default(),
+            cloud_boards: Default::default(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };
 
@@ -1184,7 +1204,7 @@ mod tests {
             wifi: Default::default(),
             remembered_networks: Default::default(),
             remembered_bluetooth: Default::default(),
-            account_name: None,
+            account: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
@@ -1208,6 +1228,8 @@ mod tests {
             link_kinds: Default::default(),
             last_seen: Default::default(),
             ends: Default::default(),
+            cloud_boards: Default::default(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };
 

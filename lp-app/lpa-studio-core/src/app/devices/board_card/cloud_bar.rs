@@ -1,7 +1,8 @@
 //! The lightplayer.app row: the board reached through the cloud
 //! (`docs/ux/anatomy/board-card.md`, "lightplayer.app"). Its kind is the
-//! link's name, "lightplayer.app"; its name is the account it belongs to
-//! while lightplayer.app can reach it. It has its own row for privacy —
+//! link's name, "lightplayer.app"; signed in, its name is the account (its
+//! email) and its state says whether lightplayer.app can reach the board,
+//! and why not. It has its own row for privacy —
 //! "lightplayer.app · disabled" is a clean thing to say — and for its
 //! journey: sign in, join Wi‑Fi, reached.
 //!
@@ -10,12 +11,19 @@
 //! | nothing yet (no firmware, not answered, a stand-in, a board with no relay) | "—" | — | Neutral |
 //! | its Cloud relay switch off | "disabled" | — | Neutral |
 //! | signed out | "not connected" | Sign in | Neutral |
-//! | signed in, the board not on Wi‑Fi | "not connected" | — (its fix is the Wi‑Fi row's) | Neutral |
-//! | signed in, the board holds no account key | "not connected" (why in the details) | — | Neutral |
-//! | signed in, joined, lightplayer.app didn't answer | "Yona's account · can't reach" | — | Attention |
-//! | signed in, lightplayer.app refused the board | "Yona's account · can't reach" (why in the details) | — | Attention |
-//! | the board dialling | "Yona's account · connecting" | — | Neutral |
-//! | reachable | "Yona's account", and "connected" when this tab's link is the relay | — | Neutral |
+//! | signed in, the board not on Wi‑Fi (nothing saved, nothing joined, or its Wi‑Fi off) | "river@example.com · no Wi‑Fi" (which, in the details) | — (its fix is the Wi‑Fi row's) | Neutral |
+//! | signed in, the board holds no account key | "river@example.com · not added" (why in the details) | — | Neutral |
+//! | signed in, joined, lightplayer.app didn't answer | "river@example.com · can't reach" | — | Attention |
+//! | signed in, lightplayer.app refused the board | "river@example.com · can't reach" (why in the details) | — | Attention |
+//! | the board dialling | "river@example.com · connecting" | — | Neutral |
+//! | reachable | "river@example.com · online", and "connected" when this tab's link is the relay | — | Neutral |
+//! | no link here, and the account's list says it is online (`ListBoards`) | "river@example.com · online" | — (Connect through lightplayer.app is the card's primary) | Neutral |
+//!
+//! An offline card keeps what the board last said about its Wi‑Fi and its
+//! key, dimmed, but never "connecting" or "can't reach": this tab can't
+//! know how the board stands with lightplayer.app now. It says "online"
+//! only when the signed-in account's list says so, and then nothing is
+//! dimmed: the list is current.
 //!
 //! Signed out is a new board's to-do: the row is lit, with Sign in. Hushing
 //! it is turning Cloud relay off with the switch at the top of its details
@@ -24,8 +32,9 @@
 //!
 //! The struck cloud mark the old Link row carried is gone: this row says
 //! it.
-//! The account is the signed-in one, named as its key is on every board
-//! ("Yona's account", [`super::board_links::account_words`]).
+//! The account is the signed-in one, named by its email
+//! ([`super::board_links::account_words`]): Yona's phone, 10-19, read
+//! "Yona's account" on a board with no Wi‑Fi as "this will work".
 
 use lpc_wire::server::{NetworkStatus, RelayRefusal, RelayState, StationState};
 
@@ -53,7 +62,8 @@ pub const NOTHING_GOES_SENTENCE: &str = "Nothing goes to lightplayer.app until y
 pub(crate) fn cloud_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let status = input.network_status().filter(|_| !input.stand_in());
     let mut facts = relay_facts(input, status);
-    facts.stale = input.offline() && status.is_some() && facts.action.is_none();
+    facts.stale =
+        input.offline() && !input.online_at_cloud() && status.is_some() && facts.action.is_none();
     facts.details = details(input, status);
     facts.verbs = connect_verb(
         input,
@@ -78,6 +88,14 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
             ..row(account.as_deref().unwrap_or(UiLinkKind::Relay.label())).named()
         };
     }
+    // No link here, and the account's list says lightplayer.app reaches it
+    // now: that is current, whatever the board last said here.
+    if let Some(account) = account.as_deref().filter(|_| input.online_at_cloud()) {
+        return LinkFacts {
+            aside: Some(card::ONLINE.to_string()),
+            ..row(account).named()
+        };
+    }
     let Some(status) = status else {
         return row(NOT_KNOWN);
     };
@@ -97,25 +115,46 @@ fn relay_facts(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> Li
             ..row(NOT_CONNECTED)
         };
     };
-    let joined = matches!(status.station, StationState::Connected { .. });
-    let named = |aside: Option<&str>, tone| LinkFacts {
-        aside: aside.map(str::to_string),
+    let named = |aside: &str, tone| LinkFacts {
+        aside: Some(aside.to_string()),
         tone,
         ..row(&account).named()
     };
+    if no_wifi(status).is_some() {
+        return named(card::NO_WIFI, UiStatusKind::Neutral);
+    }
+    if status.relay == RelayState::NoAccount {
+        return named(card::NOT_ADDED, UiStatusKind::Neutral);
+    }
+    // How it stands with lightplayer.app now, which only a board that
+    // answers can say.
+    if input.offline() {
+        return row(&account).named();
+    }
     match status.relay {
-        _ if !joined => row(NOT_CONNECTED),
-        RelayState::NoAccount => row(NOT_CONNECTED),
         RelayState::WaitingForInternet
         | RelayState::Refused {
             reason: RelayRefusal::UnknownAccount | RelayRefusal::UpdateFirmware,
-        } => named(Some(card::CANT_REACH), UiStatusKind::Attention),
-        RelayState::Connecting => named(Some(card::CONNECTING), UiStatusKind::Neutral),
+        } => named(card::CANT_REACH, UiStatusKind::Attention),
+        RelayState::Connecting => named(card::CONNECTING, UiStatusKind::Neutral),
         RelayState::Connected
         | RelayState::Off
+        | RelayState::NoAccount
         | RelayState::Refused {
             reason: RelayRefusal::Busy,
-        } => named(None, UiStatusKind::Neutral),
+        } => named(card::ONLINE, UiStatusKind::Neutral),
+    }
+}
+
+/// Why lightplayer.app can't reach the board because of its Wi‑Fi, as
+/// the details say it: its Wi‑Fi off, nothing saved, or nothing joined.
+/// `None` once it is joined. The row says "no Wi‑Fi" for each.
+fn no_wifi(status: &NetworkStatus) -> Option<&'static str> {
+    match () {
+        _ if matches!(status.station, StationState::Connected { .. }) => None,
+        _ if !status.wifi => Some(relay::WIFI_OFF),
+        _ if status.networks.is_empty() => Some(relay::NO_WIFI),
+        _ => Some(relay::WIFI_DOWN),
     }
 }
 
@@ -180,7 +219,8 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
     // is for — or, when the board can't use it, why.
     let mut reach = facts("", lines);
     reach.sentence = Some(
-        relay::note(status.relay)
+        no_wifi(status)
+            .or_else(|| relay::note(status.relay))
             .unwrap_or(CLOUD_RELAY_HELP)
             .to_string(),
     );
@@ -215,96 +255,233 @@ mod tests {
             rssi: -50,
             host: "lp-b48c.local".to_string(),
         };
-        let table: Vec<(
-            Option<(bool, StationState, RelayState)>,
-            bool,
-            &str,
-            Option<&str>,
-        )> = vec![
-            (None, true, "\u{2014}", None),
+        let off = StationState::NotConnected;
+        let busy = RelayState::Refused {
+            reason: RelayRefusal::Busy,
+        };
+        let refused = RelayState::Refused {
+            reason: RelayRefusal::UnknownAccount,
+        };
+        // (status: (cloud relay on, Wi‑Fi on, networks saved, station,
+        // relay), signed in, summary, aside, tone)
+        type Status = (bool, bool, bool, StationState, RelayState);
+        let table: Vec<(Option<Status>, bool, &str, Option<&str>, UiStatusKind)> = vec![
+            (None, true, "\u{2014}", None, UiStatusKind::Neutral),
             (
-                Some((false, joined.clone(), RelayState::Off)),
+                Some((false, true, true, joined.clone(), RelayState::Off)),
                 true,
                 "disabled",
                 None,
+                UiStatusKind::Neutral,
             ),
             (
-                Some((true, joined.clone(), RelayState::Off)),
+                Some((true, true, true, joined.clone(), RelayState::Off)),
                 true,
                 "\u{2014}",
                 None,
+                UiStatusKind::Neutral,
             ),
             (
                 Some((
                     true,
-                    StationState::NotConnected,
+                    true,
+                    false,
+                    off.clone(),
                     RelayState::WaitingForInternet,
                 )),
                 false,
                 "not connected",
                 None,
+                UiStatusKind::Neutral,
             ),
             (
                 Some((
                     true,
-                    StationState::NotConnected,
+                    true,
+                    false,
+                    off.clone(),
                     RelayState::WaitingForInternet,
                 )),
                 true,
-                "not connected",
-                None,
+                EMAIL,
+                Some("no Wi\u{2011}Fi"),
+                UiStatusKind::Neutral,
             ),
             (
-                Some((true, joined.clone(), RelayState::NoAccount)),
+                Some((true, true, false, off.clone(), RelayState::NoAccount)),
                 true,
-                "not connected",
-                None,
-            ),
-            (
-                Some((true, joined.clone(), RelayState::WaitingForInternet)),
-                true,
-                "Yona's account",
-                Some("can't reach"),
+                EMAIL,
+                Some("no Wi\u{2011}Fi"),
+                UiStatusKind::Neutral,
             ),
             (
                 Some((
                     true,
-                    joined.clone(),
-                    RelayState::Refused {
-                        reason: RelayRefusal::UnknownAccount,
-                    },
+                    true,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
                 )),
                 true,
-                "Yona's account",
+                EMAIL,
+                Some("no Wi\u{2011}Fi"),
+                UiStatusKind::Neutral,
+            ),
+            (
+                Some((
+                    true,
+                    false,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
+                true,
+                EMAIL,
+                Some("no Wi\u{2011}Fi"),
+                UiStatusKind::Neutral,
+            ),
+            (
+                Some((true, true, true, joined.clone(), RelayState::NoAccount)),
+                true,
+                EMAIL,
+                Some("not added"),
+                UiStatusKind::Neutral,
+            ),
+            (
+                Some((
+                    true,
+                    true,
+                    true,
+                    joined.clone(),
+                    RelayState::WaitingForInternet,
+                )),
+                true,
+                EMAIL,
                 Some("can't reach"),
+                UiStatusKind::Attention,
             ),
             (
-                Some((true, joined.clone(), RelayState::Connecting)),
+                Some((true, true, true, joined.clone(), refused)),
                 true,
-                "Yona's account",
+                EMAIL,
+                Some("can't reach"),
+                UiStatusKind::Attention,
+            ),
+            (
+                Some((true, true, true, joined.clone(), RelayState::Connecting)),
+                true,
+                EMAIL,
                 Some("connecting"),
+                UiStatusKind::Neutral,
             ),
             (
-                Some((true, joined.clone(), RelayState::Connected)),
+                Some((true, true, true, joined.clone(), RelayState::Connected)),
                 true,
-                "Yona's account",
-                None,
+                EMAIL,
+                Some("online"),
+                UiStatusKind::Neutral,
+            ),
+            (
+                Some((true, true, true, joined.clone(), busy)),
+                true,
+                EMAIL,
+                Some("online"),
+                UiStatusKind::Neutral,
             ),
         ];
-        for (status, signed_in, summary, aside) in table {
+        for (status, signed_in, summary, aside, tone) in table {
             let mut fixture = CardFixture::ready();
-            fixture.account = signed_in.then(|| "Yona".to_string());
-            fixture.wifi = status
-                .clone()
-                .map(|(on, station, relay)| wifi(on, station, relay));
+            fixture.account = signed_in.then(|| EMAIL.to_string());
+            fixture.wifi = status.clone().map(|(on, wifi_on, saved, station, relay)| {
+                let mut wifi = wifi(on, station, relay);
+                let status = wifi.status.as_mut().unwrap();
+                status.wifi = wifi_on;
+                if !saved {
+                    status.networks.clear();
+                }
+                wifi
+            });
             let bar = cloud_bar(&fixture.input());
             assert_eq!(bar.kind, Some("lightplayer.app"));
             assert_eq!(
-                (bar.summary.as_str(), bar.aside.as_deref()),
-                (summary, aside),
+                (bar.summary.as_str(), bar.aside.as_deref(), bar.tone),
+                (summary, aside, tone),
                 "{status:?} signed in: {signed_in}"
             );
         }
+    }
+
+    /// Yona's phone, 10-19: signed in, no Wi‑Fi set up. The row says the
+    /// account and why lightplayer.app can't reach the board, and its
+    /// details say what to do about it.
+    #[test]
+    fn signed_in_with_no_wifi_says_it_cant_be_reached() {
+        let mut fixture = CardFixture::ready();
+        fixture.account = Some(EMAIL.to_string());
+        let mut board = wifi(
+            true,
+            StationState::NotConnected,
+            RelayState::WaitingForInternet,
+        );
+        board.status.as_mut().unwrap().networks.clear();
+        fixture.wifi = Some(board);
+        let bar = cloud_bar(&fixture.input());
+        assert_eq!(
+            (bar.summary.as_str(), bar.aside.as_deref()),
+            (EMAIL, Some("no Wi\u{2011}Fi"))
+        );
+        assert!(!bar.todo, "its fix is the Wi\u{2011}Fi row's");
+        assert_eq!(line(&bar, "Account").as_deref(), Some(EMAIL));
+        let sentences: Vec<&str> = bar
+            .details
+            .sections
+            .iter()
+            .filter_map(|section| section.sentence.as_deref())
+            .collect();
+        assert_eq!(sentences, [relay::NO_WIFI]);
+    }
+
+    /// No link here, and the account's list says the board is online at
+    /// lightplayer.app: the row says so, not dimmed — for a board this
+    /// browser never met too, which has no status of its own to read.
+    #[test]
+    fn the_accounts_list_says_an_offline_card_is_online() {
+        let mut fixture = CardFixture::online_at_cloud();
+        let bar = cloud_bar(&fixture.input());
+        assert_eq!(
+            (bar.summary.as_str(), bar.aside.as_deref()),
+            ("river@example.com", Some(card::ONLINE))
+        );
+        assert!(!bar.stale);
+        fixture.view.remembered_firmware = None;
+        fixture.remembered_network = None;
+        let never_met = cloud_bar(&fixture.input());
+        assert_eq!(never_met.aside.as_deref(), Some(card::ONLINE));
+    }
+
+    /// Offline, the card keeps the board's last Wi‑Fi facts but never
+    /// claims it is online at lightplayer.app on its own say.
+    #[test]
+    fn an_offline_card_never_says_online() {
+        let mut fixture = CardFixture::offline();
+        fixture.account = Some(EMAIL.to_string());
+        fixture.remembered_network = Some(
+            wifi(
+                true,
+                StationState::Connected {
+                    ssid: "home".to_string(),
+                    ip: "10.0.0.5".to_string(),
+                    rssi: -50,
+                    host: "lp-b48c.local".to_string(),
+                },
+                RelayState::Connected,
+            )
+            .status
+            .unwrap(),
+        );
+        let bar = cloud_bar(&fixture.input());
+        assert_eq!((bar.summary.as_str(), bar.aside.as_deref()), (EMAIL, None));
+        assert!(bar.stale);
     }
 
     /// Signed out, the row says the fact and its button the fix; the
@@ -377,7 +554,7 @@ mod tests {
     #[test]
     fn cant_reach_is_orange() {
         let mut fixture = CardFixture::ready();
-        fixture.account = Some("Yona".to_string());
+        fixture.account = Some(EMAIL.to_string());
         fixture.wifi = Some(wifi(
             true,
             StationState::Connected {
@@ -390,7 +567,7 @@ mod tests {
         ));
         let bar = cloud_bar(&fixture.input());
         assert_eq!(bar.tone, UiStatusKind::Attention);
-        assert_eq!(line(&bar, "Account").as_deref(), Some("Yona's account"));
+        assert_eq!(line(&bar, "Account").as_deref(), Some(EMAIL));
         assert_eq!(line(&bar, "Now").as_deref(), Some(relay::NO_INTERNET));
     }
 
@@ -399,18 +576,20 @@ mod tests {
     fn a_relay_board_is_the_cloud_rows_and_never_says_bluetooth_or_usb() {
         let mut fixture = CardFixture::ready().over(UiLinkKind::Relay);
         fixture.lan = crate::lan_link_for_endpoint("relay:a0f26287b48c");
-        fixture.account = Some("Yona".to_string());
+        fixture.account = Some(EMAIL.to_string());
         let card = super::super::board_card_builder::board_card(&fixture.input());
         let bar = card.bar(BarLayer::Cloud);
         assert_eq!(
             (bar.summary.as_str(), bar.aside.as_deref()),
-            ("Yona's account", Some("connected"))
+            (EMAIL, Some("connected"))
         );
         assert_eq!(bar.icon, "cloud");
         assert_eq!(card.bar(BarLayer::Usb).summary, "not connected");
         let words = format!("{bar:?}");
         assert!(!words.contains("Bluetooth"), "{words}");
     }
+
+    const EMAIL: &str = "river@example.com";
 
     fn wifi(cloud_relay: bool, station: StationState, relay: RelayState) -> UiDeviceWifi {
         UiDeviceWifi {

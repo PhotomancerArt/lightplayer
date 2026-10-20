@@ -104,7 +104,12 @@ async function main() {
   const door = TAB ? null : await startDoor({
     root: ROOT,
     id: "walk-drop",
-    boards: [`${BOARD}={fw}`],
+    // `pace=realtime`: Studio is a wall-clock peer (the page reads through the
+    // Mac serial model, 255 B per 16 ms). An unpaced `emu serve` board skips
+    // idle time at `wfi`, so its emulated SEND_ROOM_WAIT / stall_after budgets
+    // run out before the page drains a frame and it drops the next one (defect
+    // 2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board).
+    boards: [`${BOARD}={fw},pace=realtime`],
     stateDir: path.join(out, "state"),
     consoleDir: path.join(out, "console"),
     logFile: path.join(out, "serve.log"),
@@ -161,8 +166,9 @@ async function main() {
         what: "the Reconnecting strip",
       });
       // Settled, not mid-fade: the curtain has faded all the way in.
-      await driver.waitFor(
-        `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+      await driver.waitSettled(
+        '[data-reconnecting="true"]',
+        `(els) => getComputedStyle(els[0]).opacity === '1'`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
       );
       const now = await driver.evaluate(ROUTE);
@@ -178,9 +184,10 @@ async function main() {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the strip to go (the board back)",
       });
-      await driver.waitFor(
-        `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+      await driver.waitSettled(
+        "[data-reconnecting]",
+        `(els) => els.every((c) => getComputedStyle(c).visibility === 'hidden')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out", allowNone: true },
       );
       const now = await driver.evaluate(ROUTE);
       if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);

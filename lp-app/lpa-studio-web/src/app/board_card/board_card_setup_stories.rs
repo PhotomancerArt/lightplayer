@@ -10,9 +10,14 @@
 //! core decides.
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::devices::cloud_board_picture::{
+    CloudBoardPicture, cloud_picture_preview,
+};
+use lpa_studio_core::app::devices::ui_cloud_board::ONLINE_AT_LIGHTPLAYER_APP;
 use lpa_studio_core::{
     BarLayer, BoardPlays, DeviceId, DeviceLoadedProject, DeviceView, NetworkStatus,
-    SavedNetworkInfo, StationState, UiDeviceWifi, UiLinkKind, UiRuntimeBand, lan_link_for_endpoint,
+    SavedNetworkInfo, StationState, UiCloudBoard, UiDeviceWifi, UiLinkKind, UiRuntimeBand,
+    lan_link_for_endpoint,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_wire::RelayState;
@@ -29,7 +34,7 @@ use crate::app::home::device_offer_story_fixtures::{STORY_BOARD_NOW, StoryBoardC
 // --- A new board's first minutes --------------------------------------------
 
 #[story(
-    description = "A new board's setup is its card (AC4, AC6): the rows with something left to do are LIT — the whole row on a lighter flat ground, its icon, kind and name at full strength, its button on the same ground with no fill of its own; no gradient, no dot. INSTALLED, SIGNED OUT: Project none · Add, Wi‑Fi not connected · Set up, lightplayer.app not connected · Sign in are lit; Bluetooth says the name a phone sees (LP-0b0c), Access edit · USB, Firmware its version, Hardware the model; the primary is Add a project (\"This board has no project yet. Add a project to play on it.\"). INSTALLED, SIGNED IN: lightplayer.app is not lit — its fix is the Wi‑Fi row's. A BLANK CHIP: only Firmware none · Install is lit, and Install firmware is the primary; the radio rows say — until there is firmware to ask. SET UP: nothing is lit, every row says what it reaches. OFFLINE: every row keeps its last value, dimmed; Bluetooth says on, not a name — the name follows what the board runs, and offline that is not known. EMULATED: the USB row says what it is, the radio rows —."
+    description = "A new board's setup is its card (AC4, AC6): the rows with something left to do are LIT — the whole row on a lighter flat ground, its icon, kind and name at full strength, its button on the same ground with no fill of its own; no gradient, no dot. INSTALLED, SIGNED OUT: Project none · Add, Wi‑Fi not connected · Set up, lightplayer.app not connected · Sign in are lit; Bluetooth says the name a phone sees (LP-0b0c), Access edit · USB, Firmware its version, Hardware the model; the primary is Add a project (\"This board has no project yet. Add a project to play on it.\"). INSTALLED, SIGNED IN: lightplayer.app says the account and why it can't reach the board, river@example.com · no Wi‑Fi, not lit — its fix is the Wi‑Fi row's (Yona's phone, 10-19: \"River's account\" there read as \"this will work\"). SET UP, SIGNED IN: lightplayer.app river@example.com · online. A BLANK CHIP: only Firmware none · Install is lit, and Install firmware is the primary; the radio rows say — until there is firmware to ask. SET UP: nothing is lit, every row says what it reaches. OFFLINE: every row keeps its last value, dimmed; Bluetooth says on, not a name — the name follows what the board runs, and offline that is not known. EMULATED: the USB row says what it is, the radio rows —."
 )]
 fn board_card_setup_rows() -> Element {
     rsx! {
@@ -98,7 +103,56 @@ fn board_card_setup_rows() -> Element {
 // --- Every state of the link rows --------------------------------------------
 
 #[story(
-    description = "The four link rows in their states (AC2): each row's kind is the link's own name, and the row says what that link reaches or how it stands — the fact; the button is the fix. WRONG PASSWORD: Wi‑Fi Cedar Lane · wrong password · Change, orange. JOINING: the spinner in the icon's place, Cedar Lane · joining. SAVED, NOT IN RANGE: Cedar Lane · not connected, quiet. ON WI‑FI: this tab's link is the LAN, so Wi‑Fi says Cedar Lane · connected and USB not connected. OVER BLUETOOTH: Bluetooth LP-aurora-drift · connected. CAN'T REACH: joined, and lightplayer.app didn't answer: River's account · can't reach, orange. ALL DISABLED: Wi‑Fi, Bluetooth and lightplayer.app hushed from their details say disabled, plain, with no button. THROUGH LIGHTPLAYER.APP: lightplayer.app River's account · connected, the cloud icon."
+    description = "A board online through lightplayer.app (your boards on every computer, M1): the signed-in account's list (ListBoards) says it is online, and no link of this tab reaches it. NEVER MET HERE: set up on a phone (Yona's \"Fabric Test\", 10-19), it is in Online boards all the same — its surface is its picture from lightplayer.app, one row of lamps per output, not dimmed and with no words; Connect, the cloud icon, is the primary; lightplayer.app says river@example.com · online; Project says what it told lightplayer.app it plays, Firmware its version; the radio rows say — (nothing here has heard it); Connect is its only verb (no rename: nothing here can reach it yet). MET HERE: a board this browser remembers, unplugged, moves to Online boards the same way: lightplayer.app's picture over its saved one, its rows its last facts dimmed, lightplayer.app online and not dimmed. NO PICTURE (relay protocol 1, or none yet): the dark, no words, Connect — nothing is said about the missing picture."
+)]
+fn board_card_online_through_lightplayer_app() -> Element {
+    rsx! {
+        section { class: GRID_CLASS,
+            Cell { caption: "never met here",
+                StoryBoardCard {
+                    card: never_met(),
+                    never_met: true,
+                    link: Some(UiLinkKind::Relay),
+                    relay: true,
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(cloud_board(true)),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "met here · unplugged",
+                StoryBoardCard {
+                    card: DeviceView {
+                        state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
+                        ..offline()
+                    },
+                    feed: last_picture(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    relay: true,
+                    remembered_network: joined(RelayState::Connected).status,
+                    remembered_bluetooth: Some(true),
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(cloud_board(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * DAY),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "no picture",
+                StoryBoardCard {
+                    card: never_met(),
+                    never_met: true,
+                    link: Some(UiLinkKind::Relay),
+                    relay: true,
+                    account: Some(ACCOUNT.to_string()),
+                    cloud: Some(cloud_board(false)),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The four link rows in their states (AC2): each row's kind is the link's own name, and the row says what that link reaches or how it stands — the fact; the button is the fix. WRONG PASSWORD: Wi‑Fi Cedar Lane · wrong password · Change, orange. JOINING: the spinner in the icon's place, Cedar Lane · joining. SAVED, NOT IN RANGE: Cedar Lane · not connected, quiet. ON WI‑FI: this tab's link is the LAN, so Wi‑Fi says Cedar Lane · connected and USB not connected. OVER BLUETOOTH: Bluetooth LP-aurora-drift · connected. CAN'T REACH: joined, and lightplayer.app didn't answer: river@example.com · can't reach, orange. ALL DISABLED: Wi‑Fi, Bluetooth and lightplayer.app hushed from their details say disabled, plain, with no button. THROUGH LIGHTPLAYER.APP: lightplayer.app river@example.com · connected, the cloud icon."
 )]
 fn board_card_link_row_states() -> Element {
     rsx! {
@@ -385,8 +439,62 @@ fn board_card_rename_in_place() -> Element {
 
 // --- Fixtures --------------------------------------------------------------------
 
-/// The made-up account: "River's account" on lightplayer.app's row.
-const ACCOUNT: &str = "River";
+/// A board this browser never met, as core's roster holds it from the
+/// account's list: offline here, named by the row, its firmware and
+/// project as it told lightplayer.app.
+fn never_met() -> DeviceView {
+    DeviceView {
+        id: DeviceId(11),
+        title: "Fabric Test".to_string(),
+        state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
+        board_id: None,
+        detected_chip: None,
+        identity_label: None,
+        remembered_firmware: Some("2026.10.19-1".to_string()),
+        loaded_project: DeviceLoadedProject::Running {
+            label: "rainbow".to_string(),
+        },
+        escapes: Vec::new(),
+        ..offline()
+    }
+}
+
+/// The account's row for "Fabric Test", with its picture from
+/// lightplayer.app (two outputs, a rainbow across them) or without one.
+fn cloud_board(picture: bool) -> UiCloudBoard {
+    let samples = 48usize;
+    let colors: Vec<u8> = (0..samples)
+        .flat_map(|sample| rainbow(sample as f32 / samples as f32))
+        .collect();
+    let shown = CloudBoardPicture {
+        seq: 7,
+        at: STORY_BOARD_NOW - 0.4,
+        outputs: vec![30, 18],
+        colors,
+    };
+    UiCloudBoard {
+        key: lpa_studio_core::BoardKey::parse("10bda3b08e30").expect("a MAC"),
+        label: "Fabric Test".to_string(),
+        firmware: Some("2026.10.19-1".to_string()),
+        project: Some("rainbow".to_string()),
+        relay_proto: if picture { 2 } else { 1 },
+        picture: picture.then(|| cloud_picture_preview(&shown)).flatten(),
+        picture_at: picture.then_some(shown.at),
+    }
+}
+
+/// A hue around the wheel, as sRGB codes.
+fn rainbow(hue: f32) -> [u8; 3] {
+    let channel = |offset: f32| {
+        let x = ((hue + offset) * 6.0).rem_euclid(6.0);
+        let level = (x - 3.0).abs() - 1.0;
+        (level.clamp(0.0, 1.0) * 255.0) as u8
+    };
+    [channel(0.0), channel(2.0 / 3.0), channel(1.0 / 3.0)]
+}
+
+/// The made-up account, as lightplayer.app's row names it: its email.
+const ACCOUNT: &str = "river@example.com";
 
 /// The made-up home network.
 const HOME: &str = "Cedar Lane";
