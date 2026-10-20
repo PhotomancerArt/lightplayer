@@ -340,6 +340,14 @@ impl<'r> TickContext<'r> {
         self.resolver.structure_epoch()
     }
 
+    /// Which panel write supplies this node's consumed `slot`, when an
+    /// engaged panel writer wins it: unique per write, so a fresh write of
+    /// the value already held is still told apart. `None` for any other
+    /// source.
+    pub fn consumed_slot_panel_write(&self, slot: &SlotPath) -> Option<u64> {
+        self.resolver.consumed_slot_panel_write(self.node_id, slot)
+    }
+
     /// Publish one of this node's runtime state slots for the current frame.
     ///
     /// `slot` is borrowed: a node publishes the same path every frame, so
