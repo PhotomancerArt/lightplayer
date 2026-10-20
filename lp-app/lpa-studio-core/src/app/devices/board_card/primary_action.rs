@@ -20,6 +20,7 @@
 //! | The last Connect failed | Retry | `connect` | retry |
 //! | Not answering (a board that said hello went quiet) | Retry | `retry` | retry |
 //! | A stand-in, off | Power on | `reconnect` | play |
+//! | Online at lightplayer.app, no link here | Connect | `connect`, else the road's own offer (`connect-relay` for a board never met here) | cloud (or Wi‑Fi's, when that road comes first) |
 //! | Offline: Wi‑Fi first, then lightplayer.app, then its cable | Connect | `connect`, else the road's own offer | wifi / cloud / the link's |
 //! | Offline, nothing reaches it | nothing | — | — |
 //! | A send, an update, an install, an erase or a removal failed, while its verb is offered again | Retry (the row's) | `push` / `update-firmware` / `flash` / `erase` / `remove-project` | retry |
@@ -148,7 +149,7 @@ pub(crate) fn state_action(
         ConnectFailed => press("connect", "Retry", "retry"),
         NotAnswering => press("retry", "Retry", "retry"),
         PoweredOff => press("reconnect", "Power on", "play"),
-        Offline | OfflineReachable => offline_road(input).map(|(road, offer)| {
+        Offline | OfflineReachable | OnlineAtCloud => offline_road(input).map(|(road, offer)| {
             UiCardAction::press(offer, "Connect").with_icon(link_icon(road_link(input, road)))
         }),
         Disconnected => press("connect", "Connect", icon),

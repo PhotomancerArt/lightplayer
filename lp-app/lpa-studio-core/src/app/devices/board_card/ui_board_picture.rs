@@ -22,7 +22,7 @@ pub struct UiBoardPicture {
     pub light: Option<UpdateLight>,
 }
 
-/// Where the picture comes from. Later, the cloud is one more case.
+/// Where the picture comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PictureSource {
     /// The board's link, live or waiting for its first frame.
@@ -31,6 +31,10 @@ pub enum PictureSource {
     Lens,
     /// The last picture saved before the board went away.
     Saved,
+    /// lightplayer.app's last picture of a board of the account that no
+    /// link here reaches (`BoardPictures`): current, drawn one row of lamps
+    /// per output.
+    Cloud,
     /// No picture.
     None,
 }

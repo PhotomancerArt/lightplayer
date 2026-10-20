@@ -105,6 +105,11 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+/// The account's boards online at lightplayer.app, and their pictures.
+pub use app::devices::{
+    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, CloudPictureAsk,
+    UiCloudBoard, account_board_device,
+};
 pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{

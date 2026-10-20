@@ -144,6 +144,8 @@ connect failed              Studio couldn't connect to this board over USB.
 not answering (it said      This board stopped responding over USB.
   hello, now says nothing)  Retry to reconnect.                                            ↻ Retry
 sim off                     This simulated board is off.                                   ▶ Power on
+online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect
+  (no link here)            (no picture yet, or relay protocol 1: the dark, no words)
 offline, another way        This board isn't plugged in.
   reaches it                Connect over Wi‑Fi to use it.                                  ↔ Connect
 offline                     This board is offline.  It was last seen 2 hours ago.          (none; ↔ Connect by its cable when it can)
@@ -189,6 +191,40 @@ in the editor               This board is open in the editor.                   
 connected                   the live picture, no words (the rows become the panel)          ✓ Done
 picture too large           This board's picture is too large to show over Bluetooth.      ↔ Connect
 all well                    the live picture, no words                                     ↔ Connect
+```
+
+**Online at lightplayer.app** is a board of the signed-in account that the
+account's list (`ListBoards`) says is online, and that no link of this tab
+reaches: one this browser knows, or one it never met (set up on a phone,
+say). It is well, so the surface is its picture and no words, the picture
+lightplayer.app last had (`BoardPictures`), drawn one row of lamps per
+output and not dimmed: it is current. Its card stands in Online boards; its
+lightplayer.app row says `river@example.com · online`; Connect goes through
+lightplayer.app. A board with a USB, Bluetooth or LAN link here keeps that
+link and its own surface: the list only lets its lightplayer.app row say
+online.
+
+```text
+┌──────────────────────────────────────────┐
+│     ● ● ● ● ● ● ● ● ● ● ● ● ● ●     ╭────┤
+│     ● ● ● ● ● ● ● ●                 │ ⋯  │   its picture, from lightplayer.app
+├────────────────────────────┬─────────┴────┤
+│ Fabric Test ✎              │ ☁ Connect    │
+├────────────────────────────┴──────────────┤
+│ ◆ Project          rainbow              › │   what it told lightplayer.app
+│ ⏚ USB              —                    › │
+│ ≋ Wi‑Fi            —                    › │
+│ ᛒ Bluetooth        —                    › │
+│ ☁ lightplayer.app  river@example.com  online │
+│ ○ Access           —                    › │
+│ ▲ Firmware         2026.10.19-1         › │
+│ ■ Hardware         —                    › │
+└──────────────────────────────────────────┘
+```
+
+```text
+bad:  the board set up on a phone shows nowhere on the computer   # Yona, 10-19 ("Fabric Test"): Studio only
+                                                                  #   offered the relay to boards it had met
 ```
 
 One update over USB first (a pre-update board) is no notice: the board
@@ -388,7 +424,8 @@ connect by it."
 ☁ lightplayer.app  river@example.com   no Wi‑Fi      # signed in, the board not on Wi‑Fi (nothing saved, none joined, or off;
                                                      #   the details say which): its fix is Wi‑Fi's. not lit
 ☁ lightplayer.app  river@example.com   not added     # the board doesn't hold the account's key
-☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it
+☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it; with no
+                                                    #   link here, the account's list says it (ListBoards)
 ☁ lightplayer.app  river@example.com   connected     # this tab's link
 ☁ lightplayer.app  river@example.com   connecting
 ☁ lightplayer.app  river@example.com   can't reach   # joined, and it didn't answer (or refused it). orange
@@ -520,6 +557,7 @@ bad:  This board stopped responding over USB.  │ Retry │ # Yona's C6 10-19, 
 
 ```text
 │ Porch lamp            │ ↔ Connect           │
+│ Fabric Test           │ ☁ Connect           │   online at lightplayer.app, no link here
 │ Porch lamp            │ ✓ Done              │   connected, reconnecting, in the editor
 │ Porch lamp            │ ◌                   │   connecting, moving here from another tab
 │ Porch lamp            │ ▲ Update firmware   │   old firmware; files that need newer firmware   # was: no button (the desk C6)

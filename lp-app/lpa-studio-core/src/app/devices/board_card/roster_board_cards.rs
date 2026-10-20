@@ -133,6 +133,7 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
             account: roster.account.as_deref(),
             remembered_network: roster.remembered_networks.get(&view.id),
             remembered_bluetooth: roster.remembered_bluetooth.get(&view.id).copied(),
+            cloud: roster.cloud_boards.get(&view.id),
         },
         now,
     }))

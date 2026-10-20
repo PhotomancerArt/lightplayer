@@ -153,6 +153,15 @@ pub struct DeviceRosterView {
     /// How each board's last activity ended, and when
     /// ([`super::ActivityEnds`]): a bar's Done and Failed.
     pub ends: std::collections::BTreeMap<lpa_devices::DeviceId, super::ActivityEnd>,
+    /// Each board the signed-in account's list says is online at
+    /// lightplayer.app (`ListBoards`), by its roster handle — a board this
+    /// browser knows, or the in-memory entry of one it never met
+    /// (`account_boards_flow.rs`). Absent = not listed, or nobody signed in.
+    pub cloud_boards: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiCloudBoard>,
+    /// The listed boards no link of this tab reaches, whose cards draw
+    /// lightplayer.app's picture: what the web edge asks `BoardPictures`
+    /// for.
+    pub cloud_picture_asks: Vec<super::CloudPictureAsk>,
     /// Every board's card, built in core: new boards first, then the
     /// roster's boards in order. Filled by the controller once the view's
     /// offers are published (a card points only at offered verbs); empty in
@@ -191,6 +200,8 @@ impl Default for DeviceRosterView {
             link_kinds: std::collections::BTreeMap::new(),
             last_seen: std::collections::BTreeMap::new(),
             ends: std::collections::BTreeMap::new(),
+            cloud_boards: std::collections::BTreeMap::new(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         }
     }
@@ -252,8 +263,11 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
     let mut connected = Vec::new();
     let mut remembered = Vec::new();
     for device in &roster.roster.devices {
+        // A board online at lightplayer.app is online, whatever this tab
+        // reaches.
         if device.status == lpa_devices::device::DeviceStatus::Offline
             && device.held_elsewhere.is_none()
+            && !roster.cloud_boards.contains_key(&device.id)
         {
             remembered.push(RememberedView {
                 id: device.id,
@@ -578,6 +592,9 @@ impl DeviceRoster {
             chooser_failure: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
+            // Joined by the controller, which holds the account's list.
+            cloud_boards: std::collections::BTreeMap::new(),
+            cloud_picture_asks: Vec::new(),
             // Joined by the controller, which staged the pushes.
             sending: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
@@ -1147,6 +1164,8 @@ mod tests {
             link_kinds: Default::default(),
             last_seen: Default::default(),
             ends: Default::default(),
+            cloud_boards: Default::default(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };
 
@@ -1209,6 +1228,8 @@ mod tests {
             link_kinds: Default::default(),
             last_seen: Default::default(),
             ends: Default::default(),
+            cloud_boards: Default::default(),
+            cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };
 

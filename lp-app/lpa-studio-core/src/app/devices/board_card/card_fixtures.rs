@@ -89,6 +89,8 @@ pub(crate) struct CardFixture {
     pub remembered_network: Option<lpc_wire::server::NetworkStatus>,
     /// Bluetooth on or off, as its access file last said.
     pub remembered_bluetooth: Option<bool>,
+    /// The account's list says the board is online at lightplayer.app.
+    pub cloud: Option<crate::UiCloudBoard>,
     /// More verbs the controller publishes beside the device's own (the
     /// layout verbs).
     pub extra_offers: Vec<UiOffer>,
@@ -137,6 +139,7 @@ impl CardFixture {
             account: None,
             remembered_network: None,
             remembered_bluetooth: None,
+            cloud: None,
             extra_offers: Vec::new(),
             hidden: Vec::new(),
             offers: Vec::new(),
@@ -155,6 +158,19 @@ impl CardFixture {
         fixture.view.can_remove_project = false;
         fixture.view.escapes = vec![Escape::Reconnect, Escape::Forget];
         fixture.plays = BoardPlays::Unknown;
+        fixture
+    }
+
+    /// The same board, offline here, and online at lightplayer.app by the
+    /// signed-in account's list, with its picture there: someone is signed
+    /// in, so `connect-relay` is its way in.
+    pub fn online_at_cloud() -> Self {
+        let mut fixture = Self::offline();
+        fixture.relay = true;
+        fixture.account = Some("river@example.com".to_string());
+        fixture.cloud = Some(cloud_board(true));
+        fixture.view.state_label =
+            crate::app::devices::ui_cloud_board::ONLINE_AT_LIGHTPLAYER_APP.to_string();
         fixture
     }
 
@@ -251,6 +267,7 @@ impl CardFixture {
                 account: self.account.as_deref(),
                 remembered_network: self.remembered_network.as_ref(),
                 remembered_bluetooth: self.remembered_bluetooth,
+                cloud: self.cloud.as_ref(),
             },
             now: self.now,
         }
@@ -508,5 +525,26 @@ pub(crate) fn library_project(uid: &str, slug: &str) -> UiPackageCard {
         open_elsewhere: false,
         target: None,
         health: crate::app::library::PackageHealth::Ready,
+    }
+}
+
+/// The account's row for the fixture board, with a picture or without.
+pub(crate) fn cloud_board(picture: bool) -> crate::UiCloudBoard {
+    let shown = crate::app::devices::cloud_board_picture::CloudBoardPicture {
+        seq: 4,
+        at: 1_000.0,
+        outputs: vec![3],
+        colors: vec![255, 0, 0, 0, 255, 0, 0, 0, 255],
+    };
+    crate::UiCloudBoard {
+        key: lpa_devices::BoardKey::parse("10bda3b08e30").unwrap(),
+        label: "Fabric Test".to_string(),
+        firmware: Some("2026.10.19-1".to_string()),
+        project: Some("rainbow".to_string()),
+        relay_proto: 2,
+        picture: picture
+            .then(|| crate::app::devices::cloud_board_picture::cloud_picture_preview(&shown))
+            .flatten(),
+        picture_at: picture.then_some(1_000.0),
     }
 }

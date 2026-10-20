@@ -50,13 +50,14 @@ pub fn BoardPicture(
 }
 
 /// The hook's word for where the picture comes from (`data-picture`):
-/// `link`, `lens`, `saved` or `none`. A walk reads it — a board another tab
+/// `link`, `lens`, `saved`, `cloud` or `none`. A walk reads it — a board another tab
 /// holds shows `saved`, the picture that tab left in the library.
 fn source_name(source: PictureSource) -> &'static str {
     match source {
         PictureSource::Link => "link",
         PictureSource::Lens => "lens",
         PictureSource::Saved => "saved",
+        PictureSource::Cloud => "cloud",
         PictureSource::None => "none",
     }
 }

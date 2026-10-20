@@ -1116,13 +1116,21 @@ secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
 half in every browser with a WebSocket — boards reached THROUGH
 lightplayer.app (`relay:<mac>`, the relay's browser leg
 `/relay/board/<mac>` on the page's own origin;
-`docs/adr/2026-10-06-cloud-relay.md`). The only way in is one core offer: a
-remembered board (it said its MAC over any link), while someone is signed
-in, is offered "Connect through lightplayer.app"
-(`devices/<board>/connect-relay`); an offline board says "The board isn't
-online." on its tile. There is no "your boards" list, no `ListBoards` sweep
-and no automatic move onto the LAN yet (held for the domain-model and
-device-UX pass). A relay link presents held keys only — the account's, then
+`docs/adr/2026-10-06-cloud-relay.md`). The way in is one core offer,
+"Connect through lightplayer.app" (`devices/<board>/connect-relay`), while
+someone is signed in and no USB, Bluetooth or LAN link of the tab reaches
+the board: on a remembered board (it said its MAC over any link; an offline
+one says "The board isn't online." on its tile), and on every board the
+account's list says is online. Signed in, the web edge
+(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListBoards` at load and
+every 30 s while the page is visible, and `BoardPictures` (watching) every
+half second for the cards that draw lightplayer.app's picture; core joins
+the rows onto the roster by MAC (`studio_controller/account_boards_flow.rs`):
+a listed board is in Online boards, and one this browser never met is an
+in-memory entry under `mac-<12 hex>`, never written to `/registry.json`,
+until its hello makes it a remembered board. Offline account boards (a
+stored list) and the automatic move onto the LAN are not built yet (M2 and
+M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
 the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
 stays as a dev shortcut that dials those boards at page load (like `?lan=`);
 there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks

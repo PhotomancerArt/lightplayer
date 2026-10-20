@@ -167,7 +167,7 @@ fn settle<E: core::fmt::Display>(
 
 /// `None` while the session is unsettled (pending, unreachable: change
 /// nothing); `Some(None)` signed out; `Some(Some(who))` signed in.
-fn signed_in_state(session: &CloudSession) -> Option<Option<AccountWho>> {
+pub(crate) fn signed_in_state(session: &CloudSession) -> Option<Option<AccountWho>> {
     match session {
         CloudSession::Pending | CloudSession::Unreachable => None,
         CloudSession::Anonymous { .. } => Some(None),

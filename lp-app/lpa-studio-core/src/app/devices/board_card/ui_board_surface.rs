@@ -120,6 +120,9 @@ pub enum SurfaceState {
     Offline,
     /// Offline from here, and Wi‑Fi or lightplayer.app reaches it.
     OfflineReachable,
+    /// No link here, and the signed-in account's list says the board is
+    /// online at lightplayer.app: its picture there, no words, Connect.
+    OnlineAtCloud,
     /// The port is there and closed.
     Disconnected,
     /// A simulated or emulated board, powered off.
@@ -198,6 +201,7 @@ impl SurfaceState {
             Self::NotAnswering => "not-answering",
             Self::Offline => "offline",
             Self::OfflineReachable => "offline-reachable",
+            Self::OnlineAtCloud => "online-at-cloud",
             Self::Disconnected => "disconnected",
             Self::PoweredOff => "powered-off",
             Self::SendFailed => "send-failed",

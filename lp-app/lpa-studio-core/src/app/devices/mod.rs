@@ -36,6 +36,7 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+pub mod account_boards;
 pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
@@ -72,6 +73,7 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod bundled_own_build;
 pub mod chooser_failure;
+pub mod cloud_board_picture;
 pub mod composite_transport;
 pub mod connect_offer;
 pub mod device_affordance;
@@ -141,6 +143,7 @@ pub mod take_over_offer;
 pub mod take_over_op;
 pub mod take_over_state;
 pub mod target_offer;
+pub mod ui_cloud_board;
 pub mod ui_link_kind;
 pub(crate) mod update_auto_start;
 pub mod update_build_facts;
@@ -155,6 +158,9 @@ pub mod wifi_connect_op;
 pub mod wifi_connects;
 pub mod wire_conversation;
 
+pub use account_boards::{
+    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, account_board_device,
+};
 pub use activity_ends::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS};
 pub use add_device_offers::{
     USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
@@ -324,6 +330,7 @@ pub use take_over_state::{
     TakeOverStage, TakeOverTimeout, TakeOvers, UiTakeOver,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
+pub use ui_cloud_board::{CloudPictureAsk, UiCloudBoard};
 pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};
 pub use update_host::UpdateHost;

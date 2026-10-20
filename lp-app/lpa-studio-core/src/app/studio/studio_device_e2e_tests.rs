@@ -167,6 +167,10 @@ fn bench_link(
     fake_device_link(info, device)
 }
 
+/// Your boards on every computer: the account's list (`ListBoards`) joined
+/// onto the roster by MAC, a board never met here connected through
+/// lightplayer.app, and the rule for live links.
+mod account_boards_tests;
 /// E4: the app agent's device journey over this bench.
 mod agent_device_journey_tests;
 /// The app chat seated on this bench (E4's seat, and the corpus's device
