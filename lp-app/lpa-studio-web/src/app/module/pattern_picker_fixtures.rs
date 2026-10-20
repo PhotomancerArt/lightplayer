@@ -82,6 +82,8 @@ pub(crate) fn set_facts(names: &[&str], active: u32) -> PatternPickerFacts {
         cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
         skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
         entry_target: Some(target(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+        picked: Some(active),
+        stepping_from: Some(active),
     }
 }
 
