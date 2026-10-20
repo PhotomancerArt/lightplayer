@@ -142,3 +142,50 @@ hang detected by hardware watchdog`, twice in the second run), so the
 mid-read `got 0` is a rebooted board answering, not only a stalled link. The
 first run shared the machine with a release `dx build`. `just walk-no-board
 --tab` passed all 13 steps on the same build.
+
+**Cause found, and the walk's door board held to wall time, 2026-10-20**
+(ticket `2026-10-17-drop-walk-door-editor-deterministic`; an investigation on
+`1bc45c7e5`, `lp-emu:esp32c6:t1`, lp-emu `04cb9d95d`, Brave headless, desk load
+28–344; emulated only, no hardware).
+
+The mechanism is the 2026-10-10 one, now pinned to its clock. An `emu serve`
+board with no `pace=` skips idle time at `wfi` (`lp-emu-esp32c6`
+`machine.rs`, `idle_skip`), so its emulated clock runs as far ahead of the
+wall as the machine lets it. The page reads on wall time through the Mac
+serial model (255 B per 16 ms). The board's two budgets in
+`usb_link_transport.rs` `write_once`, `SEND_ROOM_WAIT` (3 s) and
+`stall_after` (1 s), are counted on the emulated clock, so they run out
+before the page has drained one 16 KiB frame. The board then drops the next
+frame (`host link busy … 2048 B held`, `dropping message id=…`) and sends the
+seq-0 drop notice, which the client reports as `expected project read frame
+seq N, got 0`. How far the emulator outruns the page is the machine's load,
+which is why the same walk failed 2 of 6 stock runs (editor step) and not
+every time.
+
+The A/B that shows it is the clock: with the page reading every 32 ms and the
+default pace, 23 drops and a watchdog reset; with `pace=realtime`, 0 drops and
+all 10 steps passing. With `pace=realtime` the editor step passed 7 of 7 with
+0 drops. `pace=realtime` needs no `lan=` on a door board (the board's private
+LAN still holds it, `net_engage`, `net_seam.rs`).
+
+**The walk's change.** `scripts/emu/walk-drop-emu.mjs` now starts its door
+board as `c6-a={fw},pace=realtime`, so the board's guest clock is held to
+wall time, as Studio (a wall-clock peer) assumes. `startDoor` and the other
+walks are unchanged. After it, `just walk-drop-emu --serve-release` over the
+door passed 10 of 10 steps three runs in a row (`switch-off` included), each
+with 0 `expected project read frame seq` errors in the page console and 0
+`host link busy` / `dropping message` lines and no watchdog line in the
+board's console, at desk load about 5. Not yet seen under the load of the
+failing runs.
+
+**Status stays open.** `pace=realtime` makes the walk honest; it does not
+make the firmware tolerate a slow host. Two follow-ups, each its own ticket:
+
+- `2026-10-20-send-room-wait-starves-watchdog`: one server pass can outlast
+  the 8 s hardware watchdog while a slow host drains (the reset in the 2026-10-19
+  entries above), because the room wait blocks inside the pass.
+- `2026-10-20-drop-walk-switch-off-flake`: the walk's last step, `switch-off`,
+  flakes on its own about 1 run in 3; a separate cause, not this defect's.
+
+The other cause the investigation found, the Play curtain wait (red on both
+lanes), was a walk defect and is fixed on `main` by #1208 (`waitSettled`).
