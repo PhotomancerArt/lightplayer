@@ -7,7 +7,9 @@
 //! (by MAC, so the answer finds its card even if the roster merged the entry
 //! meanwhile), or Connect a board's one address field. A new press replaces the
 //! target's attempt; a success clears it (the board's card takes over from
-//! there); a failure stays, in plain words, until the next press.
+//! there); a failure stays, in plain words, until the next press — or until
+//! the board is reached by another road (plugged in, say), when it no longer
+//! says anything true.
 
 use std::collections::BTreeMap;
 
@@ -154,6 +156,22 @@ impl WifiConnects {
         self.forget(WifiConnectTarget::Relay(board));
     }
 
+    /// Drop the failed connects of every board `reached` says a link
+    /// reaches now: a board plugged in after its Wi‑Fi connect failed is
+    /// not unreachable. A connect under way is left to finish. Whether
+    /// anything went.
+    pub fn settle_reached(&mut self, reached: impl Fn(BoardKey) -> bool) -> bool {
+        let before = self.attempts.len();
+        self.attempts.retain(|target, attempt| {
+            let board = match target {
+                WifiConnectTarget::Board(board) | WifiConnectTarget::Relay(board) => *board,
+                WifiConnectTarget::Address => return true,
+            };
+            attempt.failure.is_none() || !reached(board)
+        });
+        self.attempts.len() != before
+    }
+
     /// What `target`'s card or slot says.
     pub fn view(&self, target: WifiConnectTarget) -> Option<UiWifiConnect> {
         let attempt = self.attempts.get(&target)?;
@@ -212,6 +230,35 @@ mod tests {
         );
         assert!(!connects.connecting(WifiConnectTarget::Address));
         assert_eq!(connects.view(board), None, "one target's answer is its own");
+    }
+
+    #[test]
+    fn a_failure_goes_once_its_board_is_reached_and_a_connect_under_way_stays() {
+        let mut connects = WifiConnects::default();
+        let failed = BoardKey::parse("a0f26287b48c").unwrap();
+        let dialling = BoardKey::parse("a0f26287b48d").unwrap();
+        connects.start(WifiConnectTarget::Board(failed), "10.0.0.5");
+        connects.finish(
+            WifiConnectTarget::Board(failed),
+            "10.0.0.5",
+            Err(WifiConnectFailure::Busy),
+        );
+        connects.start(WifiConnectTarget::Relay(dialling), "lightplayer.app");
+        connects.start(WifiConnectTarget::Address, "10.0.0.9");
+        connects.finish(
+            WifiConnectTarget::Address,
+            "10.0.0.9",
+            Err(WifiConnectFailure::Busy),
+        );
+
+        assert!(!connects.settle_reached(|_| false), "nothing reached");
+        assert!(connects.settle_reached(|_| true));
+        assert_eq!(connects.view_board(failed), None, "reached: no failure");
+        assert!(connects.connecting(WifiConnectTarget::Relay(dialling)));
+        assert!(
+            connects.view(WifiConnectTarget::Address).is_some(),
+            "the address field's answer is no board's"
+        );
     }
 
     #[test]

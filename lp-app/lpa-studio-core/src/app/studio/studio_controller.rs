@@ -2071,8 +2071,9 @@ impl StudioController {
             self.note_section_chooser_answer(*link, answer);
         }
         // A failed Connect's words go once the board is reached by any
-        // road.
+        // road, and so do a failed Wi‑Fi or lightplayer.app connect's.
         self.settle_connect_failure();
+        self.settle_wifi_connect_failures();
         // One tab holds a board: a refused open is read against the claims
         // standing now, at this batch's reconcile.
         if let Some(link) = link_error {
