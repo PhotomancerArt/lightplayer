@@ -95,9 +95,14 @@ authored entry again".
 - **Boot still pays the authored entry's load** (derive and attach, then its
   unload in the first tick), because the registry decides residency before
   panel state exists and has no persist-path mapping to read it with. No
-  compile and no frame are spent on it. Seeding the registry's resident set
-  from `panel.json` before derivation would save the load; it is a
-  follow-up if the measured cost matters.
+  compile and no frame are spent on it. Measured on the PLAYFUL tryout,
+  `lp-emu:esp32c6:t1` (lp-emu at `c2212c0fd`, emulated, never
+  hardware-validated; `lp-cli/tests/emu_playlist_pick_reboot.rs`): first
+  light 258 ms with a restored pick against 172 ms on the authored entry,
+  the difference all in the `lit` stage (139 ms against 52 ms) — the
+  authored entry's unload and the pick's load. Seeding the registry's
+  resident set from `panel.json` before derivation would save it; it is
+  the first follow-up.
 - **A pick made less than 10 s before a power cut can be lost**: panel state
   is written at most every 10 s (P11 as built).
 - Button steps are not remembered across a reboot.
