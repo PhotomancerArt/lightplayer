@@ -266,7 +266,6 @@ pub fn HFaderField(
                 let width = element_width(&track_id_for_press).unwrap_or(0.0);
                 strip_drag.set(Some(StripDragAnchor {
                     press: (at.x, at.y),
-                    x: at.x,
                     width,
                     fraction: frac,
                 }));
@@ -286,19 +285,19 @@ pub fn HFaderField(
                 }
                 let at = event.data().client_coordinates();
                 // Under the slop it may still be a tap; past it the drag
-                // starts from here, so the value never jumps by the slop.
+                // counts from the press, so the value follows the whole of
+                // the hand's travel however coarse the moves come.
                 if !past_slop() {
                     if !past_tap_slop(anchor.press, (at.x, at.y)) {
                         return;
                     }
                     past_slop.set(true);
-                    strip_drag.set(Some(StripDragAnchor { x: at.x, ..anchor }));
-                    return;
                 }
                 let Some((address, handler)) = move_wired.clone() else {
                     return;
                 };
-                let fraction = strip_drag_fraction(anchor.fraction, at.x - anchor.x, anchor.width);
+                let fraction =
+                    strip_drag_fraction(anchor.fraction, at.x - anchor.press.0, anchor.width);
                 let next = to_value(fraction);
                 hold.write(emit.sent_value(next));
                 wrote.set(true);
@@ -340,13 +339,12 @@ pub fn HFaderField(
     }
 }
 
-/// Where a strip's sideways drag started: the press point (for the tap
-/// slop), the x the drag counts from, the track's width, and the value's
-/// fraction of the track then.
+/// Where a strip's sideways drag started: the press point (the tap slop's
+/// centre, and where the drag counts from), the track's width, and the
+/// value's fraction of the track then.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct StripDragAnchor {
     press: (f64, f64),
-    x: f64,
     width: f64,
     fraction: f32,
 }

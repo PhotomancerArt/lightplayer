@@ -258,15 +258,13 @@ pub fn KnobField(
                 };
                 let at = event.data().client_coordinates();
                 // Under the slop it may still be a tap: nothing moves. Past
-                // it, the drag starts from here, so the knob never jumps by
-                // the slop.
+                // it, the drag counts from the press, so the knob follows the
+                // whole of the hand's travel however coarse the moves come.
                 if !past_slop() {
                     if !past_tap_slop(press_at(), (at.x, at.y)) {
                         return;
                     }
                     past_slop.set(true);
-                    drag.set(Some((at.y, anchor_value)));
-                    return;
                 }
                 let rise = anchor_y - at.y;
                 // Phasor knobs drag the felt SPEED axis log-period (equal
