@@ -2362,10 +2362,10 @@ impl StudioController {
                 view.remembered_bluetooth.insert(device.id, on);
             }
         }
-        view.account_name = self
+        view.account = self
             .access
             .account_keys()
-            .map(|keys| keys.account_name.clone());
+            .map(|keys| crate::account_words(&keys.account_name, &keys.account_email));
         let updates = view
             .roster
             .devices

@@ -284,6 +284,12 @@ bad:  Revert on /orbit could not reach the server overlay: …           # sweep
 bad:  no writer — authored default (R6)                  # sweep 10-17: a plan id on screen
 ```
 
+```text
+do:   ☁ lightplayer.app  hypher@gmail.com   no Wi‑Fi
+bad:  ☁ lightplayer.app  Yona's account      # Yona's phone, 10-19: a board with no Wi‑Fi. The
+                                             #   name it signed in with, and the state, not a promise
+```
+
 ## P12. the button explains
 
 A button says its verb, and its object when that isn't obvious. Let it

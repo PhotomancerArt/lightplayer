@@ -32,15 +32,26 @@ pub enum AccountAccessState {
     /// Nobody signed in (or a guest).
     SignedOut,
     /// Signed in; the record is on its way.
-    Loading { name: String },
+    Loading { name: String, email: String },
     Ready {
         /// The account's given name ("Yona").
         name: String,
+        /// The account's email, how a board card names the account.
+        email: String,
         info: AccountAccessInfo,
     },
     /// Signed in, but the record did not come (offline): the cached keys
     /// still unlock, Settings just cannot show or change them now.
-    Unavailable { name: String },
+    Unavailable { name: String, email: String },
+}
+
+/// Who is signed in, as the account's keys carry it to core: the given name
+/// the board entries are labelled with, and the email a card names the
+/// account by.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AccountWho {
+    pub name: String,
+    pub email: String,
 }
 
 /// Settings' handle on the account's device access.
@@ -75,7 +86,7 @@ pub fn use_account_access_provider(on_access: Callback<AccessCommand>) -> Accoun
             return;
         };
         on_access.call(AccessCommand::BrowserNameDefault(default_browser_name(
-            signed_in.as_deref(),
+            signed_in.as_ref().map(|who| who.name.as_str()),
             detect_browser(),
             detect_platform(),
         )));
@@ -84,19 +95,22 @@ pub fn use_account_access_provider(on_access: Callback<AccessCommand>) -> Accoun
                 state.set(AccountAccessState::SignedOut);
                 on_access.call(AccessCommand::AccountKeys(None));
             }
-            Some(name) => {
-                state.set(AccountAccessState::Loading { name: name.clone() });
+            Some(who) => {
+                state.set(AccountAccessState::Loading {
+                    name: who.name.clone(),
+                    email: who.email.clone(),
+                });
                 spawn(async move {
                     let answer =
                         lpa_cloud_client::call(&FetchCloudPort::new(), GetAccountAccess).await;
-                    settle(answer, name, state, on_access);
+                    settle(answer, who, state, on_access);
                 });
             }
         }
     });
     let set_password = Callback::new(
         move |(tier, password): (AccountPasswordTier, Option<String>)| {
-            let Some(name) = state_name(&state.peek()) else {
+            let Some(who) = state_who(&state.peek()) else {
                 return;
             };
             spawn(async move {
@@ -105,17 +119,17 @@ pub fn use_account_access_provider(on_access: Callback<AccessCommand>) -> Accoun
                     SetAccountPassword { tier, password },
                 )
                 .await;
-                settle(answer, name, state, on_access);
+                settle(answer, who, state, on_access);
             });
         },
     );
     let reset_key = Callback::new(move |()| {
-        let Some(name) = state_name(&state.peek()) else {
+        let Some(who) = state_who(&state.peek()) else {
             return;
         };
         spawn(async move {
             let answer = lpa_cloud_client::call(&FetchCloudPort::new(), ResetAccountKey).await;
-            settle(answer, name, state, on_access);
+            settle(answer, who, state, on_access);
         });
     });
     use_context_provider(|| AccountAccessUi {
@@ -133,39 +147,47 @@ pub fn use_account_access_ui() -> Option<AccountAccessUi> {
 /// A record arrived (or did not): show it, and hand its keys to core.
 fn settle<E: core::fmt::Display>(
     answer: Result<AccountAccessInfo, E>,
-    name: String,
+    who: AccountWho,
     mut state: Signal<AccountAccessState>,
     on_access: Callback<AccessCommand>,
 ) {
     match answer {
         Ok(info) => {
-            on_access.call(AccessCommand::AccountKeys(Some(account_keys(&info, &name))));
-            state.set(AccountAccessState::Ready { name, info });
+            on_access.call(AccessCommand::AccountKeys(Some(account_keys(&info, &who))));
+            let AccountWho { name, email } = who;
+            state.set(AccountAccessState::Ready { name, email, info });
         }
         Err(error) => {
             log::warn!("account device access unavailable: {error}");
-            state.set(AccountAccessState::Unavailable { name });
+            let AccountWho { name, email } = who;
+            state.set(AccountAccessState::Unavailable { name, email });
         }
     }
 }
 
 /// `None` while the session is unsettled (pending, unreachable: change
-/// nothing); `Some(None)` signed out; `Some(Some(name))` signed in.
-fn signed_in_state(session: &CloudSession) -> Option<Option<String>> {
+/// nothing); `Some(None)` signed out; `Some(Some(who))` signed in.
+fn signed_in_state(session: &CloudSession) -> Option<Option<AccountWho>> {
     match session {
         CloudSession::Pending | CloudSession::Unreachable => None,
         CloudSession::Anonymous { .. } => Some(None),
         CloudSession::SignedIn { me, .. } if me.anonymous => Some(None),
-        CloudSession::SignedIn { me, .. } => Some(Some(account_name(me))),
+        CloudSession::SignedIn { me, .. } => Some(Some(AccountWho {
+            name: account_name(me),
+            email: me.email.clone(),
+        })),
     }
 }
 
-fn state_name(state: &AccountAccessState) -> Option<String> {
+fn state_who(state: &AccountAccessState) -> Option<AccountWho> {
     match state {
         AccountAccessState::SignedOut => None,
-        AccountAccessState::Loading { name }
-        | AccountAccessState::Ready { name, .. }
-        | AccountAccessState::Unavailable { name } => Some(name.clone()),
+        AccountAccessState::Loading { name, email }
+        | AccountAccessState::Ready { name, email, .. }
+        | AccountAccessState::Unavailable { name, email } => Some(AccountWho {
+            name: name.clone(),
+            email: email.clone(),
+        }),
     }
 }
 
@@ -182,7 +204,7 @@ pub fn account_name(me: &MeInfo) -> String {
 }
 
 /// The cloud's record as core's keys.
-pub fn account_keys(info: &AccountAccessInfo, name: &str) -> AccountKeys {
+pub fn account_keys(info: &AccountAccessInfo, who: &AccountWho) -> AccountKeys {
     AccountKeys {
         key_secret: info.key_secret,
         key_salt: info.key_salt,
@@ -191,7 +213,8 @@ pub fn account_keys(info: &AccountAccessInfo, name: &str) -> AccountKeys {
         play_password: info.play_password.clone(),
         edit_password: info.edit_password.clone(),
         previous_key_salts: info.previous_key_salts.clone(),
-        account_name: name.to_string(),
+        account_name: who.name.clone(),
+        account_email: who.email.clone(),
     }
 }
 
@@ -230,7 +253,13 @@ mod tests {
             me: me(),
             options: None,
         });
-        assert_eq!(signed_in.flatten().as_deref(), Some("Yona"));
+        assert_eq!(
+            signed_in.flatten(),
+            Some(AccountWho {
+                name: "Yona".to_string(),
+                email: "yona@example.com".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -245,8 +274,13 @@ mod tests {
             previous_key_salts: vec![[5; 16]],
             updated_at: 1.0,
         };
-        let keys = account_keys(&info, "Yona");
+        let who = AccountWho {
+            name: "Yona".to_string(),
+            email: "yona@example.com".to_string(),
+        };
+        let keys = account_keys(&info, &who);
         assert_eq!(keys.account_name, "Yona");
+        assert_eq!(keys.account_email, "yona@example.com");
         assert_eq!(keys.key_salt, [2; 16]);
         assert_eq!(keys.play_password.as_deref(), Some("camp"));
         assert!(keys.owns_salt(&[5; 16]));

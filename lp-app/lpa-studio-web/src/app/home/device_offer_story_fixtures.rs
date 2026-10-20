@@ -569,8 +569,8 @@ pub(crate) fn StoryBoardCard(
     /// `connection` is Connected.
     #[props(default)]
     panel: Option<lpa_studio_core::UiBoardPanel>,
-    /// The signed-in account's name ("River"): lightplayer.app's row
-    /// names "River's account". `None` is signed out, and the card offers
+    /// The signed-in account as lightplayer.app's row names it
+    /// ("river@example.com"). `None` is signed out, and the card offers
     /// Sign in, as the controller does on a page that reaches
     /// lightplayer.app.
     #[props(default)]

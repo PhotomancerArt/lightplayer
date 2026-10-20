@@ -31,6 +31,10 @@ pub struct AccountKeys {
     pub previous_key_salts: Vec<[u8; SALT_BYTES]>,
     /// The name the entries are labelled with (the account's given name).
     pub account_name: String,
+    /// The account's email, how the card's lightplayer.app row names the
+    /// account ("hypher@gmail.com"). Empty in a cache written before it
+    /// was kept, until the next sign-in check refreshes it.
+    pub account_email: String,
 }
 
 impl AccountKeys {
@@ -134,6 +138,8 @@ struct AccountKeysDoc {
     #[serde(default)]
     previous_key_salts: Vec<Salt>,
     account_name: String,
+    #[serde(default)]
+    account_email: String,
 }
 
 impl From<&AccountKeys> for AccountKeysDoc {
@@ -148,6 +154,7 @@ impl From<&AccountKeys> for AccountKeysDoc {
             edit_password: keys.edit_password.clone(),
             previous_key_salts: keys.previous_key_salts.iter().copied().map(Salt).collect(),
             account_name: keys.account_name.clone(),
+            account_email: keys.account_email.clone(),
         }
     }
 }
@@ -163,6 +170,7 @@ impl From<AccountKeysDoc> for AccountKeys {
             edit_password: doc.edit_password,
             previous_key_salts: doc.previous_key_salts.into_iter().map(|s| s.0).collect(),
             account_name: doc.account_name,
+            account_email: doc.account_email,
         }
     }
 }
@@ -181,6 +189,7 @@ pub(crate) mod tests {
             edit_password: None,
             previous_key_salts: vec![[44; 16]],
             account_name: "Yona".to_string(),
+            account_email: "yona@example.com".to_string(),
         }
     }
 
@@ -202,5 +211,20 @@ pub(crate) mod tests {
         assert_eq!(AccountKeys::from_json(&keys.to_json()), Some(keys.clone()));
         assert!(AccountKeys::from_json("nope").is_none());
         assert!(!format!("{keys:?}").contains("glitter"));
+    }
+
+    /// A cache written before the email was kept still unlocks: it reads
+    /// with no email, and the next sign-in check fills it in.
+    #[test]
+    fn a_cache_with_no_email_still_reads() {
+        let keys = account(None);
+        let mut doc: serde_json::Value = serde_json::from_str(&keys.to_json()).unwrap();
+        doc.as_object_mut()
+            .unwrap()
+            .remove("accountEmail")
+            .expect("the cache keeps the email");
+        let read = AccountKeys::from_json(&doc.to_string()).expect("still a cache");
+        assert_eq!(read.account_email, "");
+        assert_eq!(read.key_secret, keys.key_secret);
     }
 }

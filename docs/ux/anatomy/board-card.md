@@ -27,7 +27,7 @@ shipped before, its comment says `was:`. ◆ is the layers icon (O2).
 │ ⏚ USB              connected           › │
 │ ≋ Wi‑Fi            Cedar Lane          › │
 │ ᛒ Bluetooth        LP-3f2a             › │
-│ ☁ lightplayer.app  River's account     › │
+│ ☁ lightplayer.app  river@example.com   › │
 │ ○ Access           edit · USB          › │
 │ ▲ Firmware         unknown  older LightPlayer │ Update │
 │ ■ Hardware         XIAO ESP32-C6       › │
@@ -385,11 +385,13 @@ connect by it."
 ```text
 ☁ lightplayer.app  —                         # no firmware, not answered, no relay on this firmware
 ☁ lightplayer.app  not connected   │ Sign in │   # signed out: lit
-☁ lightplayer.app  not connected             # signed in, the board not on Wi‑Fi: its fix is Wi‑Fi's. not lit
-☁ lightplayer.app  River's account           # reachable, named as the account's key is
-☁ lightplayer.app  River's account   connected   # this tab's link
-☁ lightplayer.app  River's account   connecting
-☁ lightplayer.app  River's account   can't reach   # joined, and it didn't answer (or refused it). orange
+☁ lightplayer.app  river@example.com   no Wi‑Fi      # signed in, the board not on Wi‑Fi (nothing saved, none joined, or off;
+                                                     #   the details say which): its fix is Wi‑Fi's. not lit
+☁ lightplayer.app  river@example.com   not added     # the board doesn't hold the account's key
+☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it
+☁ lightplayer.app  river@example.com   connected     # this tab's link
+☁ lightplayer.app  river@example.com   connecting
+☁ lightplayer.app  river@example.com   can't reach   # joined, and it didn't answer (or refused it). orange
 ☁ lightplayer.app  disabled                  # hushed, for privacy
 ```
 
@@ -398,12 +400,19 @@ relay switch). Signed out, then "Sign in to reach this board from any
 browser, through lightplayer.app." with Sign in (the person's own click: it
 leaves the page), and "Nothing goes to lightplayer.app until you sign in."
 Signed in: the account, how it stands now, and "Lets lightplayer.app reach
-this board through the cloud." Off: the switch stands off over
+this board through the cloud.", or, off Wi‑Fi, why it can't ("This board
+isn't set up on Wi‑Fi, so lightplayer.app can't reach it. Set up Wi‑Fi to
+reach it from any browser."). Offline, the row keeps the board's last
+Wi‑Fi facts, dimmed, but never says online, connecting or can't reach. Off: the switch stands off over
 "lightplayer.app is disabled for this board: it never connects to the
 cloud."
 
 ```text
 bad:  USB · connected  ☁̸        # the struck cloud: Yona's desk, 10-19. lightplayer.app's row says it now
+bad:  ☁ lightplayer.app  Yona's account     # Yona's phone, 10-19: no Wi‑Fi set up, and it read as
+                                            #   "this will work". Name the account by its email, then the state
+bad:  ☁ lightplayer.app  river@example.com   Wi‑Fi not s…    # story, 10-19: at the grid's width the state was cut;
+                                                            #   a state beside an email stays short
 ```
 
 ### Access ○: what you can do
