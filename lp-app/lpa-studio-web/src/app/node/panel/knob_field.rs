@@ -18,6 +18,14 @@
 //! live value (already violet); drags and keys still edit the authored
 //! default (P6 item 1).
 //!
+//! **As a panel cell** (the connected board card's, `module/panel_cell.rs`)
+//! the knob takes a `body` — the cell's label and value — and draws it
+//! inside its own gesture surface, so the surface is the whole cell: a drag
+//! from anywhere in it turns the knob. With an `on_tap` a press is a drag
+//! only once it has moved past the tap slop (`super::panel_tap`); a press
+//! that never does writes nothing and is a tap. The Speed knob's tap waits
+//! out its double-click window first, since its double-click is 1×.
+//!
 //! A knob carrying a `step` is quantized end to end ([`knob_snap`]): the arc,
 //! pointer, and `aria-valuenow` all land on the grid, and so does every value
 //! a gesture writes. Integer uniforms (`i32`/`u32`) get `step: 1`, which is
@@ -37,6 +45,9 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::{capture_field_pointer, field_wiring};
 
 use super::PanelEmit;
+use super::panel_tap::{
+    DOUBLE_CLICK_WINDOW_MS, PanelRelease, TapGate, panel_release, past_tap_slop,
+};
 use super::speed_knob::{
     speed_knob_drag_value, speed_knob_fraction, speed_knob_key_value, speed_knob_ticks,
 };
@@ -99,6 +110,20 @@ pub fn KnobField(
     #[props(default)]
     emit: PanelEmit,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// What a panel cell draws with the knob (its label and its value),
+    /// inside the knob's own gesture surface, which then fills the cell.
+    /// `None` = the knob alone, as every other surface draws it.
+    #[props(default)]
+    body: Option<Element>,
+    /// The gesture surface's own layout when it carries a `body` (the
+    /// cell's column and padding).
+    #[props(default)]
+    surface_class: &'static str,
+    /// A press that never moves past the tap slop: writes nothing and
+    /// calls this (the cell opens the control's details). `None` = every
+    /// move is a drag, as today.
+    #[props(default)]
+    on_tap: Option<EventHandler<()>>,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let editable = wired.is_some();
@@ -158,12 +183,20 @@ pub fn KnobField(
     // Whether this drag has moved: a press alone writes nothing, so its
     // release must not flush (it would engage a panel channel on a click).
     let mut moved = use_signal(|| false);
+    // With a tap: where the press landed, and whether the pointer has gone
+    // past the slop since (only then is it a drag).
+    let mut press_at = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut past_slop = use_signal(|| false);
+    // The Speed knob's tap, waiting out the double-click window.
+    let mut tap_gate = use_signal(TapGate::default);
+    let has_body = body.is_some();
     // Last dispatch timestamp (ms) for the drag throttle.
     let last_sent = use_signal(|| 0.0_f64);
 
     rsx! {
         span {
-            class: if editable { "tw:inline-flex tw:flex-none tw:cursor-ns-resize tw:touch-none tw:rounded-full tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:focus-visible:outline-border-strong" } else { "tw:inline-flex tw:flex-none" },
+            class: knob_surface_class(editable, has_body, surface_class),
+            "data-panel-surface": has_body.then_some(""),
             role: "slider",
             tabindex: if editable { "0" } else { "-1" },
             aria_valuemin: "{min}",
@@ -193,13 +226,21 @@ pub fn KnobField(
                 handler.call(panel_or_slot_action(&key_target, address, emit.lp_value(next)));
             },
             onpointerdown: move |event| {
+                // A press ends a tap still waiting for its window: this is
+                // the double-click's second press.
+                if speed && on_tap.is_some() {
+                    tap_gate.write().cancel();
+                }
                 if down_wiring.is_none() {
                     return;
                 }
                 capture_field_pointer(&event);
                 hold.press();
                 moved.set(false);
-                drag.set(Some((event.data().client_coordinates().y, base)));
+                let at = event.data().client_coordinates();
+                press_at.set((at.x, at.y));
+                past_slop.set(on_tap.is_none());
+                drag.set(Some((at.y, base)));
             },
             onpointermove: move |event| {
                 let mut last_sent = last_sent;
@@ -215,7 +256,19 @@ pub fn KnobField(
                 let Some((address, handler)) = move_wiring.clone() else {
                     return;
                 };
-                let rise = anchor_y - event.data().client_coordinates().y;
+                let at = event.data().client_coordinates();
+                // Under the slop it may still be a tap: nothing moves. Past
+                // it, the drag starts from here, so the knob never jumps by
+                // the slop.
+                if !past_slop() {
+                    if !past_tap_slop(press_at(), (at.x, at.y)) {
+                        return;
+                    }
+                    past_slop.set(true);
+                    drag.set(Some((at.y, anchor_value)));
+                    return;
+                }
+                let rise = anchor_y - at.y;
                 // Phasor knobs drag the felt SPEED axis log-period (equal
                 // drag = equal feel-ratio); plain knobs stay linear.
                 let next = if speed {
@@ -239,14 +292,40 @@ pub fn KnobField(
                 handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
             },
             onpointerup: move |_| {
-                // Flush the final position: the throttle may have swallowed
-                // the last few moves, and the release must land exactly.
-                // The hold keeps showing it until the snapshot catches up.
-                if drag().is_some()
-                    && moved()
-                    && let (Some(next), Some((address, handler))) = (hold.held(), up_wiring.clone())
-                {
-                    handler.call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
+                match panel_release(drag().is_some(), past_slop(), moved()) {
+                    // Flush the final position: the throttle may have
+                    // swallowed the last few moves, and the release must land
+                    // exactly. The hold keeps showing it until the snapshot
+                    // catches up.
+                    PanelRelease::Flush => {
+                        if let (Some(next), Some((address, handler))) =
+                            (hold.held(), up_wiring.clone())
+                        {
+                            handler
+                                .call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
+                        }
+                    }
+                    // A tap: nothing was written. The Speed knob's waits for
+                    // its double-click window; any other opens at once.
+                    PanelRelease::Tap => {
+                        if let Some(on_tap) = on_tap {
+                            if speed {
+                                let token = tap_gate.write().arm();
+                                gloo_timers::callback::Timeout::new(DOUBLE_CLICK_WINDOW_MS, move || {
+                                    let fires = tap_gate
+                                        .try_write()
+                                        .is_ok_and(|mut gate| gate.fire(token));
+                                    if fires {
+                                        on_tap.call(());
+                                    }
+                                })
+                                .forget();
+                            } else {
+                                on_tap.call(());
+                            }
+                        }
+                    }
+                    PanelRelease::Nothing => {}
                 }
                 drag.set(None);
                 hold.release(reported);
@@ -261,6 +340,9 @@ pub fn KnobField(
                 if !speed {
                     return;
                 }
+                if on_tap.is_some() {
+                    tap_gate.write().cancel();
+                }
                 let Some((address, handler)) = reset_wiring.clone() else {
                     return;
                 };
@@ -268,7 +350,7 @@ pub fn KnobField(
                 handler.call(panel_or_slot_action(&reset_target, address, emit.lp_value(1.0)));
             },
             svg {
-                class: "tw:block",
+                class: "tw:block tw:flex-none",
                 width: "46",
                 height: "46",
                 view_box: "0 0 48 48",
@@ -368,7 +450,21 @@ pub fn KnobField(
                 transform: "rotate({pointer_deg} 24 24)",
             }
             }
+            {body}
         }
+    }
+}
+
+/// The knob's gesture surface: the knob alone (a focus ring round its
+/// body), or with a `body` the whole cell it is drawn in (the cell's own
+/// layout, its focus ring round the cell). Editable surfaces drag
+/// vertically and take a vertical swipe as a turn (`touch-action: none`).
+fn knob_surface_class(editable: bool, has_body: bool, surface_class: &str) -> String {
+    match (editable, has_body) {
+        (true, false) => "tw:inline-flex tw:flex-none tw:cursor-ns-resize tw:touch-none tw:rounded-full tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:focus-visible:outline-border-strong".to_string(),
+        (false, false) => "tw:inline-flex tw:flex-none".to_string(),
+        (true, true) => format!("ux-panel-surface {surface_class} tw:cursor-ns-resize tw:touch-none tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:-outline-offset-1 tw:focus-visible:outline-border-strong"),
+        (false, true) => format!("ux-panel-surface {surface_class}"),
     }
 }
 
@@ -379,7 +475,7 @@ const KNOB_ARC_PATH: &str = "M10.56 37.44 A19 19 0 1 1 37.44 37.44";
 
 /// Minimum interval between drag dispatches (ms). The geometry previews
 /// every pointer move; only the write stream is throttled.
-const KNOB_DISPATCH_INTERVAL_MS: f64 = 50.0;
+pub(crate) const KNOB_DISPATCH_INTERVAL_MS: f64 = 50.0;
 
 /// The fastest period a phasor knob's gesture can reach, in seconds. The
 /// knob's authored `min` is clamped up to this: an authored min of 0 exists

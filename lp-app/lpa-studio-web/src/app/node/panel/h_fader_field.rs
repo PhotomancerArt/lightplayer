@@ -10,10 +10,21 @@
 //! panel writer holds the channel. Dispatches `SlotEditOp::SetValue` with
 //! `oninput` semantics (the actor coalesces the drag flood per address).
 //!
+//! **As a panel strip** (the connected board card's, `module/panel_strip.rs`)
+//! the fader takes a `body` — the strip's label row — and the whole strip
+//! becomes its gesture surface: a press on the track still jumps there (the
+//! native input), and a drag that starts anywhere else moves the value
+//! sideways from where it was, the track's width the whole range
+//! ([`strip_drag_value`]). A press there that never leaves the tap slop
+//! writes nothing and is a tap (`on_tap`). The strip lets a vertical swipe
+//! scroll the page (`touch-action: pan-y`).
+//!
 //! The thumb and fill follow the hand, not the snapshot, through a
 //! [`GestureHold`](crate::app::node::gesture_hold::GestureHold): the native input is
 //! controlled, so a snapshot still echoing an earlier write of the drag used
 //! to be written back into it — the thumb jumped back, then "took".
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
@@ -23,8 +34,12 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
 use super::PanelEmit;
-use super::knob_field::{knob_fraction, knob_snap};
+use super::knob_field::{KNOB_DISPATCH_INTERVAL_MS, knob_fraction, knob_snap};
+use super::panel_tap::{PanelRelease, panel_release, past_tap_slop};
 use crate::app::node::gesture_hold::use_gesture_hold;
+use crate::app::node::slot_fields::capture_field_pointer;
+
+static NEXT_FADER_TRACK_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -65,6 +80,19 @@ pub fn HFaderField(
     #[props(default = false)]
     rate_log_detents: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// What a panel strip draws with the fader (its label row), above the
+    /// track; the whole strip is then the gesture surface. `None` = the
+    /// fader alone, as every other surface draws it.
+    #[props(default)]
+    body: Option<Element>,
+    /// The gesture surface's own layout when it carries a `body` (the
+    /// strip's padding and rows).
+    #[props(default)]
+    surface_class: &'static str,
+    /// A press off the track that never moves past the tap slop: writes
+    /// nothing and calls this (the strip opens the control's details).
+    #[props(default)]
+    on_tap: Option<EventHandler<()>>,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
@@ -94,6 +122,7 @@ pub fn HFaderField(
     } else {
         (min.to_string(), max.to_string(), base.to_string())
     };
+    let step_hint = step;
     let step = if rate_log_detents {
         "any".to_string()
     } else {
@@ -102,17 +131,42 @@ pub fn HFaderField(
     let invalid_title = state.invalid.clone().unwrap_or_default();
     let key_wired = wired.clone();
     let dbl_wired = wired.clone();
+    let move_wired = wired.clone();
+    let up_wired = wired.clone();
     let key_target = panel_target.clone();
     let dbl_target = panel_target.clone();
+    let move_target = panel_target.clone();
+    let up_target = panel_target.clone();
+    let has_body = body.is_some();
+    let editable = wired.is_some();
+    let track_id = use_hook(|| {
+        let id = NEXT_FADER_TRACK_ID.fetch_add(1, Ordering::Relaxed);
+        format!("ux-fader-track-{id}")
+    });
+    let track_id_for_press = track_id.clone();
+    // A strip's sideways drag off the track: where the press landed, the
+    // track's width and the value's fraction then; whether it has gone past
+    // the tap slop, and whether it has written.
+    let mut strip_drag = use_signal(|| None::<StripDragAnchor>);
+    let mut past_slop = use_signal(|| false);
+    let mut wrote = use_signal(|| false);
+    let last_sent = use_signal(|| 0.0_f64);
+    let to_value = move |fraction: f32| {
+        if rate_log_detents {
+            apply_detents(frac_rate(fraction))
+        } else {
+            knob_snap(min + fraction * (max - min), min, step_hint).clamp(min, max)
+        }
+    };
 
-    rsx! {
+    let track = rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
             if rate_log_detents {
                 RateDetentTicks {}
             } else {
                 FaderTicks {}
             }
-            div { class: "tw:relative tw:h-7 tw:min-w-0",
+            div { id: "{track_id}", class: "tw:relative tw:h-7 tw:min-w-0",
                 // The recessed slot + value fill; the input above is the
                 // gesture surface. Colors ride STATIC classes and the only
                 // dynamic style is the fill width: a compound inline style
@@ -136,7 +190,14 @@ pub fn HFaderField(
                     value: "{input_value}",
                     disabled,
                     title: "{invalid_title}",
-                    onpointerdown: move |_| hold.press(),
+                    onpointerdown: move |event| {
+                        // A press on the track is the native input's (it
+                        // jumps there), not the strip's sideways drag.
+                        if has_body {
+                            event.stop_propagation();
+                        }
+                        hold.press();
+                    },
                     onpointerup: move |_| hold.release(reported),
                     onpointercancel: move |_| hold.release(reported),
                     oninput: move |event| {
@@ -186,7 +247,124 @@ pub fn HFaderField(
                 }
             }
         }
+    };
+
+    let Some(body) = body else {
+        return track;
+    };
+    rsx! {
+        div {
+            class: "ux-panel-surface {surface_class} tw:cursor-ew-resize tw:touch-pan-y",
+            "data-panel-surface": "",
+            onpointerdown: move |event| {
+                if !editable {
+                    return;
+                }
+                capture_field_pointer(&event);
+                hold.press();
+                let at = event.data().client_coordinates();
+                let width = element_width(&track_id_for_press).unwrap_or(0.0);
+                strip_drag.set(Some(StripDragAnchor {
+                    press: (at.x, at.y),
+                    x: at.x,
+                    width,
+                    fraction: frac,
+                }));
+                past_slop.set(on_tap.is_none());
+                wrote.set(false);
+            },
+            onpointermove: move |event| {
+                let mut last_sent = last_sent;
+                let Some(anchor) = strip_drag() else {
+                    return;
+                };
+                if event.data().held_buttons().is_empty() {
+                    // Missed release (no pointer capture): stop the drag.
+                    strip_drag.set(None);
+                    hold.clear();
+                    return;
+                }
+                let at = event.data().client_coordinates();
+                // Under the slop it may still be a tap; past it the drag
+                // starts from here, so the value never jumps by the slop.
+                if !past_slop() {
+                    if !past_tap_slop(anchor.press, (at.x, at.y)) {
+                        return;
+                    }
+                    past_slop.set(true);
+                    strip_drag.set(Some(StripDragAnchor { x: at.x, ..anchor }));
+                    return;
+                }
+                let Some((address, handler)) = move_wired.clone() else {
+                    return;
+                };
+                let fraction = strip_drag_fraction(anchor.fraction, at.x - anchor.x, anchor.width);
+                let next = to_value(fraction);
+                hold.write(emit.sent_value(next));
+                wrote.set(true);
+                // Throttled, as the knob's drag is; the release flushes.
+                let now = js_sys::Date::now();
+                if now - last_sent() < KNOB_DISPATCH_INTERVAL_MS {
+                    return;
+                }
+                last_sent.set(now);
+                handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
+            },
+            onpointerup: move |_| {
+                match panel_release(strip_drag().is_some(), past_slop(), wrote()) {
+                    PanelRelease::Flush => {
+                        if let (Some(next), Some((address, handler))) =
+                            (hold.held(), up_wired.clone())
+                        {
+                            handler
+                                .call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
+                        }
+                    }
+                    PanelRelease::Tap => {
+                        if let Some(on_tap) = on_tap {
+                            on_tap.call(());
+                        }
+                    }
+                    PanelRelease::Nothing => {}
+                }
+                strip_drag.set(None);
+                hold.release(reported);
+            },
+            onpointercancel: move |_| {
+                strip_drag.set(None);
+                hold.clear();
+            },
+            {body}
+            {track}
+        }
     }
+}
+
+/// Where a strip's sideways drag started: the press point (for the tap
+/// slop), the x the drag counts from, the track's width, and the value's
+/// fraction of the track then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StripDragAnchor {
+    press: (f64, f64),
+    x: f64,
+    width: f64,
+    fraction: f32,
+}
+
+/// The fraction of the track a strip's sideways drag lands on: `dx` CSS px
+/// from where it started, the track's `width` the whole range, clamped to
+/// the track. A track with no width moves nothing.
+pub(crate) fn strip_drag_fraction(anchor_fraction: f32, dx: f64, width: f64) -> f32 {
+    if width <= 0.0 {
+        return anchor_fraction.clamp(0.0, 1.0);
+    }
+    (anchor_fraction + (dx / width) as f32).clamp(0.0, 1.0)
+}
+
+/// An element's rendered width in CSS px, by id.
+fn element_width(id: &str) -> Option<f64> {
+    let element = web_sys::window()?.document()?.get_element_by_id(id)?;
+    Some(element.get_bounding_client_rect().width())
 }
 
 /// The rate fader's tick row: one stop per octave detent at its log-frac
@@ -289,7 +467,25 @@ pub(crate) fn fader_fill_style(frac: f32) -> String {
 mod tests {
     use lpa_studio_core::UiSlotFieldState;
 
-    use super::{fader_fill_class, fader_fill_style, fader_input_class, fader_slot_class};
+    use super::{
+        fader_fill_class, fader_fill_style, fader_input_class, fader_slot_class,
+        strip_drag_fraction,
+    };
+
+    /// A strip's sideways drag: the track's width is the whole range, from
+    /// wherever the value was, clamped to the track's ends.
+    #[test]
+    fn the_strips_drag_maps_the_track_width_to_the_range_and_clamps() {
+        // Half the track's width from a quarter: three quarters.
+        assert_eq!(strip_drag_fraction(0.25, 100.0, 200.0), 0.75);
+        // Leftward moves it down, from where it was (no jump to the press).
+        assert_eq!(strip_drag_fraction(0.5, -50.0, 200.0), 0.25);
+        // Past either end: the end.
+        assert_eq!(strip_drag_fraction(0.9, 400.0, 200.0), 1.0);
+        assert_eq!(strip_drag_fraction(0.1, -400.0, 200.0), 0.0);
+        // A track not laid out yet moves nothing.
+        assert_eq!(strip_drag_fraction(0.4, 120.0, 0.0), 0.4);
+    }
 
     #[test]
     fn fill_style_is_width_only() {

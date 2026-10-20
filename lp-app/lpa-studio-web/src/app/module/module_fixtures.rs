@@ -1307,13 +1307,20 @@ fn phase_knob(scope: &str, seconds: f32) -> UiPanelControlView {
 /// [`card_root_panel`] with `channel` held at `value` (gold, its let-go):
 /// the held value is what the channel reads now, so the face shows it.
 pub(crate) fn card_root_panel_held(channel: &str, value: f32) -> UiPanelGroup {
-    let mut panel = card_root_panel();
-    engage_group(&mut panel, ROOT_SCOPE, channel, value);
-    visit_group_controls(&mut panel, &mut |_, view| {
-        if view.channel == channel {
-            view.control.live_value = None;
-        }
-    });
+    held_at(card_root_panel(), &[(channel, value)])
+}
+
+/// `panel` with each root `(channel, value)` held (gold, its let-go): the
+/// held value is what the channel reads now, so the face shows it.
+pub(crate) fn held_at(mut panel: UiPanelGroup, held: &[(&str, f32)]) -> UiPanelGroup {
+    for &(channel, value) in held {
+        engage_group(&mut panel, ROOT_SCOPE, channel, value);
+        visit_group_controls(&mut panel, &mut |_, view| {
+            if view.channel == channel {
+                view.control.live_value = None;
+            }
+        });
+    }
     panel
 }
 

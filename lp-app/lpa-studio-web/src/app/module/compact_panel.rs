@@ -150,12 +150,12 @@ fn CardControl(
 const PANEL_CLASS: &str = "ux-board-panel tw:flex tw:min-w-0 tw:flex-col";
 
 /// The root's section: the band, under the card's hairline. No heading.
-const BAND_CLASS: &str = "ux-panel-band tw:min-w-0 tw:border-0 tw:border-t tw:border-solid tw:border-border";
+const BAND_CLASS: &str =
+    "ux-panel-band tw:min-w-0 tw:border-0 tw:border-t tw:border-solid tw:border-border";
 
 /// A nested group's section: its own line, a step stronger than the light
 /// lines between controls, then its heading.
-const GROUP_CLASS: &str =
-    "tw:min-w-0 tw:border-0 tw:border-t tw:border-solid tw:border-border";
+const GROUP_CLASS: &str = "tw:min-w-0 tw:border-0 tw:border-t tw:border-solid tw:border-border";
 
 /// A nested group's heading: its node's kind icon and its name, small and
 /// quiet; no box, no hairline after the name.
@@ -228,7 +228,8 @@ mod tests {
                 control("palette", UiPanelWidget::PaletteSwatch),
             ],
         )]));
-        let spans_the_row = |channel: &str| opening_tag(&html, channel).contains("tw:col-span-full");
+        let spans_the_row =
+            |channel: &str| opening_tag(&html, channel).contains("tw:col-span-full");
         assert!(!spans_the_row("speed"), "the Speed knob is a cell");
         assert!(!spans_the_row("sparkle"), "a toggle is a cell");
         assert!(spans_the_row("level"), "a fader is a strip");
@@ -258,7 +259,10 @@ mod tests {
         let module_icon = icon(node_kind_icon("Module"));
         let playlist_icon = icon(node_kind_icon("Playlist"));
         assert_ne!(module_icon, playlist_icon);
-        assert!(heading.contains(&module_icon), "the Module icon in {heading}");
+        assert!(
+            heading.contains(&module_icon),
+            "the Module icon in {heading}"
+        );
         assert!(!heading.contains(&playlist_icon), "{heading}");
         assert!(!html.contains("ux-panel-band"), "{html}");
     }
@@ -268,7 +272,10 @@ mod tests {
     #[test]
     fn controls_sit_in_the_lined_grid_with_no_gaps() {
         assert!(GRID_CLASS.contains("ux-panel-grid"), "{GRID_CLASS}");
-        assert!(!GRID_CLASS.contains(":gap-"), "the lines are the gaps: {GRID_CLASS}");
+        assert!(
+            !GRID_CLASS.contains(":gap-"),
+            "the lines are the gaps: {GRID_CLASS}"
+        );
         let html = render(panel(vec![section(None, vec![knob("speed")])]));
         let lines = html.find("ux-panel-lines").expect("the lines' clip");
         let speed = html.find(r#"data-panel-channel="speed""#).expect("speed");

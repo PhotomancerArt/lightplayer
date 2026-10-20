@@ -40,9 +40,10 @@ use crate::app::home::device_offer_story_fixtures::{
     STORY_BOARD_NOW, StoryBoardCard, StoryNewBoardCard, story_board_prefix,
 };
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
+use crate::app::module::PanelStoryLook;
 use crate::app::module::module_fixtures::{
     card_few_controls_panel, card_many_controls_panel, card_playful_panel, card_root_panel,
-    card_root_panel_held, card_small_dome_panel,
+    card_root_panel_held, card_small_dome_panel, held_at,
 };
 use crate::app::module::pattern_picker_fixtures::{
     CHOKER_SET, picker_offers, piece_panel, set_facts,
@@ -763,6 +764,40 @@ fn board_card_connected_playlist() -> Element {
 }
 
 #[story(
+    description = "The PLAYFUL card with two controls drawn under the pointer: the Scale cell and the Brightness strip each lighten and show their details circle (ⓘ), a 24 px circle in the cell's top-right corner, at the end of the strip's label row. Nothing else moves. The whole cell is the target: a knob drags from anywhere in its square, the brightness from anywhere along its strip (its track still jumps), and a tap with no drag opens the details."
+)]
+fn board_card_connected_hovered() -> Element {
+    rsx! {
+        StoryPanelLook { look: hovering(&["scale", "brightness"]),
+            section { class: "tw:p-4",
+                div { class: CARD_WIDTH_CLASS,
+                    {connected_card(card_playful_panel(), None)}
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A control's details, opened by a tap on its cell (or its ⓘ): the Scale knob's details card grows out of its cell, which stays lit above it, and says what the control is, its state and its scope. Tapping outside closes it."
+)]
+fn board_card_connected_details_open() -> Element {
+    rsx! {
+        StoryPanelLook {
+            look: PanelStoryLook {
+                hovered: Vec::new(),
+                details_open: Some("scale".to_string()),
+            },
+            section { class: "tw:h-[760px] tw:p-4",
+                div { class: CARD_WIDTH_CLASS,
+                    {connected_card(card_playful_panel(), None)}
+                }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The connected card's ⋯ open: below Running, the panel's two settings that are not controls — Held controls (the hue knob is held: \"1 held\" and Reset, which lets go of every held control) and Auto-save with its switch and what it does (\"Held values will come back after a restart.\") — then the terminal. With nothing held, the row reads \"None held\" and offers no Reset."
 )]
 fn board_card_connected_settings() -> Element {
@@ -834,12 +869,14 @@ fn board_card_connected_narrow() -> Element {
 }
 
 #[story(
-    description = "The big panel at a phone's width: the six root controls on the band (two strips, then four cells), then each effect under its own line and heading, its module icon and its name (Plasma 1, Plasma 2, Fire, Noise party), three cells to a line, a long label cut. The card is as tall as its panel."
+    description = "The big panel at a phone's width: the six root controls on the band (two strips, then four cells), then each effect under its own line and heading, its module icon and its name (Plasma 1, Plasma 2, Fire, Noise party), three cells to a line at 50 px, a long label cut. The Hue cell is held and drawn under the pointer: its two corner circles (↺ and ⓘ) show together in a 50 px cell, nearly touching, the only time they both show. The card is as tall as its panel."
 )]
 fn board_card_connected_many_controls_narrow() -> Element {
     rsx! {
-        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:items-start tw:gap-[9px] tw:p-3",
-            {connected_card(card_many_controls_panel(), None)}
+        StoryPanelLook { look: hovering(&["hue"]),
+            section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:items-start tw:gap-[9px] tw:p-3",
+                {connected_card(held_at(card_many_controls_panel(), &[("hue", 0.82)]), None)}
+            }
         }
     }
 }
@@ -871,13 +908,13 @@ fn board_card_connected_many_controls() -> Element {
 }
 
 #[story(
-    description = "A connected board with one control held (the hue knob, dragged on the card): gold, and its let-go glyph beside its label, exactly as on the panel everywhere else. Letting go returns it to following the project; the ⋯ holds the Reset that lets go of every held control."
+    description = "A connected board with two controls held, dragged on the card: the Brightness strip and the Hue cell, each gold, each with its let-go (↺), a 24 px circle in its top-left corner (at the start of the strip's label row). Neither label nor value moved when it came. Letting go returns a control to following the project; the ⋯ holds the Reset that lets go of every held control."
 )]
 fn board_card_connected_engaged() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: CARD_WIDTH_CLASS,
-                {connected_card(card_root_panel_held("hue", 0.82), None)}
+                {connected_card(held_at(card_root_panel(), &[("hue", 0.82), ("brightness", 180.0)]), None)}
             }
         }
     }
@@ -1759,6 +1796,25 @@ pub(crate) fn lens_feed() -> Option<DeviceCardFeedView> {
 /// play-only story); else it is on its USB cable, at the edit tier.
 pub(crate) fn connected_card(root: UiPanelGroup, access: Option<UiDeviceAccess>) -> Element {
     connected_card_open(root, access, None)
+}
+
+/// The card's panel drawn as a hand would leave it: some controls under
+/// the pointer, or one control's details open (stories cannot hover).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn StoryPanelLook(look: PanelStoryLook, children: Element) -> Element {
+    use_context_provider(|| look);
+    rsx! {
+        {children}
+    }
+}
+
+/// A look with `channels` drawn under the pointer.
+fn hovering(channels: &[&str]) -> PanelStoryLook {
+    PanelStoryLook {
+        hovered: channels.iter().map(|channel| channel.to_string()).collect(),
+        details_open: None,
+    }
 }
 
 /// [`connected_card`] with one part's details open.
