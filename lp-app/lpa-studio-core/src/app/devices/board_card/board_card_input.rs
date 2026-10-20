@@ -24,6 +24,7 @@ use crate::app::network::UiDeviceWifi;
 use crate::{OfferPath, UiOffer};
 
 use super::board_connection::BoardConnection;
+use super::board_links::BoardLinks;
 use super::ui_board_panel::UiBoardPanel;
 
 /// One board's card, as facts. See the module docs.
@@ -87,6 +88,9 @@ pub struct BoardCardInput<'a> {
     /// ([`super::board_panel_picks`]), while it is connected and its
     /// project is ready; the card draws it in the bars' place.
     pub panel: Option<&'a UiBoardPanel>,
+    /// What the link rows know beyond the link in use: the board's last
+    /// Wi‑Fi and Bluetooth, and who is signed in ([`BoardLinks`]).
+    pub links: BoardLinks<'a>,
     /// Now, epoch seconds (the controller's clock).
     pub now: f64,
 }
@@ -96,6 +100,16 @@ impl<'a> BoardCardInput<'a> {
     /// tree publishes it.
     pub fn offer(&self, verb: &str) -> Option<&'a UiOffer> {
         offer_at(self.offers, self.board, verb)
+    }
+
+    /// The board's offer at `segments` under its prefix
+    /// (`devices/<board>/wifi/enabled` is `["wifi", "enabled"]`), when the
+    /// tree publishes it.
+    pub fn offer_under(&self, segments: &[&str]) -> Option<&'a UiOffer> {
+        let path = segments
+            .iter()
+            .fold(self.board.clone(), |path, segment| path.child(*segment));
+        self.offers.iter().find(|offer| offer.path == path)
     }
 
     /// The model holds a link to the board (Disconnect is offered exactly
@@ -146,6 +160,32 @@ impl<'a> BoardCardInput<'a> {
     /// The link's kind, USB when nothing has named one.
     pub fn link_kind(&self) -> UiLinkKind {
         self.link.unwrap_or_default()
+    }
+
+    /// This tab reaches the board over `link` right now: the link in use
+    /// is that one, and the model holds it.
+    pub fn reached_over(&self, link: UiLinkKind) -> bool {
+        self.linked() && !self.offline() && self.link_kind() == link
+    }
+
+    /// The board's network status: as it answered on this link, else as it
+    /// last did (an offline board's, kept while it is on the roster).
+    pub fn network_status(&self) -> Option<&'a lpc_wire::server::NetworkStatus> {
+        self.wifi
+            .and_then(|wifi| wifi.status.as_ref())
+            .or(self.links.remembered_network)
+    }
+
+    /// Bluetooth on or off: on, when this tab reaches the board by it;
+    /// else what its access file says, now or last.
+    pub fn bluetooth_on(&self) -> Option<bool> {
+        if self.reached_over(UiLinkKind::Bluetooth) {
+            return Some(true);
+        }
+        self.access
+            .and_then(|access| access.panel.as_ref())
+            .and_then(|panel| panel.ble_enabled)
+            .or(self.links.remembered_bluetooth)
     }
 
     /// This tab has no open link to the board: it is offline, or its port

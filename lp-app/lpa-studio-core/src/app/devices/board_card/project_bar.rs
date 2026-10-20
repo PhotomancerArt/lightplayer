@@ -13,7 +13,7 @@
 //! | No LightPlayer on it (blank, somebody else's firmware) | "none" | — | Neutral | — (Install firmware is the primary) |
 //! | A shader error (degraded) | the project | "error" | Error | — (the error is in the details) |
 //! | Given an older version than the project's newest | the project | "out of date" | Neutral | "Send latest" (`push`, the project preset) |
-//! | Says it runs nothing | "none", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker), unless the primary carries it |
+//! | Says it runs nothing | "none", or what starts at its next power-up | — | Neutral | "Add" (`push`, the picker): a to-do, lit |
 //! | Open in the editor, or given the newest | the project | "N boards" when shared | Neutral | Edit |
 //! | Runs something this library cannot name | its label | — | Neutral | Edit |
 //! | Has not said yet, a LightPlayer on a link | — (the spinner, a moment) | — | Neutral | — |
@@ -31,13 +31,14 @@
 //! offered only when the board can take a project and has said what it
 //! runs; without it there is no action, and the words stay. On a ready
 //! board running no project, Add a project is the card's primary
-//! ([`super::primary_action::add_a_project`]), and the row does not repeat
-//! it.
+//! ([`super::primary_action::add_a_project`]) and the row carries the same
+//! pick as "Add", lit as a to-do (P19's accepted repeat: the row is where
+//! a project lives).
 //!
 //! **Edit** (D32) takes the slot whenever no project state does: Edit
 //! (`edit`, pencil) on a board you can edit, Edit with a lock (`unlock`, the
 //! password sheet) on a play-only one ([`edit_action`]). When "Send latest"
-//! or "Add a project" holds the slot, Edit is in the project's details. It
+//! or "Add" holds the slot, Edit is in the project's details. It
 //! is where `edit` is offered, so never on the editor's docked card (the
 //! editor already shows the board). While the board is connected the rows
 //! give way to its panel, and the same action rides the panel's All
@@ -49,11 +50,9 @@ use lpa_devices::view::{FirmwareFace, LoadedProject};
 use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{danger, facts, notice, verbs, without_empty};
-use super::primary_action::{ADD_A_PROJECT, primary_action};
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
-use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::board_plays::BoardPlays;
 use crate::app::devices::device_push_offer::PUSH_SOURCE_PARAM;
@@ -62,6 +61,8 @@ use crate::{OfferArgs, RichLine, UiStatusKind};
 
 /// The name of a board that plays nothing.
 pub const PROJECT_NONE: &str = "none";
+/// The Project row's to-do on a board that plays nothing: the project pick.
+pub const ADD: &str = "Add";
 /// The name on a locked board: it plays something, and the link may not
 /// say what.
 pub const PROJECT_HIDDEN: &str = "hidden";
@@ -91,6 +92,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let mut way_out = None;
     let mut stale = false;
     let mut waiting = false;
+    let mut todo = false;
     let (summary, aside, tone, action) = if input.locked() {
         (
             PROJECT_HIDDEN.to_string(),
@@ -161,18 +163,25 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                         )
                 }),
             ),
-            BoardPlays::Nothing => (
-                note.map_or_else(|| PROJECT_NONE.to_string(), |note| note.line.clone()),
-                None,
-                UiStatusKind::Neutral,
-                push.filter(|_| !primary_adds_a_project(input)).map(|push| {
-                    UiCardAction::press(push, ADD_A_PROJECT)
-                        .with_icon("add")
-                        .drawn(UiActionDraw::ProjectPick {
+            // A new board's to-do: Add, the same pick the primary's Add a
+            // project opens (P19's accepted repeat: the row teaches where a
+            // project lives, the primary says what is next).
+            BoardPlays::Nothing => {
+                let add = push.map(|push| {
+                    UiCardAction::press(push, ADD).with_icon("add").drawn(
+                        UiActionDraw::ProjectPick {
                             board_id: view.board_id.clone(),
-                        })
-                }),
-            ),
+                        },
+                    )
+                });
+                todo = add.is_some() && note.is_none();
+                (
+                    note.map_or_else(|| PROJECT_NONE.to_string(), |note| note.line.clone()),
+                    None,
+                    UiStatusKind::Neutral,
+                    add,
+                )
+            }
             BoardPlays::Open { .. } | BoardPlays::Given { at_head: true, .. } => (
                 name.unwrap_or_default(),
                 (input.sharing >= 2).then(|| format!("{} boards", input.sharing)),
@@ -226,6 +235,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         action: if running { None } else { action },
         way_out: if running { None } else { way_out },
         stale,
+        todo: todo && !running,
         details: details(
             input,
             tone,
@@ -264,7 +274,7 @@ pub(crate) fn data_lost(input: &BoardCardInput<'_>) -> bool {
     input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some()
 }
 
-/// Edit, as the Project row and the connected panel's All controls row
+/// Edit, as the Project row and the connected panel's foot
 /// draw it (D32, CD15): `edit` with the pencil on a board you can edit, or
 /// Edit with a lock — the `unlock` sheet — on a board whose link holds play
 /// only (an editor there could not edit). `None` where `edit` is not
@@ -282,15 +292,6 @@ pub(crate) fn edit_action(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
         );
     }
     Some(UiCardAction::press(edit, "Edit").with_icon("edit"))
-}
-
-/// Whether the card's primary is Add a project (a ready board running no
-/// project): the row then does not draw the same button again.
-fn primary_adds_a_project(input: &BoardCardInput<'_>) -> bool {
-    matches!(
-        primary_action(input, None),
-        Some(UiPrimary::Offer(action)) if action.word == ADD_A_PROJECT
-    )
 }
 
 /// A new board's Project row: while it is still saying who it is, nothing
@@ -313,6 +314,7 @@ pub(crate) fn pending_project_bar(pending: &lpa_devices::view::PendingLinkView) 
     );
     UiStackBar {
         details: UiBarDetails {
+            switch: None,
             sections: vec![known],
             panels: Vec::new(),
             raised: false,
@@ -429,6 +431,7 @@ fn details(
             .collect(),
     ));
     UiBarDetails {
+        switch: None,
         sections: without_empty(sections),
         panels,
         raised: false,
@@ -441,6 +444,7 @@ mod tests {
     use lpa_devices::device::DeviceStatus;
 
     use super::super::card_fixtures::{CardFixture, activity, library_project};
+    use super::super::ui_name_bar::UiPrimary;
     use super::*;
 
     #[test]
@@ -525,10 +529,10 @@ mod tests {
         );
     }
 
-    /// A ready board running no project says "none"; Add a project is the
-    /// card's primary, so the row does not repeat it.
+    /// A ready board running no project says "none" with Add, lit: a
+    /// to-do, the same pick as the primary's Add a project.
     #[test]
-    fn an_empty_board_says_none_and_leaves_add_a_project_to_the_primary() {
+    fn an_empty_board_says_none_with_add_as_a_to_do() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.view.can_remove_project = false;
@@ -536,8 +540,12 @@ mod tests {
         let bar = project_bar(&fixture.input());
         assert_eq!(bar.summary, "none");
         assert_eq!(bar.tone, UiStatusKind::Neutral);
-        assert_eq!(bar.action, None, "the primary carries Add a project");
-        let Some(UiPrimary::Offer(primary)) = primary_action(&fixture.input(), None) else {
+        assert!(bar.todo, "lit: something left to do");
+        let add = bar.action.clone().expect("Add");
+        assert_eq!(add.word, "Add");
+        let Some(UiPrimary::Offer(primary)) =
+            super::super::primary_action::primary_action(&fixture.input(), None)
+        else {
             panic!("Add a project is the primary");
         };
         assert_eq!(primary.word, "Add a project");
@@ -546,20 +554,25 @@ mod tests {
             primary.draw,
             UiActionDraw::ProjectPick { board_id: Some(_) }
         ));
+        assert_eq!(
+            (add.offer, add.draw),
+            (primary.offer, primary.draw),
+            "the same pick"
+        );
     }
 
     /// Where the primary is something else (the editor's docked card shows
-    /// Done), the row keeps Add a project as its action.
+    /// Done), the row keeps Add as its action.
     #[test]
-    fn the_row_keeps_add_a_project_when_the_primary_is_another_verb() {
+    fn the_row_keeps_add_when_the_primary_is_another_verb() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.view.can_remove_project = false;
         fixture.plays = BoardPlays::Nothing;
         fixture.editor_holds_it = true;
         fixture.docked = true;
-        let action = project_bar(&fixture.input()).action.expect("Add a project");
-        assert_eq!(action.word, "Add a project");
+        let action = project_bar(&fixture.input()).action.expect("Add");
+        assert_eq!(action.word, "Add");
         assert!(action.offer.to_string().ends_with("/push"));
     }
 

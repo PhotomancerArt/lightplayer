@@ -158,7 +158,6 @@ mod tests {
                 unit: None,
                 state: UiSlotFieldState::editable(),
                 aspects: Vec::new(),
-                wires: Vec::new(),
             },
             state,
             source: None,

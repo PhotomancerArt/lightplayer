@@ -30,6 +30,13 @@ has already blessed it against the images it built and posted the patch
 just apply-ci-figures <pr>        # download CI's figure patches and apply them; then commit and push
 ```
 
+One record rides the same comment and the same apply command with a rule of
+its own: the C6's **first-light ratchet**
+(`scripts/first-light-record/esp32c6.json`, the `C6 first light` job). A drop
+is a patch like any figure's; a rise of more than 5 ms on a product change is
+**Yona's to bless** (`just bless-first-light`), CI hands back no patch for it,
+and `apply-ci-figures` refuses one. See [first-light-ratchet.md](first-light-ratchet.md).
+
 ## What a figure is, and what is not
 
 Every pinned number is one of two kinds, and the kind decides where it lives.

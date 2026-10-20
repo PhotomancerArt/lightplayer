@@ -992,6 +992,16 @@ impl AccessController {
     // --- views ------------------------------------------------------------
 
     /// The access facts for one card.
+    /// Bluetooth on or off, as `device`'s access file last said (kept by
+    /// identity across a dropped link): the card's last value for an
+    /// offline board's Bluetooth row.
+    pub fn remembered_bluetooth(&self, device: &Device) -> Option<bool> {
+        let key = record_key(&device.identity)?;
+        self.records
+            .get(&key)
+            .map(|record| record.listing.ble_enabled)
+    }
+
     pub fn device_view(&self, device: &Device) -> Option<UiDeviceAccess> {
         let over_bluetooth = is_bluetooth(device);
         let untrusted = is_untrusted(device);

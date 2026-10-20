@@ -13,10 +13,11 @@
 use lpa_devices::view::PendingLinkView;
 
 use super::access_bar::{access_bar, pending_access_bar};
+use super::bluetooth_bar::bluetooth_bar;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
 use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
-use super::connection_bar::{connection_bar, pending_connection_bar};
+use super::cloud_bar::cloud_bar;
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
@@ -31,6 +32,8 @@ use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
+use super::usb_bar::{pending_link_bars, usb_bar};
+use super::wifi_bar::wifi_bar;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
 
@@ -38,7 +41,10 @@ use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind}
 pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     let bars: Vec<UiStackBar> = vec![
         project_bar(input),
-        connection_bar(input),
+        usb_bar(input),
+        wifi_bar(input),
+        bluetooth_bar(input),
+        cloud_bar(input),
         access_bar(input),
         firmware_bar(input),
         hardware_bar(input),
@@ -63,7 +69,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         primary.as_ref(),
         state_action(input, state).as_ref(),
     );
-    let bars = quiet_rows(bars, carried_layer(state));
+    let bars = quiet_rows(bars, carried_layer(input, state));
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -75,10 +81,11 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         },
         picture,
         surface,
-        status: status_corner(input, &bars),
+        status: status_corner(input, &bars, panel.as_ref()),
         name_bar: UiNameBar {
             title: input.view.title.clone(),
             place: None,
+            rename: input.offer("rename").map(|rename| rename.path.clone()),
             primary,
         },
         bars,
@@ -118,7 +125,7 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
 /// A row whose work failed says why in its details, first: its notice is
 /// the failure, with the row's Retry, and the status corner reads it from
 /// there like any notice. The row itself says only that it failed ("send
-/// failed", "USB · connection failed"), never the sentence (P5).
+/// failed", "connection failed"), never the sentence (P5).
 fn with_failure_notice(mut bar: UiStackBar) -> UiStackBar {
     if let Some(UiBarWork {
         state: BarWorkState::Failed { retry },
@@ -140,10 +147,11 @@ fn with_failure_notice(mut bar: UiStackBar) -> UiStackBar {
     bar
 }
 
-/// The board's panel on its card: the controller's picks, while the session
-/// is connected here and its project is ready (CD7), with Edit (or its lock)
-/// at the end of the All controls row — the project bar's own action, built
-/// by the same function (CD15) — and auto-save only at the edit tier (Q12).
+/// The board's panel on its card: every control of the project's root
+/// panel, while the session is connected here and its project is ready
+/// (CD7), with Edit (or its lock) at its foot — the project bar's own
+/// action, built by the same function (CD15) — and auto-save only at the
+/// edit tier (Q12), for the ⋯ menu.
 fn connected_panel(input: &BoardCardInput<'_>) -> Option<UiBoardPanel> {
     let picks = input.panel.filter(|_| input.connection.is_connected())?;
     Some(UiBoardPanel {
@@ -205,15 +213,20 @@ pub fn pending_board_card(
         name_bar: UiNameBar {
             title: pending.title.clone(),
             place: None,
+            rename: offers
+                .iter()
+                .find(|offer| offer.path == board.clone().child("rename"))
+                .map(|rename| rename.path.clone()),
             primary,
         },
-        bars: vec![
-            pending_project_bar(pending),
-            pending_connection_bar(pending, link),
-            pending_access_bar(pending),
-            pending_firmware_bar(pending),
-            pending_hardware_bar(pending, board, offers),
-        ],
+        bars: std::iter::once(pending_project_bar(pending))
+            .chain(pending_link_bars(pending, link))
+            .chain([
+                pending_access_bar(pending),
+                pending_firmware_bar(pending, board, offers),
+                pending_hardware_bar(pending, board, offers),
+            ])
+            .collect(),
         panel: None,
     };
     debug_assert_offered(&card, offers);
@@ -251,7 +264,7 @@ mod tests {
     use crate::app::devices::device_card_feed_view::FeedLiveness;
 
     #[test]
-    fn a_card_has_its_five_bars_in_order() {
+    fn a_card_has_its_eight_rows_in_order() {
         let card = board_card(&CardFixture::ready().input());
         let layers: Vec<BarLayer> = card.bars.iter().map(|bar| bar.layer).collect();
         assert_eq!(layers, BarLayer::ALL);
@@ -259,6 +272,52 @@ mod tests {
         assert_eq!(card.name_bar.place, None);
         assert_eq!(card.presence, UiBoardPresence::Online);
         assert_eq!(card.board.to_string(), "devices/mac-a0f26287b48c");
+    }
+
+    /// AC4: a new board's to-do rows are lit, and only those. Installed and
+    /// signed out: Project (none · Add), Wi‑Fi (not connected · Set up) and
+    /// lightplayer.app (not connected · Sign in). Signed in, lightplayer.app
+    /// waits on Wi‑Fi — its fix is the Wi‑Fi row's — so it is not lit. A
+    /// blank chip: Firmware (none · Install).
+    #[test]
+    fn a_new_boards_to_do_rows_are_lit_and_only_those() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.loaded_project = lpa_devices::view::LoadedProject::Empty;
+        fixture.view.can_remove_project = false;
+        fixture.plays = crate::app::devices::board_plays::BoardPlays::Nothing;
+        fixture.wifi = Some(crate::UiDeviceWifi {
+            status: Some(lpc_wire::server::NetworkStatus {
+                wifi: true,
+                cloud_relay: true,
+                networks: Vec::new(),
+                station: lpc_wire::server::StationState::NotConnected,
+                relay: lpc_wire::server::RelayState::NoAccount,
+            }),
+            ..crate::UiDeviceWifi::new(fixture.view.id, true)
+        });
+        let lit = |fixture: &mut CardFixture| -> Vec<BarLayer> {
+            board_card(&fixture.input())
+                .bars
+                .iter()
+                .filter(|bar| bar.todo)
+                .map(|bar| bar.layer)
+                .collect()
+        };
+        assert_eq!(
+            lit(&mut fixture),
+            [BarLayer::Project, BarLayer::Wifi, BarLayer::Cloud]
+        );
+        fixture.account = Some("Yona".to_string());
+        assert_eq!(lit(&mut fixture), [BarLayer::Project, BarLayer::Wifi]);
+
+        let mut blank = CardFixture::ready();
+        blank.view.status = DeviceStatus::NeedsAttention;
+        blank.view.firmware_face = lpa_devices::view::FirmwareFace::Blank;
+        blank.view.loaded_project = lpa_devices::view::LoadedProject::Unknown;
+        blank.view.can_receive_project = false;
+        blank.view.can_remove_project = false;
+        blank.plays = crate::app::devices::board_plays::BoardPlays::Unknown;
+        assert_eq!(lit(&mut blank), [BarLayer::Firmware]);
     }
 
     /// The card can only point at verbs core offered: in every state a test
@@ -303,18 +362,29 @@ mod tests {
     }
 
     /// CD7 and CD15: connected with its project ready, the card carries the
-    /// panel (the bars are still built), its primary is Done, and Edit sits
-    /// at the end of the All controls row — the project bar's own action.
-    /// Auto-save rides along at the edit tier.
+    /// whole panel (the bars are still built), its primary is Done, and Edit
+    /// sits at the panel's foot — the project bar's own action. The ⋯ holds
+    /// the panel's reset and, at the edit tier, auto-save.
     #[test]
-    fn a_connected_card_carries_the_panel_with_edit_at_its_end() {
+    fn a_connected_card_carries_the_panel_with_edit_at_its_foot() {
         let mut fixture = connected(CardFixture::ready());
         let card = board_card(&fixture.input());
         let panel = card.panel.clone().expect("the panel");
-        assert_eq!(panel.controls.len(), 1);
-        assert_eq!(panel.more, 2);
+        assert_eq!(panel.controls().count(), 3, "every control");
         assert_eq!(panel.auto_save, Some(true), "USB is the edit tier");
-        let edit = panel.edit.clone().expect("Edit on the All controls row");
+        assert!(
+            card.status
+                .details
+                .panels
+                .contains(&UiDetailPanel::PanelSettings {
+                    target: panel.target,
+                    held: 0,
+                    auto_save: Some(true),
+                }),
+            "the ⋯ holds the reset and auto-save: {:?}",
+            card.status.details.panels
+        );
+        let edit = panel.edit.clone().expect("Edit at the panel's foot");
         assert_eq!(edit.word, "Edit");
         assert_eq!(edit.icon.as_deref(), Some("edit"));
         assert_eq!(
@@ -322,7 +392,7 @@ mod tests {
             card.bar(BarLayer::Project).action.as_ref(),
             "one function builds both"
         );
-        assert_eq!(card.bars.len(), 5, "the bars are still built");
+        assert_eq!(card.bars.len(), 8, "the rows are still built");
         assert_eq!(
             card.name_bar
                 .primary
@@ -361,8 +431,19 @@ mod tests {
             }),
             ..crate::UiDeviceAccess::default()
         });
-        let panel = board_card(&fixture.input()).panel.expect("the panel");
+        let card = board_card(&fixture.input());
+        let panel = card.panel.expect("the panel");
         assert_eq!(panel.auto_save, None, "below the edit tier");
+        assert!(
+            !card.status.details.panels.iter().any(|panel| matches!(
+                panel,
+                UiDetailPanel::PanelSettings {
+                    auto_save: Some(_),
+                    ..
+                }
+            )),
+            "no auto-save in the ⋯ either"
+        );
         let edit = panel.edit.expect("Edit, locked");
         assert_eq!(edit.icon.as_deref(), Some("lock"));
         assert!(edit.offer.to_string().ends_with("/unlock"));
@@ -400,7 +481,7 @@ mod tests {
                 "the picture dims under the notice"
             );
             assert_eq!(
-                card.bar(BarLayer::Connection).tone,
+                card.bar(BarLayer::Usb).tone,
                 UiStatusKind::Neutral,
                 "the surface says someone has it, once (P2)"
             );
@@ -425,10 +506,7 @@ mod tests {
                     .and_then(|primary| primary.word()),
                 Some("Connect here")
             );
-            assert_eq!(
-                card.bar(BarLayer::Connection).summary,
-                "Open in another tab"
-            );
+            assert_eq!(card.bar(BarLayer::Usb).summary, "Open in another tab");
         }
     }
 
@@ -450,7 +528,8 @@ mod tests {
         assert_eq!(card.presence, UiBoardPresence::New);
         assert_eq!(card.status.mark, CornerMark::Blank);
         assert_eq!(card.name_bar.title, "New board");
-        assert_eq!(card.bars.len(), 5);
+        let layers: Vec<BarLayer> = card.bars.iter().map(|bar| bar.layer).collect();
+        assert_eq!(layers, BarLayer::ALL, "a new board has the eight rows too");
         assert!(matches!(
             card.status.details.panels.as_slice(),
             [UiDetailPanel::Terminal { lines, dropped: 0 }] if lines.is_empty()
@@ -466,8 +545,8 @@ mod tests {
         assert_eq!(card.panel, None);
     }
 
-    /// `fixture`, connected on its card with its project's picks: one
-    /// master fader, and two controls the card does not draw.
+    /// `fixture`, connected on its card with its project's panel: the
+    /// master, a fader and a palette.
     fn connected(mut fixture: CardFixture) -> CardFixture {
         fixture.editor_holds_it = true;
         fixture.connection = BoardConnection::Connected;
@@ -487,7 +566,6 @@ mod tests {
                     unit: None,
                     state: crate::UiSlotFieldState::editable(),
                     aspects: Vec::new(),
-                    wires: Vec::new(),
                 },
             )
         };
@@ -496,11 +574,15 @@ mod tests {
             max: 1.0,
             step: None,
         };
-        let root = crate::UiPanelGroup::new("Porch", "/").with_controls(vec![
-            control(super::super::MASTER_CHANNEL, fader()),
-            control("level", fader()),
-            control("palette", crate::UiPanelWidget::PaletteSwatch),
-        ]);
+        let root = crate::UiPanelGroup::new("Porch", "/")
+            .with_target(lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            })
+            .with_controls(vec![
+                control(super::super::MASTER_CHANNEL, fader()),
+                control("level", fader()),
+                control("palette", crate::UiPanelWidget::PaletteSwatch),
+            ]);
         fixture.panel = Some(super::super::board_panel_picks(&root, Some(true)));
         fixture
     }

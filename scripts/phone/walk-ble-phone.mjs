@@ -200,12 +200,15 @@ async function main() {
       }
       const face = await driver.boardRuns({ board: mac, timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") throw new Error(`${info.slug} has no project loaded; load one (over USB) and walk again`);
-      await driver.openBar("connection", { board: mac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitBar("bluetooth", /^Bluetooth \S+ connected\b/, { board: mac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.openBar("bluetooth", { board: mac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
-        `(() => { const panel = ${CARD}?.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]');
-                  return Boolean(panel) && (panel.innerText || '').includes('turn off by USB')
-                    && Boolean(panel.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled')); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the connection details' locked Bluetooth switch (this link is Bluetooth)" },
+        `(() => { const panel = ${CARD}?.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
+                  const head = panel?.querySelector('[data-detail-switch="bluetooth"]');
+                  const sw = head?.querySelector('[data-offer-path$="/bluetooth/enabled"] [role="switch"]');
+                  const why = head?.querySelector('[data-detail-switch-refused]')?.textContent || '';
+                  return Boolean(sw) && sw.disabled && sw.getAttribute('aria-checked') === 'true' && why.includes('turned off by USB'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's switch, locked on (this link is Bluetooth)" },
       );
       await driver.closeDetails({ board: mac });
       return `the card is ${info.mac}, running a project, on Bluetooth`;
@@ -249,11 +252,11 @@ async function main() {
 
     await step("card-done", "Done: the session closes and the card shows its facts", async () => {
       await driver.pressOffer("done", { board: mac, timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 5`, {
+      await driver.waitFor(`Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 8`, {
         timeoutMs: STEP_DEADLINE_MS,
-        what: "the card's five bars",
+        what: "the card's eight rows",
       });
-      return "the card's five bars again";
+      return "the card's eight rows again";
     });
 
     await step("card", `the card's picture at the Bluetooth pace, moving over ${CARD_WINDOW_MS / 1000} s`, async () => {

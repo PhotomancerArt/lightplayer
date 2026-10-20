@@ -84,6 +84,22 @@ pub struct Device {
     /// activities ago must not be able to look current.
     #[serde(default)]
     next_effect_id: u64,
+    /// Studio wiped this board's flash (a Factory reset that ended well),
+    /// and nothing heard since shows firmware on it: the flash is blank,
+    /// whether or not the board says so.
+    ///
+    /// Studio's own knowledge, not evidence: an erased chip can be silent
+    /// (the flasher's stub, or a boot loop lost to its re-enumerations), and
+    /// silence from a board that once said hello reads as "stopped
+    /// responding", with Retry — a dead end for a board that is waiting
+    /// for firmware (2026-10-19, a real C6:
+    /// docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
+    /// Set when an Erase ends well; cleared by any firmware verdict (a
+    /// hello, a core, other firmware) and by a flash or update that ends
+    /// well. Kept for this session only: what a reload knows is what the
+    /// board shows, and the erase cleared the record's firmware label.
+    #[serde(default)]
+    erased: bool,
 }
 
 impl Device {
@@ -98,6 +114,7 @@ impl Device {
             armed_timer: None,
             identify_retries: 0,
             next_effect_id: 0,
+            erased: false,
         }
     }
 
@@ -342,6 +359,7 @@ impl Device {
             .evidence
             .fold(now, event, &mut self.identity, ctx.config);
         self.journal_notes(now, notes, ctx);
+        self.forget_erase_on_firmware();
         self.rearm(now, ctx)
     }
 
@@ -813,6 +831,7 @@ impl Device {
             )
         });
         self.journal_notes(now, notes, ctx);
+        self.forget_erase_on_firmware();
 
         // 2. Coarse-effect progress lands on the cell (display only).
         if let Event::ActivityMarker {
@@ -971,6 +990,25 @@ impl Device {
                     },
                 );
                 let failed = matches!(outcome, ActivityOutcome::Failed { .. });
+                match cell.kind {
+                    // A Factory reset that went well: the flash is blank,
+                    // and Studio knows it without the board saying so. The
+                    // firmware the record remembers is gone with it, so the
+                    // board is no longer one that "spoke LightPlayer" — its
+                    // silence is a blank chip's, never "stopped responding".
+                    ActivityKind::Erase if outcome.is_success() => {
+                        self.erased = true;
+                        if let Some(record) = &mut self.record {
+                            record.firmware = None;
+                        }
+                    }
+                    // New firmware on the flash: whatever the erase taught
+                    // is over (its hello would say so too).
+                    ActivityKind::Flash | ActivityKind::Update if outcome.is_success() => {
+                        self.erased = false;
+                    }
+                    _ => {}
+                }
                 // An update's typed ending outlives the activity on the
                 // evidence (the card's words are made of it) — the driver's
                 // word, or the model's own when the board never came back.
@@ -1141,9 +1179,12 @@ pub enum DeviceStatus {
     /// "Running" over a black strip).
     Degraded,
     /// Identified as something else: blank, bootloader, foreign,
-    /// incompatible.
+    /// incompatible — or silent, from a board that never said hello or
+    /// that Studio erased ([`Device::known_blank`]).
     NeedsAttention,
-    /// Attached and open, but saying nothing.
+    /// Attached and open, but saying nothing: a board that has spoken
+    /// LightPlayer ([`Device::spoke_light_player`]) went quiet, or a
+    /// window reopened under an evicted activity has no verdict yet.
     NotResponding,
 }
 
@@ -1187,12 +1228,84 @@ impl Device {
             | Classification::OlderLightPlayer { .. }
             | Classification::Foreign { .. } => DeviceStatus::NeedsAttention,
             Classification::Quiet { .. } | Classification::Unknown => {
-                if self.evidence.presence.is_open() {
-                    DeviceStatus::NotResponding
-                } else {
-                    DeviceStatus::Attached
+                // A board Studio erased is blank, heard or not: actionable
+                // as stored, like the blank verdict it stands in for.
+                if self.erased {
+                    return DeviceStatus::NeedsAttention;
+                }
+                if !self.evidence.presence.is_open() {
+                    return DeviceStatus::Attached;
+                }
+                // Settled silence from a board that never said hello is
+                // what it is, not a board that stopped: a chip whose
+                // firmware prints nothing (a factory one) needs firmware,
+                // as a blank chip does — its face, Silent, asks for the
+                // flash (2026-10-18: a first-time user's new board read
+                // "stopped responding", with Retry, a dead end). Only a
+                // board that has spoken LightPlayer stops responding.
+                //
+                // `Unknown` stays NotResponding for every board: an idle
+                // device is there only after an activity was evicted and
+                // its port reopened (a flash past its deadline, a cancel
+                // that did not wind down), so the board did stop answering
+                // the work under way, and Retry is what asks it again.
+                match &self.evidence.classification {
+                    Classification::Quiet { .. } if !self.spoke_light_player() => {
+                        DeviceStatus::NeedsAttention
+                    }
+                    _ => DeviceStatus::NotResponding,
                 }
             }
+        }
+    }
+
+    /// Whether this board has said hello as a LightPlayer: in the current
+    /// window, or ever before — the record keeps the firmware label of the
+    /// last hello it heard ([`DeviceRecord::firmware`]), learned on this
+    /// link earlier or remembered from another session by the MAC that
+    /// found the record, and cleared only by a Factory reset (the firmware
+    /// that said it is gone).
+    ///
+    /// Read off the hello and nothing weaker. A MAC is not proof: the flash
+    /// preflight learns a blank chip's MAC from its ROM. Nor is the
+    /// record's board id, which the provisioning flow's board pick writes
+    /// too.
+    pub fn spoke_light_player(&self) -> bool {
+        self.evidence.classification.is_light_player()
+            || self
+                .record
+                .as_ref()
+                .is_some_and(|record| record.firmware.is_some())
+    }
+
+    /// Whether the board's flash is blank because Studio erased it, and
+    /// nothing heard since says otherwise (a Factory reset that ended well,
+    /// this session): what the card
+    /// reads as a blank chip while the board itself says nothing — never
+    /// on a board that is not plugged in, which says nothing about it.
+    pub fn known_blank(&self) -> bool {
+        self.erased
+            && self.evidence.presence.is_attached()
+            && matches!(
+                self.evidence.classification,
+                Classification::Quiet { .. } | Classification::Unknown
+            )
+    }
+
+    /// A firmware verdict ends what an erase taught: the board shows what
+    /// its flash holds now. A blank or download-mode verdict agrees with
+    /// it, and silence says nothing either way.
+    fn forget_erase_on_firmware(&mut self) {
+        if self.erased
+            && !matches!(
+                self.evidence.classification,
+                Classification::Quiet { .. }
+                    | Classification::Unknown
+                    | Classification::Blank
+                    | Classification::Bootloader
+            )
+        {
+            self.erased = false;
         }
     }
 
@@ -1749,6 +1862,144 @@ mod tests {
         );
     }
 
+    /// 2026-10-18, lightplayer.app: a first-time user's new board, its
+    /// factory firmware printing nothing, read "Not responding" with Retry
+    /// — "duh, I'm trying to program it". A board that never said hello
+    /// and settles silent needs firmware, as a blank chip does.
+    #[test]
+    fn a_board_that_never_said_hello_and_says_nothing_needs_firmware() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        let id = device.id;
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::Action(Action::Connect { device: id }),
+        );
+        harness.feed(
+            &mut device,
+            Millis(10),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        let now = harness.settle(&mut device, Millis(10));
+
+        assert!(!device.spoke_light_player());
+        assert!(matches!(
+            device.evidence.classification,
+            Classification::Quiet { .. }
+        ));
+        assert_eq!(device.status(), DeviceStatus::NeedsAttention);
+        let view = crate::view::device_view(&device, now);
+        assert_eq!(view.firmware_face, crate::view::FirmwareFace::Silent);
+        assert!(view.needs_firmware(), "its face asks for the flash");
+        assert_eq!(view.state_label, "No response — needs firmware");
+    }
+
+    /// The other half: a board that HAS said hello — on this link earlier,
+    /// or remembered from another session by its record — and now says
+    /// nothing on its open port stopped responding, and keeps Retry.
+    #[test]
+    fn a_board_that_said_hello_and_went_quiet_is_not_responding() {
+        // On this link: a hello, then a window that hears nothing.
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        device.record = Some(DeviceRecord::new(device.id, device.identity.clone()));
+        let id = device.id;
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::Action(Action::Connect { device: id }),
+        );
+        harness.feed(
+            &mut device,
+            Millis(10),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        harness.feed(
+            &mut device,
+            Millis(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Frame(ServerFrame::hello(
+                    1,
+                    HelloFacts {
+                        proto: harness.config.expected_proto,
+                        firmware: Some("fw-esp32c6 2026.10.16-1".to_string()),
+                        ..Default::default()
+                    },
+                )),
+            ),
+        );
+        let now = harness.settle(&mut device, Millis(20));
+        assert_eq!(device.status(), DeviceStatus::Ready, "setup: it said hello");
+
+        harness.feed(
+            &mut device,
+            now.plus_ms(10),
+            Input::Action(Action::Identify { device: id }),
+        );
+        harness.feed(
+            &mut device,
+            now.plus_ms(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        let now = harness.settle(&mut device, now.plus_ms(20));
+        assert!(device.spoke_light_player());
+        assert!(matches!(
+            device.evidence.classification,
+            Classification::Quiet { .. }
+        ));
+        assert_eq!(device.status(), DeviceStatus::NotResponding);
+        let view = crate::view::device_view(&device, now);
+        assert!(view.escapes.contains(&crate::view::Escape::Retry));
+
+        // Remembered by its record (another session's hello), silent now.
+        let mut record = DeviceRecord::new(DeviceId(2), IdentityChain::default());
+        record.firmware = Some("fw-esp32c6 2026.10.16-1".to_string());
+        let mut remembered = Device::from_record(record);
+        remembered.fold_only(
+            Millis(0),
+            &Event::LinkAttached {
+                link: LinkId(2),
+                info: LinkInfo::default(),
+            },
+            &mut harness.ctx(),
+        );
+        let id = remembered.id;
+        harness.feed(
+            &mut remembered,
+            Millis(0),
+            Input::Action(Action::Connect { device: id }),
+        );
+        harness.feed(
+            &mut remembered,
+            Millis(10),
+            Input::link(
+                LinkId(2),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        harness.settle(&mut remembered, Millis(10));
+        assert_eq!(remembered.status(), DeviceStatus::NotResponding);
+    }
+
     struct Harness {
         config: RosterConfig,
         journal: Journal,
@@ -1791,6 +2042,22 @@ mod tests {
 
         fn feed(&mut self, device: &mut Device, now: Millis, input: Input) -> Vec<Command> {
             device.handle(now, &input, &mut self.ctx())
+        }
+
+        /// Fire the device's armed timer past each identify deadline until
+        /// nothing runs (a silent identify re-asks up to its cap). Returns
+        /// the time it settled at.
+        fn settle(&mut self, device: &mut Device, mut now: Millis) -> Millis {
+            while device.is_busy() {
+                let armed = device.armed_timer.expect("a busy device arms a timer");
+                now = now.plus_ms(self.config.identify_deadline_ms + 1);
+                let timer = crate::time::TimerId {
+                    scope: device.scope(),
+                    seq: armed.0,
+                };
+                self.feed(device, now, Input::Event(Event::TimerFired { timer }));
+            }
+            now
         }
 
         fn journal_len(&self) -> usize {

@@ -37,6 +37,9 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::{capture_field_pointer, field_wiring};
 
 use super::PanelEmit;
+use super::speed_knob::{
+    speed_knob_drag_value, speed_knob_fraction, speed_knob_key_value, speed_knob_ticks,
+};
 use crate::app::node::gesture_hold::use_gesture_hold;
 
 /// Vertical drag distance (CSS px) that sweeps the knob across its whole
@@ -71,6 +74,13 @@ pub fn KnobField(
     /// produces it.
     #[props(default = false)]
     invert: bool,
+    /// The clock's Speed knob ([`lpa_studio_core::UiPanelWidget::Speed`]):
+    /// the stored number is a rate, swept log ¼×–8× with 1× at the top
+    /// centre, seated on the octave stops the marks show; the arrows step
+    /// stop to stop and a double-click returns it to 1× (the tape fader's
+    /// feel, `super::speed_knob`). `min`/`max` are ignored.
+    #[props(default = false)]
+    speed: bool,
     /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Deliberately NOT the
     /// violet bound family — bound means "wired", engaged means "captured"
@@ -111,7 +121,9 @@ pub fn KnobField(
     // continuous bus reading) is behind it. Gestures still start from the raw
     // `value` so repeated arrow presses never stall on a rounding boundary.
     let shown = knob_snap(base, min, step);
-    let frac = if invert {
+    let frac = if speed {
+        speed_knob_fraction(shown)
+    } else if invert {
         phasor_knob_fraction(shown, min, max)
     } else {
         knob_fraction(shown, min, max)
@@ -131,10 +143,16 @@ pub fn KnobField(
     let down_wiring = wired.clone();
     let move_wiring = wired.clone();
     let up_wiring = wired.clone();
-    let key_wiring = wired;
+    let key_wiring = wired.clone();
+    let reset_wiring = wired;
     let move_target = panel_target.clone();
     let up_target = panel_target.clone();
-    let key_target = panel_target;
+    let key_target = panel_target.clone();
+    let reset_target = panel_target;
+    let ticks: Vec<f32> = match speed {
+        true => speed_knob_ticks().to_vec(),
+        false => CONTINUOUS_TICKS.to_vec(),
+    };
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
     // Whether this drag has moved: a press alone writes nothing, so its
@@ -160,7 +178,9 @@ pub fn KnobField(
                 // Phasor knobs step the felt SPEED axis in p-space along the
                 // log-period curve (up = faster; Home = slowest, End =
                 // fastest); plain knobs step the stored value.
-                let next = if invert {
+                let next = if speed {
+                    speed_knob_key_value(base, &event.key())
+                } else if invert {
                     phasor_knob_key_value(base, &event.key(), multiplier, min, max)
                 } else {
                     knob_key_value(base, &event.key(), multiplier, min, max, step)
@@ -198,7 +218,9 @@ pub fn KnobField(
                 let rise = anchor_y - event.data().client_coordinates().y;
                 // Phasor knobs drag the felt SPEED axis log-period (equal
                 // drag = equal feel-ratio); plain knobs stay linear.
-                let next = if invert {
+                let next = if speed {
+                    speed_knob_drag_value(anchor_value, rise)
+                } else if invert {
                     phasor_knob_drag_value(anchor_value, rise, min, max)
                 } else {
                     knob_drag_value(anchor_value, rise, min, max, step)
@@ -232,6 +254,18 @@ pub fn KnobField(
             onpointercancel: move |_| {
                 drag.set(None);
                 hold.clear();
+            },
+            // The Speed knob's way home: a double-click is 1×, as on the
+            // tape's fader.
+            ondoubleclick: move |_| {
+                if !speed {
+                    return;
+                }
+                let Some((address, handler)) = reset_wiring.clone() else {
+                    return;
+                };
+                hold.write(emit.sent_value(1.0));
+                handler.call(panel_or_slot_action(&reset_target, address, emit.lp_value(1.0)));
             },
             svg {
                 class: "tw:block",
@@ -297,12 +331,13 @@ pub fn KnobField(
                     stroke_linecap: "round",
                     stroke_dasharray: "{arc_len} 100",
                 }
-                // Min / quarter / mid / quarter / max tick marks.
+                // Min / quarter / mid / quarter / max tick marks (the Speed
+                // knob's: one per octave stop).
                 g {
                     stroke: "var(--studio-color-text-subtle)",
                     stroke_width: "1",
                     opacity: "0.5",
-                    for (index, tick) in CONTINUOUS_TICKS.into_iter().enumerate() {
+                    for (index, tick) in ticks.into_iter().enumerate() {
                         line {
                             key: "{index}",
                             x1: "{knob_tick_x(tick, TICK_INNER_RADIUS):.2}",

@@ -246,7 +246,6 @@ mod tests {
             }),
             serial_number: None,
             carries_update_channel: true,
-            firmware_blocked: None,
         };
         assert_eq!(HoldKey::of_link(mac(), &usb), Some(usb_key()));
         let lan = lpa_link::providers::network_link::lan_link_info("ws://10.0.0.5/link");

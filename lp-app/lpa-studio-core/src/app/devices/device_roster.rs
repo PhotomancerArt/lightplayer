@@ -83,6 +83,16 @@ pub struct DeviceRosterView {
     /// board's network status, read on a link that holds edit. Absent = no
     /// row (a sim, a held board, a Bluetooth link nothing unlocked).
     pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
+    /// Each board's network status as it last answered, kept across a
+    /// dropped link (the card's Wi‑Fi and lightplayer.app rows say it,
+    /// dimmed, while the board is offline).
+    pub remembered_networks:
+        std::collections::BTreeMap<lpa_devices::DeviceId, lpc_wire::server::NetworkStatus>,
+    /// Each board's Bluetooth switch, as its access file last said.
+    pub remembered_bluetooth: std::collections::BTreeMap<lpa_devices::DeviceId, bool>,
+    /// The signed-in account's name ("Yona"): the card's lightplayer.app
+    /// row names "Yona's account". `None` while nobody is signed in.
+    pub account_name: Option<String>,
     /// Each board reached on the LAN right now (Wi-Fi M6 P07): the
     /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
     pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
@@ -163,6 +173,9 @@ impl Default for DeviceRosterView {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            remembered_networks: std::collections::BTreeMap::new(),
+            remembered_bluetooth: std::collections::BTreeMap::new(),
+            account_name: None,
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
@@ -547,6 +560,11 @@ impl DeviceRoster {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            // Joined by the controller, which holds the access and network
+            // controllers.
+            remembered_networks: std::collections::BTreeMap::new(),
+            remembered_bluetooth: std::collections::BTreeMap::new(),
+            account_name: None,
             lan_links: self
                 .roster
                 .devices()
@@ -790,7 +808,6 @@ mod tests {
             usb: None,
             serial_number: None,
             carries_update_channel: false,
-            firmware_blocked: None,
         }
     }
 
@@ -1089,6 +1106,9 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            remembered_networks: Default::default(),
+            remembered_bluetooth: Default::default(),
+            account_name: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
@@ -1162,6 +1182,9 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            remembered_networks: Default::default(),
+            remembered_bluetooth: Default::default(),
+            account_name: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,

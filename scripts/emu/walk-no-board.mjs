@@ -5,7 +5,7 @@
 // ESP32-C6 that nothing on the desk is plugged into:
 //
 //     flash → connect → identify → upload a project
-//       → card-connect → card-panel → card-all-controls → card-done
+//       → card-connect → card-panel → card-settings → card-done
 //       → card-edit → card-back → card-edit-again
 //       → detach → re-attach
 //
@@ -17,10 +17,11 @@
 //
 // The seven `card-*` steps are the connected card (roadmap M4,
 // `lp2025/2026-10-08-2330-connected-in-the-card` P7): Connect on the card
-// turns its bars into the board's panel with the page staying on `/`; a
-// control written there; All controls (the play page) and back; Done; Edit
-// on the watched card connects first; Back keeps the session; Edit on the
-// All controls row reopens nothing; Done on the editor's docked card. Each
+// turns its bars into the board's whole panel with the page staying on `/`;
+// a control written there; nothing on the panel links away, and its ⋯ holds
+// Reset and Auto-save (the card panel pass, 2026-10-19); Done; Edit on the
+// watched card connects first; Back keeps the session; Edit at the panel's
+// foot reopens nothing; Done on the editor's docked card. Each
 // one waits on the board's words, never on a string Studio could satisfy
 // itself: a panel control turns held at once from Studio's own echo, so
 // "held" is read in a FRESH session (after Done), where the only source is
@@ -614,31 +615,36 @@ async function main() {
       console.log(`  wrote ${written.scope} ${written.channel} (${written.how}); ${record.name} ${record.outcome}`);
     });
 
-    await step("card-all-controls", "All controls: the board's play page on the same session; Back to its card", async () => {
-      const installs = poolCount("install");
-      const href = await driver.evaluate(`${card}.querySelector('[data-all-controls] a')?.getAttribute('href') ?? null`);
-      if (!href) throw new Error("the All controls row is not a link");
-      await driver.evaluate(`${card}.querySelector('[data-all-controls] a').click()`);
-      const play = await driver.waitFor(
-        `location.pathname.endsWith('/play') && Boolean(document.querySelector('#main [data-panel-channel]'))
-          ? location.pathname + location.search : false`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the play page and its panel" },
+    await step("card-settings", "The whole panel on the card, nothing linking away; its ⋯ holds Reset and Auto-save", async () => {
+      const away = await driver.evaluate(
+        `${card}.querySelectorAll('[data-board-panel] a[href], [data-all-controls]').length`,
       );
-      if (poolCount("install") !== installs) throw new Error("All controls opened a second session");
-      await driver.evaluate("history.back()");
-      await cardPanel("the card's panel again, back at `/`");
-      if (poolCount("install") !== installs) throw new Error("going back home opened a session");
-      sessions.allControls = { href, play };
-      console.log(`  All controls → ${play}  (href ${href}); back at /, no new session`);
+      if (away !== 0) throw new Error(`the card's panel links away (${away} link(s) or an All controls row)`);
+      // The ⋯: the panel's two settings that are not controls. Reset is
+      // offered because the control written above is held.
+      await driver.openCorner({ board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      let autoSave;
+      try {
+        autoSave = await driver.waitFor(
+          `(() => { const c = ${card}; const reset = c?.querySelector('[data-board-corner] [data-panel-reset]');
+                    const save = c?.querySelector('[data-board-corner] [data-panel-auto-save]');
+                    return reset && save ? save.getAttribute('data-panel-auto-save') : false; })()`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the ⋯'s Reset (a control is held) and Auto-save" },
+        );
+      } finally {
+        await driver.closeDetails({ board: boardMac });
+      }
+      sessions.settings = { autoSave };
+      console.log(`  nothing links away; the ⋯ holds Reset and Auto-save (${autoSave})`);
     });
 
-    await step("card-done", "Done: the session closes and the card shows its five bars", async () => {
+    await step("card-done", "Done: the session closes and the card shows its eight rows", async () => {
       const before = sink.records.length;
       await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(() => { const c = ${card}; return Boolean(c) && !c.querySelector('[data-board-panel]')
-                  && c.querySelectorAll('[data-bar]').length === 5; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the card's five bars" },
+                  && c.querySelectorAll('[data-bar]').length === 8; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's eight rows" },
       );
       await sink.awaitRecord(poolRecord("remove"), 30_000, before, "the session's `pool remove`");
     });
@@ -674,7 +680,7 @@ async function main() {
       console.log(`  the session kept (no pool install); ${written.channel} still held on the card`);
     });
 
-    await step("card-edit-again", "Edit on the All controls row: the editor with nothing reopened; let go; Done on the docked card", async () => {
+    await step("card-edit-again", "Edit at the panel's foot: the editor with nothing reopened; let go; Done on the docked card", async () => {
       const installs = poolCount("install");
       await driver.evaluate(`(() => {
         window.__lpWalkOpeningSeen = Boolean(document.querySelector('[data-opening-frame]'));
@@ -685,14 +691,14 @@ async function main() {
         window.__lpWalkOpeningObserver.observe(document.body, { subtree: true, childList: true });
       })()`);
       const pressed = await driver.evaluate(`(() => {
-        const mark = ${card}.querySelector('[data-all-controls] [data-offer-path$="/edit"]');
+        const mark = ${card}.querySelector('[data-board-panel-foot] [data-offer-path$="/edit"]');
         const buttons = mark ? mark.querySelectorAll('button') : [];
         const button = buttons[buttons.length - 1];
         if (!button || button.disabled) return null;
         button.click();
         return (button.textContent || '').trim();
       })()`);
-      if (!pressed) throw new Error("the All controls row draws no Edit to press");
+      if (!pressed) throw new Error("the panel's foot draws no Edit to press");
       const at = await waitEditor("the editor, on the session already open");
       const opened = await driver.evaluate("window.__lpWalkOpeningSeen === true");
       if (opened) throw new Error("an opening frame was drawn: Edit reopened the session");
@@ -713,10 +719,10 @@ async function main() {
       await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(() => { const c = ${card}; return location.pathname === '/' && Boolean(c)
-                  && !c.querySelector('[data-board-panel]') && c.querySelectorAll('[data-bar]').length === 5; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "home, the card's five bars" },
+                  && !c.querySelector('[data-board-panel]') && c.querySelectorAll('[data-bar]').length === 8; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "home, the card's eight rows" },
       );
-      console.log(`  ${pressed} on the row → ${at}: no opening frame, no pool install; let go; Done → / and the card's facts`);
+      console.log(`  ${pressed} at the foot → ${at}: no opening frame, no pool install; let go; Done → / and the card's facts`);
     });
     steps.sessions = sessions;
 
@@ -747,12 +753,12 @@ async function main() {
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
       // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
-      // Since that fix the card's Link row should read the port open ("USB ·
-      // connected") once its work is over; "USB · not connected" here is a
+      // Since that fix the card's USB row should read the port open ("USB
+      // connected") once its work is over; "USB not connected" here is a
       // regression worth chasing, not the expected answer.
       const settled = await driver
-        .waitWork("connection", ["none", "failed"], { timeoutMs: 60_000 })
-        .then(() => driver.barText("connection"))
+        .waitWork("usb", ["none", "failed"], { timeoutMs: 60_000 })
+        .then(() => driver.barText("usb"))
         .catch(() => "(the card never settled)");
       console.log(`  after the replug the card reads: ${JSON.stringify(settled)}`);
       steps.replugSettled = settled;
@@ -879,7 +885,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    `\n✓ the walk finished: flash → connect → identify → upload → card-connect → card-panel → card-all-controls → card-done → card-edit → card-back → card-edit-again → detach → re-attach, ` +
+    `\n✓ the walk finished: flash → connect → identify → upload → card-connect → card-panel → card-settings → card-done → card-edit → card-back → card-edit-again → detach → re-attach, ` +
       `with no board${door ? "" : " and no server"}.`,
   );
 }

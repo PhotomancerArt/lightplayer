@@ -11,13 +11,11 @@ const ESPTOOL_TRANSPORT_TRACING = false;
 // version + refuse: a v1 manifest fails loudly rather than half-decoding.
 const FIRMWARE_MANIFEST_SCHEMA_VERSION = 2;
 
-// Not over WebUSB (Chrome on Android): a C6 drops what it sends while the
-// phone is slow to read, and esptool's protocol has no resend, so a flash
-// there fails partway (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
-// The provider then advertises no flash and the card says
-// "Installing firmware from a phone needs a computer" before anyone presses.
+// Over Web Serial, and over WebUSB (Chrome on Android) too: a C6 drops what
+// it sends while a phone is slow to read, and every read and write here
+// survives that (`readFlashSafely`, `writeFlashChecked`).
 export function isSupported() {
-  return Boolean(serialIsSupported() && serialBackendKind() === "serial" && globalThis.fetch);
+  return Boolean(serialIsSupported() && globalThis.fetch);
 }
 
 export async function loadManifest(manifestPath) {
@@ -34,20 +32,12 @@ export async function probeTarget(portId, esptoolModulePath) {
     const port = await getPort(portId);
     await releasePort(portId);
 
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const esptool = await loadEsptoolModule(esptoolModulePath);
     const logs = [];
     const terminal = terminalFor(logs, "esp32-probe");
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: 115200,
-      terminal,
-      debugLogging: false,
-    });
-
+    const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      const chipName = await loader.main();
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         chipName: chipName ? String(chipName) : null,
         logs,
@@ -91,20 +81,12 @@ export async function flashFirmware(
   try {
     const manifest = await loadFullManifest(manifestPath);
     const imageFiles = await loadImageFiles(manifest, manifestPath);
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const esptool = await loadEsptoolModule(esptoolModulePath);
     const port = await getPort(portId);
     await releasePort(portId);
 
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: manifest.flash?.baudRate ?? 115200,
-      terminal,
-      debugLogging: false,
-    });
-
+    const { transport, loader, chipName } = await openLoader(esptool, port, manifest.flash?.baudRate ?? 115200, terminal);
     try {
-      const chipName = await loader.main();
       // The image is chosen before the port is opened; the chip is only
       // known once the SYNC handshake answers. Between those two facts is
       // the last moment anything can stop a C6 image from being written
@@ -121,17 +103,10 @@ export async function flashFirmware(
         totalSteps: 3,
         percent: 10,
       });
-      await loader.writeFlash({
-        fileArray: imageFiles.map((image) => ({
-          data: image.data,
-          address: image.address,
-        })),
-        flashSize: "keep",
-        flashMode: "keep",
-        flashFreq: "keep",
-        eraseAll: false,
-        compress: true,
-        reportProgress: (fileIndex, written, total) => {
+      await writeFlashChecked(
+        loader,
+        imageFiles.map((image) => ({ data: image.data, address: image.address })),
+        (fileIndex, written, total) => {
           const percent = total > 0 ? Math.round((written / total) * 100) : 0;
           pushProgress(progress, onEvent, {
             label: `Writing firmware image ${fileIndex + 1}/${imageFiles.length}`,
@@ -140,7 +115,8 @@ export async function flashFirmware(
             percent,
           });
         },
-      });
+        terminal,
+      );
       pushProgress(progress, onEvent, {
         label: "Resetting flashed device",
         completedSteps: 3,
@@ -151,7 +127,7 @@ export async function flashFirmware(
       // the bootloader we just wrote cannot boot from the LP state a fresh
       // board's factory firmware leaves behind.
       await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         manifest: summarizeManifest(manifest, manifestPath),
         chipName: chipName ? String(chipName) : null,
@@ -184,17 +160,9 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
     const port = await getPort(portId);
     await releasePort(portId);
 
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: 115200,
-      terminal,
-      debugLogging: false,
-    });
-
+    const esptool = await loadEsptoolModule(esptoolModulePath);
+    const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      const chipName = await loader.main();
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -209,6 +177,10 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
       });
       await loader.eraseFlash();
       assertEraseCompleted(logs, "Device erase");
+      // The board is still in the stub, which says nothing. Rebooted, the
+      // wiped board's ROM loops on its blank-flash header, and those lines
+      // are what the card reads as Blank and offers Install for.
+      await rebootFromFlash(transport, terminal);
       pushProgress(progress, onEvent, {
         label: "Device flash erased",
         completedSteps: 3,
@@ -259,36 +231,16 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
     const port = await getPort(portId);
     await releasePort(portId);
 
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: 115200,
-      terminal,
-      debugLogging: false,
-    });
-
+    const esptool = await loadEsptoolModule(esptoolModulePath);
+    const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      const chipName = await loader.main();
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
         totalSteps: 2,
         percent: 25,
       });
-      await loader.writeFlash({
-        fileArray: [{ data: new Uint8Array(record), address }],
-        flashSize: "keep",
-        flashMode: "keep",
-        flashFreq: "keep",
-        eraseAll: false,
-        // MUST be true: esptool-js 0.6.0 implements ONLY deflate writes and
-        // throws "Yet to handle Non Compressed Writes" otherwise — found on
-        // the bench (2026-07-31) as "Arming safe mode failed". The ROM/stub
-        // accepts FLASH_DEFL_BEGIN in download mode; flashFirmware above has
-        // always used it.
-        compress: true,
-      });
+      await writeFlashChecked(loader, [{ data: new Uint8Array(record), address }], null, terminal);
       // Verify by READBACK, not by esptool's flash-ID warning. On the bench
       // (2026-07-31, ESP32-C6 rev 2 over USB-Serial-JTAG) the ID probe reads
       // 0 and esptool prints "Failed to communicate with the flash chip" —
@@ -317,7 +269,7 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
         totalSteps: 2,
         percent: 100,
       });
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         chipName: chipName ? String(chipName) : null,
         logs,
@@ -361,17 +313,9 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
     const port = await getPort(portId);
     await releasePort(portId);
 
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: 115200,
-      terminal,
-      debugLogging: false,
-    });
-
+    const esptool = await loadEsptoolModule(esptoolModulePath);
+    const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      const chipName = await loader.main();
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 0,
@@ -491,13 +435,11 @@ export async function inspectLayout(
     // What the image mounts: its manifest core lists `fs.tree` (the
     // package's `core` is the image's own manifest core, verbatim).
     const targetFs = packageMountsTreeStore(manifest) ? "tree" : "littlefs";
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const esptool = await loadEsptoolModule(esptoolModulePath);
     const port = await getPort(portId);
     await releasePort(portId);
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({ transport, baudrate: 115200, terminal, debugLogging: false });
+    const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
-      const chipName = await loader.main();
       assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       const baseMac = await readBaseMac(loader);
       let read = nextRead(
@@ -586,18 +528,11 @@ export async function executePlan(
   try {
     const manifest = await loadFullManifest(manifestPath);
     const imageFiles = await loadImageFiles(manifest, manifestPath);
-    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const esptool = await loadEsptoolModule(esptoolModulePath);
     const port = await getPort(portId);
     await releasePort(portId);
-    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
-    const loader = new ESPLoader({
-      transport,
-      baudrate: manifest.flash?.baudRate ?? 115200,
-      terminal,
-      debugLogging: false,
-    });
+    const { transport, loader, chipName } = await openLoader(esptool, port, manifest.flash?.baudRate ?? 115200, terminal);
     try {
-      const chipName = await loader.main();
       assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       const baseMac = await readBaseMac(loader);
       const refusal = approveBoard(chipName ? String(chipName) : "", baseMac);
@@ -605,15 +540,10 @@ export async function executePlan(
         throw new Error(String(refusal));
       }
       const write = async (fileArray, label) => {
-        await loader.writeFlash({
+        await writeFlashChecked(
+          loader,
           fileArray,
-          flashSize: "keep",
-          flashMode: "keep",
-          flashFreq: "keep",
-          eraseAll: false,
-          // esptool-js 0.6.0 implements only deflate writes.
-          compress: true,
-          reportProgress: (_index, written, total) => {
+          (_index, written, total) => {
             pushProgress(progress, onEvent, {
               label,
               completedSteps: written,
@@ -621,7 +551,8 @@ export async function executePlan(
               percent: total > 0 ? Math.round((written / total) * 100) : 0,
             });
           },
-        });
+          terminal,
+        );
       };
       let index = 0;
       while (index < steps.length) {
@@ -662,7 +593,7 @@ export async function executePlan(
       }
       pushProgress(progress, onEvent, { label: "Resetting the board", percent: 100 });
       await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
-      await loader.after("hard_reset");
+      await rebootFromFlash(transport, terminal);
       return {
         manifest: summarizeManifest(manifest, manifestPath),
         chipName: chipName ? String(chipName) : null,
@@ -683,85 +614,354 @@ export async function executePlan(
   }
 }
 
-/// The packet size of every flash read this file makes, and why it is small.
+/// How every flash read in this file is paced, per serial backend.
 ///
-/// esptool-js's own `readFlash` asks the stub for 4 KB packets with 1024 of
-/// them in flight. On a Mac, Chromium's Web Serial opens the port with
-/// `PARMRK` set, so the kernel's tty queue stores each `0xFF` byte TWICE in
-/// its 1,024 slots, and once doubling pushes the queue past 1,020 it drops
-/// bytes silently (`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`).
-/// Flash is mostly `0xFF` — an erased sector is nothing else — so a 4 KB
-/// packet of it is 8 KB of tty slots, and the read loses a run of bytes the
-/// first time the page reads late. esptool-js then waits for the rest of a
-/// packet the stub believes it sent, the stub waits for the ack, and the read
-/// stalls for esptool-js's 100 s packet timeout (G1-F2, 2026-10-02:
+/// **Why packets are small at all (Web Serial on a Mac).** esptool-js's own
+/// `readFlash` asks the stub for 4 KB packets with 1024 of them in flight. On
+/// a Mac, Chromium's Web Serial opens the port with `PARMRK` set, so the
+/// kernel's tty queue stores each `0xFF` byte TWICE in its 1,024 slots, and
+/// once doubling pushes the queue past 1,020 it drops bytes silently
+/// (`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`).
+/// Flash is mostly `0xFF`, so a 4 KB packet of it is 8 KB of tty slots, and
+/// the read lost a run of bytes the first time the page read late (G1-F2,
 /// `docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md`).
+/// One packet in flight of at most 384 bytes is at most 770 slots, under what
+/// the tty holds with no reader at all; the stub sends the next packet only
+/// after the ack. 960 KB took 14.2 s that way over a desk C6 in headless
+/// Brave on macOS (2026-10-02).
 ///
-/// One packet in flight of at most 384 bytes is at most 770 slots — every
-/// data byte costs at most two (a doubled `0xFF`, or a SLIP-escaped `0xC0` /
-/// `0xDB`), plus the two SLIP delimiters — under the 1,020 the tty can hold
-/// with no reader at all, so nothing can be dropped however late the page
-/// reads; the stub sends the next packet only after the ack, which the page
-/// writes only once it has read the whole packet out of the tty. The cost is
-/// a round trip per packet: 960 KB took 14.2 s at 384 bytes (21.7 s at 256)
-/// over a desk C6's Web Serial in headless Brave on macOS (2026-10-02), where
-/// esptool-js's 4 KB packets took 4.8 s on a lossless path and, on the Mac's
-/// real one, stalled at 310 KB.
-const SAFE_READ_PACKET = 384;
-/// One packet unacknowledged. Whether the stub counts this in packets or in
-/// bytes, 1 means it sends a packet and then waits for the ack.
-const SAFE_READ_IN_FLIGHT = 1;
-/// A packet that has not arrived in this long is lost, not slow: fail with a
-/// message instead of esptool-js's 100 s silence.
-const SAFE_READ_PACKET_TIMEOUT_MS = 3000;
+/// **Why they shrink (WebUSB on a phone).** A C6's USB-Serial-JTAG drops what
+/// it sends while the host is not reading, and the stub ends a USB packet at
+/// every `0x0a` as well as every 63 bytes, so a 384-byte packet of the board's
+/// JSON files is 25 or more USB packets back to back. The desk's Pixel 8a
+/// reads about one a millisecond and falls behind: at 384 bytes a packet was
+/// lost every few kilobytes, at 64 none in 512 KB (2026-10-19,
+/// `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`).
+/// So a read there starts at 128, halves on a loss and doubles again after a
+/// run of clean segments, and waits a quarter of a second, not three, before
+/// calling a packet lost.
+///
+/// `segmentPackets` is how many packets one READ_FLASH asks for: the unit a
+/// loss costs, and the unit the stub's digest checks.
+export const READ_PACE = Object.freeze({
+  serial: Object.freeze({ packet: 384, min: 64, max: 384, segmentPackets: 64, packetTimeoutMs: 3000, commandTimeoutMs: 3000 }),
+  "usb-cdc": Object.freeze({ packet: 128, min: 32, max: 384, segmentPackets: 32, packetTimeoutMs: 250, commandTimeoutMs: 1000 }),
+});
+/// Clean segments in a row before a read tries packets twice as long.
+const READ_GROW_AFTER = 4;
+/// Segments lost in a row, at the smallest packet, before a read gives up.
+const READ_GIVE_UP_AFTER = 12;
 
-/// Read `length` bytes of flash at `offset` over the stub, in packets a
-/// Mac's serial path cannot drop (see [`SAFE_READ_PACKET`]). Every packet's
-/// length is checked as it arrives and the stub's closing MD5 digest is
-/// compared with the bytes, so a read that lost or changed anything fails
-/// loudly rather than returning a short or wrong image.
+/// The pace for this page's serial backend.
+export function readPaceFor(kind = serialBackendKind()) {
+  return READ_PACE[kind] ?? READ_PACE.serial;
+}
+
+/// Read `length` bytes of flash at `offset` over the stub, surviving a lost
+/// packet.
+///
+/// The read is a run of READ_FLASH segments, one packet unacknowledged at a
+/// time ([`READ_PACE`]). Each segment's bytes are kept only once the stub's
+/// own MD5 digest of that segment matches them, so nothing this returns was
+/// changed or cut short on the way. A packet that comes up short, a SLIP
+/// frame that breaks, or a packet that does not arrive in time loses the
+/// segment, not the read: the page acks the segment's whole length, which
+/// ends the stub's send loop (it sends its digest and goes back to reading
+/// commands — measured on a C6, about 60 ms), drains what is left, and reads
+/// the segment again with packets half as long. The stub's session is never
+/// dropped.
 ///
 /// `onProgress(bytesRead, totalBytes)` is called every 4 KB and at the end.
-export async function readFlashSafely(loader, offset, length, onProgress = null) {
+export async function readFlashSafely(loader, offset, length, onProgress = null, pace = readPaceFor()) {
   const int32 = (value) => loader._intToByteArray(value);
+  const bytes = new Uint8Array(length);
+  let done = 0;
+  let packet = pace.packet;
+  let clean = 0;
+  let lostInARow = 0;
+  let lastLoss = null;
+  while (done < length) {
+    const segmentLength = Math.min(length - done, packet * pace.segmentPackets);
+    const segment = await readSegment(loader, offset + done, segmentLength, packet, pace, int32);
+    if (segment.bytes) {
+      bytes.set(segment.bytes, done);
+      const before = done;
+      done += segmentLength;
+      lostInARow = 0;
+      clean += 1;
+      if (clean >= READ_GROW_AFTER && packet < pace.max) {
+        packet = Math.min(pace.max, packet * 2);
+        clean = 0;
+      }
+      if (onProgress && (Math.floor(done / 4096) > Math.floor(before / 4096) || done === length)) {
+        onProgress(done, length);
+      }
+      continue;
+    }
+    lastLoss = segment.loss;
+    clean = 0;
+    lostInARow += 1;
+    if (packet === pace.min && lostInARow >= READ_GIVE_UP_AFTER) {
+      throw new Error(
+        `Flash read at 0x${offset.toString(16)} lost bytes ${lostInARow} times in a row ` +
+          `(${done} of ${length} read; last: ${lastLoss}).`,
+      );
+    }
+    packet = Math.max(pace.min, Math.floor(packet / 2));
+    // On the flash's terminal, so a walk can count what it read twice.
+    loader.info?.(`read at 0x${(offset + done).toString(16)} lost a segment (${lastLoss}); reading it again in ${packet}-byte packets`);
+  }
+  return bytes;
+}
+
+/// One READ_FLASH of `length` bytes in `packet`-long packets: `{ bytes }`
+/// when every packet arrived and the stub's digest matches them, else
+/// `{ loss }` (what went wrong) with the stub back at its command loop.
+async function readSegment(loader, offset, length, packet, pace, int32) {
   let request = loader._appendArray(int32(offset), int32(length));
-  request = loader._appendArray(request, int32(SAFE_READ_PACKET));
-  request = loader._appendArray(request, int32(SAFE_READ_IN_FLIGHT));
-  const status = await loader.checkCommand("read flash", loader.ESP_READ_FLASH, request);
+  request = loader._appendArray(request, int32(packet));
+  // One packet unacknowledged: the stub sends a packet and waits for its ack.
+  request = loader._appendArray(request, int32(1));
+  let status;
+  try {
+    status = await loader.checkCommand(
+      "read flash",
+      loader.ESP_READ_FLASH,
+      request,
+      0,
+      0,
+      pace.commandTimeoutMs,
+    );
+  } catch (error) {
+    // The stub took the command (what the page writes is not lost) and may
+    // be waiting for an ack; end its loop either way.
+    await abortRead(loader, length, int32);
+    return { loss: `the read's reply was lost (${errorMessage(error)})` };
+  }
   if (status != 0) {
     throw new Error(`The board refused to read flash at 0x${offset.toString(16)}: ${status}`);
   }
   const bytes = new Uint8Array(length);
   let received = 0;
   while (received < length) {
-    const packet = await loader.transport.read(SAFE_READ_PACKET_TIMEOUT_MS);
-    const expected = Math.min(SAFE_READ_PACKET, length - received);
-    if (!(packet instanceof Uint8Array) || packet.length !== expected) {
-      throw new Error(
-        `Flash read at 0x${offset.toString(16)} lost bytes: a packet of ` +
-          `${packet?.length ?? 0} bytes where ${expected} were sent ` +
-          `(${received} of ${length} read).`,
-      );
+    let got;
+    try {
+      got = await loader.transport.read(pace.packetTimeoutMs);
+    } catch (error) {
+      await abortRead(loader, length, int32);
+      return { loss: `${errorMessage(error)} (${received} of ${length} at 0x${offset.toString(16)})` };
     }
-    bytes.set(packet, received);
-    received += packet.length;
+    const expected = Math.min(packet, length - received);
+    if (!(got instanceof Uint8Array) || got.length !== expected) {
+      await abortRead(loader, length, int32);
+      return { loss: `a packet of ${got?.length ?? 0} bytes where ${expected} were sent` };
+    }
+    bytes.set(got, received);
+    received += got.length;
     await loader.transport.write(int32(received));
-    // Every 4 KB, not every packet: the card does not need 16 times the
-    // events esptool-js's own reads sent.
-    if (onProgress && (received % 4096 === 0 || received === length)) {
-      onProgress(received, length);
+  }
+  let digest = null;
+  try {
+    digest = await loader.transport.read(pace.packetTimeoutMs);
+  } catch (error) {
+    // Every packet arrived, so the stub is back at its command loop already:
+    // nothing to end, only what is left of the digest to clear.
+    await drainQuietly(loader.transport);
+    return { loss: `the digest was lost (${errorMessage(error)})` };
+  }
+  const gotDigest = digest instanceof Uint8Array && digest.length === 16 ? toHex(digest) : null;
+  if (gotDigest !== md5Hex(bytes)) {
+    await drainQuietly(loader.transport);
+    return { loss: `the bytes do not match the board's digest (${gotDigest ?? "no digest"})` };
+  }
+  return { bytes };
+}
+
+/// End a READ_FLASH the page will not finish: ack its whole length, so the
+/// stub leaves its send loop, sends its digest and reads commands again;
+/// then let what it still sends go.
+async function abortRead(loader, length, int32) {
+  try {
+    await loader.transport.write(int32(length));
+  } catch {
+    /* a port that cannot write fails the next command loudly */
+  }
+  await drainQuietly(loader.transport);
+}
+
+/// How long the port must be quiet before what it held is all gone.
+const DRAIN_QUIET_MS = 60;
+
+/// Read and discard until nothing arrives for [`DRAIN_QUIET_MS`]: the rest of
+/// a broken packet, a digest nobody wants, a reply that came after its
+/// command was given up on. A frame that does not decode is dropped the same
+/// way (esptool-js's `read` throws on it at once, rather than timing out).
+export async function drainQuietly(transport, quietMs = DRAIN_QUIET_MS) {
+  for (let i = 0; i < 256; i += 1) {
+    try {
+      await transport.read(quietMs);
+    } catch (error) {
+      if (/No serial data|stream stopped/i.test(errorMessage(error))) {
+        break;
+      }
     }
   }
-  const digest = await loader.transport.read(SAFE_READ_PACKET_TIMEOUT_MS);
-  const expectedDigest = md5Hex(bytes);
-  const gotDigest = digest instanceof Uint8Array && digest.length === 16 ? toHex(digest) : null;
-  if (gotDigest !== expectedDigest) {
-    throw new Error(
-      `Flash read at 0x${offset.toString(16)} does not match the board's digest ` +
-        `(board ${gotDigest ?? "sent no digest"}, read ${expectedDigest}).`,
-    );
+  transport.flushInput?.();
+}
+
+/// Reboot the board from its flash: EN held low for 100 ms (RTS asserted,
+/// DTR not), then released. The board leaves the stub and boots what is in
+/// flash, as `lp-cli`'s erase does (`reset_into_app`).
+///
+/// Not esptool-js 0.6.0's `after("hard_reset")`: its HardReset only
+/// RELEASES RTS, and the connect's reset sequence already left both lines
+/// low, so it changes no line and the board stays in the stub, silent. An
+/// erase that ended that way left its card "not responding" until a reload
+/// (2026-10-19, `docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`;
+/// a Mac's tty open and close leave a parked C6 in the stub as well). A
+/// flash, a boot-control write and a probe ended that way too, and the
+/// flashed board answered only when the Flash activity's reconnect ladder
+/// reached its `ResetKind::Normal` rung, a rung (8 s) later.
+///
+/// Whole-status writes, both lines named each time: a CH34x's macOS driver
+/// ignores a write naming one line, and the order never passes through
+/// (DTR asserted, RTS released), a CH34x's download-mode selection (see the
+/// controller's `runBothThenDropReset`). A C6 re-enumerates on the reset,
+/// so the release may find the port gone; the reset has happened by then,
+/// and what was written stands either way.
+export async function rebootFromFlash(transport, terminal = null) {
+  const port = transport.device;
+  terminal?.writeLine?.("Rebooting the board from its flash (RTS pulse, DTR low)");
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(100);
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  } catch (error) {
+    terminal?.writeLine?.(`The reset's release went unanswered: ${errorMessage(error)}`);
   }
-  return bytes;
+}
+
+/// How many times an image whose write failed, or does not read back the
+/// same, is written again before the flash fails.
+const WRITE_ATTEMPTS = 3;
+/// How many times a command that only asks (the flash's MD5, a register) is
+/// sent again when its reply is lost.
+const QUERY_ATTEMPTS = 3;
+
+/// Write `fileArray` (`{ data, address }`) and prove each image landed: the
+/// stub's MD5 of the region must equal the image's, or the image is written
+/// again.
+///
+/// A write's reply is one short frame with one command unanswered, so it is
+/// rarely lost (512 KB written three times over a phone's WebUSB, 2026-10-19,
+/// none lost) — but a lost reply cannot be answered by sending the block
+/// again, because the stub inflates what it receives and a block it already
+/// took would be inflated twice. So the unit of a retry is the image:
+/// FLASH_DEFL_BEGIN starts it over. The MD5 check is the same proof on every
+/// backend; it costs a hash of the image on the board.
+///
+/// `reportProgress(fileIndex, written, total)` is esptool-js's, per image.
+export async function writeFlashChecked(loader, fileArray, reportProgress = null, terminal = null) {
+  for (let index = 0; index < fileArray.length; index += 1) {
+    const { data, address } = fileArray[index];
+    if (data.length === 0) {
+      continue;
+    }
+    // What esptool-js writes: the image padded to a word with 0xFF.
+    const padded = data.length % 4 === 0 ? data : padToWord(data);
+    const expected = md5Hex(padded);
+    let lastError = null;
+    for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt += 1) {
+      try {
+        await loader.writeFlash({
+          fileArray: [{ data, address }],
+          flashSize: "keep",
+          flashMode: "keep",
+          flashFreq: "keep",
+          eraseAll: false,
+          // MUST be true: esptool-js 0.6.0 implements ONLY deflate writes and
+          // throws "Yet to handle Non Compressed Writes" otherwise — found on
+          // the bench (2026-07-31) as "Arming safe mode failed".
+          compress: true,
+          reportProgress: reportProgress
+            ? (_index, written, total) => reportProgress(index, written, total)
+            : undefined,
+        });
+        const onBoard = await retryingQuery(loader, () => loader.flashMd5sum(address, padded.length));
+        if (onBoard === expected) {
+          lastError = null;
+          break;
+        }
+        lastError = new Error(
+          `The image written at 0x${address.toString(16)} does not read back the same ` +
+            `(board ${onBoard}, image ${expected}).`,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+      terminal?.writeLine(
+        `write at 0x${address.toString(16)} failed (attempt ${attempt} of ${WRITE_ATTEMPTS}): ` +
+          errorMessage(lastError),
+      );
+      await drainQuietly(loader.transport);
+    }
+    if (lastError) {
+      throw lastError;
+    }
+  }
+}
+
+/// Run `ask` — a command that only reads, so asking again is harmless — and
+/// ask again when its reply is lost, clearing what is left of it first.
+async function retryingQuery(loader, ask, attempts = QUERY_ATTEMPTS) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await ask();
+    } catch (error) {
+      lastError = error;
+      await drainQuietly(loader.transport);
+    }
+  }
+  throw lastError;
+}
+
+function padToWord(data) {
+  const padded = new Uint8Array(Math.ceil(data.length / 4) * 4).fill(0xff);
+  padded.set(data);
+  return padded;
+}
+
+/// Bootloader sessions a flash opens before it fails, per backend: over a
+/// phone's WebUSB the stub's start can lose its "OHAI" (the defect above), and
+/// a fresh session costs half a second there; over Web Serial one, as always.
+const CONNECT_ATTEMPTS = Object.freeze({ serial: 1, "usb-cdc": 3 });
+
+/// Open an esptool-js session on `port`: `{ transport, loader, chipName }`.
+/// Each attempt is a new transport and loader (a failed `main()` leaves the
+/// port open and the loader half set up).
+async function openLoader({ ESPLoader, Transport }, port, baudrate, terminal) {
+  const attempts = CONNECT_ATTEMPTS[serialBackendKind()] ?? 1;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({ transport, baudrate, terminal, debugLogging: false });
+    try {
+      const chipName = await loader.main();
+      return { transport, loader, chipName };
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        terminal.writeLine(`bootloader session failed (attempt ${attempt} of ${attempts}): ${errorMessage(error)}`);
+      }
+      try {
+        await transport.disconnect();
+      } catch {
+        /* the next open says whether the port is still there */
+      }
+    }
+  }
+  throw lastError;
 }
 
 function toHex(bytes) {
@@ -1182,6 +1382,10 @@ function reportFailure(target, error, onEvent = null) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error ?? "unknown error");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function looksLikeHtml(contentType, text) {

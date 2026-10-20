@@ -949,6 +949,53 @@ label:has(> input:not(:disabled)) {
     height: 11px;
 }
 
+/* A row's kind (`stack_bar.rs`): a fixed column, so the names line up
+   down the card, wide enough for the longest link's name
+   ("lightplayer.app"). */
+.ux-board-bar-kind {
+    flex: none;
+    width: 84px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A row with something left to do (`UiStackBar::todo`, a new board's
+   setup list): the whole row lit, on a lighter flat ground — never a
+   gradient — its icon, kind and name at full strength, and its button on
+   the same ground with no fill of its own. Hover is one step lighter
+   (the trigger's own wash over the ground), so lit and hovered differ. */
+.ux-board-bar-todo {
+    background-color: var(--studio-color-surface-raised-strong);
+    --ux-row-flush-edge: var(--studio-color-panel-primary-border);
+}
+
+.ux-board-bar-todo .ux-board-bar-kind,
+.ux-board-bar-todo .ux-board-bar-name {
+    color: var(--studio-color-text-strong);
+}
+
+.ux-board-bar-todo svg {
+    color: var(--studio-color-text-strong);
+}
+
+.ux-board-bar-todo .ux-row-flush {
+    background: transparent;
+}
+
+/* The board's name in the name bar (`name_bar.rs`), pressable to rename:
+   the faint pencil brightens, and the name is underlined, on hover. */
+.ux-board-name:hover .ux-board-name-pencil,
+.ux-board-name:focus-visible .ux-board-name-pencil {
+    color: var(--studio-color-text-muted);
+}
+
+.ux-board-name:hover .ux-board-name-text {
+    text-decoration: underline;
+    text-decoration-color: var(--studio-color-text-faint);
+    text-underline-offset: 3px;
+}
+
 /* A row's name and its state (`stack_bar.rs`). The name is the row's
    value and keeps its width; the state takes what is left. One 28px line
    that wraps and clips: a state that can't fit its least beside the whole
@@ -999,6 +1046,12 @@ label:has(> input:not(:disabled)) {
 @container board-card (max-width: 239px) {
     [data-name-bar] .ux-row-flush {
         padding-inline: 10px;
+    }
+
+    /* The kind column gives the value room; a link's longer name is cut at
+       its end, and the row's hover holds it whole. */
+    .ux-board-bar-kind {
+        width: 58px;
     }
 }
 

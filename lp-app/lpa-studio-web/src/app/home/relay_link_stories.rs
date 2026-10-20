@@ -19,7 +19,7 @@ use crate::app::home::ble_access_stories::{usb_access, usb_card};
 use crate::app::home::device_offer_story_fixtures::StoryDeviceCard;
 
 #[story(
-    description = "A board reached through lightplayer.app's relay (`relay:<mac>`, opened by \"Connect through lightplayer.app\" or the `?relay=<mac>` shortcut), unlocked at edit by the account's key: the connection bar says \"Wi‑Fi via lightplayer.app · connected\" with the cloud icon — the same words the editor header uses — and its details carry no USB line (behind `?relay=1` the card said \"USB connected\"). Before a frame lands, the status corner's details say a running board's words (\"No picture yet — the live feed is coming.\"), never \"No live picture over Bluetooth\", which it said before PR C. Firmware verbs need USB, as on every network link."
+    description = "A board reached through lightplayer.app's relay (`relay:<mac>`, opened by \"Connect through lightplayer.app\" or the `?relay=<mac>` shortcut), unlocked at edit by the account's key: the lightplayer.app row names the account and says \"connected\", the cloud icon, and the USB row says \"not connected\" (behind `?relay=1` the card said \"USB connected\"). Before a frame lands, the status corner's details say a running board's words (\"No picture yet — the live feed is coming.\"), never \"No live picture over Bluetooth\", which it said before PR C. Firmware verbs need USB, as on every network link."
 )]
 fn relay_card_connected() -> Element {
     rsx! {

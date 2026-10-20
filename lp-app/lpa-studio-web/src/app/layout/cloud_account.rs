@@ -554,6 +554,26 @@ fn AuthLink(
     }
 }
 
+/// A board card's Sign in (`devices/<board>/sign-in`), answered: straight
+/// to the deployment's one way in when it has one, else the `/account`
+/// page, which offers the chooser. Back to where the person was after.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn leave_for_sign_in(session: &crate::cloud::session_state::CloudSession) {
+    let here = web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .unwrap_or_else(|| "/".to_string());
+    let href = match session
+        .login_options()
+        .map(|options| sign_in_affordance(options, &here))
+    {
+        Some(SignInAffordance::Direct(href)) => href,
+        Some(SignInAffordance::Chooser | SignInAffordance::Nothing) | None => {
+            "/account".to_string()
+        }
+    };
+    leave_app(&href);
+}
+
 /// Hand the browser a full page navigation (host builds: nothing to do).
 fn leave_app(href: &str) {
     #[cfg(target_arch = "wasm32")]

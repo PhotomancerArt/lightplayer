@@ -241,7 +241,7 @@ fn preview_sentence(view: &DeviceView, activity: Option<&ActivityView>) -> Strin
         return format!("{label}… the picture returns when the board does.");
     }
     // A board Studio cannot reach has no feed coming, never "coming"; the
-    // Link row says how long it has been away (P2).
+    // surface says how long it has been away (P2).
     if view.status == DeviceStatus::Offline {
         return "No picture — the board is offline.".to_string();
     }
@@ -493,7 +493,7 @@ mod tests {
     }
 
     /// An offline board's picture line says it is offline — never that a
-    /// feed is coming; how long it has been away is the Link row's (P2).
+    /// feed is coming; how long it has been away is the surface's (P2).
     #[test]
     fn an_offline_boards_picture_line_says_it_is_offline() {
         let mut offline = CardFixture::offline();

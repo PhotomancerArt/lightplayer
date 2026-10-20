@@ -11,7 +11,7 @@
 //!
 //! | piece | draws |
 //! |---|---|
-//! | [`BoardCard`] | the card: the picture's row, the name bar, the five bars (connected, the board's panel in their place: [`CompactPanel`](crate::app::module::CompactPanel)), at one height in every state |
+//! | [`BoardCard`] | the card: the picture's row, the name bar, the eight rows at one height in every state (connected, the board's whole panel in their place, as tall as it needs: [`CompactPanel`](crate::app::module::CompactPanel)) |
 //! | [`BoardPicture`](board_picture::BoardPicture) | the board's lights, dimmed when last known, or the update's light strip |
 //! | [`BoardSurface`](board_surface::BoardSurface) | over the picture, what matters now: the state's icon in its tone, one or two plain sentences, the work's progress; the picture dims under it |
 //! | [`StatusCorner`](status_corner::StatusCorner) | the notch cut out of the picture: a quiet ⋯ that opens the corner's details |
@@ -19,12 +19,11 @@
 //! | [`StackBar`](stack_bar::StackBar) | one 28 px row in the card's grammar — icon · kind · name · state (one trigger for its details), its action outside the trigger; while it works, the spinner in the icon's place and the work's words as its state |
 //! | [`WorkFoot`](bar_work::WorkFoot) | a row's running work: the iridescent fill along its foot |
 //! | [`BarDetails`](bar_details::BarDetails) | a bar's (or the corner's) details: the merged detail card, its sections, panels and danger zone |
-//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, the Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other version, restore from file |
+//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, Wi‑Fi, link counters, the layout question, other version, restore from file, the connected panel's settings |
 //! | [`CardAction`] | one action from the offer it presses, in the card's word and icon |
-//! | [`card_play_address`] | the lens session's play page, where a connected card's All controls goes (the router builds it, the web app provides it) |
 //!
-//! The panels moved here from today's card (`bluetooth_switch_panel`,
-//! `link_counters_section`, `other_version_form`,
+//! The panels moved here from today's card (`link_counters_section`,
+//! `other_version_form`,
 //! `restore_from_file_button`) are sections of the details card they sit
 //! in: no box in a box, no popover in a popover.
 //!
@@ -50,9 +49,11 @@
 //!   (`AgentMark`), so a walk presses an offer by its path;
 //! - `data-board-terminal` on the board's terminal in the corner's details
 //!   (`DeviceTerminal`): what the board said, in its own words;
-//! - connected, in the bars' place: `data-board-panel` on the panel and
-//!   `data-all-controls` on its last row (All controls, and Edit at its
-//!   end); each of its controls carries the panel control's own
+//! - connected, in the bars' place: `data-board-panel` on the panel,
+//!   `data-board-panel-heading` on a group's heading and
+//!   `data-board-panel-foot` on its foot (Edit at its end); in the corner's
+//!   details, `data-panel-reset` and `data-panel-auto-save`; each of the
+//!   panel's controls carries the panel control's own
 //!   `data-panel-scope`, `data-panel-channel` and
 //!   `data-panel-state="read-default|read-following|engaged"`, as it does in
 //!   the editor and on the play page (`ModulePanelControl`).
@@ -65,24 +66,27 @@
 //!
 //! The card is mounted wherever a board appears: the home page's
 //! `BoardCardSlot`, the editor's docked card (`LensCardPane`) and the
-//! mismatch page. Its stories are [`board_card_stories`].
+//! mismatch page. Its stories are [`board_card_stories`], and the rows as a
+//! new board's setup list [`board_card_setup_stories`].
 
 pub(crate) mod bar_detail_panel;
 pub(crate) mod bar_details;
 pub(crate) mod bar_work;
-pub(crate) mod bluetooth_switch_panel;
 pub(crate) mod board_card;
+#[cfg(feature = "stories")]
+pub(crate) mod board_card_setup_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;
 pub(crate) mod board_picture;
 pub(crate) mod board_surface;
 pub(crate) mod card_action;
-pub(crate) mod card_play_address;
 #[cfg(test)]
 pub(crate) mod card_test_fixtures;
+pub(crate) mod detail_switch_head;
 pub(crate) mod link_counters_section;
 pub(crate) mod name_bar;
 pub(crate) mod other_version_form;
+pub(crate) mod panel_settings_section;
 pub(crate) mod restore_from_file_button;
 pub(crate) mod stack_bar;
 pub(crate) mod status_corner;

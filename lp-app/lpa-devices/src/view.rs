@@ -133,11 +133,9 @@ pub struct DeviceView {
     /// keep it bounded — the panel's honest "…and N more" count.
     pub terminal_dropped: u32,
     /// Why this board's firmware cannot be written from here, when it
-    /// cannot: [`FIRMWARE_NEEDS_USB`] for a board reached over Bluetooth,
-    /// the LAN or the relay, or the link's own reason
-    /// ([`FIRMWARE_NEEDS_A_COMPUTER`] for Chrome on Android's WebUSB). `None`
-    /// = nothing about the LINK stands in the way (whether a verb is offered
-    /// is still the firmware face's call).
+    /// cannot: today exactly one reason, [`FIRMWARE_NEEDS_USB`], for a board
+    /// reached over Bluetooth or the LAN. `None` = nothing about the LINK stands in the
+    /// way (whether a verb is offered is still the firmware face's call).
     ///
     /// A reason and not a bool on purpose: the card draws the verb DISABLED
     /// with this sentence under it rather than hiding it, so "why can't I
@@ -166,14 +164,6 @@ pub struct DeviceView {
 /// Bluetooth link has no reset lines and no ROM downloader behind it, so
 /// flash, update and factory reset all need the cable.
 pub const FIRMWARE_NEEDS_USB: &str = "Firmware updates need USB";
-
-/// The sentence a card says when the board is on USB but the link still
-/// cannot carry the flasher: Chrome on Android reaches a wired board over
-/// WebUSB, where the board drops what it sends faster than the phone reads,
-/// and the flash protocol has no resend (an over-the-air update rides
-/// lp-link, which does, and stays offered). See
-/// `docs/adr/2026-10-18-android-usb-over-webusb.md`.
-pub const FIRMWARE_NEEDS_A_COMPUTER: &str = "Installing firmware from a phone needs a computer";
 
 /// The running activity, as the card shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -320,8 +310,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     // The one verdict identify can END in is silence, and the escape from
     // silence must not be a replug: offer the re-ask whenever the link is
     // up, nothing is running, and the evidence still says nothing.
+    // A board Studio erased says nothing because it is blank: its way on
+    // is the firmware, and asking it again is no escape.
     if activity.is_none()
         && device.link().is_some()
+        && !device.known_blank()
         && matches!(
             device.evidence.classification,
             Classification::Quiet { .. } | Classification::Unknown
@@ -383,7 +376,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .as_ref()
                     .and_then(|record| record.board_id.clone())
             }),
-        firmware_face: firmware_face(&device.evidence),
+        firmware_face: device_firmware_face(device),
         remembered_firmware: device
             .record
             .as_ref()
@@ -415,8 +408,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .endpoint
             .as_ref()
             .filter(|endpoint| endpoint.is_network())
-            .map(|_| FIRMWARE_NEEDS_USB.to_string())
-            .or_else(|| device.evidence.link_firmware_blocked().map(str::to_string)),
+            .map(|_| FIRMWARE_NEEDS_USB.to_string()),
         update_blocked: update_blocked(device),
         held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
@@ -555,6 +547,16 @@ impl PendingLinkView {
     /// (an unsettled link projects [`FirmwareFace::Unknown`]).
     pub fn needs_firmware(&self) -> bool {
         self.firmware_face.wants_flash()
+    }
+}
+
+/// A device's face: its evidence's, except that a board Studio erased
+/// and that says nothing is the blank chip Studio knows it is
+/// ([`Device::known_blank`]).
+fn device_firmware_face(device: &Device) -> FirmwareFace {
+    match device.known_blank() {
+        true => FirmwareFace::Blank,
+        false => firmware_face(&device.evidence),
     }
 }
 
@@ -798,8 +800,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .info
             .endpoint
             .is_bluetooth()
-            .then(|| FIRMWARE_NEEDS_USB.to_string())
-            .or_else(|| entry.info.firmware_blocked.clone()),
+            .then(|| FIRMWARE_NEEDS_USB.to_string()),
         held_by_tab,
         escapes: vec![Escape::Forget],
     }
@@ -820,6 +821,9 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
         DeviceStatus::Ready => "Ready".to_string(),
         DeviceStatus::Degraded => "Degraded".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
+        DeviceStatus::NeedsAttention if device.known_blank() => {
+            classification_label(&Classification::Blank)
+        }
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),
     }
 }
@@ -839,7 +843,10 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
         Classification::Foreign { label: None } => "Unrecognized firmware".to_string(),
-        Classification::Quiet { .. } => "Not responding".to_string(),
+        // The label of a board that never said hello and says nothing (a
+        // board that said hello and went quiet is `NotResponding`, whose
+        // own label is "Not responding").
+        Classification::Quiet { .. } => "No response — needs firmware".to_string(),
     }
 }
 

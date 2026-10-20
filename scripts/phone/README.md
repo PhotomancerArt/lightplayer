@@ -98,10 +98,21 @@ just walk-usb-phone --studio https://lightplayer.app/
 
 It finds the board by MAC (`phone usb`) and leases it, presses USB, answers
 Chrome's chooser and Android's access dialog by tapping what they say, and
-checks the card (by MAC), the Firmware details' refusal ("Installing
-firmware from a phone needs a computer"), the editor and Play. A Studio tab
-an earlier walk left open still holds the board, so the walk closes them
-first. There is no power cut: the board's power is the phone's port.
+checks the card (by MAC). Then it installs firmware from the phone:
+Factory reset (esptool's erase over WebUSB), Install firmware on the blank
+board (this Studio's build, written by the flasher over WebUSB), the board's
+hello on that build, and a project put back from the gallery; then the
+editor and Play. **It erases the board** — a test board only; `--no-install`
+skips the firmware steps. A Studio tab an earlier walk left open still holds
+the board, so the walk closes them first. There is no power cut: the board's
+power is the phone's port.
+
+The flasher survives what the C6 drops on a phone (it reads in short,
+digest-checked segments it reads again, and proves each written image by
+its MD5): `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`.
+Its numbers are this phone's: a lab page measured them by driving esptool-js
+over the shipped port with `StudioDriver.evaluate` (the method is in the
+defect).
 
 ## The walk
 

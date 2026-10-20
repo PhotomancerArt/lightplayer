@@ -5,10 +5,10 @@ use dioxus_icons::lucide::{
     CircleQuestionMark, Clock, Cloud, CloudOff, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
     Eye, Flag, FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, Layers,
     LayoutGrid, Lightbulb, Link, Link2, Link2Off, List, ListMusic, Locate, LocateFixed, Lock,
-    LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus,
-    Power, Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, SlidersHorizontal,
-    Smartphone, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug,
-    Upload, Usb, Users, Waypoints, Wifi, X, Zap,
+    LockOpen, LogIn, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug,
+    Plus, Power, Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, Smartphone,
+    Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb,
+    Users, Waypoints, Wifi, X, Zap,
 };
 
 #[component]
@@ -81,6 +81,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::ExternalLink => rsx! { ArrowUpRight { size } },
         StudioIconName::Copy => rsx! { Copy { size } },
         StudioIconName::Download => rsx! { Download { size } },
+        StudioIconName::LogIn => rsx! { LogIn { size } },
         StudioIconName::Upload => rsx! { Upload { size } },
         StudioIconName::Grow => rsx! { Maximize2 { size } },
         StudioIconName::Shrink => rsx! { Minimize2 { size } },
@@ -118,7 +119,6 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Restart => rsx! { RotateCcw { size } },
         StudioIconName::ViewCards => rsx! { LayoutGrid { size } },
         StudioIconName::ViewList => rsx! { List { size } },
-        StudioIconName::Sliders => rsx! { SlidersHorizontal { size } },
     }
 }
 
@@ -137,6 +137,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("edit") => Some(StudioIconName::Edited),
         Some("copy") => Some(StudioIconName::Copy),
         Some("download") => Some(StudioIconName::Download),
+        Some("login") => Some(StudioIconName::LogIn),
         Some("upload") => Some(StudioIconName::Upload),
         Some("grow") => Some(StudioIconName::Grow),
         Some("agent") => Some(StudioIconName::Agent),
@@ -241,6 +242,8 @@ pub enum StudioIconName {
     Copy,
     /// Export-to-file affordances.
     Download,
+    /// Sign in: the lightplayer.app row's to-do.
+    LogIn,
     /// Import-from-file affordances.
     Upload,
     /// Diagonal expand arrows: the device card's always-visible grow
@@ -329,9 +332,6 @@ pub enum StudioIconName {
     ViewCards,
     /// Rows: the home page's list view.
     ViewList,
-    /// Two sliders: the connected board card's All controls row (the
-    /// board's play page).
-    Sliders,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

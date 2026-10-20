@@ -6,32 +6,32 @@
 //! |---|---|---|
 //! | Terminal | [`DeviceTerminal`], flush | the status corner's details |
 //! | Access | [`DeviceAccessPanel`] (its own sections) | the access bar's |
-//! | Bluetooth | [`BluetoothSwitchPanel`] | the connection bar's |
-//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`) | the connection bar's |
-//! | Link counters | [`LinkCountersSection`] | the connection bar's |
-//! | Rename | [`DeviceRenameSection`] over the `rename` offer | the hardware bar's |
+//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`; no root heading and no switches of its own: the Wi‑Fi and lightplayer.app rows' switch lines are both) | the Wi‑Fi row's |
+//! | Link counters | [`LinkCountersSection`] | the row of the link in use |
 //! | Layout | [`DeviceLayoutSheet`]: the question or the refusal | the firmware bar's (raised) |
 //! | Other version | [`OtherVersionForm`], inline | the firmware bar's |
 //! | Restore from file | [`RestoreFromFileButton`] | the firmware bar's |
+//! | Panel settings | [`PanelSettingsSection`]: held controls' Reset, Auto-save | the status corner's, while connected |
 //!
 //! The panels' words are core's payload or the moved panels' own,
 //! unchanged; their verbs are offers drawn from the tree. The access
-//! panel's edits, the Bluetooth switch and the Wi‑Fi refresh still send
-//! their access and network commands, as today (out of scope here).
+//! panel's edits and the Wi‑Fi refresh still send their access and network
+//! commands, and the panel settings their panel commands, as today (out of
+//! scope here). The Bluetooth switch is a core offer now, the switch line
+//! at the top of the Bluetooth row's details.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceId, OfferPath, UiAction, UiDetailPanel, UiDeviceWifi, UiLayoutPanel};
 
-use super::bluetooth_switch_panel::BluetoothSwitchPanel;
 use super::card_action::use_card_scope;
 use super::link_counters_section::LinkCountersSection;
 use super::other_version_form::OtherVersionForm;
+use super::panel_settings_section::PanelSettingsSection;
 use super::restore_from_file_button::RestoreFromFileButton;
 use crate::app::agent::AgentMark;
 use crate::app::home::access_ui_context::{access_handler, network_handler};
 use crate::app::home::device_access_panel::DeviceAccessPanel;
 use crate::app::home::device_layout_sheet::DeviceLayoutSheet;
-use crate::app::home::device_rename_section::DeviceRenameSection;
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::wifi_panel::WifiPanel;
 use crate::base::DetailSection;
@@ -65,14 +65,8 @@ pub fn BarDetailPanel(
                 keys_open_preview: scope.previews.access_keys_open,
             }
         },
-        UiDetailPanel::Bluetooth(switch) => rsx! {
-            BluetoothSwitchPanel { switch, device, on_access }
-        },
         UiDetailPanel::Wifi(wifi) => rsx! {
             WifiDetails { wifi, board, on_action }
-        },
-        UiDetailPanel::Rename { offer, title } => rsx! {
-            RenameDetails { offer, title, on_action }
         },
         UiDetailPanel::LinkCounters(counters) => rsx! {
             LinkCountersSection { counters }
@@ -105,6 +99,13 @@ pub fn BarDetailPanel(
         } => rsx! {
             RestoreDetails { offer, current_base_mac, device, on_action }
         },
+        UiDetailPanel::PanelSettings {
+            target,
+            held,
+            auto_save,
+        } => rsx! {
+            PanelSettingsSection { target, held, auto_save, on_action }
+        },
     }
 }
 
@@ -122,19 +123,6 @@ fn WifiDetails(wifi: UiDeviceWifi, board: OfferPath, on_action: EventHandler<UiA
     let on_network = network_handler();
     rsx! {
         WifiPanel { wifi, offers, on_action, on_network, in_card: true }
-    }
-}
-
-/// Rename, over the `rename` offer the tree holds; nothing when it is gone.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RenameDetails(offer: OfferPath, title: String, on_action: EventHandler<UiAction>) -> Element {
-    let Some(rename) = use_offer_at(offer)() else {
-        return rsx! {};
-    };
-    // The section marks its own form with the offer's path.
-    rsx! {
-        DeviceRenameSection { offer: rename, title, on_action }
     }
 }
 
@@ -200,9 +188,7 @@ const RESTORE_SECTION_CLASS: &str = "tw:grid tw:border-0 tw:border-t tw:border-s
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{
-        DeviceLinkCounters, UiAccessPanel, UiBluetoothSwitch, UiOffer, UiOfferTree,
-    };
+    use lpa_studio_core::{DeviceLinkCounters, UiAccessPanel, UiOffer, UiOfferTree};
 
     use super::*;
     use crate::app::board_card::card_test_fixtures::{
@@ -250,17 +236,7 @@ mod tests {
                 dropped: 3,
             },
             UiDetailPanel::Access(UiAccessPanel::reading(DeviceId(7))),
-            UiDetailPanel::Bluetooth(UiBluetoothSwitch {
-                on: true,
-                locked: false,
-                sub: None,
-                restart_note: Some("Restarting to turn Bluetooth on…".to_string()),
-            }),
             UiDetailPanel::Wifi(UiDeviceWifi::new(DeviceId(7), true)),
-            UiDetailPanel::Rename {
-                offer: board().child("rename"),
-                title: "Porch".to_string(),
-            },
             UiDetailPanel::LinkCounters(DeviceLinkCounters {
                 resends: 3,
                 damaged: 0,
@@ -287,6 +263,13 @@ mod tests {
                 offer: board().child("restore-from-file"),
                 current_base_mac: None,
             },
+            UiDetailPanel::PanelSettings {
+                target: Some(lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                }),
+                held: 1,
+                auto_save: Some(true),
+            },
         ]
     }
 
@@ -295,9 +278,9 @@ mod tests {
         match panel {
             UiDetailPanel::Terminal { .. } => ("3", None),
             UiDetailPanel::Access(_) => ("Access", None),
-            UiDetailPanel::Bluetooth(_) => ("Restarting to turn Bluetooth on…", None),
-            UiDetailPanel::Wifi(_) => ("Wi", None),
-            UiDetailPanel::Rename { offer, .. } => ("Rename", Some(offer.clone())),
+            // In a card the panel has no heading (the row's switch line is
+            // it): what it draws while it reads the board.
+            UiDetailPanel::Wifi(_) => ("Reading", None),
             UiDetailPanel::LinkCounters(_) => ("Link", None),
             UiDetailPanel::Layout(layout) => (
                 "lays its files out differently",
@@ -307,6 +290,7 @@ mod tests {
             UiDetailPanel::RestoreFromFile { offer, .. } => {
                 ("Restore from a backup file", Some(offer.clone()))
             }
+            UiDetailPanel::PanelSettings { .. } => ("Held controls", None),
         }
     }
 

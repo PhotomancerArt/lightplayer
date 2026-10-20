@@ -17,12 +17,9 @@
 //! core's SHA-256 arrives in the facts: the firmware computes and caches it
 //! (DM24); the session never hashes the running core.
 
-use alloc::string::String;
-
 use crate::board_manifest::{BoardManifest, BoardState, TransferView};
-use crate::build_id::build_id_text;
+use crate::board_manifest_view::BoardManifestView;
 use crate::code_table::PROTO_V1;
-use crate::sha256_hex::sha256_to_hex;
 
 use super::board_link::LinkId;
 use super::board_session::BoardSession;
@@ -43,7 +40,18 @@ impl BoardSession {
         self.manifest_seen_by(now_ms, None)
     }
 
+    /// The same manifest as [`manifest`](Self::manifest), borrowing its text
+    /// from the facts: nothing on the heap, so a board can keep it resident.
+    #[must_use]
+    pub fn manifest_view(&self, now_ms: u64) -> BoardManifestView<'_> {
+        self.view_seen_by(now_ms, None)
+    }
+
     fn manifest_seen_by(&self, now_ms: u64, link: Option<LinkId>) -> BoardManifest {
+        self.view_seen_by(now_ms, link).to_manifest()
+    }
+
+    fn view_seen_by(&self, now_ms: u64, link: Option<LinkId>) -> BoardManifestView<'_> {
         let f = &self.facts;
         let transfer = self.transfer.as_ref().map(|t| TransferView {
             kind: t.kind(),
@@ -64,16 +72,16 @@ impl BoardSession {
         } else {
             BoardState::NeedsEngine
         };
-        BoardManifest {
+        BoardManifestView {
             proto: PROTO_V1,
-            target: f.target.clone(),
-            chip: f.chip_word.clone(),
-            version: f.version.clone(),
-            build_id: String::from_utf8_lossy(build_id_text(&f.build_id)).into_owned(),
+            target: &f.target,
+            chip: &f.chip_word,
+            version: &f.version,
+            build_id: f.build_id,
             wire_proto: f.wire_proto,
-            core_sha256: sha256_to_hex(&f.core_sha256),
+            core_sha256: f.core_sha256,
             core_len: f.core_len,
-            engine_sha256: sha256_to_hex(&f.digest_slot),
+            engine_sha256: f.digest_slot,
             engine_len: f.engine_len.filter(|_| self.engine_valid),
             layout: f.layout,
             loader: f.loader,

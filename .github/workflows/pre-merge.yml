@@ -214,6 +214,14 @@ jobs:
       # with no pinned figure of the image (emu-c6-cli, emu-esp32v3-ref, the
       # layout migration) stay on the narrower filters (DD77).
       figures_esp32c6: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
+      # The first-light ratchet (`c6-first-light`, docs/first-light-ratchet.md)
+      # runs where the C6's figures do, and on its own record and script.
+      # `c6_image` is whether the PR changes the image it boots (or the
+      # project it measures): when it does not, a moved first light is the
+      # emulator's or the measurement's and CI re-records it without Yona.
+      # Unknown (a main push) counts as changed.
+      c6_first_light: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.some.outputs.first_light == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
+      c6_image: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.c6_image == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
       figures_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_esp32v3 == 'true' || steps.closure.outputs.fw_closure_esp32v3 == 'true') && 'true' || 'false' }}
       figures_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_esp32s3 == 'true' || steps.closure.outputs.fw_closure_esp32s3 == 'true') && 'true' || 'false' }}
       release: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.release }}
@@ -647,6 +655,32 @@ jobs:
               - 'docs/defects/**'
               - 'scripts/defects-index.py'
               - '.github/workflows/pre-merge.yml'
+            # The first-light ratchet's own files (its other inputs are
+            # `emu_c6` and the C6's firmware closure; see `c6_first_light`).
+            first_light:
+              - 'scripts/first-light-record/**'
+              - 'scripts/ci/first-light-ratchet.py'
+              - 'scripts/ci/figures-patch.py'
+              - 'lp-cli/tests/emu_first_light.rs'
+              - 'lp-cli/tests/support/tree_store_board.rs'
+              - 'projects/test/basic/**'
+            # What the first-light ratchet boots and measures, beyond the
+            # generated firmware closure: the split image's other parts (the
+            # loader, our bootloader, the boot records, the split pipeline,
+            # the merged-image recipe), the vendored forks, the lockfile and
+            # toolchain, and the measured project. A PR touching none of these
+            # cannot have moved the product's first light.
+            c6_image:
+              - 'lp-fw/fw-esp32c6/**'
+              - 'lp-fw/fw-esp32c6-loader/**'
+              - 'lp-fw/bootloaders/**'
+              - 'lp-base/lp-bootctl/**'
+              - 'tools/lp-fw-split/**'
+              - 'scripts/emu/build-*.sh'
+              - 'third_party/**'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'projects/test/basic/**'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
               - 'lp-fw/fw-esp32c6/src/tree_flash.rs'
@@ -2970,6 +3004,132 @@ jobs:
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
+  # The first-light ratchet (docs/first-light-ratchet.md; Yona, 2026-10-18):
+  # the C6's split image booted ROM-up through our bootloader on
+  # lp-emu:esp32c6:t4, power-on, `projects/test/basic` with a saved Wi-Fi
+  # network on the emulated LAN, read off the firmware's `[perf] first
+  # light`. The ONE gate on emulated time (the emulator-first ADR's
+  # 2026-10-18 amendment): > 500 ms red, > 400 ms a warning, more than +5 ms
+  # over `scripts/first-light-record/esp32c6.json` red until Yona blesses it
+  # (`just bless-first-light` + the label `first-light-blessed`), a drop red
+  # with a patch (`just apply-ci-figures`) so the record ratchets down. A
+  # rise on a PR that does not change the image (`c6_image`) is the
+  # emulator's: CI re-records it with a note. The c40-sized project is
+  # reported, never gated. Its patch and verdict ride `figures-comment`.
+  #
+  # Path-gated like the C6's figure jobs (`c6_first_light`), and on every
+  # main push. Setup is emu-c6-cli's (the same release lp-cli test tree, so
+  # main's sccache objects serve both).
+  c6-first-light:
+    name: C6 first light (x64)
+    runs-on: ubuntu-24.04
+    # Estimated, not yet measured on a runner: ~1 min setup, ~6 min release
+    # lp-cli test tree, ~2 min split image, ~3 min of emulated boots. 40 is
+    # ~3x; re-measure before tightening.
+    timeout-minutes: 40
+    needs: detect-changes
+    if: needs.detect-changes.outputs.c6_first_light == 'true'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
+
+      # Depth 2: on a PR the checkout is GitHub's merge commit, whose first
+      # parent is the base — the record a PR may not raise without Yona.
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          fetch-depth: 2
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: First light on t4 (basic and c40, a saved network)
+        shell: bash
+        run: cd lp2025 && just first-light-measure "$RUNNER_TEMP/first-light"
+
+      - name: The ratchet (500 red, 400 yellow, +5 ms needs Yona)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          C6_IMAGE: ${{ needs.detect-changes.outputs.c6_image }}
+        run: |
+          cd lp2025
+          args=(--json "$RUNNER_TEMP/first-light/emu-first-light-t4.json" --artifact --image-changed "$C6_IMAGE")
+          if [ -n "$PR_NUMBER" ]; then
+            # Read live, not from the event: a re-run replays the original
+            # payload, so a label Yona added since would not be in it.
+            labels="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" -q '.[].name' | paste -sd, -)"
+            args+=(--base HEAD^1 --labels "$labels")
+          fi
+          python3 scripts/ci/first-light-ratchet.py check "${args[@]}"
+
+      - name: Upload the ratchet's verdict (figures-comment reads it)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-c6-first-light
+          path: ${{ runner.temp }}/figures-patch/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload the first-light record
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-light-t4
+          path: ${{ runner.temp }}/first-light/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # The C6 repartition's migration, end to end on the emulated C6 (`just
   # test-emu-layout-migration`, `lp-cli/tests/emu_layout_migration.rs`): a
   # "fielded board" on the pre-2026-10 table, read, migrated, refused and
@@ -4004,6 +4164,7 @@ jobs:
       - emu-esp32s3
       - heap-budget-chips
       - validate-x64
+      - c6-first-light
     # …and only when at least one of them ran, so a PR that runs none of
     # them (docs-only, say) still runs nothing.
     if: >-
@@ -4011,7 +4172,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       (needs.emu-c6.result != 'skipped' || needs.emu-esp32v3.result != 'skipped' ||
        needs.emu-esp32s3.result != 'skipped' || needs.heap-budget-chips.result != 'skipped' ||
-       needs.validate-x64.result != 'skipped')
+       needs.validate-x64.result != 'skipped' || needs.c6-first-light.result != 'skipped')
     permissions:
       contents: read
       pull-requests: write
@@ -4072,6 +4233,7 @@ jobs:
       - emu-esp32s3
       - heap-budget-chips
       - emu-c6-cli
+      - c6-first-light
       - emu-c6-layout-migration
       - validate-x64
       - validate-gfx

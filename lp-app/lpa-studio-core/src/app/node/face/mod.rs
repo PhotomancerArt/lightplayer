@@ -27,6 +27,7 @@ mod ui_panel_control;
 mod ui_panel_control_view;
 mod ui_panel_group;
 mod ui_panel_widget;
+mod ui_panel_wire;
 mod ui_patch_bay;
 mod ui_pattern_picker;
 mod ui_playlist_entry;
@@ -44,12 +45,11 @@ pub use ui_node_face::UiNodeFace;
 pub use ui_output_face::{
     UiLedBudget, UiOutputBoardFacts, UiOutputFace, UiOutputPin, UiOutputPortRow, UiWireStatus,
 };
-pub use ui_panel_control::{
-    UiPanelControl, UiPanelEmit, UiPanelTarget, UiPanelWire, UiPanelWireRole,
-};
+pub use ui_panel_control::{UiPanelControl, UiPanelEmit, UiPanelTarget};
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
 pub use ui_panel_group::UiPanelGroup;
 pub use ui_panel_widget::UiPanelWidget;
+pub use ui_panel_wire::{UiPanelWire, UiPanelWireRole};
 pub use ui_patch_bay::{UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchPort};
 pub use ui_pattern_picker::{UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry};
 pub use ui_playlist_entry::UiPlaylistEntry;

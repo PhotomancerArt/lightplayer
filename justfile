@@ -3747,14 +3747,66 @@ test-emu-c6-cli-boards: install-rv32-target
 # and its parts, from a ROM-up boot, for the shipped image (the tree store)
 # and the fielded littlefs image (pinned, `FIELDED_LITTLEFS`, on its own
 # 176-sector table), with no project, `projects/test/basic` and a c40-sized
-# project. A REPORT, never a gate: emulated time, never compared
-# with silicon in ms (docs/reports/2026-10-16-c6-time-to-first-light.md has
-# the silicon figures). Never CI. `grade` is t1, t2 or t3; `dir` keeps the
-# JSON record.
+# project. A report at every grade and case: the ONE gated reading is the
+# first-light ratchet's (`first-light-check`, below — t4, basic + a saved
+# network). `grade` is t1, t2, t3 or t4; `dir` keeps the JSON record.
 #   just report-first-light-emu
 #   just report-first-light-emu t3 target/first-light
 report-first-light-emu grade="t2" dir="": install-rv32-target
     LP_FIRST_LIGHT_GRADE={{ grade }} LP_FIRST_LIGHT_DIR={{ dir }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_first_light -- --include-ignored --nocapture
+
+# The first-light ratchet's measurement (docs/first-light-ratchet.md): the
+# split image ROM-up through our bootloader on lp-emu:esp32c6:t4, power-on,
+# `projects/test/basic` (gated) and a c40-sized project (reported), each with
+# a saved Wi-Fi network on the emulated LAN. Writes
+# `<dir>/emu-first-light-t4.json`. Uses CI's images under `LP_CI_IMAGES`.
+first-light-measure dir="target/first-light": install-rv32-target
+    LP_FIRST_LIGHT_GRADE=t4 LP_FIRST_LIGHT_NET=1 LP_FIRST_LIGHT_CASES=basic,c40 LP_FIRST_LIGHT_DIR={{ dir }} LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_first_light -- --include-ignored --nocapture
+
+# The first-light ratchet, as CI runs it (minus the PR's labels and base):
+# measure, then > 500 ms fails, > 400 ms warns, more than +5 ms over
+# `scripts/first-light-record/esp32c6.json` fails (Yona's to bless), and a
+# drop rewrites the record. INDICATIVE ON A DESK: the record is CI's reading,
+# and a desk build is not the same bytes (host paths) — at 6fadbca6c a desk
+# read 394 ms and CI 385. Use it to see a direction, not to bless.
+#   just first-light-check
+first-light-check dir="target/first-light": (first-light-measure dir)
+    scripts/ci/first-light-ratchet.py check --json {{ dir }}/emu-first-light-t4.json
+
+# YONA'S bless of a first-light rise (docs/first-light-ratchet.md): writes
+# the record at `ms` — CI's reading, from the PR comment or the job summary,
+# never a desk measurement — with `recorded_by: yona`. CI accepts a raised
+# record only with that field AND the PR label `first-light-blessed`.
+# Agents never run this for a rise.
+#   just bless-first-light 392
+bless-first-light ms:
+    scripts/ci/first-light-ratchet.py bless {{ ms }}
+
+# The first-light ratchet's periodic silicon cross-check (a DESK recipe,
+# never CI; docs/first-light-ratchet.md): flash this tree's split image whole
+# onto CX1 (the sacrificial board — it ERASES its filesystem) and take 10
+# power-on boots per case off `[perf] first light`
+# (`lp-cli/tests/board_first_light.rs`). Lease CX1 first and pass your
+# session as BOARD_HOLDER. The `wifi` case (the ratchet's `basic+net`) needs
+# the bench access point in LP_FIRST_LIGHT_WIFI_SSID/_PASSWORD (environment
+# only). Compare the medians with the record; a drift beyond ~5 % is an
+# emulator fidelity defect to file.
+#   board take c6-expendable --as "<you>" --for "first-light cross-check"
+#   BOARD_HOLDER="<you>" just first-light-cx1
+first-light-cx1 cases="basic,wifi" dir="target/first-light-cx1": fw-esp32c6-split
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${BOARD_HOLDER:?lease CX1 and set BOARD_HOLDER (board take c6-expendable --as ...)}"
+    if [[ ",{{ cases }}," == *",wifi,"* && -z "${LP_FIRST_LIGHT_WIFI_SSID:-}" ]]; then
+        echo "first-light-cx1: the wifi case needs LP_FIRST_LIGHT_WIFI_SSID and _PASSWORD (the bench AP), from the environment" >&2
+        exit 2
+    fi
+    LP_FIRST_LIGHT_DIR={{ dir }} LP_FIRST_LIGHT_LABEL="$(git rev-parse --short HEAD)" \
+        LP_FIRST_LIGHT_MERGED=target/fw-split/shipped/merged.bin \
+        LP_FIRST_LIGHT_CASES={{ cases }} LP_FIRST_LIGHT_BOOTS=10 \
+        cargo test -p lp-cli --test board_first_light -- --include-ignored --nocapture
+    echo "first-light-cx1: the ratchet's record (t4, basic+net):"
+    cat scripts/first-light-record/esp32c6.json
 
 # The tree-store cut walk's long form (plan
 # lp2025/2026-10-08-2339-tree-store-firmware-and-emulator, P7): every erase
@@ -5112,6 +5164,32 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# Factory reset end to end (Yona's C6 walk, 2026-10-19): an emulated C6 on the
+# packaged firmware, ROM-up, through Studio's real device stack over `?emu=`.
+# Factory reset is under Hardware (not Firmware); after it the card is the
+# blank board with Install firmware and no Retry, and its top never says
+# "stopped responding" (every `data-surface` it showed is recorded); three
+# re-enumerations (the shim's, with a gap, for the erased chip's watchdog)
+# leave the same card with its details open; Install firmware, one press,
+# brings its hello back. Needs a Studio on this worktree's port, or
+# `--serve-release` (after `just studio-web-story-build`,
+# `just studio-firmware-package-served` and `cargo build -p lp-cli`). Proves
+# Studio's flow on the emulated chip, not a real C6's re-enumeration. Not CI.
+walk-factory-reset-emu *args:
+    node scripts/emu/walk-factory-reset-emu.mjs {{ args }}
+
+# A running board whose OPEN port re-enumerates (a reset that takes a C6's
+# USB with it) keeps its card in place: an emulated C6 on the packaged
+# firmware over `?emu=`, its Hardware details open, its open port killed and
+# a new one adopted under the same grant a second later (the shim's, three
+# times): the same card element, under Online boards at every change the page
+# made, its details still open. A port that stays gone puts the card under
+# Offline boards. Needs a Studio on this worktree's port, or `--serve-release`
+# (after `just studio-web-story-build`, `just studio-firmware-package-served`
+# and `cargo build -p lp-cli`). Not a real C6's re-enumeration timing. Not CI.
+walk-reenumerate-emu *args:
+    node scripts/emu/walk-reenumerate-emu.mjs {{ args }}
+
 # The desk's Android test phone over adb (scripts/phone/README.md):
 # `just phone status|pair <code>|connect|awake|cdp|serve <port>|open <url>|shot <png>|snoop <dir>`.
 phone *args:
@@ -5148,10 +5226,12 @@ walk-usb-phone *args:
 walk-two-tabs-emu *args:
     node scripts/emu/walk-two-tabs-emu.mjs {{ args }}
 
-# The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
-# reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
-# the USB shim (`usb`) or `?ble=emu` (`ble`). Transport, UI and the board's
-# store — not access (the emulated link is trusted). Serves the RELEASE
+# The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, joining
+# a network the board heard on its virtual LAN, adding one by name, reading
+# both back (after a reload) and forgetting one, on an emulated C6 over the
+# USB shim (`usb`) or `?ble=emu` (`ble`). Every claim is the board's status
+# over its LAN forward. Transport, UI, the board's store and its station —
+# not access (the emulated link is trusted), not the radio. Serves the RELEASE
 # bundle itself; needs `just studio-web-story-build`,
 # `just studio-firmware-package-esp32c6` and `cargo build -p lp-cli`. Not CI.
 #

@@ -165,8 +165,9 @@ impl DeviceRegistry {
 
     /// Rename a remembered device (D34). The registry name is the
     /// user-facing truth: it wins over device-reported names at reconcile
-    /// ([`upsert_device_merged`](super::device_session::upsert_device_merged))
-    /// and is written back to the device when a session is live.
+    /// ([`upsert_device_merged`](super::device_session::upsert_device_merged)).
+    /// It is Studio's own name for the board, and is never written to the
+    /// board.
     pub fn rename(&self, uid: &str, name: &str) -> Result<(), LibraryError> {
         let mut file = self.load()?;
         let Some(device) = file.devices.iter_mut().find(|d| d.uid == uid) else {

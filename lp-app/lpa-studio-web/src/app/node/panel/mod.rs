@@ -18,6 +18,7 @@ mod palette_editor;
 mod palette_swatch_field;
 mod panel_control;
 mod panel_emit;
+mod speed_knob;
 mod toggle_field;
 
 pub use h_fader_field::HFaderField;
@@ -32,4 +33,5 @@ pub use palette_editor::{PaletteEditor, PaletteOrigin};
 pub use palette_swatch_field::PaletteSwatchField;
 pub use panel_control::PanelControl;
 pub use panel_emit::PanelEmit;
+pub(crate) use speed_knob::speed_words;
 pub use toggle_field::ToggleField;

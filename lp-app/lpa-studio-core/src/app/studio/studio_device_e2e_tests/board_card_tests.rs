@@ -76,7 +76,7 @@ fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
     assert_eq!(done.icon.as_deref(), Some("check"));
     every_card_action_is_offered(&mut bench);
 
-    // Edit: the project bar's action (the panel's All controls row's too).
+    // Edit: the project bar's action (the panel foot's too).
     let edit = card
         .bar(crate::BarLayer::Project)
         .action
@@ -252,9 +252,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board's Project row says "none", and its primary is "Add a project":
-/// the `push` offer, drawn as the picker, which the project bar does not
-/// repeat; pressed by path with a source, the push runs.
+/// An empty board's Project row says "none" with Add, lit as a to-do, and
+/// its primary is "Add a project": the same `push` offer, drawn as the
+/// picker; pressed by path with a source, the push runs.
 #[test]
 fn an_empty_boards_primary_adds_a_project_by_path() {
     let device = empty_light_player("dev000000card000005");
@@ -270,8 +270,13 @@ fn an_empty_boards_primary_adds_a_project_by_path() {
     let card = card_of(&bench, id);
     let bar = card.bar(crate::BarLayer::Project).clone();
     assert_eq!(bar.summary, "none");
-    assert_eq!(bar.action, None, "the primary carries it, once");
+    assert!(bar.todo, "lit: something left to do");
     let add = primary_offer(&card);
+    assert_eq!(
+        bar.action.as_ref().map(|row| (&row.offer, &row.draw)),
+        Some((&add.offer, &add.draw)),
+        "the row's Add is the primary's pick"
+    );
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(id, "push"));
     assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));
@@ -377,7 +382,7 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
     assert_eq!(bar.tone, crate::UiStatusKind::Neutral);
 }
 
-/// A board on a live wire that never answers: the connection bar says it is
+/// A board on a live wire that never answers: the USB row says it is
 /// not responding, in Warning, and Retry presses `retry` by path.
 #[test]
 fn a_not_responding_boards_retry_presses_retry_by_path() {
@@ -405,8 +410,8 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     });
     let id = bench.view().devices[0].id;
     let card = card_of(&bench, id);
-    let bar = card.bar(crate::BarLayer::Connection).clone();
-    assert_eq!(bar.summary, "USB · not responding");
+    let bar = card.bar(crate::BarLayer::Usb).clone();
+    assert_eq!(bar.summary, "not responding");
     assert_eq!(
         bar.tone,
         crate::UiStatusKind::Neutral,
@@ -435,16 +440,140 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     bench
         .press(&retry.offer, retry.args.clone())
         .expect("Retry asks again");
-    let identifying = card_of(&bench, id).bar(crate::BarLayer::Connection).clone();
+    let identifying = card_of(&bench, id).bar(crate::BarLayer::Usb).clone();
     assert!(
         identifying.work.is_some(),
         "asking again is the bar's work: {identifying:?}"
     );
 }
 
+/// The dead end of 2026-10-18 (a first-time user on lightplayer.app): a new
+/// board whose firmware prints nothing at all, set up before it answered,
+/// read "This board stopped responding over USB." with Retry — "duh, I'm
+/// trying to program it". A board that never said hello and says nothing
+/// is a board to install: the surface says it doesn't respond, the primary
+/// is Install firmware (`flash`), pressed by path, and the USB row says
+/// nothing loud.
+#[test]
+fn a_silent_board_that_never_said_hello_offers_install_not_retry() {
+    let device = FakeEsp32Device::new(silent_script());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-silent-1");
+    bench.run_until(&tasks, "the new board to be identifying", |bench| {
+        !bench.view().pending.is_empty()
+    });
+    // "Set up this device" while it identifies: the board becomes a card.
+    bench
+        .press("devices/new-1/adopt", OfferArgs::new())
+        .expect("Set up this device");
+    bench.run_until(&tasks, "its identify to settle silent", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+    let id = bench.view().devices[0].id;
+    assert_eq!(
+        bench.view().devices[0].status,
+        crate::DeviceStatus::NeedsAttention,
+        "it never said hello: it needs firmware, it did not stop responding"
+    );
+    let card = card_of(&bench, id);
+    assert_eq!(card.surface.state, crate::SurfaceState::Silent);
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board doesn't respond.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Install the firmware to use it.")
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer, bench.device_verb(id, "flash"));
+    let link = card.bar(crate::BarLayer::Usb).clone();
+    assert_eq!(link.summary, "connected");
+    assert_eq!(link.tone, crate::UiStatusKind::Neutral);
+    assert_eq!(link.action, None, "no Retry on the USB row");
+    every_card_action_is_offered(&mut bench);
+
+    // Over firmware that will not say what it is, the flash is Lasting:
+    // the user's second click.
+    bench
+        .press_lasting(
+            &install.offer,
+            OfferArgs::new().with(crate::FLASH_BOARD_PARAM, c6_board_choice().board_id),
+        )
+        .expect("Install firmware starts the flash");
+    bench.run_until(&tasks, "the flash to run", |bench| {
+        bench.view().devices.iter().any(|card| {
+            card.activity
+                .as_ref()
+                .is_some_and(|work| work.kind == crate::DeviceActivityKind::Flash)
+        })
+    });
+}
+
+/// The same silent board left on its new-board card: once it settles, the
+/// card says it doesn't respond, and Install firmware is the primary.
+#[test]
+fn a_silent_new_boards_card_offers_install() {
+    let device = FakeEsp32Device::new(silent_script());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-silent-2");
+    bench.run_until(&tasks, "the silent verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let id = bench.view().pending[0].device;
+    let card = card_of(&bench, id);
+    assert_eq!(card.surface.state, crate::SurfaceState::Silent);
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board doesn't respond.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Install the firmware to use it.")
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer.to_string(), "devices/new-1/flash");
+    assert_eq!(card.bar(crate::BarLayer::Usb).summary, "connected");
+    every_card_action_is_offered(&mut bench);
+}
+
+/// The board is renamed where its name is: the name bar carries the
+/// `rename` offer, pressed by that path with the new name, and the card
+/// wears it; Hardware's details hold no name field.
+#[test]
+fn the_name_bar_renames_the_board_by_its_offer() {
+    let device = empty_light_player("dev000000card000021");
+    let (mut bench, tasks) = identified(&device, "usb-card-21");
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    let rename = card.name_bar.rename.clone().expect("rename is offered");
+    assert_eq!(rename, bench.device_verb(id, "rename"));
+    assert!(
+        card.bar(crate::BarLayer::Hardware)
+            .details
+            .panels
+            .is_empty(),
+        "no name field in Hardware's details"
+    );
+    bench
+        .press(
+            &rename,
+            OfferArgs::new().with(crate::RENAME_NAME_PARAM, "Holiday eaves"),
+        )
+        .expect("the rename presses");
+    bench.run_until(&tasks, "the card to wear the new name", |bench| {
+        card_of(bench, id).name_bar.title == "Holiday eaves"
+    });
+    every_card_action_is_offered(&mut bench);
+}
+
 /// The hardware bar's details: Reset says why it waits while work runs
-/// (the offer's own reason), and Forget is Lasting — the second click
-/// forgets the board.
+/// (the offer's own reason), Factory reset and Forget are its danger
+/// section, and Forget is Lasting — the second click forgets the board.
 #[test]
 fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
     let device = empty_light_player("dev000000card000008");
@@ -479,16 +608,17 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
             .is_some_and(|card| card.activity.is_none())
     });
 
-    let forget = card_of(&bench, id)
+    let danger = card_of(&bench, id)
         .bar(crate::BarLayer::Hardware)
         .details
         .sections
         .last()
-        .expect("the danger section")
-        .affordances
-        .first()
         .cloned()
-        .expect("Forget");
+        .expect("the danger section");
+    let words: Vec<&str> = danger.affordances.iter().map(|a| a.word.as_str()).collect();
+    assert_eq!(words, ["Factory reset", "Forget"]);
+    assert_eq!(danger.affordances[0].offer, bench.device_verb(id, "erase"));
+    let forget = danger.affordances[1].clone();
     assert_eq!(forget.word, "Forget");
     assert_eq!(forget.offer, bench.device_verb(id, "forget"));
     bench
@@ -499,6 +629,274 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
         bench.view().devices.iter().all(|card| card.id != id),
         "forgotten"
     );
+}
+
+/// Yona's C6 over USB, 2026-10-19: Factory reset was under Firmware, and
+/// after it the card read "This board stopped responding over USB." with a
+/// Retry that timed out; only a replug reached the blank board. Factory
+/// reset is the Hardware row's now, and after it the card is the blank
+/// board — even when the erased board says nothing (the flasher's stub, or
+/// a boot loop lost to re-enumerating): "This board doesn't have LightPlayer
+/// firmware.", Install firmware as the primary, no Retry. Install firmware
+/// works in one press from there.
+#[test]
+fn a_factory_reset_from_hardware_lands_on_install_firmware_with_no_retry() {
+    let device = light_player("dev_wipesilent");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-reset");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    let erase = bench.device_verb(id, "erase");
+    let card = card_of(&bench, id);
+    let in_bar = |card: &UiBoardCard, layer: crate::BarLayer| {
+        card.bar(layer)
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .any(|action| action.offer == erase)
+    };
+    assert!(in_bar(&card, crate::BarLayer::Hardware), "under Hardware");
+    assert!(
+        !in_bar(&card, crate::BarLayer::Firmware),
+        "not under Firmware"
+    );
+
+    bench.erase_plan.set(ErasePlan::Silent);
+    bench
+        .press_lasting(&erase, OfferArgs::new())
+        .expect("Factory reset, after the arm");
+    bench.run_until(&tasks, "the erase to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = card_of(&bench, id);
+    let notice = card.surface.notice.as_ref().expect("the surface says it");
+    assert_eq!(
+        (notice.first.as_str(), notice.second.as_deref()),
+        (
+            "This board doesn't have LightPlayer firmware.",
+            Some("Install the firmware to use it.")
+        ),
+        "{:?}",
+        card.surface
+    );
+    let install = primary_offer(&card);
+    assert_eq!(install.word, "Install firmware");
+    assert_eq!(install.offer, bench.device_verb(id, "flash"));
+    let retry = bench.device_verb(id, "retry");
+    bench.not_offered(retry);
+    assert_eq!(card.bar(crate::BarLayer::Firmware).summary, "none");
+    assert_eq!(
+        card.bar(crate::BarLayer::Usb).action,
+        None,
+        "the USB row offers no Retry either"
+    );
+    every_card_action_is_offered(&mut bench);
+
+    // Install firmware, one press: the flash parks the chip and writes it.
+    let choice = c6_board_choice();
+    bench
+        .press(
+            &install.offer,
+            OfferArgs::new().with("board", &choice.board_id),
+        )
+        .expect("Install firmware starts the flash");
+    bench.run_until(&tasks, "the installed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+}
+
+/// Yona's C6, 2026-10-19: "the card periodically 'refreshes' which is
+/// jarring and resets the ui." An erased native-USB chip re-enumerates on
+/// every watchdog reset of its boot loop; each one took the board offline
+/// and back, and its card moved from Online boards to Offline boards and
+/// back, remounted (open details closed, an armed button disarmed). A port
+/// that comes back within the grace is the same board that never left: the
+/// blank card holds — Online, the blank board, Install firmware — through
+/// every turn of the loop. A board that stays gone is offline after the
+/// grace.
+#[test]
+fn an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone() {
+    let device = light_player("dev_bootloop");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-bootloop");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    bench.erase_plan.set(ErasePlan::Silent);
+    let erase = bench.device_verb(id, "erase");
+    bench
+        .press_lasting(&erase, OfferArgs::new())
+        .expect("Factory reset, after the arm");
+    bench.run_until(&tasks, "the erase to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let blank = |bench: &DeviceBench| {
+        let card = card_of(bench, id);
+        assert_eq!(
+            card.presence,
+            crate::UiBoardPresence::Online,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(
+            card.surface.state,
+            crate::SurfaceState::NoFirmware,
+            "{:?}",
+            card.surface
+        );
+        assert_eq!(primary_offer(&card).word, "Install firmware");
+    };
+    blank(&bench);
+
+    // Three turns of the boot loop: the port leaves, and is back (under the
+    // same grant) a moment later. The card never moves or changes.
+    let steps = |seconds: f64| (seconds / STEP_MS) as usize;
+    for _ in 0..3 {
+        bench.granted.set(false);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+        for _ in 0..steps(1.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+        bench.granted.set(true);
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+        for _ in 0..steps(4.0) {
+            bench.step(&tasks);
+            blank(&bench);
+        }
+    }
+
+    // Unplugged for good: offline once the grace has passed.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to be offline", |bench| {
+        card_of(bench, id).presence == crate::UiBoardPresence::Offline
+    });
+}
+
+/// The open-port half of the same defect: a running board whose USB
+/// re-enumerates (any reset that takes a native-USB chip's USB with it)
+/// while Studio holds its port open. The read pump hears the dead port's
+/// own error, and used to detach the link at once: the board was Offline
+/// for the moment it took to come back, and its card left Online boards
+/// and came back, remounted. Now the board is held for the grace while the
+/// new port attaches as its link's next generation: the card stays Online
+/// at every step, its surface does not move while the port is gone, and
+/// once the port is back it only re-identifies the board on the new link
+/// (honest: Studio is asking the board who it is). A board whose port dies
+/// and does not come back is offline after the grace.
+#[test]
+fn a_running_board_re_enumerating_with_its_port_open_holds_its_card() {
+    let device = light_player_running("dev000000reenumopen", identity_free_project());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-reenum-open");
+    let running = |bench: &DeviceBench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.state_label == "Ready"
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    };
+    bench.run_until(&tasks, "the running board to settle", running);
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    assert_eq!(
+        card.surface.state,
+        crate::SurfaceState::AllWell,
+        "{:?}",
+        card.surface
+    );
+    let held = |bench: &DeviceBench, re_identifying: bool| {
+        let home = bench.controller.view().home.expect("the home view");
+        let sections = &home.sections;
+        assert!(
+            sections.online.iter().any(|board| board.id == id)
+                && sections.offline.iter().all(|board| board.id != id),
+            "the card stays under Online boards: {sections:?}"
+        );
+        let card = home
+            .devices
+            .cards
+            .into_iter()
+            .find(|card| card.device == id)
+            .expect("the board's card");
+        assert_eq!(
+            card.presence,
+            crate::UiBoardPresence::Online,
+            "{:?}",
+            card.surface
+        );
+        let allowed = match re_identifying {
+            false => &[crate::SurfaceState::AllWell][..],
+            true => &[
+                crate::SurfaceState::AllWell,
+                crate::SurfaceState::Identifying,
+            ][..],
+        };
+        assert!(allowed.contains(&card.surface.state), "{:?}", card.surface);
+        assert!(bench.view().pending.is_empty(), "never a new board");
+    };
+
+    let steps = |seconds: f64| (seconds / STEP_MS) as usize;
+    for _ in 0..3 {
+        // The port dies under the open link and the grant is gone.
+        bench.lose_port();
+        for _ in 0..steps(1.0) {
+            bench.step(&tasks);
+            held(&bench, false);
+        }
+        // A new port under the same grant: the link's next generation.
+        bench.port_back();
+        for _ in 0..steps(4.0) {
+            bench.step(&tasks);
+            held(&bench, true);
+        }
+        assert!(running(&bench), "{:?}", bench.view().devices);
+        assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+        assert_eq!(bench.view().devices[0].id, id, "the same card");
+    }
+
+    // Unplugged for good with the port open: held for the grace, then
+    // offline.
+    bench.lose_port();
+    let grace = crate::app::devices::device_effects::REENUMERATION_GRACE.as_secs_f64();
+    for _ in 0..steps(grace - 0.5) {
+        bench.step(&tasks);
+        held(&bench, false);
+    }
+    bench.run_until(&tasks, "the board to be offline", |bench| {
+        card_of(bench, id).presence == crate::UiBoardPresence::Offline
+    });
 }
 
 /// The layout question rides the firmware bar: while it is open the bar's
@@ -936,9 +1334,10 @@ fn a_running_sim_with_no_project_offers_add_a_project() {
     });
     let card = card_of(&bench, sim);
     assert_eq!(card.bar(crate::BarLayer::Project).summary, "none");
+    let usb = card.bar(crate::BarLayer::Usb);
     assert_eq!(
-        card.bar(crate::BarLayer::Connection).summary,
-        "Simulated · running"
+        (usb.kind, usb.summary.as_str()),
+        (Some("Simulated"), "running")
     );
     let add = primary_offer(&card);
     assert_eq!(add.word, "Add a project");
@@ -1019,50 +1418,6 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
     });
 }
 
-/// The same older LightPlayer, reached from Chrome on Android over USB
-/// (WebUSB), where the flasher cannot run: the USB square still connects it
-/// by path, and its card's Update firmware is published disabled, with the
-/// reason under it — the press a refused verb gets.
-/// (`docs/adr/2026-10-18-android-usb-over-webusb.md`.)
-#[test]
-fn from_a_phone_over_usb_update_firmware_is_refused_in_plain_words() {
-    const HELLO_PROTO_32: &str =
-        include_str!("../../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
-    super::links_cannot_flash(lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER);
-    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
-        FakeLightPlayerState::new()
-            .with_base_mac(BENCH_BOARD_MAC)
-            .with_hello_json(HELLO_PROTO_32),
-    )));
-    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-webusb-older-1");
-    bench
-        .press("devices/connect-usb", OfferArgs::new())
-        .expect("the USB square is offered on a phone too");
-    bench.run_until(
-        &tasks,
-        "the board to read as an older LightPlayer",
-        |bench| {
-            bench.view().pending.first().is_some_and(|pending| {
-                matches!(
-                    pending.firmware_face,
-                    lpa_devices::view::FirmwareFace::OlderLightPlayer { .. }
-                )
-            })
-        },
-    );
-    let id = bench.view().pending[0].device;
-    let card = card_of(&bench, id);
-    assert_eq!(card.surface.state, crate::SurfaceState::OldFirmware);
-    let notice = card.surface.notice.clone().expect("the surface says it");
-    assert_eq!(notice.first, "This board is running old firmware.");
-    assert_eq!(
-        bench.offer_reason("devices/new-1/flash"),
-        lpa_devices::view::FIRMWARE_NEEDS_A_COMPUTER,
-        "Update firmware is drawn disabled, with the reason under it"
-    );
-    every_card_action_is_offered(&mut bench);
-}
-
 /// The card the home view publishes for `device`.
 fn card_of(bench: &DeviceBench, device: crate::DeviceId) -> UiBoardCard {
     bench
@@ -1101,4 +1456,13 @@ fn every_card_action_is_offered(bench: &mut DeviceBench) {
             );
         }
     }
+}
+
+/// A board whose firmware prints nothing at all, ever: no ROM banner, no
+/// boot line, no hello (a factory firmware that keeps quiet on USB).
+fn silent_script() -> FakeDeviceScript {
+    let mut script = FakeDeviceScript::new(FakeBootState::ForeignFirmware);
+    script.rom_banner.clear();
+    script.foreign_banner.clear();
+    script
 }

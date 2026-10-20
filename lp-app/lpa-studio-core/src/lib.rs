@@ -56,17 +56,17 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
-    ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
-    BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONFIRMATION_REQUIRED,
-    CONNECT_HERE, CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE,
-    LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN,
-    PROJECT_NONE, PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput,
-    SOMEONE_ELSE_SENTENCE, SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED,
-    UPDATE_REQUIRED, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch,
-    UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
-    UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
-    UiStatusCorner, UiSurfaceNotice, activity_bar, activity_words, bluetooth_switch, board_card,
-    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    ADD_A_PROJECT, ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput,
+    BoardConnection, BoardLinks, CONFIRMATION_REQUIRED, CONNECT_HERE, CONNECTING,
+    CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, LENS_SOURCE_WORDS,
+    LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN, PROJECT_NONE,
+    PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
+    SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
+    UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBoardCard, UiBoardPanel,
+    UiBoardPanelSection, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
+    UiCardControl, UiCornerDetails, UiDetailPanel, UiDetailSwitch, UiNameBar, UiPrimary,
+    UiStackBar, UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words,
+    board_card, board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
     roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
@@ -147,6 +147,7 @@ pub use app::devices::{
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
 };
+pub use app::devices::{SIGN_IN_VERB, SignInOp, sign_in_offer};
 /// Connect on a board another tab holds: the offer, its op and its words.
 pub use app::devices::{
     TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,
@@ -170,13 +171,15 @@ pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
-    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
+    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BLUETOOTH_ENABLED_PARAM,
+    BluetoothSwitchOp, BrowserKey, DEFAULT_KDF_ITERATIONS, DISABLE_BLUETOOTH, DeviceAccessChange,
+    DroppedKey, ENABLE_BLUETOOTH, MAX_SECRETS_PER_FILE, NetworkLinkKeys, OFF_OVER_BLUETOOTH,
     OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
     UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
     UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
-    account_key_refused_sentence, device_unlock_offer, dropped_sentence, not_permitted_sentence,
-    open_summary, tier_word, unlock_offer,
+    account_key_refused_sentence, bluetooth_offer, bluetooth_path, bluetooth_restart_words,
+    device_unlock_offer, dropped_sentence, not_permitted_sentence, open_summary, tier_word,
+    unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

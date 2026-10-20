@@ -65,11 +65,13 @@ struct Setup {
 struct Running {
     setup: Setup,
     edge: Option<UpdateEdge>,
-    /// The manifest at install, its `coreSha256` filled in only when said
-    /// ([`manifest`]). With no session nothing else it says can change: the
-    /// engine never runs on a trial core, and only a session starts a
-    /// transfer.
-    at_install: lpc_update::BoardManifest,
+    /// The manifest at install, as a view that owns no heap: its text is
+    /// the image's own `'static` strings, so what stays resident does not
+    /// grow with the app version's length (#964). With no session nothing
+    /// it says can change: the engine never runs on a trial core, and only
+    /// a session starts a transfer. Its `core_sha256` is left zero: it is
+    /// filled in only when said ([`manifest`]).
+    at_install: lpc_update::BoardManifestView<'static>,
 }
 
 /// The hook's state. One task only: the server loop's (the transports call
@@ -104,18 +106,31 @@ pub fn install(
     };
     // Built here, before the engine starts, rather than in the server
     // loop's first hello; dropped at once, so its buffers cost the engine's
-    // heap nothing until a host arrives — the manifest kept is ~200 B. The
+    // heap nothing until a host arrives — the view kept owns no heap. The
     // core's hash is left out (all-zero facts): hashing it here held every
     // boot's first light ~185 ms. `manifest` fills it in.
-    let at_install = new_edge_with(&setup, [0; 32])
-        .session
-        .manifest(super::update_edge::now_ms());
+    let at_install = resident_manifest(&setup);
     *RUNNING.0.borrow_mut() = Some(Running {
         setup,
         edge: None,
         at_install,
     });
     fw_esp32_common::usb_link::set_update_hook(usb_hook);
+}
+
+/// The manifest at install, borrowing the image's own strings. Its own
+/// frame (`inline(never)`), so the edge it reads from does not stay on the
+/// stack beside the view it returns.
+#[inline(never)]
+fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
+    let edge = new_edge_with(setup, [0; 32]);
+    edge.session
+        .manifest_view(super::update_edge::now_ms())
+        .with_text(
+            setup.identity.target,
+            setup.identity.chip,
+            setup.identity.version,
+        )
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
@@ -132,10 +147,12 @@ pub fn manifest() -> Option<lpc_update::BoardManifest> {
     Some(match &running.edge {
         Some(edge) => edge.session.manifest(super::update_edge::now_ms()),
         None => {
-            let mut manifest = running.at_install.clone();
-            manifest.core_sha256 =
-                lpc_update::sha256_hex::sha256_to_hex(&core_sha256(&running.setup.state));
-            manifest
+            // The owned manifest exists only for this send; the hash the
+            // resident view leaves out is filled in (finished here if
+            // `hash_step` has not).
+            let mut view = running.at_install;
+            view.core_sha256 = core_sha256(&running.setup.state);
+            view.to_manifest()
         }
     })
 }

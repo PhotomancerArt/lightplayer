@@ -275,6 +275,9 @@ pub fn App() -> Element {
     let last_transient = use_hook(|| Rc::new(Cell::new(false)));
     let loop_last_transient = Rc::clone(&last_transient);
     let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
+    // A card's Sign in (`devices/<board>/sign-in`): core counts the
+    // presses; the page leaves for sign-in when the count advances.
+    let loop_sign_ins = use_hook(|| Rc::new(Cell::new(0u64)));
     let mut loop_toasts = toasts;
     // The anonymous-fork hook (examples vision D3/D8): a fork by a browser
     // with no session mints a GUEST account, then refreshes the session —
@@ -585,6 +588,13 @@ pub fn App() -> Element {
                     }
                 }
                 loop_fork_generation.set(next.transient_fork_generation);
+                if next.sign_in_requests > loop_sign_ins.get() {
+                    #[cfg(target_arch = "wasm32")]
+                    crate::app::layout::cloud_account::leave_for_sign_in(
+                        &loop_cloud_session.peek(),
+                    );
+                }
+                loop_sign_ins.set(next.sign_in_requests);
                 loop_last_transient.set(next.open_project_transient);
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
@@ -749,9 +759,9 @@ pub fn App() -> Element {
                     //
                     // A CONNECTED session never ends this way: it is alive,
                     // on its card, and its editor is just not built until
-                    // core hears the place (All controls from `/` lands
-                    // here first). Done, which ends it, still sends the
-                    // address home.
+                    // core hears the place (the session's own address,
+                    // followed from `/`, lands here first). Done, which ends
+                    // it, still sends the address home.
                     let open_failed = matches!(
                         lpa_studio_core::open_stage(),
                         lpa_studio_core::OpenStage::Failed(_)
@@ -1345,11 +1355,6 @@ pub fn App() -> Element {
     // session panel's Rename), the Unlock page's Connect, and everything
     // under the shell, which provides the same tree again for its stories.
     crate::core::use_provide_offers(&current_view.offers);
-    // A connected card's All controls: the session's play page, built once
-    // by the router for every card the page draws.
-    crate::app::board_card::card_play_address::use_provide_card_play_address(router::play_address(
-        &current_view,
-    ));
     // What the app agent just did (M8): every control below lights by its
     // offer path, and the user's Show scrolls to the one it names.
     crate::app::agent::use_provide_agent_activity(&current_view.app_agent.activity);
@@ -2019,7 +2024,7 @@ fn nav_session_plan(
 ///
 /// Never while the view's session is connected: that session is alive, on
 /// its card, and its editor is just not built until core hears the place
-/// (following All controls from `/` lands on its own lens route first).
+/// (following its own address from `/` lands on its lens route first).
 fn open_ended(
     next: &UiStudioView,
     open_failed: bool,

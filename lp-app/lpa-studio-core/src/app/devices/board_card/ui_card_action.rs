@@ -76,6 +76,21 @@ impl UiCardAction {
     }
 
     /// The offer in its own words ([`UiOffer::label`]).
+    /// `offer` pressed with `args`, worded `word` — a parameter's value
+    /// chosen for the person ("Disable Wi‑Fi" is `enabled: false`). Refused,
+    /// with the bound action's own reason, where those args cannot be
+    /// pressed now.
+    pub fn press_with(offer: &UiOffer, word: impl Into<String>, args: OfferArgs) -> Self {
+        let refused = offer.press(&args).err().map(|error| match error {
+            crate::OfferArgError::Unavailable { reason } => reason,
+            error => error.to_string(),
+        });
+        Self {
+            refused,
+            ..Self::press(offer, word).with_args(args)
+        }
+    }
+
     pub fn own_words(offer: &UiOffer) -> Self {
         Self::press(offer, offer.label())
     }

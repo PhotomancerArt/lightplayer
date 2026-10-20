@@ -38,7 +38,7 @@ use crate::core::OffersProvider;
 // --- The device card, one row of the table each ---------------------------
 
 #[story(
-    description = "Up to date (information): the firmware bar says the version alone, \"2026.10.05-2\", plain and with no action; its details give the version with its commit and build, Other version… (the store's other releases), and Factory reset apart."
+    description = "Up to date (information): the firmware bar says the version alone, \"2026.10.05-2\", plain and with no action; its details give the version with its commit and build, Other version… (the store's other releases); Factory reset is the hardware bar's."
 )]
 fn device_card_update_up_to_date() -> Element {
     update_card(UpdateFixtureRow::UpToDate, Link::Usb)
@@ -80,7 +80,7 @@ fn device_card_update_updating_bluetooth() -> Element {
 }
 
 #[story(
-    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same work (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Wi‑Fi: the new firmware first.\"), the connection bar \"Wi‑Fi · live\". The board resets three times on the way; each time the page redials it by itself and the card keeps this work."
+    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same work (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Wi‑Fi: the new firmware first.\"), the link row \"Wi‑Fi · live\". The board resets three times on the way; each time the page redials it by itself and the card keeps this work."
 )]
 fn device_card_update_updating_wifi() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Wifi)

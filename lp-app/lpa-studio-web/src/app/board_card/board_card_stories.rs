@@ -2,8 +2,9 @@
 //! is measured here, AC5), each bar's details open, the corner's, a tall
 //! details card over its own bar, the narrow card — and today's panels in
 //! the details they moved to (access, Wi‑Fi, Bluetooth, link counters,
-//! other version, the layout question and its refusal, rename, a Lasting
-//! verb armed in place, the terminal).
+//! other version, the layout question and its refusal, a Lasting verb
+//! armed in place, the terminal). The rows as a new board's setup list are
+//! [`super::board_card_setup_stories`].
 //!
 //! The details stories leave room under the card, but a details card taller
 //! than the capture's 760 px viewport is placed where the shared popover
@@ -34,18 +35,20 @@ use lpc_wire::RelayState;
 use super::other_version_form::OfferPickerPreview;
 use super::{CardPart, CardPreviews};
 use crate::app::home::ble_access_stories::usb_access;
+use crate::app::home::device_grid_class;
 use crate::app::home::device_offer_story_fixtures::{
     STORY_BOARD_NOW, StoryBoardCard, StoryNewBoardCard, story_board_prefix,
 };
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 use crate::app::module::module_fixtures::{
-    card_few_controls_panel, card_many_controls_panel, card_root_panel, card_root_panel_held,
+    card_few_controls_panel, card_many_controls_panel, card_playful_panel, card_root_panel,
+    card_root_panel_held,
 };
 
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md), the card's top saying what matters (round 3's surface: the state's icon in its tone and plain sentences, the picture dimmed under them): live (the picture alone, the corner a quiet ⋯, Connect as the primary, Edit on the Project row), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), identifying (\"Identifying this board.\" with the spinner; the Hardware row working; no button), offline with its last picture (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\" over it, its Link row naming the way that works, \"Wi‑Fi · not connected\", the other rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: \"This board is locked. Unlock it to connect.\", Unlock), updating (\"This board is updating its firmware.\" and its bar at 40 %, over the board's own light strip), done (the project bar green for a few seconds), failed (\"Studio couldn't send the project to this board. Retry to send it again.\"; the Project row keeps its words and Retry, quietly), a new board (\"This board doesn't have LightPlayer firmware.\", Install firmware with the board pick), an emulated board (\"Emulated · running\" on its Link row, the model alone on its Hardware row), a board reached through lightplayer.app (\"lightplayer.app · connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"This board is open in another tab. Connect here to move it to this tab.\" over the picture that tab saved; Connect here), taking over (\"Moving this board to this tab.\", the spinner, here and as the primary) and taken (\"Another tab took this board.\", Connect here). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
+    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md), the card's top saying what matters (round 3's surface: the state's icon in its tone and plain sentences, the picture dimmed under them): live (the picture alone, the corner a quiet ⋯, Connect as the primary, Edit on the Project row), connected (the bars give way to the board's whole panel and the card grows to hold it: Brightness, Speed and Scale knobs, the palette across the card, Edit at its foot; Done as the primary), identifying (\"Identifying this board.\" with the spinner; the Hardware row working; no button), offline with its last picture (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\" over it, the rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: \"This board is locked. Unlock it to connect.\", Unlock), updating (\"This board is updating its firmware.\" and its bar at 40 %, over the board's own light strip), done (the project bar green for a few seconds), failed (\"Studio couldn't send the project to this board. Retry to send it again.\"; the Project row keeps its words and Retry, quietly), a new board (\"This board doesn't have LightPlayer firmware.\", Install firmware with the board pick), an emulated board (\"Emulated running\" on its USB row, the model alone on its Hardware row), a board reached through lightplayer.app (lightplayer.app \"connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"This board is open in another tab. Connect here to move it to this tab.\" over the picture that tab saved; Connect here), taking over (\"Moving this board to this tab.\", the spinner, here and as the primary) and taken (\"Another tab took this board.\", Connect here). The picture is 138 px, the name bar 50 px, each bar 28 px: every card but the connected one is 414 px tall, and each keeps its own height in the grid."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -60,7 +63,7 @@ fn board_card_every_state() -> Element {
                 }
             }
             Cell { caption: "connected",
-                {connected_card(card_root_panel(), None)}
+                {connected_card(card_playful_panel(), None)}
             }
             Cell { caption: "connecting",
                 StoryBoardCard { card: identifying(), on_action: |_| {} }
@@ -230,7 +233,7 @@ fn board_card_surface_firmware() -> Element {
 }
 
 #[story(
-    description = "The surface when the board can't be reached, or is someone else's: NOT ANSWERING (\"This board stopped responding over USB. Retry to reconnect.\", Retry), Wi‑Fi FAILED (\"Studio couldn't reach this board over Wi‑Fi. Make sure this computer is on the same Wi‑Fi, then retry.\", the longest words a surface says), through lightplayer.app failed, SOMEONE ELSE connected, the last Connect FAILED, OFFLINE (its last picture dims under \"This board is offline. It was last seen 2 hours ago.\", no button: nothing reaches it), offline but WI‑FI REACHES IT (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\", and the Link row names the way that works: \"Wi‑Fi · not connected\"), OPEN IN ANOTHER TAB (\"Connect here\"), TAKEN by another tab, BUSY in another tab, a closed port (DISCONNECTED) and a simulated board POWERED OFF. One dim: a picture under the notice takes the cover's dim, never a stale dim as well."
+    description = "The surface when the board can't be reached, or is someone else's: NOT ANSWERING (\"This board stopped responding over USB. Retry to reconnect.\", Retry), Wi‑Fi FAILED (\"Studio couldn't reach this board over Wi‑Fi. Make sure this computer is on the same Wi‑Fi, then retry.\", the longest words a surface says), through lightplayer.app failed, SOMEONE ELSE connected, the last Connect FAILED, OFFLINE (its last picture dims under \"This board is offline. It was last seen 2 hours ago.\", no button: nothing reaches it), offline but WI‑FI REACHES IT (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\", and the USB row says only its own fact, \"not connected\"), OPEN IN ANOTHER TAB (\"Connect here\"), TAKEN by another tab, BUSY in another tab, a closed port (DISCONNECTED) and a simulated board POWERED OFF. One dim: a picture under the notice takes the cover's dim, never a stale dim as well."
 )]
 fn board_card_surface_reach() -> Element {
     let mut not_answering = porch();
@@ -335,6 +338,39 @@ fn board_card_surface_reach() -> Element {
                     runtime: Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", None)),
                     on_action: |_| {},
                 }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A board that says nothing on its open USB port, by whether it ever said hello (the dead end of 2026-10-18, a first-time user on lightplayer.app: \"'board not responding' is sort of a 'duh, I'm trying to program it'\"). NEVER SAID HELLO, set up before it answered: a factory firmware that prints nothing reads \"This board doesn't respond. Install the firmware to use it.\", Install firmware as the primary, and its USB row says \"connected\", quietly: the link works, and the surface and the Firmware row say the silence. NEVER SAID HELLO, left on its new-board card: the same words and the same Install firmware. SAID HELLO, THEN WENT QUIET (a LightPlayer Studio knows): \"This board stopped responding over USB. Retry to reconnect.\", Retry, its USB row \"not responding\"."
+)]
+fn board_card_says_nothing() -> Element {
+    let mut went_quiet = porch();
+    went_quiet.status = DeviceStatus::NotResponding;
+    went_quiet.state_label = "Not responding".to_string();
+    went_quiet.firmware_face = DeviceFirmwareFace::Silent;
+    went_quiet.remembered_firmware = Some("fw-esp32c6 2026.10.16-1".to_string());
+    went_quiet.loaded_project = DeviceLoadedProject::Unknown;
+    went_quiet.engine_fps = None;
+    went_quiet.can_receive_project = false;
+    went_quiet.can_remove_project = false;
+    went_quiet.escapes = vec![
+        DeviceEscape::Retry,
+        DeviceEscape::Disconnect,
+        DeviceEscape::Forget,
+    ];
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "never said hello",
+                StoryBoardCard { card: never_said_hello(), on_action: |_| {} }
+            }
+            Cell { caption: "never said hello, a new board",
+                StoryNewBoardCard { pending: silent_new_board(), on_action: |_| {} }
+            }
+            Cell { caption: "said hello, then went quiet",
+                StoryBoardCard { card: went_quiet, on_action: |_| {} }
             }
         }
     }
@@ -581,7 +617,7 @@ fn board_card_sweep_stays_inside_the_card() -> Element {
 // --- A board another tab holds ----------------------------------------------
 
 #[story(
-    description = "A board another tab of this browser holds (one tab holds each board; the others show its last picture and say so). Three frames of the same card, by what the holder is doing: WATCHING (it holds the board and nothing of the user's is open there): the picture that tab saved, dimmed under the surface's \"This board is open in another tab. Connect here to move it to this tab.\", its icon orange, the colour of \"someone has it\"; the connection bar says \"Open in another tab\", quietly (the surface is the loud place); the name bar's primary is Connect here, whose offer is the take-over; the corner's details say \"The last picture another tab saved.\". EDITOR OPEN: the aside says \"editor open\", and Connect here wears the error tint (taking the board closes that editor; the undo is pressing Connect here over there). BUSY: \"This board is busy in another tab.\", the aside what the holder is doing (\"Updating · 42%\"), and no button: never a greyed Connect. The card is the board's own card: same height, same five bars."
+    description = "A board another tab of this browser holds (one tab holds each board; the others show its last picture and say so). Three frames of the same card, by what the holder is doing: WATCHING (it holds the board and nothing of the user's is open there): the picture that tab saved, dimmed under the surface's \"This board is open in another tab. Connect here to move it to this tab.\", its icon orange, the colour of \"someone has it\"; the link row says \"Open in another tab\", quietly (the surface is the loud place); the name bar's primary is Connect here, whose offer is the take-over; the corner's details say \"The last picture another tab saved.\". EDITOR OPEN: the aside says \"editor open\", and Connect here wears the error tint (taking the board closes that editor; the undo is pressing Connect here over there). BUSY: \"This board is busy in another tab.\", the aside what the holder is doing (\"Updating · 42%\"), and no button: never a greyed Connect. The card is the board's own card: same height, same eight rows."
 )]
 fn board_card_held_by_another_tab() -> Element {
     rsx! {
@@ -600,7 +636,7 @@ fn board_card_held_by_another_tab() -> Element {
 }
 
 #[story(
-    description = "Connect here on a board another tab holds, while it runs and when it fails. ASKING: the surface says \"Moving this board to this tab.\" with the spinner in its icon's place; the Link row is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary the spinner alone, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: \"Studio couldn't move this board to this tab. Connect here to try again.\", its icon red; the Link row keeps \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, quietly, both pressing the same take-over."
+    description = "Connect here on a board another tab holds, while it runs and when it fails. ASKING: the surface says \"Moving this board to this tab.\" with the spinner in its icon's place; the USB row is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary the spinner alone, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: \"Studio couldn't move this board to this tab. Connect here to try again.\", its icon red; the USB row keeps \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, quietly, both pressing the same take-over."
 )]
 fn board_card_taking_over() -> Element {
     rsx! {
@@ -625,7 +661,7 @@ fn board_card_taking_over() -> Element {
 }
 
 #[story(
-    description = "The tab that let go because another tab asked. Its card stays: \"Another tab took this board. Connect here to move it back to this tab.\" over the picture it saved on the way out (dimmed; its age in the corner's details), \"Taken by another tab\" on the connection bar, and Connect here, which takes the board back the same way. Nothing reopens by itself."
+    description = "The tab that let go because another tab asked. Its card stays: \"Another tab took this board. Connect here to move it back to this tab.\" over the picture it saved on the way out (dimmed; its age in the corner's details), \"Taken by another tab\" on the link row, and Connect here, which takes the board back the same way. Nothing reopens by itself."
 )]
 fn board_card_taken_from_this_tab() -> Element {
     rsx! {
@@ -641,7 +677,7 @@ fn board_card_taken_from_this_tab() -> Element {
 }
 
 #[story(
-    description = "A board whose one network connection is someone else's — a person Studio cannot name, so there is no tab to ask. The surface says \"Someone else is connected to this board. Retry when they're done.\", its icon orange; the connection bar says \"Someone else connected\" and keeps Retry on the same road (Wi‑Fi, or the cloud), which the primary repeats, and nothing more: taking a board from another person is sharing's question. Compare \"Open in another tab\", which is a tab of this browser and whose Connect here takes it over."
+    description = "A board whose one network connection is someone else's — a person Studio cannot name, so there is no tab to ask. The surface says \"Someone else is connected to this board. Retry when they're done.\", its icon orange; the link row says \"Someone else connected\" and keeps Retry on the same road (Wi‑Fi, or the cloud), which the primary repeats, and nothing more: taking a board from another person is sharing's question. Compare \"Open in another tab\", which is a tab of this browser and whose Connect here takes it over."
 )]
 fn board_card_network_busy() -> Element {
     rsx! {
@@ -673,7 +709,33 @@ fn board_card_network_busy() -> Element {
 // --- Connected --------------------------------------------------------------
 
 #[story(
-    description = "A connected board (Connect pressed on its card): the five bars give way, at the same height, to the board's panel — the master brightness fader across the card (label, fader, value), then a row of three knobs (speed and hue following what drives them, in violet; palette, stepped, at its default), then \"All controls · 2 more\" (a link to the board's own play page; the mirror toggle and a second fader are there) with Edit flush at the row's end. Done is the primary; the picture is the session's own frames. Same widgets and gestures as the panel everywhere else: drag a control and it turns gold and offers to let go. No panel reset and no auto-save switch on the card (the play page has both)."
+    description = "The PLAYFUL choker connected (its four controls: the fixture's brightness, the clock, the shader's scale and its palette cycle). The eight rows give way to the board's whole panel, and the card grows once to hold it: Brightness first, then Speed (the clock, one knob: 1× at the top) and Scale in one row of knobs, the palette across the card, Edit at the foot. Nothing is left to another page: no All controls, no \"more\". Done is the primary; the picture is the session's own frames. Same widgets and gestures as the panel everywhere else."
+)]
+fn board_card_connected_playful() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_playful_panel(), None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The connected card's ⋯ open: below Running, the panel's two settings that are not controls — Held controls (the hue knob is held: \"1 held\" and Reset, which lets go of every held control) and Auto-save with its switch and what it does (\"Held values will come back after a restart.\") — then the terminal. With nothing held, the row reads \"None held\" and offers no Reset."
+)]
+fn board_card_connected_settings() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card_open(card_root_panel_held("hue", 0.82), None, Some(CardPart::Corner))}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A connected board with six controls (the master brightness, speed and hue following what drives them in violet, a stepped palette knob, the mirror toggle, then the level fader across the card): knobs and toggles fill rows, as many to a row as the card is wide; a fader takes its own. Edit sits at the foot. Done is the primary."
 )]
 fn board_card_connected() -> Element {
     rsx! {
@@ -686,12 +748,39 @@ fn board_card_connected() -> Element {
 }
 
 #[story(
-    description = "The connected card at a phone's width, beside a watched one: the picture is 108 px, and the panel keeps the five bars' height (140 px) — master fader, the three knobs, All controls · 2 more with Edit. Both cards are 300 px tall."
+    description = "A connected card in the home page's own grid, beside two watched ones: the connected card is as tall as its panel, and its neighbours keep their 414 px — the row does not stretch them."
+)]
+fn board_card_connected_in_the_grid() -> Element {
+    rsx! {
+        section { class: "tw:w-[1060px] tw:max-w-full tw:p-4",
+            div { class: device_grid_class(),
+                {connected_card(card_playful_panel(), None)}
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    wifi_address: Some("192.168.1.40".to_string()),
+                    last_seen_at: Some(STORY_BOARD_NOW - 14.0 * DAY),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The connected card at a phone's width, beside a watched one: the picture is 108 px; three knobs to a row (Brightness, Speed, Scale), the palette across the card, Edit at the foot. The watched card keeps its 300 px."
 )]
 fn board_card_connected_narrow() -> Element {
     rsx! {
-        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:gap-[9px] tw:p-3",
-            {connected_card(card_root_panel(), None)}
+        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:items-start tw:gap-[9px] tw:p-3",
+            {connected_card(card_playful_panel(), None)}
             StoryBoardCard {
                 card: porch(),
                 feed: live_feed(),
@@ -704,7 +793,18 @@ fn board_card_connected_narrow() -> Element {
 }
 
 #[story(
-    description = "A connected board whose project has one control and no master: the row holds the one knob, and the All controls row has no \"more\" (the play page has nothing else), Edit at its end. The panel keeps the bars' height."
+    description = "The big panel at a phone's width: the six root controls, then each effect's under its quiet heading (Plasma 1, Plasma 2, Fire, Noise party), three knobs to a row. The card is as tall as its panel."
+)]
+fn board_card_connected_many_controls_narrow() -> Element {
+    rsx! {
+        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:items-start tw:gap-[9px] tw:p-3",
+            {connected_card(card_many_controls_panel(), None)}
+        }
+    }
+}
+
+#[story(
+    description = "A connected board whose project has one control and no master: the one knob, then Edit at the foot. The card is barely taller than a watched one."
 )]
 fn board_card_connected_few_controls() -> Element {
     rsx! {
@@ -717,7 +817,7 @@ fn board_card_connected_few_controls() -> Element {
 }
 
 #[story(
-    description = "A connected board with a big panel (fifteen controls across the root and four effects): the card draws the master and three knobs, at most four, and \"All controls · 11 more\". The card does not grow."
+    description = "A connected board with a big panel (fifteen controls across the root and four effects): every one on the card — the root's own, then each effect's under its quiet heading (Plasma 1, Plasma 2, Fire, Noise party), knobs filling rows. The card grows to hold them."
 )]
 fn board_card_connected_many_controls() -> Element {
     rsx! {
@@ -730,7 +830,7 @@ fn board_card_connected_many_controls() -> Element {
 }
 
 #[story(
-    description = "A connected board with one control held (the hue knob, dragged on the card): gold, and its let-go glyph beside its label, exactly as on the panel everywhere else. Letting go returns it to following the project."
+    description = "A connected board with one control held (the hue knob, dragged on the card): gold, and its let-go glyph beside its label, exactly as on the panel everywhere else. Letting go returns it to following the project; the ⋯ holds the Reset that lets go of every held control."
 )]
 fn board_card_connected_engaged() -> Element {
     rsx! {
@@ -743,20 +843,20 @@ fn board_card_connected_engaged() -> Element {
 }
 
 #[story(
-    description = "A board connected over Bluetooth with the play password (\"Unlocked with friends · play\"): the panel works the same — every control writes — but there is no auto-save anywhere on the card, and the All controls row's Edit wears the lock (pressing it asks for the edit password). Emulated boards answer at the edit tier, so this state is in stories, not on a live walk."
+    description = "A board connected over Bluetooth with the play password (\"Unlocked with friends · play\"): the panel works the same — every control writes — but there is no auto-save anywhere on the card (the ⋯ has only Held controls), and the foot's Edit wears the lock (pressing it asks for the edit password). Emulated boards answer at the edit tier, so this state is in stories, not on a live walk."
 )]
 fn board_card_connected_play_only() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: CARD_WIDTH_CLASS,
-                {connected_card(card_root_panel(), Some(play_only_access()))}
+                {connected_card(card_playful_panel(), Some(play_only_access()))}
             }
         }
     }
 }
 
 #[story(
-    description = "Connect pressed: the board's session is opening (or the board is being reached first). The surface says \"Connecting to this board over USB.\" with the spinner in its icon's place; the Link row is the work — the spinner and \"USB · connecting\", the iridescent sweep along its foot — and the primary is the spinner alone (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
+    description = "Connect pressed: the board's session is opening (or the board is being reached first). The surface says \"Connecting to this board over USB.\" with the spinner in its icon's place; the USB row is the work — the spinner and \"connecting\", the iridescent sweep along its foot — and the primary is the spinner alone (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
 )]
 fn board_card_connecting() -> Element {
     rsx! {
@@ -776,7 +876,7 @@ fn board_card_connecting() -> Element {
 }
 
 #[story(
-    description = "The last Connect did not open: the surface says \"Studio couldn't connect to this board over USB. Retry to connect.\", its icon red, and Retry (Connect again) is the primary; the Link row keeps \"USB · connection failed\" and its own Retry, quietly, the reason the first thing in its details."
+    description = "The last Connect did not open: the surface says \"Studio couldn't connect to this board over USB. Retry to connect.\", its icon red, and Retry (Connect again) is the primary; the USB row keeps \"connection failed\" and its own Retry, quietly, the reason the first thing in its details."
 )]
 fn board_card_connect_failed() -> Element {
     rsx! {
@@ -798,7 +898,7 @@ fn board_card_connect_failed() -> Element {
 }
 
 #[story(
-    description = "The board's card docked in the editor (Edit pressed on a connected card): the five bars, the session's picture, and Done as the primary — Done ends the session from here as it does from the home page. No Edit: the editor already shows the board."
+    description = "The board's card docked in the editor (Edit pressed on a connected card): the eight rows, the session's picture, and Done as the primary — Done ends the session from here as it does from the home page. No Edit: the editor already shows the board."
 )]
 fn board_card_docked_done() -> Element {
     rsx! {
@@ -828,10 +928,10 @@ fn board_card_project_details_open() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details, open: how the board is reached (the link, the last word heard, the board's own words), its links, then Identify again and Disconnect as menu rows."
+    description = "The USB row's details, open, on the link in use: how the board is reached (what the row says, the last word heard, the board's own words), then Identify again and Disconnect as menu rows."
 )]
 fn board_card_connection_details_open() -> Element {
-    details_open(BarLayer::Connection)
+    details_open(BarLayer::Usb)
 }
 
 #[story(
@@ -886,7 +986,7 @@ fn board_card_corner_details_open() -> Element {
 }
 
 #[story(
-    description = "The 2026-10-06 regression case: a details card taller than the room below its bar — the connection details with the Wi‑Fi panel's long Nearby list (nothing saved, so it opens on what the board hears) — opened from a card at the bottom of the page. The shared popover places the card where it fits across its own wide bar, and the bar's copy is never drawn over the card's rows (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`); past the viewport's budget the details scroll inside themselves."
+    description = "The 2026-10-06 regression case: a details card taller than the room below its bar — the Wi‑Fi row's details with the Wi‑Fi panel's long Nearby list (nothing saved, so it opens on what the board hears) — opened from a card at the bottom of the page. The shared popover places the card where it fits across its own wide bar, and the bar's copy is never drawn over the card's rows (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`); past the viewport's budget the details scroll inside themselves."
 )]
 fn board_card_tall_details_over_its_bar() -> Element {
     let mut wifi = wifi_board(StationState::NotConnected, Vec::new());
@@ -906,7 +1006,7 @@ fn board_card_tall_details_over_its_bar() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(wifi),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Wifi)),
                     on_action: |_| {},
                 }
             }
@@ -942,7 +1042,7 @@ fn board_card_access_details_keys_open() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details with the Wi‑Fi panel inline, as a section of the card (its divider, no frame): the connected network first, the other saved ones with their words, \"+ Connect to a network\", the Wi‑Fi and Cloud relay switches. Opening these details asks the board for its networks again, as opening today's Wi‑Fi popover did."
+    description = "The Wi‑Fi row's details with the Wi‑Fi panel inline, as a section of the card (its divider, no frame): the connected network first, the other saved ones with their words, \"+ Connect to a network\", the Wi‑Fi and Cloud relay switches. Opening these details asks the board for its networks again, as opening today's Wi‑Fi popover did."
 )]
 fn board_card_connection_details_wifi() -> Element {
     rsx! {
@@ -954,7 +1054,7 @@ fn board_card_connection_details_wifi() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     wifi: Some(connected_truck()),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Wifi)),
                     on_action: |_| {},
                 }
             }
@@ -963,7 +1063,7 @@ fn board_card_connection_details_wifi() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details over USB just after Bluetooth was flipped: the switch row (moved from the Connections group), locked while it applies, and core's note under it — \"Restarting to turn Bluetooth on…\"."
+    description = "The Bluetooth row's details over USB just after Bluetooth was flipped: the switch row (moved from the Connections group), locked while it applies, and core's note under it — \"Restarting to turn Bluetooth on…\"."
 )]
 fn board_card_connection_details_bluetooth_restarting() -> Element {
     rsx! {
@@ -975,7 +1075,7 @@ fn board_card_connection_details_bluetooth_restarting() -> Element {
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
                     access: Some(usb_access(Some(true), true)),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Bluetooth)),
                     on_action: |_| {},
                 }
             }
@@ -984,7 +1084,7 @@ fn board_card_connection_details_bluetooth_restarting() -> Element {
 }
 
 #[story(
-    description = "The connection bar's details with the board's link counters (moved from today's ⋯ menu): resends, damaged frames, restarts, stalls and traffic in core's words and units, the two the link had to recover from in the warning tone, and core's caption."
+    description = "The USB row's details with the board's link counters (moved from today's ⋯ menu): resends, damaged frames, restarts, stalls and traffic in core's words and units, the two the link had to recover from in the warning tone, and core's caption."
 )]
 fn board_card_connection_details_link_counters() -> Element {
     let mut card = porch();
@@ -1006,7 +1106,7 @@ fn board_card_connection_details_link_counters() -> Element {
                     feed: live_feed(),
                     open_uid: Some(PORCH_UID.to_string()),
                     plays: running(),
-                    details_open: Some(CardPart::Bar(BarLayer::Connection)),
+                    details_open: Some(CardPart::Bar(BarLayer::Usb)),
                     on_action: |_| {},
                 }
             }
@@ -1059,9 +1159,9 @@ fn board_card_firmware_layout_refused() -> Element {
 }
 
 #[story(
-    description = "The hardware bar's details with Rename (moved from today's ⋯ menu): the name field prefilled with what the board is called now, and Rename pressing the board's own rename offer."
+    description = "The Hardware row's details: the model, the chip, the board's id, Reset, and apart Factory reset and Forget. No name field: the board is renamed in its name bar (board_card_rename_in_place)."
 )]
-fn board_card_hardware_details_rename() -> Element {
+fn board_card_hardware_details() -> Element {
     details_open(BarLayer::Hardware)
 }
 
@@ -1464,7 +1564,7 @@ pub(crate) fn porch() -> DeviceView {
     }
 }
 
-/// The porch board saying who it is: the connection bar's work.
+/// The porch board saying who it is: the link row's work.
 pub(crate) fn identifying() -> DeviceView {
     DeviceView {
         status: DeviceStatus::Busy,
@@ -1555,6 +1655,41 @@ pub(crate) fn new_board() -> PendingLinkView {
     }
 }
 
+/// A new board set up before it answered, whose factory firmware prints
+/// nothing at all: no hello ever, no boot banner, so no chip, no MAC, no
+/// name but the placeholder.
+fn never_said_hello() -> DeviceView {
+    DeviceView {
+        id: DeviceId(105),
+        title: "New device".to_string(),
+        state_label: "No response — needs firmware".to_string(),
+        detail: None,
+        freshness_label: None,
+        heard_age_ms: None,
+        identity_label: None,
+        detected_chip: None,
+        terminal: Vec::new(),
+        escapes: vec![
+            DeviceEscape::Retry,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..needs_firmware(DeviceFirmwareFace::Silent)
+    }
+}
+
+/// The same silent board, left on its new-board card.
+fn silent_new_board() -> PendingLinkView {
+    PendingLinkView {
+        title: "New device".to_string(),
+        state_label: "New device found — no response (is another app using this port?)".to_string(),
+        firmware_face: DeviceFirmwareFace::Silent,
+        detected_chip: None,
+        mac: None,
+        ..new_board()
+    }
+}
+
 /// The board's picture, live.
 pub(crate) fn live_feed() -> Option<DeviceCardFeedView> {
     Some(DeviceCardFeedView {
@@ -1582,6 +1717,15 @@ pub(crate) fn lens_feed() -> Option<DeviceCardFeedView> {
 /// `root`. With `access`, it holds that access over Bluetooth (the
 /// play-only story); else it is on its USB cable, at the edit tier.
 pub(crate) fn connected_card(root: UiPanelGroup, access: Option<UiDeviceAccess>) -> Element {
+    connected_card_open(root, access, None)
+}
+
+/// [`connected_card`] with one part's details open.
+pub(crate) fn connected_card_open(
+    root: UiPanelGroup,
+    access: Option<UiDeviceAccess>,
+    details_open: Option<CardPart>,
+) -> Element {
     let panel = board_panel_picks(&root, Some(true));
     let (card, link) = match access {
         Some(_) => (over_network(porch()), Some(UiLinkKind::Bluetooth)),
@@ -1598,6 +1742,7 @@ pub(crate) fn connected_card(root: UiPanelGroup, access: Option<UiDeviceAccess>)
             editor_holds_it: true,
             connection: BoardConnection::Connected,
             panel: Some(panel),
+            details_open,
             on_action: |_| {},
         }
     }

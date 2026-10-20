@@ -106,7 +106,7 @@ impl UiRuntimeBand {
     }
 
     /// What the stand-in is, in the card's words: "Simulated" for a sim,
-    /// "Emulated" for an emu. The connection bar leads with it ("Simulated ·
+    /// "Emulated" for an emu. The USB row says it as its kind ("Simulated ·
     /// running") and the hardware bar puts it before the board
     /// ("Simulated XIAO ESP32-C6"), so the card names a stand-in for what
     /// it is everywhere it says so.

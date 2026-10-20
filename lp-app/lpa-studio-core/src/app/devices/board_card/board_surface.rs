@@ -37,7 +37,7 @@
 //! | A Wi‑Fi connect failed | wifi · error | "Studio couldn't reach this board over Wi‑Fi." "Make sure this computer is on the same Wi‑Fi, then retry." | Retry |
 //! | …through lightplayer.app | cloud · error | "Studio couldn't reach this board through lightplayer.app." "Retry to connect." | Retry |
 //! | The last Connect failed | link · error | "Studio couldn't connect to this board over USB." "Retry to connect." | Retry |
-//! | Not answering | link · attention | "This board stopped responding over USB." "Retry to reconnect." | Retry |
+//! | Not answering (a board that said hello went quiet) | link · attention | "This board stopped responding over USB." "Retry to reconnect." | Retry |
 //! | A stand-in, off | play · neutral | "This simulated board is off." | Power on |
 //! | Offline, Wi‑Fi or lightplayer.app reaches it | wifi / cloud · neutral | "This board isn't plugged in." "Connect over Wi‑Fi to use it." | Connect |
 //! | Offline | link · neutral | "This board is offline." "It was last seen 2 hours ago." | Connect by its cable, when offered |
@@ -53,11 +53,11 @@
 //! | From before the hello | firmware · attention | "This board is running old firmware." "Install the firmware to connect and edit." | Install firmware |
 //! | No LightPlayer (blank, another firmware) | firmware · neutral | "This board doesn't have LightPlayer firmware." "Install the firmware to use it." | Install firmware |
 //! | In download mode | firmware · neutral | "This board is waiting in download mode." "Install the firmware to use it." | Install firmware |
-//! | Says nothing | firmware · attention | "This board doesn't respond." "Install the firmware to use it." | Install firmware |
+//! | Says nothing (it never said hello) | firmware · attention | "This board doesn't respond." "Install the firmware to use it." | Install firmware |
 //! | Locked | lock · neutral | "This board is locked." "Unlock it to connect." | Unlock |
 //! | Its port closed | link · neutral | "Studio isn't connected to this board." "Connect over USB to use it." | Connect |
 //! | A shader error | project · error | "This board's project has an error." "Edit the project to fix it." | Edit project |
-//! | Runs no project | project · neutral | "This board has no project yet." | Add a project |
+//! | Runs no project | project · neutral | "This board has no project yet." "Add a project to play on it." | Add a project |
 //! | The editor holds it (its last frame) | edit · neutral | "This board is open in the editor." | Done |
 //! | The session open, or the editor showing it | — | the live picture, no words | Done |
 //! | Frames too large to show over the link | project · neutral | "This board's picture is too large to show over Bluetooth." | Connect |
@@ -77,6 +77,7 @@ use super::bar_work::{failed_kind, retry};
 use super::board_card_input::{BoardCardInput, link_icon};
 use super::board_connection::BoardConnection;
 use super::board_picture::board_picture;
+use super::link_session::{connect_layer, held_layer};
 use super::project_bar::data_lost;
 use super::ui_bar_work::BarWorkState;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
@@ -102,7 +103,7 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     let view = input.view;
     let connect = input.wifi_connect;
     // A board that stopped answering says so, with its Retry, rather than
-    // a spinner over it (the Link row does the same).
+    // a spinner over it (its link row does the same).
     let answering = view.status != DeviceStatus::NotResponding;
     if answering
         && (*input.connection == BoardConnection::Connecting
@@ -146,6 +147,9 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
     if let BoardConnection::Failed { .. } = input.connection {
         return ConnectFailed;
     }
+    // Only a board that said hello stops responding: one that never did
+    // and says nothing is the model's NeedsAttention, and its face (Silent)
+    // asks for the firmware below (`Device::status`, 2026-10-18).
     if view.status == DeviceStatus::NotResponding {
         return NotAnswering;
     }
@@ -274,12 +278,15 @@ pub(crate) fn pending_surface(
 
 /// The row whose problem the surface says, which goes quiet: it keeps its
 /// state word and its button, and loses its attention or error tone (the
-/// surface is the one loud place).
-pub(crate) fn carried_layer(state: SurfaceState) -> Option<BarLayer> {
+/// surface is the one loud place). A link's problem is the row of the link
+/// it is about: a Wi‑Fi connect that failed quiets the Wi‑Fi row, a board
+/// held on its network slot the row of that way in.
+pub(crate) fn carried_layer(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<BarLayer> {
     use SurfaceState::*;
     match state {
-        NotAnswering | ConnectFailed | NetworkFailed | SomeoneElse | AnotherTab
-        | AnotherTabBusy | TakenByAnotherTab | MoveFailed => Some(BarLayer::Connection),
+        NotAnswering | ConnectFailed => Some(BarLayer::of_link(input.link_kind())),
+        NetworkFailed | SomeoneElse => input.wifi_connect.map(connect_layer),
+        AnotherTab | AnotherTabBusy | TakenByAnotherTab | MoveFailed => Some(held_layer(input)),
         OldFirmware | PreHelloFirmware | NoFirmware | DownloadMode | Silent | Crashing
         | Incomplete | CantGetVersion | ConfirmationRequired | UpdateRequired | DataUnreadable
         | UpdateInterrupted | UpdateFailed | InstallFailed | EraseFailed => {
@@ -374,8 +381,10 @@ fn face_state(face: &FirmwareFace) -> Option<SurfaceState> {
     })
 }
 
-/// A ready, idle board that said it runs nothing.
-fn runs_no_project(input: &BoardCardInput<'_>) -> bool {
+/// A ready, idle board that said it runs nothing: the NoProject surface,
+/// whose primary is Add a project ([`super::primary_action::add_a_project`]
+/// reads the same predicate, so the surface never says it with no button).
+pub(crate) fn runs_no_project(input: &BoardCardInput<'_>) -> bool {
     let ready = matches!(
         input.view.status,
         DeviceStatus::Ready | DeviceStatus::Degraded
@@ -667,7 +676,8 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
             .then_press("Restore them from a backup, or reset the board."),
         ProjectError => Words::new("project", Error, "This board's project has an error.")
             .then_press("Edit the project to fix it."),
-        NoProject => Words::new("project", Neutral, "This board has no project yet."),
+        NoProject => Words::new("project", Neutral, "This board has no project yet.")
+            .then_press("Add a project to play on it."),
         Locked => {
             Words::new("lock", Neutral, "This board is locked.").then_press("Unlock it to connect.")
         }
@@ -1078,8 +1088,8 @@ mod tests {
     fn the_row_the_surface_speaks_for_goes_quiet() {
         let mut fixture = CardFixture::not_answering();
         let card = board_card(&fixture.input());
-        let link = card.bar(BarLayer::Connection);
-        assert_eq!(link.summary, "USB · not responding");
+        let link = card.bar(BarLayer::Usb);
+        assert_eq!(link.summary, "not responding");
         assert_eq!(link.tone, UiStatusKind::Neutral, "the surface is loud");
         assert_eq!(link.action.as_ref().map(|a| a.word.as_str()), Some("Retry"));
 
@@ -1465,7 +1475,7 @@ mod tests {
             empty,
             NoProject,
             "This board has no project yet.",
-            None,
+            Some("Add a project to play on it."),
             Some("Add a project"),
         ));
 

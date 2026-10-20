@@ -1006,8 +1006,9 @@ impl Tab {
     }
 
     /// A stranger's busy: no hold fact, no `take-over`, the connect that
-    /// was turned away is offered again, enabled, and the card's connection
-    /// bar says "Someone else connected" with Retry on that same connect.
+    /// was turned away is offered again, enabled, and the row of the link
+    /// it took (Wi‑Fi, or lightplayer.app through the relay) says "Someone
+    /// else connected" with Retry on that same connect.
     #[track_caller]
     fn assert_a_strangers_busy(&mut self, mac: &str, connect: &crate::OfferPath) {
         assert_eq!(self.fact(mac), None, "nobody here holds it");
@@ -1017,7 +1018,11 @@ impl Tab {
             "Retry is a press"
         );
         let card = self.ui_card(mac);
-        let bar = card.bar(crate::BarLayer::Connection);
+        let layer = match connect.to_string().ends_with("/connect-relay") {
+            true => crate::BarLayer::Cloud,
+            false => crate::BarLayer::Wifi,
+        };
+        let bar = card.bar(layer);
         assert_eq!(bar.summary, "Someone else connected");
         assert_eq!(
             bar.tone,

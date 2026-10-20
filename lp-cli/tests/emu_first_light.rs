@@ -11,8 +11,14 @@
 //! figures are A1's, and the before/after on silicon is the cutover's CX1
 //! run (the release littlefs split image against this one).
 //!
-//! **A report, never a gate** (AGENTS.md: never gate on emulated time). Each
-//! case prints two readings of the same boot:
+//! **A report — except one reading.** CI's first-light ratchet
+//! (`just first-light-measure`, `scripts/ci/first-light-ratchet.py`,
+//! docs/first-light-ratchet.md) runs this at `t4` with
+//! `LP_FIRST_LIGHT_NET=1` and gates the `basic+net` row's `[perf] first
+//! light at <ms> ms`: the one deliberate exception to "never gate on
+//! emulated time" (the emulator-first ADR's 2026-10-18 amendment). Every
+//! other grade, case and reading stays a report; the test itself asserts
+//! only what is below. Each case prints two readings of the same boot:
 //!
 //! - the firmware's own `[perf] first light …` line (`fw-esp32c6`'s
 //!   `first_light`): its parts, on the system timer — the emulator models no

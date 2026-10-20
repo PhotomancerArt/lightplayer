@@ -12,23 +12,29 @@
 use super::board_card_input::BoardCardInput;
 use super::board_picture::{frame_rate, last_frame, picture_line};
 use super::held_board::held_summary;
+use super::ui_board_panel::UiBoardPanel;
 use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use crate::{RichLine, RichSection, RichWeight, UiStatusKind};
 
-/// A board's status corner, read off its finished rows.
-pub(crate) fn status_corner(input: &BoardCardInput<'_>, bars: &[UiStackBar]) -> UiStatusCorner {
+/// A board's status corner, read off its finished rows and, while it is
+/// connected, its panel.
+pub(crate) fn status_corner(
+    input: &BoardCardInput<'_>,
+    bars: &[UiStackBar],
+    panel: Option<&UiBoardPanel>,
+) -> UiStatusCorner {
     let mut sections = notices(bars);
     sections.push(running_section(input));
-    let panels = match input.linked() {
-        true => vec![UiDetailPanel::Terminal {
+    let mut panels: Vec<UiDetailPanel> = panel.and_then(panel_settings).into_iter().collect();
+    if input.linked() {
+        panels.push(UiDetailPanel::Terminal {
             lines: input.view.terminal.clone(),
             dropped: input.view.terminal_dropped,
-        }],
-        false => Vec::new(),
-    };
+        });
+    }
     UiStatusCorner {
         mark: match input.linked() {
             true => CornerMark::Fine,
@@ -46,11 +52,25 @@ pub(crate) fn notices(bars: &[UiStackBar]) -> Vec<RichSection<UiCardAction>> {
         .collect()
 }
 
+/// The connected panel's settings, which the card's ⋯ holds (the panel
+/// draws only controls): the reset over the root's scope and, at the edit
+/// tier, the auto-save switch. `None` when neither can be offered.
+fn panel_settings(panel: &UiBoardPanel) -> Option<UiDetailPanel> {
+    (panel.target.is_some() || panel.auto_save.is_some()).then(|| UiDetailPanel::PanelSettings {
+        target: panel.target,
+        held: panel.held(),
+        auto_save: panel.auto_save,
+    })
+}
+
 /// A bar's name as a notice's title.
 pub(crate) fn layer_title(layer: BarLayer) -> &'static str {
     match layer {
         BarLayer::Project => "Project",
-        BarLayer::Connection => "Connection",
+        BarLayer::Usb => "USB",
+        BarLayer::Wifi => "Wi\u{2011}Fi",
+        BarLayer::Bluetooth => "Bluetooth",
+        BarLayer::Cloud => "lightplayer.app",
         BarLayer::Access => "Access",
         BarLayer::Firmware => "Firmware",
         BarLayer::Hardware => "Hardware",
@@ -105,7 +125,7 @@ mod tests {
             bar_with_notice(BarLayer::Project, UiStatusKind::Attention, "a fault"),
             bar_with_notice(BarLayer::Firmware, UiStatusKind::Error, "crashing"),
         ];
-        let corner = status_corner(&ready.input(), &bars);
+        let corner = status_corner(&ready.input(), &bars, None);
         let sentences: Vec<Option<&str>> = corner
             .details
             .sections
@@ -127,27 +147,76 @@ mod tests {
             "crashing",
         )];
         assert_eq!(
-            status_corner(&ready.input(), &crashing).mark,
+            status_corner(&ready.input(), &crashing, None).mark,
             CornerMark::Fine
         );
         let mut offline = CardFixture::offline();
-        assert_eq!(status_corner(&offline.input(), &[]).mark, CornerMark::Quiet);
+        assert_eq!(
+            status_corner(&offline.input(), &[], None).mark,
+            CornerMark::Quiet
+        );
     }
 
     #[test]
     fn the_terminal_is_there_only_while_the_board_is_linked() {
         let mut ready = CardFixture::ready();
-        let panels = status_corner(&ready.input(), &[]).details.panels;
+        let panels = status_corner(&ready.input(), &[], None).details.panels;
         assert!(matches!(
             panels.as_slice(),
             [UiDetailPanel::Terminal { .. }]
         ));
         let mut offline = CardFixture::offline();
         assert!(
-            status_corner(&offline.input(), &[])
+            status_corner(&offline.input(), &[], None)
                 .details
                 .panels
                 .is_empty()
+        );
+    }
+
+    /// Connected, the ⋯ holds the panel's settings ahead of the terminal:
+    /// the reset over the root's scope, how many controls it lets go of,
+    /// and auto-save. With neither a scope nor auto-save, nothing.
+    #[test]
+    fn the_connected_panels_settings_lead_the_panels() {
+        let mut ready = CardFixture::ready();
+        let target = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        let panel = UiBoardPanel {
+            target: Some(target),
+            sections: Vec::new(),
+            auto_save: Some(false),
+            edit: None,
+        };
+        let panels = status_corner(&ready.input(), &[], Some(&panel))
+            .details
+            .panels;
+        assert!(
+            matches!(
+                panels.as_slice(),
+                [
+                    UiDetailPanel::PanelSettings {
+                        target: Some(_),
+                        held: 0,
+                        auto_save: Some(false),
+                    },
+                    UiDetailPanel::Terminal { .. },
+                ]
+            ),
+            "{panels:?}"
+        );
+        let bare = UiBoardPanel {
+            target: None,
+            auto_save: None,
+            ..panel
+        };
+        let panels = status_corner(&ready.input(), &[], Some(&bare))
+            .details
+            .panels;
+        assert!(
+            matches!(panels.as_slice(), [UiDetailPanel::Terminal { .. }]),
+            "{panels:?}"
         );
     }
 
@@ -157,7 +226,7 @@ mod tests {
     fn running_says_the_state_the_rate_and_the_picture() {
         let mut fixture = CardFixture::ready();
         fixture.feed = Some(feed(FeedLiveness::Live, true));
-        let corner = status_corner(&fixture.input(), &[]);
+        let corner = status_corner(&fixture.input(), &[], None);
         let running = corner.details.sections.last().expect("running");
         assert_eq!(running.title, "Running");
         assert_eq!(
@@ -166,7 +235,7 @@ mod tests {
             "a live picture needs no sentence"
         );
         fixture.feed = Some(feed(FeedLiveness::Stale, true));
-        let corner = status_corner(&fixture.input(), &[]);
+        let corner = status_corner(&fixture.input(), &[], None);
         assert_eq!(
             lines(corner.details.sections.last().unwrap()),
             [("State", "Ready"), ("Last frame", "12 s ago")]
@@ -185,6 +254,7 @@ mod tests {
         UiStackBar {
             tone,
             details: UiBarDetails {
+                switch: None,
                 sections: vec![RichSection {
                     title: layer_title(layer).to_string(),
                     tone,

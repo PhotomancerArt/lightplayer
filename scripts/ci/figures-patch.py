@@ -317,10 +317,13 @@ def cmd_comment(args):
 def render(summaries, args):
     if not summaries:
         return ""
+    yona = [s for s in summaries if s["verdict"] in ("needs-yona", "over-budget")]
     patched = [s for s in summaries if s["verdict"] == "figure-move"]
-    other = [s for s in summaries if s["verdict"] != "figure-move"]
+    other = [s for s in summaries if s["verdict"] not in ("figure-move", "needs-yona", "over-budget")]
     sha = (args.sha or "")[:10]
     out = [MARKER]
+    for s in yona:
+        out += first_light_section(s, args)
     if patched:
         out += [
             "### Pinned firmware figures moved — CI has the patch",
@@ -339,9 +342,16 @@ def render(summaries, args):
             f"([docs/chip-figures.md](https://github.com/{args.repo}/blob/main/docs/chip-figures.md))",
             "",
         ]
+        if any(s["job"] == "c6-first-light" for s in patched):
+            out += [
+                "The first-light ratchet's record is the exception: a drop, or a move on a PR that "
+                "does not change the image, is CI's to re-record and yours to apply "
+                f"([docs/first-light-ratchet.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.md)).",
+                "",
+            ]
         for s in patched:
             out += job_section(s, heading="####")
-    else:
+    elif other:
         out += [
             "### A figure check failed — this failure is not a figure move",
             "",
@@ -379,6 +389,9 @@ def job_section(s, heading="####"):
                 f"| {c['chip']} | {c['record']} | `{c['figure']}` | {cell(c['old'])} | {cell(c['new'])} |"
             )
         out.append("")
+        out += [f"- {n}" for n in s.get("notes", [])]
+        if s.get("notes"):
+            out.append("")
         return out
     if s["verdict"] == "no-move":
         why = ("the failed checks passed when re-run as a bless and no record changed — the failure "
@@ -394,6 +407,37 @@ def job_section(s, heading="####"):
             out.append(line)
     if s["verdict"] == "no-check-failed":
         out.append(f"- {link}: no figure check failed.")
+    return out
+
+
+def first_light_section(s, args):
+    """The first-light ratchet's red that only Yona clears (scripts/ci/first-light-ratchet.py)."""
+    name = s.get("job_name") or s["job"]
+    link = f"[{name}]({s['run_url']})" if s.get("run_url") else name
+    if s["verdict"] == "over-budget":
+        title = "### First light is over its 500 ms budget"
+    else:
+        title = "### Needs Yona: first light rose more than 5 ms over its record"
+    out = [title, ""]
+    if s.get("changes"):
+        out += ["| chip | record | figure | old | new |", "|---|---|---|---|---|"]
+        for c in s["changes"]:
+            out.append(
+                f"| {c['chip']} | {c['record']} | `{c['figure']}` | {cell(c['old'])} | {cell(c['new'])} |"
+            )
+        out.append("")
+    for st in s.get("steps", []):
+        if st.get("why"):
+            out.append(f"- {link}: {st['why']}")
+    out += [f"- {n}" for n in s.get("notes", [])]
+    out += [
+        "",
+        "**No patch, and `just apply-ci-figures` refuses one.** A rise is Yona's call: "
+        "`just bless-first-light <ms>` on the branch (writes `recorded_by: yona`), commit, put the "
+        "label `first-light-blessed` on this PR and re-run the job. "
+        f"([docs/first-light-ratchet.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.md))",
+        "",
+    ]
     return out
 
 
