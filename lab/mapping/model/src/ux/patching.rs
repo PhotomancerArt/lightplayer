@@ -583,45 +583,76 @@ impl Editor {
 
     // ---- walking the wire ----------------------------------------------------
 
-    /// ⇧← ⇧→: the previous or next place on the wire, every port in order:
-    /// the objects on it and its free segments.
+    /// ⇧← ⇧→: the previous or next span on the wire, every port in order:
+    /// the objects on it and the gaps between them (`span.rs`).
     pub fn step_wire(&mut self, dir: i64) {
-        let places = self.wire_places();
+        let places = self.wire_spans();
         if places.is_empty() {
             self.notice = Some(Notice::info("No port has anything on it yet"));
             return;
         }
-        let i = if let [Target::Port { output, key }] = self.selection.as_slice() {
-            // From a port: its first place, or the last before it.
-            let first = places
-                .iter()
-                .position(|p| {
-                    self.place_port(p)
-                        .is_some_and(|(o, k)| o == output && k == key)
-                })
-                .unwrap_or(places.len());
-            if dir > 0 {
-                first as i64
-            } else {
-                first as i64 - 1
+        let here = match self.selection.as_slice() {
+            [t @ Target::Span { .. }] => places.iter().position(|s| s == t),
+            [Target::Port { output, key }] => {
+                // From a port: its first span, or the last before it.
+                let first = places
+                    .iter()
+                    .position(|s| matches!(s, Target::Span { output: o, key: k, .. } if o == output && k == key))
+                    .unwrap_or(places.len());
+                let i = if dir > 0 {
+                    first as i64
+                } else {
+                    first as i64 - 1
+                };
+                return self.go_to_place(&places, i, dir);
             }
-        } else {
-            let here = self
-                .selected_end()
-                .and_then(|e| places.iter().position(|p| self.same_place(p, &e)));
-            match here {
-                Some(i) => i as i64 + dir,
-                None if dir > 0 => 0,
-                None => places.len() as i64 - 1,
-            }
+            _ => match self.selected_end() {
+                Some(PairEnd::Object(o)) => places
+                    .iter()
+                    .position(|s| matches!(s, Target::Span { object: Some(x), .. } if *x == o)),
+                Some(PairEnd::Segment {
+                    output,
+                    port,
+                    pixels,
+                }) => {
+                    // Loose pixels: first, the span they are in.
+                    if let Some(i) = places.iter().position(|s| {
+                        self.project.span_of(s).is_some_and(|x| {
+                            x.output == output && x.port == port && x.pixels.contains(&pixels.start)
+                        })
+                    }) {
+                        return self.go_to_place(&places, i as i64, dir);
+                    }
+                    None
+                }
+                None => None,
+            },
         };
+        let i = match here {
+            Some(i) => i as i64 + dir,
+            None if dir > 0 => 0,
+            None => places.len() as i64 - 1,
+        };
+        self.go_to_place(&places, i, dir);
+    }
+
+    fn go_to_place(&mut self, places: &[Target], i: i64, dir: i64) {
         if i < 0 || i >= places.len() as i64 {
             let end = if dir < 0 { "first" } else { "last" };
             self.notice = Some(Notice::info(format!("This is the {end} place on the wire")));
             return;
         }
-        let next = places[i as usize].clone();
-        self.selection = self.end_targets(&next);
+        self.selection = vec![places[i as usize].clone()];
+    }
+
+    /// Every span on the wire, port after port, in pixel order.
+    fn wire_spans(&self) -> Vec<Target> {
+        let p = &self.project;
+        p.wire_ports()
+            .iter()
+            .flat_map(|(o, k)| p.spans(o, k))
+            .map(|s| s.target())
+            .collect()
     }
 
     /// .: the next port's first free segment.
@@ -646,19 +677,7 @@ impl Editor {
 
     /// Whether ⇧← ⇧→ have anywhere to go.
     pub fn wire_has_places(&self) -> bool {
-        !self.wire_places().is_empty()
-    }
-
-    fn place_port<'a>(&'a self, place: &'a PairEnd) -> Option<(&'a NodeId, &'a String)> {
-        match place {
-            PairEnd::Segment { output, port, .. } => Some((output, port)),
-            PairEnd::Object(o) => self
-                .project
-                .effective_patch()
-                .pixel_runs_of(o)
-                .next()
-                .map(|s| (&s.output, &s.port)),
-        }
+        !self.wire_spans().is_empty()
     }
 
     /// The first free segment on `port` (after `after_selection`'s place
@@ -721,62 +740,6 @@ impl Editor {
             .max(1)
     }
 
-    /// Every place on the wire, in order: per port, its objects (one per
-    /// span start) and its free segments, by pixel.
-    fn wire_places(&self) -> Vec<PairEnd> {
-        let p = &self.project;
-        let size = self.segment_size();
-        let mut out = Vec::new();
-        for (output, port) in p.wire_ports() {
-            let mut here: Vec<(u32, PairEnd)> = Vec::new();
-            let mut seen: Vec<&ObjectId> = Vec::new();
-            for s in p
-                .effective_patch()
-                .pixel_runs
-                .iter()
-                .filter(|s| s.output == output && s.port == port)
-            {
-                if seen.contains(&&s.object) {
-                    continue;
-                }
-                seen.push(&s.object);
-                here.push((s.pixels().start, PairEnd::Object(s.object.clone())));
-            }
-            for pixels in p.free_segments(&output, &port, size) {
-                here.push((
-                    pixels.start,
-                    PairEnd::Segment {
-                        output: output.clone(),
-                        port: port.clone(),
-                        pixels,
-                    },
-                ));
-            }
-            here.sort_by_key(|(px, _)| *px);
-            out.extend(here.into_iter().map(|(_, e)| e));
-        }
-        out
-    }
-
-    fn same_place(&self, a: &PairEnd, b: &PairEnd) -> bool {
-        match (a, b) {
-            (PairEnd::Object(x), PairEnd::Object(y)) => x == y,
-            (
-                PairEnd::Segment {
-                    output: o1,
-                    port: k1,
-                    pixels: p1,
-                },
-                PairEnd::Segment {
-                    output: o2,
-                    port: k2,
-                    pixels: p2,
-                },
-            ) => o1 == o2 && k1 == k2 && p1.start == p2.start,
-            _ => false,
-        }
-    }
-
     // ---- what is selected ----------------------------------------------------
 
     /// The selection as one end of a pair: one object, a run of pixels on
@@ -784,6 +747,14 @@ impl Editor {
     pub fn selected_end(&self) -> Option<PairEnd> {
         if let Some(o) = self.selected_object() {
             return Some(PairEnd::Object(o));
+        }
+        if let [t @ Target::Span { object: None, .. }] = self.selection.as_slice() {
+            let gap = self.project.span_of(t)?;
+            return Some(PairEnd::Segment {
+                output: gap.output,
+                port: gap.port,
+                pixels: gap.pixels,
+            });
         }
         if let [Target::Port { output, key }] = self.selection.as_slice() {
             return self.next_free_segment(output, key, false).filter(|s| {
@@ -842,7 +813,10 @@ impl Editor {
     /// exactly one.
     fn object_of(&self, t: &Target) -> Option<ObjectId> {
         match t {
-            Target::Object(o) => Some(o.clone()),
+            Target::Object(o)
+            | Target::Span {
+                object: Some(o), ..
+            } => Some(o.clone()),
             Target::Component(c) => {
                 let mut objects = self.project.objects_of(c);
                 let first = objects.next()?;
@@ -863,9 +837,9 @@ impl Editor {
     /// span.
     fn selection_port(&self) -> Option<(NodeId, String)> {
         match self.selection.first()? {
-            Target::Port { output, key } | Target::Pixel { output, key, .. } => {
-                Some((output.clone(), key.clone()))
-            }
+            Target::Port { output, key }
+            | Target::Pixel { output, key, .. }
+            | Target::Span { output, key, .. } => Some((output.clone(), key.clone())),
             t => {
                 let o = self.object_of(t)?;
                 let s = self.project.effective_patch().pixel_runs_of(&o).next()?;
@@ -874,10 +848,23 @@ impl Editor {
         }
     }
 
-    /// The targets that select an end: an object's, or a segment's pixels.
+    /// The targets that select an end: an object's, or a segment's — the
+    /// gap span it starts, else its pixels.
     pub(crate) fn end_targets(&self, end: &PairEnd) -> Vec<Target> {
         match end {
             PairEnd::Object(o) => vec![self.project.object_target(o)],
+            PairEnd::Segment {
+                output,
+                port,
+                pixels,
+            } if let Some(gap) = self
+                .project
+                .spans(output, port)
+                .into_iter()
+                .find(|s| s.object.is_none() && s.pixels.start == pixels.start) =>
+            {
+                vec![gap.target()]
+            }
             PairEnd::Segment {
                 output,
                 port,

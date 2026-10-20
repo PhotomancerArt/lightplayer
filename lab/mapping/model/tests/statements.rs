@@ -775,29 +775,38 @@ fn a_module_is_see_through() {
     assert_eq!(e.selection, vec![fixture(&e, "tail rig")]);
 }
 
-/// On an output, a span is its object: a click on the strip's span on D1
-/// selects path3, as a click on it in the strip would, and a press there
-/// never drags the drawing. The output itself is picked by its title, and
-/// Esc from a span's pixel climbs to its port.
+/// On an output, a span is its own selection (plan D13): a click on the
+/// strip's span on D1 selects that span, and its inspector says where it is
+/// and offers to select path3. A press there never drags the drawing. The
+/// output itself is picked by its title, and Esc from a pixel climbs to its
+/// span, then its port.
 #[test]
-fn a_span_on_an_output_selects_its_object() {
+fn a_span_on_an_output_is_its_own_selection() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let at = pixel_centre(&e, &main, "1", 3);
+    let span = path3_span(&main);
     e.pointer_move(e.camera.to_screen(at), none());
-    assert_eq!(e.hover_target(), Some(comp("path3")), "the hover says so");
+    assert_eq!(e.hover_target(), Some(span.clone()), "the hover says so");
     assert_eq!(e.cursor_note(), None, "the card behind is no overlap");
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![comp("path3")]);
-    let spans = e
+    assert_eq!(e.selection, vec![span]);
+    let items = e
         .view_inspector()
         .sections
         .into_iter()
-        .find(|s| s.title.as_deref() == Some("Spans"))
-        .expect("the inspector says where it lands");
+        .find(|s| s.title.as_deref() == Some("Span"))
+        .expect("the inspector says what's on it")
+        .items;
     assert_eq!(
-        spans.items,
-        vec![UiItem::Fact("Pixels 0–29 of D1 of main".into())]
+        items,
+        vec![
+            UiItem::Fact("Pixels 0–29 of D1 of main".into()),
+            UiItem::Select {
+                text: "Select path3".into(),
+                target: comp("path3")
+            }
+        ]
     );
     let before = e.project.clone();
     let from = e.camera.to_screen(at);
@@ -811,6 +820,9 @@ fn a_span_on_an_output_selects_its_object() {
     click_at(&mut e, at, none());
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
+    // Esc climbs output → port → span → pixel back up.
+    key(&mut e, Key::Escape, none());
+    assert_eq!(e.selection, vec![path3_span(&main)]);
     key(&mut e, Key::Escape, none());
     assert_eq!(e.selection, vec![port(&main, "1")]);
     assert_eq!(e.project.label(&e.selection[0]), "D1");
@@ -2609,16 +2621,16 @@ fn with_move_and_draw_off_nothing_moves() {
 
 // ---- pixels --------------------------------------------------------------------
 
-/// Clicking a span selects its object; clicking again selects the pixel
-/// under the cursor. The arrow keys walk the pixels, and ⇧-click selects
-/// the run from the first one picked.
+/// Clicking a span selects it; clicking again selects the pixel under the
+/// cursor. The arrow keys walk the pixels, and ⇧-click selects the run
+/// from the first one picked.
 #[test]
 fn clicking_into_a_span_selects_a_pixel() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let at = pixel_centre(&e, &main, "1", 3);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![comp("path3")]);
+    assert_eq!(e.selection, vec![path3_span(&main)]);
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
     assert_eq!(
@@ -3441,11 +3453,11 @@ fn the_overlay_outlines_selection_context_and_hover() {
     e.select(vec![lamp("circle1", "r1", 3)]);
     e.pointer_move(lamp_screen(&e, "circle1", "r1", 10), none());
     let kinds: Vec<OutlineKind> = e.view_overlay().outlines.iter().map(|o| o.kind).collect();
-    // The ring is outlined in its fixture and on its span on D0.
+    // The ring is outlined in its fixture; its span on D0 is a thing of
+    // its own (plan D13).
     assert_eq!(
         kinds,
         vec![
-            OutlineKind::Context,
             OutlineKind::Context,
             OutlineKind::Selected,
             OutlineKind::Hover
@@ -3453,7 +3465,7 @@ fn the_overlay_outlines_selection_context_and_hover() {
     );
     let hover = e.hover_target().unwrap();
     let area = e.project.area(&e.camera, &hover).unwrap();
-    assert_eq!(e.view_overlay().outlines[3].path, area.outline_path());
+    assert_eq!(e.view_overlay().outlines[2].path, area.outline_path());
 }
 
 /// With nothing selected the inspector lists the project's facts; with a
@@ -3907,5 +3919,15 @@ fn auto_onto(output: &NodeId) -> PatchPlace {
             output: output.clone(),
         }),
         ..PatchPlace::on(PatchTarget::Fixture)
+    }
+}
+
+/// path3's span on D1 of main.
+fn path3_span(main: &NodeId) -> Target {
+    Target::Span {
+        output: main.clone(),
+        key: "1".into(),
+        object: Some(ObjectId::new(&ComponentId::new("path3"), "path")),
+        start: 0,
     }
 }

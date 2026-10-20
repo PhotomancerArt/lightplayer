@@ -91,7 +91,7 @@ impl Project {
     fn span_belongs_to(&self, s: &PixelRun, t: &Target) -> bool {
         match t {
             Target::Lamp { object, index } => &s.object == object && s.lamps.contains(index),
-            Target::Port { .. } | Target::Pixel { .. } => false,
+            Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => false,
             Target::Node(id) if self.output(id).is_some() => false,
             // A fixture: its own spans, without walking up from each one.
             Target::Node(id) if self.fixture(id).is_some() => &s.fixture == id,
@@ -117,6 +117,14 @@ impl Editor {
                 Target::Pixel { output, key, index } => {
                     p.lamp_on_pixel(output, key, *index).into_iter().collect()
                 }
+                // A span marks the lamps of its object that land on it.
+                Target::Span { output, key, .. } => match p.span_of(t) {
+                    Some(s) => s
+                        .pixels
+                        .filter_map(|px| p.lamp_on_pixel(output, key, px))
+                        .collect(),
+                    None => Vec::new(),
+                },
                 _ => Vec::new(),
             };
             for l in lamps {

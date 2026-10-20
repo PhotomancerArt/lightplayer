@@ -89,6 +89,11 @@ impl Editor {
             }
             out.extend(facts);
         }
+        if let [t @ Target::Span { .. }] = selection.as_slice()
+            && let Some(span) = p.span_of(t)
+        {
+            out.push(section("Span", self.span_items(t, &span)));
+        }
         let fixtures_only = selection
             .iter()
             .all(|t| matches!(t, Target::Node(id) if p.fixture(id).is_some()));
@@ -502,5 +507,52 @@ fn orders(p: &Project, output: &NodeId, key: &str) -> String {
         0 => String::new(),
         1 => format!(" · {}", words[0]),
         _ => format!(" · {} (mixed)", words.join(" + ")),
+    }
+}
+
+impl Editor {
+    /// A span in the inspector: what's on it, a way to its object, or for a
+    /// gap, what can be patched here (plan D13).
+    fn span_items(&self, t: &Target, span: &crate::domain::span::Span) -> Vec<UiItem> {
+        let p = &self.project;
+        let port = t
+            .port_of_pixel()
+            .map(|port| p.long_label(&port))
+            .unwrap_or_default();
+        let pixels = if span.pixels.len() == 1 {
+            format!("Pixel {}", span.pixels.start)
+        } else {
+            format!(
+                "Pixels {}–{}",
+                span.pixels.start,
+                span.pixels.end.saturating_sub(1)
+            )
+        };
+        match &span.object {
+            Some(o) => {
+                let target = p.object_target(o);
+                vec![
+                    UiItem::Fact(format!("{pixels} of {port}")),
+                    UiItem::Select {
+                        text: format!("Select {}", p.long_label(&target)),
+                        target,
+                    },
+                ]
+            }
+            None => {
+                let options: Vec<String> = self
+                    .patch_here_options()
+                    .iter()
+                    .map(|o| p.long_label(&p.object_target(o)))
+                    .collect();
+                let mut items = vec![UiItem::Fact(format!("Free · {pixels} of {port}"))];
+                if options.is_empty() {
+                    items.push(UiItem::Hint("Every object is on the wire.".into()));
+                } else {
+                    items.push(UiItem::PatchHere { options });
+                }
+                items
+            }
+        }
     }
 }

@@ -67,6 +67,16 @@ pub enum UiItem {
         chosen: Option<usize>,
         field: PatchField,
     },
+    /// A button that selects something else: a span's object.
+    Select {
+        text: String,
+        target: Target,
+    },
+    /// A gap's "Patch here": the objects not on the wire, the chosen one put
+    /// at the gap's start.
+    PatchHere {
+        options: Vec<String>,
+    },
     /// A Patch row with a number and − + (`None` when mixed).
     PatchNumber {
         label: &'static str,

@@ -40,19 +40,6 @@ pub(crate) struct Derived {
     placed: OnceLock<Arc<Placed>>,
     patch: OnceLock<Arc<EffectivePatch>>,
     wiring: OnceLock<Arc<Wiring>>,
-    pixel_runs: OnceLock<Arc<SpanOutlines>>,
-}
-
-/// Each span's outline on its output, in world units: plain boxes, worked
-/// out by the view's card geometry (`ux/area.rs`) and kept here with the
-/// rest, since they too follow only the project and where its nodes sit.
-#[derive(Debug, Default)]
-pub struct SpanOutlines {
-    /// Each span: its object, its output, its outline (a box per line of
-    /// the port's pixels it covers).
-    pub list: Vec<(ObjectId, NodeId, Vec<Rect>)>,
-    pub by_object: HashMap<ObjectId, Vec<usize>>,
-    pub by_output: HashMap<NodeId, Vec<usize>>,
 }
 
 impl Default for Derived {
@@ -63,7 +50,6 @@ impl Default for Derived {
             placed: OnceLock::new(),
             patch: OnceLock::new(),
             wiring: OnceLock::new(),
-            pixel_runs: OnceLock::new(),
         }
     }
 }
@@ -230,14 +216,6 @@ impl Project {
         self.derived
             .patch
             .get_or_init(|| Arc::new(self.compute_patch()))
-    }
-
-    /// Each span's outline, kept; `work_out` is asked only the first time.
-    pub(crate) fn kept_span_outlines(
-        &self,
-        work_out: impl FnOnce() -> SpanOutlines,
-    ) -> &SpanOutlines {
-        self.derived.pixel_runs.get_or_init(|| Arc::new(work_out()))
     }
 
     /// Which pixel each lamp lands on, kept. Shared with every board frame

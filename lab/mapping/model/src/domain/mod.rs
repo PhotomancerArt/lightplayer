@@ -34,4 +34,5 @@ pub mod render_source;
 pub mod resolve;
 pub mod rgb;
 pub mod ring_set;
+pub mod span;
 pub mod target;

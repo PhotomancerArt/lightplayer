@@ -131,12 +131,14 @@ A 2D canvas with selection, and the start of the whole node graph on it
   are cards with one row per port. Frames are see-through: a click inside
   one selects what's in it, and the frame itself is picked by its title or
   border. A fixture's empty inside picks the fixture too, behind anything
-  drawn in it (a drag from there still draws a selection box). An output card is not a frame: its **spans** (each object's run of
-  pixels on a port) are its objects, so a click on a span selects the
-  object, as a click on it in its fixture would, and hovering either side
-  outlines both. Click again for the pixel under the cursor (D47); Esc
-  climbs to its port. The card's title selects the output. A press on a
-  span never drags the drawing.
+  drawn in it (a drag from there still draws a selection box). An output card is not a frame, but its **spans** are picked
+  directly, as a fixture's contents are (plan D12, D13; `span.rs`): a span
+  is one object's pixels on a port, or a gap between them — a view, never
+  stored, and spans may overlap. A click on one selects it (its inspector
+  says what's on it, with "Select <object>", and a gap offers "Patch
+  here"); click again for the pixel under the cursor (D47); Esc climbs
+  output → port → span → pixel back up. The card's title selects the
+  output. A press on a span never drags the drawing.
 - **Layout runs in the page** (D63), from `lab-layout`, by role: controls
   (a clock, a power button) in a row on top, then shaders, fixtures and
   outputs in columns that follow the flow, each output level with what
@@ -172,20 +174,28 @@ A 2D canvas with selection, and the start of the whole node graph on it
   binding, read the product's way: the fixture writes the channel its
   rule's output reads (fit-check §6); a fixture bound to an output with
   nothing placed yet gets one plain edge, node to node.
-- **Patch rules** (`patch.rs`): place (one object on a port's pixel,
-  reversed, turned) and auto (what no place rule claims fills the
+- **Placements** (`patch_place.rs`, `patch_resolve.rs`, `patch.rs`; plan
+  D8–D11): one vocabulary for a fixture, a component and an object — a
+  **wire** (auto onto an output, a port and pixel, or not on the wire), a
+  **direction** (as drawn, reversed) and a **turn** (objects only) — each
+  setting inherited down the tree on its own. A placed circle runs its
+  rings end to end; reversed, in the other order, each the other way. One
+  ring can reverse in its slot with no address of its own, or leave its
+  circle's run for a wire of its own (the others close up). Auto fills the
   output's ports in order, after every placed run and after fixtures
-  before it in the product's attach order). The effective patch is
-  derived and never stored. A rule whose output, port or object is gone
-  shows as a problem and is never retargeted. Two objects on the same
-  pixels are allowed and reported as an **overlap**; the board shows the
-  later span.
+  before it in the product's attach order. The effective patch is derived
+  and never stored; a placement whose target, output or port is gone is a
+  problem and is never retargeted. Two objects on the same pixels are
+  allowed and reported as an **overlap**; the board shows the later one.
+  What today's patch rows can't say (a component placed, an object
+  reversed while it follows) saves as each object's address (plan D14:
+  patch format 4 later).
 - **Patching by hand** (the roadmap's stage 4, plan
   `lp2025/2026-10-18-2337-explicit-patching-spike`; `patch_edits.rs`,
   `ux/patching.rs`). Looking is free; a pair takes an arm. **A** arms a
-  patch from what is selected: one object, or a **free segment** (a run
-  of selected pixels on one port; a selected port means its first free
-  segment, sized to the next object not on the wire). While armed, **← →**
+  patch from what is selected: one object (or its span), or a gap (a
+  span with nothing on it; a run of selected pixels, or a port's first
+  gap, works the same). While armed, **← →**
   walk the other end's candidates (free segments in wire order from an
   object; objects not on the wire from a segment), the board previews the
   pair as if it were made, and **Enter** or a click makes it. **M** is
@@ -195,9 +205,9 @@ A 2D canvas with selection, and the start of the whole node graph on it
   on the wire. On the selected objects: **R** reverses the placement
   while Move & draw is off (on, it reverses the path itself), **K L** turn
   one lamp and **; '** a third (direction-aware, as lp2014's keys were),
-  **[ ]** shift a pixel along the port, **U** unpatches. **⇧← ⇧→** walk
-  the places on the wire (spans and free segments, port after port), **.**
-  the next port's first free segment. On a fixture, **⇧A** turns auto on
+  **[ ]** shift a pixel along the port, **U** puts a thing back to
+  following. **⇧← ⇧→** walk the wire span by span, port after port; **.**
+  jumps to the next port's first gap. On a fixture, **⇧A** turns auto on
   or off and **⇧U** unpatches every object. **A wiring edit moves only
   what it edits**: when auto would move an object nobody touched, the edit
   pins it where it was and says so.
@@ -304,10 +314,13 @@ A 2D canvas with selection, and the start of the whole node graph on it
 - **One tree and a data-driven inspector:** the tree lists modules,
   fixtures, outputs and ports. The inspector shows the properties
   everything selected shares, a fixture's rules and problems, and an
-  output's ports with how full each one is. A selected object's **Wire**
-  section says where it is on the wire (with Unpatch and Reverse beside
-  the facts); a fixture's **Patch** section says whether auto is on and
-  how many objects are on the wire.
+  output's ports with how full each one is. Its **Patch** section is the
+  same on a fixture, a component, an object or a span (plan P6): Wire
+  (follows its parent, auto onto an output, any port, not on the wire),
+  Start with − + when it has a port of its own, Direction, and Turn on an
+  object; each "Follows" says what it follows. A multi-selection edits
+  together and says mixed; every edit is one undo step, the same edit the
+  keys make.
 - **Verbs by name** (`graph_verb.rs`): every key the hint bar names is a
   `GraphVerb` (`delete`, `go-in`, `select-all`, `path-tool`, …), and each
   hint carries its verbs; `Editor::verbs` lists the ones on offer now from

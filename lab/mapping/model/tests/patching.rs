@@ -347,8 +347,9 @@ fn unpatching_what_already_follows_says_how_to_take_it_off() {
     assert!(n.help.unwrap().contains("Not on the wire"));
 }
 
-/// ⇧→ walks the wire: the objects on it and its free segments, in pixel
-/// order, port after port; . jumps to the next port's first free segment.
+/// ⇧→ walks the wire span by span: the objects on it and the gaps
+/// between them, in pixel order, port after port; . jumps to the next
+/// port's first gap.
 #[test]
 fn shift_arrows_walk_the_wire() {
     let (mut p, _, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3, 4]);
@@ -362,7 +363,11 @@ fn shift_arrows_walk_the_wire() {
     key(&mut e, Key::Right, shift());
     assert_eq!(e.selected_end(), Some(segment(&out, "0", 7..10)));
     key(&mut e, Key::Char('.'), none());
-    assert_eq!(e.selected_end(), Some(segment(&out, "1", 0..3)));
+    assert_eq!(e.selected_end(), Some(segment(&out, "1", 0..10)));
+    assert!(matches!(
+        e.selection.as_slice(),
+        [Target::Span { object: None, .. }]
+    ));
 }
 
 /// Every patching verb the hint bar offers does something, for an object
@@ -637,6 +642,64 @@ fn turn_in_the_section_is_the_turn_key() {
         by_key.project.effective_patch().pixel_runs,
         by_row.project.effective_patch().pixel_runs
     );
+}
+
+// ---- spans (plan P7, D12, D13) -----------------------------------------------
+
+/// A port's spans are each object's pixels on it and the gaps between; two
+/// overlapping objects make two spans, each leading back to its own object.
+#[test]
+fn spans_are_projections_and_gaps_and_may_overlap() {
+    let (mut p, _, out, objects) = paths(&[("D0", 20)], &[4, 4]);
+    p.patch_object(&objects[0], &out, "0", 2).unwrap();
+    p.patch_object(&objects[1], &out, "0", 4).unwrap();
+    let spans: Vec<(std::ops::Range<u32>, Option<ObjectId>)> = p
+        .spans(&out, "0")
+        .into_iter()
+        .map(|s| (s.pixels, s.object))
+        .collect();
+    assert_eq!(
+        spans,
+        vec![
+            (0..2, None),
+            (2..6, Some(objects[0].clone())),
+            (4..8, Some(objects[1].clone())),
+            (8..20, None),
+        ]
+    );
+}
+
+/// A gap's Patch here puts the chosen object at the gap's start, and
+/// selects it.
+#[test]
+fn patch_here_puts_an_object_at_the_gap() {
+    let (mut p, _, out, objects) = paths(&[("D0", 20)], &[3, 4]);
+    p.patch_object(&objects[0], &out, "0", 0).unwrap();
+    let mut e = editor_of(p);
+    let gap = e.project.spans(&out, "0")[1].target();
+    e.select(vec![gap]);
+    let options = e.patch_here_options();
+    assert_eq!(options, vec![objects[1].clone()]);
+    e.patch_input(PatchInput::PatchHere { option: 0 });
+    assert_eq!(pixels(&e.project, &objects[1]), vec![3, 4, 5, 6]);
+    assert_eq!(e.selected_object(), Some(objects[1].clone()));
+}
+
+/// A span's Patch section is its object's: reversing from the span
+/// reverses the object.
+#[test]
+fn a_spans_patch_section_edits_its_object() {
+    let (mut p, f, out, objects) = paths(&[("D0", 20)], &[3]);
+    p.auto_patch(&f, &out);
+    let mut e = editor_of(p);
+    e.select(vec![e.project.spans(&out, "0")[0].target()]);
+    let (options, _) = choice(&e, "Direction");
+    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    e.patch_input(PatchInput::Choose {
+        field: PatchField::Direction,
+        option: reversed,
+    });
+    assert_eq!(pixels(&e.project, &objects[0]), vec![2, 1, 0]);
 }
 
 // ---- the piece ------------------------------------------------------------

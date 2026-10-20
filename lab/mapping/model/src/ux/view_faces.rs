@@ -214,6 +214,13 @@ impl Editor {
                         rects: grid.run_outline(run.pixels.clone()),
                         emphasis: match &run.object {
                             Some(o) if lit_by(o) => Emphasis::Lit,
+                            Some(o)
+                                if self.selection.iter().any(
+                                    |t| matches!(t, Target::Span { object: Some(x), .. } if x == o),
+                                ) =>
+                            {
+                                Emphasis::Lit
+                            }
                             Some(o) if candidate == Some(PairEnd::Object(o.clone())) => {
                                 Emphasis::Lit
                             }
@@ -247,6 +254,21 @@ impl Editor {
                         _ => None,
                     })
                     .collect();
+                // A selected gap rings its pixels.
+                for t in &self.selection {
+                    if let Target::Span {
+                        output,
+                        key,
+                        object: None,
+                        ..
+                    } = t
+                        && output == id
+                        && *key == port.key
+                        && let Some(gap) = p.span_of(t)
+                    {
+                        marked.extend(gap.pixels.filter(|&px| px < grid.count));
+                    }
+                }
                 if let Some(PairEnd::Segment {
                     output,
                     port: key,

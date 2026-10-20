@@ -159,6 +159,37 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 }
             }
         },
+        UiItem::Select { text, target } => rsx! {
+            div { class: "fact action-fact",
+                button {
+                    class: "action-fact-button",
+                    tabindex: "-1",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| {
+                        ed.input(GraphInput::Select(vec![target.clone()]));
+                    },
+                    "{text}"
+                }
+            }
+        },
+        UiItem::PatchHere { options } => rsx! {
+            div { class: "prop",
+                span { class: "prop-label", "Patch here" }
+                select {
+                    class: "choice",
+                    onkeydown: move |evt| evt.stop_propagation(),
+                    onchange: move |evt| {
+                        if let Ok(option) = evt.value().parse::<usize>() {
+                            ed.input(GraphInput::Patch(PatchInput::PatchHere { option }));
+                        }
+                    },
+                    option { value: "", selected: true, disabled: true, "Choose an object…" }
+                    for (i, word) in options.iter().enumerate() {
+                        option { value: "{i}", "{word}" }
+                    }
+                }
+            }
+        },
         UiItem::PatchNumber {
             label,
             value,

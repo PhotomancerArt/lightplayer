@@ -165,8 +165,8 @@ fn the_radiance_dome_loads_in_the_product_as_specified() {
     let lamps = resolve(&doc).unwrap();
     assert_eq!(doc.objects.len(), 55);
     assert_eq!(lamps.lamps.len(), 22_000);
-    assert_eq!(lamps.pixel_runs.len(), 275);
-    assert!(lamps.pixel_runs.iter().all(|s| s.count == 80));
+    assert_eq!(lamps.spans.len(), 275);
+    assert!(lamps.spans.iter().all(|s| s.count == 80));
     let mut ports = 0;
     for k in 1..=10 {
         let def = NodeDef::from_json_str(&read(&dir.join(format!("out_{k}.json")))).unwrap();

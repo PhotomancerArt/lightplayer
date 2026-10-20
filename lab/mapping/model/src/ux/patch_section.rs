@@ -41,6 +41,9 @@ pub enum PatchInput {
     Choose { field: PatchField, option: usize },
     /// − or + on a number row.
     Nudge { field: PatchField, by: i64 },
+    /// A gap's "Patch here": this object (by its index in
+    /// `Editor::patch_here_options`) at the gap's start.
+    PatchHere { option: usize },
 }
 
 /// One option of a choice row.
@@ -67,7 +70,10 @@ impl Editor {
                     out.push((id.clone(), PatchTarget::Fixture));
                     continue;
                 }
-                Target::Object(o) => PatchTarget::Object(o.clone()),
+                Target::Object(o)
+                | Target::Span {
+                    object: Some(o), ..
+                } => PatchTarget::Object(o.clone()),
                 Target::Component(c) => {
                     let mut objects = p.objects_of(c);
                     match (objects.next(), objects.next()) {
@@ -181,8 +187,34 @@ impl Editor {
         Some(items)
     }
 
+    /// What a gap's "Patch here" offers: the objects not on the wire, in
+    /// tree order.
+    pub fn patch_here_options(&self) -> Vec<ObjectId> {
+        let p = &self.project;
+        p.placed_objects()
+            .iter()
+            .filter(|(_, o)| !o.lamps.is_empty() && !p.effective_patch().lands(&o.id))
+            .map(|(_, o)| o.id.clone())
+            .collect()
+    }
+
     /// Apply a Patch row's edit to every selected thing, as one undo step.
     pub fn patch_input(&mut self, input: PatchInput) {
+        if let PatchInput::PatchHere { option } = input {
+            let gap = match self.selection.as_slice() {
+                [t @ Target::Span { object: None, .. }] => self.project.span_of(t),
+                _ => None,
+            };
+            let object = self.patch_here_options().get(option).cloned();
+            if let (Some(gap), Some(object)) = (gap, object) {
+                self.checkpoint();
+                self.project
+                    .patch_object(&object, &gap.output, &gap.port, gap.pixels.start);
+                self.after_edit();
+                self.selection = vec![self.project.object_target(&object)];
+            }
+            return;
+        }
         let targets = self.patch_targets();
         let Some((fixture, first)) = targets.first().cloned() else {
             return;
@@ -269,7 +301,8 @@ impl Editor {
                     }
                 }
             }
-            PatchInput::Choose { .. } | PatchInput::Nudge { .. } => {}
+            PatchInput::Choose { .. } | PatchInput::Nudge { .. } | PatchInput::PatchHere { .. } => {
+            }
         }
         self.after_edit();
     }
