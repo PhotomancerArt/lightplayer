@@ -33,6 +33,21 @@ use lpc_shared::transport::{Incoming, Link, ServerTransport};
 use crate::link_upkeep::LinkUpkeep;
 use crate::time::Esp32TimeProvider;
 
+/// The most one server pass may spend waiting on a link's send path (a
+/// reply waiting for the frame buffer, a radio link letting go of it),
+/// counted from the pass's start (the last [`LinkUpkeep::upkeep`]) and
+/// including whatever the pass did first — a project load, a shader
+/// compile. One pass must stay under the RTC watchdog (stage 0, 8 s, fed
+/// once per pass below), with room left for the rest of the pass: a load
+/// followed by a stalled peer's 5 s wait reset the emulated C6 in a loop
+/// (PR C's walk, 12 watchdog resets), and a slow-draining USB host did the
+/// same through a multi-frame `ProjectRead`, each frame waiting up to
+/// `SEND_ROOM_WAIT` on its own (ticket
+/// `2026-10-20-send-room-wait-starves-watchdog`). The radio links, the USB
+/// link and the classic's UART link all end their waits at this one
+/// deadline; each transport's per-frame wait only ever shortens under it.
+pub const TICK_WAIT_LIMIT_MS: u32 = 5_000;
+
 /// The chip's per-frame hook (`0`: none): see [`set_frame_hook`].
 static FRAME_HOOK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
@@ -364,7 +379,11 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         transport.upkeep(&server, current_time);
         run_frame_hook(&server);
 
-        feed_watchdog(current_time);
+        // The clock now, not the pass's `current_time`: the heartbeat sends
+        // above can wait seconds on a slow host, and a feed stamped with the
+        // clock from before them makes the next pass see the I/O task as
+        // silent for that long and withhold the feed — a false alarm.
+        feed_watchdog(time_provider.now_ms());
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
@@ -754,7 +773,11 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         transport.upkeep(&server, current_time);
         run_frame_hook(&server);
 
-        feed_watchdog(current_time);
+        // The clock now, not the pass's `current_time`: the heartbeat sends
+        // above can wait seconds on a slow host, and a feed stamped with the
+        // clock from before them makes the next pass see the I/O task as
+        // silent for that long and withhold the feed — a false alarm.
+        feed_watchdog(time_provider.now_ms());
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
