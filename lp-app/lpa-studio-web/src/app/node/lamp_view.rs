@@ -42,9 +42,11 @@ use lpa_mapping_editor::{neutral_lamp_rgb, point_cells_with_radius};
 use lpa_studio_core::app::draw::lamp_hint_position;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, LampPictureFrame,
-    UiControlProductPreview, UiPatchSurface, UiPatchSurfaceFixture,
+    UiControlProductPreview, UiDrawable, UiPatchSurface, UiPatchSurfaceFixture,
 };
 use wasm_bindgen::{JsCast, closure::Closure};
+
+use super::lamp_draw::{DrawRing, LampDrawSurface};
 
 /// Monotonic lamp-canvas element ids (one per mounted lamp view).
 static NEXT_LAMP_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
@@ -79,6 +81,14 @@ struct LampPaintKey {
 pub(crate) fn LampView(
     preview: UiControlProductPreview,
     #[props(default = true)] live: bool,
+    /// Core says this live picture is drawable (plan `drawing-on-the-picture`
+    /// D12): fingers on it draw ([`LampDrawSurface`]). `None` is today's
+    /// picture, untouched.
+    #[props(default)]
+    drawable: Option<UiDrawable>,
+    /// Rings drawn without a pointer (stories of a stroke in progress).
+    #[props(default)]
+    rings: Vec<DrawRing>,
 ) -> Element {
     let canvas_id = use_hook(|| {
         let id = NEXT_LAMP_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
@@ -140,8 +150,15 @@ pub(crate) fn LampView(
         });
     }
 
-    rsx! {
-        canvas { id: "{canvas_id}", class: "ux-produced-product-lamp-canvas" }
+    match (drawable, preview.display_layout.clone()) {
+        (Some(drawable), Some(layout)) => rsx! {
+            LampDrawSurface { drawable, layout, rings,
+                canvas { id: "{canvas_id}", class: "ux-produced-product-lamp-canvas" }
+            }
+        },
+        _ => rsx! {
+            canvas { id: "{canvas_id}", class: "ux-produced-product-lamp-canvas" }
+        },
     }
 }
 

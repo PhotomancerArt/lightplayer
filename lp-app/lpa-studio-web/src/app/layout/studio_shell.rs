@@ -147,6 +147,7 @@ pub fn StudioShell(
                 PlayModeSurface {
                     panel: face.panel,
                     preview: face.preview,
+                    drawable: face.drawable,
                     auto_save: face.auto_save,
                     access_line: lens_access_line.clone(),
                     on_panel: panel_gesture_actions(on_action),
