@@ -213,6 +213,14 @@ jobs:
       # #1142; docs/debt/firmware-figures-skip-on-shared-crate-prs.md). Jobs
       # with no pinned figure of the image (emu-c6-cli, emu-esp32v3-ref, the
       # layout migration) stay on the narrower filters (DD77).
+      # `emu_c6_cli` (the `emu-c6-cli` job) is `emu_c6` OR the tree store's own
+      # paths (`tree_store_walks`, below). That job runs the firmware cut walks
+      # of the `fs-tree` image (`emu_tree_store_boot`, the CI subset of
+      # `emu_tree_store_cuts`), and a store-only PR (GC, packing, mount) matched
+      # none of `emu_c6`, so those walks never ran for it. It is a separate
+      # output, not a wider `emu_c6`, so the figure jobs and the other `emu_c6`
+      # users do not start on a store-only PR (DD77).
+      emu_c6_cli: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.some.outputs.tree_store_walks == 'true') && 'true' || 'false' }}
       figures_esp32c6: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
       # The first-light ratchet (`c6-first-light`, docs/first-light-ratchet.md)
       # runs where the C6's figures do, and on its own record and script.
@@ -655,6 +663,14 @@ jobs:
               - 'docs/defects/**'
               - 'scripts/defects-index.py'
               - '.github/workflows/pre-merge.yml'
+            # What only `emu-c6-cli` needs beyond `emu_c6` (see `emu_c6_cli`
+            # above): the tree store crate the cut walks exercise on the
+            # `fs-tree` firmware, and the walks' shared helpers. The walks' own
+            # test files (`lp-cli/tests/emu_*.rs`) are already in `emu_c6`.
+            # Ticket 2026-10-11-tree-store-walks-path-filter (found in #1131).
+            tree_store_walks:
+              - 'lp-base/lp-tree-store/**'
+              - 'lp-cli/tests/support/tree_store_*'
             # The first-light ratchet's own files (its other inputs are
             # `emu_c6` and the C6's firmware closure; see `c6_first_light`).
             first_light:
@@ -2917,7 +2933,7 @@ jobs:
   #
   # No pinned figures in these tests, so no figure-patch step and no place in
   # `figures-comment`. Setup is heap-budget-chips' exactly. Path-gated on
-  # `emu_c6`.
+  # `emu_c6_cli` (`emu_c6` plus the tree store's paths).
   emu-c6-cli:
     name: Emulator C6 lp-cli (x64)
     runs-on: ubuntu-24.04
@@ -2929,7 +2945,7 @@ jobs:
     # `ReferenceImage::FIELDED_LITTLEFS`) built cold in its own worktree: 40.
     timeout-minutes: 40
     needs: detect-changes
-    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    if: needs.detect-changes.outputs.emu_c6_cli == 'true'
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
