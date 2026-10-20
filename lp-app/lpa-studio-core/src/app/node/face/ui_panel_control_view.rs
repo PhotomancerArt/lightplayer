@@ -129,7 +129,7 @@ impl UiPanelControlView {
                     .with_affordance(UiSlotAffordance::Edited)
                     .with_row(UiSlotAspectRow::new(
                         "",
-                        "This panel holds the channel; other writers are shadowed until it is reset.",
+                        "The panel is holding this channel. Other writers are ignored until you reset it.",
                     ));
                 match source {
                     Some(source) => aspect.with_row(UiSlotAspectRow::new("Was", source)),
@@ -141,7 +141,7 @@ impl UiPanelControlView {
                     .with_affordance(UiSlotAffordance::Bound)
                     .with_row(UiSlotAspectRow::new(
                         "",
-                        "Something else drives this channel; turning the control takes it over.",
+                        "Something else is driving this channel. Turning the control will take it over.",
                     ));
                 match source {
                     Some(source) => aspect.with_row(UiSlotAspectRow::new("Driven by", source)),

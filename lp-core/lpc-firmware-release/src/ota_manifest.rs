@@ -113,6 +113,20 @@ pub struct Requires {
     /// The loader version; the board's must be **≥** this (M4's code table:
     /// `1` = M2's loader, `0` = no version word).
     pub loader: u16,
+    /// The build mounts the tree store (its manifest core lists `fs.tree`):
+    /// the board must already be on it — its hello's build lists `fs.tree` —
+    /// or a littlefs board's files move over USB first (the tree-store
+    /// cutover, ADR `2026-10-16-c6-tree-store-cutover-migration.md`).
+    /// Additive (format 1): absent reads `false`, which every manifest
+    /// written before the field is — none of those builds mounts the tree
+    /// store — and a littlefs build writes nothing, so its bytes do not
+    /// change.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fs_tree: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// A file the manifest names: its name in the lookup, length, SHA-256.
@@ -312,6 +326,7 @@ pub(crate) mod tests {
             commit: "abc1234567890123456789012345678901234567".into(),
             wire_proto: 36,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },
@@ -362,6 +377,26 @@ pub(crate) mod tests {
         m.validate().unwrap();
         let back = OtaManifest::parse_valid(&m.to_json_bytes()).unwrap();
         assert_eq!(back, m);
+    }
+
+    /// `requires.fsTree` is additive: a manifest without it (every one
+    /// written before it) reads `false`, a littlefs build writes nothing (its
+    /// bytes unchanged), and a tree-store build's survives a round trip.
+    #[test]
+    fn fs_tree_is_additive_and_absent_for_littlefs() {
+        let m = sample();
+        assert!(!m.requires.fs_tree);
+        let text = String::from_utf8(m.to_json_bytes()).unwrap();
+        assert!(!text.contains("fsTree"), "{text}");
+        let mut tree = sample();
+        tree.requires.fs_tree = true;
+        let bytes = tree.to_json_bytes();
+        assert!(
+            String::from_utf8(bytes.clone())
+                .unwrap()
+                .contains("\"fsTree\": true")
+        );
+        assert!(OtaManifest::parse_valid(&bytes).unwrap().requires.fs_tree);
     }
 
     #[test]

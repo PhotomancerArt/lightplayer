@@ -1,6 +1,11 @@
 //! The device's Wi‑Fi popover: the detail card the Connections group's
-//! Wi‑Fi row opens — three pages, the UX spike's 2B
-//! (`spikes/wifi-networks/index.html`, chosen 2026-10-05).
+//! Wi‑Fi row opens — and, on the board card, a section of the Wi‑Fi row's
+//! details (`in_card`: the section's divider, no frame of its own, and no
+//! switches or root heading: the row's details lead with their own switch
+//! line, "Wi‑Fi" and the board's switch, and lightplayer.app's switch is
+//! its own row's) —
+//! three pages, the UX spike's 2B (`spikes/wifi-networks/index.html`,
+//! chosen 2026-10-05).
 //!
 //! 1. **Networks** — the connected network first (bars, "Connected · ip"),
 //!    the other saved ones with a word each, then "+ Connect to a network";
@@ -81,17 +86,31 @@ pub(crate) fn WifiPanel(
     /// `connecting` while it tries; a later step is M6's to tell).
     #[props(default)]
     test_preview: Option<UiWifiTest>,
+    /// Drawn as a section of a details card (the board card's Wi‑Fi row's
+    /// details), not as a popover's whole body: its divider, no frame, no
+    /// switches and no root heading (the details' switch line is both).
+    #[props(default)]
+    in_card: bool,
 ) -> Element {
     let mut page = use_signal(|| page_preview.clone().unwrap_or(WifiPage::Networks));
+    // In a card a root page draws no heading ([`PageHead`]).
+    use_context_provider(|| InCard(in_card));
+    let panel_class = panel_class(in_card);
     let args = use_signal(|| args_preview.clone().unwrap_or_default());
-    let verbs = WifiVerbs::of(&offers);
+    let mut verbs = WifiVerbs::of(&offers);
+    // On the board card the two switches are the rows' own: the Wi‑Fi
+    // row's switch line above this list, and the lightplayer.app row's.
+    if in_card {
+        verbs.enabled = None;
+        verbs.cloud_relay = None;
+    }
     let shown = shown_page(&page.read(), &wifi);
     let device = wifi.device;
 
     if wifi.status.is_none() {
         let line = wifi.waiting_line().unwrap_or_default();
         return rsx! {
-            div { class: PANEL_CLASS,
+            div { class: panel_class,
                 PageHead { title: label::WIFI.to_string() }
                 p { class: HELP_CLASS, "{line}" }
             }
@@ -132,7 +151,7 @@ pub(crate) fn WifiPanel(
         ),
     };
     rsx! {
-        div { class: PANEL_CLASS,
+        div { class: panel_class,
             {body}
             if wifi.writing {
                 p { class: HELP_CLASS, "{label::WRITING}" }
@@ -465,8 +484,14 @@ impl WifiVerbs {
     }
 }
 
+/// Whether the panel is drawn in a board card's details ([`WifiPanel`]'s
+/// `in_card`), for its page heads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InCard(bool);
+
 /// A page's header: back (or the Wi‑Fi glyph), the title, and the board's
-/// Wi‑Fi switch on the root page.
+/// Wi‑Fi switch on the root page. In a card a root page (no Back) draws
+/// none: the details' switch line above it is its heading and its switch.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PageHead(
@@ -475,6 +500,10 @@ fn PageHead(
     #[props(default)] switch: Option<UiOffer>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let in_card = use_hook(try_consume_context::<InCard>).is_some_and(|InCard(in_card)| in_card);
+    if in_card && on_back.is_none() {
+        return rsx! {};
+    }
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:text-status-neutral-foreground",
             if let Some(on_back) = on_back {
@@ -802,6 +831,19 @@ fn step_class(state: WifiStepState) -> &'static str {
 
 const PANEL_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-2 tw:px-3 tw:pt-2.5 tw:pb-3";
 
+/// [`PANEL_CLASS`] as a section of a details card: the section's divider
+/// above it, and still no frame of its own (no box in a box).
+const IN_CARD_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-2 tw:border-0 tw:border-t tw:border-solid tw:border-border-muted tw:px-3 tw:pt-2.5 tw:pb-3 tw:first:border-t-0";
+
+/// The panel's classes: a popover's whole body, or a section of a details
+/// card.
+fn panel_class(in_card: bool) -> &'static str {
+    match in_card {
+        true => IN_CARD_CLASS,
+        false => PANEL_CLASS,
+    }
+}
+
 const SAY_CLASS: &str = "tw:m-0 tw:text-[12.5px] tw:leading-snug tw:text-muted-foreground";
 
 const ROW_BUTTON_CLASS: &str = "tw:-mx-1 tw:flex tw:w-[calc(100%+8px)] tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:rounded-md tw:border-0 tw:bg-transparent tw:px-1 tw:py-1.5 tw:text-left tw:hover:bg-white/5 ux-focus-ring";
@@ -862,6 +904,19 @@ mod tests {
             shown_page(&WifiPage::Networks, &wifi(&["lp-walk-net"], false)),
             WifiPage::Networks
         );
+    }
+
+    /// Inside a details card the panel is a section of it: the section's
+    /// divider, and no frame of its own — no border box, no ground, no
+    /// rounding.
+    #[test]
+    fn inside_a_details_card_the_panel_carries_no_frame() {
+        let class = panel_class(true);
+        assert!(class.contains("tw:border-t"), "{class}");
+        assert!(!class.contains("rounded"), "{class}");
+        assert!(!class.contains("tw:bg-"), "{class}");
+        assert!(!class.contains("shadow"), "{class}");
+        assert_eq!(panel_class(false), PANEL_CLASS);
     }
 
     #[test]

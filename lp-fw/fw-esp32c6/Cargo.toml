@@ -16,6 +16,7 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "fs-tree",
     "fw-esp32-common/server",
     "lpc-hardware",
     "lpc-model",
@@ -24,7 +25,7 @@ server = [
     "lpa-server",
     "lpc-shared",
     "lpfs",
-]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
+]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs, the tree store)
 radio = [
     "lpc-hardware",
     "lpc-shared",
@@ -201,7 +202,19 @@ desk_ble_params = ["ble"]
 # an unparseable packet does, so a desk board can prove that a runner restart
 # closes its links and advertises again. See `src/ble/hci_transport.rs`.
 desk_ble_fault = ["ble"]
+# LP SRAM above the recovery region (15,360 B in this image) as the heap's
+# last region, untagged so only Rust's global allocator reaches it, after
+# main, dram2_seg and the radio region (`src/board/esp32c6/lp_sram_heap.rs`).
+# Off: held for a memory-layout decision (research/ram-e03). Turning it on
+# moves the chip's heap figures: `just bless-chips esp32c6`.
+lp_sram_heap = []
 heap_map_diag = ["lpc-shared"]
+# The heap's peak between two heartbeats, one `[heap] peak=… live=…
+# max_usage=… largest=…` line per heartbeat (`src/heap_peak_diag.rs`) — OFF
+# by default, never shipped: the tree store's RAM figures (plan
+# `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D5). It owns
+# esp-alloc's hooks, so not with `heap_map_diag`. The wire is unchanged.
+heap_peak_diag = ["esp-alloc/alloc-hooks"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
@@ -240,7 +253,31 @@ uart_bridge_fast = []
 test_button = ["server"]  # Test root-owned GPIO button input with internal pull-up
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
-memory_fs = []  # Use in-memory filesystem instead of persistent flash
+# The in-memory filesystem instead of the tree store on flash: no `lpfs` is
+# mounted, nothing on flash is read or written for files. For benchmark and
+# no-flash emulator images, never shipped. It REPLACES the tree store (a
+# `server` build links `fs-tree` either way, and LTO drops it unused); the
+# hello then lists no `fs.tree`.
+memory_fs = []
+# The tree store as `lpfs` — the C6's filesystem since the tree-store cutover
+# (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7). Every `server`
+# build mounts it (there is no littlefs build of this crate any more:
+# littlefs left the C6 with the cutover, AD5). `lp-tree-store` over
+# esp-storage (`src/tree_flash.rs`: the word-alignment shim) with the SHA
+# accelerator as its hasher (`src/hw_sha.rs`); every board file goes through
+# it, because they all go through `base_fs`. Mount verdicts
+# (`fw_esp32_common::tree_fs`): a partition with no store is formatted
+# (lazily) unless a littlefs superblock is found — in `lpfs` itself, or at
+# `0x350000` where the 176-sector littlefs of a board that skipped the
+# migration starts — then the board HOLDS (`fs: legacy_held`, files untouched,
+# for the USB migration); a newer or damaged store is REFUSED — nothing
+# written, files kept, access locked (`fs: refused`). Its update session
+# refuses a core install that does not carry the tree-store mark in its own
+# bytes (`fw_esp32_common::fs_tree_core_guard`). See
+# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md and
+# docs/adr/2026-10-16-c6-tree-store-cutover-migration.md. The name stays for
+# the build defs and recipes that spell it; `server` implies it.
+fs-tree = ["fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 # JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
@@ -276,6 +313,17 @@ test_rmt_rx = ["dep:fw-checks", "fw-checks/check-rmt-rx", "fw-checks/check-rmt"]
 # classifier and boot flow live in fw-checks as `checks::flash_tears`; what
 # stays here is esp-storage, the clock, the USB link and the reset reason.
 test_flash_tears = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The same harness as the `flash-tears-unaligned` payload: every program
+# starts off a 32-byte boundary, so a torn prefix says whether program
+# commands count from the write's address or from absolute boundaries. Same
+# board, same gates; never built together with `test_flash_tears`.
+test_flash_tears_unaligned = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The `flash-reprogram` payload's harness (tree-store M7): power cuts on the
+# same SACRIFICIAL board, every one while the part programs, and each torn
+# word programmed again with its intended value and read back — does that
+# make its weak bits solid? It owns the WHOLE `lpfs` partition. The flow
+# lives in fw-checks as `checks::flash_reprogram`.
+test_flash_reprogram = ["dep:fw-checks", "fw-checks/check-flash-reprogram"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,
@@ -419,7 +467,9 @@ esp-alloc = { version = "0.10.0", default-features = false, features = ["global-
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }
-bt-hci = { version = "0.8.0", optional = true, default-features = false }
+# `log`: the fork's one warning (a Command Complete with more return bytes
+# than its command declares, third_party/bt-hci/README-LP.md).
+bt-hci = { version = "0.8.0", optional = true, default-features = false, features = ["log"] }
 heapless = { version = "0.9", optional = true }
 # trouble-host 0.6's `#[gatt_server]` expands to `static_cell::…` and
 # `embassy_sync::…` paths, and its embassy-sync is 0.7 (ours is 0.8); the
@@ -524,7 +574,9 @@ log = { workspace = true, default-features = false }
 
 embedded-storage = "0.3"
 esp-storage = { version = "0.9", features = ["esp32c6", "panic-unaligned-buffer"] }
-littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+# The tree store as `lpfs` (`fs-tree`, which `server` implies). No
+# `soft-sha` (the SHA accelerator is the hasher), no `stats`.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs"], optional = true }
 
 [lints]
 workspace = true

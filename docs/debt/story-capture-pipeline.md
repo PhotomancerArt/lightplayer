@@ -711,3 +711,16 @@ hours), and neither is an exit path on its own.
   with `STUDIO_STORY_DISCOVERY_TIMEOUT_MS=600000`,
   `STUDIO_STORY_PNGS_CONCURRENCY=1` and `STUDIO_STORY_CDP_TIMEOUT_MS=240000`
   skips the rebuild and gives discovery the room the load takes.
+
+- 2026-10-17 — **the desk's Google Chrome dies at launch** (the board
+  card's round 3, `just studio-story-pngs board-card`, macOS 26). The
+  `--dump-dom` discovery Chrome exits 2 with "Trying to load the allocator
+  multiple times. This is *not* supported." on every attempt, in and out
+  of the sandbox; the walks' headless Chrome does the same. Chrome for
+  Testing from puppeteer's cache captures stories:
+  `CHROME_BIN="$HOME/.cache/puppeteer/chrome/mac_arm-142.0.7444.175/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"`
+  in front of the script line above. For the walks it is not enough: it
+  aborts (SIGABRT inside macOS frameworks) on a page with no `?emu=` that
+  remembers a Wi‑Fi board (`walk-wifi-emu studio-lan`'s S2), and the 140
+  build does not start at all. `CHROME_BIN="/Applications/Brave
+  Browser.app/Contents/MacOS/Brave Browser"` ran every walk.

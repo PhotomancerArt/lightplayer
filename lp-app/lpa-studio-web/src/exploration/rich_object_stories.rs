@@ -230,7 +230,7 @@ fn pane_header() -> Element {
                             tone: IconMenuTone::Warning,
                             active: true,
                             DetailSection {
-                                title: "Unsaved (persisted)".to_string(),
+                                title: "Unsaved changes".to_string(),
                                 meta: "2".to_string(),
                                 tint: DetailSectionTint::Warning,
                                 p { class: "tw:m-0 tw:py-1 tw:text-xs tw:leading-snug tw:text-muted-foreground",

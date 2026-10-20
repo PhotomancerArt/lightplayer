@@ -15,6 +15,9 @@
 //! - [`radio_link_config`]: one link's lp-link configuration, its frame size
 //!   fitted to the connection's ATT MTU, its receive window to the mode
 //!   (feature `radio-link`);
+//! - [`mtu_grace`]: when a link opens — at subscribe, or once a central
+//!   that subscribed at the Bluetooth minimum has raised the MTU (feature
+//!   `radio-link`);
 //! - [`radio_link_port`]: the slots the radio side and the mux (or
 //!   core-only) share — each open connection's `Link`, the boot's mode, and
 //!   the signals both halves wait on (feature `radio-link`);
@@ -52,6 +55,8 @@ pub mod hci_connection_ledger;
 pub mod lan_link_config;
 #[cfg(feature = "radio-link")]
 pub mod link_mux_transport;
+#[cfg(feature = "radio-link")]
+pub mod mtu_grace;
 #[cfg(feature = "wifi")]
 pub mod network_key_answer;
 #[cfg(feature = "wifi")]
@@ -74,6 +79,10 @@ pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "radio-link")]
 pub use link_mux_transport::{
     LAN_WRITE_DEADLINE_MS, LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS, now_us,
+};
+#[cfg(feature = "radio-link")]
+pub use mtu_grace::{
+    BLE_MIN_ATT_MTU, MTU_GRACE_US, MTU_POLL_US, MtuGraceDecision, mtu_grace_decision,
 };
 #[cfg(feature = "wifi")]
 pub use parked_handshake::{ChallengeVerdict, PARKED_FRAME_MAX, ParkRefused};

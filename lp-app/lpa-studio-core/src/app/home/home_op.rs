@@ -78,8 +78,8 @@ impl ProjectTemplate {
     pub fn description(self) -> &'static str {
         match self {
             Self::Blank => "empty canvas, no nodes",
-            Self::Pattern1d => "strip + matrix rig · exports effect/",
-            Self::Pattern2d => "matrix rig · exports effect/",
+            Self::Pattern1d => "a strip and a matrix to try an effect on",
+            Self::Pattern2d => "a matrix to try an effect on",
         }
     }
 
@@ -272,13 +272,13 @@ impl ControllerOp for HomeOp {
             .with_icon("play"),
             Self::OpenExample { .. } => ActionMeta::new(
                 "Open example",
-                "Run this example; it becomes yours on first save.",
+                "Open this example. Save a copy to keep it.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
             Self::OpenSharedTransient { .. } => ActionMeta::new(
                 "Open shared project",
-                "Run this shared project; saving forks your own copy.",
+                "Open this shared project. Save a copy to keep your changes.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
@@ -298,13 +298,11 @@ impl ControllerOp for HomeOp {
                 template.label(),
                 match template {
                     ProjectTemplate::Pattern1d => {
-                        "Create a 1D pattern project — a strand and a panel to judge \
-                         the effect on, with `effect/` designated as the export — and \
-                         open it."
+                        "Create and open a 1D pattern project, with a strip and a matrix \
+                         to try the effect on."
                     }
                     _ => {
-                        "Create a 2D pattern project — a panel to judge the effect on, \
-                         with `effect/` designated as the export — and open it."
+                        "Create and open a 2D pattern project, with a matrix to try the effect on."
                     }
                 },
                 ActionPriority::Secondary,
@@ -313,9 +311,8 @@ impl ControllerOp for HomeOp {
             Self::CreateFromPattern { export, .. } => ActionMeta::new(
                 "New project from this…",
                 format!(
-                    "Create a pattern project built around this project's {export} module — a \
-                     rig to judge it on, with your own copy of the module designated as the \
-                     export — and open it."
+                    "Create and open a pattern project with your own copy of this project's \
+                     {export} module."
                 ),
                 ActionPriority::Secondary,
             )
@@ -332,7 +329,7 @@ impl ControllerOp for HomeOp {
             .with_icon("edit"),
             Self::DuplicatePackage { .. } => ActionMeta::new(
                 "Duplicate",
-                "Fork an independent copy of this project.",
+                "Make a separate copy of this project.",
                 ActionPriority::Secondary,
             )
             .with_icon("copy"),
@@ -351,13 +348,13 @@ impl ControllerOp for HomeOp {
             )),
             Self::ImportZip { .. } => ActionMeta::new(
                 "Import zip",
-                "Install a project from a zip archive.",
+                "Add a project from a zip file.",
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
             Self::ImportJson { .. } => ActionMeta::new(
                 "Paste project",
-                "Install a project from a pasted JSON envelope.",
+                "Add a project you copied as JSON.",
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),

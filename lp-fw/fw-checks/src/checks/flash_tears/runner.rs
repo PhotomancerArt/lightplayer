@@ -11,11 +11,12 @@ use super::analysis::{Verdict, accumulate, analyze_in_flight, analyze_settled};
 use super::journal::{self, CopyScan};
 use super::layout::{TearsLayout, last_cycle_of, sector_of};
 use super::pattern::fill_pattern;
+use super::program_plan::writes;
 use super::records::{
     BootRecord, InFlightRecord, JournalRecord, RepairRecord, SettledRecord, SummaryRecord,
     TimingRecord,
 };
-use super::{JOURNAL_COPIES, PAGE_SIZE, REGION_SECTORS, SCAN_READS, SECTOR_SIZE};
+use super::{JOURNAL_COPIES, REGION_SECTORS, SCAN_READS, SECTOR_SIZE};
 
 /// The flash the payload drives. Addresses are absolute.
 pub trait TearsFlash {
@@ -23,7 +24,15 @@ pub trait TearsFlash {
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Self::Error>;
     /// Erase the 4 KiB sector at `addr`.
     fn erase_sector(&mut self, addr: u32) -> Result<(), Self::Error>;
-    /// Program `data` at `addr`. The runner never crosses a page.
+    /// Program `data` at `addr`. Under [`ProgramMode::Pages`] the runner
+    /// never crosses a page; under [`ProgramMode::Unaligned`] one call may
+    /// cross several (at most [`super::program_plan::MAX_WRITE`] bytes, a
+    /// multiple of 4 at a 4-aligned address), and how it is split into
+    /// commands is the flash driver's — that split is what the unaligned
+    /// payload measures.
+    ///
+    /// [`ProgramMode::Pages`]: super::program_plan::ProgramMode::Pages
+    /// [`ProgramMode::Unaligned`]: super::program_plan::ProgramMode::Unaligned
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), Self::Error>;
 }
 
@@ -147,7 +156,12 @@ pub fn scan<F: TearsFlash>(
                 out.needs_rewrite |= 1 << sector;
             }
             out.in_flight = Some(f.verdict);
-            emit(&InFlightRecord { latest, sector, f });
+            emit(&InFlightRecord {
+                latest,
+                sector,
+                f,
+                mode: layout.mode,
+            });
         } else {
             fill_pattern(sector, wrote, &mut bufs.new);
             let s = analyze_settled(&bufs.and, &bufs.or, &bufs.new);
@@ -265,9 +279,9 @@ pub fn timed_cycle<F: TearsFlash>(
     flash.erase_sector(addr)?;
     let t2 = now_us();
     fill_pattern(sector, cycle, buf);
-    for (i, page) in buf.chunks(PAGE_SIZE).enumerate() {
+    for (at, len) in writes(layout.mode, sector, cycle) {
         let p0 = now_us();
-        flash.program(addr + (i * PAGE_SIZE) as u32, page)?;
+        flash.program(addr + at as u32, &buf[at..at + len])?;
         let dt = now_us() - p0;
         t.page_us_min = t.page_us_min.min(dt);
         t.page_us_max = t.page_us_max.max(dt);
@@ -294,7 +308,7 @@ pub fn run_cycles<F: TearsFlash>(
 }
 
 /// One work cycle: journal both copies, erase the cycle's sector, program it
-/// page by page.
+/// write by write ([`super::program_plan`]: page by page, or unaligned).
 pub fn run_cycle<F: TearsFlash>(
     flash: &mut F,
     layout: &TearsLayout,
@@ -333,8 +347,8 @@ fn write_sector<F: TearsFlash>(
     let addr = layout.sector_addr(sector);
     flash.erase_sector(addr)?;
     fill_pattern(sector, cycle, buf);
-    for (i, page) in buf.chunks(PAGE_SIZE).enumerate() {
-        flash.program(addr + (i * PAGE_SIZE) as u32, page)?;
+    for (at, len) in writes(layout.mode, sector, cycle) {
+        flash.program(addr + at as u32, &buf[at..at + len])?;
     }
     Ok(())
 }
@@ -349,6 +363,7 @@ mod tests {
 
     use super::*;
     use crate::checks::flash_tears::LAYOUT_SECTORS;
+    use crate::checks::flash_tears::program_plan::{ProgramMode, writes};
 
     /// How the fake part tears the op the cut lands on.
     #[derive(Clone, Copy)]
@@ -470,7 +485,17 @@ mod tests {
     /// One boot: scan, repair, a timed cycle. Returns the records and the
     /// cycle the loop resumes at.
     fn boot(nor: &mut FakeNor) -> (Vec<String>, u32) {
-        let layout = TearsLayout::new(BASE, LAYOUT_SECTORS * SECTOR_SIZE as u32).unwrap();
+        boot_as(nor, ProgramMode::Pages)
+    }
+
+    fn layout_as(mode: ProgramMode) -> TearsLayout {
+        TearsLayout::new(BASE, LAYOUT_SECTORS * SECTOR_SIZE as u32)
+            .unwrap()
+            .with_mode(mode)
+    }
+
+    fn boot_as(nor: &mut FakeNor, mode: ProgramMode) -> (Vec<String>, u32) {
+        let layout = layout_as(mode);
         let mut bufs = Box::new(ScanBuffers::new());
         let mut out: Vec<String> = Vec::new();
         let mut emit = |r: &dyn fmt::Display| out.push(r.to_string());
@@ -493,7 +518,11 @@ mod tests {
 
     /// Run the silent loop from `next` until the cut fires.
     fn work_until_cut(nor: &mut FakeNor, next: u32) {
-        let layout = TearsLayout::new(BASE, LAYOUT_SECTORS * SECTOR_SIZE as u32).unwrap();
+        work_until_cut_as(nor, next, ProgramMode::Pages);
+    }
+
+    fn work_until_cut_as(nor: &mut FakeNor, next: u32, mode: ProgramMode) {
+        let layout = layout_as(mode);
         let mut buf = Box::new([0u8; SECTOR_SIZE]);
         let r = run_cycles(nor, &layout, next, 1000, &mut buf);
         assert_eq!(r, Err(PowerLost), "the cut must land inside the loop");
@@ -610,5 +639,61 @@ mod tests {
         assert!(in_flight(&records).contains(r#""verdict":"old""#));
         assert!(records.iter().any(|r| r.contains(r#""journal_copies":1"#)));
         assert_eq!(next_after, next + 3);
+    }
+
+    #[test]
+    fn an_unaligned_cut_inside_a_write_is_a_torn_program_with_its_plan_listed() {
+        let mode = ProgramMode::Unaligned;
+        let mut nor = FakeNor::new();
+        let (records, _) = boot_as(&mut nor, mode);
+        assert!(records[0].contains(r#""state":"fresh""#), "{}", records[0]);
+        // The region the unaligned plan filled scans whole.
+        let (records, next) = boot_as(&mut nor, mode);
+        let summary = records.iter().find(|r| r.contains("ft-summary")).unwrap();
+        assert!(summary.contains(r#""settled_complete":15"#), "{summary}");
+        assert!(summary.contains(r#""in_flight":"complete""#), "{summary}");
+
+        // The first loop cycle: 2 journal programs, the erase, then its
+        // writes; cut write 3, 12 of its bytes landed.
+        nor.cut(2 + 1 + 3, Tear::Prefix(12));
+        work_until_cut_as(&mut nor, next, mode);
+        let (records, _) = boot_as(&mut nor, mode);
+        let f = in_flight(&records);
+        assert!(f.contains(r#""verdict":"torn-program""#), "{f}");
+        let plan: Vec<(usize, usize)> = writes(mode, next % REGION_SECTORS, next).collect();
+        let listed: String = plan
+            .iter()
+            .map(|(a, l)| std::format!("[{a},{l}]"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            f.ends_with(&std::format!(r#","writes":[{listed}]}}"#)),
+            "{f}"
+        );
+        assert!(f.contains(r#""writes":[[0,20],"#), "{f}");
+        // The prefix stops 12 bytes into write 3 (or later, where the
+        // pattern asks nothing of the bytes after it).
+        let at = plan[3].0;
+        let extent: usize = f
+            .split(r#""landed_extent":"#)
+            .nth(1)
+            .unwrap()
+            .split('}')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            extent <= at + 12 && extent > at,
+            "{extent} vs write at {at}"
+        );
+
+        // A page-aligned record never lists its plan.
+        let mut nor = FakeNor::new();
+        let (_, next) = boot(&mut nor);
+        nor.cut(CYCLE_OPS * 2 + 3 + 5, Tear::Prefix(40));
+        work_until_cut(&mut nor, next);
+        let (records, _) = boot(&mut nor);
+        assert!(!in_flight(&records).contains("writes"));
     }
 }

@@ -32,7 +32,9 @@ use std::rc::Rc;
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::home::home_view_builder::HomeInputs;
-use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
+use crate::app::home::{
+    HOME_NODE_ID, HomeOp, UiHomeView, home_sections_builder, home_view_builder,
+};
 use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
@@ -54,6 +56,13 @@ use crate::{
     UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
+
+/// One tab holds a board: the holder's flows (priming, claims, the gate's
+/// claims, the answer to an ask, the sentinels, the facts on the boards).
+mod board_hold_flow;
+/// One tab holds a board: Connect on a board another tab holds
+/// (`devices/<board>/take-over`), the asker's side.
+mod take_over_flow;
 
 /// Minimum gap between view publishes that carry *only* streamed log lines
 /// (session console tails, drained producer batches). Anything structural —
@@ -108,6 +117,10 @@ pub(crate) fn device_roster_config_for_test() -> crate::DeviceRosterConfig {
     device_roster_config()
 }
 
+/// Connected: the home page holds the open session (Connect, Done, Edit,
+/// and which surface the session shows on).
+mod connect_flow;
+
 pub struct StudioController {
     /// The rebuilt device layer (M3): the `lpa-devices` roster plus the
     /// effects layer that performs its commands. The ONLY device path —
@@ -127,7 +140,11 @@ pub struct StudioController {
     /// The hold, not a wait: the fold that produces the hello runs on the
     /// actor's own queue, so an open that awaited the hello inside its
     /// dispatch would wait for a fold that cannot run until it returns.
-    pending_device_lens: Option<String>,
+    ///
+    /// A Connect that had to reach its board first holds here too
+    /// ([`crate::PendingLens::connect`]), with a grace and its own ends
+    /// (`connect_flow.rs`); an address's hold keeps the rule above.
+    pending_device_lens: Option<crate::PendingLens>,
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
@@ -161,6 +178,9 @@ pub struct StudioController {
     wifi_addresses: crate::WifiAddressBook,
     /// The web edge's sink for [`Self::wifi_addresses`]' stored form.
     on_wifi_addresses: Option<Box<dyn Fn(&str)>>,
+    /// The web edge's sink for the boards whose owner chose Start fresh
+    /// (the roster's [`crate::BoardFilesMemory`]), kept in this browser.
+    on_fresh_starts: Option<Box<dyn Fn(&str)>>,
     /// The connects over Wi‑Fi someone asked for, while they run and once
     /// they fail.
     wifi_connects: crate::WifiConnects,
@@ -168,6 +188,26 @@ pub struct StudioController {
     /// reports back (the actor's queue). `None` in a rig that wires neither.
     wifi_spawner: Option<Rc<dyn Fn(crate::DeviceTaskFuture)>>,
     wifi_tx: Option<crate::app::studio::studio_view_channel::CommandSender>,
+    /// The hold edge: the browser's Web Locks and hold channel
+    /// ([`Self::set_board_hold_edge`]). `None` where the browser has
+    /// neither, and in a rig that installs none: then this tab names no
+    /// holds and every device flow is as it was before holds existed.
+    board_hold_edge: Option<Rc<dyn crate::BoardHoldEdge>>,
+    /// What this tab and the other tabs of this browser hold, kept beside
+    /// the edge (there is a book exactly when there is an edge).
+    board_hold_book: Option<crate::BoardHoldBook>,
+    /// What this tab is doing about the holds: claims in flight, sentinels,
+    /// the facts on its boards, boards being let go
+    /// (`studio_controller/board_hold_flow.rs`). Idle without an edge.
+    board_hold_flow: crate::app::devices::board_hold::BoardHoldFlow,
+    /// Every Connect on a board another tab holds under way here, and how
+    /// each ended (`devices/<board>/take-over`;
+    /// `studio_controller/take_over_flow.rs`).
+    take_overs: crate::TakeOvers,
+    /// The project each board's last push sent, by name, as the push
+    /// staged it: the card's surface names it while that push runs
+    /// (`DeviceRosterView.sending`).
+    sending: std::collections::BTreeMap<crate::DeviceId, String>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -183,10 +223,16 @@ pub struct StudioController {
     /// tests and evals, which have no page). Read-only: core never
     /// navigates because of it.
     place: Option<crate::UiPlace>,
+    /// The Graph tab's editor and how it is kept in step with the open
+    /// project's files (`app/graph`).
+    graph: crate::app::graph::GraphController,
     /// How many Play surfaces are mounted on the lens right now (the
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
     play_views: u32,
+    /// How many times a card's Sign in was pressed: the shell leaves for
+    /// sign-in when the count it sees advances (`UiStudioView::sign_in_requests`).
+    sign_in_seq: u64,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -293,6 +339,21 @@ pub struct StudioController {
     /// stays open, the page says "Reconnecting…", and the session rebinds
     /// when the same board is back (see [`lens_hold`](super::lens_hold)).
     lens_hold: Option<LensHold>,
+    /// The home page holds the open session (Connect, or Edit from a
+    /// card): read through [`Self::connected`], which answers `None` once
+    /// the session has left the pool by any road. Cleared by
+    /// [`Self::close_device_lens`] and by every open an address makes
+    /// (`studio_controller/connect_flow.rs`).
+    connected: Option<crate::ConnectedBoard>,
+    /// Why the last Connect did not open, for the board's card; cleared by
+    /// the next Connect, Edit or Done on any board.
+    connect_failure: Option<crate::ConnectFailure>,
+    /// The chooser Connect a board's USB or Bluetooth square opened last,
+    /// while it has not answered: the link its answer names, and which.
+    section_chooser: Option<(lpa_devices::LinkId, crate::ChooserTransport)>,
+    /// That chooser's connect failed after the pick: the section's words
+    /// under its squares, until the next press of either.
+    chooser_failure: Option<crate::UiChooserFailure>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -475,14 +536,22 @@ impl StudioController {
             relay_transport: None,
             wifi_addresses: crate::WifiAddressBook::new(),
             on_wifi_addresses: None,
+            on_fresh_starts: None,
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
+            board_hold_edge: None,
+            board_hold_book: None,
+            board_hold_flow: Default::default(),
+            take_overs: crate::TakeOvers::default(),
+            sending: std::collections::BTreeMap::new(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
             place: None,
+            graph: crate::app::graph::GraphController::default(),
             play_views: 0,
+            sign_in_seq: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -510,6 +579,10 @@ impl StudioController {
             link_health: crate::app::devices::LinkHealthMap::default(),
             lens_reconnect: None,
             lens_hold: None,
+            connected: None,
+            connect_failure: None,
+            section_chooser: None,
+            chooser_failure: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -553,6 +626,43 @@ impl StudioController {
 
     /// Hand the agent sub-controller the actor's command sender (called by
     /// `StudioActor::new`); run futures report progress through it.
+    /// The Graph's editor, for the page to hold before the controller moves
+    /// into the actor (see [`crate::app::graph::GraphHandle`]).
+    pub fn graph_handle(&self) -> crate::app::graph::GraphHandle {
+        self.graph.handle()
+    }
+
+    /// Give the Graph's handle the actor's queue (called by
+    /// `StudioActor::new`).
+    pub(crate) fn set_graph_command_sender(
+        &mut self,
+        tx: crate::app::studio::studio_view_channel::CommandSender,
+    ) {
+        self.graph.handle().set_command_sender(tx);
+    }
+
+    /// Something the page did in the Graph changed the project or the
+    /// selection (`StudioCommand::Graph`).
+    pub fn apply_graph_note(&mut self, note: crate::app::graph::GraphNote) {
+        let _ = note;
+        self.mark_dirty();
+    }
+
+    /// Open the project on the Graph, or bring it back in step with its
+    /// files, while the Graph is the place (called by the actor after each
+    /// batch).
+    pub async fn settle_graph(&mut self) {
+        let wanted = self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph);
+        let server = self
+            .pool
+            .lens_session_mut()
+            .ok()
+            .and_then(|session| session.client_mut().ok());
+        if self.graph.settle(&mut self.project, server, wanted).await {
+            self.mark_dirty();
+        }
+    }
+
     pub(crate) fn set_agent_command_sender(
         &mut self,
         tx: crate::app::studio::studio_view_channel::CommandSender,
@@ -666,7 +776,7 @@ impl StudioController {
     /// beside the others: in every browser with a WebSocket. Its links
     /// present [`Self::network_link_keys`]. With it installed, a board this
     /// browser remembers an address for is offered "Connect over Wi‑Fi",
-    /// and the add slot takes an address.
+    /// and Connect a board's Network row takes an address.
     pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
         self.lan_transport = Some(transport);
         self.install_device_transport();
@@ -706,6 +816,30 @@ impl StudioController {
     /// Where each board Studio has met is on Wi‑Fi, as core holds it.
     pub fn wifi_addresses(&self) -> &crate::WifiAddressBook {
         &self.wifi_addresses
+    }
+
+    /// The boards whose owner chose Start fresh, as this browser kept them
+    /// (the web edge's `localStorage`, [`crate::FRESH_STARTS_STORAGE_KEY`],
+    /// read at boot). Load before the actor takes ownership.
+    pub fn load_fresh_starts(&mut self, json: &str) {
+        self.devices.files_memory_mut().load_fresh_starts(json);
+    }
+
+    /// Where the fresh starts' stored form goes whenever it changes (the
+    /// web edge's `localStorage`). Install before the actor takes ownership.
+    pub fn set_on_fresh_starts(&mut self, hook: impl Fn(&str) + 'static) {
+        self.on_fresh_starts = Some(Box::new(hook));
+    }
+
+    /// Hand the fresh starts' stored form to the web edge when they changed
+    /// (a Start fresh, a factory reset here, a board running a project
+    /// again).
+    fn keep_fresh_starts(&mut self) {
+        if let Some(json) = self.devices.files_memory_mut().take_changed_fresh_starts()
+            && let Some(hook) = &self.on_fresh_starts
+        {
+            hook(&json);
+        }
     }
 
     /// The book changed: hand its stored form to the web edge.
@@ -824,6 +958,9 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("wi-fi: {host}: {}", failure.words());
         }
+        if let crate::WifiConnectTarget::Board(board) = target {
+            self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
+        }
         let connected = result.is_ok();
         self.wifi_connects.finish(target, host, result);
         if connected {
@@ -883,6 +1020,7 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("relay: {board}: {}", failure.words());
         }
+        self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
         self.wifi_connects
             .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
@@ -947,6 +1085,9 @@ impl StudioController {
     /// never navigates because of it.
     pub fn set_place(&mut self, place: crate::UiPlace) {
         if self.place.as_ref() != Some(&place) {
+            // An Edit waits only until the user reaches the session's page;
+            // from there the place itself shows the editor.
+            self.note_place_for_connected(&place);
             self.place = Some(place);
             self.mark_dirty();
         }
@@ -1565,6 +1706,39 @@ impl StudioController {
         self.devices.effects_mut().set_backup_store(store);
     }
 
+    /// Install the hold edge (Web Locks and the hold channel in the
+    /// browser; a [`crate::MemoryBoardHoldBus`] tab in tests), with an empty
+    /// book for the tab it names. Without one, this tab names no holds.
+    pub fn set_board_hold_edge(&mut self, edge: Rc<dyn crate::BoardHoldEdge>) {
+        self.board_hold_book = Some(crate::BoardHoldBook::new(edge.tab_id()));
+        self.board_hold_edge = Some(edge);
+    }
+
+    /// The hold book, when a hold edge is installed.
+    pub fn board_hold_book(&self) -> Option<&crate::BoardHoldBook> {
+        self.board_hold_book.as_ref()
+    }
+
+    /// A note another tab said on the hold channel
+    /// ([`StudioCommand::BoardHold`](crate::StudioCommand::BoardHold)):
+    /// folded into the book. Returns what it changed; reacting to it (the
+    /// fact on the board, the answer to an ask) is the hold flow's.
+    /// Without an edge there is no book, and a note changes nothing.
+    pub fn on_hold_note(
+        &mut self,
+        from: crate::TabId,
+        note: crate::HoldNote,
+    ) -> Vec<crate::BookChange> {
+        let changes = match self.board_hold_book.as_mut() {
+            Some(book) => book.apply(&from, &note),
+            None => return Vec::new(),
+        };
+        self.react_to_hold_changes(&changes);
+        self.reconcile_board_holds();
+        self.mark_dirty();
+        changes
+    }
+
     /// Install the engine cache (OPFS `firmware-cache/` in the browser).
     /// Without one, Studio keeps engines in memory for the page's life.
     pub fn set_engine_cache(&mut self, cache: Rc<dyn lpa_firmware_store::EngineCache>) {
@@ -1704,6 +1878,9 @@ impl StudioController {
                 store_releases: None,
                 store_lookups: None,
                 file_build: None,
+                // An automatic start waits for the hello: an unknown board
+                // is never started on its own.
+                board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1800,6 +1977,7 @@ impl StudioController {
             store_releases: self.update_build_facts.store_releases(),
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
+            board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -1836,6 +2014,13 @@ impl StudioController {
             }
             _ => None,
         };
+        let link_error = match &input {
+            crate::DeviceInput::Event(crate::DeviceEvent::Link {
+                link,
+                event: lpa_devices::link::LinkEvent::Error(_),
+            }) => Some(*link),
+            _ => None,
+        };
         for line in self.devices.handle(now, input) {
             self.record_device_event(
                 None,
@@ -1845,6 +2030,21 @@ impl StudioController {
                     entry: line.entry,
                 },
             );
+        }
+        self.keep_fresh_starts();
+        // A Connect waiting on the chooser it opened hears its answer, and
+        // so does Connect a board.
+        if let Some((link, answer)) = &grant_answer {
+            self.note_connect_chooser(*link, answer);
+            self.note_section_chooser_answer(*link, answer);
+        }
+        // A failed Connect's words go once the board is reached by any
+        // road.
+        self.settle_connect_failure();
+        // One tab holds a board: a refused open is read against the claims
+        // standing now, at this batch's reconcile.
+        if let Some(link) = link_error {
+            self.note_refused_open(link);
         }
         self.drop_device_lens_if_wireless();
         self.link_health
@@ -1886,9 +2086,15 @@ impl StudioController {
     /// Run the granted-port sweep when one is due (boot, transport install,
     /// hotplug connect). Coalesced: a storm of connect events costs one sweep.
     fn run_due_device_sweep(&mut self) {
-        if !core::mem::take(&mut self.device_sweep_pending) {
+        if !self.device_sweep_pending {
             return;
         }
+        // With a hold edge, the first sweep waits for one look at what the
+        // other tabs hold, so it never opens a port they hold.
+        if !self.hold_priming_lets_sweep_run() {
+            return;
+        }
+        self.device_sweep_pending = false;
         self.devices.sweep_granted_ports();
     }
 
@@ -1907,6 +2113,11 @@ impl StudioController {
         for action in self.auto_name_actions() {
             self.fold_device_input(crate::DeviceInput::Action(action));
         }
+        // One tab holds a board: boards let go on request write their last
+        // picture and disconnect, then every hold is reconciled against
+        // what the folds left.
+        self.run_due_hold_releases().await;
+        self.reconcile_board_holds();
         let writes = self.devices.take_writes();
         if writes.is_empty() {
             return;
@@ -2099,7 +2310,7 @@ impl StudioController {
 
     /// Whether this page can reach a board over USB. Web Serial (or the
     /// `?emu=` shim that polyfills it) is what built a serial transport;
-    /// without one the add slot keeps its USB verb out of the primary
+    /// without one Connect a board keeps its USB square out of the primary
     /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree's
     /// `devices/connect-usb` is disabled with the reason.
     fn usb_available(&self) -> bool {
@@ -2109,13 +2320,16 @@ impl StudioController {
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
         let mut view = self.devices.view(self.device_now());
+        let lens_frame = self.lens_frame_source();
         view.feeds = crate::device_card_feed_views(
             self.devices.roster(),
             &view.roster.devices,
             &self.device_feeds,
             self.devices.effects(),
+            lens_frame.as_ref(),
             (self.now_secs)(),
         );
+        view.connections = self.board_connections();
         view.runtime_bands = self.runtime_bands(&view);
         view.usb_available = self.usb_available();
         view.access = self
@@ -2140,6 +2354,18 @@ impl StudioController {
                     .map(|wifi| (device.id, wifi))
             })
             .collect();
+        for device in self.devices.roster().devices() {
+            if let Some(status) = self.network.remembered_status(device.id) {
+                view.remembered_networks.insert(device.id, status.clone());
+            }
+            if let Some(on) = self.access.remembered_bluetooth(device) {
+                view.remembered_bluetooth.insert(device.id, on);
+            }
+        }
+        view.account_name = self
+            .access
+            .account_keys()
+            .map(|keys| keys.account_name.clone());
         let updates = view
             .roster
             .devices
@@ -2162,8 +2388,109 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.chooser_failure = self.chooser_failure.clone();
+        view.take_overs = self
+            .take_overs
+            .devices()
+            .filter_map(|device| Some((device, self.take_overs.view(device)?)))
+            .collect();
+        // A name only while that board's push runs: a finished push's name
+        // is no news.
+        view.sending = view
+            .roster
+            .devices
+            .iter()
+            .filter(|device| {
+                device
+                    .activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.kind == crate::DeviceActivityKind::Push)
+            })
+            .filter_map(|device| Some((device.id, self.sending.get(&device.id)?.clone())))
+            .collect();
+        // A port another tab's claims account for is that tab's board, not
+        // a new device found here.
+        self.hide_accounted_held_links(&mut view);
         view.board_projects = self.board_projects(&view);
+        view.last_seen = self.registry_last_seen(&view);
         view
+    }
+
+    /// The lens session's picture for the card of the device it is open on
+    /// ([`crate::LensFrameSource`], CD8): the session's own passive pull
+    /// already carries the board's published frame, so the card draws that
+    /// while the feed cannot pull under the borrow — no second pull, no
+    /// change to the lens's cadence. `None` without a device lens holding a
+    /// wire, or before its first frame (the card then keeps the dimmed last
+    /// one, "editor has the wire"). Closed PR #571, redone.
+    fn lens_frame_source(&self) -> Option<crate::LensFrameSource> {
+        let session = self.pool.lens_session()?;
+        let attachment = session.attachment();
+        if !self.devices.effects().lens_holds_wire(attachment.link) {
+            return None;
+        }
+        let (frame, frames_seen) = self.project.lens_published_frame()?;
+        let age =
+            self.device_feeds
+                .observe_lens_frames(session.id(), frames_seen, (self.now_secs)());
+        Some(crate::LensFrameSource {
+            device: attachment.device,
+            frame,
+            frame_age_secs: Some(age),
+            engine_fps: session
+                .engine_fps()
+                .map(|fps| fps.round().clamp(0.0, f32::from(u16::MAX)) as u16),
+        })
+    }
+
+    /// When the registry last saw each board on the roster: its row's
+    /// `last_seen_at`, found by the row key the roster loaded it under (or
+    /// its identity's key). How long an offline board has been away.
+    fn registry_last_seen(
+        &self,
+        view: &crate::DeviceRosterView,
+    ) -> std::collections::BTreeMap<crate::DeviceId, f64> {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return std::collections::BTreeMap::new();
+        };
+        view.roster
+            .devices
+            .iter()
+            .filter_map(|board| {
+                let key = view.open_addresses.get(&board.id.0).cloned().or_else(|| {
+                    let device = self.devices.roster().device(board.id)?;
+                    crate::app::devices::device_records::registry_key(&device.identity)
+                })?;
+                let row = inputs.registered.iter().find(|row| row.uid == key)?;
+                Some((board.id, row.last_seen_at))
+            })
+            .collect()
+    }
+
+    /// The inputs every card on the roster is built from: the view's
+    /// published tree, the library, the board the editor is open on, the
+    /// connected board's panel picks (`panel`, the home view's), now.
+    fn roster_cards_input<'a>(
+        &'a self,
+        roster: &'a crate::DeviceRosterView,
+        offers: &'a crate::UiOfferTree,
+        panel: Option<(crate::DeviceId, &'a crate::UiBoardPanel)>,
+    ) -> crate::RosterCardsInput<'a> {
+        crate::RosterCardsInput {
+            roster,
+            offers,
+            projects: self
+                .home_inputs
+                .as_ref()
+                .map(|inputs| inputs.projects.as_slice())
+                .unwrap_or_default(),
+            lens: self
+                .pool
+                .attached_session()
+                .map(|session| session.attachment().device),
+            panel,
+            now: (self.now_secs)(),
+        }
     }
 
     /// Which board plays which project: the roster joined to the library
@@ -2557,6 +2884,14 @@ impl StudioController {
     /// A Bluetooth lens held in Play mode is the one idle-budgeted case
     /// (M5): see [`BLE_PLAY_IDLE_REFRESH_INTERVAL`](crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL).
     fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
+        // `play_views` counts the play PAGE only. A connected board's card
+        // is not a play view, though it shows the same panel: connecting
+        // must never make a card's picture slower than watching it (Q4), and
+        // the card's picture IS the lens's reads while the lens holds the
+        // wire (CD8). So a Bluetooth lens on its card keeps the session's
+        // own cadence, which reads at least as often as a watched card's
+        // feed (`DEVICE_CARD_FEED_BLE_INTERVAL`); the Play budget stays the
+        // play page's.
         let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
         crate::app::studio::lens_refresh_gap_policy(
             session.cadence_interval(),
@@ -2839,12 +3174,8 @@ impl StudioController {
     /// feeding — the common case, where the UI timer keeps its calm
     /// heartbeat pace.
     fn device_feed_due_in(&self, now: f64) -> Option<Duration> {
-        self.device_feeds.due_in(
-            now,
-            crate::DEVICE_CARD_FEED_INTERVAL,
-            self.devices.roster(),
-            self.devices.effects(),
-        )
+        self.device_feeds
+            .due_in(now, self.devices.roster(), self.devices.effects())
     }
 
     /// Pull one published frame per feeding DEVICE card whose completion
@@ -2867,7 +3198,6 @@ impl StudioController {
             .device_feeds
             .run_due(
                 &*now_secs,
-                crate::DEVICE_CARD_FEED_INTERVAL,
                 crate::DEVICE_CARD_FEED_CLASS
                     .deadline()
                     .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
@@ -2929,11 +3259,49 @@ impl StudioController {
         }
     }
 
+    /// Write `device`'s newest frame to its sidecar NOW, past the ten-second
+    /// limit, stamped with the frame's own capture time: the holder's last
+    /// picture as it lets the board go to another tab, so that tab shows
+    /// the newest one. The same writer as [`Self::persist_due_device_frames`];
+    /// a failed write is a log line, like theirs.
+    async fn persist_device_frame_now(&mut self, device: crate::DeviceId) {
+        let now = (self.now_secs)();
+        let Some((frame, captured_at)) = self.device_feeds.get(device).and_then(|feed| {
+            let frame = feed.frame()?.clone();
+            let age = feed.frame_age_secs(now)?;
+            Some((frame, now - age))
+        }) else {
+            return;
+        };
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        let Some(uid) = self.device_registry_key(device).or_else(|| {
+            self.devices
+                .roster()
+                .device(device)
+                .and_then(|device| device.identity.uid.as_ref())
+                .map(|uid| uid.0.clone())
+        }) else {
+            return;
+        };
+        let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+        if let Err(error) = host
+            .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
+            .await
+        {
+            log::warn!("device last frame not persisted: {error}");
+        }
+        self.device_feeds
+            .mark_snapshot_written(device, captured_at, now);
+    }
+
     /// Seed the feeds of remembered boards from their persisted last frames
     /// (`device_frame_snapshot`), read off the library snapshot `fs` at
-    /// settle. Only a board whose feed has NO picture reads its sidecar, so
-    /// after the first settle nothing is read again, and a frame this
-    /// session pulled is never displaced by an older one on disk.
+    /// settle. A board whose link is open here keeps its own picture once
+    /// it has one; any other reads its sidecar and takes it when it is
+    /// newer, so a board another tab holds follows that tab's picture, and
+    /// a frame is never displaced by an older one on disk.
     fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
         let Some(inputs) = self.home_inputs.as_ref() else {
             return;
@@ -2962,7 +3330,16 @@ impl StudioController {
             let Some(device) = device else {
                 continue;
             };
-            if self.device_feeds.has_frame(device) {
+            // A picture pulled over a link open here is the newest there
+            // is; any other (a seed, the last pull on a closed link) gives
+            // way to a newer sidecar — another tab holding the board writes
+            // one every ten seconds, and every write re-settles this tab.
+            let live = self
+                .devices
+                .roster()
+                .device(device)
+                .is_some_and(|device| device.evidence.presence.is_open());
+            if !self.device_feeds.wants_snapshot(device, live) {
                 continue;
             }
             let snapshot = {
@@ -2970,7 +3347,9 @@ impl StudioController {
                 crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
             };
             if let Some((frame, captured_at)) = snapshot {
-                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
+                seeded |= self
+                    .device_feeds
+                    .seed_snapshot(device, frame, captured_at, live);
             }
         }
         if seeded {
@@ -2979,7 +3358,7 @@ impl StudioController {
     }
 
     /// The card's mount lease for its live frame feed: a mounted
-    /// `DeviceRosterCard` wants its device fed; an unmounted one does not.
+    /// board card wants its device fed; an unmounted one does not.
     pub fn set_device_feed_wanted(&mut self, device: crate::DeviceId, wanted: bool) {
         self.device_feeds.set_wanted(device, wanted);
         self.mark_dirty();
@@ -3001,18 +3380,36 @@ impl StudioController {
 
     pub fn view(&self) -> UiStudioView {
         let mut offers = crate::UiOfferTree::new();
-        if let Some(home) = self.home_view() {
+        if let Some(mut home) = self.home_view() {
             // Home's own verbs first: with no project open, starting or
             // opening one is what the page is for.
             for offer in crate::home_offers(&home) {
                 offers.publish(offer);
             }
             self.publish_device_offers(&mut offers);
+            // Each board's card points at the verbs just published; the
+            // connected board's carries its panel.
+            let panel = self.connected_board_panel();
+            home.devices.cards = crate::roster_board_cards(&self.roster_cards_input(
+                &home.devices,
+                &offers,
+                panel.as_ref().map(|(device, panel)| (*device, panel)),
+            ));
             offers.set_focus(self.offer_focus(true));
             let app_agent = self.app_agent_view_placed(&mut offers);
+            // A connected session on its card still has an address: the
+            // web knows it without opening it again (`open_project_uid`).
+            let (open_uid, open_name) = match self.connected() {
+                Some(_) => (
+                    self.project.active_library_uid(),
+                    self.project.active_library_display_name(),
+                ),
+                None => (None, None),
+            };
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
+                .with_open_project(open_uid, open_name)
                 .with_session(self.session_control())
                 .with_open_mismatch(self.open_mismatch.as_deref().cloned())
                 .with_settings(self.settings_view())
@@ -3021,12 +3418,18 @@ impl StudioController {
                     self.access.access_added().cloned(),
                 )
                 .with_app_agent(app_agent)
+                .with_sign_in_requests(self.sign_in_seq)
                 .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
         let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
         self.publish_device_offers(&mut offers);
+        // The Graph's verbs, while it is the page (`project/graph/…`).
+        let graph = self.graph.view(&self.project);
+        if self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph) {
+            self.graph.publish_offers(&mut offers);
+        }
         offers.set_focus(self.offer_focus(false));
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
@@ -3071,7 +3474,7 @@ impl StudioController {
                 self.project.active_transient_example(),
                 self.project.transient_fork_generation(),
             )
-            .with_lens_card(self.lens_card())
+            .with_lens_card(self.lens_card(&offers))
             .with_session(self.session_control())
             .with_settings(self.settings_view())
             .with_access(
@@ -3082,7 +3485,9 @@ impl StudioController {
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
             .with_app_agent(app_agent)
+            .with_sign_in_requests(self.sign_in_seq)
             .with_offers(offers)
+            .with_graph(graph)
     }
 
     /// The app chat's view with the agent's activity on it (roadmap M8):
@@ -3156,7 +3561,7 @@ impl StudioController {
                 let on_lens_card = lens.is_some()
                     && owner.as_ref().and_then(|owner| offers.device_at(owner)) == lens;
                 (!(place.page.is_editor() && on_lens_card))
-                    .then(|| "It is on the Devices page.".to_string())
+                    .then(|| "It is on the home page.".to_string())
             }
             _ => None,
         }
@@ -3273,6 +3678,14 @@ impl StudioController {
     ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
+    /// - `devices/<board>/unlock`: a board whose link holds nothing (or only
+    ///   play), while it is linked and idle ([`crate::device_unlock_offer`]).
+    /// - `devices/<board>/connect` on a board Studio is talking to (its
+    ///   session on its card, [`crate::device_connect_offer`]), `edit` (the
+    ///   editor on it, [`crate::device_edit_offer`]) and `done` (close the
+    ///   session on it, [`crate::device_done_offer`]):
+    ///   [`Self::session_offers`]. A closed port's `connect` is
+    ///   [`crate::device_offers`]'.
     /// - `devices/<board>/{continue-update,cancel-update,download-backup,
     ///   restore-files,finish-update}`: each card's layout verbs across the
     ///   C6 repartition, under the same `<board>` prefix
@@ -3355,9 +3768,38 @@ impl StudioController {
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.sign_in_offer(&facts) {
+                offers.publish(offer);
+            }
+            if let Some(offer) = self.take_over_offer_for(view, &facts) {
+                offers.publish(offer);
+            }
+            // `<board>/unlock`: while the board's link holds nothing (or
+            // only play), linked and idle.
+            let unlock = roster.access.get(&view.id).and_then(|access| access.unlock);
+            if let Some(offer) = crate::device_unlock_offer(&facts.prefix, view, unlock) {
+                offers.publish(offer);
+            }
+            // `<board>/connect` on a board Studio is talking to, `edit` and
+            // `done`: the session's verbs (`connect_flow.rs`).
+            for offer in self.session_offers(view, &facts, &roster) {
+                offers.publish(offer);
+            }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
             if let Some(wifi) = roster.wifi.get(&view.id) {
                 for offer in crate::app::network::wifi_offers(&facts.prefix, wifi) {
+                    offers.publish(offer);
+                }
+            }
+            // The Bluetooth switch (`<board>/bluetooth/enabled`), where the
+            // board's access list says it; "on Bluetooth" is the link's
+            // own kind, read off the endpoint.
+            if let Some(access) = roster.access.get(&view.id) {
+                let over_bluetooth = view.status != crate::DeviceStatus::Offline
+                    && roster.link_kinds.get(&view.id) == Some(&crate::UiLinkKind::Bluetooth);
+                if let Some(offer) =
+                    crate::bluetooth_offer(&facts.prefix, view.id, access, over_bluetooth)
+                {
                     offers.publish(offer);
                 }
             }
@@ -3385,7 +3827,9 @@ impl StudioController {
     /// board this browser remembers a Wi‑Fi address for, while nothing
     /// reaches it (it is offline — unplugged, or its last link went), on a
     /// page that reaches the LAN. Not on a runtime (a sim or an in-tab emu
-    /// has no radio). Disabled while it is being reached.
+    /// has no radio), and not while another tab of this browser holds the
+    /// board's network slot: Connect is then `take-over`, which asks that
+    /// tab first. Disabled while it is being reached.
     fn connect_wifi_offer(
         &self,
         view: &crate::DeviceView,
@@ -3398,6 +3842,9 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         let address = self.wifi_addresses.get(&key)?;
         Some(crate::connect_wifi_offer(
             &facts.prefix,
@@ -3416,7 +3863,9 @@ impl StudioController {
     ///
     /// No list of the account's boards stands behind it, and nothing asks
     /// lightplayer.app whether the board is online first: the press finds
-    /// out, and an offline board says so on its tile.
+    /// out, and an offline board says so on its tile. Not while another tab
+    /// of this browser holds the board's network slot (Connect is then
+    /// `take-over`).
     fn connect_relay_offer(
         &self,
         view: &crate::DeviceView,
@@ -3430,12 +3879,37 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         Some(crate::connect_relay_offer(
             &facts.prefix,
             view.id,
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
+    }
+
+    /// `devices/<board>/sign-in`: the lightplayer.app row's Sign in, on a
+    /// board that is not a runtime, while this page can reach lightplayer.app
+    /// (its relay transport is installed) and nobody is signed in.
+    fn sign_in_offer(&self, facts: &crate::DeviceOfferFacts<'_>) -> Option<crate::UiOffer> {
+        (self.relay_transport.is_some()
+            && self.access.account_keys().is_none()
+            && facts.face == crate::DeviceFace::Wire)
+            .then(|| crate::sign_in_offer(&facts.prefix))
+    }
+
+    /// Whether another tab of this browser holds the network slot of the
+    /// board with `mac` (a board the person reached on the LAN or through
+    /// the relay in that tab). A connect from here would take the slot from
+    /// under it — or, on an open board, be turned away — so the board's
+    /// Connect is `take-over`, which asks that tab first.
+    fn network_slot_held_elsewhere(&self, mac: lpa_devices::BoardKey) -> bool {
+        self.board_hold_book.as_ref().is_some_and(|book| {
+            let key = crate::HoldKey::network(mac);
+            book.held_elsewhere(&key).is_some() && book.holds(&key).is_none()
+        })
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its
@@ -3519,18 +3993,22 @@ impl StudioController {
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
-    /// on, projected by the roster exactly as the gallery projects it —
-    /// never a second card, and for a sim the same card the Devices grid
-    /// draws, band and all (PD11).
-    fn lens_card(&self) -> Option<crate::UiLensCard> {
+    /// on, built as the home page builds its card, with the editor holding
+    /// it — never a second card, and for a sim the same card the grid draws
+    /// (PD11). `offers` is the view's published tree.
+    fn lens_card(&self, offers: &crate::UiOfferTree) -> Option<crate::UiLensCard> {
         let attachment = self.pool.attached_session()?.attachment();
-        let view = self.device_roster_view();
-        let runtime = view.runtime_bands.get(&attachment.device).cloned();
-        view.roster
+        let roster = self.device_roster_view();
+        let view = roster
+            .roster
             .devices
-            .into_iter()
-            .find(|card| card.id == attachment.device)
-            .map(|card| crate::UiLensCard::Device { card, runtime })
+            .iter()
+            .find(|card| card.id == attachment.device)?
+            .clone();
+        // No panel on the docked card: the editor is the session's surface.
+        let card =
+            crate::roster_board_card(&self.roster_cards_input(&roster, offers, None), &view)?;
+        Some(crate::UiLensCard::Board(Box::new(card)))
     }
 
     /// The header session·project control's ONE session (single-session
@@ -3601,6 +4079,7 @@ impl StudioController {
             status,
             stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
             update,
+            connected: self.connected().is_some(),
         })
     }
 
@@ -3676,9 +4155,10 @@ impl StudioController {
 
     /// The home gallery: shown whenever NO project is open — always
     /// (D24; the M4 transitional bridge and its home-only-when-link-idle
-    /// rule are gone).
+    /// rule are gone) — and while the project open is a connected session
+    /// showing on its board's card (`connect_flow.rs`).
     fn home_view(&self) -> Option<UiHomeView> {
-        if self.project_is_loaded() {
+        if self.project_is_loaded() && !self.connected_shows_on_its_card() {
             return None;
         }
         let opening = self.pending_open.as_ref();
@@ -3691,6 +4171,11 @@ impl StudioController {
         // no `Ui*` mirror of it, so the page cannot drift from the fold.
         // The sim is in it, like every device (PD9).
         view.devices = self.device_roster_view();
+        // Which boards play each project is the board↔project join's
+        // answer (carried on the roster view); the library half could not
+        // know it. Then the page's sections, built from both halves.
+        home_sections_builder::stamp_on_boards(&mut view.projects, &view.devices);
+        view.sections = home_sections_builder::build_home_sections(&view.projects, &view.devices);
         Some(view)
     }
 
@@ -3736,6 +4221,11 @@ impl StudioController {
         // A light the last view showed went out: publish without it.
         let now = (self.now_secs)();
         if self.agent.app_session_mut().activity.went_dark(now) {
+            self.mark_dirty();
+        }
+        // A board card's bar was green for work that ended well: when its
+        // few seconds are up, publish without it.
+        if self.devices.activity_ends_mut().done_lapsed(now) {
             self.mark_dirty();
         }
         let revision = self.current_revision();
@@ -3935,6 +4425,16 @@ impl StudioController {
                 // gallery and the picker.
                 self.project
                     .set_import_patterns(home_view_builder::importable_patterns(&inputs));
+                // The rows that name a project this browser gave a board:
+                // evidence the board held files, should it come back
+                // without them.
+                self.devices.files_memory_mut().set_given(
+                    inputs
+                        .registered
+                        .iter()
+                        .filter(|row| row.association.is_some())
+                        .map(|row| row.uid.clone()),
+                );
                 self.home_inputs = Some(inputs);
                 snapshot_fs = Some(fs);
             }
@@ -4144,6 +4644,16 @@ impl StudioController {
                 .map(|()| UiNotices::new())
                 .map_err(UiError::Link);
         }
+        if node_id.as_str() == crate::UnlockOp::NODE_ID {
+            let op = action.into_op::<crate::UnlockOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::BluetoothSwitchOp::NODE_ID {
+            let op = action.into_op::<crate::BluetoothSwitchOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
+        }
         if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
             let op = action.into_op::<crate::WifiConnectOp>()?;
             return self.start_wifi_connect(op);
@@ -4151,6 +4661,10 @@ impl StudioController {
         if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
             let op = action.into_op::<crate::RelayConnectOp>()?;
             return self.start_relay_connect(op);
+        }
+        if node_id.as_str() == crate::TakeOverOp::NODE_ID {
+            let op = action.into_op::<crate::TakeOverOp>()?;
+            return self.begin_take_over(op);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
@@ -4166,6 +4680,21 @@ impl StudioController {
                 true => self.play_views.saturating_add(1),
                 false => self.play_views.saturating_sub(1),
             };
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::DeviceStartFreshOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceStartFreshOp>()?;
+            if !self.devices.start_fresh(op.device) {
+                log::debug!("start fresh on {:?}: nothing to remember", op.device);
+            }
+            self.keep_fresh_starts();
+            self.mark_dirty();
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::SignInOp::NODE_ID {
+            let _op = action.into_op::<crate::SignInOp>()?;
+            self.sign_in_seq += 1;
+            self.mark_dirty();
             return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceBackupOp::NODE_ID {
@@ -4293,6 +4822,12 @@ impl StudioController {
             if action.op_as::<PatchPulseOp>().is_some() {
                 let op = action.into_op::<PatchPulseOp>()?;
                 return self.execute_patch_pulse_op(op).await;
+            }
+            if action.op_as::<crate::app::graph::GraphOp>().is_some() {
+                let op = action.into_op::<crate::app::graph::GraphOp>()?;
+                self.graph.press(op.verb);
+                self.mark_dirty();
+                return Ok(crate::core::notice::UiNotices::new());
             }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
@@ -4622,7 +5157,7 @@ impl StudioController {
             });
             if let Some(slug) = slug {
                 return UiError::UnsupportedAction(format!(
-                    "{slug} is open in another tab — close it there first"
+                    "{slug} is open in another tab. Close it there first."
                 ));
             }
         }
@@ -6101,7 +6636,9 @@ impl StudioController {
             crate::DeviceAction::Forget { device } => self.board_key(*device),
             _ => None,
         };
+        let chooser_before = self.devices.effects().last_grant_request();
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.note_section_chooser(op.action(), chooser_before);
         if let Some(key) = forgotten_board {
             self.wifi_connects.forget_board(key);
             if self.wifi_addresses.forget(&key) {
@@ -6144,7 +6681,7 @@ impl StudioController {
             // programming error or a hand-made action — refused with the
             // reason rather than silently started as Desktop.
             return Err(UiError::UnsupportedAction(format!(
-                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+                "{target_id} has no hardware profile yet, so it can't be started here"
             )));
         }
         let kind = match op.backing {
@@ -6256,8 +6793,14 @@ impl StudioController {
             }));
         }
         let (staged, migration_notice) = self.prepare_push(&op.source).await;
-        if let Err(reason) = &staged {
-            log::warn!("nothing to push to {:?}: {reason}", op.device);
+        match &staged {
+            Ok(payload) => {
+                self.sending.insert(op.device, payload.label.clone());
+            }
+            Err(reason) => {
+                self.sending.remove(&op.device);
+                log::warn!("nothing to push to {:?}: {reason}", op.device);
+            }
         }
         self.devices.effects_mut().stage_push(op.device, staged);
         self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::Push {
@@ -6459,7 +7002,6 @@ impl StudioController {
         if unnamed.is_empty() {
             return Vec::new();
         }
-        let now = (self.now_secs)();
         let cards = self.device_roster_view().roster.devices;
         // Names minted earlier in THIS pass, which no card wears yet.
         let mut minted: Vec<String> = Vec::new();
@@ -6467,7 +7009,7 @@ impl StudioController {
         for record in unnamed {
             let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
             taken.extend(minted.iter().cloned());
-            let Some(name) = crate::app::devices::auto_record_name(&record, now, &taken) else {
+            let Some(name) = crate::app::devices::auto_record_name(&record, &taken) else {
                 continue;
             };
             minted.push(name.clone());
@@ -6527,7 +7069,7 @@ impl StudioController {
         );
         Some(crate::DeviceAction::SetName {
             device: *device,
-            name: crate::app::devices::derive_flash_name(&board_display, (self.now_secs)(), &taken),
+            name: crate::app::devices::derive_flash_name(&board_display, &taken),
         })
     }
 
@@ -6538,8 +7080,14 @@ impl StudioController {
     ) -> UiResult {
         match op {
             crate::RuntimeOp::SetLogLevel { level } => self.set_runtime_log_level(level).await,
-            crate::RuntimeOp::OpenDeviceLens { uid } => self.open_device_lens(&uid, updates).await,
+            crate::RuntimeOp::OpenDeviceLens { uid } => self.open_address_lens(&uid, updates).await,
+            crate::RuntimeOp::ConnectDevice { device, reach } => {
+                self.connect_device(device, reach, false, updates).await
+            }
+            crate::RuntimeOp::EditDevice { device } => self.edit_device(device, updates).await,
             crate::RuntimeOp::CloseDeviceLens => {
+                // Done: a failed connect's words go with the session.
+                self.connect_failure = None;
                 self.close_device_lens();
                 Ok(UiNotices::new())
             }
@@ -6566,7 +7114,29 @@ impl StudioController {
     /// Refusals are honest and leave nothing half-done: an unknown uid, a
     /// board that is not connected and identified as LightPlayer, one busy
     /// with an activity, or a wire the transport cannot lend.
+    ///
+    /// This is an ADDRESS's open (a route, a project card, a held open):
+    /// whatever held the session before, its address holds it now, so it is
+    /// not connected ([`Self::open_device_lens_for`]).
     async fn open_device_lens(&mut self, uid: &str, updates: UxUpdateSink) -> UiResult {
+        self.open_device_lens_for(uid, None, updates).await
+    }
+
+    /// [`Self::open_device_lens`], for whoever holds the session: `None`
+    /// for an address, `Some` for the home page (Connect, or Edit from a
+    /// card), which records the session as connected once it is installed
+    /// ([`crate::ConnectedBoard`], phase Opening, then Open when the lens
+    /// has attached). A connect that cannot open says why on the board's
+    /// card ([`crate::ConnectFailure`]).
+    async fn open_device_lens_for(
+        &mut self,
+        uid: &str,
+        connect: Option<connect_flow::ConnectIntent>,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        if connect.is_none() {
+            self.connected = None;
+        }
         // Already there: re-attaching the same lens is a no-op with a
         // fresh mirror.
         if let Some(session) = self.pool.attached_session() {
@@ -6587,8 +7157,13 @@ impl StudioController {
             // renders the board's honest state meanwhile, and the tick
             // attaches the lens the moment the board says hello. Only a
             // gesture on the gallery (close, another open) lets it go.
+            // A Connect holds too, on its own terms (its grace, its ends).
             Err(error) => {
-                self.pending_device_lens = Some(uid.to_string());
+                if let Some(intent) = connect {
+                    self.hold_connect(uid, intent, &error);
+                    return Ok(UiNotices::new());
+                }
+                self.pending_device_lens = Some(crate::PendingLens::address(uid));
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Info,
                     UiLogOrigin::Studio,
@@ -6637,6 +7212,7 @@ impl StudioController {
             crate::LinkTransport::Serial | crate::LinkTransport::Ble => "board",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
+        let device = attachment.device;
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
         self.record_device_event(
             Some(&id.to_string()),
@@ -6656,23 +7232,31 @@ impl StudioController {
             }
         }
         self.pool.set_lens(id);
+        if let Some(intent) = connect {
+            self.connected = Some(intent.opening(id, device, uid));
+        }
         let opened = match self.read_device_build(id).await {
             Ok(()) => self.attach_lens(id, updates).await,
             Err(error) => Err(error),
         };
         match opened {
-            Ok(notices) => Ok(notices),
+            Ok(notices) => {
+                self.note_connected_open(id);
+                Ok(notices)
+            }
             Err(error) => {
                 // The board answered the fold's hello but not the lens's
                 // conversation (its own hello, or the attach): no lens, no
                 // session, the wire goes back — the card says the rest.
                 // (A cancelled open unwinds through here too, quietly.)
                 if !crate::app::open_progress::open_superseded() {
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Warn,
-                        UiLogOrigin::Studio,
-                        format!("could not open the {open_noun} in the editor: {error}"),
-                    ));
+                    // A Connect opens the board on its card, not in the
+                    // editor: its line says so in its own words.
+                    let line = match connect {
+                        Some(_) => format!("could not connect to the {open_noun}: {error}"),
+                        None => format!("could not open the {open_noun} in the editor: {error}"),
+                    };
+                    self.push_log(UiLogDraft::new(UiLogLevel::Warn, UiLogOrigin::Studio, line));
                 }
                 self.close_device_lens();
                 Err(error)
@@ -6909,6 +7493,8 @@ impl StudioController {
         self.pending_device_lens = None;
         self.lens_reconnect = None;
         self.lens_hold = None;
+        // The one road a session ends by: whatever held it, nothing does now.
+        self.connected = None;
         let Some(session) = self.pool.attached_session() else {
             return;
         };
@@ -7129,9 +7715,15 @@ impl StudioController {
     }
 
     async fn try_pending_device_lens_inner(&mut self) {
-        let Some(uid) = self.pending_device_lens.clone() else {
+        let Some(pending) = self.pending_device_lens.clone() else {
             return;
         };
+        // A Connect's hold ends on its own terms (`connect_flow.rs`).
+        if let Some(hold) = pending.connect {
+            self.try_connect_hold(pending.uid, hold).await;
+            return;
+        }
+        let uid = pending.uid;
         // THE WAKE-UP. A hold waits for a device to become ready; a sim
         // only ever becomes ready because this tab started it. Nothing else
         // will, so if the sim under a held lens is off — the open's own
@@ -7672,7 +8264,7 @@ impl StudioController {
     ) -> Result<(lpa_agent::ProjectEditsOutcome, UiNotices), UiError> {
         if self.project.active_library_uid().is_none() {
             return Err(UiError::UnsupportedAction(
-                "no project is open — open or create one first".to_string(),
+                "no project is open: open or create one first".to_string(),
             ));
         }
         let (landings, runs) = {
@@ -8355,7 +8947,7 @@ impl StudioController {
     fn app_agent_start(&mut self, text: String, shown: bool) -> UiResult {
         let Some(config) = self.settings.app_agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the assistant isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
@@ -8388,8 +8980,8 @@ impl StudioController {
     /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, looking_at_lines, opening_line, page_line,
-            project_lines,
+            AppReadoutSnapshot, device_lines, home_lines, looking_at_lines, opening_line,
+            page_line, project_lines,
         };
         let home_view = self.home_view();
         let home = home_view.is_some();
@@ -8423,6 +9015,11 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
+        // The home page the way a person sees it: which boards and
+        // projects sit in which section.
+        if let Some(home_view) = &home_view {
+            text.push_str(&home_lines(home_view));
+        }
         // A real board is one on the bus right now (not a remembered,
         // offline one) that wears no runtime band — a band marks a sim
         // (D38). `false` keeps the add-a-board offers listed in full on
@@ -8580,7 +9177,7 @@ impl StudioController {
         };
         let Some(config) = self.settings.agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the agent isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the agent isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
@@ -9475,7 +10072,15 @@ impl StudioController {
         &mut self.agent
     }
 
+    /// Read the project and the board's frames now, as a refresh does
+    /// (test-only: a bench whose clock never makes a tick due).
+    #[cfg(test)]
+    pub(crate) async fn refresh_project_for_test(&mut self) {
+        let _ = self.refresh_project(UxUpdateSink::noop()).await;
+    }
+
     /// The runtime pool, for e2e assertions about session coexistence.
+
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project
@@ -9490,7 +10095,9 @@ impl StudioController {
     }
 
     pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {
-        self.pending_device_lens.clone()
+        self.pending_device_lens
+            .as_ref()
+            .map(|pending| pending.uid.clone())
     }
 
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
@@ -9670,17 +10277,9 @@ fn clock_fallback_random() -> [u8; 16] {
 /// [`StudioController::set_local_stamp`]). Howard Hinnant's civil-from-days.
 fn utc_slug_stamp(now_secs: f64) -> String {
     let secs = now_secs as i64;
-    let days = secs.div_euclid(86_400);
     let seconds_of_day = secs.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let crate::CalendarDate { year, month, day } =
+        crate::CalendarDate::from_days(secs.div_euclid(86_400));
     format!(
         "{year:04}-{month:02}-{day:02}-{:02}{:02}",
         seconds_of_day / 3_600,
@@ -9848,6 +10447,26 @@ struct AgentStartProbe {
     journal: u64,
     /// What a push press sends, by name.
     push_project: Option<String>,
+}
+
+/// Whether the board's last hello listed `fs.tree` (its filesystem is the
+/// tree store) and did not hold its files for a migration: what lets a
+/// tree-store build go to it over the air. A held board's files are in an
+/// older littlefs that a core placed high in its app partition could write
+/// over; they move over USB first. A littlefs core holding a tree store
+/// (`TreeStoreHeld`, A5) is on the store: a core that reads it is what it
+/// needs.
+fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
+    use lpa_devices::wire::BoardFs;
+    // `None`: the board sent no hello — a core-only board waiting for its
+    // engine answers only on the update channel. The person's own offers do
+    // not hold it back (since the tree-store cutover such a board is almost
+    // always a tree board, and a tree core on a littlefs one holds its files
+    // for the USB migration, AD3); an automatic start waits for the hello.
+    let hello = evidence.classification.hello()?;
+    Some(
+        (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
+    )
 }
 
 /// The board a device press is aimed at, when it is one that changes what
@@ -10443,6 +11062,24 @@ mod tests {
         assert!(view.panes.is_empty(), "home replaces the pane layout");
         assert!(!home.library_available, "no store attached on host");
         assert!(!home.examples.is_empty(), "examples always show");
+    }
+
+    /// On the home page — the place the web reports for `/`, and for its
+    /// old addresses `/devices` and `/projects` — the boards' verbs and
+    /// Home's own project verbs (new, open) rank together, as they did on
+    /// the pages it replaced.
+    #[test]
+    fn the_home_page_ranks_the_boards_and_the_project_verbs_together() {
+        let mut studio = StudioController::new(|| 0.0);
+        studio.set_place(crate::UiPlace::new(crate::UiPage::Home));
+
+        let view = studio.view();
+
+        assert!(view.home.is_some(), "an idle studio shows home");
+        assert_eq!(
+            view.offers.focus().areas,
+            [crate::OfferPath::devices(), crate::OfferPath::project()]
+        );
     }
 
     /// The New menu's optional name: a typed name is what the library dates

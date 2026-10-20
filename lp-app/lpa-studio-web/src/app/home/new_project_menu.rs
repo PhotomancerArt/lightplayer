@@ -86,7 +86,7 @@ pub fn NewProjectMenu(
                         class: NAME_INPUT_CLASS,
                         r#type: "text",
                         aria_label: "Project name (optional)",
-                        placeholder: "Name (optional) \u{2014} else named after the template",
+                        placeholder: "Name (optional)",
                         value: "{name}",
                         oninput: move |event| name.set(event.value()),
                     }
@@ -145,7 +145,7 @@ fn TemplateRow(
     let press = offer.press(&args);
     let summary = match &press {
         Ok(action) => action.meta().summary.clone(),
-        Err(refused) => refused.to_string(),
+        Err(refused) => refused.shown(),
     };
     let close = try_consume_context::<PopoverCloseHandle>();
 

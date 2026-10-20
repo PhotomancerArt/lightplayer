@@ -6,16 +6,23 @@
 //! The backup is stored and read back before anything is written: between
 //! retiring the old filesystem and writing the new one's superblock, it is
 //! the only copy (plan MQ9).
+//!
+//! `--to tree` (every C6 image since the cutover): the move from littlefs into
+//! the tree store — staged in the blocks the old filesystem does not use
+//! when it can be, so the old board stays whole until the firmware switch
+//! (`lpa_link::layout_migration::tree_migration_plan`). `--dry-run` reads
+//! the board, prints every step, and writes nothing.
 
 use anyhow::{Context, Result, bail};
 use lpa_link::layout_migration::device_backup_archive::BackupPurpose;
 use lpa_link::layout_migration::{
-    LayoutDecision, LayoutProbe, LpfsGeometry, Refusal, decide, describe_layout,
+    FlashPlan, FlashStep, LayoutDecision, LayoutProbe, LpfsGeometry, MigrationSummary, Refusal,
+    WriteOrder, decide, describe_layout, firmware_reads_tree_store,
 };
 use lpa_link::providers::host_serial_esp32::{LayoutSessionOutcome, layout_session};
 use lpa_link::{LinkError, LinkLayoutInspection, PartitionTable, normalize_base_mac};
 
-use super::super::args::LpfsMigrateArgs;
+use super::super::args::{LpfsMigrateArgs, LpfsTargetFs};
 use super::lpfs_target::{
     BackupFacts, default_backup_dir, kb, package_manifest, stderr_events, store_backup,
 };
@@ -30,7 +37,12 @@ pub fn handle_migrate(args: LpfsMigrateArgs) -> Result<()> {
         &args.port,
         &manifest_str,
         |inspection| {
+            check_target_fs(args.to, inspection)?;
             let decision = decide_for(inspection)?;
+            if args.dry_run {
+                print_dry_run(&decision);
+                return Ok(None);
+            }
             match decision {
                 LayoutDecision::Plain(_) => {
                     println!(
@@ -76,17 +88,9 @@ pub fn handle_migrate(args: LpfsMigrateArgs) -> Result<()> {
                     )
                     .map_err(|e| LinkError::other(format!("backup not stored: {e}")))?;
                     println!(
-                        "Backup stored and read back: {}\n\
-                         Moving {} files ({}) to the filesystem at {:#x}: {} of {} blocks, {} \
-                         free{}.",
+                        "Backup stored and read back: {}\n{}",
                         backup.display(),
-                        summary.file_count,
-                        kb(summary.total_bytes),
-                        summary.target.offset,
-                        summary.blocks_used,
-                        summary.target.block_count,
-                        summary.blocks_free,
-                        if summary.tight { " (tight)" } else { "" }
+                        moving(&summary)
                     );
                     if !args.yes && !confirm().map_err(|e| LinkError::other(e.to_string()))? {
                         println!("Nothing written.");
@@ -127,7 +131,12 @@ fn decide_for(inspection: &LinkLayoutInspection) -> Result<LayoutDecision, LinkE
         .as_deref()
         .and_then(lpa_link::chip_id_from_reported)
         == Some("esp32c6");
-    let classified = LayoutProbe::replay(target.clone(), chip_is_c6, &inspection.reads);
+    let classified = LayoutProbe::replay_for(
+        target.clone(),
+        inspection.target_fs,
+        chip_is_c6,
+        &inspection.reads,
+    );
     if let Some(device) = &classified.device_table {
         eprintln!(
             "  board: {} → package: {}",
@@ -141,8 +150,91 @@ fn decide_for(inspection: &LinkLayoutInspection) -> Result<LayoutDecision, LinkE
         inspection.target_image_len,
         None,
         false,
+        firmware_reads_tree_store(inspection.target_manifest.as_deref()),
     )
     .map_err(|refusal| LinkError::other(refusal_text(&refusal)))
+}
+
+/// `--to`: the image must mount what the caller asked for.
+fn check_target_fs(
+    to: Option<LpfsTargetFs>,
+    inspection: &LinkLayoutInspection,
+) -> Result<(), LinkError> {
+    let wanted = match to {
+        None => return Ok(()),
+        Some(LpfsTargetFs::Tree) => lpa_link::FsKind::Tree,
+        Some(LpfsTargetFs::Littlefs) => lpa_link::FsKind::Littlefs,
+    };
+    if inspection.target_fs != wanted {
+        return Err(LinkError::other(format!(
+            "this image mounts {}, not {} (an image for the tree store is built with \
+             `fs-tree`, every C6 package since the cutover). Nothing was written.",
+            inspection.target_fs.word(),
+            wanted.word()
+        )));
+    }
+    Ok(())
+}
+
+/// What a migration is about to do, in one sentence.
+fn moving(summary: &MigrationSummary) -> String {
+    let unit = match summary.target_fs {
+        lpa_link::FsKind::Tree => "sectors",
+        lpa_link::FsKind::Littlefs => "blocks",
+    };
+    let order = match summary.order {
+        Some(WriteOrder::Staged) => {
+            " The old filesystem stays whole until the firmware is switched."
+        }
+        Some(WriteOrder::Retired) => {
+            " The old filesystem is erased first: until the new one is written, the backup is \
+             the only copy."
+        }
+        None => "",
+    };
+    format!(
+        "Moving {} files ({}) to the {} at {:#x}: {} of {} {unit} of 4 KB, {} free{}.{order}",
+        summary.file_count,
+        kb(summary.total_bytes),
+        summary.target_fs.word(),
+        summary.target.offset,
+        summary.blocks_used,
+        summary.target.block_count,
+        summary.blocks_free,
+        if summary.tight { " (tight)" } else { "" }
+    )
+}
+
+/// `--dry-run`: the decision and every step, nothing written.
+fn print_dry_run(decision: &LayoutDecision) {
+    let (what, plan, summary): (&str, &FlashPlan, Option<&MigrationSummary>) = match decision {
+        LayoutDecision::Plain(plan) => ("No files move: a plain flash", plan, None),
+        LayoutDecision::Migrate { plan, summary, .. } => ("Migration", plan, Some(summary)),
+        LayoutDecision::Restore { plan, summary } => ("Restore from a backup", plan, Some(summary)),
+    };
+    println!("Dry run — nothing written, no backup stored.\n{what}:");
+    if let Some(summary) = summary {
+        println!("  {}", moving(summary));
+    }
+    for (index, step) in plan.steps.iter().enumerate() {
+        let line = match step {
+            FlashStep::WriteFirmware => "write the firmware image at 0x0".to_string(),
+            FlashStep::Erase { offset, length } => {
+                format!("erase  {offset:#08x} + {length:#x} ({} KB)", length / 1024)
+            }
+            FlashStep::Write { offset, bytes } => {
+                format!(
+                    "write  {offset:#08x} + {:#x} ({} KB)",
+                    bytes.len(),
+                    bytes.len() / 1024
+                )
+            }
+            FlashStep::VerifyEquals { offset, bytes } => {
+                format!("verify {offset:#08x} + {:#x}", bytes.len())
+            }
+        };
+        println!("  {:>3}. {line}", index + 1);
+    }
 }
 
 /// A refusal in words, with what to do about it.
@@ -152,6 +244,8 @@ pub fn refusal_text(refusal: &Refusal) -> String {
             "{refusal}. Nothing was written. Remove a project from the board \
              (`lp-cli` or Studio's Remove project) and try again."
         ),
+        // Its own words already say nothing was written.
+        Refusal::TreeStoreNotRead | Refusal::TreeStoreWouldBeWritten => format!("{refusal}."),
         other => format!("{other}. Nothing was written."),
     }
 }
@@ -184,6 +278,9 @@ fn verify_hello(port: &str, expected_uid: Option<&str>) -> Result<()> {
         let Some(hello) = hello else {
             bail!("the board came back without a hello");
         };
+        if hello.hardware.fs == lpc_wire::FsBootState::Refused {
+            bail!("{}", super::refused_store_words(&hello));
+        }
         if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
             bail!(
                 "the board came back with its filesystem {:?}, not mounted — its files are in the \

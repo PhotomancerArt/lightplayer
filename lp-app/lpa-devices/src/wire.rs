@@ -399,6 +399,13 @@ pub struct HelloFacts {
     /// reads to say a board's files are waiting.
     #[serde(default)]
     pub fs: BoardFs,
+    /// The board's build lists `fs.tree` (its hello's `build.features`): its
+    /// filesystem is the tree store. A board without it holds littlefs, and
+    /// a tree-store core is never sent to it over the air — its files move
+    /// over USB first (plan `lp2025/2026-10-16-0848-tree-store-adoption`,
+    /// AD3).
+    #[serde(default)]
+    pub tree_store: bool,
     /// The hello's board manifest (its `firmware` field, update protocol
     /// Part B), mirrored: proof the board speaks channel 3, and its update
     /// facts until channel 3 itself says otherwise. `None` from a board
@@ -424,6 +431,15 @@ pub enum BoardFs {
     /// A pre-repartition filesystem is waiting for a migration: the
     /// firmware refused to format over it.
     LegacyHeld,
+    /// The board refused its file store (a newer or damaged store header,
+    /// `fs-tree` builds): files kept on the flash, a RAM filesystem served,
+    /// access locked. Not a migration.
+    Refused,
+    /// The same refusal from a build that does not read the tree store (`fs:
+    /// refused` in a hello without `fs.tree`): a littlefs core found its
+    /// board's files in the tree store, the newer filesystem, and kept them.
+    /// A firmware that reads it brings them back.
+    TreeStoreHeld,
 }
 
 impl HelloFacts {

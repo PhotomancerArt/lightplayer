@@ -1,11 +1,12 @@
-//! What the add slot says under a transport button this browser cannot use
-//! (BLE G3): the reason, and a way to continue — never a dead end.
+//! What the Connect a board section says under a transport button this
+//! browser cannot use (BLE G3): the reason, and a way to continue — never a
+//! dead end.
 //!
-//! Both of the slot's buttons are always drawn. One this browser cannot
-//! drive is DISABLED, with its reason under it; the way forward (a link to
-//! Bluefy, the Brave flag, this page's address to open elsewhere) is text to
-//! select and copy, never folded behind a click — the repo's rule for
-//! pasteable text.
+//! The section's USB and Bluetooth buttons are always drawn. One this
+//! browser cannot drive is DISABLED, with its reason; the way forward (a
+//! link to Bluefy, the Brave flag, this page's address to open elsewhere) is
+//! text to select and copy, never folded behind a click — the repo's rule
+//! for pasteable text.
 
 /// Bluefy – Web BLE Browser, on the App Store (PNN SOFT, app id
 /// 1492822055). Region-neutral: apps.apple.com redirects to the visitor's
@@ -76,5 +77,5 @@ pub fn this_page_url() -> String {
             return href;
         }
     }
-    "https://lightplayer.app/devices".to_string()
+    "https://lightplayer.app/".to_string()
 }

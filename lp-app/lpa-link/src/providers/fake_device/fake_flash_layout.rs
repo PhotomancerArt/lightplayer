@@ -78,6 +78,11 @@ impl FakeEsp32Device {
             probed_mac: efuse_mac,
             target_table: fake_target_table().to_bytes(),
             target_image_len: FAKE_FIRMWARE_LEN,
+            target_fs: crate::FsKind::Littlefs,
+            // The fake package is a littlefs build: it embeds no manifest.
+            target_manifest: crate::layout_migration::embedded_manifest([
+                fake_firmware_image().as_slice()
+            ]),
             reads,
             logs: vec!["fake layout inspection".to_string()],
             progress: vec![
@@ -316,6 +321,7 @@ mod tests {
             &fake_target_table(),
             FAKE_FIRMWARE_LEN,
             None,
+            false,
             false,
         )
         .unwrap()

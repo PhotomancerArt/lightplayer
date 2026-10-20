@@ -34,6 +34,7 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
         (!args.wire.is_empty(), "--wire"),
         (args.efuse_mac.is_some(), "--efuse-mac"),
         (args.efuse_rev.is_some(), "--efuse-rev"),
+        (args.flash_part.is_some(), "--flash-part"),
         (args.reset_cause.is_some(), "--reset-cause"),
         (args.strap.is_some(), "--strap"),
         (args.uart0_baud.is_some(), "--uart0-baud"),

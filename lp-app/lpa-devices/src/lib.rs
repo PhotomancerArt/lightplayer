@@ -48,6 +48,7 @@ pub mod device;
 pub mod event;
 pub mod evidence;
 pub mod firmware_age;
+pub mod held_elsewhere;
 pub mod identity;
 pub mod intent;
 pub mod journal;
@@ -77,6 +78,7 @@ pub use evidence::{
     TerminalLine, WireVersion,
 };
 pub use firmware_age::FirmwareAge;
+pub use held_elsewhere::{HeldElsewhere, HoldLevel, HoldVia};
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};
 pub use journal::{Journal, JournalEntry, JournalNote, Scope};

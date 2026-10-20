@@ -319,7 +319,7 @@ pub fn VersionDetails(
                     },
                     None => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
-                            "Dev build — version metadata is only present in deployed builds."
+                            "Dev build. Version details are only in deployed builds."
                         }
                     },
                 },

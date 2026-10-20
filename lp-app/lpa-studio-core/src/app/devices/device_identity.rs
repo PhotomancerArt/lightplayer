@@ -322,6 +322,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,
@@ -338,6 +339,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,
@@ -712,6 +714,7 @@ mod tests {
             detected_chip: None,
             mac: None,
             firmware_blocked: None,
+            held_by_tab: false,
             escapes: vec![Escape::Forget],
         }
     }

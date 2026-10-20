@@ -308,6 +308,25 @@ impl FakeEsp32Device {
         core.reset_current();
     }
 
+    /// "Erase flash" the way a flasher that does not reset afterwards
+    /// leaves a board: blank flash, the chip still in the ROM downloader
+    /// (the flasher's stub), saying nothing — its downloader banner went
+    /// by before the erase — until a hard reset boots the blank flash.
+    /// What Studio's browser erase did to a C6 before it reset the chip
+    /// (docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md),
+    /// and what a native-USB chip whose boot loop is lost to its
+    /// re-enumerations looks like.
+    pub fn fake_erase_without_reset(&self) {
+        let mut core = self.lock();
+        core.script.boot = FakeBootState::RomDownloadMode;
+        core.parked_from = Some(FakeBootState::BlankFlash);
+        core.reset_current();
+        core.phase = FakePhase::Passive {
+            announced: true,
+            last_emit: None,
+        };
+    }
+
     /// Scripted management transition: "reset runtime" — replay the current
     /// state's boot.
     pub fn reset_runtime(&self) {
@@ -637,6 +656,7 @@ impl FakeDeviceCore {
         let files = lp.project_files.clone();
         let root_files = lp.root_files.clone();
         let fs_boot_state = lp.fs_boot_state;
+        let fs_tree = lp.fs_tree;
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
@@ -699,6 +719,9 @@ impl FakeDeviceCore {
             let mut server =
                 create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
             server.set_fs_boot_state(fs_boot_state);
+            if fs_tree {
+                server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+            }
             if let Some(station) = wifi_station {
                 server.set_station_probe(Some(station.state));
                 server.set_scan_probe(Some(station.scan));

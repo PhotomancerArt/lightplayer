@@ -126,11 +126,11 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     bench.run_until("the backup let go on the new version", |bench| {
         !bench.held(&x())
     });
-    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over USB"));
-    assert!(bench.said("backup of 2026.10.05-1 already here · no read-back"));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over USB"));
+    assert!(bench.said("backup of v2026.10.05-1 already here · no read-back"));
     assert!(!bench.said("backing up current firmware from the board"));
     assert!(bench.said_starting("board reset · reconnected in "));
-    assert!(bench.said_starting("core 25 KB in "));
+    assert!(bench.said_starting("core 24 KB in "));
     assert!(matches!(
         bench.standing(device),
         UpdateStanding::UpToDate { .. }
@@ -194,7 +194,7 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
     bench.assert_runs(&y());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(over_bluetooth, "the card said Bluetooth");
-    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over Bluetooth"));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over Bluetooth"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -237,7 +237,7 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
     bench.assert_runs(&y_late());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(over_wifi, "the card said Wi‑Fi");
-    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
+    assert!(bench.said("update v2026.10.09-1 → v2026.10.09-2 over Wi\u{2011}Fi"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -284,7 +284,7 @@ fn an_update_through_the_relay_comes_back_by_itself_across_each_reset_and_ends_o
     bench.assert_runs(&y_late());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(through_relay, "the card's update rode the relay");
-    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
+    assert!(bench.said("update v2026.10.09-1 → v2026.10.09-2 over Wi\u{2011}Fi"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -454,7 +454,7 @@ fn update_x_to_y_with_no_cached_backup_reads_it_back_keeps_and_pins_it() {
     });
     assert!(bench.cached(&x()), "the backup stays in the cache");
     assert!(bench.said("backing up current firmware from the board"));
-    assert!(bench.said_starting("backup 33 KB in "));
+    assert!(bench.said_starting("backup 32 KB in "));
 }
 
 /// The link drops mid-core and stays away past the update's gap: the
@@ -490,7 +490,7 @@ fn a_link_drop_mid_core_finishes_on_reconnect_with_no_click() {
     bench.assert_runs(&y());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert_eq!(bench.presses, presses, "no click");
-    assert!(bench.said("board is half-way to 2026.10.06-1 · finishing it"));
+    assert!(bench.said("board is half-way to v2026.10.06-1 · finishing it"));
 }
 
 /// A board that lost its engine, plugged in (a pending link: a core-only
@@ -527,7 +527,7 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     bench.assert_runs(&x());
     assert_eq!(bench.presses, 0, "no click");
     assert!(!bench.board().saw(b'L'), "no login");
-    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+    assert!(bench.said("board is missing its v2026.10.05-1 engine · restoring it"));
 }
 
 /// The same engine-less board on the LAN (OTA M8): core-only serves its
@@ -568,7 +568,7 @@ fn an_engineless_board_on_wifi_is_restored_on_connect_from_the_cache() {
     });
     bench.assert_runs(&x());
     assert_eq!(bench.presses, 0, "no click");
-    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+    assert!(bench.said("board is missing its v2026.10.05-1 engine · restoring it"));
 }
 
 /// The same board with its engine nowhere (no cache, no store): E13's row,
@@ -581,7 +581,7 @@ fn an_engineless_board_whose_engine_is_nowhere_ends_on_e13_and_does_not_loop() {
     bench.run_until("the restore to miss", |bench| {
         bench.any_outcome() == Some(UpdateOutcomeFacts::MissingEngine { offline: true })
     });
-    assert!(bench.said("no copy of 2026.10.05-1 here, and the release store is unreachable"));
+    assert!(bench.said("no copy of v2026.10.05-1 here, and the release store is unreachable"));
     bench.steps(4_000);
 
     assert_eq!(bench.update_starts, 1, "one restore, no loop");
@@ -756,6 +756,120 @@ fn the_store_restores_a_released_build_and_names_its_latest() {
     );
 }
 
+/// The board card's firmware bar runs an update by path: blue with Update
+/// while one is available; pressed, its work says each piece in the
+/// story's short words; at the end the bar is green for a few seconds,
+/// then the version alone.
+#[test]
+fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    let device = bench.connect_device();
+    bench.run_until("the card to offer Update", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let bar = firmware_bar(&bench, device);
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the button carries it"
+    );
+    let update = bar.action.expect("Update");
+    assert_eq!(update.word, "Update");
+    assert_eq!(
+        update.offer,
+        bench.controller.device_verb(device, "update-firmware")
+    );
+    bench
+        .controller
+        .press(&update.offer, update.args.clone())
+        .expect("the update starts");
+
+    let mut said = Vec::<String>::new();
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        if let Some(work) = firmware_bar(&bench, device).work
+            && work.state == crate::BarWorkState::Running
+            && said.last() != Some(&work.words)
+        {
+            said.push(work.words);
+        }
+        if bench.outcome(device).is_some() && !bench.updating(device) {
+            break;
+        }
+    }
+    assert!(
+        said.iter().any(|words| words.starts_with("backing up")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|words| words.starts_with("updating · ")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().all(|words| !words.contains("of 2")),
+        "one number, never 1 of 2: {said:?}"
+    );
+    assert!(
+        said.iter().all(|words| !words.contains("USB")),
+        "the link is the sentence's, not the bar's: {said:?}"
+    );
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    let done = firmware_bar(&bench, device);
+    assert_eq!(
+        done.work.map(|work| work.state),
+        Some(crate::BarWorkState::Done),
+        "green for a moment"
+    );
+    bench.clock.set(bench.clock.get() + crate::DONE_SHOWS_SECS);
+    let after = firmware_bar(&bench, device);
+    assert_eq!(after.work, None);
+    assert_eq!(after.summary, "v2026.10.06-1", "the version alone");
+    assert_eq!(after.tone, crate::UiStatusKind::Neutral);
+}
+
+/// A crashing board's firmware bar offers Reinstall, pressed by path: the
+/// engine is written once.
+#[test]
+fn a_crashing_boards_firmware_bar_reinstalls_by_path() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.board_mut().rig.board.catalog[0].crashes = true;
+    bench.board_mut().reset_in_place();
+    bench.run_until("the card to offer Reinstall", |bench| {
+        matches!(bench.standing(device), UpdateStanding::KeepsCrashing { .. })
+    });
+    let card = board_card(&bench, device);
+    let bar = card.bar(crate::BarLayer::Firmware).clone();
+    // Crashing is broken, and the surface says so in red; the row keeps its
+    // word and its button, quietly.
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(card.surface.state, crate::SurfaceState::Crashing);
+    assert_eq!(notice.tone, crate::UiStatusKind::Error, "broken: red");
+    assert_eq!(notice.first, "This board's firmware keeps crashing.");
+    assert_eq!(bar.tone, crate::UiStatusKind::Neutral, "the row goes quiet");
+    assert_eq!(bar.aside.as_deref(), Some("crashing"));
+    let reinstall = bar.action.expect("Reinstall");
+    assert_eq!(reinstall.word, "Reinstall");
+    assert_eq!(
+        reinstall.offer,
+        bench.controller.device_verb(device, "reinstall-firmware")
+    );
+    let Some(crate::UiPrimary::Offer(primary)) = card.name_bar.primary.clone() else {
+        panic!("Reinstall firmware: {:?}", card.name_bar.primary);
+    };
+    assert_eq!(primary.word, "Reinstall firmware");
+    assert_eq!(primary.offer, reinstall.offer, "the row's button, repeated");
+    let boots = bench.board().rig.boots;
+    bench
+        .controller
+        .press(&reinstall.offer, reinstall.args.clone())
+        .expect("Reinstall starts");
+    bench.run_until_update_ends(device);
+    assert_eq!(bench.board().rig.boots, boots + 1, "written once");
+}
+
 /// Reinstall on a crashing board: the board's own engine (from the cache)
 /// is written once; the model's crash is the build's, so the board comes
 /// back crashing and the update says so rather than writing it again.
@@ -779,7 +893,7 @@ fn reinstall_on_a_crashing_board_writes_its_engine_once() {
         boots + 1,
         "written once, reset once"
     );
-    assert!(bench.said("writing 2026.10.05-1 again over USB"));
+    assert!(bench.said("writing v2026.10.05-1 again over USB"));
 }
 
 /// E13 on a known board, then "Install Y": the board waits for an engine
@@ -880,7 +994,7 @@ fn other_version_installs_a_newer_release_at_one_press_and_an_older_one_armed() 
     assert_eq!(copy.title, "Install an older version?");
     assert!(
         copy.message
-            .contains("2026.10.05-1 is older than what this board runs")
+            .contains("v2026.10.05-1 is older than what this board runs")
             && copy
                 .message
                 .contains("It also speaks an older language than this Studio"),
@@ -1555,6 +1669,7 @@ impl Board {
         self.events.push_back(LinkEvent::Frame(ServerFrame::hello(
             request_id,
             HelloFacts {
+                tree_store: false,
                 proto: lpc_wire::WIRE_PROTO_VERSION,
                 identity: Self::mac(),
                 firmware: Some(format!("fw-esp32c6 {version}")),
@@ -1869,6 +1984,7 @@ fn index_entry(version: &str, build: Option<&ModelBuild>, wire: u32) -> ReleaseI
         commit,
         wire_proto: wire,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -1918,6 +2034,7 @@ fn ota_manifest(build: &ModelBuild) -> OtaManifest {
         commit: format!("{commit12}{}", "0".repeat(28)),
         wire_proto: 36,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -2435,6 +2552,27 @@ impl Bench {
             }
         }
     }
+}
+
+/// The firmware bar of `device`'s card, as the home view publishes it.
+fn firmware_bar(bench: &Bench, device: DeviceId) -> crate::UiStackBar {
+    board_card(bench, device)
+        .bar(crate::BarLayer::Firmware)
+        .clone()
+}
+
+/// The board's card, as the home view publishes it.
+fn board_card(bench: &Bench, device: DeviceId) -> crate::UiBoardCard {
+    bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .expect("the board's card")
 }
 
 // ---------------------------------------------------------------------

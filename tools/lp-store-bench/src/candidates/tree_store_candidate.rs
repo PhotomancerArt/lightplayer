@@ -1,6 +1,11 @@
 //! T1: the content-addressed copy-on-write tree store (`lp-tree-store` v1).
 //! Dials: `record_max`, `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
-//! `txn_delta_max`, `codec` (`stored` | `host_deflate`).
+//! `txn_delta_max`, `idle_free_percent`, `idle_min_garbage`, `idle_pack_free`,
+//! `idle_copy_bytes`, `codec` (`stored` | `host_deflate`), `read_cache` (`off` | `sim`: the
+//! store reads through `lp_tree_store::SimLineCache`, a model of the C6's
+//! flash cache that serves a line's old bytes until the store's
+//! `WindowedFlash` invalidates it — the firmware's C7 read path; a mount
+//! after a cut starts with it empty, as a power-on does).
 //!
 //! A workload step is one store transaction (`begin` at the step's first
 //! write, `commit` at its end), so T1 is scored step-atomic. With
@@ -10,7 +15,10 @@
 //! at offset 0 then the running size. `stored` writes every file stored.
 
 use lp_nor_sim::{NorError, NorFlashSim};
-use lp_tree_store::{GcPolicy, SoftSha256, StoreConfig, TreeStore, host_deflate_chunks, is_hot};
+use lp_tree_store::{
+    GcPolicy, SimLineCache, SoftSha256, StoreConfig, TreeStore, WindowedFlash, host_deflate_chunks,
+    is_hot,
+};
 
 use crate::{Candidate, CandidateConfig, CandidateReport, CandidateStore, StoreError};
 
@@ -36,6 +44,13 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
             "txn_delta_max" => c.txn_delta_max = num()?,
+            // 0 = mount's level walk (no whole id index); small = the index
+            // dropped part-way through pass 1.
+            "mount_index_max" => c.mount_index_max = num()?,
+            "idle_free_percent" => c.idle_free_percent = num()?,
+            "idle_min_garbage" => c.idle_min_garbage = num()?,
+            "idle_pack_free" => c.idle_pack_free = num()?,
+            "idle_copy_bytes" => c.idle_copy_bytes = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,
@@ -50,10 +65,29 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
                     _ => return Err(StoreError::Other(format!("dial codec={v}"))),
                 }
             }
+            "read_cache" => {
+                read_cache(cfg)?;
+            }
             _ => return Err(StoreError::Other(format!("unknown t1 dial {k}"))),
         }
     }
     Ok((c, codec))
+}
+
+/// The `read_cache` dial: whether reads go through the simulated cache.
+pub fn read_cache(cfg: &CandidateConfig) -> Result<bool, StoreError> {
+    match cfg.dials.get("read_cache").map(String::as_str) {
+        None | Some("off") => Ok(false),
+        Some("sim") => Ok(true),
+        Some(v) => Err(StoreError::Other(format!("dial read_cache={v}"))),
+    }
+}
+
+/// The store's flash: the part, read through the cache when the dial says.
+type T1Flash = WindowedFlash<NorFlashSim, Option<SimLineCache>>;
+
+fn cache_for(cfg: &CandidateConfig) -> Result<Option<SimLineCache>, StoreError> {
+    Ok(read_cache(cfg)?.then(SimLineCache::default))
 }
 
 fn map_err(e: lp_tree_store::StoreError<NorError>) -> StoreError {
@@ -73,7 +107,10 @@ impl Candidate for TreeStoreCandidate {
     }
 
     fn format(&self, flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
-        TreeStore::format(flash, &mut SoftSha256, &tree_store_config(cfg)?.0).map_err(map_err)
+        let flash = WindowedFlash::new(flash, cache_for(cfg)?);
+        TreeStore::format(flash, SoftSha256, tree_store_config(cfg)?.0)
+            .map(drop)
+            .map_err(|(e, _, _)| map_err(e))
     }
 
     fn mount(
@@ -81,19 +118,21 @@ impl Candidate for TreeStoreCandidate {
         flash: NorFlashSim,
         cfg: &CandidateConfig,
     ) -> Result<Box<dyn CandidateStore>, (StoreError, NorFlashSim)> {
-        let (sc, codec) = match tree_store_config(cfg) {
+        let (sc, codec, cache) = match tree_store_config(cfg)
+            .and_then(|(sc, codec)| cache_for(cfg).map(|cache| (sc, codec, cache)))
+        {
             Ok(c) => c,
             Err(e) => return Err((e, flash)),
         };
-        match TreeStore::mount(flash, SoftSha256, sc) {
+        match TreeStore::mount(WindowedFlash::new(flash, cache), SoftSha256, sc) {
             Ok(store) => Ok(Box::new(TreeStoreAdapter { store, codec })),
-            Err((e, flash, _)) => Err((map_err(e), flash)),
+            Err((e, flash, _)) => Err((map_err(e), flash.into_parts().0)),
         }
     }
 }
 
 struct TreeStoreAdapter {
-    store: TreeStore<NorFlashSim, SoftSha256>,
+    store: TreeStore<T1Flash, SoftSha256>,
     codec: T1Codec,
 }
 
@@ -146,17 +185,21 @@ impl CandidateStore for TreeStoreAdapter {
         r
     }
 
+    fn idle(&mut self) -> Result<bool, StoreError> {
+        self.store.collect_step().map_err(map_err)
+    }
+
     fn into_flash(self: Box<Self>) -> NorFlashSim {
-        self.store.into_flash()
+        self.store.into_flash().into_parts().0
     }
 
     fn flash_snapshot(&self) -> NorFlashSim {
-        self.store.flash().clone()
+        self.store.flash().flash().clone()
     }
 
     fn report(&self) -> CandidateReport {
         let st = self.store.stats();
-        let sectors = self.store.flash().geometry().sector_count;
+        let sectors = self.store.flash().flash().geometry().sector_count;
         let mut extra = std::collections::BTreeMap::new();
         for (k, v) in [
             ("index_entries", st.index_entries as f64),
@@ -176,6 +219,10 @@ impl CandidateStore for TreeStoreAdapter {
             ("free_sectors", self.store.free_sectors() as f64),
         ] {
             extra.insert(k.to_string(), v);
+        }
+        if let Some(cache) = self.store.flash().window() {
+            extra.insert("cache_lines".into(), cache.lines as f64);
+            extra.insert("cache_fills".into(), cache.fills as f64);
         }
         CandidateReport {
             ram_bytes: st.resident_ram_bytes as u64,

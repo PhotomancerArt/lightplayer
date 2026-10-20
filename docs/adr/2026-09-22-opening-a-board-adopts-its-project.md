@@ -223,3 +223,26 @@ a fresh browser saw it first.
   shows the paged `ChangesSince` read OOMs a live classic session. No
   `UnloadProject` call was added to make room for this; it stays a
   question for a walk to answer.
+
+## Amendment (2026-10-10, how "connected" was built)
+
+Plan `lp2025/2026-10-08-2330-connected-in-the-card`. Connect binds or adopts
+exactly as an open does: it is the same `open_device_lens`, held by the home
+page instead of an address. Two things the build added:
+
+- **A play-only link may leave a board unbound.** Adoption's uid stamp
+  (step 3 above) is a file write, and the board refuses file writes below
+  the edit tier. On a play-only link an identity-free project stays
+  unbound: the session opens and the panel writes, but there is no `/p/`
+  address, and All controls goes to `/device/<uid>/play`.
+- **`/device/<uid>` is emitted, narrowly.** When Edit shows the editor from
+  a route that is not the lens's own (the home page) and the session has no
+  project address (unbound: not at the library head, or the play-only case
+  above), the lens sync navigates to `/device/<uid>` (`lens_sync_target` in
+  `lpa-studio-web`'s `router.rs`). With the home page outside the editor's
+  shell, the editor would otherwise have no page to show on. That is the
+  case where an open by `/device/<uid>` cannot heal today, so the address is
+  what the bar already shows; a bound session still heals to
+  `/p/<slug>-prj…?on=…` as above. A `/device/<uid>/<view>` address keeps
+  its view when it heals
+  (`docs/defects/2026-10-08-the-device-play-address-loses-play.md`).

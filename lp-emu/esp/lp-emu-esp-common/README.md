@@ -97,6 +97,28 @@ extracting a struct two chips happen to share — the argument has to be that
 *this* algorithm has an external standard three views must agree with, not
 that two views have similar fields.
 
+### `engine::flash_cut` — a power cut at a flash command
+
+The flash chip can lose its supply in the middle of one program or erase
+command (`engine/flash_cut.rs`, plan
+`lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P1). A
+`FlashCut { range, at, tear, seed }` armed on the `FlashImage` counts the
+program and erase commands the part executes whose target touches `range`
+(never reads, WREN or status polls), and tears the `at`-th (0-based) with one
+of `lp-nor-sim`'s tear models: the calibrated CX1 mix and its forced
+models (seven erase shapes, a cut before the erase, a program torn inside a
+word) called directly on the chip's bytes, the guessed models through
+a scratch `NorFlashSim`. The chip then latches **powered off** and refuses
+every later program and erase until `restore_power`; the engine posts
+`MachineRequest::PowerCut` and yields, so the guest runs no further
+instruction. Weak bits a torn erase leaves (`engine/flash_weak_bits.rs`)
+read seeded noise until the sector is erased, survive a power cycle, and
+stay in the process (a `File` flush warns once and writes the stored cells).
+`engine/flash_op_census.rs` counts, and optionally traces, the same commands
+for a dry run. With no plan armed nothing is counted and every command runs
+exactly as before. The module docs carry the mapping from nor-sim's terms;
+the C6 wires it (`--flash-cut`), the S3 and the classic do not yet.
+
 ### `ip/` — a layout two chips genuinely share
 
 M2 recorded the USB-Serial-JTAG finding: the C6's `usb_sj` block is
@@ -197,6 +219,15 @@ Three policies:
 - **Strict mode makes it fatal.** `set_strict(true)` turns the same access
   into `MemoryError::InvalidAccess` — the vision's honest-peripheral policy,
   available to a run that must not guess.
+- **A store to nothing faults.** `set_fault_stores_to_nothing(true)` makes a
+  store outside every region and every declared MMIO window take the store
+  access fault, strict or not: there is nothing there on the chip, and
+  silicon faults. The C6 turns it on. Its split loader once copied a segment
+  to address 0; the board faulted while this bus dropped 26,452 stores and
+  booted
+  (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+  An unmapped store inside a window is an unmodelled block and is still
+  dropped.
 - **Watchpoints fire before the access.** esp-rtos's stack guard is a
   trigger on the guard word; a bus that performed the write and trapped
   afterwards would have already destroyed the evidence. NAPOT decodes as the

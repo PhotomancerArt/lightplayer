@@ -53,18 +53,15 @@ pub enum UiChromeSessionStatus {
     Empty,
 }
 
-/// The LENS session's card, docked in the editor (D43): the roster's own
-/// projection of the device the editor is open on — the gallery's
-/// `DeviceView` verbatim, never a second card. One arm, for one kind of
-/// runtime (PD9); a sim wears the runtime band and nothing else.
+/// The LENS session's card, docked in the editor (D43): the board card the
+/// home page draws for the device the editor is open on, built by the same
+/// builder with the editor holding it — never a second card. One arm, for
+/// one kind of runtime (PD9).
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiLensCard {
-    Device {
-        card: crate::DeviceView,
-        /// The runtime band, for a lens on a sim (PD11) — the docked pane
-        /// draws the SAME card the grid does, band and all.
-        runtime: Option<crate::UiRuntimeBand>,
-    },
+    /// The board's card (`crate::board_card`, with the editor holding it:
+    /// no primary until Done lands).
+    Board(Box<crate::UiBoardCard>),
 }
 
 /// The tab's ONE runtime session, projected for the header
@@ -105,6 +102,11 @@ pub struct UiChromeSessionControl {
     pub update: Option<crate::UiSessionUpdate>,
     /// How the board is reached right now: the header's glyph.
     pub link: crate::UiLinkKind,
+    /// The home page holds this session (Connect, or Edit from a board's
+    /// card — [`ConnectedBoard`](crate::ConnectedBoard)): going home keeps
+    /// it, and it shows on the board's card there. `false` for a session
+    /// an address opened, which going home ends.
+    pub connected: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,6 +147,11 @@ pub struct UiStudioView {
     /// shell watches it to raise the fork toast — a state transition
     /// alone cannot distinguish "forked" from "opened another project".
     pub transient_fork_generation: u64,
+    /// How many times a card's Sign in was pressed this page
+    /// (`devices/<board>/sign-in`, [`crate::SignInOp`]): the web shell
+    /// leaves for sign-in when it sees this advance. Core does not know the
+    /// cloud; the shell holds its sign-in options.
+    pub sign_in_requests: u64,
     /// The LENS session's card, for the editor layout (D43: the grown
     /// runtime card IS the editor's right-side pane). Same construction
     /// as the gallery roster's live card; `None` while no lens session
@@ -187,6 +194,9 @@ pub struct UiStudioView {
     /// place the web renders migrated surfaces' buttons from and the app
     /// agent reads and presses (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`).
     pub offers: crate::UiOfferTree,
+    /// The Graph tab's slice (`app/graph`): `None` until the Graph has
+    /// been asked for on the open project.
+    pub graph: Option<crate::app::graph::UiGraphView>,
 }
 
 impl UiStudioView {
@@ -201,6 +211,7 @@ impl UiStudioView {
             open_project_transient: false,
             open_transient_example: None,
             transient_fork_generation: 0,
+            sign_in_requests: 0,
             lens_card: None,
             session: None,
             open_mismatch: None,
@@ -212,7 +223,14 @@ impl UiStudioView {
             access_added: None,
             app_agent: crate::UiAppAgentView::default(),
             offers: crate::UiOfferTree::default(),
+            graph: None,
         }
+    }
+
+    /// The Graph tab's slice.
+    pub fn with_graph(mut self, graph: Option<crate::app::graph::UiGraphView>) -> Self {
+        self.graph = graph;
+        self
     }
 
     /// The lens board's login line (BLE M6).
@@ -277,6 +295,13 @@ impl UiStudioView {
         self.open_project_transient = transient;
         self.open_transient_example = example_id;
         self.transient_fork_generation = fork_generation;
+        self
+    }
+
+    /// How many times a card's Sign in was pressed (see
+    /// [`Self::sign_in_requests`]).
+    pub fn with_sign_in_requests(mut self, requests: u64) -> Self {
+        self.sign_in_requests = requests;
         self
     }
 

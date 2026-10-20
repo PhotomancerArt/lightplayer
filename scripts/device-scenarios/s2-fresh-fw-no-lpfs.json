@@ -42,8 +42,8 @@
     ],
     "steps": [
       { "do": "connect", "board": "c6-a", "describe": "Connect to this board." },
-      { "do": "settle", "words": ["Ready"], "describe": "The card should reach Ready and ask for a name (unstamped, empty)." },
-      { "do": "text", "contains": "fw-esp32c6", "describe": "The board's own hello identity is on the card." },
+      { "do": "settle", "offers": ["push|edit"], "describe": "The card should reach Ready and ask for a name (unstamped, empty): core offers the board a project (`push`) or the editor on the one it runs (`edit`)." },
+      { "do": "text", "bar": "firmware", "contains": "fw-esp32c6", "describe": "The board's own hello identity is on the card: its firmware bar, the line or its details." },
       { "do": "shot", "name": "s2-ready" },
       { "do": "registry" },
       { "do": "await", "match": "state:ready", "describe": "LAST: the walk is already observed; this is the trace's own claim." }

@@ -257,7 +257,7 @@ pub fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
         Err(error) => offer
             .press(&OfferArgs::new())
             .unwrap_or_else(|_| offer.action.clone())
-            .disabled(error.to_string()),
+            .disabled(error.shown()),
     }
 }
 
@@ -438,6 +438,7 @@ mod tests {
             detected_chip: chip.map(str::to_string),
             mac: None,
             firmware_blocked: None,
+            held_by_tab: false,
             escapes: vec![lpa_studio_core::DeviceEscape::Forget],
         }
     }

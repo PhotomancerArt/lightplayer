@@ -18,6 +18,11 @@ pub mod app;
 pub mod controller;
 pub mod core;
 
+pub use self::core::data_kinds::{
+    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_spoken, age_words,
+    byte_size, date_words, duration_words, firmware_label_version, firmware_version, percent,
+    percent_of, pre_ota_version,
+};
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
@@ -50,6 +55,20 @@ pub use app::devices::BrowserRelaySource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+pub use app::devices::board_card::{
+    ADD_A_PROJECT, ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput,
+    BoardConnection, BoardLinks, CONFIRMATION_REQUIRED, CONNECT_HERE, CONNECTING,
+    CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, LENS_SOURCE_WORDS,
+    LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN, PROJECT_NONE,
+    PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
+    SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
+    UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBoardCard, UiBoardPanel,
+    UiBoardPanelSection, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
+    UiCardControl, UiCornerDetails, UiDetailPanel, UiDetailSwitch, UiNameBar, UiPrimary,
+    UiStackBar, UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words,
+    board_card, board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    roster_board_cards,
+};
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
     UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
@@ -65,8 +84,8 @@ pub use app::devices::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
     FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb,
     FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LAN_LINK_PATH, LanDeviceTransport,
-    LanFlag, LanLinkSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM,
-    NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
+    LanFlag, LanLinkSource, LensFrameSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM,
+    NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
     ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload, PushSource, PushSourceChoice,
     PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, RememberedView,
     ResetReach, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp,
@@ -79,24 +98,38 @@ pub use app::devices::{
     device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
     firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_consequence,
     flash_device_offer, flash_offer, flash_offer_for, flash_pending_offer, lan_link_for_endpoint,
-    lan_link_view, mint_sim_identity, new_sim_offer, new_sim_record, normalize_lan_address,
-    parse_lan_flag, pending_escape_action, pending_firmware_line, pending_identity_rows,
-    pending_link_offers, push_device_offer, push_offer, read_sim_record, reflash_choice,
-    sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
+    lan_link_view, lens_feed_view, mint_sim_identity, new_sim_offer, new_sim_record,
+    normalize_lan_address, parse_lan_flag, pending_escape_action, pending_firmware_line,
+    pending_identity_rows, pending_link_offers, push_device_offer, push_offer, read_sim_record,
+    reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
+/// One tab holds a board: the hold vocabulary and the edge the web installs.
+pub use app::devices::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
+};
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
-    DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
-    MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
-    device_layout_view, device_restore_from_file_action,
+    BoardFilesMemory, DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp,
+    DeviceRestoreFromFileOp, DeviceStartFreshOp, FRESH_STARTS_STORAGE_KEY, FilesEvidence,
+    MemoryBackupStore, START_FRESH, UiDeviceLayout, UiLayoutPanel, check_backup_file,
+    check_store_contract, device_layout_view, device_restore_from_file_action,
 };
 pub use app::devices::{BoardPlays, BoardProjectInputs, BoardProjects, board_projects};
 pub use app::devices::{
     BundledOwnBuild, BundledOwnBuildSource, MemoryOwnBuildSource, OWN_BUILD_MISMATCH,
     OwnBuildSource, UpdateHost,
 };
+pub use app::devices::{
+    CONNECT_VERB, ConnectFacts, DONE_VERB, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
+    device_done_offer,
+};
+/// Connect a board's chooser failing after the pick.
+pub use app::devices::{ChooserTransport, UiChooserFailure};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
@@ -114,6 +147,12 @@ pub use app::devices::{
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
 };
+pub use app::devices::{SIGN_IN_VERB, SignInOp, sign_in_offer};
+/// Connect on a board another tab holds: the offer, its op and its words.
+pub use app::devices::{
+    TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,
+    take_over_offer,
+};
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
     WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
@@ -122,27 +161,37 @@ pub use app::devices::{
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
+pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
+/// The device model's fact about a board another tab holds.
+pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
-    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
-    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup,
-    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
-    not_permitted_sentence, open_summary, tier_word,
+    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BLUETOOTH_ENABLED_PARAM,
+    BluetoothSwitchOp, BrowserKey, DEFAULT_KDF_ITERATIONS, DISABLE_BLUETOOTH, DeviceAccessChange,
+    DroppedKey, ENABLE_BLUETOOTH, MAX_SECRETS_PER_FILE, NetworkLinkKeys, OFF_OVER_BLUETOOTH,
+    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
+    UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
+    account_key_refused_sentence, bluetooth_offer, bluetooth_path, bluetooth_restart_words,
+    device_unlock_offer, dropped_sentence, not_permitted_sentence, open_summary, tier_word,
+    unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
 pub use app::home::{
-    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
-    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OPEN_PROJECT_PARAM, ProjectTemplate,
-    UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard, UiRunningProject,
-    ZipBytes, example_groups, generate_board_project, home_offers, new_project_offer,
-    open_project_offer, template_project_files,
+    DEFAULT_STRIP_PIXELS, EXAMPLE_PATTERNS_LABEL, EXAMPLE_PROJECTS_LABEL, GenerateProjectError,
+    GeneratedProject, HOME_NODE_ID, HomeOp, NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM,
+    OPEN_PROJECT_PARAM, ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeBoard,
+    UiHomeBoardKind, UiHomeConnect, UiHomeSection, UiHomeSections, UiHomeTab, UiHomeView,
+    UiOpenMismatch, UiPackageCard, UiRunningProject, ZipBytes, build_home_sections, example_groups,
+    example_page_label, generate_board_project, home_offers, new_project_offer, open_project_offer,
+    stamp_on_boards, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::network::{
@@ -232,8 +281,8 @@ pub use app::rich_object::{
 };
 pub use app::roster::board_display_name;
 pub use app::runtime_pool::{
-    DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload, RuntimePool,
-    RuntimeSession, SESSION_CAPACITY,
+    ConnectReach, DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload,
+    RuntimePool, RuntimeSession, SESSION_CAPACITY,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
@@ -251,13 +300,13 @@ pub use app::share::{
     ShareFile, ShareHeader, peek_header,
 };
 pub use app::studio::{
-    ConsoleCommand, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL,
-    FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,
-    PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
-    STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
-    StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
-    UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensCard,
-    UiLensReconnecting, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    ConsoleCommand, DEVICE_CARD_FEED_BLE_INTERVAL, DEVICE_CARD_FEED_INTERVAL,
+    DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, FRAME_STALE_AFTER_SECS, LOG_RING_CAPACITY,
+    LogClock, LogFilter, LogRing, PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand,
+    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
+    StudioViewSender, UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError,
+    UiLensCard, UiLensReconnecting, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
     UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
     VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
     set_device_lens_pause_override, studio_view_channel,
@@ -295,7 +344,8 @@ pub use lpa_devices::{
     FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
-    TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
+    TerminalLine as DeviceTerminalLine, UpdateBoardState as DeviceUpdateBoardState,
+    WireVersion as DeviceWireVersion,
 };
 /// What a board reports about its saved networks, its station and what it
 /// hears.

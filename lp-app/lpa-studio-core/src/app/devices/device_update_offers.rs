@@ -193,6 +193,7 @@ impl UpdateOfferFacts {
                     file_build: inputs.file_build,
                     link: inputs.link,
                     studio_wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+                    board_tree_store: inputs.board_tree_store,
                 });
                 (choices, index_for(inputs.store_releases, target).is_some())
             }
@@ -227,6 +228,14 @@ pub fn update_offers(
         // Over USB, today's flash is the one update this board takes; over
         // the air there is nothing to press, and the line says what to do.
         UpdateStanding::NeedsUsbOnce { link, .. } => {
+            set.keep_flash = *link == UpdateLink::Usb;
+            return set;
+        }
+        // A tree-store build for a board on littlefs: over USB the card's
+        // flash, which inspects the board, backs its files up and moves them
+        // (the layout migration's question); over the air nothing — the line
+        // says to plug it in.
+        UpdateStanding::NeedsFilesMoved { link, .. } => {
             set.keep_flash = *link == UpdateLink::Usb;
             return set;
         }
@@ -559,19 +568,12 @@ fn date_line(choice: &InstallChoice) -> Option<String> {
         return Some(day);
     }
     let (date, _) = choice.version.version.split_once('-')?;
-    month_day(&date.replace('.', "-"))
+    month_day(date)
 }
 
-/// `2026-10-07` as `Oct 7`.
+/// `2026-10-07` (or `2026.10.07`) as `Oct 7`.
 fn month_day(date: &str) -> Option<String> {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let mut parts = date.split('-');
-    let (_year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
-    let month: usize = month.parse().ok()?;
-    let day: u32 = day.parse().ok()?;
-    Some(format!("{} {day}", MONTHS.get(month.checked_sub(1)?)?))
+    crate::CalendarDate::parse_iso(date).map(|date| date.words())
 }
 
 /// The one warning a choice's line carries, most lasting first.
@@ -839,7 +841,7 @@ mod tests {
             to: y(),
         });
         let set = update_offers(&ready_view(), &facts, &prefix());
-        assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert_eq!(set.offers[0].label(), "Install v2026.10.05-2");
         assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         let facts = over_the_air(UpdateStanding::Available {
             board: x(),
@@ -964,6 +966,31 @@ mod tests {
         }
     }
 
+    /// AD3: a board whose files must move offers no over-the-air install at
+    /// all; over USB it keeps the card's flash (the migration), over
+    /// Bluetooth nothing — the line says to plug it in.
+    #[test]
+    fn files_moved_keeps_only_the_usb_flash() {
+        for route in [UpdateRoute::OverTheAir, UpdateRoute::Flash] {
+            for (link, keep_flash) in [(UpdateLink::Usb, true), (UpdateLink::Bluetooth, false)] {
+                let facts = UpdateOfferFacts {
+                    standing: UpdateStanding::NeedsFilesMoved {
+                        board: x(),
+                        to: y(),
+                        link,
+                    },
+                    route,
+                    ..UpdateOfferFacts::default()
+                };
+                assert_eq!(
+                    set_of(&ready_view(), &facts),
+                    (vec![], keep_flash, true),
+                    "{link:?} {route:?}"
+                );
+            }
+        }
+    }
+
     /// "Other version…" is offered on every idle row a person could want
     /// another version from, and nowhere an update runs, a play-only user
     /// looks, or the board needs USB (or, over Wi‑Fi, Bluetooth) first.
@@ -984,7 +1011,7 @@ mod tests {
                 | Row::KeepsCrashing
                 | Row::RolledBack
                 | Row::Newer => Some("Other version…"),
-                Row::CantGetVersion => Some("Install 2026.10.05-2"),
+                Row::CantGetVersion => Some("Install v2026.10.05-2"),
                 Row::BackingUp
                 | Row::Updating
                 | Row::Finishing
@@ -1205,7 +1232,7 @@ mod tests {
         assert_eq!(copy.title, "Install an older version?");
         assert_eq!(
             copy.message,
-            "2026.10.05-1 is older than what this board runs, and an older version may not \
+            "v2026.10.05-1 is older than what this board runs, and an older version may not \
              read the board's project."
         );
         assert_eq!(copy.confirm_label, "install");
@@ -1220,7 +1247,7 @@ mod tests {
         // An older version in an older language: both sentences.
         let copy = lasting(&press(&other, "2026.10.03-4"));
         assert!(
-            copy.message.starts_with("2026.10.03-4 is older"),
+            copy.message.starts_with("v2026.10.03-4 is older"),
             "{}",
             copy.message
         );
@@ -1308,7 +1335,7 @@ mod tests {
         assert_eq!(copy.title, "Install another build?");
         assert_eq!(
             copy.message,
-            "2026.10.07-4 can't be compared with what this board runs (dev build 5eb70a7), so \
+            "v2026.10.07-4 can't be compared with what this board runs (dev build 5eb70a7), so \
              it may not read the board's project."
         );
         assert_eq!(
@@ -1435,7 +1462,7 @@ mod tests {
             (vec![("install-firmware".to_string(), false)], false, false)
         );
         let set = update_offers(&offline.view, &facts, &prefix());
-        assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert_eq!(set.offers[0].label(), "Install v2026.10.05-2");
         assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         assert_eq!(
             bound_intent(&set.offers[0], &OfferArgs::new()),
@@ -1447,7 +1474,7 @@ mod tests {
 
         // With the index: the same button opens the list, Y preselected.
         let install = install_of(&fixture(UpdateFixtureRow::CantGetVersion));
-        assert_eq!(install.label(), "Install 2026.10.05-2");
+        assert_eq!(install.label(), "Install v2026.10.05-2");
         assert_eq!(choice_param(&install).1.as_deref(), Some("2026.10.05-2"));
     }
 

@@ -16,7 +16,7 @@ use crate::app::share::visitor_banner::{VisitorBanner, VisitorBannerView};
 
 #[story(
     label = "Visitor banner, pristine",
-    description = "A tracking copy that IS the service's line: live tint, \"updates arrive as they happen\", and one quiet Copy link. The strip's own Fork retired with relationship-control P5 — the project segment's popover carries the fork-family verb for every standing, and offering it twice one row apart was the duplication D2 named. Project-name-centric copy — the API exposes no owner profile (deviation from the spike's owner-name phrasing, flagged for G1)."
+    description = "A tracking copy that IS the service's line: live tint, \"updating live\", and one quiet Copy link. The strip's own Fork retired with relationship-control P5 — the project segment's popover carries the fork-family verb for every standing, and offering it twice one row apart was the duplication D2 named. Project-name-centric copy — the API exposes no owner profile (deviation from the spike's owner-name phrasing, flagged for G1)."
 )]
 pub(crate) fn visitor_banner_pristine() -> Element {
     strip(VisitorBannerView::ViewPristine {

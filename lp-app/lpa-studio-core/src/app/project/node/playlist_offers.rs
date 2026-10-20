@@ -159,7 +159,7 @@ fn play_offer(at: &OfferPath, facts: &PatternPickerFacts) -> UiOffer {
             if facts.active == Some(entry.key) {
                 option.disabled("it is playing now")
             } else if facts.failed.contains(&entry.key) {
-                option.with_detail("failed to load on the device; playing it tries again")
+                option.with_detail("failed to load on the device. Playing it will try again.")
             } else if facts.skip.contains(&entry.key) {
                 option.with_detail("off in the cycle")
             } else {

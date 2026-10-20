@@ -116,7 +116,7 @@ pub(crate) fn NodeDetailPopover(
             }
             if dirty.persisted > 0 {
                 DetailSection {
-                    title: "Unsaved (persisted)",
+                    title: "Unsaved changes",
                     meta: dirty.persisted.to_string(),
                     tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                     PendingEditList { entries: unsaved_entries, on_action: forward }
@@ -152,7 +152,7 @@ pub(crate) fn NodeDetailPopover(
                     }
                     if dirty.persisted > 0 {
                         p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                            "Copies the last saved version — this node has unsaved edits."
+                            "This node has unsaved changes, so this copies the last saved version."
                         }
                     }
                 }
@@ -212,13 +212,13 @@ fn ModuleExportRow(export: UiModuleExport, on_action: EventHandler<UiAction>) ->
                 }
             } else {
                 p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                    "Importers vendor "
+                    "Projects that import it get their own copy of "
                     span { class: "tw:font-mono", "{export.folder}/" }
-                    " as their own copy. The folder must be self-contained; its bus consumers are its interface."
+                    ". Everything it needs must be inside the folder, and the bus channels it reads are its controls."
                 }
                 if export.upgrades_to_pattern {
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-status-export-foreground",
-                        "The first export makes "
+                        "Exporting it will make "
                         strong { "{export.project}" }
                         " a pattern project."
                     }
@@ -254,6 +254,9 @@ pub(crate) fn node_status_label_class(kind: UiStatusKind) -> &'static str {
         }
         UiStatusKind::Good => {
             "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-good-foreground"
+        }
+        UiStatusKind::Live => {
+            "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-live-border tw:bg-status-live-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-live-foreground"
         }
         UiStatusKind::Warning => {
             "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-warning-foreground"

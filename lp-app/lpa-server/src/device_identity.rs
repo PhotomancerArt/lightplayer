@@ -22,9 +22,20 @@ pub const DEVICE_IDENTITY_PATH: &str = "/.lp/device.json";
 /// unparseable file → `None` (an unstamped device).
 pub fn read_device_uid(fs: &dyn LpFs) -> Option<String> {
     let bytes = fs.read_file(DEVICE_IDENTITY_PATH.as_path()).ok()?;
-    lpc_wire::json::from_slice::<DeviceIdentityFile>(&bytes)
+    let uid = lpc_wire::json::from_slice::<DeviceIdentityFile>(&bytes)
         .ok()
-        .map(|identity| identity.uid)
+        .map(|identity| identity.uid);
+    if uid.is_none() {
+        log::warn!(
+            "identity: /.lp/device.json is {}; serving as an unstamped board",
+            if bytes.is_empty() {
+                "empty"
+            } else {
+                "not a readable identity"
+            }
+        );
+    }
+    uid
 }
 
 /// The stamped device name (the identity file's `name`), if any: what the
@@ -79,6 +90,13 @@ mod tests {
 
         fs.write_file(DEVICE_IDENTITY_PATH.as_path(), b"not json")
             .unwrap();
+        assert_eq!(read_device_uid(&fs), None);
+    }
+
+    #[test]
+    fn an_empty_file_reads_as_unstamped() {
+        let fs = LpFsMemory::new();
+        fs.write_file(DEVICE_IDENTITY_PATH.as_path(), b"").unwrap();
         assert_eq!(read_device_uid(&fs), None);
     }
 

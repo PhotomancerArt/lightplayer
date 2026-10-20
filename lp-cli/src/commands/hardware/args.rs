@@ -22,6 +22,10 @@ pub enum HardwareSubcommand {
     /// A board's filesystem (`lpfs`) across partition layouts: measure it,
     /// back it up, move it to the new layout, put a backup back.
     Lpfs(LpfsArgs),
+    /// A tree-store (`lp-tree-store`) partition, read only: `inspect` it,
+    /// `check` it (the store's fsck), `extract` its files. Never writes a
+    /// board.
+    Tree(TreeArgs),
     /// Draw the desk's boards for the board bench's page: each registered
     /// board's LightPlayer drawing, and an art board's piece. Needs `board`
     /// and a build with `--features desk-images` (`just desk-images`).
@@ -43,6 +47,82 @@ pub struct DeskImagesArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct TreeArgs {
+    #[command(subcommand)]
+    pub command: TreeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TreeCommand {
+    /// What a tree-store partition holds: every sector (state, header,
+    /// records), the roots and the one mount would choose, the file tree,
+    /// live and garbage bytes. Reads only.
+    Inspect(TreeInspectArgs),
+    /// The store's fsck: verify every id, chunk, multi, size and name
+    /// under the chosen root, and account for the rest of the flash. Reads
+    /// only, never repairs. Exits 2 on any inconsistency.
+    Check(TreeCheckArgs),
+    /// Write the committed tree's files into a directory (recovery and
+    /// backups). Works on an image the store refuses to mount. Reads only.
+    Extract(TreeExtractArgs),
+}
+
+/// Where the tree-store partition comes from.
+#[derive(Debug, Args, Clone)]
+pub struct TreeSourceArgs {
+    /// A board's serial port: reads its `lpfs` partition over the
+    /// bootloader (then resets it back into its firmware). Read only.
+    #[arg(long, conflicts_with = "image")]
+    pub port: Option<String>,
+    /// A raw image: one filesystem partition (what `lpfs save` writes as
+    /// raw-lpfs-*.bin), or a whole 4 MiB chip image (its table says where
+    /// the partition is).
+    #[arg(long)]
+    pub image: Option<PathBuf>,
+    /// The sector size in bytes. Default: read from the image's headers
+    /// (4096 when none gives it).
+    #[arg(long)]
+    pub sector_size: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+pub struct TreeInspectArgs {
+    #[command(flatten)]
+    pub source: TreeSourceArgs,
+    /// List every record of every sector (kind, codec, length, id, CRC,
+    /// status), not just per-sector counts.
+    #[arg(long)]
+    pub records: bool,
+    /// Machine-readable output (always lists every record).
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct TreeCheckArgs {
+    #[command(flatten)]
+    pub source: TreeSourceArgs,
+    /// A second read of the same flash (another `lpfs save`): sectors that
+    /// differ between the two reads are weak. With --port the board is
+    /// read twice instead.
+    #[arg(long, conflicts_with = "port")]
+    pub reread: Option<PathBuf>,
+    /// Machine-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct TreeExtractArgs {
+    #[command(flatten)]
+    pub source: TreeSourceArgs,
+    /// The directory to write the files into (created; must be empty if it
+    /// exists).
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Args)]
 pub struct LpfsArgs {
     #[command(subcommand)]
     pub command: LpfsCommand,
@@ -58,7 +138,9 @@ pub enum LpfsCommand {
     /// a backup ZIP. Reads only.
     Save(LpfsSaveArgs),
     /// Move a board's files to the layout of a firmware package, writing
-    /// the firmware too. Stores a backup first. WRITES THE BOARD.
+    /// the firmware too — across a repartition, or from littlefs into the
+    /// tree store (`--to tree`, every C6 image since the cutover). Stores a backup first.
+    /// WRITES THE BOARD (unless `--dry-run`).
     Migrate(LpfsMigrateArgs),
     /// Put a backup ZIP's files back onto a board already on the package's
     /// layout (the last-resort path). WRITES THE BOARD'S FILESYSTEM.
@@ -153,6 +235,24 @@ pub struct LpfsMigrateArgs {
     /// Do not wait for the board's hello afterwards.
     #[arg(long)]
     pub no_verify: bool,
+    /// The filesystem the files must end in: refuse unless the image mounts
+    /// it (`tree`: its manifest lists `fs.tree`). Without it, whatever the
+    /// image mounts.
+    #[arg(long, value_enum)]
+    pub to: Option<LpfsTargetFs>,
+    /// Read the board and print what would be written, step by step; write
+    /// nothing, store no backup.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// `lpfs migrate --to`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub enum LpfsTargetFs {
+    /// littlefs (every image before the tree store).
+    Littlefs,
+    /// The tree store (every C6 image since the tree-store cutover).
+    Tree,
 }
 
 #[derive(Debug, Args)]
@@ -203,6 +303,10 @@ pub struct LpfsFixtureArgs {
     /// The directory whose tree becomes the board's filesystem root.
     #[arg(long)]
     pub tree: PathBuf,
+    /// The filesystem to build it as (default littlefs, what every fielded
+    /// board holds).
+    #[arg(long, value_enum, default_value = "littlefs")]
+    pub fs: LpfsTargetFs,
     /// Where to write the 4 MiB chip image.
     #[arg(long)]
     pub out: PathBuf,

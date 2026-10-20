@@ -23,6 +23,7 @@
 //! | what a USB connect added on its own | [`access_added`] |
 //! | the controller that runs all of it | [`access_controller`] |
 //! | its inputs, and what the UI reads | [`access_command`], [`ui_access_view`] |
+//! | Unlock as an offer, `devices/<board>/unlock` | [`unlock_offer`], [`unlock_op`], [`unlock_password`] |
 //!
 //! Decision records: `docs/adr/2026-09-23-ble-access-model.md` (the model),
 //! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport),
@@ -35,6 +36,8 @@ pub mod access_command;
 pub mod access_controller;
 pub mod access_session;
 pub mod account_keys;
+pub mod bluetooth_offer;
+pub mod bluetooth_switch_op;
 pub mod browser_key;
 pub mod device_access_ops;
 pub mod device_access_record;
@@ -47,6 +50,9 @@ pub mod network_link_keys;
 pub mod remembered_passwords;
 pub mod two_passwords;
 pub mod ui_access_view;
+pub mod unlock_offer;
+pub mod unlock_op;
+pub mod unlock_password;
 
 #[cfg(test)]
 pub(crate) mod test_board;
@@ -59,6 +65,11 @@ pub use access_session::{
     TypedPassword,
 };
 pub use account_keys::AccountKeys;
+pub use bluetooth_offer::{
+    BLUETOOTH_ENABLED_PARAM, OFF_OVER_BLUETOOTH, bluetooth_offer, bluetooth_path,
+    bluetooth_restart_words,
+};
+pub use bluetooth_switch_op::{BluetoothSwitchOp, DISABLE_BLUETOOTH, ENABLE_BLUETOOTH};
 pub use browser_key::BrowserKey;
 pub use device_access_ops::{AccessListing, AccessOp, DroppedKey};
 pub use device_access_record::{
@@ -71,9 +82,15 @@ pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use network_link_keys::{NetworkLinkKeys, link_key};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
-    UiUnlockOffer, account_key_refused_sentence, dropped_sentence, open_summary,
+    PLAY_ONLY_SENTENCE, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
+    open_summary,
 };
+pub use unlock_offer::{
+    UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM, UNLOCK_VERB, device_unlock_offer, unlock_offer,
+};
+pub use unlock_op::UnlockOp;
+pub use unlock_password::UnlockPassword;
 
 /// Who nearby gets in with no password.
 pub use lpc_access::OpenTo;

@@ -340,6 +340,45 @@ apply from now regardless.
 (decisions D1–D21), spike `lp2025/2026-10-01-1854-ota-split-link-spike`,
 draft PR #903.
 
+## Amendment (2026-10-17): a fallback from a dead trial is a rollback
+
+A trial that dies **warm** rolls back (§4), but its record stays the newer
+one, attempted and (usually) never started, with no cold retry counted. The
+rolled-back core's engine is then healed back where the update had put it —
+and when the dead core sat low, that is over the dead core's bytes. On the
+next **cold** boot `choose` picks the trial again (a power cut is a retry,
+not a failure), the loader finds no image there and falls back (§3). The
+core used to read "the records disagree with the MMU", trust nothing, write
+nothing, believe itself on trial and leave its engine stopped — on every
+power cycle
+([defect](../defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md)).
+
+- **The core reads that fallback as the rollback it is**
+  (`lp_bootctl::booted_by`): when `choose`'s pick is an unconfirmed trial
+  whose core is not the one running, and the other record is proven and
+  names the core the MMU says runs, the boot is the other record's,
+  `rolled_back`. The state is trusted, the trial's build is refused, the
+  engine starts, and the next update's trial record replaces the dead one
+  (it goes in the sector the running core's record is not in).
+- **No record byte, mark or loader change.** The loader still picks the
+  dead trial on a cold boot and skips it with a reason; nothing new is
+  written to either record. Any other disagreement — a proven pick that will
+  not load, a core neither record names — is still untrusted.
+- Scenarios: `emu_split_scenarios` S12 (the state, constructed) and
+  `emu_ota` U19 (X → Y, Y → Y-dies rolled back, Y healed, power cycles),
+  through both doors.
+
+## Amendment (2026-10-17): the second stage at `0x0` is ours
+
+The `0x0` row of §2 and §3's "the IDF bootloader starts the loader": from the
+cutover on, every board flashed over USB boots **ROM → LightPlayer's own
+second stage → core → engine**. The second stage is this loader's
+`bootloader` flavour — the same records, `choose` and fallback, after a
+prologue that leaves the core what the IDF did — and `app.bin` (the factory
+loader included) is unchanged, so boards updated only over the air keep
+booting through the IDF bootloader. See
+[2026-10-17-the-c6-boots-through-our-own-bootloader](2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+
 ## Amendment (2026-10-07): a trial core that hears from no host gives the board back
 
 §4 keeps a trial that started and never confirmed alive across every cold

@@ -39,6 +39,12 @@ lpa-palettes = { path = "../lpa-palettes" }
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false }
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
 lpa-mapping-editor = { path = "../lpa-mapping-editor" }
+# The Graph tab: the mapping lab's canvas, panels and model, mounted as
+# they are (plan 2026-10-17-0202-mapping-lab-into-studio, D5).
+lab-layout = { path = "../../lab/mapping/layout" }
+lab-mapping-files = { path = "../../lab/mapping/files" }
+lab-mapping-model = { path = "../../lab/mapping/model" }
+lab-mapping-web = { path = "../../lab/mapping/web" }
 # Board catalog data + the BoardDiagram row-engine renderer.
 lpa-board-editor = { path = "../lpa-board-editor" }
 lpa-boards = { path = "../lpa-boards", features = ["diagram"] }
@@ -145,3 +151,7 @@ lpa-cloud-client = { path = "../lpa-cloud-client" }
 # its tests compare every module against this MIT encoder. Test-only: the
 # shipped bundle carries none of it.
 qrcodegen = "1.8"
+# The board card's DOM, rendered on the host: its walk hooks and that every
+# action is marked with its offer path are facts of the markup, not of a
+# class string. Already in the workspace (lp-cli's desk images); test-only.
+dioxus-ssr = "0.7"

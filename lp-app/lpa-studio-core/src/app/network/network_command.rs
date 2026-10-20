@@ -31,7 +31,7 @@ pub enum NetworkCommand {
         result: ScanAnswer,
     },
     /// A connect over Wi‑Fi someone asked for ended (a card's "Connect over
-    /// Wi‑Fi", or the add slot's address): the board at `host` answered, or
+    /// Wi‑Fi", or Connect a board's address): the board at `host` answered, or
     /// why not. The studio controller's, not the settings controller's.
     WifiConnected {
         target: crate::app::devices::WifiConnectTarget,

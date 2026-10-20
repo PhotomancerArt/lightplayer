@@ -449,6 +449,13 @@ impl NetworkController {
     // --- views ------------------------------------------------------------
 
     /// The Wi‑Fi facts for one card, when its link shows a Wi‑Fi row.
+    /// The board's network status as it last answered, kept while it is
+    /// on the roster (across a dropped link): the card's last values for an
+    /// offline board's Wi‑Fi and lightplayer.app rows.
+    pub fn remembered_status(&self, device: DeviceId) -> Option<&NetworkStatus> {
+        self.devices.get(&device)?.status.as_ref()
+    }
+
     pub fn device_view(&self, device: &Device, granted: Option<Tier>) -> Option<UiDeviceWifi> {
         let (_, reach) = reach(device, granted)?;
         let state = self.devices.get(&device.id);

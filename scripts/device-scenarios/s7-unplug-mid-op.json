@@ -19,7 +19,7 @@
     ],
     "steps": [
       { "do": "connect", "board": "c6-a", "describe": "Connect." },
-      { "do": "settle", "words": ["Ready"] },
+      { "do": "settle", "offers": ["push|edit"] },
       { "do": "project", "name": "Fyeah Sign", "describe": "Start a push on the card." },
       { "do": "push" },
       { "do": "mark" },

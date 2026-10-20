@@ -111,6 +111,25 @@ impl BundledOwnBuild {
             )));
         }
 
+        // Whether the image mounts the tree store: the update files must say
+        // what its manifest core says (`requires.fsTree`), or a littlefs
+        // board could be offered a tree core over the air.
+        let core_lists_tree = package
+            .pointer("/core/features")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some("fs.tree")));
+        if core_lists_tree != ota.requires.fs_tree {
+            return Err(mismatch(format!(
+                "the image's manifest core {} fs.tree, the update files say fsTree {}",
+                if core_lists_tree {
+                    "lists"
+                } else {
+                    "does not list"
+                },
+                ota.requires.fs_tree
+            )));
+        }
+
         let image = match package.pointer("/images") {
             Some(serde_json::Value::Array(images)) if images.len() == 1 => &images[0],
             _ => {
@@ -488,6 +507,7 @@ mod tests {
                 commit: "e6775ad537f6039afabc35952488312141962ccd".to_string(),
                 wire_proto: 38,
                 requires: Requires {
+                    fs_tree: false,
                     layout: 1,
                     loader: 1,
                 },

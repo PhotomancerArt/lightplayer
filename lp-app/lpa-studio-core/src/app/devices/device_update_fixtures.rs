@@ -256,6 +256,7 @@ impl UpdateFixture {
     /// The standing's inputs, as the controller assembles them.
     pub fn inputs(&self) -> UpdateStandingInputs<'_> {
         UpdateStandingInputs {
+            board_tree_store: false,
             view: &self.view,
             facts: Some(&self.facts),
             own: Some(&self.own),
@@ -526,6 +527,7 @@ pub fn release_index() -> ReleaseIndex {
                 _ => lpc_wire::WIRE_PROTO_VERSION - 1,
             },
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },
@@ -544,6 +546,7 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -576,6 +579,7 @@ pub fn ota_manifest_for(version: &str, core: &[u8], engine: &[u8]) -> OtaManifes
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -694,6 +698,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
             detected_chip: Some("esp32c6".to_string()),
             board_id: None,
@@ -716,6 +721,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: over_bluetooth.then(|| FIRMWARE_NEEDS_USB.to_string()),
             update_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
         }
     }

@@ -1,13 +1,15 @@
-//! The words for every update standing: the firmware zone's line, the
-//! picture slot's sentence (also the line's hover), the light the slot
-//! shows when the show has stopped, the header chip, and the editor
-//! popover's run word and stat line.
+//! The words for every update standing: the firmware bar's short line, the
+//! long sentence its details say (and the picture slot's, while the show has
+//! stopped), the light the board's own LEDs show, the header chip, and the
+//! editor popover's run word and stat line.
 //!
-//! Verbatim from the update-states spike, direction C (DS16): the version
-//! reads as a version ([`super::device_update_version`]), `<link>` is
-//! "USB" or "Bluetooth". In core because they are decisions with a test
-//! each; the web only lays them out. Data only — the buttons are offers
-//! ([`super::device_update_offers`]).
+//! From the update-states spike, direction C (DS16): the version reads as a
+//! version ([`super::device_update_version`]), `<link>` is "USB" or
+//! "Bluetooth". The board card's copy pass (DC23) made a running update's
+//! line short and naming its piece — "Updating · 1 of 2 · 40%", "Resuming ·
+//! 2 of 2 · 70%" — with the link and the rest in the sentence. In core
+//! because they are decisions with a test each; the web only lays them out.
+//! Data only — the buttons are offers ([`super::device_update_offers`]).
 
 use super::device_update_route::UpdateLink;
 use super::device_update_standing::UpdateStanding;
@@ -48,19 +50,25 @@ pub struct UpdateProgress {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiDeviceUpdate {
     pub kind: UpdateRowKind,
-    /// The firmware zone's line.
+    /// The firmware bar's short words ("Updating · 1 of 2 · 40%"), and the
+    /// Reconnecting curtain's.
     pub line: String,
-    /// The whole sentence: the picture slot's when the show has stopped,
-    /// and the line's hover.
+    /// The whole sentence: the firmware bar's details, and the picture's
+    /// line while the show has stopped.
     pub sentence: String,
     /// The picture slot's light; `None` while the show runs.
     pub light: Option<UpdateLight>,
-    /// The header chip's word.
+    /// The short word for the update's state: the editor's session
+    /// popover reads it (`update_session_words`).
     pub chip: String,
     /// The version the header's second identity row names.
     pub version: UpdateVersionDisplay,
     /// The bar, while an update runs or is about to.
     pub progress: Option<UpdateProgress>,
+    /// The standing these words were read from: the board card's firmware
+    /// bar matches its rows on it (which needs-you row, a play-only
+    /// update).
+    pub standing: UpdateStanding,
 }
 
 /// The tone the popover's run word reads in.
@@ -104,6 +112,7 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
         chip: chip.to_string(),
         version: version.clone(),
         progress: None,
+        standing: standing.clone(),
     };
     let progress = |percent, other_device| {
         Some(UpdateProgress {
@@ -137,7 +146,7 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             progress: progress(*percent, false),
             ..words(
                 Progress,
-                format!("Backing up current firmware…{}", pct(*percent)),
+                format!("Backing up{}", step_pct(*percent)),
                 running_sentence(
                     "Backing up current firmware…",
                     *percent,
@@ -153,50 +162,46 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             progress: progress(*percent, false),
             ..words(
                 Progress,
-                format!("Updating over {}…{}", link.word(), pct(*percent)),
-                running_sentence(
-                    &format!("Updating to {} over {}…", to.short(), link.word()),
-                    *percent,
-                    "Keep the board powered.",
+                format!("Updating · 1 of 2{}", step_pct(*percent)),
+                format!(
+                    "Updating to {} over {}: the new firmware first. Keep the board powered.",
+                    to.short(),
+                    link.word()
                 ),
                 yellow,
                 "Updating",
             )
         },
         UpdateStanding::Finishing {
-            to,
-            percent,
-            resumed,
-            ..
+            percent, resumed, ..
         } => UiDeviceUpdate {
             progress: progress(*percent, false),
-            ..words(
-                Progress,
-                format!("Finishing the update…{}", pct(*percent)),
-                // "Interrupted" only when this Studio found the update
-                // half-way; the last phase of an update it ran is ordinary.
-                if *resumed {
-                    running_sentence(
-                        &format!("Finishing the update to {}…", to.short()),
-                        *percent,
-                        "It was interrupted; this Studio is completing it.",
-                    )
-                } else {
-                    running_sentence(
-                        "Installing the rest of the firmware…",
-                        *percent,
-                        "Keep the board powered.",
-                    )
-                },
-                yellow,
-                "Updating",
-            )
+            // The piece is named either way; "Resuming" and "interrupted"
+            // only when this Studio found the update half-way — the last
+            // piece of an update it ran is ordinary.
+            ..match *resumed {
+                true => words(
+                    Progress,
+                    format!("Resuming · 2 of 2{}", step_pct(*percent)),
+                    "It was interrupted; this Studio is installing the rest of the firmware."
+                        .to_string(),
+                    yellow,
+                    "Updating",
+                ),
+                false => words(
+                    Progress,
+                    format!("Updating · 2 of 2{}", step_pct(*percent)),
+                    "Installing the rest of the firmware. Keep the board powered.".to_string(),
+                    yellow,
+                    "Updating",
+                ),
+            }
         },
         UpdateStanding::Restoring { board, percent, .. } => UiDeviceUpdate {
             progress: progress(*percent, false),
             ..words(
                 Progress,
-                format!("Restoring firmware…{}", pct(*percent)),
+                format!("Restoring{}", step_pct(*percent)),
                 running_sentence(
                     &format!("Restoring firmware {}…", board.short()),
                     *percent,
@@ -215,7 +220,7 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
                 progress: progress(*percent, true),
                 ..words(
                     Progress,
-                    format!("Another device is updating it…{}", pct(*percent)),
+                    format!("Another device is updating it{}", step_pct(*percent)),
                     running_sentence(&head, *percent, "If it stops, this Studio finishes it."),
                     yellow,
                     "Updating",
@@ -230,6 +235,26 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
                  updates without a cable.",
                 link.word()
             ),
+            None,
+            "Ready",
+        ),
+        UpdateStanding::NeedsFilesMoved { link, to, .. } => words(
+            NeedsYou,
+            "Files move to a new filesystem".to_string(),
+            match link {
+                UpdateLink::Usb => format!(
+                    "{} keeps this board's files in a new filesystem. Update moves them there \
+                     over this cable — backed up first, every file kept.",
+                    to.short()
+                ),
+                _ => format!(
+                    "{} keeps this board's files in a new filesystem, and only a USB cable can \
+                     move them. Connect it by USB to update; after that it updates over {} \
+                     again.",
+                    to.short(),
+                    link.word()
+                ),
+            },
             None,
             "Ready",
         ),
@@ -329,7 +354,8 @@ pub fn update_session_words(
     let board = standing.board()?;
     let run_word = match words.kind {
         UpdateRowKind::Progress => Some(UpdateRunWord {
-            text: match words.progress.and_then(|p| p.percent) {
+            // The card's one number for the whole update.
+            text: match standing.whole_percent() {
                 Some(percent) => format!("{} · {percent}%", words.chip),
                 None => words.chip.clone(),
             },
@@ -405,9 +431,9 @@ fn available(board: &UpdateVersion, to: &UpdateVersion) -> (String, String) {
     }
 }
 
-/// ` 40%`, or nothing before the first report.
-fn pct(percent: Option<u8>) -> String {
-    percent.map(|p| format!(" {p}%")).unwrap_or_default()
+/// ` · 40%`, or nothing before the first report.
+fn step_pct(percent: Option<u8>) -> String {
+    percent.map(|p| format!(" · {p}%")).unwrap_or_default()
 }
 
 /// A progress sentence: `head` (ending in `…`), the percent, then `tail`.
@@ -466,13 +492,13 @@ mod tests {
     fn up_to_date() {
         let words = says(
             &UpdateStanding::UpToDate { version: y() },
-            "2026.10.05-2 · up to date",
-            "2026.10.05-2, the same as this Studio.",
+            "v2026.10.05-2 · up to date",
+            "v2026.10.05-2, the same as this Studio.",
             None,
             "Ready",
         );
         assert_eq!(words.kind, UpdateRowKind::Information);
-        assert_eq!(words.version.text, "2026.10.05-2");
+        assert_eq!(words.version.text, "v2026.10.05-2");
         assert_eq!(words.version.commit.as_deref(), Some("626a1b8"));
     }
 
@@ -483,13 +509,13 @@ mod tests {
                 board: x(),
                 to: y(),
             },
-            "2026.10.03-1 → 2026.10.05-2 available",
-            "Update available: 2026.10.03-1 → 2026.10.05-2.",
+            "v2026.10.03-1 → v2026.10.05-2 available",
+            "Update available: v2026.10.03-1 → v2026.10.05-2.",
             None,
             "Ready",
         );
         assert_eq!(
-            words.version.text, "2026.10.03-1",
+            words.version.text, "v2026.10.03-1",
             "the header names the board's"
         );
         // A dev board.
@@ -498,8 +524,8 @@ mod tests {
                 board: UpdateVersion::new("5eb70a7c2"),
                 to: y(),
             },
-            "dev 5eb70a7 · Studio has 2026.10.05-2",
-            "This board runs dev build 5eb70a7; this Studio has 2026.10.05-2.",
+            "dev 5eb70a7 · Studio has v2026.10.05-2",
+            "This board runs dev build 5eb70a7; this Studio has v2026.10.05-2.",
             None,
             "Ready",
         );
@@ -513,7 +539,7 @@ mod tests {
                 to: y(),
                 percent: Some(18),
             },
-            "Backing up current firmware… 18%",
+            "Backing up · 18%",
             "Backing up current firmware… 18%. The show keeps running meanwhile.",
             None,
             "Backing up",
@@ -541,8 +567,11 @@ mod tests {
                     link,
                     percent: Some(40),
                 },
-                &format!("Updating over {word}… 40%"),
-                &format!("Updating to 2026.10.05-2 over {word}… 40%. Keep the board powered."),
+                "Updating · 1 of 2 · 40%",
+                &format!(
+                    "Updating to v2026.10.05-2 over {word}: the new firmware first. Keep the board \
+                     powered."
+                ),
                 Some(UpdateLight::DarkYellow),
                 "Updating",
             );
@@ -559,8 +588,8 @@ mod tests {
                 running: true,
                 resumed: false,
             },
-            "Finishing the update… 70%",
-            "Installing the rest of the firmware… 70%. Keep the board powered.",
+            "Updating · 2 of 2 · 70%",
+            "Installing the rest of the firmware. Keep the board powered.",
             Some(UpdateLight::DarkYellow),
             "Updating",
         );
@@ -578,9 +607,8 @@ mod tests {
                     running,
                     resumed: true,
                 },
-                "Finishing the update… 70%",
-                "Finishing the update to 2026.10.05-2… 70%. It was interrupted; this Studio is \
-                 completing it.",
+                "Resuming · 2 of 2 · 70%",
+                "It was interrupted; this Studio is installing the rest of the firmware.",
                 Some(UpdateLight::DarkYellow),
                 "Updating",
             );
@@ -595,8 +623,8 @@ mod tests {
                 percent: Some(35),
                 running: true,
             },
-            "Restoring firmware… 35%",
-            "Restoring firmware 2026.10.03-1… 35%. Part of it was missing; this Studio had a copy.",
+            "Restoring · 35%",
+            "Restoring firmware v2026.10.03-1… 35%. Part of it was missing; this Studio had a copy.",
             Some(UpdateLight::DarkYellow),
             "Restoring firmware",
         );
@@ -607,8 +635,8 @@ mod tests {
                 percent: None,
                 running: false,
             },
-            "Restoring firmware…",
-            "Restoring firmware 2026.10.03-1… Part of it was missing; this Studio had a copy.",
+            "Restoring",
+            "Restoring firmware v2026.10.03-1… Part of it was missing; this Studio had a copy.",
             Some(UpdateLight::DarkYellow),
             "Restoring firmware",
         );
@@ -622,8 +650,8 @@ mod tests {
                 to: Some(y()),
                 percent: Some(40),
             },
-            "Another device is updating it… 40%",
-            "Another device is updating this board to 2026.10.05-2… 40%. If it stops, this \
+            "Another device is updating it · 40%",
+            "Another device is updating this board to v2026.10.05-2… 40%. If it stops, this \
              Studio finishes it.",
             Some(UpdateLight::DarkYellow),
             "Updating",
@@ -652,8 +680,8 @@ mod tests {
     fn keeps_crashing() {
         says(
             &UpdateStanding::KeepsCrashing { board: y() },
-            "2026.10.05-2 keeps crashing",
-            "2026.10.05-2 keeps crashing on this board, so it stopped trying. Reinstall it, or \
+            "v2026.10.05-2 keeps crashing",
+            "v2026.10.05-2 keeps crashing on this board, so it stopped trying. Reinstall it, or \
              install another version.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
@@ -665,9 +693,9 @@ mod tests {
         let v = UpdateVersion::new("2026.09.28-4");
         says(
             &UpdateStanding::CantGetVersion { board: v, own: y() },
-            "Needs 2026.09.28-4, which Studio can't get",
-            "This board needs 2026.09.28-4 to start, and this Studio can't get it. Connect to the \
-             internet, or install 2026.10.05-2 instead.",
+            "Needs v2026.09.28-4, which Studio can't get",
+            "This board needs v2026.09.28-4 to start, and this Studio can't get it. Connect to the \
+             internet, or install v2026.10.05-2 instead.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
         );
@@ -678,7 +706,7 @@ mod tests {
             },
             "Needs dev 5eb70a7, which Studio can't get",
             "This board needs dev build 5eb70a7 to start, and this Studio can't get it. Connect \
-             to the internet, or install 2026.10.05-2 instead.",
+             to the internet, or install v2026.10.05-2 instead.",
             Some(UpdateLight::DarkRed),
             "Needs firmware",
         );
@@ -691,8 +719,8 @@ mod tests {
                 board: x(),
                 refused: y(),
             },
-            "Back on 2026.10.03-1 · the update didn't start",
-            "The update to 2026.10.05-2 didn't start, so the board went back to 2026.10.03-1.",
+            "Back on v2026.10.03-1 · the update didn't start",
+            "The update to v2026.10.05-2 didn't start, so the board went back to v2026.10.03-1.",
             None,
             "Ready",
         );
@@ -705,8 +733,8 @@ mod tests {
                 board: UpdateVersion::new("2026.10.07-4"),
                 own: y(),
             },
-            "2026.10.07-4 · newer than this Studio",
-            "2026.10.07-4 is newer than this Studio (2026.10.05-2). Reload Studio to catch up.",
+            "v2026.10.07-4 · newer than this Studio",
+            "v2026.10.07-4 is newer than this Studio (v2026.10.05-2). Reload Studio to catch up.",
             None,
             "Ready",
         );
@@ -719,8 +747,8 @@ mod tests {
                 board: x(),
                 to: y(),
             },
-            "2026.10.03-1 → 2026.10.05-2 available",
-            "Update available: 2026.10.03-1 → 2026.10.05-2. Installing it needs the author \
+            "v2026.10.03-1 → v2026.10.05-2 available",
+            "Update available: v2026.10.03-1 → v2026.10.05-2. Installing it needs the author \
              password.",
             None,
             "Ready",
@@ -746,32 +774,32 @@ mod tests {
             (
                 "2026.10.05-2",
                 "2026.10.05-2",
-                "2026.10.05-2",
-                "2026.10.05-2 · up to date",
+                "v2026.10.05-2",
+                "v2026.10.05-2 · up to date",
             ),
             (
                 "2026.10.03-1",
                 "2026.10.05-2",
-                "2026.10.03-1",
-                "2026.10.03-1 → 2026.10.05-2 available",
+                "v2026.10.03-1",
+                "v2026.10.03-1 → v2026.10.05-2 available",
             ),
             (
                 "2026.10.07-4",
                 "2026.10.05-2",
-                "2026.10.07-4",
-                "2026.10.07-4 · newer than this Studio",
+                "v2026.10.07-4",
+                "v2026.10.07-4 · newer than this Studio",
             ),
             (
                 "5eb70a7c2",
                 "2026.10.05-2",
                 "dev 5eb70a7",
-                "dev 5eb70a7 · Studio has 2026.10.05-2",
+                "dev 5eb70a7 · Studio has v2026.10.05-2",
             ),
             (
                 "5eb70a7-dirty-142233PT",
                 "2026.10.05-2",
                 "dev 5eb70a7 (modified)",
-                "dev 5eb70a7 (modified) · Studio has 2026.10.05-2",
+                "dev 5eb70a7 (modified) · Studio has v2026.10.05-2",
             ),
             (
                 "5eb70a7c2",
@@ -788,14 +816,14 @@ mod tests {
             (
                 "2026.10.03-1",
                 "626a1b851",
-                "2026.10.03-1",
-                "2026.10.03-1 · this Studio is dev 626a1b8",
+                "v2026.10.03-1",
+                "v2026.10.03-1 · this Studio is dev 626a1b8",
             ),
             (
                 "2026.12.31-146",
                 "2026.12.31-147",
-                "2026.12.31-146",
-                "2026.12.31-146 → 2026.12.31-147 available",
+                "v2026.12.31-146",
+                "v2026.12.31-146 → v2026.12.31-147 available",
             ),
         ];
         let view = ready_view();
@@ -825,7 +853,7 @@ mod tests {
         };
         let up = session(&UpdateStanding::UpToDate { version: y() });
         assert_eq!(up.run_word, None, "the popover's own \"running\" stands");
-        assert_eq!(up.stat_line, "esp32c6 · 2026.10.05-2 · 60:55:f9:0a:0b:0c");
+        assert_eq!(up.stat_line, "esp32c6 · v2026.10.05-2 · 60:55:f9:0a:0b:0c");
 
         let available = session(&UpdateStanding::Available {
             board: x(),
@@ -840,7 +868,7 @@ mod tests {
         );
         assert_eq!(
             available.stat_line,
-            "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.03-1 → v2026.10.05-2 · 60:55:f9:0a:0b:0c"
         );
 
         let updating = session(&UpdateStanding::Updating {
@@ -852,13 +880,13 @@ mod tests {
         assert_eq!(
             updating.run_word,
             Some(UpdateRunWord {
-                text: "Updating · 40%".to_string(),
+                text: "Updating · 20%".to_string(),
                 tone: UpdateRunTone::Working
             })
         );
         assert_eq!(
             updating.stat_line,
-            "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.03-1 → v2026.10.05-2 · 60:55:f9:0a:0b:0c"
         );
 
         let crashing = session(&UpdateStanding::KeepsCrashing { board: y() });
@@ -871,7 +899,7 @@ mod tests {
         );
         assert_eq!(
             crashing.stat_line,
-            "esp32c6 · 2026.10.05-2 keeps crashing · 60:55:f9:0a:0b:0c"
+            "esp32c6 · v2026.10.05-2 keeps crashing · 60:55:f9:0a:0b:0c"
         );
     }
 
@@ -900,7 +928,60 @@ mod tests {
         let standing = update_standing(&inputs(&running, Some(&facts), Some(&y)));
         assert_eq!(
             update_words(&standing).unwrap().line,
-            "Updating over USB… 40%"
+            "Updating · 1 of 2 · 40%"
         );
+    }
+
+    /// The copy pass (DC23): an update this Studio found half-way names the
+    /// piece it is on, and says it is resuming — in the bar's words, not
+    /// only the sentence.
+    #[test]
+    fn a_resumed_update_names_the_piece_it_is_on() {
+        let words = update_words(&UpdateStanding::Finishing {
+            board: x(),
+            to: y(),
+            percent: Some(70),
+            running: true,
+            resumed: true,
+        })
+        .expect("words");
+        assert_eq!(words.line, "Resuming · 2 of 2 · 70%");
+        assert!(words.sentence.contains("interrupted"));
+        // Before the driver reports a percent, the piece is still named.
+        let waiting = update_words(&UpdateStanding::Finishing {
+            board: x(),
+            to: y(),
+            percent: None,
+            running: false,
+            resumed: true,
+        })
+        .expect("words");
+        assert_eq!(waiting.line, "Resuming · 2 of 2");
+    }
+
+    /// An update this Studio runs counts its two pieces, and the link the
+    /// bar's words used to carry is in the sentence now.
+    #[test]
+    fn a_fresh_update_counts_its_two_pieces() {
+        let first = update_words(&UpdateStanding::Updating {
+            board: x(),
+            to: y(),
+            link: UpdateLink::Bluetooth,
+            percent: Some(40),
+        })
+        .expect("words");
+        assert_eq!(first.line, "Updating · 1 of 2 · 40%");
+        assert!(!first.line.contains("Bluetooth"));
+        assert!(first.sentence.contains("over Bluetooth"));
+        let second = update_words(&UpdateStanding::Finishing {
+            board: x(),
+            to: y(),
+            percent: None,
+            running: true,
+            resumed: false,
+        })
+        .expect("words");
+        assert_eq!(second.line, "Updating · 2 of 2");
+        assert!(!second.sentence.contains("interrupted"));
     }
 }

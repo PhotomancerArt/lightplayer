@@ -12,9 +12,13 @@ default = ["soft-sha"]
 # `SoftSha256`: the `sha2` crate behind the hasher seam (host, tests). The
 # firmware passes the C6's hardware SHA instead and leaves this off.
 soft-sha = ["dep:sha2"]
-# `host_deflate_chunks`: raw deflate (miniz_oxide) producing
+# `plan_deflated_chunks`: raw deflate (miniz_oxide) cut into chunks that each
+# fit one record — a client's side of a deflated wire push (`lpa-client`,
+# native and wasm). No hasher. Never on a device.
+deflate-plan = ["dep:miniz_oxide"]
+# `host_deflate_chunks`: the plan with each chunk's id, producing
 # `put_chunk_deflated` input — the host's side of a push. Never on a device.
-host-deflate = ["dep:miniz_oxide", "soft-sha"]
+host-deflate = ["deflate-plan", "soft-sha"]
 # `LpFsTree`: `lpfs::LpFs` over the store.
 lpfs = ["dep:lpfs"]
 # `impl Flash for lp_nor_sim::NorFlashSim`.
@@ -22,11 +26,19 @@ nor-sim = ["dep:lp-nor-sim"]
 # `TreeStore::stats`: counters and RAM-peak accounting (tests, the bench).
 # Off in firmware: ~0.7 KB of RV32 code for numbers nothing on a device reads.
 stats = []
+# Test-only mutation switches (`mutants::set_mutant`): each breaks one
+# guarantee on purpose, for `lp-store-bench mutants`. Never in a product build.
+mutants = []
+# `StoreImage`: the read-only inspector over a raw image of the partition
+# (`lp-cli hardware tree inspect|check|extract`). Host tooling; never on a
+# device. Reports derive `serde::Serialize` for `--json`.
+inspect = ["dep:serde"]
 
 [dependencies]
 lp-crc32 = { path = "../lp-crc32" }
 lp-deflate = { path = "../lp-deflate" }
 sha2 = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"], optional = true }
 lpfs = { path = "../lpfs", optional = true }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
@@ -34,7 +46,7 @@ lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
 [dev-dependencies]
 # The crate's own optional parts, on for its tests (the LpFs conformance
 # test, the host deflater, the stats the RAM and sweep tests read).
-lp-tree-store = { path = ".", features = ["lpfs", "host-deflate", "nor-sim", "stats"] }
+lp-tree-store = { path = ".", features = ["lpfs", "host-deflate", "nor-sim", "stats", "inspect"] }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 

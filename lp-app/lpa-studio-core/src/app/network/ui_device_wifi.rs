@@ -119,14 +119,6 @@ impl UiDeviceWifi {
         }
     }
 
-    /// The connected network's signal, for the card row's bars.
-    pub fn row_rssi(&self) -> Option<i8> {
-        match self.status.as_ref().map(|status| &status.station) {
-            Some(StationState::Connected { rssi, .. }) => Some(*rssi),
-            _ => None,
-        }
-    }
-
     /// What the popover says while there is no status: [`READING`] or
     /// [`NEEDS_AUTHOR`].
     pub fn waiting_line(&self) -> Option<&'static str> {

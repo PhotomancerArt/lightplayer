@@ -8,11 +8,18 @@
 // write datagrams translated to and from the board's stream framing):
 //
 //     add over Bluetooth → identify (flash disabled, with its reason)
-//       → clear + push a project over Bluetooth → the editor (authoring,
-//       counted for comparison) → out of range under the editor
-//       → Play → idle → turn a knob
+//       → clear + push a project over Bluetooth
+//       → Connect on the card (its panel in its bars' place, a control
+//       turned) → Done → the card's picture,
+//       at the Bluetooth pace → the editor (authoring,
+//       counted for comparison; the control turned on the card reads held
+//       in this new session — the board's word) → out of range under the
+//       editor → Play → idle → turn a knob
 //       → the board goes away and comes back → the radio blips
 //       → Bluefy's phantom drop → out of range, the link up and quiet
+//
+// The card steps prove a Bluetooth board connects and plays on its card,
+// NOT the play-only tier: `?ble=emu` answers at the edit tier.
 //
 // and it states the one number M5 owes: the bytes per second an idle,
 // connected Studio in Play mode puts on a `ble:` link, both directions,
@@ -54,7 +61,7 @@ import path from "node:path";
 import process from "node:process";
 import { execSync } from "node:child_process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver } from "./studio-driver.mjs";
 import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -65,6 +72,8 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 const IDLE_WINDOW_MS = Number(process.env.BLE_IDLE_WINDOW_MS ?? 75_000);
 /// The editor's (authoring) comparison window: the same count, shorter.
 const EDITOR_WINDOW_MS = Number(process.env.BLE_EDITOR_WINDOW_MS ?? 20_000);
+/// The card's window: its picture watched on the home page.
+const CARD_WINDOW_MS = Number(process.env.BLE_CARD_WINDOW_MS ?? 20_000);
 const STEP_DEADLINE_MS = 180_000;
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
@@ -227,7 +236,7 @@ async function main() {
     console.log(`  studio is up — page visibility: ${visibility}\n`);
 
     await step("add", "Connect a board via Bluetooth, and pick the board in the pairing chooser", async () => {
-      await driver.clickWhenReady("via Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
       return `paired with ${picked}`;
     });
@@ -235,20 +244,31 @@ async function main() {
     // Over Bluetooth the over-the-air update is not refused (OTA M7 P12);
     // the USB flash and Factory reset still are, and the reason is drawn
     // beside whichever of them the card shows.
-    await step("identify", "the card comes up Ready, the USB-only firmware verbs drawn disabled with their reason", async () => {
-      await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "Ready",
-      });
-      const reason = await driver.evaluate(`${MAIN_TEXT}.includes('Firmware updates need USB')`);
-      if (!reason) throw new Error("the card does not say `Firmware updates need USB`");
-      // The Connections group: over the link it is on, Bluetooth is locked
-      // on and the row says how to turn it off instead.
+    await step("identify", "the card comes up ready, the firmware details saying the USB-only verbs need USB", async () => {
+      // Ready, as core reads it: the card offers the board a project, or the
+      // editor on the one it runs.
+      await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
+      // The firmware details say why the USB-only verbs are refused over
+      // this link.
+      const reason = await driver.detailsFact("firmware", "Over this link", { timeoutMs: STEP_DEADLINE_MS });
+      if (reason !== "Firmware updates need USB") {
+        throw new Error(`the firmware details do not say \`Firmware updates need USB\` (they say ${JSON.stringify(reason)})`);
+      }
+      // The Bluetooth row is the link in use, and over it its switch is
+      // locked on, saying why: it is the link you are on.
+      await driver.waitBar("bluetooth", /^Bluetooth \S+ connected$/, { timeoutMs: STEP_DEADLINE_MS });
+      await driver.openBar("bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const locked = await driver.waitFor(
-        `${MAIN_TEXT}.includes('turn off by USB') && Boolean(document.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled'))`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the Connections group's locked Bluetooth switch" },
+        `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
+                  const panel = card.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
+                  const head = panel?.querySelector('[data-detail-switch="bluetooth"]');
+                  const sw = head?.querySelector('[data-offer-path$="/bluetooth/enabled"] [role="switch"]');
+                  const why = head?.querySelector('[data-detail-switch-refused]')?.textContent || '';
+                  return Boolean(sw) && sw.disabled && sw.getAttribute('aria-checked') === 'true' && why.includes('turned off by USB'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's switch, locked on over Bluetooth, saying why" },
       );
-      if (!locked) throw new Error("the card has no locked Bluetooth switch");
+      await driver.closeDetails();
+      if (!locked) throw new Error("the card's Bluetooth switch is not locked over Bluetooth");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
       );
@@ -259,50 +279,134 @@ async function main() {
       // The packaged image boots with a project on it; clearing it is the
       // other conversation effect (ask → stop → delete), over the link.
       // Ready comes first; what it is running arrives on its heartbeat.
-      const face = await driver.waitFor(
-        `(() => { const t = ${MAIN_TEXT};
-                  return t.includes('Remove project') ? 'running' : t.includes('Nothing loaded') ? 'empty' : false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board to say what it runs" },
-      );
+      const face = await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") return "nothing was loaded";
-      // An inline two-click confirmation: the first click arms the button,
-      // the second dispatches (both labels live in the one button).
-      await driver.clickWhenReady("Remove project", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.click("Remove project");
-      await driver.waitFor(`${MAIN_TEXT}.includes('to choose from')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the empty face",
-      });
+      // Remove project, in the project details' danger zone: an inline
+      // two-click confirmation — the first click arms the button, the second
+      // dispatches (both labels live in the one button).
+      await driver.pressOffer("remove-project", { bar: "project", confirm: true, timeoutMs: STEP_DEADLINE_MS });
+      await driver.closeDetails();
+      await driver.waitFor(
+        `(() => { const card = document.querySelector('[data-board-card]');
+                  return Boolean(card?.querySelector('[data-name-bar] [data-offer-path$="/push"]')); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the empty board (`push`, Add a project, as the primary)" },
+      );
       return "the board reported nothing loaded";
     });
 
     await step("push", `push ${PROJECT} over Bluetooth`, async () => {
       const before = await stats();
-      await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-        what: "the project popover",
-      });
-      await driver.click(PROJECT, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-      await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
-      // The board's own words, streamed off the Bluetooth link.
-      await driver.waitFor(`${MAIN_TEXT}.includes('Project loaded')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the board to say `Project loaded`",
-      });
+      // `push`: the empty board's "Add a project", drawn as the project pick.
+      await driver.pressOffer("push", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(`Boolean(${PANEL})`, { what: "the project popover" });
+      await driver.click(PROJECT, { scope: PANEL });
+      await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_DEADLINE_MS });
+      // The board's own words, streamed off the Bluetooth link, in its
+      // terminal.
+      await driver.boardSaid("Project loaded", { timeoutMs: STEP_DEADLINE_MS });
       const after = await stats();
       return `the board said Project loaded; the push wrote ${after.written - before.written} B in ${after.writes - before.writes} writes`;
     });
 
+    // THE CONNECTED CARD over Bluetooth (roadmap M4): Connect on the card
+    // opens the board's panel there, a control on it is turned, and Done
+    // gives the card its facts back. The write's proof is not here — the
+    // control turns held at once from Studio's own echo — but in the next
+    // session (`editor`), which has no echo.
+    const CARD = `document.querySelector('[data-board-card]')`;
+    /// The control turned on the card, by its identity.
+    let written = null;
+    await step("card-connect", "Connect on the card over Bluetooth: the board's panel in its bars' place; turn its first control", async () => {
+      await driver.pressOffer("connect", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(
+        `location.pathname === '/' && Boolean(${CARD}?.querySelector('[data-board-panel] [data-panel-channel]'))`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel on its card, the page still at `/`" },
+      );
+      const s0 = await stats();
+      written = await driver.evaluate(`(() => {
+        const control = ${CARD}.querySelector('[data-board-panel] [data-panel-channel]');
+        const out = { scope: control.getAttribute('data-panel-scope'), channel: control.getAttribute('data-panel-channel') };
+        const knob = control.querySelector('[role="slider"]');
+        const range = control.querySelector('input[type="range"]');
+        const toggle = control.querySelector('button[role="switch"]');
+        if (knob) {
+          knob.focus();
+          out.how = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
+          knob.dispatchEvent(new KeyboardEvent('keydown', { key: out.how, bubbles: true, cancelable: true }));
+        } else if (range) {
+          const to = Number(range.value) >= Number(range.max) ? range.min : range.max;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(range, to);
+          range.dispatchEvent(new Event('input', { bubbles: true }));
+          out.how = 'to ' + to;
+        } else if (toggle) {
+          toggle.click();
+          out.how = 'flipped';
+        }
+        return out;
+      })()`);
+      if (!written.how) throw new Error(`the card's first control (${written.channel}) has no widget the walk can turn`);
+      await driver.waitFor(
+        `window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}).writes > ${s0.writes}`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
+      );
+      return `the panel on the card; turned ${written.scope} ${written.channel} (${written.how}) over Bluetooth`;
+    });
+
+    await step("card-done", "Done: the session closes and the card shows its facts", async () => {
+      await driver.pressOffer("done", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(
+        `Boolean(${CARD}) && !${CARD}.querySelector('[data-board-panel]') && ${CARD}.querySelectorAll('[data-bar]').length === 8`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's eight rows" },
+      );
+      return "the card's eight rows again";
+    });
+
+    // The card's picture over Bluetooth (2026-10-08): the feed runs at its
+    // gentle pace, and the picture line says how often it moves. The
+    // counts are wire bytes over the emulated board's USB link standing in
+    // for the radio, and the read rate is the page's pace against an
+    // emulated clock: neither is a Bluetooth number.
+    await step("card", `the card shows the board's picture over Bluetooth, then ${CARD_WINDOW_MS / 1000} s watched`, async () => {
+      // The board card says how its picture moves in the status corner's
+      // details: the "Picture" fact names the Bluetooth pace (the frame
+      // rate and the age are facts of their own).
+      await driver.openCorner({ timeoutMs: STEP_DEADLINE_MS });
+      const pill = await driver.waitFor(
+        `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
+                  const dt = [...card.querySelectorAll('[data-board-corner] [id^="ux-popover-panel"] dt')]
+                    .find((el) => (el.textContent || '').trim().toLowerCase() === 'picture');
+                  const line = (dt?.nextElementSibling?.textContent || '').trim();
+                  return line.includes('over Bluetooth') ? line : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's picture fact, live at the Bluetooth pace" },
+      );
+      await driver.closeDetails();
+      report.card = await measure(CARD_WINDOW_MS);
+      if (!report.card.previewChangedWhileIdle) throw new Error("the card's picture did not move while watched");
+      const reads = report.card.studioRequestsByKind.projectRead ?? 0;
+      if (reads < 2) throw new Error(`the card read ${reads} time(s) in ${report.card.seconds} s`);
+      return `pill "${pill}"; ${JSON.stringify(report.card)}`;
+    });
+
     await step("editor", `open the board in the editor, then ${EDITOR_WINDOW_MS / 1000} s untouched (authoring, for comparison)`, async () => {
-      await driver.clickWhenReady("Open in editor", { timeoutMs: STEP_DEADLINE_MS });
+      // Edit, the project bar's action on a watched board (`edit`): it
+      // connects first, then shows the editor.
+      await driver.pressOffer("edit", { timeoutMs: STEP_DEADLINE_MS });
       // The project has to arrive before Play can be asked for: Play is a
       // view of the lens's project, and the toggle is inert until it is.
       await driver.waitFor(
         `!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the project to open on the board" },
       );
+      // THE BOARD'S WORD for the write on the card: this session is new and
+      // has no echo of it, so the control reads held only if the board kept
+      // it.
+      const selector = `[data-panel-scope=${JSON.stringify(written.scope)}][data-panel-channel=${JSON.stringify(written.channel)}]`;
+      await driver.waitFor(
+        `[...document.querySelectorAll(${JSON.stringify(selector)})].some((el) => el.getAttribute('data-panel-state') === 'engaged')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: `${written.channel} to read held in the new session (the board's own read)` },
+      );
       report.editorIdle = await measure(EDITOR_WINDOW_MS);
-      return JSON.stringify(report.editorIdle);
+      return `${written.channel} held (the board's read); ${JSON.stringify(report.editorIdle)}`;
     });
 
     const turnKnob = async () => {
@@ -320,9 +424,12 @@ async function main() {
         `(() => { const s = window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}); return s.writes > ${s0.writes}; })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
       );
+      // The knob takes the turn at once (its gesture hold and Studio's
+      // echo), so this is the page answering, not the board's word; the
+      // write going out is the stats line above (see the `knob` step).
       await driver.waitFor(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "the knob to take the turn" },
       );
       return `${before} → ${await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
@@ -434,7 +541,7 @@ async function main() {
     );
 
     await step("play", "switch the editor to Play", async () => {
-      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.evaluate(`document.querySelector('a[data-play-toggle="enter"]').click()`);
       await driver.waitFor(`location.pathname.endsWith('/play')`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Play route",
@@ -451,7 +558,7 @@ async function main() {
       return JSON.stringify(report.idle);
     });
 
-    await step("knob", "turn the first knob to its end; the board takes it and says so", async () => {
+    await step("knob", "turn the first knob to its end: the write goes out over Bluetooth and the reads after it come back", async () => {
       const s0 = await stats();
       await driver.evaluate(`window.__lpBleCensus = {}`);
       const before = await driver.evaluate(
@@ -468,11 +575,15 @@ async function main() {
         `(() => { const s = window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}); return s.writes > ${s0.writes}; })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
       );
-      // The knob shows what the BOARD holds: its value moves only when a
-      // read after the write brings the board's panel state back.
+      // The knob follows the hand: its value moves at once from the
+      // widget's own gesture hold and Studio's echo of the write, before any
+      // read (checked 2026-10-10, `KnobField`'s `hold.write`, and
+      // `note_panel_write`). So this is the knob taking the turn, not the
+      // board's word; that is read in a fresh session (`card-connect`'s
+      // write, read held in `editor`).
       await driver.waitFor(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "the knob to take the turn" },
       );
       const after = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
@@ -550,6 +661,13 @@ async function main() {
 
   console.log("\n=== the Bluetooth walk, step by step");
   for (const s of report.steps) console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${path.basename(s.shot)}`);
+  if (report.card) {
+    console.log(
+      `\n  the card over ble: ${report.card.studioRequestsByKind.projectRead ?? 0} reads in ${report.card.seconds} s; ` +
+        `Studio→board ${report.card.studioToBoardBytesPerSecond} B/s, ` +
+        `board→Studio ${report.card.boardToStudioBytesPerSecond} B/s (emulated link, not air)`,
+    );
+  }
   if (report.editorIdle) {
     console.log(
       `\n  editor over ble (authoring): Studio→board ${report.editorIdle.studioToBoardBytesPerSecond} B/s, ` +
@@ -584,7 +702,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → a quiet drop under the editor and four on Play ridden out, with no board.");
+  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Connect on the card → Done → the card's picture → the editor (the card's write held) → Play → idle → knob → a quiet drop under the editor and four on Play ridden out, with no board.");
 }
 
 await main();

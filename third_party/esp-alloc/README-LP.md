@@ -28,12 +28,32 @@ would have opened: `stats()` writes `region_stats[id]` for every occupied slot
 of `heap`, so a longer `heap` with a 3-slot `region_stats` would panic on the
 fourth region's stats — not at registration, but on the first heartbeat.
 
-Nothing else is changed: no allocator swap (upstream's LLFF stays), no stats
-semantics, no features.
+Nothing else is changed but the second diff below: no allocator swap
+(upstream's LLFF stays), no stats semantics, no features.
+
+## The second diff: a heap's top is exclusive when a free finds its region
+
+`EspHeap::dealloc` offers a pointer to each region in registration order, and
+upstream's LLFF region took it when `bottom <= ptr && top >= ptr` — `top`
+**inclusive**. No block of a region starts at that region's top; the first
+block of a region whose span begins exactly there does. So when two regions
+are address-adjacent and the lower one was registered first, freeing the
+upper region's first block hands it to the lower region's hole list: a hole
+past the lower region's end, which the lower region then allocates from,
+over the upper region's own hole headers. The C6's E4 layout (RAM research,
+2026-10-09: the main region ending at `0x4086B910` where the Rust-only tail
+begins) hit it on the emulator within a minute — `Freed node (…) aliases
+existing hole (…)! Bad free?` — after an 11-byte block was handed out at
+`0x4086B90C`, straddling the two. Today's shipped layouts have no such pair
+(the C6's radio region ends where its main region begins, but the main region
+is registered first and owns that address by its `bottom`).
+
+The fix is one comparison, `ptr < top`, the same exclusive end the TLSF
+region in `src/heap/tlsf.rs` already uses (`pool_end > addr`).
 
 ## Re-syncing with upstream
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig` (mirroring
-`third_party/esp-storage`), then re-apply the cap. `grep -n '; 3\]'
+`third_party/esp-storage`), then re-apply the cap and the exclusive top. `grep -n '; 3\]'
 src/lib.rs` finds every place upstream restates it.

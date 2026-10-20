@@ -10,7 +10,7 @@ use crate::OutputError;
 use crate::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, HwResource,
-    Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    Ws281xConfig, Ws281xDriver, Ws281xOutput, preferred_endpoint,
 };
 
 /// Manifest-backed virtual WS281x driver for tests and emulation.
@@ -114,6 +114,37 @@ impl VirtualWs281xDriver {
         timing.clone()
     }
 
+    /// Every WS281x endpoint, built one at a time as the caller asks for it.
+    ///
+    /// The shared timing verdict is computed once, up front, as it always was.
+    fn endpoint_stream(&self) -> impl Iterator<Item = HwEndpoint> + '_ {
+        // A board with no timing resource offers no endpoints at all.
+        let offered = !self.timing_addresses.is_empty();
+        let timing = if offered {
+            self.timing_status()
+        } else {
+            HwEndpointStatus::Available
+        };
+        self.registry
+            .manifest()
+            .resources()
+            .iter()
+            .filter(move |resource| offered && resource.supports(HwCapability::GpioOutput))
+            .map(move |resource| {
+                let address = resource.address().clone();
+                let spec = ws281x_local_spec(resource.display_label());
+                HwEndpoint::new(
+                    self.endpoint_id(&spec),
+                    spec,
+                    HwEndpointKind::Ws281x,
+                    self.driver_id(),
+                    address,
+                    resource.display_label(),
+                    self.endpoint_status(resource, &timing),
+                )
+            })
+    }
+
     /// The GPIO an endpoint id names, without building the endpoint list.
     ///
     /// Every entry in that list carries a freshly computed status — several
@@ -156,29 +187,11 @@ impl HwDriver for VirtualWs281xDriver {
 
 impl Ws281xDriver for VirtualWs281xDriver {
     fn endpoints(&self) -> Vec<HwEndpoint> {
-        let mut endpoints = Vec::new();
-        if self.timing_addresses.is_empty() {
-            return endpoints;
-        }
+        self.endpoint_stream().collect()
+    }
 
-        let timing = self.timing_status();
-        for resource in self.registry.manifest().resources() {
-            if !resource.supports(HwCapability::GpioOutput) {
-                continue;
-            }
-            let address = resource.address().clone();
-            let spec = ws281x_local_spec(resource.display_label());
-            endpoints.push(HwEndpoint::new(
-                self.endpoint_id(&spec),
-                spec,
-                HwEndpointKind::Ws281x,
-                self.driver_id(),
-                address,
-                resource.display_label(),
-                self.endpoint_status(resource, &timing),
-            ));
-        }
-        endpoints
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        preferred_endpoint(self.endpoint_stream(), matches)
     }
 
     fn open(

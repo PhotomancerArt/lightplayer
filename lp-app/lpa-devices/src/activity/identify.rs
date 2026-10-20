@@ -36,6 +36,10 @@ use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 
+/// Identify's outcome line when another tab of this browser holds the port
+/// ([`Event::LinkHeld`]).
+pub const HELD_BY_ANOTHER_TAB: &str = "held by another tab";
+
 /// Identify's own state: a cadence and a settle time. Everything it learns
 /// lives in the fold.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -118,7 +122,9 @@ impl IdentifyActivity {
     }
 
     fn settle(&self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
-        let outcome = match ctx.evidence.verdict_if_settled(now) {
+        let verdict = ctx.evidence.verdict_if_settled(now);
+        let light_player = matches!(verdict, Classification::LightPlayer { .. });
+        let outcome = match verdict {
             // A LightPlayer on ANOTHER wire version is still the happy
             // verdict; the outcome line says so in passing, and the fold
             // has already journaled the numbers.
@@ -177,7 +183,26 @@ impl IdentifyActivity {
                 message: "no response from the device".to_string(),
             },
         };
-        ActivityStep::done(outcome)
+        let commands = match light_player {
+            true => self.ask_what_it_runs(ctx).into_iter().collect(),
+            false => Vec::new(),
+        };
+        ActivityStep::Done { outcome, commands }
+    }
+
+    /// A LightPlayer that has not said what it runs is asked, once, as the
+    /// identify ends. Firmware volunteers it in every heartbeat, but an
+    /// embedder that sends none (the browser sim) only ever answers a
+    /// `ListLoadedProjects`, and without one its card would say "not
+    /// known" forever and never offer a project (the board card's feel
+    /// gate, finding 2). The answer is folded like a heartbeat's report.
+    fn ask_what_it_runs(&self, ctx: &ActivityCtx<'_>) -> Option<Command> {
+        let link = ctx.link?;
+        let unsaid = ctx.evidence.loaded_projects().is_none();
+        (unsaid && ctx.evidence.presence.is_open()).then(|| Command::Link {
+            link,
+            command: LinkCommand::SendFrame(ClientFrame::list_loaded(self.next_request_id)),
+        })
     }
 }
 
@@ -227,6 +252,13 @@ impl IdentifyActivity {
     ) -> ActivityStep {
         match event {
             Event::Link { event, .. } => self.handle_link_event(event, ctx),
+            // Another tab holds the port: there is nothing to wait for and
+            // nothing to re-ask. The port was never opened (or the OS refused
+            // it), so there is no port to hand back either. The device does
+            // not retry this ending (see `Device::apply_step`).
+            Event::LinkHeld { .. } => ActivityStep::done(ActivityOutcome::Failed {
+                message: HELD_BY_ANOTHER_TAB.to_string(),
+            }),
             Event::TimerFired { .. } => {
                 if self.winding_down {
                     return ActivityStep::nothing();
@@ -250,6 +282,8 @@ impl IdentifyActivity {
             Event::LinkAttached { .. }
             | Event::LinkDetached { .. }
             | Event::LinkBorrow { .. }
+            | Event::BoardHeld { .. }
+            | Event::LinkFreed { .. }
             | Event::ActivityMarker { .. }
             | Event::IdentityObserved { .. }
             | Event::GrantAnswered { .. } => ActivityStep::nothing(),
@@ -400,6 +434,67 @@ mod tests {
                 ..
             } if summary.contains("dig-uno")
         ));
+    }
+
+    /// An embedder that sends no heartbeat (the browser sim) only says what
+    /// it runs when asked: a LightPlayer whose hello came with nothing said
+    /// about its projects is asked once, as the identify ends. One that
+    /// already said (a heartbeat's report) is not asked again.
+    #[test]
+    fn a_light_player_that_has_not_said_what_it_runs_is_asked_as_identify_ends() {
+        let config = RosterConfig::default();
+        let hello = Event::Link {
+            link: LinkId(1),
+            event: LinkEvent::Frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    ..Default::default()
+                },
+            )),
+        };
+        let asks_what_it_runs = |step: &ActivityStep| match step {
+            ActivityStep::Done { commands, .. } => commands.iter().any(|command| {
+                matches!(
+                    command,
+                    Command::Link {
+                        command: LinkCommand::SendFrame(ClientFrame {
+                            body: crate::wire::ClientFrameBody::ListLoadedProjects,
+                            ..
+                        }),
+                        ..
+                    }
+                )
+            }),
+            ActivityStep::Continue(_) => panic!("the hello settles it: {step:?}"),
+        };
+
+        let mut unsaid = Evidence::default();
+        fold(&mut unsaid, Millis(0), opened(), &config);
+        fold(&mut unsaid, Millis(100), hello.clone(), &config);
+        let mut identify = IdentifyActivity::new(Millis(0), Millis(5_000), 1_000);
+        let step = with_ctx(&unsaid, &config, |ctx| {
+            identify.handle(Millis(100), &Input::Event(hello.clone()), ctx)
+        });
+        assert!(asks_what_it_runs(&step), "{step:?}");
+
+        let mut said = Evidence::default();
+        fold(&mut said, Millis(0), opened(), &config);
+        fold(
+            &mut said,
+            Millis(50),
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::Frame(ServerFrame::loaded_report(0, Vec::new())),
+            },
+            &config,
+        );
+        fold(&mut said, Millis(100), hello.clone(), &config);
+        let mut identify = IdentifyActivity::new(Millis(0), Millis(5_000), 1_000);
+        let step = with_ctx(&said, &config, |ctx| {
+            identify.handle(Millis(100), &Input::Event(hello), ctx)
+        });
+        assert!(!asks_what_it_runs(&step), "it said already: {step:?}");
     }
 
     #[test]

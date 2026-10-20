@@ -288,11 +288,23 @@ impl NorFlashSim {
                 Ok(())
             }
             OpFate::Tear => {
+                let shape = match self.plan.tear.mix(self.tear_mix) {
+                    Some(mix) => match mix.draw_erase_cut(&mut self.tear_rng) {
+                        // The cut landed before the erase started: power is
+                        // gone and the sector is exactly as it was.
+                        None => {
+                            self.stats.erase_cuts_before_start += 1;
+                            return Err(NorError::PowerLost);
+                        }
+                        shape => shape,
+                    },
+                    None => None,
+                };
                 self.stats.torn_erases += 1;
                 if self.plan.tear != TearModel::Clean {
                     self.mark_nonblank(sector as usize);
                 }
-                self.tear_erase(sector as usize);
+                self.tear_erase(sector as usize, shape);
                 Err(NorError::PowerLost)
             }
         }
@@ -382,6 +394,21 @@ impl NorFlashSim {
         self.damage[sector].tainted = true;
         let rng = &mut self.tear_rng;
         let cells = Arc::make_mut(&mut self.sectors[sector]);
+        if let Some(mix) = tear.mix(self.tear_mix) {
+            let ss = self.geom.sector_size as usize;
+            let state = &mut self.damage[sector];
+            let weak = state.weak_mask(ss);
+            calibrated_tear::tear_program(&mix, rng, cells, weak, off, data);
+            // Bits a torn program did clear are solid; the weak bits it left
+            // sit on clears that did not land (cells still 1), so they stay.
+            for i in 0..data.len() {
+                weak[off + i] &= cells[off + i];
+            }
+            if weak.iter().all(|&w| w == 0) {
+                state.weak = None;
+            }
+            return;
+        }
         match tear {
             TearModel::Clean => {}
             TearModel::Calibrated
@@ -389,9 +416,11 @@ impl NorFlashSim {
             | TearModel::CalibratedAllZero
             | TearModel::CalibratedErasing
             | TearModel::CalibratedReadsFfWeak
-            | TearModel::CalibratedReadsFf => {
-                calibrated_tear::tear_program(&self.tear_mix, rng, cells, off, data)
-            }
+            | TearModel::CalibratedReadsFf
+            | TearModel::CalibratedBeforeErase
+            | TearModel::CalibratedMidWord
+            | TearModel::CalibratedZeroingMidWord
+            | TearModel::CalibratedFirstLift => unreachable!("calibrated tears return above"),
             TearModel::BytePrefix => {
                 let n = rng.below(data.len() as u64) as usize;
                 for (i, &d) in data.iter().enumerate().take(n) {
@@ -421,7 +450,7 @@ impl NorFlashSim {
     /// old, `0xFF` and weak; (1) reads erased but carries a sprinkling of weak
     /// bits; (2) erased up to a point, old after it, weak around the edge.
     /// Under [`TearModel::Calibrated`], the shapes `calibrated_tear` draws.
-    fn tear_erase(&mut self, sector: usize) {
+    fn tear_erase(&mut self, sector: usize, calibrated: Option<calibrated_tear::EraseShape>) {
         if self.plan.tear == TearModel::Clean {
             return;
         }
@@ -431,18 +460,12 @@ impl NorFlashSim {
         let state = &mut self.damage[sector];
         state.tainted = true;
         let weak = state.weak_mask(ss);
-        let tear = self.plan.tear;
-        let mix = match tear.forced_erase_shape() {
-            Some(shape) => Some(self.tear_mix.erase_only(shape)),
-            None if tear.is_calibrated() => Some(self.tear_mix),
-            None => None,
-        };
-        let shape = match mix {
+        let shape = match calibrated {
             Some(_) => None,
             None => Some(rng.below(3)),
         };
         match shape {
-            None => calibrated_tear::tear_erase(&mix.unwrap_or_default(), rng, cells, weak),
+            None => calibrated_tear::tear_erase(calibrated.unwrap(), rng, cells, weak),
             Some(0) => {
                 for i in 0..ss {
                     match rng.below(10) {

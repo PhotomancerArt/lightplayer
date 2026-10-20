@@ -127,10 +127,9 @@ fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
     let product = product_of_kind(sections, UiProductKind::Time)?;
     let mut face = crate::UiClockFace::new(product);
     face.transport = clock_transport(sections);
-    if let Some(transport) = face.transport.as_ref() {
-        face.controls = clock_transport_control(sections, transport)
-            .into_iter()
-            .collect();
+    if face.transport.is_some() {
+        face.wires = clock_transport_wires(sections);
+        face.controls = clock_speed_control(sections).into_iter().collect();
     }
     Some(face)
 }
@@ -188,88 +187,59 @@ const TRANSPORT_RATE_ROW: &str = "transport.rate";
 /// See [`TRANSPORT_PLAY_STATE_ROW`].
 const TRANSPORT_SCRUB_ROW: &str = "transport.scrub_offset_seconds";
 
-/// The clock's ONE grouped panel control (P8): the whole tape transport —
-/// fader, run/pause, scrub strip — as a single control on the enclosing
-/// module's panel, derived from the model-declared grouping.
-///
-/// The `transport` record carries `panel = "show"`
-/// ([`lpc_model::CLOCK_TRANSPORT_SHAPE_NAME`]) and its three leaves each
-/// declare a `clock.*` `default_bind`, so the promotion reaches every leaf
-/// endpoint. That is what this arm reads — one match arm on the clock kind,
-/// deliberately, not a shape→widget registry: there is exactly one grouped
-/// widget, and a match that has to be widened is a better signal than a
-/// lookup that silently accepts anything.
-///
-/// Three facts, three different rules (settled 2026-08-07):
-///
-/// - **Rendering is a shape fact.** The faceplate is whole whatever the
-///   wiring says; nothing here subtracts a dimension from it.
-/// - **Membership is a wiring fact.** `None` — no panel presence at all —
-///   unless at least one leaf is panel-public.
-/// - **Dispatch is a per-leaf fact.** Each [`crate::UiPanelWire`] carries
-///   its own target-or-address, so a partially wired transport dispatches
-///   mixed (panel writes on the wired dimensions, slot edits on the rest).
-///
-/// **Anchor** (Q22): the group's identity is the RATE leaf's channel, since
-/// the fader is the control people mean by "the speed"; if rate
-/// specifically is unwired, the next wired sibling in declaration order
-/// (play_state, then scrub) stands in, so the group keeps a stable
-/// `(scope, channel)` to dedup, reset, and read panel state through.
-fn clock_transport_control(
-    sections: &[UiNodeSection],
-    transport: &crate::UiClockTransport,
-) -> Option<UiPanelControl> {
+/// The tape's wiring: one [`crate::UiPanelWire`] per transport dimension,
+/// in anchor order (rate, play_state, scrub), each carrying its own
+/// target-or-address so a gesture on the card's tape dispatches on its own
+/// leaf (`2026-08-07-clock-transport-is-a-panel-instrument.md` §3: dispatch
+/// is a per-leaf fact). A dimension with no panel-public wiring carries no
+/// target, and its gesture falls back to a slot edit.
+fn clock_transport_wires(sections: &[UiNodeSection]) -> Vec<crate::UiPanelWire> {
     use crate::{UiPanelWire, UiPanelWireRole};
 
     let rows = debug_rows(sections);
-    // Anchor order, not declaration order: rate leads (Q22).
-    let dimensions = [
+    [
         (UiPanelWireRole::Rate, TRANSPORT_RATE_ROW),
         (UiPanelWireRole::PlayState, TRANSPORT_PLAY_STATE_ROW),
         (UiPanelWireRole::Scrub, TRANSPORT_SCRUB_ROW),
-    ];
-    let wired: Vec<(UiPanelWire, Option<&UiConfigSlot>)> = dimensions
-        .into_iter()
-        .map(|(role, key)| {
-            let row = rows.iter().copied().find(|row| row.key == key);
-            (
-                UiPanelWire {
-                    role,
-                    address: row.and_then(editable_row_address),
-                    panel_target: row.and_then(public_panel_target),
-                    live_value: row.and_then(bound_live_value),
-                },
-                row,
-            )
-        })
-        .collect();
-    // Membership: zero panel-public leaves means no panel presence. The
-    // card's own tape hero is unaffected — it renders off the transport
-    // block, wired or not.
-    let (anchor, anchor_row) = wired.iter().find(|(wire, _)| wire.panel_target.is_some())?;
+    ]
+    .into_iter()
+    .map(|(role, key)| {
+        let row = rows.iter().copied().find(|row| row.key == key);
+        UiPanelWire {
+            role,
+            address: row.and_then(editable_row_address),
+            panel_target: row.and_then(public_panel_target),
+            live_value: row.and_then(bound_live_value),
+        }
+    })
+    .collect()
+}
 
+/// The clock's panel control: one Speed knob over the transport's RATE
+/// leaf (the card panel pass, 2026-10-19; the clock ADR's 2026-10-19
+/// amendment).
+///
+/// The `transport` record still carries `panel = "show"`
+/// ([`lpc_model::CLOCK_TRANSPORT_SHAPE_NAME`]), and its three leaves still
+/// ride three `clock.*` channels; what reaches a panel is the rate alone,
+/// drawn as a knob ([`UiPanelWidget::Speed`]). Run/pause and scrub stay on
+/// the clock's own card, in the tape.
+///
+/// An ordinary one-channel control: `None` — no panel presence — unless the
+/// rate leaf is panel-public, and then its target, address and live
+/// reading are the rate's own, so the generic panel machinery (dedup,
+/// reset, the Read/Following/Engaged state) reads it like any knob.
+fn clock_speed_control(sections: &[UiNodeSection]) -> Option<UiPanelControl> {
+    let rows = debug_rows(sections);
+    let rate = rows
+        .iter()
+        .copied()
+        .find(|row| row.key == TRANSPORT_RATE_ROW)?;
+    public_panel_target(rate)?;
+    let control = panel_control_from_row(rate, UiPanelWidget::Speed)?;
     Some(UiPanelControl {
-        label: "Time".to_string(),
-        address: anchor.address.clone(),
-        widget: UiPanelWidget::Transport {
-            transport: transport.clone(),
-        },
-        // The group's scalar stand-in is the rate: it is the dimension a
-        // generic reader (the readout, the panel-emit ladder) can say
-        // anything true about. The faceplate shows all three itself.
-        value: UiSlotValue::f32(transport.rate),
-        emit: crate::UiPanelEmit::Value,
-        live_value: anchor.live_value.clone(),
-        live_gradient: None,
-        panel_target: anchor.panel_target.clone(),
-        unit: None,
-        state: anchor_row
-            .map(|row| row.state.clone())
-            .unwrap_or_else(crate::UiSlotFieldState::editable),
-        aspects: anchor_row
-            .map(UiConfigSlot::visible_aspects)
-            .unwrap_or_default(),
-        wires: wired.into_iter().map(|(wire, _)| wire).collect(),
+        label: "Speed".to_string(),
+        ..control
     })
 }
 
@@ -717,7 +687,6 @@ fn phasor_period_control(
         unit: None,
         state: config_row.state.clone(),
         aspects: config_row.visible_aspects(),
-        wires: Vec::new(),
     };
     // The wiring facts live on the binding-derived row keyed by the bare
     // uniform name, exactly as they do for a value uniform's knob.
@@ -810,7 +779,6 @@ fn palette_swatch_control(
         unit: None,
         state: config_row.state.clone(),
         aspects: config_row.visible_aspects(),
-        wires: Vec::new(),
     };
     // The wiring facts live on the binding-derived row keyed by the bare
     // uniform name, exactly as they do for a knob.
@@ -1423,8 +1391,6 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
-        // One row, one channel: only a GROUPED control carries wires.
-        wires: Vec::new(),
     })
 }
 
@@ -2826,7 +2792,7 @@ mod tests {
         assert_eq!(transport.scrub_override, None);
     }
 
-    // -- the grouped Transport control (P8) ---------------------------------
+    // -- the Speed knob on the panel, and the tape's wires -------------------
 
     /// A transport leaf as the default-binding overlay decorates it: a
     /// default-origin bound endpoint carrying the promoted `panel = "show"`
@@ -2859,21 +2825,33 @@ mod tests {
         ]
     }
 
-    fn clock_controls(rows: Vec<UiConfigSlot>) -> Vec<UiPanelControl> {
+    fn clock_face_of(rows: Vec<UiConfigSlot>) -> crate::UiClockFace {
         let sections = clock_sections(rows);
         let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
-        face.controls
+        face
+    }
+
+    /// The channel each of the tape's wires writes, in wire order.
+    fn wire_channels(face: &crate::UiClockFace) -> Vec<Option<&str>> {
+        face.wires
+            .iter()
+            .map(|wire| {
+                wire.panel_target
+                    .as_ref()
+                    .map(|target| target.channel.as_str())
+            })
+            .collect()
     }
 
     /// The default project's shape: all three leaves default-bound and
-    /// promoted by the record's `panel = "show"`. ONE control — the whole
-    /// faceplate — anchored on the rate channel, carrying a wire per
+    /// promoted by the record's `panel = "show"`. The panel gets ONE
+    /// control, the rate's Speed knob; the card's tape keeps a wire per
     /// dimension.
     #[test]
-    fn a_promoted_transport_derives_exactly_one_grouped_control() {
-        let controls = clock_controls(vec![
+    fn a_promoted_transport_puts_one_speed_knob_on_the_panel() {
+        let face = clock_face_of(vec![
             wired_transport_row(
                 "play_state",
                 UiSlotValue::string("playing"),
@@ -2891,33 +2869,27 @@ mod tests {
             ),
         ]);
 
-        assert_eq!(controls.len(), 1, "three channels, ONE control");
-        let control = &controls[0];
-        assert_eq!(control.label, "Time");
-        let UiPanelWidget::Transport { transport } = &control.widget else {
-            panic!("the grouped control wears the Transport widget");
-        };
-        assert_eq!(transport.rate, 2.0, "the faceplate carries the whole block");
-        // Anchor (Q22): the group's identity is the rate leaf's channel.
+        assert_eq!(face.controls.len(), 1, "three channels, ONE control");
+        let speed = &face.controls[0];
+        assert_eq!(speed.label, "Speed");
+        assert_eq!(speed.widget, UiPanelWidget::Speed);
+        assert_eq!(speed.value.kind, UiSlotValueKind::F32(2.0));
         assert_eq!(
-            control
+            speed
                 .panel_target
                 .as_ref()
                 .map(|target| target.channel.as_str()),
-            Some("clock.rate")
+            Some("clock.rate"),
+            "the knob is the rate's own control"
         );
-        // And every dimension carries its own dispatch facts.
-        let channels: Vec<Option<&str>> = control
-            .wires
-            .iter()
-            .map(|wire| {
-                wire.panel_target
-                    .as_ref()
-                    .map(|target| target.channel.as_str())
-            })
-            .collect();
         assert_eq!(
-            channels,
+            speed.address,
+            Some(clock_slot_address("transport.rate")),
+            "its slot-edit fallback is the rate row"
+        );
+        // The tape keeps every dimension, each with its own dispatch facts.
+        assert_eq!(
+            wire_channels(&face),
             vec![
                 Some("clock.rate"),
                 Some("clock.play_state"),
@@ -2925,9 +2897,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            control
-                .wire(crate::UiPanelWireRole::Scrub)
-                .and_then(|wire| wire.address.clone()),
+            face.wires[2].address,
             Some(clock_slot_address("transport.scrub_offset_seconds")),
             "the slot-edit fallback address rides each wire too"
         );
@@ -2935,33 +2905,34 @@ mod tests {
 
     /// Membership is a WIRING fact: a transport nothing has wired has no
     /// panel presence at all. Its card face is untouched — the tape hero
-    /// still renders, it just dispatches slot edits.
+    /// still renders, and its wires dispatch slot edits.
     #[test]
     fn an_unwired_transport_reaches_no_panel() {
-        let sections = clock_sections(vec![
+        let face = clock_face_of(vec![
             transport_row("play_state", UiSlotValue::string("playing")),
             transport_row("rate", UiSlotValue::f32(1.0)),
             transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
         ]);
-        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
-            panic!("expected a clock face");
-        };
 
-        assert!(face.controls.is_empty(), "no wired leaf, no panel control");
+        assert!(face.controls.is_empty(), "no wired rate, no panel control");
         assert!(
             face.transport.is_some(),
             "the card's own tape hero is a shape fact, not a wiring one"
         );
-        assert!(face.transport_wires().is_empty());
+        assert_eq!(wire_channels(&face), vec![None, None, None]);
+        assert!(
+            face.wires.iter().all(|wire| wire.address.is_some()),
+            "every gesture falls back to its own slot: {:?}",
+            face.wires
+        );
     }
 
-    /// PARTIAL wiring: only play_state is public. The faceplate still
-    /// renders whole, the group anchors on the next wired sibling in
-    /// declaration order (Q22 — rate is unwired, so play_state stands in),
-    /// and the unwired dimensions keep their slot-edit addresses.
+    /// Only play_state is public: the panel's one control is the RATE's, so
+    /// nothing reaches the panel; the tape writes play_state's channel and
+    /// edits the rate's slot.
     #[test]
-    fn a_partly_wired_transport_renders_whole_and_dispatches_mixed() {
-        let controls = clock_controls(vec![
+    fn run_pause_and_scrub_never_reach_the_panel() {
+        let face = clock_face_of(vec![
             wired_transport_row(
                 "play_state",
                 UiSlotValue::string("paused"),
@@ -2971,24 +2942,15 @@ mod tests {
             transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
         ]);
 
-        assert_eq!(controls.len(), 1, "one wired leaf is enough to be on");
-        let control = &controls[0];
+        assert!(face.controls.is_empty(), "the Speed knob is the rate's");
         assert_eq!(
-            control
-                .panel_target
-                .as_ref()
-                .map(|target| target.channel.as_str()),
-            Some("clock.play_state"),
-            "rate is unwired, so the anchor migrates to the next wired sibling"
+            wire_channels(&face),
+            vec![None, Some("clock.play_state"), None]
         );
-        let rate = control
-            .wire(crate::UiPanelWireRole::Rate)
-            .expect("the fader dimension is still on the faceplate");
-        assert!(rate.panel_target.is_none(), "…but it is not wired");
         assert_eq!(
-            rate.address,
+            face.wires[0].address,
             Some(clock_slot_address("transport.rate")),
-            "so its gesture falls back to a slot edit at its own address"
+            "the tape's fader edits the rate's slot"
         );
     }
 

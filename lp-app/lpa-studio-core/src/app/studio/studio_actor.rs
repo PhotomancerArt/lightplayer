@@ -237,6 +237,9 @@ where
         // same command queue the UI feeds; hand the controller a sender
         // before it takes ownership.
         controller.set_agent_command_sender(tx.clone());
+        // The Graph's page applies its input to core's editor directly and
+        // tells the actor what changed on the same queue.
+        controller.set_graph_command_sender(tx.clone());
         // Access conversations (login on connect, device-store writes)
         // report back on the same queue.
         controller.set_access_command_sender(tx.clone());
@@ -319,7 +322,7 @@ where
         if let Some(reach) = plan.bluetooth_reach {
             self.controller.set_bluetooth_reach(reach);
         }
-        if let Some(place) = plan.place {
+        for place in plan.places {
             self.controller.set_place(place);
         }
         for command in plan.console {
@@ -334,8 +337,19 @@ where
         for command in plan.network {
             self.controller.apply_network_command(command);
         }
+        // Before the device folds: what other tabs hold is what this
+        // batch's device inputs are read against.
+        for (from, note) in plan.board_hold {
+            self.controller.on_hold_note(from, note);
+        }
+        for event in plan.hold_edge {
+            self.controller.on_hold_edge_event(event);
+        }
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
+        }
+        if let Some(note) = plan.graph {
+            self.controller.apply_graph_note(note);
         }
         // Device folds run BEFORE this batch's actions, and each is
         // synchronous (invariant I7 — the fold never awaits device IO). A
@@ -379,6 +393,9 @@ where
             let feed_preempted = self.run_card_feed_tick(standing).await;
             self.note_passive_run_end(refresh_preempted || feed_preempted);
         }
+        // The Graph: open the project on it, or bring it back in step with
+        // its files, while it is the place.
+        self.controller.settle_graph().await;
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
         // settle inside dispatch).
@@ -718,9 +735,16 @@ struct CommandPlan {
     settings: Vec<crate::SettingsCommand>,
     access: Vec<crate::app::access::AccessCommand>,
     network: Vec<crate::app::network::NetworkCommand>,
+    /// Hold-channel notes from other tabs, in queue order (never coalesced).
+    board_hold: Vec<(crate::TabId, crate::HoldNote)>,
+    /// The hold edge's answers and hold deadlines, in queue order.
+    hold_edge: Vec<crate::HoldEdgeEvent>,
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
+    /// The Graph page's notes, merged: the actor reads the editor for
+    /// what changed, so one note says it all.
+    graph: Option<crate::app::graph::GraphNote>,
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
@@ -734,8 +758,13 @@ struct CommandPlan {
     page_visibility: Option<bool>,
     /// The browser's latest Bluetooth answer in the batch (latest wins).
     bluetooth_reach: Option<crate::BluetoothReach>,
-    /// The page's latest place report in the batch (latest wins).
-    place: Option<crate::UiPlace>,
+    /// The page's place reports in the batch, in queue order. Never
+    /// coalesced: a waiting Edit ends at the first report that moves the
+    /// user to another page (`ConnectedBoard::note_page_moved`), so a move
+    /// and a move back queued behind one long action must both be seen.
+    /// Kept as latest-wins, the pair read as "no move" and the editor stayed
+    /// up over the home page.
+    places: Vec<crate::UiPlace>,
 }
 
 /// One planned device step: fold an input, or make the effects layer look.
@@ -751,7 +780,10 @@ impl CommandPlan {
         let mut settings = Vec::new();
         let mut access = Vec::new();
         let mut network = Vec::new();
+        let mut board_hold = Vec::new();
+        let mut hold_edge = Vec::new();
         let mut agent = Vec::new();
+        let mut graph: Option<crate::app::graph::GraphNote> = None;
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
@@ -759,16 +791,18 @@ impl CommandPlan {
         let mut library_changed = false;
         let mut page_visibility = None;
         let mut bluetooth_reach = None;
-        let mut place = None;
+        let mut places = Vec::new();
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
                 StudioCommand::Device(input) => device.push(DeviceStep::Input(input)),
                 StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
+                StudioCommand::BoardHold { from, note } => board_hold.push((from, note)),
+                StudioCommand::HoldEdge(event) => hold_edge.push(event),
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
-                StudioCommand::Place(reported) => place = Some(reported),
+                StudioCommand::Place(reported) => places.push(reported),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
                 // a server round-trip, so convert it into the equivalent
@@ -787,6 +821,11 @@ impl CommandPlan {
                 // gesture whose relative order matters (e.g. Clear between
                 // two level changes).
                 StudioCommand::Console(command) => console.push(command),
+                StudioCommand::Graph(note) => {
+                    let merged = graph.get_or_insert_with(Default::default);
+                    merged.edited |= note.edited;
+                    merged.selected |= note.selected;
+                }
                 StudioCommand::Settings(command) => settings.push(command),
                 StudioCommand::Access(command) => access.push(command),
                 StudioCommand::Network(command) => network.push(command),
@@ -802,7 +841,10 @@ impl CommandPlan {
             settings,
             access,
             network,
+            board_hold,
+            hold_edge,
             agent,
+            graph,
             actions,
             tick,
             shutdown,
@@ -810,7 +852,7 @@ impl CommandPlan {
             library_changed,
             page_visibility,
             bluetooth_reach,
-            place,
+            places,
         }
     }
 }

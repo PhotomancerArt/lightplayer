@@ -29,7 +29,7 @@ pub(crate) const DIST_EXTRA: [u8; 30] = [
 /// The fixed literal/length and distance codes a type-1 block uses (RFC 1951
 /// §3.2.6): literals 0-143 at 8 bits, 144-255 at 9, length codes 256-279 at
 /// 7, 280-287 at 8; every distance code at 5 bits.
-pub(crate) fn fixed_tables() -> (Huff<288>, Huff<30>) {
+pub(crate) fn fill_fixed(lit: &mut Huff<288>, dist: &mut Huff<30>) {
     let mut l = [0u8; 288];
     l[..144].fill(8);
     l[144..256].fill(9);
@@ -37,8 +37,9 @@ pub(crate) fn fixed_tables() -> (Huff<288>, Huff<30>) {
     l[280..].fill(8);
     let d = [5u8; 30];
     // Both tables are fixed, valid canonical codes by construction, so
-    // `Huff::new` cannot fail here.
-    (Huff::new(&l).unwrap(), Huff::new(&d).unwrap())
+    // `Huff::build` cannot fail here.
+    lit.build(&l).unwrap();
+    dist.build(&d).unwrap();
 }
 
 #[cfg(test)]
@@ -68,6 +69,7 @@ mod tests {
 
     #[test]
     fn fixed_tables_build_without_error() {
-        let _ = fixed_tables();
+        let (mut lit, mut dist) = (Huff::<288>::empty(), Huff::<30>::empty());
+        fill_fixed(&mut lit, &mut dist);
     }
 }

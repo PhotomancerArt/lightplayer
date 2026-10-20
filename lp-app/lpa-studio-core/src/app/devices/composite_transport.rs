@@ -228,7 +228,7 @@ impl DeviceTransport for CompositeDeviceTransport {
     }
 
     fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
-        // The chooser is a PORT chooser. Sims are made on the Devices page,
+        // The chooser is a PORT chooser. Sims are made from Connect a board,
         // so a build with no serial transport lets the sim half answer —
         // which is a refusal naming the way in, not a silent nothing.
         match &self.serial {

@@ -1,5 +1,5 @@
 ---
-status: FIXED 2026-09-08 (this branch) — `links = "esp-hal"` on the fork
+status: fixed          # 2026-09-08 (this branch) — `links = "esp-hal"` on the fork
 found: 2026-09-07      # L4 of the esp-emulator plan (PR #591), chasing a non-reproducible reference image
 area: lp-fw/fw-esp32c6/build.rs, third_party/esp-hal
 class: build-script-ordering

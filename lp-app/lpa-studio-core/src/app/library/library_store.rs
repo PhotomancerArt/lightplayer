@@ -1344,11 +1344,11 @@ mod tests {
             "the floor migrates on open, so its card stays a normal card"
         );
         for (slug, expected) in [
-            ("b-format-3", "Format 3 — too old for this Studio"),
-            ("c-format-99", "Format 99 — made by a newer LightPlayer"),
+            ("b-format-3", "Format too old (3)"),
+            ("c-format-99", "Made by a newer LightPlayer (format 99)"),
             ("d-garbage", "project.json could not be read"),
-            ("e-pre-mitosis", "Format 1 — too old for this Studio"),
-            ("f-no-manifest", "No project.json — not a project"),
+            ("e-pre-mitosis", "Format too old (1)"),
+            ("f-no-manifest", "Not a project (no project.json)"),
         ] {
             let health = health(slug);
             let (headline, remedy) = health

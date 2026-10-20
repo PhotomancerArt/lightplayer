@@ -2,7 +2,8 @@
 //!
 //! Not a model action — the roster has no opinion on whether a person can
 //! see a card — so it is not a [`DevicesOp`](super::DevicesOp). A mounted
-//! `DeviceRosterCard` sends `wanted: true`, an unmounting one `false`, and
+//! board card (`lpa-studio-web`'s `BoardCard`) sends `wanted: true`, an
+//! unmounting one `false`, and
 //! the feed pulls only for wanted cards on a visible page.
 
 use core::any::Any;

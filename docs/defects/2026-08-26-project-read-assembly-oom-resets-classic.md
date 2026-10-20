@@ -3,6 +3,7 @@ status: fixed
 found: 2026-08-26
 fixed: 2026-08-29
 area: lpa-server ProjectRead assembly vs classic ESP32 heap; surfaced by PR #448's transport fix
+class: budget-exhaustion
 related:
   - ../debt/shared-uart-io-task-starvation.md
   - ../adr/2026-08-25-classic-uart-io-task-executor-isolation.md

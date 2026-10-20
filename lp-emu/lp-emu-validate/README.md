@@ -281,6 +281,15 @@ ESP-NOW, the driver's own heap and timing — has no field class in this table,
 so it is stated in the overlay's description rather than graded `absent`;
 the first payload to make a radio claim adds the class.
 
+**A flash-cut run never makes a transcript either.** A run with a
+`--flash-cut` plan armed is labelled `<base>[+<seam>=<impl>…]+flash-cut[@pace=…]`
+(`FLASH_CUT_MARKER`; the emulator writes the same spelling, and `lp-cli`
+owns the parity test). `+flash-cut` is not a seam and has no overlay:
+`ValidateConfig::configuration` reads it as a mark on the entry
+(`flash_cut`), and `validate record` and `validate run` refuse the
+configuration and name the base to use. What such a run says is about one
+injected power cut, not about the image.
+
 **Performance seams never make transcripts**: `validate record` and
 `validate run` refuse a composite with a performance atom and name the base
 to use instead. A capability seam's composite (`…+net=lan`) records, on our

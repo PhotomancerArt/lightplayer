@@ -247,7 +247,7 @@ pub fn SignInPanel(
                     // there is otherwise nothing here to act on.
                     if picker.choices.is_empty() {
                         p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                            "No profiles yet — the first sign-in creates one:"
+                            "No profiles yet. Signing in will create one:"
                         }
                         code { class: "tw:min-w-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:select-all tw:[overflow-wrap:anywhere]",
                             "{picker.start_path}?email=you@example.com"
@@ -552,6 +552,26 @@ fn AuthLink(
             {children}
         }
     }
+}
+
+/// A board card's Sign in (`devices/<board>/sign-in`), answered: straight
+/// to the deployment's one way in when it has one, else the `/account`
+/// page, which offers the chooser. Back to where the person was after.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn leave_for_sign_in(session: &crate::cloud::session_state::CloudSession) {
+    let here = web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .unwrap_or_else(|| "/".to_string());
+    let href = match session
+        .login_options()
+        .map(|options| sign_in_affordance(options, &here))
+    {
+        Some(SignInAffordance::Direct(href)) => href,
+        Some(SignInAffordance::Chooser | SignInAffordance::Nothing) | None => {
+            "/account".to_string()
+        }
+    };
+    leave_app(&href);
 }
 
 /// Hand the browser a full page navigation (host builds: nothing to do).

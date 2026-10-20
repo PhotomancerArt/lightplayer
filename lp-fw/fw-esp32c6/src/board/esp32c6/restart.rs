@@ -15,7 +15,8 @@
 //! which the next boot may lay out differently after an update or with
 //! Bluetooth switched off — does not happen at all. A reset the host makes
 //! (RTS on the USB serial line) never runs this code, which is why it is the
-//! second half and not the fix.
+//! second half and not the fix. The update's reset (`ota::reset_now`) comes
+//! here too; until 2026-10-17 it called `software_reset` directly.
 
 /// Hold the modem's blocks in reset, then release them: the radio's DMA
 /// stops, and the next boot's radio bring-up starts from reset as it would

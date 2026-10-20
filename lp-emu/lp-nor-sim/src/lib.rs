@@ -26,7 +26,7 @@ mod nor_stats;
 mod sim_rng;
 mod wear_out;
 
-pub use calibrated_tear::{EraseShape, TearMix};
+pub use calibrated_tear::{EraseShape, ProgramShape, TearMix};
 pub use embedded_storage_impl::NorSimFlashError;
 pub use fault_plan::{FaultPlan, TearModel};
 pub use nor_error::NorError;

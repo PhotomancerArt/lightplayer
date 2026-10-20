@@ -450,6 +450,11 @@ const fn catalog_note(feature: LpFeature) -> CatalogNote {
         LpFeature::ShaderF32 => CatalogNote::Extra {
             present: "f32 shader math",
         },
+        // Which filesystem a build mounts is the board's business, not the
+        // catalog's: the C6 has mounted the tree store since the cutover
+        // (normal is silent), and the routing it decides (a board that must
+        // move its files over USB first) is the device card's.
+        LpFeature::FsTree => CatalogNote::Silent,
     }
 }
 

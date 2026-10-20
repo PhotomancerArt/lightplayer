@@ -30,7 +30,7 @@ pub struct BrowserSerialTransport {
 
 impl BrowserSerialTransport {
     /// Wrap a provider, or `None` when this browser has no Web Serial at all
-    /// (Safari, Firefox). Refusing to construct is how the devices page ends
+    /// (Safari, Firefox). Refusing to construct is how the home page ends
     /// up saying "this browser cannot talk to USB devices" instead of showing
     /// an empty roster that looks like "you have none".
     pub fn new(provider: Rc<BrowserSerialEsp32Provider>) -> Option<Self> {

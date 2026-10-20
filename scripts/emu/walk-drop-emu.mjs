@@ -28,16 +28,18 @@
 // power button, and skips that step.
 //
 // Like `walk-no-board`, it is not a CI job and must not become one, and it
-// needs a Studio already serving on this worktree's canonical port. Every
-// wait is the page's; nothing here sleeps for a fixed time.
+// needs a Studio: one already serving on this worktree's canonical port, or
+// `--serve-release`, which serves the release bundle itself so the walk runs
+// as one foreground command. Every wait is the page's; nothing here sleeps
+// for a fixed time.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { execSync } from "node:child_process";
 
-import { StudioDriver } from "./studio-driver.mjs";
-import { startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
+import { PANEL, StudioDriver } from "./studio-driver.mjs";
+import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 /// `WALK_BACKING=tab` holds the board in the page (`?emu=tab`, a Worker,
@@ -84,11 +86,17 @@ async function main() {
   const shots = path.join(out, "shots");
   mkdirSync(shots, { recursive: true });
 
-  const port = studioPort();
-  if (!(await studioUp(port))) {
+  // `--serve-release`: no dev server. This walk serves the release bundle
+  // (`just studio-web-story-build`) and the packaged firmware itself, on its
+  // own stable slot, and never looks at another listener.
+  const bundle = process.argv.includes("--serve-release")
+    ? await serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-drop-emu") })
+    : null;
+  const port = bundle ? bundle.address().port : studioPort();
+  if (!bundle && !(await studioUp(port))) {
     console.error(
       `No Studio on this worktree's canonical port ${port}. Start one first ` +
-        "(`just studio-dev`) and re-run; this walk never adopts a sibling's listener.",
+        "(`just studio-dev`), or run with --serve-release; this walk never adopts a sibling's listener.",
     );
     process.exit(1);
   }
@@ -191,73 +199,65 @@ async function main() {
     });
 
     await step("connect", "Connect a board via USB, and pick the board in the chooser", async () => {
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
       if (TAB) {
-        // The tab's board is blank: Studio's own flash flow first.
-        await driver.waitFor(`${MAIN_TEXT}.includes('needs firmware')`, {
-          timeoutMs: STEP_DEADLINE_MS,
-          what: "the blank-flash face",
-        });
-        await driver.clickWhenReady("boards fit", { timeoutMs: STEP_DEADLINE_MS });
-        await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-          timeoutMs: STEP_DEADLINE_MS,
-          what: "the board-model picker",
-        });
-        await driver.click(BOARD_MODEL, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-        await driver.clickWhenReady("Flash firmware", { timeoutMs: STEP_DEADLINE_MS });
-        await driver.waitFor(`${MAIN_TEXT}.includes('Flashing firmware')`, {
-          timeoutMs: STEP_DEADLINE_MS,
-          what: "the flash to start",
-        });
-        await driver.waitFor(
-          `(() => { const t = ${MAIN_TEXT}; return !t.includes('Flashing firmware') && !t.includes('needs firmware'); })()`,
-          { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish" },
-        );
+        // The tab's board is blank: Studio's own flash flow first, through
+        // the card's Install.
+        await driver.flashBlank(BOARD_MODEL, { timeoutMs: STEP_DEADLINE_MS, flashTimeoutMs: FLASH_DEADLINE_MS });
       }
-      await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_DEADLINE_MS, what: "Ready" });
-      return "Ready";
+      // Ready, as core reads it: the card offers the board a project, or
+      // Edit on the one it runs.
+      return `ready (${await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS })})`;
     });
 
     await step("push", `put ${PROJECT} on the board`, async () => {
-      const face = await driver.waitFor(
-        `(() => { const t = ${MAIN_TEXT};
-                  return t.includes('Remove project') ? 'running' : t.includes('to choose from') ? 'empty' : false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board to say what it runs" },
-      );
+      // `remove-project` (the project details' danger zone) is the running
+      // signal; `push` as the card's primary ("Add a project") the empty one.
+      const face = await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
       if (face === "running") {
-        await driver.clickWhenReady("Remove project", { timeoutMs: STEP_DEADLINE_MS });
-        await driver.click("Remove project");
+        // Lasting: its first click arms, the second is the press.
+        await driver.pressOffer("remove-project", { bar: "project", confirm: true, timeoutMs: STEP_DEADLINE_MS });
+        await driver.closeDetails();
+        await driver.waitFor(
+          `(() => { const card = document.querySelector('[data-board-card]');
+                    return Boolean(card?.querySelector('[data-name-bar] [data-offer-path$="/push"]')); })()`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the board to say it runs nothing (`push`, Add a project, as the primary)" },
+        );
       }
-      await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-        what: "the project popover",
-      });
-      await driver.click(PROJECT, {
-        scope: `document.querySelector('[id^="ux-popover-panel"]')`,
-        exact: true,
-      });
-      await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`${MAIN_TEXT}.includes('Project loaded')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the board to say `Project loaded`",
-      });
+      await driver.pressOffer("push", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(`Boolean(${PANEL})`, { what: "the project popover" });
+      await driver.click(PROJECT, { scope: PANEL, exact: true });
+      await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_DEADLINE_MS });
+      // The board's own words, in its terminal.
+      await driver.boardSaid("Project loaded", { timeoutMs: STEP_DEADLINE_MS });
       return "the board said Project loaded";
     });
 
     await step("editor", "open the board in the editor", async () => {
-      await driver.clickWhenReady("Open in editor", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(
-        `!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the project to open on the board" },
+      // Edit, the project bar's action on a watched board (`edit`): it
+      // connects first, then shows the editor.
+      await driver.pressOffer("edit", { timeoutMs: STEP_DEADLINE_MS });
+      // THE BOARD'S WORDS, not a page string ("Connecting project" going
+      // away is satisfied before anything has been read): the address is the
+      // session's own (`/p/…`, the id in the board's project file, or
+      // `/device/<uid>` for a project Studio has no address for), and the
+      // editor draws that project's panel controls, which exist only once
+      // the board's project has been read off it.
+      const controls = await driver.waitFor(
+        `(() => { if (!location.pathname.startsWith('/p/') && !location.pathname.startsWith('/device/')) return false;
+                  const els = [...document.querySelectorAll('#main [data-panel-channel]')];
+                  return els.length > 0 && Boolean(document.querySelector('#main [role="slider"]'))
+                    ? els.map((el) => el.getAttribute('data-panel-channel')).join(', ') : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board's project open in the editor (its address and its panel's controls)" },
       );
-      return `at ${await driver.evaluate(ROUTE)}`;
+      return `at ${await driver.evaluate(ROUTE)}; the board's panel: ${controls}`;
     });
 
     await pullTheCable("editor-drop", "the editor", `Boolean(document.querySelector('#main [role="slider"]'))`);
 
     await step("play", "switch the editor to Play", async () => {
-      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.evaluate(`document.querySelector('a[data-play-toggle="enter"]').click()`);
       await driver.waitFor(`location.pathname.endsWith('/play')`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Play route",
@@ -271,7 +271,7 @@ async function main() {
 
     await pullTheCable("play-drop", "Play", `Boolean(document.querySelector('#main [role="slider"]'))`);
 
-    await step("knob", "turn the first knob on the resumed session; the board's state comes back", async () => {
+    await step("knob", "turn the first knob on the resumed session: it takes the turn", async () => {
       const before = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
       );
@@ -281,11 +281,16 @@ async function main() {
         const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
         knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
       })()`);
-      // The knob shows what the BOARD holds: it moves only when a read
-      // after the write brings the board's panel state back.
+      // The knob follows the hand: its value moves at once from the
+      // widget's own gesture hold and Studio's echo of the write, before any
+      // read (`KnobField`'s `hold.write`, `note_panel_write`). So this proves
+      // the resumed page takes the turn, NOT that the board kept it: a
+      // board's word for a write is the next session's read, which has no
+      // echo (write, Done, Edit, then the control reads held —
+      // `walk-no-board`'s `card-edit`).
       await driver.waitFor(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "the knob to take the turn" },
       );
       const after = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
@@ -351,6 +356,7 @@ async function main() {
 
   await driver.close();
   if (door) stopDoor(door);
+  bundle?.close();
 
   if (fatal) {
     console.error(`\nThe dropped-link walk did not finish: ${fatal.message}`);

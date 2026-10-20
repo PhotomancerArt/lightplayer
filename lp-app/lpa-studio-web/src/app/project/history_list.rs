@@ -3,7 +3,7 @@
 //!
 //! Born as the project popover's History tab (D10); re-homed into the
 //! header control's CHANGES popup by D14 — changes and history are one
-//! temporal axis (the receipt "Save banks v13" and the timeline's "v12
+//! temporal axis (the receipt "Save to keep them as v13" and the timeline's "v12
 //! saved" are the same ledger read from opposite ends), so the banked rows
 //! render under the pending block rather than behind a separate tab. This
 //! module is the rows alone; the popup owns the pending block above them.
@@ -19,7 +19,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::UiProjectHistory;
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::age_words;
 
 use crate::app::home::package_card::platform_now_secs;
 use crate::app::share::relationship::ProjectRelationship;
@@ -58,13 +58,13 @@ pub fn HistoryList(
                     span { class: "{HISTORY_KIND_CLASS} tw:text-dim-foreground", "{entry.kind.word()}" }
                     span { class: "{HISTORY_WHAT_CLASS} tw:text-subtle-foreground", "{entry.label}" }
                     span { class: "tw:flex-none tw:text-[9.5px] tw:text-dim-foreground",
-                        "{time_ago(now, entry.at)}"
+                        "{age_words(now - entry.at)}"
                     }
                 }
             }
         }
         p { class: "tw:m-0 tw:px-0.5 tw:pt-1 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
-            "Read-only for now \u{2014} restore lands with the history effort."
+            "Restoring a saved version isn\u{2019}t available yet."
         }
     }
 }
@@ -83,7 +83,7 @@ pub fn history_empty_line(
     history: &UiProjectHistory,
 ) -> Option<&'static str> {
     (relationship == ProjectRelationship::Example || history.entries.is_empty())
-        .then_some("No history yet \u{2014} history begins at your first save.")
+        .then_some("No history yet. Each save will add a version here.")
 }
 
 /// One history row's geometry, before its separator: four columns on a

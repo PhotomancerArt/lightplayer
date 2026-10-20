@@ -81,6 +81,7 @@ use lpa_link::device_link::wire_reader::{ReadFrame, WireRead};
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, LensTapLine, web_serial_link,
 };
+use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
 use wasm_bindgen_futures::spawn_local;
 
@@ -153,6 +154,24 @@ extern "C" {
     #[wasm_bindgen(js_name = uninstallShim)]
     fn js_uninstall_shim() -> Promise;
 
+    #[wasm_bindgen(js_name = installSecondTab)]
+    fn js_install_second_tab(second_tab: bool) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabBoardsJson)]
+    fn js_second_tab_boards_json() -> String;
+
+    #[wasm_bindgen(js_name = openPortOf)]
+    fn js_open_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = closePortOf)]
+    fn js_close_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabCableVerb)]
+    fn js_second_tab_cable_verb(board_id: &str, verb: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = openAttemptsOf)]
+    fn js_open_attempts_of(first: bool, board_id: &str) -> Promise;
+
     #[wasm_bindgen(js_name = busBoardIds)]
     fn js_bus_board_ids() -> Promise;
 
@@ -216,6 +235,18 @@ extern "C" {
 
     #[wasm_bindgen(js_name = canShadowNavigatorSerial)]
     fn js_can_shadow_navigator_serial() -> String;
+
+    #[wasm_bindgen(js_name = routeOverWebUsb)]
+    fn js_route_over_webusb() -> Promise;
+
+    #[wasm_bindgen(js_name = unrouteWebUsb)]
+    fn js_unroute_webusb();
+
+    #[wasm_bindgen(js_name = serialBackendKind)]
+    fn js_serial_backend_kind() -> Promise;
+
+    #[wasm_bindgen(js_name = webUsbChooserFilters)]
+    fn js_webusb_chooser_filters() -> String;
 }
 
 #[wasm_bindgen]
@@ -837,6 +868,152 @@ async fn the_flash_bridge_acquires_the_live_generation() {
 }
 
 // ---------------------------------------------------------------------------
+// A second tab (`?emu-second-tab=1`)
+// ---------------------------------------------------------------------------
+//
+// Real Chrome lists a granted port in both tabs of a browser and refuses only
+// the second `open()`. The door admits ONE `/control` client per board, so a
+// second page's install is refused (409) — unless it asks to be a second tab,
+// when it gets the board's bytes and not its cable. These pin both halves:
+// the loud failure without the flag is unchanged, and with it the port can
+// open and close (take a board over) while every cable verb says whose cable
+// it is. They reach inside the scripted door's second bus, so they run
+// against it only.
+
+/// The outcome of a promise that resolves to a string.
+async fn text(promise: Promise) -> String {
+    JsFuture::from(promise)
+        .await
+        .expect("a string outcome")
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// `describeBoards()` of the second page, one board.
+fn second_tab_board(board: &str) -> JsValue {
+    let all = js_sys::JSON::parse(&js_second_tab_boards_json()).expect("boards JSON");
+    Array::from(&all)
+        .iter()
+        .find(|entry| {
+            Reflect::get(entry, &JsValue::from_str("boardId"))
+                .ok()
+                .and_then(|id| id.as_string())
+                .as_deref()
+                == Some(board)
+        })
+        .expect("the second page holds the board")
+}
+
+#[wasm_bindgen_test]
+async fn a_second_page_without_the_flag_fails_to_install_as_before() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+
+    assert_eq!(
+        text(js_install_second_tab(false)).await,
+        "NetworkError",
+        "a second page that is not a second tab meets the door's 409, loudly"
+    );
+    log("second page without the flag: NetworkError at install, as ever");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_second_tab_installs_cableless_and_opens_what_the_first_lets_go() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    let board = second_tab_board("c6-a");
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("cable"))
+            .unwrap()
+            .as_bool(),
+        Some(false),
+        "another page holds the cable"
+    );
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("granted"))
+            .unwrap()
+            .as_bool(),
+        Some(true),
+        "a page with no chooser grants at load"
+    );
+    let holds = Reflect::get(&board, &JsValue::from_str("holds")).unwrap();
+    assert_eq!(
+        Array::from(&holds).length(),
+        0,
+        "the page's default switches are the cable's, not the second tab's"
+    );
+    assert!(
+        !js_control_log("c6-a").contains("pin"),
+        "no pin verb from a port with no cable: {}",
+        js_control_log("c6-a")
+    );
+
+    // The first page opens the board; the second is refused, as Chrome
+    // refuses a second open().
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "NetworkError");
+    // It lets go (a take-over's holder closes first); the second opens.
+    assert_eq!(text(js_close_port_of(true, "c6-a")).await, "closed");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "NetworkError");
+    assert_eq!(text(js_close_port_of(false, "c6-a")).await, "closed");
+
+    let attempts = |first: bool| async move {
+        JsFuture::from(js_open_attempts_of(first, "c6-a"))
+            .await
+            .expect("attempts")
+            .as_f64()
+            .unwrap_or(-1.0)
+    };
+    assert_eq!(
+        attempts(false).await,
+        2.0,
+        "the second page's open() ran twice"
+    );
+    assert_eq!(attempts(true).await, 2.0, "and the first page's twice");
+    log("second tab: cable-less, opens and closes the bytes in turn with the first");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_cable_verb_on_a_cableless_port_rejects() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    for verb in ["detach", "attach", "reset", "downloadMode", "state", "pins"] {
+        let outcome = text(js_second_tab_cable_verb("c6-a", verb)).await;
+        assert!(
+            outcome.starts_with("NetworkError: ")
+                && outcome.contains("another page holds this board's cable"),
+            "{verb}: {outcome}"
+        );
+    }
+    assert!(
+        !js_control_log("c6-a").contains("detach"),
+        "nothing reached the door: {}",
+        js_control_log("c6-a")
+    );
+    log("second tab: every cable verb rejects, and none reaches the door");
+
+    shim_off().await;
+}
+
+// ---------------------------------------------------------------------------
 // The polyfill's own contract
 // ---------------------------------------------------------------------------
 
@@ -939,6 +1116,147 @@ async fn the_signal_lines_pass_through_undecoded() {
     );
 
     shim_off().await;
+}
+
+// ---------------------------------------------------------------------------
+// Chrome on Android: the same boards over WebUSB
+// (`docs/adr/2026-10-18-android-usb-over-webusb.md`)
+// ---------------------------------------------------------------------------
+
+/// Put the installed boards behind Chrome-on-Android's facts (see
+/// `routeOverWebUsb` in the support module) and check the shipped
+/// `browser_serial.js` chose WebUSB from them on its own.
+async fn webusb_on() {
+    JsFuture::from(js_route_over_webusb())
+        .await
+        .expect("route the boards over WebUSB");
+    let kind = JsFuture::from(js_serial_backend_kind())
+        .await
+        .expect("serialBackendKind()");
+    assert_eq!(kind.as_string().as_deref(), Some("usb-cdc"));
+}
+
+async fn webusb_off() {
+    drain_sessions().await;
+    js_unroute_webusb();
+    shim_off().await;
+}
+
+/// On Android the USB square is still offered (the provider reads
+/// `isSupported`, and flashing too), its chooser asks `navigator.usb` for CDC
+/// devices of the same vendors Web Serial's filter names, and the port it
+/// returns is the one `getGrantedPorts` enumerates, as the same session.
+#[wasm_bindgen_test]
+async fn on_android_the_usb_chooser_is_webusbs_and_its_port_is_a_session() {
+    if real_backing() {
+        log_skip("the WebUSB double stands on the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    webusb_on().await;
+    assert!(
+        boolean(js_is_supported()).await,
+        "the USB square is offered"
+    );
+    assert!(
+        boolean(js_flash_bridge_is_supported()).await,
+        "flashing is offered"
+    );
+
+    let session = JsFuture::from(js_request_port())
+        .await
+        .expect("requestPort() over WebUSB");
+    let id = number(&session, "id").expect("session id") as u32;
+    assert_eq!(number(&session, "usbVendorId"), Some(f64::from(0x303a)));
+    assert_eq!(number(&session, "usbProductId"), Some(f64::from(0x1001)));
+    let filters = js_webusb_chooser_filters();
+    assert_eq!(
+        filters,
+        r#"[{"classCode":2,"vendorId":12346},{"classCode":2,"vendorId":6790},{"classCode":2,"vendorId":4292},{"classCode":2,"vendorId":1027}]"#,
+        "the chooser asks for CDC devices of the Web Serial filter's vendors"
+    );
+    let granted = granted_sessions().await;
+    assert_eq!(ids(&granted), vec![id], "{granted:?}");
+    assert_eq!(granted[0].label, "ESP32 Serial (303a:1001)");
+    log(&format!("WebUSB chooser filters {filters}; session {id}"));
+    webusb_off().await;
+}
+
+/// CDC sets both lines in one request, so every step of a reset dance reaches
+/// the board as a whole-status write, from the lines the open asserted (both,
+/// as a tty's open does) — and the board decodes ONE reset from it, as it
+/// does from Web Serial's line-by-line writes.
+#[wasm_bindgen_test]
+async fn a_reset_over_webusb_is_whole_status_writes_the_board_decodes_once() {
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    webusb_on().await;
+    let id = granted_sessions().await[0].id;
+
+    open_port(id, true)
+        .await
+        .expect("openPort with a reset, over WebUSB");
+    let log_text = js_control_log(&board);
+    log(&format!(
+        "control channel after a normal reset over WebUSB:\n{log_text}"
+    ));
+    assert_eq!(
+        log_text.lines().collect::<Vec<_>>(),
+        vec![
+            "signals dtr=1 rts=1",
+            "signals dtr=0 rts=1",
+            "signals dtr=0 rts=1",
+            "signals dtr=0 rts=0",
+        ],
+    );
+    assert_eq!(js_reboot_count(&board), 1, "the board decoded one reset");
+    webusb_off().await;
+}
+
+/// The link comes up over WebUSB, on the C6's `usb()` preset (picked from
+/// the vendor id, as over Web Serial), and the board's hello arrives whole.
+#[wasm_bindgen_test]
+async fn over_webusb_the_link_comes_up_and_the_boards_hello_arrives() {
+    let Some(mut bench) = LinkBench::open_on("webusb-link-up", Board::C6, Route::WebUsb).await
+    else {
+        return;
+    };
+    let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    assert_eq!(hello_count(&reads), 1, "{reads:?}");
+    let notes = web_serial_link::take_wire_notes(bench.id);
+    assert!(
+        notes.iter().any(|note| note.starts_with("link: up")),
+        "{notes:?}"
+    );
+    bench.close().await;
+}
+
+/// A request over WebUSB is one link message and its answer comes back
+/// packed, as over Web Serial.
+#[wasm_bindgen_test]
+async fn over_webusb_a_request_is_answered_packed() {
+    let Some(mut bench) = LinkBench::open_on("webusb-request", Board::C6, Route::WebUsb).await
+    else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    bench.exchange_until(|_| bench_board_packs()).await;
+    let request = lpc_wire::ClientMessage {
+        id: 43,
+        msg: lpc_wire::ClientRequest::StopAllProjects,
+    };
+    let request_json = lpc_wire::json::to_string(&request).expect("json");
+    web_serial_link::send_client_json(bench.id, &request_json).expect("the link takes the request");
+    let reads = bench
+        .exchange_until(|reads| answer(reads, 43).is_some())
+        .await;
+    let frame = answer(&reads, 43).expect("the answer");
+    assert!(frame.packed, "the answer came packed: {frame:?}");
+    bench.close().await;
 }
 
 /// Under the shim there is no chooser to show. M2 resolves `requestPort` to
@@ -1258,11 +1576,8 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board
         id: 41,
         msg: lpc_wire::ClientRequest::StopAllProjects,
     };
-    web_serial_link::send_client_json(
-        bench.id,
-        &lpc_wire::json::to_string(&request).expect("json"),
-    )
-    .expect("the link takes the request");
+    let request_json = lpc_wire::json::to_string(&request).expect("json");
+    web_serial_link::send_client_json(bench.id, &request_json).expect("the link takes the request");
     let reads = bench
         .exchange_until(|reads| answer(reads, 41).is_some())
         .await;
@@ -1273,12 +1588,53 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board
         BOARD.with(|double| double.borrow().requests.contains(&41)),
         "the board saw the request as one proto message"
     );
-    let raw = js_received_bytes(&bench.board);
+    // No `M!` line: every byte the host wrote is in a link frame. Not a
+    // search for the bytes `M!`, which the host's nonce and checksums hold
+    // by chance about once in 3,000 runs
+    // (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+    let preset = board.host_preset();
+    let messages = host_proto_messages(bench.host_wrote(), &preset);
     assert!(
-        !raw.contains("M!"),
-        "nothing the host wrote is an M! line: {raw:?}"
+        messages.contains(&request_json),
+        "the request went out as one link message: {messages:?}"
     );
     bench.close().await;
+}
+
+/// The frame check above reads the bytes a classic's port wrote in a CI run
+/// whose first SYN's checksum ends `4d 21` — `M!` — as the link frames they
+/// are, the request among them.
+#[wasm_bindgen_test]
+fn the_frame_check_reads_a_checksum_that_spells_m_bang_as_a_checksum() {
+    assert_eq!(&HOST_WROTE_IN_CI[18..22], [0xdd, 0x5f, 0x4d, 0x21]);
+    let messages = host_proto_messages(&HOST_WROTE_IN_CI, &LinkConfig::uart());
+    assert!(
+        messages.contains(&r#"{"id":41,"msg":"stopAllProjects"}"#.to_string()),
+        "{messages:?}"
+    );
+}
+
+/// An `M!` line among the host's bytes, the framing it no longer writes, is
+/// caught: it is text outside every frame.
+#[wasm_bindgen_test]
+#[should_panic(expected = "the host wrote bytes outside link frames")]
+fn the_frame_check_catches_an_m_bang_line() {
+    let mut written = HOST_WROTE_IN_CI.to_vec();
+    written.extend_from_slice(b"M!{\"id\":42,\"msg\":\"stopAllProjects\"}\n");
+    host_proto_messages(&written, &LinkConfig::uart());
+}
+
+/// A frame whose checksum does not verify is caught: the check reads the
+/// session from the host's SYNs and verifies every frame under it.
+#[wasm_bindgen_test]
+#[should_panic(expected = "not a verified link frame")]
+fn the_frame_check_catches_a_frame_that_does_not_verify() {
+    let mut written = HOST_WROTE_IN_CI.to_vec();
+    // The request frame's last checksum byte.
+    let at = written.len() - 13;
+    assert_eq!(written[at], 0xf3);
+    written[at] = 0xf4;
+    host_proto_messages(&written, &LinkConfig::uart());
 }
 
 /// A link frame the board wrote in two halves, drained in between, comes out
@@ -1604,6 +1960,8 @@ struct LinkBench {
     board: String,
     profile: Board,
     reads: Vec<WireRead>,
+    /// Every byte the host has written at the board, in order.
+    written: Vec<u8>,
 }
 
 impl LinkBench {
@@ -1614,6 +1972,10 @@ impl LinkBench {
     /// page describes it; either way the bench checks the port's link took the
     /// board's preset, through the production vendor-id rule.
     async fn open(name: &str, profile: Board) -> Option<Self> {
+        Self::open_on(name, profile, Route::WebSerial).await
+    }
+
+    async fn open_on(name: &str, profile: Board, route: Route) -> Option<Self> {
         if real_backing() {
             log_skip("the board end here is a Rust lp-link double on the scripted door");
             return None;
@@ -1625,6 +1987,9 @@ impl LinkBench {
             JsFuture::from(js_present_behind_bridge(&board, vendor, product))
                 .await
                 .expect("the port presents as a bridge");
+        }
+        if let Route::WebUsb = route {
+            webusb_on().await;
         }
         let ports = lpa_link::providers::browser_serial_esp32::granted_ports()
             .await
@@ -1647,6 +2012,7 @@ impl LinkBench {
             board,
             profile,
             reads: Vec::new(),
+            written: Vec::new(),
         })
     }
 
@@ -1661,6 +2027,7 @@ impl LinkBench {
     async fn exchange_until(&mut self, done: impl Fn(&[WireRead]) -> bool) -> Vec<WireRead> {
         for _ in 0..200 {
             let written = js_take_received_raw(&self.board).to_vec();
+            self.written.extend_from_slice(&written);
             let out = BOARD.with(|board| {
                 let mut board = board.borrow_mut();
                 board.on_bytes(&written);
@@ -1678,10 +2045,29 @@ impl LinkBench {
         std::mem::take(&mut self.reads)
     }
 
+    /// Everything the host has written at the board since the bench opened.
+    /// What the board double has not read yet is taken too, so it never
+    /// will: for the end of a test.
+    fn host_wrote(&mut self) -> &[u8] {
+        let rest = js_take_received_raw(&self.board).to_vec();
+        self.written.extend_from_slice(&rest);
+        &self.written
+    }
+
     async fn close(self) {
         let _ = web_serial_link::release(self.id).await;
+        drain_sessions().await;
+        js_unroute_webusb();
         shim_off().await;
     }
+}
+
+/// How the page reaches the board: Web Serial, or (Chrome on Android) a
+/// CDC-ACM port over WebUSB (`usb_cdc_serial.js`).
+#[derive(Clone, Copy, Debug)]
+enum Route {
+    WebSerial,
+    WebUsb,
 }
 
 thread_local! {
@@ -1815,6 +2201,71 @@ fn answer(reads: &[WireRead], id: u64) -> Option<&ReadFrame> {
         WireRead::Frame(frame) if frame.message.as_ref().is_ok_and(|m| m.id == id) => Some(frame),
         _ => None,
     })
+}
+
+/// Every byte a classic's port wrote in CI run 37951739994 (job 113893308952,
+/// 2026-10-09), when `a_classic_request_is_…` failed on a chance `M!`: two
+/// SYNs under the host nonce `0xe7d4bb42`, an ACK, the packed opt-in, an
+/// ACK, the request (id 41) and an ACK. Rebuilt from the panic's lossy
+/// Debug string, which it reproduces character for character: the nonce is
+/// the only one that fits both SYNs' checksums, and every other checksum
+/// follows from it (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+const HOST_WROTE_IN_CI: [u8; 212] = [
+    0x00, 0x02, 0x03, 0x01, 0x01, 0x05, 0x42, 0xbb, 0xd4, 0xe7, 0x01, 0x01, 0x01, 0x01, 0x01, 0x07,
+    0x01, 0x04, 0xdd, 0x5f, 0x4d, 0x21, 0x00, 0x00, 0x02, 0x03, 0x01, 0x01, 0x06, 0x42, 0xbb, 0xd4,
+    0xe7, 0x01, 0x04, 0xa2, 0xb0, 0x01, 0x07, 0x01, 0x04, 0x02, 0x88, 0x6c, 0x0d, 0x00, 0x00, 0x02,
+    0x02, 0x01, 0x06, 0x04, 0x61, 0x1d, 0xd9, 0x62, 0x00, 0x00, 0x02, 0x38, 0x55, 0x02, 0x04, 0x7b,
+    0x22, 0x69, 0x64, 0x22, 0x3a, 0x39, 0x30, 0x30, 0x37, 0x31, 0x39, 0x39, 0x32, 0x35, 0x34, 0x37,
+    0x34, 0x30, 0x39, 0x39, 0x31, 0x2c, 0x22, 0x6d, 0x73, 0x67, 0x22, 0x3a, 0x7b, 0x22, 0x73, 0x65,
+    0x74, 0x45, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x22, 0x3a, 0x7b, 0x22, 0x65, 0x6e, 0x63,
+    0x6f, 0x64, 0x69, 0x6e, 0x67, 0x22, 0x3a, 0x22, 0x70, 0x61, 0x63, 0x6b, 0x65, 0x64, 0x22, 0x2c,
+    0x22, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x22, 0x3a, 0x32, 0x7d, 0x7d, 0x7d, 0x7a, 0xfb, 0x56,
+    0x93, 0x00, 0x00, 0x02, 0x02, 0x07, 0x03, 0x04, 0xf8, 0xb5, 0x3e, 0x56, 0x00, 0x00, 0x2a, 0x38,
+    0x01, 0x03, 0x04, 0x7b, 0x22, 0x69, 0x64, 0x22, 0x3a, 0x34, 0x31, 0x2c, 0x22, 0x6d, 0x73, 0x67,
+    0x22, 0x3a, 0x22, 0x73, 0x74, 0x6f, 0x70, 0x41, 0x6c, 0x6c, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63,
+    0x74, 0x73, 0x22, 0x7d, 0x77, 0xd5, 0x2a, 0xf3, 0x00, 0x00, 0x02, 0x02, 0x07, 0x04, 0x04, 0xbd,
+    0x7c, 0x53, 0x2c, 0x00,
+];
+
+/// The proto-channel messages in what a host wrote under `preset`, once
+/// every byte of it is shown to belong to a link frame: back-to-back
+/// `0x00 COBS-FF 0x00` frames with nothing between them (so no text and no
+/// `M!` line), each one decoding and passing its checksum under the session
+/// the host's own SYNs name.
+fn host_proto_messages(written: &[u8], preset: &LinkConfig) -> Vec<String> {
+    // Split on the delimiter: a frame body sits between each pair and
+    // nothing sits anywhere else, so pieces at even places are empty and
+    // pieces at odd places are bodies.
+    let pieces: Vec<&[u8]> = written.split(|&byte| byte == 0).collect();
+    let in_frames = pieces.len() % 2 == 1
+        && pieces
+            .iter()
+            .enumerate()
+            .all(|(at, piece)| piece.is_empty() == (at % 2 == 0));
+    assert!(
+        in_frames,
+        "the host wrote bytes outside link frames: {written:?}"
+    );
+
+    let mut sniffer = LinkSniffer::new(preset.crc, preset.escape_ff);
+    let mut messages = Vec::new();
+    let mut on = |event: SniffEvent| match event {
+        SniffEvent::Session { .. } => {}
+        SniffEvent::Message {
+            channel,
+            data,
+            verified: true,
+            ..
+        } => {
+            if channel == CH_PROTO {
+                messages.push(String::from_utf8_lossy(&data).into_owned());
+            }
+        }
+        other => panic!("the host wrote {other:?}, not a verified link frame: {written:?}"),
+    };
+    sniffer.push(Direction::HostToBoard, 0, written, &mut on);
+    sniffer.flush(Direction::HostToBoard, &mut on);
+    messages
 }
 
 /// The Rust half of the pump for the tests that drive the SUPPORT module's

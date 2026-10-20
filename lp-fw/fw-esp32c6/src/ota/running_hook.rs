@@ -24,10 +24,19 @@
 //! it does in core-only. Read-back needs play; another core needs edit.
 //!
 //! The session is built once at install, before the engine starts, for the
-//! hello's manifest (its facts carry the core's SHA-256, DM24, computed
-//! then), and dropped again; a host's first message, on any link, builds it
-//! for good. It lives in a core static, touched only from the server loop's
-//! task.
+//! hello's manifest, and dropped again; a host's first message, on any link,
+//! builds it for good. It lives in a core static, touched only from the
+//! server loop's task.
+//!
+//! **The core's SHA-256 (DM24) is not taken at install**: hashing the 1.4 MB
+//! core there held every boot's first light ~185 ms (CX1, 2026-10-16). The
+//! engine's frame hook hashes it a slice a frame once the boot has lit
+//! ([`hash_step`]), and the server loop holds the hello — unsolicited, owed
+//! to a link that opened, or asked for — until it is known ([`hello_ready`];
+//! a host waiting on its `Hello` has the rest taken at once after first
+//! light, and nothing waits past `server_loop::HELLO_HOLD_MAX_MS`). Anything
+//! else that needs the hash sooner — a host's first channel-3 message —
+//! finishes it then, as every boot used to.
 
 use core::cell::RefCell;
 
@@ -35,7 +44,9 @@ use lpc_update::board::{
     AccessFacts, EngineStatus, LinkTrust, OWNER_QUIET_MS, SessionConfig, SessionMode,
 };
 
-use super::board_identity::{CoreIdentity, board_facts};
+use super::board_identity::{
+    CoreIdentity, board_facts, core_sha256, core_sha256_known, core_sha256_step,
+};
 use super::boot_state::BootState;
 use super::update_edge::{EdgeEffect, UpdateEdge};
 use super::update_links::{USB_LINK, UpdateLinks};
@@ -58,7 +69,8 @@ struct Running {
     /// the image's own `'static` strings, so what stays resident does not
     /// grow with the app version's length (#964). With no session nothing
     /// it says can change: the engine never runs on a trial core, and only
-    /// a session starts a transfer.
+    /// a session starts a transfer. Its `core_sha256` is left zero: it is
+    /// filled in only when said ([`manifest`]).
     at_install: lpc_update::BoardManifestView<'static>,
 }
 
@@ -93,9 +105,10 @@ pub fn install(
         usb_trust,
     };
     // Built here, before the engine starts, rather than in the server
-    // loop's first hello (which would stall the loop for the core's hash,
-    // ~0.8 s emulated); dropped at once, so its buffers cost the engine's
-    // heap nothing until a host arrives — the view kept owns no heap.
+    // loop's first hello; dropped at once, so its buffers cost the engine's
+    // heap nothing until a host arrives — the view kept owns no heap. The
+    // core's hash is left out (all-zero facts): hashing it here held every
+    // boot's first light ~185 ms. `manifest` fills it in.
     let at_install = resident_manifest(&setup);
     *RUNNING.0.borrow_mut() = Some(Running {
         setup,
@@ -110,7 +123,7 @@ pub fn install(
 /// stack beside the view it returns.
 #[inline(never)]
 fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
-    let edge = new_edge(setup);
+    let edge = new_edge_with(setup, [0; 32]);
     edge.session
         .manifest_view(super::update_edge::now_ms())
         .with_text(
@@ -125,13 +138,46 @@ fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
 /// host spoke, the one taken at install. `None` only while the hook is not
 /// installed (or is busy, which a hello built between two of its passes
 /// never sees).
+///
+/// The core's hash is in it: if [`hash_step`] has not finished it yet, it is
+/// finished here.
 pub fn manifest() -> Option<lpc_update::BoardManifest> {
     let running = RUNNING.0.try_borrow().ok()?;
     let running = running.as_ref()?;
     Some(match &running.edge {
         Some(edge) => edge.session.manifest(super::update_edge::now_ms()),
-        None => running.at_install.to_manifest(),
+        None => {
+            // The owned manifest exists only for this send; the hash the
+            // resident view leaves out is filled in (finished here if
+            // `hash_step` has not).
+            let mut view = running.at_install;
+            view.core_sha256 = core_sha256(&running.setup.state);
+            view.to_manifest()
+        }
     })
+}
+
+/// The engine's frame hook, once the boot has lit (or given up lighting):
+/// one slice more of the core's hash, until it is known.
+pub fn hash_step() {
+    if core_sha256_known().is_some() {
+        return;
+    }
+    let Ok(running) = RUNNING.0.try_borrow() else {
+        return;
+    };
+    if let Some(running) = running.as_ref() {
+        core_sha256_step(&running.setup.state);
+    }
+}
+
+/// Whether the unsolicited hello may go out (`server_loop::set_hello_gate`):
+/// the core's hash is known, so saying it costs the loop nothing; or a host
+/// is waiting on its `Hello` (`wanted`) and the boot has lit, so the rest of
+/// the hash is taken at once, for it, rather than a slice a frame. Set only
+/// once [`install`] has run (the engine's door, after it).
+pub fn hello_ready(wanted: bool) -> bool {
+    core_sha256_known().is_some() || (wanted && crate::first_light::decided())
 }
 
 /// DM13: a progress record beside a valid engine is stale (a cut between
@@ -158,12 +204,17 @@ fn edge_of(running: &mut Running) -> &mut UpdateEdge {
 }
 
 fn new_edge(s: &Setup) -> UpdateEdge {
+    new_edge_with(s, core_sha256(&s.state))
+}
+
+fn new_edge_with(s: &Setup, core_sha256: [u8; 32]) -> UpdateEdge {
     let facts = board_facts(
         &s.state,
         &s.identity,
         SessionMode::EngineRunning,
         EngineStatus::Valid,
         Some(s.engine_len),
+        core_sha256,
     );
     let config = SessionConfig {
         takes_encoding_1: false,

@@ -14,8 +14,15 @@
 //! truth about the WIPE; the observation window only refreshes the card's
 //! classification so the needs-firmware face appears with the chip named by
 //! the boot output. A quiet window therefore degrades to success with a
-//! note, never to failure. Identity survives an erase by design — it lives
-//! in the efuse (ADR 2026-08-04), so the entry and its registry row stay.
+//! note, never to failure — and a success is the device's knowledge that
+//! the flash is blank ([`Device::known_blank`](crate::Device::known_blank)),
+//! so a board that says nothing afterwards (a native-USB chip's boot loop
+//! lost to its re-enumerations) still reads as the blank chip it is, never
+//! as one that stopped responding. A blank verdict settles at once and
+//! gives the port back, as identify's does: a blank board has nothing more
+//! to say. A quiet window gives it back too, for the same reason and one
+//! more: an open port meets the chip's next re-enumeration as a dead port. Identity survives an erase by design — it lives in the efuse
+//! (ADR 2026-08-04), so the entry and its registry row stay.
 //!
 //! Cancel during the wipe is held (esptool cannot abort cleanly) exactly
 //! like the flash's write window; the erase grace bounds the hold (I1/I2).
@@ -73,6 +80,12 @@ impl EraseActivity {
         }
     }
 
+    /// The wipe is done and verified; the activity only listens for the
+    /// blank chip's boot loop (and outlives a vanished link meanwhile).
+    pub(crate) fn is_observing(&self) -> bool {
+        matches!(self.phase, ErasePhase::Observing { .. })
+    }
+
     /// The command that starts the coarse effect. Emitted by
     /// [`Device::spawn_erase`](crate::Device::spawn_erase) at spawn.
     pub(crate) fn spawn_commands(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
@@ -109,6 +122,31 @@ impl EraseActivity {
             }]),
             None => ActivityStep::done(ActivityOutcome::Cancelled),
         }
+    }
+
+    /// Settle on what the observation window saw, when it is conclusive: a
+    /// blank (or download-mode) verdict gives the port back, as identify's
+    /// does — a blank board has nothing more to say, and its boot loop only
+    /// floods the journal.
+    fn settle_when_observed(&self, ctx: &ActivityCtx<'_>) -> Option<ActivityStep> {
+        let outcome = self.observed_outcome(ctx)?;
+        Some(Self::settle(outcome, ctx))
+    }
+
+    /// End with `outcome`; a success gives the port back. Studio knows the
+    /// board is blank either way, and Install firmware opens the port
+    /// itself: an erased chip's port held open only meets its next
+    /// re-enumeration as a dead port, which takes the board off the page
+    /// until it is back (a closed port re-enumerates unseen).
+    fn settle(outcome: ActivityOutcome, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        let commands = match (outcome.is_success(), ctx.link) {
+            (true, Some(link)) => vec![Command::Link {
+                link,
+                command: LinkCommand::Close,
+            }],
+            _ => Vec::new(),
+        };
+        ActivityStep::Done { outcome, commands }
     }
 
     /// What the observation window has seen, if it is conclusive.
@@ -178,17 +216,19 @@ impl EraseActivity {
                 deadline,
                 next_poke_at,
             } => {
-                if let Some(outcome) = self.observed_outcome(ctx) {
-                    return ActivityStep::done(outcome);
+                if let Some(step) = self.settle_when_observed(ctx) {
+                    return step;
                 }
                 if now >= deadline {
                     // The wipe itself was verified by the effect; only the
                     // classification refresh went quiet. Degrade honestly.
-                    return ActivityStep::done(ActivityOutcome::Succeeded {
-                        summary: "flash erased; the board hasn't shown its boot loop yet — \
-                                  Identify re-checks it"
-                            .to_string(),
-                    });
+                    return Self::settle(
+                        ActivityOutcome::Succeeded {
+                            summary: "flash erased; the board is blank (it said nothing after)"
+                                .to_string(),
+                        },
+                        ctx,
+                    );
                 }
                 if now >= next_poke_at && !ctx.evidence.presence.is_open() {
                     let commands = self.open_port(ctx);
@@ -237,12 +277,26 @@ impl ActivityReducer for EraseActivity {
                     crate::link::LinkEvent::Closed { .. } if self.winding_down => {
                         ActivityStep::done(ActivityOutcome::Cancelled)
                     }
-                    // Boot lines are the fold's; the timer reads the
-                    // classification it produces.
+                    // Boot lines are the fold's; a line that makes the
+                    // verdict settles now, not at the next poke (a native-USB
+                    // chip's boot loop runs only until its watchdog
+                    // re-enumerates it).
+                    crate::link::LinkEvent::Line(_)
+                        if !self.winding_down
+                            && matches!(self.phase, ErasePhase::Observing { .. }) =>
+                    {
+                        self.settle_when_observed(ctx)
+                            .unwrap_or_else(ActivityStep::nothing)
+                    }
                     _ => ActivityStep::nothing(),
                 },
                 Event::IdentityObserved { .. }
                 | Event::GrantAnswered { .. }
+                // Another tab's hold is the roster's and the fold's news, never this
+                // reducer's: a link this activity runs on was opened here.
+                | Event::BoardHeld { .. }
+                | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The wire borrow is the fold's business (it pauses

@@ -11,6 +11,7 @@ mod frame_num;
 mod frame_time;
 mod loaded_project_runtime;
 pub mod memory_pressure;
+mod output_picture;
 mod power_service;
 // All three tests in this module exercise a Fixture node fed by a Shader
 // node's output slot, so the module needs both node kinds.

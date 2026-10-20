@@ -53,6 +53,23 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
   envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
   byte functions, with the clipboard itself living in the web edge).
+- `app/graph/` is the **Graph** tab's state: the mapping design lab's
+  editor (`lab/mapping/`'s `lab-mapping-model`) on the open project. While
+  the Graph is the place, the actor opens the project's own files with
+  `lab-mapping-files` (fetching what it asks for), lays it out with
+  `lab-layout`, and rebuilds it only when a file it read changes. The page
+  applies its pointer and key input to the editor synchronously through
+  a `GraphHandle` (an `Rc<RefCell>` built before the controller moves into
+  the actor, like `StudioHandle`'s delay cell), because a pointer move
+  can't wait behind a device read and a whole-view rebuild; what an input
+  changes for the rest of Studio reaches the actor as a
+  `StudioCommand::Graph` note. Every verb is an offer at
+  `project/graph/<verb>`; edits save through the ordinary asset edit
+  (`apply_asset_body`) in today's formats with an id on every written
+  object, pins go in `editor.json`'s per-node `canvas` surface, and the
+  selection breathes or chases on the board through the Patch view's
+  `PatchPulseOp`. Colours are the board's own published frames. Plan:
+  `lp2025/2026-10-17-0202-mapping-lab-into-studio`.
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.
 
@@ -195,7 +212,8 @@ it enqueues commands and renders change-gated snapshots. The pieces:
 - **The device card's frame feed is the second pull class.** While a card's ▶
   Play tab is up on a **Ready** device, that session pulls the frame the board
   has already published (`ProjectProbeRequest::OutputFrame` — a read, never a
-  re-render) at its own `DEVICE_CARD_FEED_INTERVAL` completion gap, held in the
+  re-render) at its own `DEVICE_CARD_FEED_INTERVAL` completion gap (over
+  Bluetooth the gentler `DEVICE_CARD_FEED_BLE_INTERVAL`), held in the
   session's `CardFeedState` and surfaced on `UiDeviceCard`
   (`frame_preview` / `frame_age_secs` / `frame_fps`). It runs on **non-lens**
   sessions, which otherwise issue no wire op between heartbeats, and it declares
@@ -452,8 +470,8 @@ keeps a card attached — right for a board still on the desk, wrong for a
 runtime that no longer exists. Only the two verbs' WORDS fork ("Power on" /
 "Power off", via `DevicesOp`'s `face`); every other verb reads the same.
 
-**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the Devices
-page add slot's second verb — its own op rather than a `DevicesOp` variant
+**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the home
+page's Connect a board second verb — its own op rather than a `DevicesOp` variant
 because creating a device is not something the fold does: the record is
 written in the library (row + sidecar, one settle), the roster meets it as
 an ordinary device at the settle that follows, and only then is there a
@@ -474,14 +492,14 @@ whatever they arrived with.
 
 ### Device verbs are offers, and some take values
 
-Every verb a device card, the add slot or a pending link draws is a
+Every verb a device card, the Connect a board section or a pending link draws is a
 `UiOffer` in the tree at `devices/<board ref>/<verb>`
 (`devices/device_offers.rs`, `pending_link_offers.rs`,
 `add_device_offers.rs`, `new_sim_offer.rs`). The ref is a `BoardRef`
 (`devices/board_ref.rs`): `mac-<12 hex>` for a board known by its silicon
 MAC, `sim-…` and `emu-…` for made boards by their generated MAC, and
-`new-<n>` for a link that has not said who it is yet. The card, the add
-slot, the agent and the palette all read the same offers.
+`new-<n>` for a link that has not said who it is yet. The card, the Connect a board
+section, the agent and the palette all read the same offers.
 
 A verb that needs a value declares typed `params` (`core/offer/`:
 `OfferParam` of kind `Choice`, `Text` or `Toggle`) and holds an
@@ -496,8 +514,85 @@ and `backing`. A level can depend on the board. Flashing a blank chip is
 Routine and flashing over firmware is Lasting. A push over a project the
 library has no copy of is Lasting, and Routine otherwise. Bluetooth reach
 is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
-is published disabled with its reason. See
+is published disabled with its reason. Unlock takes `password` (secret) and
+`remember`; pressed with no password it raises the sheet
+(`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
+`UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
+never carries it). It is published while a board's link holds nothing, or
+only play, and the board is linked and idle.
+
+A board whose files are gone is offered its way back and a way on
+(`devices/device_layout_view.rs`): Restore files (a backup this browser
+kept), Restore from a backup file…, and `start-fresh`
+(`DeviceStartFreshOp`, Routine: nothing on the board changes, the notice
+goes). The notice needs evidence the board had files (`FilesEvidence`, from
+`devices/board_files_memory.rs`: a pending backup, a project seen running
+here or given by this browser, a stamped identity it no longer names): a
+fresh install's first boot formats too, and is not a loss. A Start fresh
+is kept per board in this browser (the web edge's `localStorage`,
+`FRESH_STARTS_STORAGE_KEY`) until the board runs a project again.
+
+Three verbs open, show and close the board's session (the editor's lens),
+which the home page can hold (`app/studio/connected_board.rs`,
+`studio_controller/connect_flow.rs`; the board card ADR, §4):
+
+- `connect` means one thing: this board's session, on its card, with the
+  home page still up (`devices/connect_offer.rs`,
+  `RuntimeOp::ConnectDevice`). The lens opens the way an address opens it,
+  and the session is recorded as a `ConnectedBoard`: going home keeps it,
+  and it shows on the board's card unless an Edit is waiting or the user is
+  on the session's own page (`ConnectedBoard::shows_editor`, which reads the
+  place and acts on nothing). It is published on a board that is Ready (or
+  Degraded), linked, idle, holds a tier (any: the play password is enough),
+  registered, and not the board this tab's session is on; disabled, "No
+  project", on a board running none (its card's primary is then Add a
+  project, the `push` offer), and "Project not known" until the board says
+  what it runs. A session on another
+  board closes first: one board is connected at a time. Connect reaches the
+  board if it must, then opens its panel, in one press: on a closed port
+  (`device_offers.rs`) it opens the port; on an offline board it takes the
+  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
+  then the cable (`ConnectReach`, the same code `connect-wifi`,
+  `connect-relay` and `reconnect` run). Then it holds the intent
+  (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
+  board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
+  "The board didn't answer in time" (`StudioController::connect_failure`),
+  and it lets go at once when the board turns out locked or needing
+  firmware (Unlock, Install take over), when the port chooser it opened
+  closes with nothing picked (no failure: the user said no) or fails (said
+  on the card), on Done, another Connect, an Edit elsewhere, or an
+  address's open. "Couldn't connect" goes by itself once the board is
+  ready on another link (`ConnectFailure::outlived`). While an editor open is held for the
+  board (the opening frame's exit), it opens the port only. Not published
+  again while it waits, nor on an offline stand-in (Power on is its way
+  back).
+- `edit` shows the editor on the board (`devices/edit_offer.rs`,
+  `RuntimeOp::EditDevice`): on the connected board, the session already
+  open, with nothing reattached or read again; on any other ready, running,
+  registered board, a connect first. It is not published while the editor
+  already shows the board.
+- `done` closes the session on the board this tab's session is on, whoever
+  holds it (`devices/done_offer.rs`, `RuntimeOp::CloseDeviceLens`; Routine).
+
+An address's open (`RuntimeOp::OpenDeviceLens`, `/device/<uid>`, a project
+card) is not connected, and on the board a connected session already holds
+it does nothing: the user being on the session's address is what shows it
+in the editor. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+
+A board another tab of this browser holds offers `devices/<board
+ref>/take-over` (`take_over_offer.rs`; the controller decides when) instead
+of `connect`, `retry` and `identify`, which would each open a port that tab
+holds. Its level is what it closes over there, by the holder's last word:
+`Watching` is Routine, `Open` (and a level not said yet) is Undoable, and
+`Busy` is disabled with "Busy in the other tab: <label>". It asks the
+holder, waits five seconds, and on `Released` opens the ports the hold kept
+shut — or, for a board held by its network slot, runs the board's ordinary
+connect (its own network link here, else `connect-wifi`, else
+`connect-relay`; with none of them it is disabled, "No way to reach it from
+here"). `connect-wifi` and `connect-relay` are not offered while another tab
+holds the board's network slot. The progress is
+`DeviceRosterView.take_overs` (`UiTakeOver`).
 
 ### Which board plays which project
 
@@ -527,6 +622,156 @@ the board card's project bar ("Holiday Eaves · 3 boards", "Out of date") and
 the home page's "Other projects" ask. Both read this join and never build
 their own. A project on an offline board counts as on a board; pending links
 are not in the join.
+
+### The board card is built in core
+
+Every board Studio shows — new, online or offline, on the home page, docked
+in the editor or on the mismatch page — is one card, built here as data
+(`devices/board_card/`) and only drawn by the web. `board_card(&BoardCardInput)`
+builds a roster board's card and `pending_board_card(..)` a new board's;
+`roster_board_cards(&RosterCardsInput)` builds every card on a roster, new
+boards first. `StudioController::view()` publishes them on
+`DeviceRosterView.cards` once the view's offers are published, and the
+editor's docked card is `UiLensCard::Board`, built with the editor holding
+the board (Done is its primary, and it carries no panel: the editor is the
+session's surface). A builder reads only the board's own offers from the
+published tree, so a card can point at nothing core did not offer.
+
+A card (`UiBoardCard`) is:
+
+- the **picture** (`UiBoardPicture`): the board's lights, dimmed when they
+  are the last known ones, or the update's light while an update holds them;
+- the **status corner** (`UiStatusCorner`): a mark (a blue dot when all is
+  fine, the worst notice's icon otherwise, quiet for a board Studio is not
+  watching), a reading ("58 fps", "5 h ago"), and details holding the
+  notices, how the board is running, the picture's words and its terminal;
+- the **name bar** (`UiNameBar`): the board's name and its **one primary**
+  (`UiPrimary`): Install, Unlock, Connect, Add a project, Power on or
+  Done; never a greyed verb: when nothing can be pressed, its word is the
+  reason ("Connecting…", "Updating · 42%", "Offline · 2 weeks";
+  `primary_action.rs` has the order);
+- **eight rows** (`UiStackBar`), always project · USB · Wi‑Fi · Bluetooth ·
+  lightplayer.app · access · firmware · hardware, each one line: a kind, a
+  summary, an aside, a tone (orange is attention or someone else has it),
+  at most one action, the row's work while an activity runs in it, and
+  `todo` when something is left to do (a new board's setup list, drawn
+  lit). Each row has its own file (`project_bar.rs`, `usb_bar.rs`,
+  `wifi_bar.rs` …), whose doc is the table of what it says; a link row is
+  assembled by `link_bar.rs` with this tab's session laid over it
+  (`link_session.rs`).
+
+**Connected**, the card carries the board's whole **panel** in the eight
+rows' place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while
+the session is connected with its project ready): every control of the
+project's root panel in sections (`board_panel_picks.rs`: the root's own
+with the master, the `brightness` channel, leading; then each nested
+group's under its name), each control the root panel's own
+`UiPanelControlView` with its scope, so its writes are the panel's own.
+The card grows to hold them. `auto_save` is `Some` only at the edit tier;
+it and the panel's reset are drawn in the status corner's details
+(`UiDetailPanel::PanelSettings`). `edit` is the panel foot's action: Edit,
+or Edit with a lock (`unlock`) on a play-only board.
+The root face is `ProjectEditorView::root_module_face`, which the play page
+and the docs embed read too. The session's state while it is not open is
+the work of the row of its link (`BoardConnection`, per board on
+`DeviceRosterView.connections`): "Connecting…", "Reconnecting…", or
+"Couldn't connect" striped with Retry (`connect`). The picture is the
+lens's own frames (`PictureSource::Lens`, `LensFrameSource`).
+
+A bar's **details** (`UiBarDetails`) are `RichSection<UiCardAction>`
+sections (a notice first, facts, verbs, a Danger section last) and today's
+surfaces as named panels (`UiDetailPanel`: the terminal, access, the
+Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other
+version, restore from file); `raised` asks the web to open them now (the
+layout question). Every action is a `UiCardAction`: the offer it presses,
+the card's word and icon for it, preset values, and how it is drawn
+(`UiActionDraw`: a press, the project pick, the board pick, the offer's own
+params, or the sheet core raises).
+
+A bar's **work** (`UiBarWork`) is the activity in the bar whose subject it
+changes (a push in project, an identify or a Wi‑Fi connect in connection, a
+flash or update in firmware): its words and percent, its Cancel, green for
+about three seconds once it is done, striped with Retry when it failed. Done
+and Failed come from `ActivityEnds` (`devices/activity_ends.rs`), read off
+the device journal in studio core. Which project a board plays is
+`BoardProjects` (above).
+
+The web draws a card with `lpa-studio-web`'s `app/board_card/` and decides
+only its look — never what a bar says, its tone, or which offer it carries.
+The walks read the card by the hooks that module documents.
+
+### One tab holds a board
+
+A USB port opens in one tab only, and a board's network slot takes one
+client. So that another Studio tab of the same browser can say "Open in
+another tab" instead of "in use by another app", ask the holder to let go,
+and notice when it dies, a tab that holds a board takes a Web Lock named for
+it after the board's hello (`HoldKey`: `lp-board:usb:<vid>:<pid>:<mac>` or
+`lp-board:net:<mac>`) and says so on a channel (`HoldNote`, versioned and
+never persisted). `devices/board_hold/` holds the vocabulary: the book of
+who holds what (`BoardHoldBook`), the one door to the browser
+(`BoardHoldEdge`, installed by the web with `set_board_hold_edge`; notes
+arrive as `StudioCommand::BoardHold`), and its host double
+(`MemoryBoardHoldBus`, several tabs on one bus). The device model carries
+the fact on the board (`Event::BoardHeld`, `DeviceView.held_elsewhere`) and
+on a port it must not open (`Event::LinkHeld`). Taking a board over is the
+offer at `devices/<board ref>/take-over` (above, "Device verbs are
+offers"), the asker's side in `studio_controller/take_over_flow.rs`. A
+board another tab holds counts as online (`split_roster`), and its picture
+follows the holder's sidecar: a newer sidecar frame replaces a frame that
+is not live here (`CardFeedState::seed_if_newer`). The card says all of
+this in `devices/board_card/held_board.rs`: Connect is the primary and
+presses `take-over`; the USB row reads "Open in another tab" (with
+"editor open" or what the holder is busy with), "Taken by another tab" for a
+tab that let go, or the take-over's own work ("Asking the other tab…",
+"Opening…", or striped with Retry), all in the orange "someone has it" tone;
+the picture is the one the holder saved; and the card is Online.
+
+The holder's side (`studio_controller/board_hold_flow.rs`, pure halves in
+`board_hold/`): a tab's first sweep waits for one look at the lock manager
+(`HoldPriming`), so it never opens a port another tab holds. Claim order is
+open, hello, then lock, then announce; release order is close the port,
+release the lock, then announce (`hold_reconcile`). The gate
+(`UsbHoldGate`, kept on the effects layer) attaches a sweep's new ports
+without opening them when the other tabs' claims for their vendor:product
+account for all of them, reads a refused open against the same claims, and
+names the board when exactly one claim and one port of the kind are in play.
+A port picked in the chooser is not gated (it may be another board of the
+kind), so it is opened and refused; that refusal is read when it is heard,
+against the claims standing then, not when the identify gives up five
+seconds later (`BoardHoldFlow.refused`). A take-over whose holder let go
+opens every port of its kind this tab could not open — kept shut, read as
+held, or refused — once each (`FreedPorts`), and a refusal heard after the
+release is that hold's and opens again too.
+A holder announces `Watching`, `Open` (its editor is on the board) or
+`Busy(label)`; it refuses an ask while busy and otherwise closes the editor,
+writes the last picture, disconnects, waits for the close, releases, then
+says `Released` (`hold_answer`). A sentinel watch per hold elsewhere clears
+the fact when the holder dies, and never opens the port — except for a hold
+read off the lock manager at load whose holder never spoke: that is the old
+page of a reload, whose lock outlives it for a moment, and when it frees the
+ports it kept shut open as a fresh load opens them. A port the claims kept
+shut loses its "held by another tab" mark (`Event::LinkFreed`) once no claim
+of its kind stands. No verb on a held board hands its port or its record
+away: no Forget, and over USB no Flash, Erase or Reset; a held pending port
+offers no Reset or dismiss.
+
+A board's one network slot (the LAN or the relay; one slot whichever road
+took it) is held the same way, as `lp-board:net:<mac>`, with no gate: there
+is nothing to refuse before the dial. A board held both ways shows its USB
+hold first. The board gives its slot to the newest client that proves the
+holder's key, and closes the holder with an ordinary close that its page
+would redial; every tab of one browser presents the same keys, so a tab
+that hears another tab newly say it holds a slot this tab had **yields**: it
+closes its own session by request (an open link through `Disconnect`, a
+dropped one through the transport's forget), lets the hold go, and its board
+says it was taken. A holder whose link took the slot before the tab it left
+let the lock go announces `Holds { locked: false }` and claims again until
+the lock is its own; other tabs watch only a locked hold. A refusal from
+anyone else (1013, 4429) is a stranger's busy: no fact, no `take-over`, and
+the connect stays offered. See
+`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`
+for what stays open (another browser, lp-cli).
 
 ## Device Management UX
 

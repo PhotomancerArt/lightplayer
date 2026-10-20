@@ -1,11 +1,13 @@
 //! Where a LightPlayer filesystem is, and the littlefs configuration the
 //! firmware mounts it with.
 //!
-//! The geometry must equal the firmware's `lpfs_config()`
-//! (`lp-fw/fw-esp32c6/src/flash_storage.rs`): 4096 B blocks, 512 B cache,
-//! 64 B lookahead, the block count from the partition table (plan Q15). A
-//! re-packed image built with any other cache or lookahead would still be
-//! littlefs — but this module only ever builds what the firmware mounts.
+//! The geometry must equal the fielded C6 firmware's `lpfs_config()`
+//! (`lp-fw/fw-esp32c6/src/flash_storage.rs` until the tree-store cutover
+//! removed littlefs from the C6; every littlefs release carries it): 4096 B
+//! blocks, 512 B cache, 64 B lookahead, the block count from the partition
+//! table (plan Q15). A re-packed image built with any other cache or
+//! lookahead would still be littlefs — but this module only ever builds what
+//! the firmware mounts. Frozen, like the layouts in `legacy_layout`.
 
 use littlefs_rust::Config;
 
@@ -79,17 +81,15 @@ mod tests {
     use super::*;
     use littlefs_rust::{Filesystem, RamStorage};
 
-    /// The firmware's numbers, pinned: a change here is a change to what
-    /// every re-packed board mounts.
+    /// The fielded firmware's numbers, pinned: a change here is a change to
+    /// what every re-packed (restored) littlefs board mounts. The C6 source
+    /// they were read from left with littlefs (the tree-store cutover); the
+    /// releases that mount them do not change.
     #[test]
-    fn the_geometry_is_the_firmwares() {
+    fn the_geometry_is_the_fielded_firmwares() {
         assert_eq!(LPFS_BLOCK_SIZE, 4096);
         assert_eq!(LPFS_CACHE_SIZE, 512);
         assert_eq!(LPFS_LOOKAHEAD_SIZE, 64);
-        let csv = include_str!("../../../../lp-fw/fw-esp32c6/src/flash_storage.rs");
-        assert!(csv.contains("const BLOCK_SIZE: u32 = 4096;"));
-        assert!(csv.contains("const CACHE_SIZE: u32 = 512;"));
-        assert!(csv.contains("const LOOKAHEAD_SIZE: u32 = 64;"));
     }
 
     #[test]

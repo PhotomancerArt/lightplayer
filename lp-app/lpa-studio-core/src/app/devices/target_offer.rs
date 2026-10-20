@@ -3,7 +3,7 @@
 //! Two surfaces ask the same question and get almost the same answer, so
 //! the answer is decided here rather than twice in the renderer:
 //!
-//! - **The Devices page's add slot** ("start a board here ▾", D44) offers
+//! - **Connect a board's second verb** ("start a board here ▾", D44) offers
 //!   only what can actually be started — Desktop and every catalog board
 //!   with a checked-in runtime manifest — and tags each row with its
 //!   [`Backing`]. A board this build can emulate gets **two** rows (D1).
@@ -79,7 +79,7 @@ pub struct TargetChoice {
     /// What picking this row starts.
     ///
     /// In [`TargetScope::Runnable`] it is the row's OWN runtime — a board
-    /// with an emulator has one row of each (D1) — and the add slot renders
+    /// with an emulator has one row of each (D1) — and Connect a board renders
     /// it as the row's tag. In [`TargetScope::Everything`] there is one row
     /// per board, it carries the advisory `backing_for` answer, and the
     /// Hardware row deliberately renders nothing from it (D41).

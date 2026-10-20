@@ -42,7 +42,7 @@ pub const NEW_PROJECT_NAME_PARAM: &str = "name";
 pub const OPEN_PROJECT_PARAM: &str = "project";
 
 /// What an empty name field means.
-const NAME_PLACEHOLDER: &str = "Name (optional) \u{2014} else named after the template";
+const NAME_PLACEHOLDER: &str = "Name (optional)";
 
 /// Why neither verb can be pressed without a library.
 const NO_LIBRARY: &str = "your project library is not available in this browser";
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn open_lists_the_library_and_binds_the_cards_open() {
         let blocked = PackageHealth::Blocked {
-            headline: "Format 2 — too old for this Studio".to_string(),
+            headline: "Format too old (2)".to_string(),
             remedy: "Export it.".to_string(),
         };
         let projects = [
@@ -257,7 +257,7 @@ mod tests {
         );
         assert_eq!(
             options[1].disabled.as_deref(),
-            Some("Format 2 — too old for this Studio"),
+            Some("Format too old (2)"),
             "a project this Studio cannot open is listed, disabled"
         );
 
@@ -298,7 +298,7 @@ mod tests {
             slug: slug.to_string(),
             last_saved_at: None,
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: target.map(str::to_string),
             health,

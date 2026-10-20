@@ -1,3 +1,4 @@
+pub mod connected_board;
 pub mod console_command;
 pub mod lens_hold;
 pub mod lens_reconnect;
@@ -9,6 +10,7 @@ pub(crate) mod offer_press_test_api;
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
 mod output_face_decoration;
+pub mod pending_lens;
 pub mod place;
 pub mod play_view_op;
 pub mod refresh_cadence;
@@ -41,6 +43,8 @@ mod studio_export_e2e_tests;
 /// with live knob/fader edits over the real overlay path (node-card P3).
 #[cfg(test)]
 mod studio_face_e2e_tests;
+#[cfg(test)]
+mod studio_graph_e2e_tests;
 /// End-to-end import tests (module authoring unit, P5): vendoring a
 /// library pattern's export into the open project through the add-node
 /// picker, and composing a whole new project around one.
@@ -84,15 +88,17 @@ pub use crate::core::log::{
 };
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
+pub use connected_board::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use console_command::ConsoleCommand;
+pub use pending_lens::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
 pub use place::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 pub use play_view_op::PlayViewOp;
 pub use refresh_cadence::{
-    BLE_PLAY_IDLE_REFRESH_INTERVAL, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL,
-    DEVICE_LENS_PAUSE_OVERRIDE_MAX, DEVICE_REFRESH_INTERVAL, FRAME_STALE_AFTER_SECS,
-    PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, PASSIVE_REFRESH_BACKOFF_BASE,
+    BLE_PLAY_IDLE_REFRESH_INTERVAL, DEVICE_CARD_FEED_BLE_INTERVAL, DEVICE_CARD_FEED_INTERVAL,
+    DEVICE_HEARTBEAT_INTERVAL, DEVICE_LENS_PAUSE_OVERRIDE_MAX, DEVICE_REFRESH_INTERVAL,
+    FRAME_STALE_AFTER_SECS, PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, PASSIVE_REFRESH_BACKOFF_BASE,
     PASSIVE_REFRESH_BACKOFF_MAX, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
-    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, lens_refresh_gap_policy,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, card_feed_gap_policy, lens_refresh_gap_policy,
     set_device_lens_pause_override,
 };
 pub use studio_actor::{StudioActor, StudioActorOptions, StudioHandle};

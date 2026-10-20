@@ -22,6 +22,19 @@
 //! purpose: it is the one piece of the split image that is never updated
 //! over the air. It carries its version word (`lp_bootctl::loader_identity`)
 //! for a core to read.
+//!
+//! # Two flavours, one crate
+//!
+//! - **factory** (default): the image above, at `factory+0`, started by the
+//!   ESP-IDF second stage (the *IDF door*). Linked by `loader.x`.
+//! - **bootloader** (`--features bootloader`): the same boot policy as
+//!   LightPlayer's own second stage at flash `0x0`, loaded by the mask ROM
+//!   itself (*our door*). Linked by `bootloader.x`; RAM-only, no placeholder
+//!   segments; runs a short platform prologue first (`prologue`: the state
+//!   the IDF left that a core relies on — watchdogs, brownout, the flash
+//!   clocks, 32 KiB MMU pages) and says which bootloader it is in one line.
+//!   `app.bin` is byte-identical under both doors. ADR
+//!   `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`.
 
 #![no_std]
 #![no_main]
@@ -29,15 +42,21 @@
 mod esp_image;
 mod flash_window;
 mod mmu;
+#[cfg(feature = "bootloader")]
+mod prologue;
 mod rom;
 
 use flash_window::FlashWindow;
-use lp_bootctl::loader_identity::{LOADER_ID_LEN, loader_identity};
+use lp_bootctl::loader_identity::LOADER_ID_LEN;
+#[cfg(not(feature = "bootloader"))]
+use lp_bootctl::loader_identity::loader_identity;
+#[cfg(not(feature = "bootloader"))]
+use lp_bootctl::LOADER_VERSION;
 use lp_bootctl::{
-    BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootSlot, LOADER_VERSION, REGION_START, ResetKind,
-    choose,
+    BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootSlot, REGION_START, ResetKind, choose,
 };
 
+#[cfg(not(feature = "bootloader"))]
 core::arch::global_asm!(
     ".section .text.entry, \"ax\"",
     ".global _start",
@@ -47,11 +66,47 @@ core::arch::global_asm!(
     "1: j 1b",
 );
 
+// The ROM jumps here with its own stack: take ours, zero `.bss` (the ROM
+// loads only the image's bytes), then the prologue and the loader's job.
+#[cfg(feature = "bootloader")]
+core::arch::global_asm!(
+    ".section .text.entry, \"ax\"",
+    ".global _start",
+    "_start:",
+    "  la sp, _stack_top",
+    "  la t0, _bss_start",
+    "  la t1, _bss_end",
+    "2: bgeu t0, t1, 3f",
+    "  sw zero, 0(t0)",
+    "  addi t0, t0, 4",
+    "  j 2b",
+    "3: call bootloader_main",
+    "1: j 1b",
+);
+
 /// The loader's version word, in its flash placeholder segment (`loader.x`):
 /// a core finds it by scanning the loader image's first 4 KiB.
+#[cfg(not(feature = "bootloader"))]
 #[unsafe(link_section = ".loader_identity")]
 #[used]
 static LOADER_IDENTITY: [u8; LOADER_ID_LEN] = loader_identity(LOADER_VERSION);
+
+/// The bootloader's word, first in its RAM segment (`bootloader.x`), so it
+/// lands at image offset `0x20` of flash `0x0`.
+#[cfg(feature = "bootloader")]
+#[unsafe(link_section = ".bootloader_identity")]
+#[used]
+static BOOTLOADER_IDENTITY: [u8; LOADER_ID_LEN] =
+    lp_bootctl::bootloader_identity::bootloader_identity(lp_bootctl::BOOTLOADER_VERSION);
+
+/// Our door: the prologue, our line, then the loader's job.
+#[cfg(feature = "bootloader")]
+#[unsafe(no_mangle)]
+extern "C" fn bootloader_main() -> ! {
+    prologue::run();
+    rom::print_bootloader(lp_bootctl::BOOTLOADER_VERSION as u32);
+    loader_main()
+}
 
 /// The loader's own RAM: a core segment landing here would overwrite the code
 /// doing the copying.

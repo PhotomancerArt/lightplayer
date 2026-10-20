@@ -174,6 +174,20 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// The board card, built in core, on real boards: its primary pressed by
+/// path, and every action it draws an offer the tree publishes.
+mod board_card_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
+/// Connect a board's chooser failing after the pick: the section says so.
+mod chooser_failure_tests;
+/// Connected: Connect, Edit and Done by path, the home page and an open
+/// session side by side, and the surface following the place.
+mod connected_tests;
+/// The home page's sections over this bench: a board plugged in is
+/// online, a detached one is offline, and the Connect a board section's
+/// offers are all published.
+mod home_sections_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
@@ -186,8 +200,11 @@ mod relay_connect_tests;
 /// identifies, refuses firmware, is never given keys, and comes back after
 /// its leg drops.
 mod relay_link_tests;
+/// Unlock as an offer, `devices/<board>/unlock`, on boards reached over
+/// Bluetooth that hold nothing, or only play.
+mod unlock_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
-/// address typed into the add slot.
+/// address typed into Connect a board's Network row.
 mod wifi_connect_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
@@ -222,9 +239,24 @@ struct ScriptedTransport {
     push_plan: Rc<Cell<PushPlan>>,
     /// What a remove effect does. `Real` runs the real conversation too.
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// What an erase effect leaves the board doing.
+    erase_plan: Rc<Cell<ErasePlan>>,
     /// Every file set a push effect was handed — the bytes Studio sent
     /// down the wire, captured before the conversation runs.
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
+    /// Which enumeration of the board's USB the ports handed out now
+    /// belong to ([`DeviceBench::lose_port`]).
+    enumeration: Rc<Cell<u32>>,
+}
+
+/// What an erase effect leaves the board doing: booting its blank flash
+/// (the boot loop the Erase listens for), or silent in the flasher's stub
+/// (no reset after the wipe — what a real C6 did, 2026-10-19).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ErasePlan {
+    #[default]
+    Reboots,
+    Silent,
 }
 
 /// The scripted outcomes a remove effect can play out. Same three shapes the
@@ -277,9 +309,88 @@ impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
         let info = fake_link_info(&self.endpoint);
         GrantedLink {
-            link: Box::new(bench_link(info.clone(), &self.device)),
+            link: Box::new(EnumeratedPort {
+                inner: bench_link(info.clone(), &self.device),
+                born: self.enumeration.get(),
+                enumeration: Rc::clone(&self.enumeration),
+                open: false,
+                death: None,
+            }),
             info,
         }
+    }
+}
+
+/// One port object onto the scripted board, belonging to one enumeration
+/// of its USB. When the board's USB goes away ([`DeviceBench::lose_port`]:
+/// a re-enumeration, or an unplug) the port dies the way Chrome's does: an
+/// open one says the browser controller's death notice and closes, a
+/// closed one says nothing, and nothing it is asked to do reaches the board
+/// again. A port enumerated after that is a new object.
+struct EnumeratedPort {
+    inner: lpa_link::device_link::fake::FakeDeviceLink,
+    born: u32,
+    enumeration: Rc<Cell<u32>>,
+    open: bool,
+    /// What the dead port has left to say, once it has died.
+    death: Option<VecDeque<lpa_devices::link::LinkEvent>>,
+}
+
+impl EnumeratedPort {
+    /// The port died: its board went away under it.
+    fn die(&mut self) -> &mut VecDeque<lpa_devices::link::LinkEvent> {
+        use lpa_devices::link::{LinkCommand, LinkEvent};
+        let open = self.open;
+        self.death.get_or_insert_with(|| {
+            let mut death = VecDeque::new();
+            if open {
+                death.push_back(LinkEvent::Error(
+                    "browser serial error: NetworkError: The device has been lost.".to_string(),
+                ));
+                death.push_back(LinkEvent::Closed {
+                    reason: "browser serial error".to_string(),
+                });
+            }
+            death
+        });
+        // The board's end of the dead port goes with it, as the old byte
+        // channel does under a real re-enumeration.
+        if open {
+            lpa_devices::link::Link::submit(&mut self.inner, LinkCommand::Close);
+            self.open = false;
+        }
+        self.death.as_mut().expect("set above")
+    }
+
+    fn dead(&self) -> bool {
+        self.enumeration.get() != self.born
+    }
+}
+
+impl lpa_devices::link::Link for EnumeratedPort {
+    fn info(&self) -> &lpa_devices::LinkInfo {
+        lpa_devices::link::Link::info(&self.inner)
+    }
+
+    fn submit(&mut self, command: lpa_devices::link::LinkCommand) {
+        if self.dead() {
+            return;
+        }
+        lpa_devices::link::Link::submit(&mut self.inner, command);
+    }
+
+    fn poll_event(&mut self) -> Option<lpa_devices::link::LinkEvent> {
+        use lpa_devices::link::LinkEvent;
+        if self.dead() {
+            return self.die().pop_front();
+        }
+        let event = lpa_devices::link::Link::poll_event(&mut self.inner)?;
+        match &event {
+            LinkEvent::Opened { .. } => self.open = true,
+            LinkEvent::Closed { .. } => self.open = false,
+            _ => {}
+        }
+        Some(event)
     }
 }
 
@@ -401,9 +512,13 @@ impl DeviceTransport for ScriptedTransport {
             }
             DeviceEffectCall::EraseFlash => {
                 let device = self.device.clone();
+                let plan = self.erase_plan.get();
                 Box::pin(async move {
                     progress("Erasing flash".to_string(), Some(50));
-                    device.fake_erase();
+                    match plan {
+                        ErasePlan::Reboots => device.fake_erase(),
+                        ErasePlan::Silent => device.fake_erase_without_reset(),
+                    }
                     progress("Flash erased".to_string(), Some(100));
                     Ok(DeviceEffectFacts {
                         summary: "flash erased".to_string(),
@@ -821,7 +936,10 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    erase_plan: Rc<Cell<ErasePlan>>,
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
+    /// The board's USB enumeration ([`Self::lose_port`]).
+    enumeration: Rc<Cell<u32>>,
     /// The sim half of the transport, when this bench has one. Held so a
     /// row can assert what is RUNNING as opposed to what is remembered.
     sims: Option<Rc<SimDeviceTransport>>,
@@ -1075,7 +1193,9 @@ impl DeviceBench {
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
         let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
+        let erase_plan: Rc<Cell<ErasePlan>> = Rc::new(Cell::new(ErasePlan::default()));
         let pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>> = Rc::new(RefCell::new(Vec::new()));
+        let enumeration = Rc::new(Cell::new(0));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -1086,7 +1206,9 @@ impl DeviceBench {
             manifest_writes: Rc::clone(&manifest_writes),
             push_plan: Rc::clone(&push_plan),
             remove_plan: Rc::clone(&remove_plan),
+            erase_plan: Rc::clone(&erase_plan),
             pushed: Rc::clone(&pushed),
+            enumeration: Rc::clone(&enumeration),
         }));
 
         // Where a layout migration's backup goes before anything is written
@@ -1106,7 +1228,9 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            erase_plan,
             pushed,
+            enumeration,
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
@@ -1137,6 +1261,10 @@ impl DeviceBench {
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
                     }
+                    // The hold edge's answers (one tab holds a board).
+                    crate::StudioCommand::HoldEdge(event) => {
+                        self.controller.on_hold_edge_event(event);
+                    }
                     _ => {}
                 }
             }
@@ -1148,6 +1276,25 @@ impl DeviceBench {
         drive(self.controller.run_network_lens_step());
         // What this turn asked the boards is answered before time moves on.
         self.wire.settle();
+    }
+
+    /// The board's USB goes away, as an unplug or a re-enumeration does: its
+    /// port dies under whatever had it open, the grant leaves the browser's
+    /// list, and `navigator.serial` fires `disconnect`. [`Self::port_back`]
+    /// is the re-enumeration's other half.
+    fn lose_port(&mut self) {
+        self.enumeration.set(self.enumeration.get() + 1);
+        self.granted.set(false);
+        self.controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    }
+
+    /// The board's USB is back: a new port object under the same grant, and
+    /// `connect`.
+    fn port_back(&mut self) {
+        self.granted.set(true);
+        self.controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
     }
 
     fn run_until(&mut self, tasks: &TaskPool, what: &str, ready: impl Fn(&Self) -> bool) {
@@ -1772,6 +1919,68 @@ fn a_replug_under_the_lens_resumes_the_same_editor_session() {
         Some(_) => panic!("the resumed lens should pull at once, and succeed"),
         None => panic!("the resumed lens had nothing to pull"),
     }
+}
+
+/// The editor is a lens on a running board whose USB re-enumerates under
+/// it (a reset that takes a C6's USB with it): the port dies under the
+/// lens's own io, and a new port is back under the same grant a moment
+/// later. The board is never offline, so its card never leaves Online
+/// boards; the editor holds behind "Reconnecting…" and the same session
+/// resumes on the new link.
+#[test]
+fn a_re_enumeration_under_the_lens_never_takes_the_board_offline() {
+    let (mut bench, tasks, device) = lens_on_a_running_board("dev000000daqf6dvvra", "usb-lens-10");
+    let session = bench.lens_session_id();
+    let old_link = lens_link(&bench);
+    let online = |bench: &DeviceBench| {
+        assert_ne!(
+            bench.view().devices[0].status,
+            lpa_devices::device::DeviceStatus::Offline,
+            "a port back within the grace never takes the board offline"
+        );
+    };
+
+    // The port dies under the lens, and the grant leaves the browser's list.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.lose_port();
+    // The editor's next pull meets the dead port.
+    let _ = bench.tick();
+    bench.run_until(&tasks, "the lens to be held on the dead port", |bench| {
+        online(bench);
+        bench.controller.lens_is_held()
+    });
+    for _ in 0..(1.0 / STEP_MS) as usize {
+        bench.step(&tasks);
+        online(&bench);
+    }
+
+    // A new port under the same grant.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.port_back();
+    bench.run_until(&tasks, "the board to be Ready on the new link", |bench| {
+        online(bench);
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.lens_is_held() {
+        let _ = bench.tick();
+        bench.step(&tasks);
+        online(&bench);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never resumed"
+        );
+    }
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    assert_eq!(bench.lens_session_id(), session, "the same session resumed");
+    assert_ne!(lens_link(&bench), old_link, "on the new link");
 }
 
 /// The replug-under-the-lens flake, made deterministic: a link whose
@@ -2532,6 +2741,21 @@ fn running_board_wanting_a_picture(uid: &str, endpoint: &str) -> (DeviceBench, T
     (bench, tasks)
 }
 
+/// One edit to one slot, as the editor's field sends it
+/// (`SlotEditOp::SetValue`). No offer carries a slot edit — the field
+/// builds it (`slot_edit_actions.rs`, the web's) — so this is the device
+/// tests' one place to build it.
+fn set_slot_value(
+    bench: &mut DeviceBench,
+    address: crate::ProjectSlotAddress,
+    value: lpc_model::LpValue,
+) -> crate::UiResult {
+    drive(bench.controller.dispatch(UiAction::from_op(
+        ProjectController::NODE_ID,
+        crate::SlotEditOp::SetValue { address, value },
+    )))
+}
+
 fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i64> {
     bench
         .controller
@@ -2549,6 +2773,10 @@ fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i
 fn a_running_board_feeds_its_card_over_the_shared_link() {
     let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt1", "usb-feed-1");
     let device = bench.view().devices[0].id;
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_INTERVAL)
+    );
 
     let mut pulls = 0;
     while feed_frame_revision(&bench, device).is_none() {
@@ -2615,6 +2843,83 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
         !journal.iter().any(|line| line.contains("Passthrough")),
         "{journal:#?}"
     );
+}
+
+/// Over Bluetooth the card gets a picture too (2026-10-08; until then it
+/// had none), at the gentler Bluetooth gap: once a frame has landed, a
+/// pull that USB's 150 ms would have made by now waits for Bluetooth's
+/// 500 ms, and then it comes.
+#[test]
+fn a_bluetooth_board_feeds_its_card_at_the_gentle_gap() {
+    let (mut bench, tasks) =
+        running_board_wanting_a_picture("dev000000daqf6dvvt8", "ble:QkxFLWZlZWQ");
+    let device = bench.view().devices[0].id;
+    assert!(
+        bench.view().devices[0].is_over_bluetooth(),
+        "{:?}",
+        bench.view().devices[0]
+    );
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_BLE_INTERVAL),
+        "a Bluetooth card feeds, at its own gap"
+    );
+
+    let steps_for = |gap: Duration| (gap.as_secs_f64() / STEP_MS).ceil() as usize + 1;
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+            bench.step(&tasks);
+        }
+    }
+    let pulled_at = |bench: &DeviceBench| {
+        bench
+            .controller
+            .device_feeds()
+            .get(device)
+            .and_then(|feed| feed.last_pull_completed_at())
+    };
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp = pulled_at(&bench);
+    assert!(stamp.is_some(), "the gap had elapsed: a pull ran");
+
+    // Past USB's gap, short of Bluetooth's: nothing is asked.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert_eq!(pulled_at(&bench), stamp, "not due yet over Bluetooth");
+
+    // Past Bluetooth's gap: the next pull runs.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        pulled_at(&bench) > stamp,
+        "due again after the Bluetooth gap"
+    );
+
+    let feeds = bench.controller.device_roster_view().feeds;
+    let feed_view = feeds.get(&device).expect("the fed card has a feed view");
+    assert_eq!(
+        feed_view.liveness,
+        crate::FeedLiveness::Live,
+        "{feed_view:?}"
+    );
+    assert!(feed_view.frame.is_some());
+}
+
+/// The gap `device`'s card feed pulls at, when it is feeding.
+fn feed_gap(bench: &DeviceBench, device: crate::DeviceId) -> Option<Duration> {
+    let devices = bench.controller.devices_for_test();
+    bench
+        .controller
+        .device_feeds()
+        .active_gap_for_test(device, devices.roster(), devices.effects())
 }
 
 /// The persisted last frame (honest-device-preview follow-up): a fed
@@ -3317,11 +3622,10 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
             .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
         "{card:?}"
     );
-    // Auto-name: "<board display_name> · <Mon D>" (bench clock = epoch
-    // second 1000 = Jan 1), no naming step anywhere.
+    // Auto-name: the board's display name (O5: no date), no naming step
+    // anywhere.
     assert_eq!(
-        card.title,
-        format!("{} · Jan 1", choice.title),
+        card.title, choice.title,
         "the derived name is the card's title"
     );
 
@@ -3794,7 +4098,7 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the empty face's primary verb is live: {card:?}"
     );
     // The picker really is built from the gallery's two lists.
-    let offer = crate::push_offer(&card, &[], &[]);
+    let offer = crate::push_offer(card.board_id.as_deref(), &[], &[]);
     assert!(
         offer.new_project_unavailable.is_some(),
         "a board that has not named itself cannot have a starter generated: {offer:?}"
@@ -4268,7 +4572,7 @@ const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
 /// back to the saved record and reach Ready, the board's later frames must
 /// land on it (on main they landed on the neighbour as `IdentityConflict`s,
 /// and the card never reached Ready), and the auto-name must be written ONCE
-/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" (a dated name, before O5) every settle for as
 /// long as the page was open, because each `SetName` aimed at the C6's id
 /// renamed the neighbour instead.
 #[test]
@@ -4322,7 +4626,7 @@ fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
     let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
     assert_eq!(desk.state_label, "Ready", "{desk:?}");
     assert!(
-        desk.title.ends_with(&month_day_of(&bench)),
+        !desk.title.is_empty() && !desk.title.ends_with(" 2"),
         "named once, without a collision suffix: {:?}",
         desk.title
     );
@@ -4435,12 +4739,6 @@ fn journal_lines(bench: &DeviceBench) -> Vec<String> {
         .entries()
         .map(|entry| format!("{entry:?}"))
         .collect()
-}
-
-/// The "<Mon D>" the auto-name ends with on the bench's clock.
-fn month_day_of(bench: &DeviceBench) -> String {
-    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
-    derived.trim_start_matches("x · ").to_string()
 }
 
 // ---------------------------------------------------------------------
@@ -5746,19 +6044,16 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
     ] {
         assert!(names.contains(&verb), "{verb} missing from {names:?}");
     }
-    for absent in [
-        "flash",
-        "connect",
-        "reconnect",
-        "cancel",
-        "retry",
-        "remove-project",
-    ] {
+    for absent in ["flash", "reconnect", "cancel", "retry", "remove-project"] {
         assert!(
             !names.contains(&absent),
             "{absent} on a Ready, empty board: {names:?}"
         );
     }
+    // Connect is the board's panel, here (Q9 of "connected"): a board
+    // running no project has none to show, and says so.
+    let connect = crate::OfferPath::parse("devices/mac-6055f90a0b0c/connect").unwrap();
+    assert_eq!(bench.offer_reason(connect), crate::NO_PROJECT);
     for (verb, lasting) in &verbs {
         let expected = matches!(verb.as_str(), "erase" | "forget" | "update-firmware");
         assert_eq!(*lasting, expected, "{verb}");
@@ -5767,7 +6062,7 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
         view.offers
             .get(&crate::OfferPath::devices().child("new-sim"))
             .is_some(),
-        "the add slot's sim verb is published beside the roster"
+        "Connect a board's sim verb is published beside the roster"
     );
 }
 
@@ -5919,7 +6214,7 @@ fn rename_binds_its_text_and_the_card_wears_it() {
 
 /// New sim through its offer: it lists the runnable targets, and a press
 /// with a board and a runtime mints that sim and powers it on — the same
-/// creation the add slot's row dispatches. The sim's verbs then live at its
+/// creation Connect a board's row dispatches. The sim's verbs then live at its
 /// `sim-` ref.
 #[test]
 fn new_sim_lists_targets_and_a_press_starts_one() {
@@ -5942,7 +6237,7 @@ fn new_sim_lists_targets_and_a_press_starts_one() {
     let offer = view
         .offers
         .get(&crate::OfferPath::devices().child("new-sim"))
-        .expect("the add slot's sim verb");
+        .expect("Connect a board's sim verb");
     let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
         panic!("board is a choice: {:?}", offer.params());
     };
@@ -6163,7 +6458,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
     );
     assert_eq!(
         bench.view().devices[0].title,
-        format!("{} · Jan 1", users.title),
+        users.title,
         "named after the user's board"
     );
     let card = app_cards(&mut bench).remove(0);
@@ -6901,7 +7196,7 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     (bench, tasks, uid, device)
 }
 
-/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// AC7, the picker's half (D44): picking a board in Connect a board's dropdown
 /// mints a sim of THAT target, names it after the board, and powers it on —
 /// one gesture, ending in a card in the grid rather than a record on the
 /// remembered line. The device is an ordinary registry row; the picker
@@ -7705,13 +8000,11 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
 
-    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
-        crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage {
-            key: key.clone(),
-            prefer: None,
-        },
-    )));
+    // The gallery's open, pressed by path as the card and the agent press it.
+    let outcome = bench.press(
+        "project/open",
+        OfferArgs::new().with(crate::OPEN_PROJECT_PARAM, &key),
+    );
     assert!(
         outcome.is_ok(),
         "the open is held, never refused: {outcome:?}"
@@ -8588,7 +8881,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
     )));
     let error = result.expect_err("a newer-format head is refused");
     assert!(
-        error.to_string().contains("made by a newer LightPlayer"),
+        error.to_string().contains("Made by a newer LightPlayer"),
         "the classified reason reaches the caller: {error}"
     );
 
@@ -8613,7 +8906,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
         failure.message
     );
     assert!(
-        failure.message.contains("made by a newer LightPlayer"),
+        failure.message.contains("Made by a newer LightPlayer"),
         "the notice carries the classified reason: {:?}",
         failure.message
     );
@@ -9290,24 +9583,68 @@ fn an_unnamed_board_with_its_files_gets_the_ordinary_card_and_its_update() {
     }
 }
 
-/// A board whose filesystem was just formatted DOES need its files back —
-/// and still gets its Update beside the restore: an update (over the air,
-/// or a flash that keeps `lpfs`) never touches the board's files, so the
-/// files state never withholds it (defect 2026-10-06).
+/// A board this tab saw run a project that comes back from a power cut with
+/// its storage formatted DOES need its files back — and still gets its
+/// Update beside the restore: an update (over the air, or a flash that
+/// keeps `lpfs`) never touches the board's files, so the files state never
+/// withholds it (defect 2026-10-06). The same board's first, fresh boot
+/// said nothing about files: a formatted boot is a loss only on evidence
+/// the board held some (defect 2026-10-14).
 #[test]
 fn a_board_that_formatted_offers_its_restore_and_its_update() {
-    let device = unnamed_light_player(lpc_wire::FsBootState::Formatted);
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac("10:bd:a3:b0:8e:30")
+            .with_fs_boot_state(lpc_wire::FsBootState::Formatted)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
     let (mut bench, tasks) = identified(&device, "usb-layout-formatted");
     let target = bench.view().devices[0].id;
-
     bench.wait_for_verb(&tasks, target, "update-firmware");
+    assert!(
+        !bench
+            .controller
+            .device_roster_view()
+            .layout
+            .contains_key(&target),
+        "a fresh boot lost nothing"
+    );
+
+    // It runs a project here, then loses power and boots formatted again,
+    // empty. (Push is offered once the card settles; on a slow runner that
+    // can come a tick after its Update.)
+    bench.wait_for_verb(&tasks, target, "push");
+    bench.push_gesture(target, bundled_example());
+    bench.run_until(&tasks, "the board to run what was pushed", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    device.fake_power_cycle();
+    bench.run_until(&tasks, "the card to say its files are gone", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.line.is_some())
+    });
     let layout = bench.controller.device_roster_view().layout[&target].clone();
     assert_eq!(
         layout.line.as_deref(),
-        Some("This board needs its files back — restore them from a backup file.")
+        Some(
+            "This board's files are gone. Restore them from a backup file if you have one. Or \
+             Start fresh, and the board waits for a new project."
+        )
     );
     assert!(layout.restore_from_file.is_some(), "the way back");
+    assert!(layout.start_fresh.is_some(), "the way on");
     assert!(card_offers(&bench, target, RESTORE_FROM_FILE));
+    assert!(card_offers(&bench, target, crate::START_FRESH));
     assert!(
         card_offers(&bench, target, "update-firmware"),
         "and its Update"
@@ -9363,7 +9700,7 @@ fn a_reboot_after_a_pull_mid_filesystem_write_still_offers_the_backup_and_update
         layout
             .line
             .as_deref()
-            .is_some_and(|line| line.contains("in a backup in this browser")),
+            .is_some_and(|line| line.contains("This browser kept a backup")),
         "{:?}",
         layout.line
     );

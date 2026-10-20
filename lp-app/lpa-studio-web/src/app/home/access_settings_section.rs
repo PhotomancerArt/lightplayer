@@ -1,6 +1,7 @@
-//! The Devices page's access settings (spike §6): this browser's name on
-//! your devices, your account's key and its optional device passwords, and
-//! the passwords this browser remembers.
+//! "Unlocking your boards" (spike §6), held in a fold under the home page's
+//! boards sections (`page/keys_fold.rs`): this browser's name on your
+//! devices, your account's key and its optional device passwords, and the
+//! passwords this browser remembers.
 //!
 //! Most people never open this: plugging a device in by USB puts this
 //! browser's key on it, and signing in puts your account's key there too,
@@ -30,6 +31,10 @@ use crate::base::{StudioIcon, StudioIconName};
 use crate::cloud::account_access::AccountAccessState;
 use crate::core::{ArmedConfirmButton, outline_action_class, quiet_action_class};
 
+/// The section's heading: the home page's own word for it (R7: "board",
+/// not "device").
+const TITLE: &str = lpa_studio_core::UiHomeSection::UnlockingYourBoards.label();
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn AccessSettingsSection(
@@ -44,11 +49,17 @@ pub(crate) fn AccessSettingsSection(
     /// Stories only: show the account passwords' text.
     #[props(default)]
     passwords_shown: bool,
+    /// Draw the section's own heading. The home page's fold carries the
+    /// same words on its toggle, so it draws the section without one.
+    #[props(default = true)]
+    titled: bool,
 ) -> Element {
     let remembered = settings.remembered_passwords;
     rsx! {
         section { class: "tw:grid tw:max-w-md tw:gap-4",
-            h2 { class: section_title_class(), "Unlocking your devices" }
+            if titled {
+                h2 { class: section_title_class(), "{TITLE}" }
+            }
             div { class: "tw:grid tw:gap-1.5",
                 p { class: GROUP_HEAD_CLASS, "This browser" }
                 ThisBrowserRow {
@@ -197,7 +208,7 @@ fn AccountGroup(
                 ArmedConfirmButton {
                     label: Some("Reset account key…".to_string()),
                     armed_label: "Confirm reset".to_string(),
-                    title: "Make a new account key. Devices drop the old one the next time you plug them in.".to_string(),
+                    title: "Make a new account key. Your devices will drop the old one the next time you plug them in.".to_string(),
                     on_confirm: move |_| on_reset_key.call(()),
                 }
             }
@@ -217,7 +228,7 @@ fn AccountGroup(
                 }
             }
             p { class: HELP_CLASS,
-                "Added to every device you set up or plug in, next to your account key. For friends who don't use LightPlayer — tell them the play one."
+                "Added to every device you set up or plug in, along with your account key. Give friends who don't use LightPlayer the play password."
             }
         }
     }
@@ -325,7 +336,7 @@ const OPT_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:rounde
 
 fn remembered_line(count: usize) -> String {
     match count {
-        0 => "None yet. Passwords friends share with you land here.".to_string(),
+        0 => "None yet. Passwords friends share with you will appear here.".to_string(),
         1 => "1 password friends shared with you.".to_string(),
         n => format!("{n} passwords friends shared with you."),
     }

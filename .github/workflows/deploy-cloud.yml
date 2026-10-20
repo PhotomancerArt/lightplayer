@@ -281,7 +281,7 @@ jobs:
           echo "healthz never answered — check: flyctl logs --app lightplayer"
           exit 1
 
-      - name: Verify plain HTTP still redirects (and only the relay's device leg does not)
+      - name: Verify plain HTTP still redirects, and the relay's device leg answers both protocols
         run: |
           set -euo pipefail
           # fly's `force_https` is off so boards can reach the relay over
@@ -294,9 +294,17 @@ jobs:
           # connection that times out (main's deploy failed on #999, #1030 and
           # #1038 this way; the same probes pass a minute later). Both probes
           # therefore repeat, 5 s apart, for up to ~90 s, until BOTH hold.
-          # What counts as success is unchanged: a page path answers 301 to
-          # https with path and query kept, and the relay's device leg (a
-          # WebSocket upgrade on /relay/device over plain HTTP) answers 101.
+          # What counts as success: a page path answers 301 to https with
+          # path and query kept, and the relay's device leg (a WebSocket
+          # upgrade on /relay/device over plain HTTP) answers 101.
+          #
+          # And the never-break check: the live hub still answers a relay
+          # protocol 1 hello — the bytes every fielded core speaks — with a
+          # Challenge (tag 0x02), and a protocol 2 hello too. Each hello
+          # names no account, so nothing ever registers: the probe closes
+          # after the challenge. A refused hello (0x05) fails the step: a
+          # deploy that stops answering protocol 1 strands boards in houses.
+          #
           # A timeout or refused connection is "not yet" until the budget
           # ends; then the step fails with the last statuses seen.
           python3 - <<'PY'
@@ -336,15 +344,18 @@ jobs:
               return True, f"{line} -> {loc}"
 
 
+          UPGRADE = (b"GET /relay/device HTTP/1.1\r\nHost: " + site.encode()
+                     + b"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                     b"Sec-WebSocket-Version: 13\r\n"
+                     b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+
+
           def device_status():
               """Return (ok, what-was-seen) for the relay's device-leg upgrade."""
               try:
                   s = socket.create_connection((host, port), timeout=probe_timeout)
                   try:
-                      s.sendall(b"GET /relay/device HTTP/1.1\r\nHost: " + site.encode()
-                                + b"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                                b"Sec-WebSocket-Version: 13\r\n"
-                                b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+                      s.sendall(UPGRADE)
                       data = b""
                       while b"\r\n" not in data:
                           chunk = s.recv(4096)
@@ -359,14 +370,93 @@ jobs:
               return " 101 " in status, status
 
 
+          def relay_hello(relay_proto, firmware):
+              """A board's hello naming no account: the bytes of lpc-relay's
+              `RelayHello::new([2, 0, 0, 0, 0, 1], "smoke", 1, None, vec![])`,
+              then (protocol 2) `.with_firmware(firmware)`."""
+              out = (bytes([0x01])                       # tag: Hello
+                     + relay_proto.to_bytes(2, "little")  # relay_proto
+                     + bytes([2, 0, 0, 0, 0, 1])          # board MAC
+                     + (1).to_bytes(4, "little")          # wire_proto
+                     + bytes([0])                         # no LAN address
+                     + bytes([5]) + b"smoke"              # label
+                     + bytes([0]))                        # no accounts
+              if firmware is not None:                    # protocol 2's tail
+                  out += bytes([len(firmware)]) + firmware.encode("ascii")
+              return out
+
+
+          def ws_frame(opcode, payload):
+              """One masked client WebSocket frame (payload under 126 bytes)."""
+              mask = os.urandom(4)
+              return (bytes([0x80 | opcode, 0x80 | len(payload)]) + mask
+                      + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+          def hello_status(relay_proto, firmware):
+              """Return (ok, what-was-seen): the device leg answers this hello
+              with a Challenge (its first frame's tag is 0x02)."""
+              try:
+                  s = socket.create_connection((host, port), timeout=probe_timeout)
+                  try:
+                      s.sendall(UPGRADE)
+                      data = b""
+                      while b"\r\n\r\n" not in data:
+                          chunk = s.recv(4096)
+                          if not chunk:
+                              return False, "closed before the upgrade's answer"
+                          data += chunk
+                      head, data = data.split(b"\r\n\r\n", 1)
+                      status = head.split(b"\r\n", 1)[0].decode(errors="replace")
+                      if " 101 " not in status:
+                          return False, status
+                      s.sendall(ws_frame(0x2, relay_hello(relay_proto, firmware)))
+                      while True:
+                          while len(data) < 2:
+                              chunk = s.recv(4096)
+                              if not chunk:
+                                  return False, "closed before any frame"
+                              data += chunk
+                          opcode, length, start = data[0] & 0x0F, data[1] & 0x7F, 2
+                          if length == 126:
+                              length, start = None, 4
+                          elif length == 127:
+                              length, start = None, 10
+                          while len(data) < start:
+                              data += s.recv(4096)
+                          if length is None:
+                              length = int.from_bytes(data[2:start], "big")
+                          while len(data) < start + length:
+                              chunk = s.recv(4096)
+                              if not chunk:
+                                  return False, "closed inside a frame"
+                              data += chunk
+                          payload, data = data[start:start + length], data[start + length:]
+                          if opcode in (0x9, 0xA):  # ping, pong
+                              continue
+                          if opcode == 0x8:
+                              return False, f"closed: {payload[2:].decode(errors='replace')!r}"
+                          if opcode != 0x2 or not payload:
+                              return False, f"websocket opcode {opcode:#x}"
+                          s.sendall(ws_frame(0x8, b""))
+                          return payload[0] == 0x02, f"answered with tag {payload[0]:#04x}"
+                  finally:
+                      s.close()
+              except Exception as e:  # timeout, refused, reset: not yet
+                  return False, f"{type(e).__name__}: {e}"
+
+
           deadline = time.monotonic() + budget
           attempt = 0
           while True:
               attempt += 1
               page_ok, page = page_status()
               dev_ok, dev = device_status()
-              print(f"attempt {attempt}: page={page!r} device-leg={dev!r}", flush=True)
-              if page_ok and dev_ok:
+              v1_ok, v1 = hello_status(1, None)
+              v2_ok, v2 = hello_status(2, "smoke")
+              print(f"attempt {attempt}: page={page!r} device-leg={dev!r} "
+                    f"relay-v1-hello={v1!r} relay-v2-hello={v2!r}", flush=True)
+              if page_ok and dev_ok and v1_ok and v2_ok:
                   break
               if time.monotonic() + pause >= deadline:
                   failed = []
@@ -374,6 +464,10 @@ jobs:
                       failed.append(f"http://{site}/ is not a 301 to https with path and query kept: {page}")
                   if not dev_ok:
                       failed.append(f"the device leg did not upgrade: {dev}")
+                  if not v1_ok:
+                      failed.append(f"a relay protocol 1 hello was not challenged (fielded boards!): {v1}")
+                  if not v2_ok:
+                      failed.append(f"a relay protocol 2 hello was not challenged: {v2}")
                   raise SystemExit("; ".join(failed) + f" (after {attempt} attempts)")
               time.sleep(pause)
           PY

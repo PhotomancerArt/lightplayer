@@ -31,6 +31,11 @@ lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 # the firmware's seam table is written in. MIT, outside the fence, and the
 # fence admits an MIT crate with no allowlist entry.
 lp-seam = { path = "../../../lp-base/lp-seam" }
+# Power cuts at flash operations (`src/engine/flash_cut.rs`): the tear models
+# (`TearModel`, the calibrated CX1 mix) a cut tears the in-flight program or
+# erase with, so the emulated C6 and the host testbed share one model. MIT,
+# inside the fence (`lp-emu/lp-nor-sim`), no allowlist entry.
+lp-nor-sim = { path = "../../lp-nor-sim" }
 # The virtual LAN (`src/seam/net/`): the gateway's and the test probe's
 # TCP/IP stacks, and the wire types its DHCP server reads and writes. 0BSD,
 # already in the tree (embassy-net's stack). No default features: no OS

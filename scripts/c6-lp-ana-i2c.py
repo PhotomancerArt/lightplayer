@@ -31,8 +31,8 @@ Facts that bite (all bench, 2026-09-06):
   LPPERI_RESET_EN bit 29.
 - The TG0 watchdog loop is not guaranteed — the induced hang is often
   silent. The reliable signature is a ROM boot line whose `Saved PC` lies in
-  the bootloader's code segments (0x4086e610..0x40871378 for the shipped
-  bootloader).
+  the bootloader's code segments (0x4086e610..0x40871378 for espflash
+  3.3.0's bootloader and its quiet rebuild alike).
 
 See docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md.
 """
@@ -175,6 +175,9 @@ def cmd_watch(args):
     sys.exit(3)
 
 
+# lpa_devices::bootloader's detection ranges: espflash 3.3.0's bundled
+# bootloader's code segments, which also contain the quiet rebuild's
+# (lp-fw/bootloaders/README.md), so one table covers a board with either.
 BOOTLOADER_CODE_RANGES = [(0x4086E610, 0x40871378), (0x40875720, 0x40876F20)]
 
 

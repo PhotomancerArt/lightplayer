@@ -235,7 +235,19 @@ fn two_harness_runs_are_byte_identical() {
 #[test]
 #[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
 fn t3_memory_equals_t1() {
-    let Some(Run { m, outcome, text }) = run_harness_at(TimeGrade::T3) else {
+    memory_equals_t1_at(TimeGrade::T3);
+}
+
+/// The same statement for `t4`: a flash command's busy time is cycles the
+/// guest spends polling, never a byte the allocator can see.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn t4_memory_equals_t1() {
+    memory_equals_t1_at(TimeGrade::T4);
+}
+
+fn memory_equals_t1_at(grade: TimeGrade) {
+    let Some(Run { m, outcome, text }) = run_harness_at(grade) else {
         return;
     };
     assert!(
@@ -245,12 +257,12 @@ fn t3_memory_equals_t1() {
     assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
 
     let root = workspace_root().expect("workspace root");
-    let sidecar = SIDECAR.replace("lp-emu:esp32c6:t1", "lp-emu:esp32c6:t3");
+    let sidecar = SIDECAR.replace("lp-emu:esp32c6:t1", grade.configuration());
     let ours = Transcript::from_parts(
         TranscriptHeader::from_json(&sidecar).expect("the sidecar parses"),
         &text,
     )
-    .expect("our t3 capture is a transcript");
+    .expect("our capture is a transcript");
     let recorded = Transcript::load(root.join(COMMITTED_T1)).expect("the committed t1 transcript");
     let report = replay(
         &ours,
@@ -276,7 +288,7 @@ fn t3_memory_equals_t1() {
     );
     assert!(
         report.differences_in(FieldClass::Timing).count() > 0,
-        "t3 produced t1's timings"
+        "{grade:?} produced t1's timings"
     );
 }
 

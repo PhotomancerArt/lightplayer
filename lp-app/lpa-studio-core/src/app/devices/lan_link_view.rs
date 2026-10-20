@@ -1,5 +1,5 @@
 //! What a device card says about a board it reaches over the network: the
-//! transport ("Wi‑Fi", or "Wi‑Fi via lightplayer.app" — the words every
+//! transport ("Wi‑Fi", or "lightplayer.app" — the words every
 //! surface uses for the link, [`UiLinkKind::label`]) and, on the LAN, the
 //! address (Wi-Fi M6 P07; the relay since the network transport's PR C).
 //!
@@ -23,7 +23,7 @@ pub struct UiLanLink {
     /// How the board is reached: [`UiLinkKind::Wifi`] on the LAN,
     /// [`UiLinkKind::Relay`] through lightplayer.app.
     pub kind: UiLinkKind,
-    /// "Wi‑Fi", "Wi‑Fi via lightplayer.app" — the card's word for the link
+    /// "Wi‑Fi", "lightplayer.app" — the card's word for the link
     /// ([`UiLinkKind::label`]).
     pub transport: &'static str,
     /// The host (and port, when given) Studio dialled: `192.168.1.40`,
@@ -36,7 +36,7 @@ pub struct UiLanLink {
 
 impl UiLanLink {
     /// The line as the card draws it: `Wi‑Fi · 192.168.1.40`, or
-    /// `Wi‑Fi via lightplayer.app`.
+    /// `lightplayer.app`.
     pub fn line(&self) -> String {
         match self.address.is_empty() {
             true => self.transport.to_string(),
@@ -96,7 +96,7 @@ mod tests {
     fn a_board_through_the_relay_says_so_and_nothing_else() {
         let line = lan_link_for_endpoint("relay:a0f26287b48c").expect("a relay endpoint");
         assert_eq!(line.kind, UiLinkKind::Relay);
-        assert_eq!(line.line(), "Wi\u{2011}Fi via lightplayer.app");
+        assert_eq!(line.line(), "lightplayer.app");
         assert_eq!(line.url, "relay:a0f26287b48c");
         assert_eq!(lan_link_for_endpoint("relay:nope"), None, "not a board id");
     }

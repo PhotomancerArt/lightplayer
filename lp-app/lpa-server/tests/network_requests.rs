@@ -23,7 +23,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpa_server::network_store::HELD_BOARD_REFUSAL;
+use lpa_server::network_store::{HELD_BOARD_REFUSAL, NEWER_STORE_REFUSAL, REFUSED_STORE_REFUSAL};
 use lpa_server::{LpGraphics, LpServer};
 use lpc_access::{NetworkFile, OpenTo, Tier};
 use lpc_model::{AsLpPath, AsLpPathBuf, FsVersion};
@@ -250,6 +250,40 @@ fn a_damaged_file_reads_as_no_network_until_the_next_add_replaces_it() {
     rig.write_raw("{\"version\":2}");
     assert!(rig.status(USB).networks.is_empty());
     assert_eq!(rig.raw(), "{\"version\":2}");
+}
+
+#[test]
+fn a_board_that_refused_its_store_refuses_changes_in_its_own_words() {
+    let mut rig = Rig::new();
+    rig.server.set_fs_boot_state(FsBootState::Refused);
+    rig.server
+        .declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+    for request in [
+        add(SSID, PASSWORD),
+        forget(SSID),
+        switches(Some(false), None),
+    ] {
+        assert_eq!(rig.error(USB, request), REFUSED_STORE_REFUSAL);
+    }
+    assert!(!rig.file_exists());
+}
+
+/// A littlefs build (no `fs.tree`) that found a tree store says where the
+/// files are and what brings them back.
+#[test]
+fn a_littlefs_board_on_a_tree_store_says_update_the_firmware() {
+    let mut rig = Rig::new();
+    rig.server.set_fs_boot_state(FsBootState::Refused);
+    for request in [
+        add(SSID, PASSWORD),
+        forget(SSID),
+        switches(Some(false), None),
+    ] {
+        assert_eq!(rig.error(USB, request), NEWER_STORE_REFUSAL);
+    }
+    assert!(NEWER_STORE_REFUSAL.contains("refused its file store"));
+    assert!(NEWER_STORE_REFUSAL.contains("update the firmware"));
+    assert!(!rig.file_exists());
 }
 
 #[test]

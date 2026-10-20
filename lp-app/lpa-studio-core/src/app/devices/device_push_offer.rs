@@ -118,7 +118,7 @@ pub fn push_device_offer(
         None,
         &consequence,
     );
-    let offer = push_offer(view, projects, examples);
+    let offer = push_offer(view.board_id.as_deref(), projects, examples);
     if let Some(reason) = offer.unavailable {
         return Some(UiOffer::new(path, "upload", template.disabled(reason)));
     }
@@ -422,7 +422,7 @@ mod tests {
             slug: "2026-08-30-porch".to_string(),
             last_saved_at: None,
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: crate::app::library::PackageHealth::Ready,
@@ -438,6 +438,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: board_id.map(str::to_string),
@@ -458,6 +459,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,

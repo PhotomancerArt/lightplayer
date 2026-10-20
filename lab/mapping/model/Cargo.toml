@@ -1,0 +1,24 @@
+[package]
+name = "lab-mapping-model"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: the editor model — fixtures, components, objects, selection, hints (pure, no product crates)"
+
+# The fence: this crate depends on NO product crate. It is the model Yona
+# reads and edits, and it has to stay small and abstract enough to drop into
+# the app later. Other lab crates are fine when they are as fenced as this
+# one (`lab-layout` depends on nothing at all). See lab/mapping/README.md.
+#
+# `libm` (crates.io, not the workspace) is the product's own trig: lamps are
+# resolved with the same f32 arithmetic the device runs (`resolve.rs`), so
+# the simulated board lights exactly the lamps a real one does.
+[dependencies]
+lab-layout = { path = "../layout" }
+libm = "0.2"
+
+[lints]
+workspace = true

@@ -59,9 +59,11 @@ import {
   StudioDriver as LaneStudioDriver,
   boardRegistry as lane_boardRegistry,
   runSteps as lane_runSteps,
+  serveStudioBundle as lane_serveStudioBundle,
   startDoor as lane_startDoor,
   stopDoor as lane_stopDoor,
   studioUrlFor as lane_studioUrlFor,
+  walkPort as lane_walkPort,
 } from "./emu/emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -915,7 +917,13 @@ async function emulatedSitting(ids, options) {
     console.error("no scenarios with an emulated lane matched.");
     process.exit(2);
   }
-  const studio = await ensureStudio();
+  // `--serve-release`: no dev server, no prompt, no detached process. The run
+  // serves the release bundle (`just studio-web-story-build`) and the packaged
+  // firmware itself, on its own stable slot, and closes it at the end.
+  const bundle = options.serveRelease
+    ? await lane_serveStudioBundle({ root: ROOT, port: lane_walkPort(ROOT, "device-scenario") })
+    : null;
+  const studio = bundle ? { port: bundle.address().port, startedPid: null } : await ensureStudio();
   if (!studio) process.exit(1);
   const { sink, state } = startSink();
   await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
@@ -926,6 +934,7 @@ async function emulatedSitting(ids, options) {
     results.push(await runOneEmulated(spec, state, studio, sinkUrl, options));
   }
   sink.close();
+  bundle?.close();
 
   console.log("\n=== emulated lane — verdicts\n");
   for (const result of results) {
@@ -999,11 +1008,12 @@ const [, , command, ...rest] = process.argv;
 /// everything else positional is a scenario id.
 function parseArgs(argv) {
   const takesValue = new Set(["--port", "--shots"]);
-  const flags = { emu: false, port: null, shots: null, keepState: false, ids: [] };
+  const flags = { emu: false, port: null, shots: null, keepState: false, serveRelease: false, ids: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--emu") flags.emu = true;
     else if (arg === "--keep-state") flags.keepState = true;
+    else if (arg === "--serve-release") flags.serveRelease = true;
     else if (takesValue.has(arg)) {
       flags[arg.slice(2)] = argv[index + 1] ?? null;
       index += 1;
@@ -1025,11 +1035,13 @@ const usage = [
   "         The sitting: setup, hand-off, the tab, capture, validate.",
   "",
   "  EMULATED lane — no board at all (emulator plan two, M6):",
-  "       just device-scenario run [id...] --emu [--shots <dir>] [--keep-state]",
+  "       just device-scenario run [id...] --emu [--serve-release] [--shots <dir>] [--keep-state]",
   "         Its own `lp-cli emu serve` per scenario on a fresh state dir, the",
-  "         worktree's own `just studio-dev` for the page, and the spec's",
-  "         `emulated.steps` driven in HEADLESS Chrome. No id runs every",
-  "         scenario that has an emulated lane. Writes <id>.emu.jsonl only.",
+  "         worktree's own `just studio-dev` for the page (or, with",
+  "         --serve-release, the release bundle this run serves itself: no",
+  "         prompt, no detached process, one foreground command), and the",
+  "         spec's `emulated.steps` driven in HEADLESS Chrome. No id runs",
+  "         every scenario that has an emulated lane. Writes <id>.emu.jsonl only.",
   "",
   "       just device-scenario check-guard",
   "         Prove, by trying, that the emulated lane cannot write a silicon",
@@ -1042,10 +1054,15 @@ if (!command || command === "status" || command === "list") {
   checkGuard(loadScenarios());
 } else if (command === "run") {
   const flags = parseArgs(rest);
+  if (flags.serveRelease && !flags.emu) {
+    console.error("--serve-release is the emulated lane's (--emu); the silicon lane is untouched");
+    process.exit(2);
+  }
   if (flags.emu) {
     process.exitCode = await emulatedSitting(flags.ids, {
       shotDir: flags.shots,
       freshState: !flags.keepState,
+      serveRelease: flags.serveRelease,
     });
   } else {
     await sitting(flags.ids[0] ?? null, flags.port);

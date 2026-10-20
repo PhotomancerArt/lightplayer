@@ -165,6 +165,21 @@ pub fn store_access(persist: lpa_studio_core::AccessPersist) {
     }
 }
 
+/// Keep the boards whose owner chose Start fresh (the controller's
+/// `on_fresh_starts` hook), under
+/// [`lpa_studio_core::FRESH_STARTS_STORAGE_KEY`]. A convenience in this
+/// browser only: a failure warns, and the choice still holds this session.
+pub fn store_fresh_starts(json: &str) {
+    let storage = web_sys::window().and_then(|window| window.local_storage().ok().flatten());
+    let Some(storage) = storage else {
+        log::warn!("Start fresh not kept: localStorage is unavailable");
+        return;
+    };
+    if let Err(error) = storage.set_item(lpa_studio_core::FRESH_STARTS_STORAGE_KEY, json) {
+        log::warn!("Start fresh not kept in localStorage: {error:?}");
+    }
+}
+
 /// Remove one `localStorage` document (a retired key). Blocked storage is
 /// nothing to remove.
 pub fn remove_local(key: &str) {

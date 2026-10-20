@@ -9,6 +9,7 @@ use core::fmt;
 
 use super::analysis::{InFlight, ProgramTear, Settled};
 use super::journal::CopyScan;
+use super::program_plan::{ProgramMode, writes};
 
 /// `ft-boot`: one per boot, first.
 pub struct BootRecord<'a> {
@@ -103,10 +104,18 @@ impl fmt::Display for SettledRecord {
 }
 
 /// `ft-sector` for the sector the in-flight cycle was writing.
+///
+/// Under [`ProgramMode::Unaligned`] it ends with `"writes":[[at,len],…]`,
+/// the in-flight cycle's program plan (offsets in the sector), so the host
+/// can say which write a torn prefix stopped in without recomputing it (it
+/// does recompute it, and checks the two agree). A page-aligned record
+/// carries no such field: its plan is the sixteen pages, and its bytes stay
+/// exactly what the first sitting's transcripts hold.
 pub struct InFlightRecord {
     pub latest: u32,
     pub sector: u32,
     pub f: InFlight,
+    pub mode: ProgramMode,
 }
 
 impl fmt::Display for InFlightRecord {
@@ -142,6 +151,16 @@ impl fmt::Display for InFlightRecord {
         match &s.program {
             Some(t) => write!(f, "{}", TearJson(t))?,
             None => f.write_str("null")?,
+        }
+        if self.mode == ProgramMode::Unaligned {
+            f.write_str(",\"writes\":[")?;
+            for (i, (at, len)) in writes(self.mode, self.sector, self.latest).enumerate() {
+                if i > 0 {
+                    f.write_str(",")?;
+                }
+                write!(f, "[{at},{len}]")?;
+            }
+            f.write_str("]")?;
         }
         f.write_str("}")
     }
@@ -204,6 +223,8 @@ pub struct TimingRecord {
     pub journal_us: u64,
     pub erase_us: u64,
     pub program_us: u64,
+    /// The fastest and slowest single write of the program: a page under
+    /// the page plan, one 16–1,040-byte write under the unaligned one.
     pub page_us_min: u64,
     pub page_us_max: u64,
 }

@@ -639,7 +639,6 @@ mod tests {
     use super::{
         format_xy_readout, parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_point,
     };
-    use lpa_studio_core::LpValue;
 
     #[test]
     fn xy_readout_display_is_fixed_three_decimals() {
