@@ -179,6 +179,9 @@ mod agent_device_journey_tests;
 /// The app chat seated on this bench (E4's seat, and the corpus's device
 /// seat).
 pub(crate) mod agent_device_seat;
+/// Connect takes the best road in one press: Wi‑Fi first while the
+/// account's list says the board shares this network, then lightplayer.app.
+mod best_link_tests;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
 /// The board card, built in core, on real boards: its primary pressed by

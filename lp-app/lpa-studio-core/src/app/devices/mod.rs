@@ -42,6 +42,7 @@ pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
 pub mod add_device_offers;
+pub mod best_link;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
@@ -123,6 +124,7 @@ pub mod forget_from_account_op;
 pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
+pub mod lan_reach;
 pub mod lan_transport;
 pub mod link_health;
 pub mod new_sim_offer;
@@ -173,6 +175,7 @@ pub use add_device_offers::{
     USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
     WifiAddressReach, add_device_offers,
 };
+pub use best_link::{BestLinkFacts, LanHint, Road};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_files_memory::{BoardFilesMemory, FRESH_STARTS_STORAGE_KEY};
@@ -305,6 +308,7 @@ pub use install_choice::{
 };
 pub use lan_addresses::{LAN_LINK_PATH, LanFlag, normalize_lan_address, parse_lan_flag};
 pub use lan_link_view::{UiLanLink, lan_link_for_endpoint, lan_link_view};
+pub use lan_reach::LanReach;
 pub use lan_transport::{LanDeviceTransport, LanLinkSource};
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
@@ -347,6 +351,6 @@ pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};
 pub use update_host::UpdateHost;
 pub use wifi_address_book::{WIFI_ADDRESSES_STORAGE_KEY, WifiAddress, WifiAddressBook};
 pub use wifi_connect_failure::{WIFI_BLOCKED_WORDS, WIFI_BUSY_WORDS, WifiConnectFailure};
-pub use wifi_connect_offer::connect_wifi_offer;
+pub use wifi_connect_offer::{connect_wifi_first_offer, connect_wifi_offer};
 pub use wifi_connect_op::WifiConnectOp;
 pub use wifi_connects::{UiWifiConnect, WifiConnectTarget, WifiConnects};
