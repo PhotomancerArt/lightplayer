@@ -67,6 +67,9 @@ mod board_hold_flow;
 /// What the account's list says about a board's own network: the one
 /// reader of a row's address and `same_network`.
 mod lan_hint;
+/// A session through lightplayer.app moves onto Wi‑Fi by itself, and back
+/// (`devices/lan_move.rs` is the machine).
+mod lan_move_flow;
 /// One tab holds a board: Connect on a board another tab holds
 /// (`devices/<board>/take-over`), the asker's side.
 mod take_over_flow;
@@ -80,6 +83,14 @@ const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
 
 /// Who a connect through the relay reaches, as a card's line names it.
 const RELAY_HOST: &str = "lightplayer.app";
+
+/// Why the editor's session could not be put on a link.
+enum LensRebind {
+    /// The board's link is not ready to lend its wire yet (why).
+    NotYet(String),
+    /// There is no editor session to rebind.
+    NoSession,
+}
 
 /// The address a docs page's anonymous sim answers to inside its own
 /// leased controller.
@@ -239,6 +250,9 @@ pub struct StudioController {
     /// lightplayer.app if that fails, while the Wi‑Fi try runs and then
     /// the relay's (`connect_flow.rs`).
     fall_through: std::collections::BTreeSet<lpa_devices::BoardKey>,
+    /// Each board's move from lightplayer.app onto Wi‑Fi this page load
+    /// (`lan_move_flow.rs`).
+    lan_moves: crate::app::devices::lan_move::LanMoves,
     /// The signed-in account's board list, online at lightplayer.app or not, and their
     /// pictures, as the web edge last heard them (`ListAccountBoards`,
     /// `BoardPictures`). In memory only: a board this browser never met is
@@ -582,6 +596,7 @@ impl StudioController {
             bluetooth_reach: crate::BluetoothReach::Checking,
             lan_reach: crate::LanReach::default(),
             fall_through: std::collections::BTreeSet::new(),
+            lan_moves: Default::default(),
             account_boards: crate::AccountBoards::default(),
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -998,6 +1013,12 @@ impl StudioController {
     ) {
         if let Err(failure) = &result {
             log::info!("wi-fi: {host}: {}", failure.words());
+        }
+        // A move onto Wi‑Fi's dial: its answer is the move's, not a card's.
+        if let crate::WifiConnectTarget::Board(board) = target
+            && self.lan_move_dialled(board, result.clone())
+        {
+            return;
         }
         if let crate::WifiConnectTarget::Board(board) = target {
             self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
@@ -2104,8 +2125,12 @@ impl StudioController {
         let link_error = match &input {
             crate::DeviceInput::Event(crate::DeviceEvent::Link {
                 link,
-                event: lpa_devices::link::LinkEvent::Error(_),
-            }) => Some(*link),
+                event: lpa_devices::link::LinkEvent::Error(message),
+            }) => {
+                // A moved board's Wi‑Fi link handed to another connection.
+                self.note_lan_move_link_error(*link, message);
+                Some(*link)
+            }
             _ => None,
         };
         for line in self.devices.handle(now, input) {
@@ -4743,6 +4768,8 @@ impl StudioController {
     {
         self.try_pending_device_lens().await;
         self.try_resume_held_lens().await;
+        // A session through lightplayer.app moves onto Wi‑Fi, and back.
+        self.drive_lan_moves().await;
         if self.lens_hold.is_some() {
             return Ok(None);
         }
@@ -7821,26 +7848,15 @@ impl StudioController {
         let Ok(attachment) = self.device_lens_attachment(&uid) else {
             return;
         };
-        let Ok(deadline) = self.device_request_deadline() else {
-            return;
-        };
         let link = attachment.link;
-        let Ok(io) = self.devices.effects_mut().attach_lens_wire(link) else {
-            return;
+        let id = match self.rebind_lens_onto(attachment) {
+            Ok(id) => id,
+            Err(LensRebind::NotYet(_)) => return,
+            Err(LensRebind::NoSession) => {
+                self.lens_hold = None;
+                return;
+            }
         };
-        let protocol = match attachment.transport {
-            crate::LinkTransport::Ble => "ble-nus",
-            crate::LinkTransport::Sim => "browser-worker",
-            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
-        };
-        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
-        let Ok(session) = self.pool.lens_session_mut() else {
-            self.devices.effects_mut().release_lens_wire(link);
-            self.lens_hold = None;
-            return;
-        };
-        let id = session.id();
-        session.rebind_device(attachment, client);
         if let Err(error) = self.read_device_build(id).await {
             // Ready to the fold, but not answering the lens yet: back to
             // waiting, and the next look tries again.
@@ -7871,6 +7887,72 @@ impl StudioController {
             },
         );
         self.mark_dirty();
+    }
+
+    /// Put the editor's session on `attachment`'s link: borrow its wire,
+    /// build a client over it, and rebind the session there (the held
+    /// lens's resume, and the move onto Wi‑Fi). The wire is handed back
+    /// when there is no session to rebind.
+    fn rebind_lens_onto(
+        &mut self,
+        attachment: crate::DeviceLensAttachment,
+    ) -> Result<crate::RuntimeId, LensRebind> {
+        let deadline = self
+            .device_request_deadline()
+            .map_err(|error| LensRebind::NotYet(error.to_string()))?;
+        let link = attachment.link;
+        let io = self
+            .devices
+            .effects_mut()
+            .attach_lens_wire(link)
+            .map_err(LensRebind::NotYet)?;
+        let protocol = match attachment.transport {
+            crate::LinkTransport::Ble => "ble-nus",
+            crate::LinkTransport::Sim => "browser-worker",
+            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+        };
+        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
+        let Ok(session) = self.pool.lens_session_mut() else {
+            self.devices.effects_mut().release_lens_wire(link);
+            return Err(LensRebind::NoSession);
+        };
+        let id = session.id();
+        session.rebind_device(attachment, client);
+        Ok(id)
+    }
+
+    /// Move the editor, open on `from`'s link, onto the link its board is
+    /// on now, in one step: the old client dropped and its wire handed
+    /// back, the session rebound on the new link, and one read to prove the
+    /// new wire answers. The lens is never held here (no "Reconnecting…");
+    /// on `Err` the caller decides.
+    async fn move_lens_onto_current_link(
+        &mut self,
+        from: &crate::DeviceLensAttachment,
+    ) -> Result<(), String> {
+        let attachment = self
+            .device_lens_attachment(&from.uid)
+            .map_err(|error| error.to_string())?;
+        if attachment.link == from.link {
+            return Ok(());
+        }
+        let session = self
+            .pool
+            .lens_session_mut()
+            .map_err(|error| error.to_string())?;
+        drop(session.drop_client());
+        self.devices.effects_mut().release_lens_wire(from.link);
+        let id = self
+            .rebind_lens_onto(attachment)
+            .map_err(|error| match error {
+                LensRebind::NotYet(why) => why,
+                LensRebind::NoSession => "the editor has no session".to_string(),
+            })?;
+        self.read_device_build(id)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.sync_lens_probe_policy();
+        Ok(())
     }
 
     /// Whether the editor is holding on for a board that went away.

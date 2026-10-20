@@ -124,6 +124,7 @@ pub mod forget_from_account_op;
 pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
+pub mod lan_move;
 pub mod lan_reach;
 pub mod lan_transport;
 pub mod link_health;

@@ -667,7 +667,7 @@ impl StudioController {
 
     /// The roster device (or the account's entry) the board with MAC `key`
     /// is, if Studio knows it.
-    fn device_for_board(&self, key: lpa_devices::BoardKey) -> Option<DeviceId> {
+    pub(super) fn device_for_board(&self, key: lpa_devices::BoardKey) -> Option<DeviceId> {
         self.devices
             .roster()
             .devices()

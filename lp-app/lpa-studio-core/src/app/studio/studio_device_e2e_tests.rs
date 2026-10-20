@@ -200,6 +200,8 @@ mod connected_tests;
 mod home_sections_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
+/// A session through lightplayer.app moves onto Wi‑Fi by itself, and back.
+mod lan_move_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
 /// back on the redialled link with no click.
 mod lan_reset_tests;

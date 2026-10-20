@@ -81,6 +81,18 @@ impl WifiConnectFailure {
     }
 }
 
+/// Whether a Wi‑Fi link's loss (`raw`, as `browser_websocket.js` says it:
+/// `wi-fi link lost: the board closed the link (code 1000…)`) is the board
+/// handing its one network slot to another connection that proved the same
+/// key: an ordinary close, code 1000, read beside the busy 1013 above. A
+/// moved board's page does not go back through lightplayer.app after it
+/// (the two would take the slot from each other).
+pub fn closed_for_another(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.starts_with("wi-fi link lost")
+        && (lower.contains("(code 1000)") || lower.contains("(code 1000:"))
+}
+
 /// Whether `host` (with or without a port) is an mDNS name.
 fn is_local_name(host: &str) -> bool {
     let name = match host.rsplit_once(':') {
@@ -98,6 +110,24 @@ fn closed_before_open(lower: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wifi_link_closed_with_1000_was_handed_to_another_connection() {
+        assert!(closed_for_another(
+            "wi-fi link lost: the board closed the link (code 1000)"
+        ));
+        assert!(closed_for_another(
+            "wi-fi link lost: the board closed the link (code 1000: taken)"
+        ));
+        for raw in [
+            "wi-fi link lost: the board closed the link (code 1006)",
+            "wi-fi link lost: the board closed the link (code 10001)",
+            "relay link lost: the board closed the link (code 1000)",
+            "wi-fi link lost: busy with another Wi\u{2011}Fi connection (code 1013)",
+        ] {
+            assert!(!closed_for_another(raw), "{raw}");
+        }
+    }
 
     #[test]
     fn a_busy_board_says_try_again() {
