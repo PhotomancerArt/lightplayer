@@ -5,6 +5,7 @@
 //! | flag | what it does |
 //! |---|---|
 //! | `?lens-pause-ms=N` | the editor lens's pause between device reads (`DEVICE_REFRESH_INTERVAL`, 150 ms), clamped to 0–1000 ms — the JSON Pack cadence probe (plan `lp-json-pack`, D2) |
+//! | `?card-ble-gap-ms=N` | the device card picture's completion gap over a Bluetooth link (`DEVICE_CARD_FEED_BLE_INTERVAL`), clamped to 0–2000 ms — so the card's Bluetooth rate can be measured at several gaps on one build (USB, the LAN and the relay keep theirs) |
 //! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
@@ -34,6 +35,8 @@ use lpc_wire::server::api::LogLevel;
 pub struct DevUrlFlags {
     /// `?lens-pause-ms=N`, unclamped (core clamps).
     pub lens_pause_ms: Option<u64>,
+    /// `?card-ble-gap-ms=N`, unclamped (core clamps).
+    pub card_ble_gap_ms: Option<u64>,
     /// `?wire=json` / `?wire=packed`; `None` takes the default (packed).
     pub wire: Option<WireChoice>,
     /// `?wire-capture=1`.
@@ -73,6 +76,10 @@ impl DevUrlFlags {
             match key {
                 "lens-pause-ms" => match value.trim().parse::<u64>() {
                     Ok(ms) => flags.lens_pause_ms = Some(ms),
+                    Err(_) => flags.ignored.push(pair.to_string()),
+                },
+                "card-ble-gap-ms" => match value.trim().parse::<u64>() {
+                    Ok(ms) => flags.card_ble_gap_ms = Some(ms),
                     Err(_) => flags.ignored.push(pair.to_string()),
                 },
                 "wire" => match value.trim() {
@@ -342,6 +349,13 @@ pub fn install() {
             pause.as_millis()
         );
     }
+    if let Some(ms) = flags.card_ble_gap_ms {
+        let gap = lpa_studio_core::set_card_feed_ble_gap_override(Some(ms));
+        log::info!(
+            "dev flag: a device card over Bluetooth waits {} ms between pictures (?card-ble-gap-ms=)",
+            gap.as_millis()
+        );
+    }
     match flags.wire {
         Some(WireChoice::Json) => {
             lpa_link::device_link::wire_reader::set_packed_replies_wanted(false);
@@ -461,6 +475,11 @@ mod tests {
 
         let flags = DevUrlFlags::parse("wire=packed");
         assert_eq!(flags.wire, Some(WireChoice::Packed));
+
+        let flags = DevUrlFlags::parse("?card-ble-gap-ms=150&lens-pause-ms=75");
+        assert_eq!(flags.card_ble_gap_ms, Some(150));
+        assert_eq!(flags.lens_pause_ms, Some(75));
+        assert!(flags.ignored.is_empty());
     }
 
     #[test]
@@ -616,9 +635,13 @@ mod tests {
 
     #[test]
     fn unreadable_values_are_ignored_and_named() {
-        let flags = DevUrlFlags::parse("lens-pause-ms=fast&wire=ion");
+        let flags = DevUrlFlags::parse("lens-pause-ms=fast&wire=ion&card-ble-gap-ms=-1");
         assert_eq!(flags.lens_pause_ms, None);
         assert_eq!(flags.wire, None);
-        assert_eq!(flags.ignored, ["lens-pause-ms=fast", "wire=ion"]);
+        assert_eq!(flags.card_ble_gap_ms, None);
+        assert_eq!(
+            flags.ignored,
+            ["lens-pause-ms=fast", "wire=ion", "card-ble-gap-ms=-1"]
+        );
     }
 }

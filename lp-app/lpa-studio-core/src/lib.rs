@@ -309,7 +309,7 @@ pub use app::studio::{
     UiLensCard, UiLensReconnecting, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
     UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
     VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
-    set_device_lens_pause_override, studio_view_channel,
+    set_card_feed_ble_gap_override, set_device_lens_pause_override, studio_view_channel,
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;

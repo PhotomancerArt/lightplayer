@@ -212,12 +212,51 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The card feed's completion gap for a board, by the link it is reached
-/// over: Bluetooth's gentle one, or [`DEVICE_CARD_FEED_INTERVAL`] for USB,
-/// the LAN and the relay.
+/// over: Bluetooth's gentle one (or its dev override), or
+/// [`DEVICE_CARD_FEED_INTERVAL`] for USB, the LAN and the relay.
 pub fn card_feed_gap_policy(over_bluetooth: bool) -> Duration {
     match over_bluetooth {
-        true => DEVICE_CARD_FEED_BLE_INTERVAL,
+        true => card_feed_ble_interval(),
         false => DEVICE_CARD_FEED_INTERVAL,
+    }
+}
+
+/// The most a [`set_card_feed_ble_gap_override`] may ask for: the card must
+/// still see a picture well inside [`FRAME_STALE_AFTER_SECS`].
+pub const CARD_FEED_BLE_GAP_OVERRIDE_MAX: Duration = Duration::from_millis(2_000);
+
+/// `u32::MAX` = no override. See [`set_card_feed_ble_gap_override`].
+static CARD_FEED_BLE_GAP_OVERRIDE_MS: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// A dev-only override for [`DEVICE_CARD_FEED_BLE_INTERVAL`] — the card
+/// feed's completion gap over a Bluetooth link — so the same build can be
+/// measured at several gaps on one board: Studio's `?card-ble-gap-ms=N` sets
+/// it at page load. Clamped to 0–[`CARD_FEED_BLE_GAP_OVERRIDE_MAX`]; `None`
+/// clears it. Returns the gap now in force.
+///
+/// Not a setting: no UI, no persistence, and it moves nothing but the card
+/// feed over Bluetooth — not USB's, the LAN's or the relay's card gap, not
+/// the lens, not Play.
+pub fn set_card_feed_ble_gap_override(ms: Option<u64>) -> Duration {
+    let stored = match ms {
+        Some(ms) => clamp_card_feed_ble_gap(ms).as_millis() as u32,
+        None => u32::MAX,
+    };
+    CARD_FEED_BLE_GAP_OVERRIDE_MS.store(stored, Ordering::Relaxed);
+    card_feed_ble_interval()
+}
+
+/// A requested Bluetooth card gap, clamped to
+/// 0–[`CARD_FEED_BLE_GAP_OVERRIDE_MAX`].
+pub fn clamp_card_feed_ble_gap(ms: u64) -> Duration {
+    Duration::from_millis(ms).min(CARD_FEED_BLE_GAP_OVERRIDE_MAX)
+}
+
+/// [`DEVICE_CARD_FEED_BLE_INTERVAL`], or the dev override when one is set.
+pub fn card_feed_ble_interval() -> Duration {
+    match CARD_FEED_BLE_GAP_OVERRIDE_MS.load(Ordering::Relaxed) {
+        u32::MAX => DEVICE_CARD_FEED_BLE_INTERVAL,
+        ms => Duration::from_millis(u64::from(ms)),
     }
 }
 
@@ -367,6 +406,16 @@ mod tests {
         assert!(DEVICE_CARD_FEED_BLE_INTERVAL > DEVICE_CARD_FEED_INTERVAL);
         assert!(DEVICE_CARD_FEED_BLE_INTERVAL <= Duration::from_secs(1));
         assert!(DEVICE_CARD_FEED_BLE_INTERVAL.as_secs_f64() * 4.0 < FRAME_STALE_AFTER_SECS);
+    }
+
+    #[test]
+    fn the_card_ble_gap_override_clamps_and_touches_only_bluetooth() {
+        assert_eq!(clamp_card_feed_ble_gap(75), Duration::from_millis(75));
+        assert_eq!(
+            clamp_card_feed_ble_gap(60_000),
+            CARD_FEED_BLE_GAP_OVERRIDE_MAX
+        );
+        assert!(CARD_FEED_BLE_GAP_OVERRIDE_MAX.as_secs_f64() * 2.0 < FRAME_STALE_AFTER_SECS);
     }
 
     #[test]
