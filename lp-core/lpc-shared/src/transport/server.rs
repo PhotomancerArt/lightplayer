@@ -387,7 +387,9 @@ where
 /// encoding failures) are *signalable*: the connection is still alive, so the
 /// server can send a terminal [`ProjectReadEvent::Error`] frame for the request
 /// id. Connection/other transport-write failures cannot be signaled — the write
-/// path is the very thing that failed — and must propagate as today.
+/// path is the very thing that failed. This only says whether a read can still
+/// carry an `Error` frame; it never means "stop the tick" (a reply that cannot
+/// be sent ends only that reply).
 #[must_use]
 pub fn transport_error_is_signalable(error: &TransportError) -> bool {
     matches!(error, TransportError::Serialization(_))
