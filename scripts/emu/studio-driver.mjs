@@ -226,7 +226,11 @@ const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySe
 /// or the work's words) each trimmed and joined by one space, so the USB
 /// row reads "USB connected", and held with its aside "USB Open in another
 /// tab editor open". A mark is an icon with no text, and reads as nothing.
-const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
+/// The name and its state share one wrapper (`.ux-board-bar-words`, so the
+/// state gives way first), read as its two pieces: "Bluetooth LP-0000
+/// connected", never "LP-0000connected".
+const LINE_TEXT = `((el) => [...el.children].flatMap((c) => c.classList.contains('ux-board-bar-words') ? [...c.children] : [c])
+  .map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
 
 /// The Firmware row of a board with no LightPlayer on it: "Firmware none"
 /// (`firmware_bar.rs`; the row's kind word, then its name).
