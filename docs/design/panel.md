@@ -335,6 +335,13 @@ mode switch.
 > direction was design reference only. Widget-side gesture classes (which
 > channel kinds ARE momentary) arrive with the touch-set vocabulary,
 > P-Q5.
+>
+> 2026-10-20 (wire 44): a panel write's value is a leaf or a `u32`-keyed
+> map (`PanelWriteValue`), and a map rides a **momentary** write only — a
+> latched one is refused, so `.lp/panel.json` stays leaf-only. The first
+> map is the touch set on the well-known `touches` channel
+> (`lp::touch::Touch { id, pos }` by pointer id, in pattern space), which
+> Studio writes while someone draws on a board's picture.
 
 ## 3. Worked walkthroughs
 

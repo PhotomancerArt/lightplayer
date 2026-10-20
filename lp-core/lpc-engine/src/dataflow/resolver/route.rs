@@ -28,6 +28,8 @@ use crate::dataflow::resolver::query_intern::QueryId;
 pub enum RouteTarget {
     /// A literal written into the binding; materialize it directly.
     Literal(LpValue),
+    /// A literal `u32`-keyed set; materialize it as a map.
+    LiteralMap(Vec<(u32, LpValue)>),
     /// Resolve this query and adopt its value.
     Query(QueryId),
 }

@@ -452,6 +452,25 @@ impl Engine {
         value: lpc_model::LpValue,
         ttl_ms: Option<u32>,
     ) {
+        self.panel_write_value(
+            scope,
+            channel,
+            lpc_model::PanelWriteValue::Value(value),
+            ttl_ms,
+        );
+    }
+
+    /// [`Self::panel_write`] for either form of [`lpc_model::PanelWriteValue`].
+    /// A map materializes on the bus as `SlotData::Map` (a touch set). The
+    /// caller enforces that a map rides a momentary write only: the engine
+    /// holds what it is given.
+    pub fn panel_write_value(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::PanelWriteValue,
+        ttl_ms: Option<u32>,
+    ) {
         // Momentary liveness (panel.md P14): the deadline is an engine-time
         // instant; renewal is just another write with a fresh TTL.
         let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
@@ -1484,7 +1503,14 @@ fn panel_provider(
     (
         BindingRef::new(scope.owner(), usize::MAX),
         crate::dataflow::binding::BindingEntry {
-            source: crate::dataflow::binding::BindingSource::Literal(writer.value.clone()),
+            source: match &writer.value {
+                lpc_model::PanelWriteValue::Value(value) => {
+                    crate::dataflow::binding::BindingSource::Literal(value.clone())
+                }
+                lpc_model::PanelWriteValue::Map(entries) => {
+                    crate::dataflow::binding::BindingSource::LiteralMap(entries.clone())
+                }
+            },
             target: crate::dataflow::binding::BindingTarget::BusChannel(channel.clone()),
             priority: crate::dataflow::binding::BindingPriority::panel(),
             kind,

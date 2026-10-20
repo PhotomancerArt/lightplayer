@@ -40,6 +40,12 @@ pub const PLAYLIST_CYCLE_CHANNEL: &str = "playlist.cycle";
 /// A playlist's skipped entry keys (`PlaylistDef::skip`), one whole list.
 pub const PLAYLIST_SKIP_CHANNEL: &str = "playlist.skip";
 
+/// A touch set: the fingers on a drawable picture, `MapSlot<u32,
+/// lp::touch::Touch>` keyed by pointer id, in pattern space. Studio writes it
+/// as a momentary panel write while someone draws; a pattern that binds it is
+/// what makes a live picture drawable. The one place this name is written.
+pub const TOUCHES_CHANNEL: &str = "touches";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +78,15 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: "trigger",
         kind: Kind::Instant,
         doc: "Control events (button presses, remote triggers); map readers merge by message id.",
+        carries_product: false,
+    },
+    // A set, not a position: nearest-fit kind again, the way `trigger` is
+    // `Instant`. The kind is a picker label; what the writer holds decides
+    // how it materializes.
+    WellKnownChannel {
+        name: TOUCHES_CHANNEL,
+        kind: Kind::Position2d,
+        doc: "Fingers on the board's picture, by pointer id, in pattern space (momentary; drawing patterns read it).",
         carries_product: false,
     },
     WellKnownChannel {

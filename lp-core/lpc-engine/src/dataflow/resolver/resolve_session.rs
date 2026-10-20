@@ -13,7 +13,7 @@ use crate::dataflow::resolver::resolve_error::SessionResolveError;
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
-use crate::dataflow::resolver::resolver::materialize_literal_product;
+use crate::dataflow::resolver::resolver::{materialize_literal_map, materialize_literal_product};
 use crate::dataflow::resolver::route::{ResolvedRoute, RouteTarget};
 use lpc_model::{
     ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMapKey, SlotMerge, SlotPath,
@@ -328,6 +328,7 @@ impl<'a> EngineSession<'a> {
     ) -> RouteTarget {
         match source {
             BindingSource::Literal(spec) => RouteTarget::Literal(spec.clone()),
+            BindingSource::LiteralMap(entries) => RouteTarget::LiteralMap(entries.clone()),
             BindingSource::ProducedSlot { node, slot } => {
                 RouteTarget::Query(self.resolver.intern_query(&QueryKey::ProducedSlot {
                     node: *node,
@@ -494,6 +495,13 @@ impl<'a> EngineSession<'a> {
                 self.resolver.counters_mut().literal_materializations += 1;
                 let product = materialize_literal_product(spec, self.revision);
                 Ok(Production::leaf(product, ProductionSource::Literal))
+            }
+            RouteTarget::LiteralMap(entries) => {
+                self.resolver.counters_mut().literal_materializations += 1;
+                Ok(Production::new(
+                    materialize_literal_map(entries, self.revision),
+                    ProductionSource::Literal,
+                ))
             }
             RouteTarget::Query(id) => {
                 let mut pv = self.resolve_id(host, *id)?;

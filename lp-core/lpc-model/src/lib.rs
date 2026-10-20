@@ -58,6 +58,7 @@ pub mod server;
 pub mod slots;
 pub mod sync;
 pub mod time;
+pub mod touch;
 
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
@@ -79,8 +80,8 @@ pub use binding::{
 };
 pub use bus::{
     ChannelName, PALETTE_CHANNEL, PLAYLIST_CYCLE_CHANNEL, PLAYLIST_SKIP_CHANNEL,
-    PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS, WellKnownChannel,
-    well_known_channel,
+    PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, PanelWriteValue, TOUCHES_CHANNEL,
+    WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
 };
 pub use color::{
     COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_CONFIG_SHAPE_NAME, GRADIENT_SHAPE_NAME, Gradient,
@@ -209,4 +210,5 @@ pub use time::{
     DEFAULT_PHASOR_PERIOD_SECONDS, PHASOR_CONFIG_SHAPE_NAME, PhasorConfig, SECONDS_SHAPE_NAME,
     WAVEFORM_SHAPE_NAME, Waveform, seconds_shape, static_seconds_shape,
 };
+pub use touch::{TOUCH_SHAPE_NAME, Touch};
 pub use value::value_path::ValuePath;

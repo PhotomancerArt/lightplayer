@@ -6893,7 +6893,7 @@ impl ProjectController {
                 lpc_wire::WirePanelWriteRequest {
                     scope: op.scope,
                     channel: op.channel.clone(),
-                    value: op.value,
+                    value: op.value.into(),
                     ttl_ms: op.ttl_ms,
                 },
             )

@@ -41,7 +41,14 @@ pub struct BindingDraft {
 #[derive(Clone, Debug)]
 pub enum BindingSource {
     Literal(LpValue),
-    ProducedSlot { node: NodeId, slot: SlotPath },
+    /// A literal `u32`-keyed set of leaves, materialized as `SlotData::Map`.
+    /// Only an engaged panel writer holding a map contributes one (a touch
+    /// set, panel.md P14); authored bindings never do.
+    LiteralMap(alloc::vec::Vec<(u32, LpValue)>),
+    ProducedSlot {
+        node: NodeId,
+        slot: SlotPath,
+    },
     BusChannel(ChannelName),
 }
 
