@@ -103,7 +103,7 @@ fn board_card_setup_rows() -> Element {
 // --- Every state of the link rows --------------------------------------------
 
 #[story(
-    description = "A board online through lightplayer.app (your boards on every computer, M1): the signed-in account's list (ListBoards) says it is online, and no link of this tab reaches it. NEVER MET HERE: set up on a phone (Yona's \"Fabric Test\", 10-19), it is in Online boards all the same — its surface is its picture from lightplayer.app, one row of lamps per output, not dimmed and with no words; Connect, the cloud icon, is the primary; lightplayer.app says river@example.com · online; Project says what it told lightplayer.app it plays, Firmware its version; the radio rows say — (nothing here has heard it). MET HERE: a board this browser remembers, unplugged, moves to Online boards the same way: lightplayer.app's picture over its saved one, its rows its last facts dimmed, lightplayer.app online and not dimmed. NO PICTURE (relay protocol 1, or none yet): the dark, no words, Connect — nothing is said about the missing picture."
+    description = "A board online through lightplayer.app (your boards on every computer, M1): the signed-in account's list (ListBoards) says it is online, and no link of this tab reaches it. NEVER MET HERE: set up on a phone (Yona's \"Fabric Test\", 10-19), it is in Online boards all the same — its surface is its picture from lightplayer.app, one row of lamps per output, not dimmed and with no words; Connect, the cloud icon, is the primary; lightplayer.app says river@example.com · online; Project says what it told lightplayer.app it plays, Firmware its version; the radio rows say — (nothing here has heard it); Connect is its only verb (no rename: nothing here can reach it yet). MET HERE: a board this browser remembers, unplugged, moves to Online boards the same way: lightplayer.app's picture over its saved one, its rows its last facts dimmed, lightplayer.app online and not dimmed. NO PICTURE (relay protocol 1, or none yet): the dark, no words, Connect — nothing is said about the missing picture."
 )]
 fn board_card_online_through_lightplayer_app() -> Element {
     rsx! {
@@ -111,6 +111,7 @@ fn board_card_online_through_lightplayer_app() -> Element {
             Cell { caption: "never met here",
                 StoryBoardCard {
                     card: never_met(),
+                    never_met: true,
                     link: Some(UiLinkKind::Relay),
                     relay: true,
                     account: Some(ACCOUNT.to_string()),
@@ -138,6 +139,7 @@ fn board_card_online_through_lightplayer_app() -> Element {
             Cell { caption: "no picture",
                 StoryBoardCard {
                     card: never_met(),
+                    never_met: true,
                     link: Some(UiLinkKind::Relay),
                     relay: true,
                     account: Some(ACCOUNT.to_string()),
