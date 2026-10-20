@@ -29,7 +29,7 @@ use crate::app::home::device_offer_story_fixtures::{STORY_BOARD_NOW, StoryBoardC
 // --- A new board's first minutes --------------------------------------------
 
 #[story(
-    description = "A new board's setup is its card (AC4, AC6): the rows with something left to do are LIT — the whole row on a lighter flat ground, its icon, kind and name at full strength, its button on the same ground with no fill of its own; no gradient, no dot. INSTALLED, SIGNED OUT: Project none · Add, Wi‑Fi not connected · Set up, lightplayer.app not connected · Sign in are lit; Bluetooth says the name a phone sees (LP-0b0c), Access edit · USB, Firmware its version, Hardware the model; the primary is Add a project (\"This board has no project yet. Add a project to play on it.\"). INSTALLED, SIGNED IN: lightplayer.app is not lit — its fix is the Wi‑Fi row's. A BLANK CHIP: only Firmware none · Install is lit, and Install firmware is the primary; the radio rows say — until there is firmware to ask. SET UP: nothing is lit, every row says what it reaches. OFFLINE: every row keeps its last value, dimmed; Bluetooth says on, not a name — the name follows what the board runs, and offline that is not known. EMULATED: the USB row says what it is, the radio rows —."
+    description = "A new board's setup is its card (AC4, AC6): the rows with something left to do are LIT — the whole row on a lighter flat ground, its icon, kind and name at full strength, its button on the same ground with no fill of its own; no gradient, no dot. INSTALLED, SIGNED OUT: Project none · Add, Wi‑Fi not connected · Set up, lightplayer.app not connected · Sign in are lit; Bluetooth says the name a phone sees (LP-0b0c), Access edit · USB, Firmware its version, Hardware the model; the primary is Add a project (\"This board has no project yet. Add a project to play on it.\"). INSTALLED, SIGNED IN: lightplayer.app says the account and why it can't reach the board, river@example.com · Wi‑Fi not set up, not lit — its fix is the Wi‑Fi row's (Yona's phone, 10-19: \"River's account\" there read as \"this will work\"). SET UP, SIGNED IN: lightplayer.app river@example.com · online. A BLANK CHIP: only Firmware none · Install is lit, and Install firmware is the primary; the radio rows say — until there is firmware to ask. SET UP: nothing is lit, every row says what it reaches. OFFLINE: every row keeps its last value, dimmed; Bluetooth says on, not a name — the name follows what the board runs, and offline that is not known. EMULATED: the USB row says what it is, the radio rows —."
 )]
 fn board_card_setup_rows() -> Element {
     rsx! {
@@ -98,7 +98,7 @@ fn board_card_setup_rows() -> Element {
 // --- Every state of the link rows --------------------------------------------
 
 #[story(
-    description = "The four link rows in their states (AC2): each row's kind is the link's own name, and the row says what that link reaches or how it stands — the fact; the button is the fix. WRONG PASSWORD: Wi‑Fi Cedar Lane · wrong password · Change, orange. JOINING: the spinner in the icon's place, Cedar Lane · joining. SAVED, NOT IN RANGE: Cedar Lane · not connected, quiet. ON WI‑FI: this tab's link is the LAN, so Wi‑Fi says Cedar Lane · connected and USB not connected. OVER BLUETOOTH: Bluetooth LP-aurora-drift · connected. CAN'T REACH: joined, and lightplayer.app didn't answer: River's account · can't reach, orange. ALL DISABLED: Wi‑Fi, Bluetooth and lightplayer.app hushed from their details say disabled, plain, with no button. THROUGH LIGHTPLAYER.APP: lightplayer.app River's account · connected, the cloud icon."
+    description = "The four link rows in their states (AC2): each row's kind is the link's own name, and the row says what that link reaches or how it stands — the fact; the button is the fix. WRONG PASSWORD: Wi‑Fi Cedar Lane · wrong password · Change, orange. JOINING: the spinner in the icon's place, Cedar Lane · joining. SAVED, NOT IN RANGE: Cedar Lane · not connected, quiet. ON WI‑FI: this tab's link is the LAN, so Wi‑Fi says Cedar Lane · connected and USB not connected. OVER BLUETOOTH: Bluetooth LP-aurora-drift · connected. CAN'T REACH: joined, and lightplayer.app didn't answer: river@example.com · can't reach, orange. ALL DISABLED: Wi‑Fi, Bluetooth and lightplayer.app hushed from their details say disabled, plain, with no button. THROUGH LIGHTPLAYER.APP: lightplayer.app river@example.com · connected, the cloud icon."
 )]
 fn board_card_link_row_states() -> Element {
     rsx! {
@@ -385,8 +385,8 @@ fn board_card_rename_in_place() -> Element {
 
 // --- Fixtures --------------------------------------------------------------------
 
-/// The made-up account: "River's account" on lightplayer.app's row.
-const ACCOUNT: &str = "River";
+/// The made-up account, as lightplayer.app's row names it: its email.
+const ACCOUNT: &str = "river@example.com";
 
 /// The made-up home network.
 const HOME: &str = "Cedar Lane";

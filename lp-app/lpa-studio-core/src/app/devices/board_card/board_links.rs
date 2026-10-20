@@ -18,8 +18,8 @@ use lpc_wire::server::NetworkStatus;
 /// See the module doc.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BoardLinks<'a> {
-    /// The signed-in account's name ("Yona"), which lightplayer.app's row
-    /// says as "Yona's account"; `None` while nobody is signed in.
+    /// The signed-in account as lightplayer.app's row names it, its email
+    /// ([`account_words`]); `None` while nobody is signed in.
     pub account: Option<&'a str>,
     /// The board's network status as it last answered, kept across a
     /// dropped link: the Wi‑Fi and lightplayer.app rows' last values.
@@ -29,19 +29,22 @@ pub struct BoardLinks<'a> {
 }
 
 impl BoardLinks<'_> {
-    /// The account as lightplayer.app's row names it: "Yona's account".
+    /// The account as lightplayer.app's row names it: "hypher@gmail.com".
     pub fn account_words(&self) -> Option<String> {
-        self.account.map(account_words)
+        self.account.map(str::to_string)
     }
 }
 
-/// "Yona's account", the label the account's key already carries on every
-/// board (`AccountKeys::held_keys`); "your account" when the account has no
-/// name.
-pub fn account_words(name: &str) -> String {
-    match name.trim() {
-        "" => "your account".to_string(),
-        name => format!("{name}'s account"),
+/// How lightplayer.app's row names the signed-in account: its email, the
+/// name a person signed in with (Yona's phone, 10-19: "Yona's account" read
+/// as a promise). A cache from before the email was kept falls back to the
+/// label the account's key carries on every board ("Yona's account"), and
+/// to "your account" when the account has no name either.
+pub fn account_words(name: &str, email: &str) -> String {
+    match (email.trim(), name.trim()) {
+        ("", "") => "your account".to_string(),
+        ("", name) => format!("{name}'s account"),
+        (email, _) => email.to_string(),
     }
 }
 
@@ -50,13 +53,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_account_is_named_as_its_key_is() {
-        let links = BoardLinks {
-            account: Some("Yona"),
-            ..BoardLinks::default()
-        };
-        assert_eq!(links.account_words().as_deref(), Some("Yona's account"));
-        assert_eq!(account_words("  "), "your account");
+    fn the_account_is_named_by_its_email() {
+        assert_eq!(account_words("Yona", "hypher@gmail.com"), "hypher@gmail.com");
+        assert_eq!(account_words("Yona", ""), "Yona's account");
+        assert_eq!(account_words("  ", ""), "your account");
         assert_eq!(BoardLinks::default().account_words(), None);
     }
 }

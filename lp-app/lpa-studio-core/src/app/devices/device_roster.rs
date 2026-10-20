@@ -90,9 +90,10 @@ pub struct DeviceRosterView {
         std::collections::BTreeMap<lpa_devices::DeviceId, lpc_wire::server::NetworkStatus>,
     /// Each board's Bluetooth switch, as its access file last said.
     pub remembered_bluetooth: std::collections::BTreeMap<lpa_devices::DeviceId, bool>,
-    /// The signed-in account's name ("Yona"): the card's lightplayer.app
-    /// row names "Yona's account". `None` while nobody is signed in.
-    pub account_name: Option<String>,
+    /// The signed-in account as the card's lightplayer.app row names it:
+    /// its email ("hypher@gmail.com", [`crate::account_words`]). `None`
+    /// while nobody is signed in.
+    pub account: Option<String>,
     /// Each board reached on the LAN right now (Wi-Fi M6 P07): the
     /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
     pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
@@ -175,7 +176,7 @@ impl Default for DeviceRosterView {
             wifi: std::collections::BTreeMap::new(),
             remembered_networks: std::collections::BTreeMap::new(),
             remembered_bluetooth: std::collections::BTreeMap::new(),
-            account_name: None,
+            account: None,
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
@@ -564,7 +565,7 @@ impl DeviceRoster {
             // controllers.
             remembered_networks: std::collections::BTreeMap::new(),
             remembered_bluetooth: std::collections::BTreeMap::new(),
-            account_name: None,
+            account: None,
             lan_links: self
                 .roster
                 .devices()
@@ -1108,7 +1109,7 @@ mod tests {
             wifi: Default::default(),
             remembered_networks: Default::default(),
             remembered_bluetooth: Default::default(),
-            account_name: None,
+            account: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
@@ -1184,7 +1185,7 @@ mod tests {
             wifi: Default::default(),
             remembered_networks: Default::default(),
             remembered_bluetooth: Default::default(),
-            account_name: None,
+            account: None,
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,

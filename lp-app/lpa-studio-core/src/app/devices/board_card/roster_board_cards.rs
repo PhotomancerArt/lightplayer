@@ -130,7 +130,7 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
             .filter(|(device, _)| *device == view.id)
             .map(|(_, panel)| panel),
         links: BoardLinks {
-            account: roster.account_name.as_deref(),
+            account: roster.account.as_deref(),
             remembered_network: roster.remembered_networks.get(&view.id),
             remembered_bluetooth: roster.remembered_bluetooth.get(&view.id).copied(),
         },
