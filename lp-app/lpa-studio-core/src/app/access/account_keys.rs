@@ -219,7 +219,10 @@ pub(crate) mod tests {
     fn a_cache_with_no_email_still_reads() {
         let keys = account(None);
         let mut doc: serde_json::Value = serde_json::from_str(&keys.to_json()).unwrap();
-        doc.as_object_mut().unwrap().remove("accountEmail").expect("the cache keeps the email");
+        doc.as_object_mut()
+            .unwrap()
+            .remove("accountEmail")
+            .expect("the cache keeps the email");
         let read = AccountKeys::from_json(&doc.to_string()).expect("still a cache");
         assert_eq!(read.account_email, "");
         assert_eq!(read.key_secret, keys.key_secret);

@@ -270,14 +270,26 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, false, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    false,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 false,
                 "not connected",
                 None,
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, false, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    false,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("no Wi\u{2011}Fi"),
@@ -291,14 +303,26 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, true, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("no Wi\u{2011}Fi"),
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, false, true, off.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    false,
+                    true,
+                    off.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("no Wi\u{2011}Fi"),
@@ -312,7 +336,13 @@ mod tests {
                 UiStatusKind::Neutral,
             ),
             (
-                Some((true, true, true, joined.clone(), RelayState::WaitingForInternet)),
+                Some((
+                    true,
+                    true,
+                    true,
+                    joined.clone(),
+                    RelayState::WaitingForInternet,
+                )),
                 true,
                 EMAIL,
                 Some("can't reach"),
@@ -350,17 +380,15 @@ mod tests {
         for (status, signed_in, summary, aside, tone) in table {
             let mut fixture = CardFixture::ready();
             fixture.account = signed_in.then(|| EMAIL.to_string());
-            fixture.wifi = status
-                .clone()
-                .map(|(on, wifi_on, saved, station, relay)| {
-                    let mut wifi = wifi(on, station, relay);
-                    let status = wifi.status.as_mut().unwrap();
-                    status.wifi = wifi_on;
-                    if !saved {
-                        status.networks.clear();
-                    }
-                    wifi
-                });
+            fixture.wifi = status.clone().map(|(on, wifi_on, saved, station, relay)| {
+                let mut wifi = wifi(on, station, relay);
+                let status = wifi.status.as_mut().unwrap();
+                status.wifi = wifi_on;
+                if !saved {
+                    status.networks.clear();
+                }
+                wifi
+            });
             let bar = cloud_bar(&fixture.input());
             assert_eq!(bar.kind, Some("lightplayer.app"));
             assert_eq!(

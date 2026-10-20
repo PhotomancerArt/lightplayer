@@ -175,7 +175,9 @@ fn AccountGroup(
                 }
             };
         }
-        AccountAccessState::Loading { name, .. } => (name.clone(), None, Some("Reading your account…")),
+        AccountAccessState::Loading { name, .. } => {
+            (name.clone(), None, Some("Reading your account…"))
+        }
         AccountAccessState::Unavailable { name, .. } => (
             name.clone(),
             None,

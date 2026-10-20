@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn the_account_is_named_by_its_email() {
-        assert_eq!(account_words("Yona", "hypher@gmail.com"), "hypher@gmail.com");
+        assert_eq!(
+            account_words("Yona", "hypher@gmail.com"),
+            "hypher@gmail.com"
+        );
         assert_eq!(account_words("Yona", ""), "Yona's account");
         assert_eq!(account_words("  ", ""), "your account");
         assert_eq!(BoardLinks::default().account_words(), None);
