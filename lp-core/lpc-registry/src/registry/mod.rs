@@ -7,5 +7,6 @@ pub mod entry_residency_error;
 pub mod load_result;
 pub mod node_authoring;
 pub mod parse_ctx;
+pub mod project_identity;
 pub mod project_registry;
 pub mod registry_error;

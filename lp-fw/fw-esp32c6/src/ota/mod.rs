@@ -80,7 +80,6 @@ mod boot_state;
 mod core_only;
 mod engine_guard;
 mod engine_window;
-mod hw_sha;
 mod running_hook;
 mod split_flash;
 mod status_light;
@@ -97,11 +96,23 @@ pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
 #[cfg(feature = "ble")]
 pub use running_hook::radio_update_hook;
-pub use running_hook::{install as install_running_hook, manifest as running_manifest};
+pub use running_hook::{
+    hash_step as core_hash_step, hello_ready, install as install_running_hook,
+    manifest as running_manifest,
+};
 pub use status_light::StatusLight;
 pub use update_links::UpdateLinks;
 
 use split_flash::SplitFlash;
+
+/// Must a core installed over the air read the tree store? Always: this
+/// board's files are in one (or held in littlefs for the USB migration,
+/// which no over-the-air core may format either). A core that does not
+/// carry the tree-store mark in its own bytes is refused before its trial
+/// record (`fw_esp32_common::fs_tree_core_guard`).
+pub fn cores_must_read_tree_store() -> bool {
+    true
+}
 
 /// Incomplete boots after which the core stops starting the engine: the
 /// recovery ledger's safe mode (2) already skipped the project; two more
@@ -109,9 +120,13 @@ use split_flash::SplitFlash;
 pub const INCOMPLETE_BOOTS_TO_CORE_ONLY: u32 = 4;
 
 /// The chip reset an update ends with (`esp_hal`'s software reset, which
-/// the loader reads as warm).
+/// the loader reads as warm), with the radio quiet first like every other
+/// reset the firmware makes (`restart`): an update over Bluetooth, the LAN
+/// or the relay ends with the radio busy, and the loader then runs in RAM
+/// the app's heap held
+/// (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
 pub fn reset_now() -> ! {
-    esp_hal::system::software_reset()
+    crate::board::esp32c6::restart::restart()
 }
 
 /// This boot's reset, as the loader classified it.

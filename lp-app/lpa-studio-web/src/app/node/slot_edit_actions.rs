@@ -32,11 +32,11 @@ pub(crate) fn panel_or_slot_action(
         .expect("an address is always a dispatch")
 }
 
-/// [`panel_or_slot_action`] for one DIMENSION of a grouped control, whose
+/// [`panel_or_slot_action`] for one DIMENSION of the clock's tape, whose
 /// slot address may be absent (a wired row the projection marked read-only).
 ///
-/// The target-or-address fallback is per dimension, not per control (the
-/// clock's Transport, P8): a wired dimension writes its channel, an unwired
+/// The target-or-address fallback is per dimension, not per instrument (the
+/// clock's tape): a wired dimension writes its channel, an unwired
 /// one edits its own slot, and one with neither has nothing to dispatch —
 /// `None`, so the widget renders inert rather than firing a dead handler.
 pub(crate) fn panel_write_or_slot_action(

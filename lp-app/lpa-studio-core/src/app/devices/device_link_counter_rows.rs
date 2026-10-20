@@ -14,7 +14,7 @@
 //! that direction's traffic ([`is_notable_rate`]) — a few lost packets on a
 //! link that has carried thousands of frames reads as the noise it is.
 
-use crate::DeviceLinkCounters;
+use crate::{DeviceLinkCounters, byte_size};
 
 /// Below this many frames in a direction, a resend/damage ratio is too
 /// noisy to judge (DD2's "min 20 frames") — 1 resend out of 2 frames sent
@@ -111,27 +111,6 @@ fn is_notable_rate(count: u32, total_frames: u32) -> bool {
         && u64::from(count) * 100 > u64::from(total_frames) * u64::from(NOTABLE_RATE_PERCENT)
 }
 
-/// A byte count in the unit that keeps the number short: `980 B`,
-/// `4.2 KB`, `38 KB`, `1.3 MB`. Binary steps, as the rest of Studio sizes
-/// things; one decimal below ten, none above.
-fn byte_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
-    if bytes < 1024 {
-        return format!("{bytes} B");
-    }
-    let mut value = bytes as f64 / 1024.0;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if value < 10.0 {
-        format!("{value:.1} {}", UNITS[unit])
-    } else {
-        format!("{value:.0} {}", UNITS[unit])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,15 +196,5 @@ mod tests {
             ..Default::default()
         });
         assert!(above_five_percent[0].notable, "10 % clears the floor");
-    }
-
-    #[test]
-    fn bytes_take_the_unit_that_keeps_the_number_short() {
-        assert_eq!(byte_size(0), "0 B");
-        assert_eq!(byte_size(980), "980 B");
-        assert_eq!(byte_size(4_300), "4.2 KB");
-        assert_eq!(byte_size(38_912), "38 KB");
-        assert_eq!(byte_size(1_363_149), "1.3 MB");
-        assert_eq!(byte_size(52_428_800), "50 MB");
     }
 }

@@ -54,20 +54,43 @@ pub fn init_board() -> (
     // docs/adr/2026-09-02-esp32c6-ram-split.md, "Amendment".
     // SAFETY: each array is handed to the allocator exactly once, here, and
     // nothing else ever names it except to read its address.
+    //
+    // The main array's top reaches into the split loader's RAM
+    // (`lp_bootctl::BOOT_STAGE_RAM`, 0x40850000..0x40860000: 18,408 B of it
+    // at main 17c6c34d6), which a still-running radio must not write across
+    // a warm reset any more than `dram2_seg` (below). So the array is two
+    // regions, cut where it reaches that range: the part below is `Internal`
+    // (where the radio's C heap overflows to when its own region is full),
+    // the part from the range up carries no tag, like `dram2_seg`, so only
+    // Rust's global allocator lands there. Rust tries them in this order, so
+    // it fills main RAM bottom-up as before
+    // (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+    let (main_dma, main_fenced) = main_region_split();
+    // SAFETY: the two parts are disjoint and together the array.
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             core::ptr::addr_of_mut!(HEAP_MAIN).cast::<u8>(),
-            HEAP_MAIN_SIZE,
+            main_dma,
             esp_alloc::MemoryCapability::Internal.into(),
         ));
+        if main_fenced != 0 {
+            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+                core::ptr::addr_of_mut!(HEAP_MAIN)
+                    .cast::<u8>()
+                    .add(main_dma),
+                main_fenced,
+                crate::c_heap::BOOTLOADER_RECLAIMED,
+            ));
+        }
     }
     // The 40 KB the main region gave up comes back with interest from
     // `dram2_seg`: the 64 KB (0x4086E610..0x4087E610) the ESP-IDF
     // second-stage bootloader loads its code and data into, and runs its
     // stack in — esp-hal's `#[ram(reclaimed)]` exists for exactly this. A
     // second `esp_alloc` region: `HEAP.free()`/`used()` sum all three,
-    // allocations fill the main region first. Heap total 301,536 B
-    // (325,536 B before the 2026-09-24 cut).
+    // allocations fill the main region first. Heap total 372,344 B since
+    // the 2026-10-16 stack-to-heap move (`HEAP_MAIN_SIZE`); 301,536 B before
+    // it, 325,536 B before the 2026-09-24 cut.
     //
     // That segment is the bootloader's again the moment the HP system
     // resets, while the radio does not reset with it: a warm reset (the
@@ -103,6 +126,11 @@ pub fn init_board() -> (
         ));
     }
 
+    // LP SRAM above the recovery region, the region Rust's allocator tries
+    // last of all (`lp_sram_heap`, off by default).
+    #[cfg(feature = "lp_sram_heap")]
+    super::lp_sram_heap::install();
+
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
     let usb_device = peripherals.USB_DEVICE;
@@ -131,8 +159,20 @@ pub fn init_board() -> (
 }
 
 /// The main heap region's size (see the RAM-split note in [`init_board`]):
-/// the 236,000 B main RAM gives the heap, less the radio's region.
-const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
+/// the heap's share of main RAM, less the radio's region.
+///
+/// 236,000 → 306,808 B of main RAM (2026-10-16, RAM research M1): the radio
+/// code that moved to flash (#1092) and the constants (#1110) left the main
+/// stack at 119,960 B in the split image (figure build, main `c97473d8f`),
+/// where the deepest catalog project needs 35,752 B: meteor's load, and the
+/// same after ten shader edits (`lp-emu:esp32c6:t1`,
+/// `lp-cli/tests/emu_stack_peak.rs`; 35,752 B on silicon too, CX1, release
+/// 2026.10.16-8 — the RAM split ADR's 2026-10-16 amendment). The stack keeps
+/// that peak + 12 KiB, rounded up to 4 KiB: 49,152 B, and the other 70,808 B
+/// are heap. `emu_stack_peak` fails CI the day the statics or this constant
+/// eat into the 12 KiB, so the next static that grows has to take its bytes
+/// back from here. See docs/adr/2026-09-02-esp32c6-ram-split.md.
+const HEAP_MAIN_SIZE: usize = 306_808 - HEAP_RADIO_SIZE;
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth
 /// up (2026-09-24), less the 10,320 B the lean ESP-NOW buffers gave back
@@ -162,6 +202,15 @@ pub fn heap_regions() -> [(usize, usize); 3] {
         (core::ptr::addr_of!(HEAP_DRAM2) as usize, HEAP_DRAM2_SIZE),
         radio_region(),
     ]
+}
+
+/// The main array cut at the boot stages' RAM: `(below, from)` — the
+/// bytes that may hold radio DMA, then the bytes from
+/// `lp_bootctl::BOOT_STAGE_RAM` up, which may not.
+pub fn main_region_split() -> (usize, usize) {
+    let start = core::ptr::addr_of!(HEAP_MAIN) as u32;
+    let (below, from) = lp_bootctl::split_at_boot_stage_ram(start, HEAP_MAIN_SIZE as u32);
+    (below as usize, from as usize)
 }
 
 /// The radio's region as `(start address, size)`.

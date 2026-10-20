@@ -754,7 +754,7 @@ fn pasting_a_node_from_another_project_format_is_refused_out_loud() {
             )
         });
     assert!(
-        refusal.message.contains("re-copy"),
+        refusal.message.contains("copy it again"),
         "and it must name the remedy: {}",
         refusal.message
     );

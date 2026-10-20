@@ -77,6 +77,10 @@ pub struct UartLinkTransport {
     inbox: VecDeque<ClientMessage>,
     /// The link came up and its hello has not been handed out yet.
     hello_owed: bool,
+    /// A session ended or began since the server last asked
+    /// ([`ServerTransport::take_reset_links`]): what the old session left
+    /// open on the server (an fs batch) is dropped.
+    session_changed: bool,
 }
 
 /// What queueing one payload came to.
@@ -98,6 +102,7 @@ impl UartLinkTransport {
             packed: PackedLink::new(),
             inbox: VecDeque::new(),
             hello_owed: false,
+            session_changed: false,
         }
     }
 
@@ -146,10 +151,12 @@ impl UartLinkTransport {
                 LinkEvent::Up { generation } => {
                     self.packed.back_to_json();
                     self.hello_owed = true;
+                    self.session_changed = true;
                     log::info!("[uart_link] host link up (session {generation})");
                 }
                 LinkEvent::Reset { reason, generation } => {
                     self.packed.back_to_json();
+                    self.session_changed = true;
                     // Requests from the ended session: its host has failed
                     // them itself (D9), and a reply would reach the next one.
                     self.inbox.clear();
@@ -339,6 +346,15 @@ impl ServerTransport for UartLinkTransport {
     async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         self.pump_events();
         Ok(self.inbox.drain(..).map(Incoming::primary).collect())
+    }
+
+    /// The one link, when its session reset or came up since the last call.
+    fn take_reset_links(&mut self) -> Vec<LinkId> {
+        if core::mem::take(&mut self.session_changed) {
+            alloc::vec![LinkId::PRIMARY]
+        } else {
+            Vec::new()
+        }
     }
 
     fn links(&self) -> Vec<Link> {

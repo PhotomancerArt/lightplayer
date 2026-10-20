@@ -1,8 +1,9 @@
 //! Content identity: 64 bits of SHA-256 over a one-byte tag and a record's
 //! logical bytes (FORMAT.md "Ids").
 //!
-//! Not cryptography (spike U9): no byte-compare on dedup, no defence against
-//! crafted collisions. The tag keeps a blob, a directory, a multi and a root
+//! Not cryptography (spike U9): a crafted collision costs ~2³² hashes, so a
+//! dedup hit compares bytes before it reuses a record (`node_write.rs`,
+//! FORMAT.md "Ids"). The tag keeps a blob, a directory, a multi and a root
 //! with equal bytes apart.
 
 use crate::object_hasher::ObjectHasher;

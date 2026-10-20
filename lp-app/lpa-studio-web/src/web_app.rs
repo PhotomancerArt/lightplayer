@@ -65,6 +65,9 @@ const STYLE: &str = include_str!("style.css");
 struct StudioBridge {
     tx: CommandSender,
     delay: Rc<Cell<Duration>>,
+    /// Core's Graph editor, which the Graph tab's page applies its input
+    /// to directly (`lpa_studio_core::app::graph::GraphHandle`).
+    graph: lpa_studio_core::app::graph::GraphHandle,
 }
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -146,7 +149,7 @@ pub fn App() -> Element {
     // The one transient-confirmation slot (base/toast.rs). Provided here so
     // a line survives the surface that raised it: archiving navigates Home
     // and unmounts the menu row that asked for it, and the "Archived —
-    // Restore from the Projects page." line still has to land.
+    // Restore it from Archived projects." line still has to land.
     let toasts = use_toast_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
@@ -166,7 +169,15 @@ pub fn App() -> Element {
         move || boot_route
     });
     use_hook(move || {
-        router::replace(&route.peek().clone());
+        // An alias of Home (`/devices`, `/projects`, `/home`, junk under
+        // `/device`) heals to `/` carrying the whole query the page read at
+        // load — `?lan=`, `?relay=` and `?firmware-store=` as much as
+        // `?emu=` — less `?on=` (`router::canonical_address`). No history
+        // entry, no reload. Every other address is written back as parsed.
+        match router::boot_canonical_address() {
+            Some(_) => router::replace(&StudioRoute::Home),
+            None => router::replace(&route.peek().clone()),
+        }
     });
     // The session recorder's route feed: every change of `route`, with the
     // reason the programmatic sites below note before they set it.
@@ -224,6 +235,10 @@ pub fn App() -> Element {
     // lens has no route for the latch above to hold, so this is how the
     // loop tells a new one (Q3, `router::lens_sync_target`).
     let lens_uid_now = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    // The device the tab's session (the lens) is on, whichever surface
+    // shows it: a connected board's session on its card has one too, so a
+    // link to its own `/device/<uid>` opens nothing a second time.
+    let session_lens_uid_now = use_hook(|| Rc::new(RefCell::new(None::<String>)));
     let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
     // A route-driven open we dispatched (startup / back-forward / hash nav)
     // that the actor hasn't started yet. While set, stale home views must
@@ -246,6 +261,7 @@ pub fn App() -> Element {
     let loop_leaving = Rc::clone(&leaving_session);
     let loop_bound_route = Rc::clone(&bound_route_now);
     let loop_lens_uid = Rc::clone(&lens_uid_now);
+    let loop_session_lens_uid = Rc::clone(&session_lens_uid_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
     let loop_unsaved = Rc::clone(&unsaved);
@@ -259,6 +275,9 @@ pub fn App() -> Element {
     let last_transient = use_hook(|| Rc::new(Cell::new(false)));
     let loop_last_transient = Rc::clone(&last_transient);
     let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
+    // A card's Sign in (`devices/<board>/sign-in`): core counts the
+    // presses; the page leaves for sign-in when the count advances.
+    let loop_sign_ins = use_hook(|| Rc::new(Cell::new(0u64)));
     let mut loop_toasts = toasts;
     // The anonymous-fork hook (examples vision D3/D8): a fork by a browser
     // with no session mints a GUEST account, then refreshes the session —
@@ -333,6 +352,15 @@ pub fn App() -> Element {
             controller.load_wifi_addresses(&json);
         }
         controller.set_on_wifi_addresses(crate::wifi_addresses_io::store_wifi_addresses_json);
+        // The boards whose owner chose Start fresh: their lost files are
+        // not news again after a reload. This browser only, like the
+        // addresses.
+        if let Some(json) =
+            crate::settings_io::load_local(lpa_studio_core::FRESH_STARTS_STORAGE_KEY)
+        {
+            controller.load_fresh_starts(&json);
+        }
+        controller.set_on_fresh_starts(crate::settings_io::store_fresh_starts);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -388,7 +416,7 @@ pub fn App() -> Element {
         // The rebuilt device layer (M3): the roster's effects run device IO
         // in spawned futures on the browser's executor, and reach real ports
         // through the Web Serial provider. A browser without Web Serial
-        // installs no serial transport, and the devices page says so rather
+        // installs no serial transport, and the home page says so rather
         // than showing an empty roster that reads like "you have none" —
         // but it still reaches SIMS, which are workers, not ports.
         #[cfg(target_arch = "wasm32")]
@@ -475,7 +503,7 @@ pub fn App() -> Element {
             // Boards on the LAN (Wi-Fi M6 P07; no flag since the network
             // transport's P01): in every browser with a WebSocket. A board
             // is reached at an address this browser remembered for it
-            // ("Connect over Wi‑Fi"), one typed into the add slot, or one
+            // ("Connect over Wi‑Fi"), one typed into Connect a board's Network row, or one
             // the `?lan=` dev shortcut names, dialled at once. Each link is
             // a secure lp-link presenting this browser's access keys, the
             // same the access controller unlocks a Bluetooth board with.
@@ -516,7 +544,19 @@ pub fn App() -> Element {
                 log::info!("this browser has no WebSocket; Wi\u{2011}Fi boards are not reachable");
             }
         }
+        // One tab holds a board: Web Locks and the hold channel, in a
+        // browser that has both (nothing is installed otherwise, and every
+        // device flow is as before). Not the docs page's actor: it has no
+        // boards to hold.
+        #[cfg(target_arch = "wasm32")]
+        let board_hold = crate::browser_board_hold::install_board_hold(&mut controller);
+        let graph = controller.graph_handle();
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
+        // The notes other tabs say reach this tab's queue from here on.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(board_hold) = &board_hold {
+            board_hold.listen(&handle.tx);
+        }
         let mut view_rx = handle.view;
         let loop_tx = handle.tx.clone();
         spawn(async move {
@@ -548,6 +588,13 @@ pub fn App() -> Element {
                     }
                 }
                 loop_fork_generation.set(next.transient_fork_generation);
+                if next.sign_in_requests > loop_sign_ins.get() {
+                    #[cfg(target_arch = "wasm32")]
+                    crate::app::layout::cloud_account::leave_for_sign_in(
+                        &loop_cloud_session.peek(),
+                    );
+                }
+                loop_sign_ins.set(next.sign_in_requests);
                 loop_last_transient.set(next.open_project_transient);
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
@@ -578,8 +625,10 @@ pub fn App() -> Element {
                     *loop_pending_project.borrow_mut() = None;
                 }
                 // The tab's one session, for the navigation listener's
-                // studio-or-site policy.
+                // studio-or-site policy, and the board it is on.
                 *loop_session.borrow_mut() = next.session.clone();
+                *loop_session_lens_uid.borrow_mut() =
+                    router::lens_device_uid(&next).map(str::to_string);
                 // The editor is showing exactly when the view built the
                 // pane layout (device-opened projects carry no library
                 // uid, so pane presence — not project identity — is the
@@ -627,19 +676,18 @@ pub fn App() -> Element {
                 // lp2025/2026-10-08-2330-connected-in-the-card).
                 let current = route.peek().clone();
                 // A STEADY lens follows the URL only while a shell route
-                // is what's rendered (the gallery routes, where a card
-                // open resolves into the lens URL, and the lens routes,
-                // where boot/slug/identity resolution lands). In any
-                // other section — Home, Explore, Boards, Docs — the user
-                // deliberately left the editor surface; yanking the URL
-                // back would make those sections unreachable while a
-                // lens is attached (seen live with `#/home` bouncing).
-                // A lens CHANGE (`bound_changed`) rewrites from anywhere.
+                // is what's rendered: the lens routes, where boot/slug/
+                // identity resolution lands. In any other section — Home,
+                // Explore, Boards, Docs — the user deliberately left the
+                // editor surface; yanking the URL back would make those
+                // sections unreachable while a lens is attached (seen live
+                // with `#/home` bouncing). Home stays out of the set for
+                // that reason, though the shell draws the home page too. A
+                // lens CHANGE (`bound_changed`) rewrites from anywhere: a
+                // card opened on the home page lands in the editor.
                 let on_shell_route = matches!(
                     current,
-                    StudioRoute::Devices
-                        | StudioRoute::Projects
-                        | StudioRoute::Project { .. }
+                    StudioRoute::Project { .. }
                         | StudioRoute::Example { .. }
                         | StudioRoute::Device { .. }
                 );
@@ -648,9 +696,9 @@ pub fn App() -> Element {
                 // (single-session policy), so between the dispatch and
                 // the session actually ending there is an emission whose
                 // lens still says "editor", on a route the user chose
-                // deliberately — `/projects` is a shell route, so without
-                // this the loop would push the user straight back into
-                // the editor they just left.
+                // deliberately; without this a new lens in that window
+                // would push the user straight back into the editor they
+                // just left.
                 if editor_showing && !loop_leaving.get() && (on_shell_route || bound_changed) {
                     // Where the address goes is `router::lens_sync_target`'s
                     // (`same_session`, so `/…/play` stays play; a
@@ -688,38 +736,42 @@ pub fn App() -> Element {
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
-                    // goes back to the gallery the cards live on
-                    // (`/devices`, not the `/` landing: the core is
-                    // showing the gallery view, so the landing stub would
-                    // be the wrong body). The boot-time home flash (nothing started
-                    // yet) keeps the route so the startup re-derivation
-                    // can use it; a route-dispatched open still connecting
-                    // (pending) keeps it too — the gallery's connect
-                    // evidence renders the window honestly in place.
+                    // goes back to `/`, the home page the cards live on.
+                    // The boot-time home flash (nothing started yet) keeps
+                    // the route so the startup re-derivation can use it; a
+                    // route-dispatched open still connecting (pending)
+                    // keeps it too — the shell draws the home page there,
+                    // whose cards render the window honestly in place.
                     //
                     // An open that stopped at the MISMATCH PAGE keeps its
                     // route too, and for the plainest reason: the page is
-                    // rendered BY that address, so sending the URL to
-                    // `/devices` would close the question before it was
-                    // read. It is not an open that ended, it is an open
-                    // waiting for an answer.
+                    // rendered BY that address, so sending the URL to `/`
+                    // would close the question before it was read. It is
+                    // not an open that ended, it is an open waiting for an
+                    // answer.
                     //
                     // A FAILED open keeps it for the same reason: the
                     // opening frame's failure notice (the step it stopped
                     // on, Retry, Reset the board) is rendered by that
-                    // address. Sending it to `/devices` is what made a
-                    // board that rebooted mid-open read as a page that
-                    // silently gave up (2026-09-24).
+                    // address. Sending it away is what made a board that
+                    // rebooted mid-open read as a page that silently gave
+                    // up (2026-09-24).
+                    //
+                    // A CONNECTED session never ends this way: it is alive,
+                    // on its card, and its editor is just not built until
+                    // core hears the place (the session's own address,
+                    // followed from `/`, lands here first). Done, which ends
+                    // it, still sends the address home.
                     let open_failed = matches!(
                         lpa_studio_core::open_stage(),
                         lpa_studio_core::OpenStage::Failed(_)
                     );
-                    let open_ended = next.home.is_some()
-                        && !opening_now
-                        && !open_failed
-                        && next.open_mismatch.is_none()
-                        && loop_saw_opening.get()
-                        && !loop_pending_route_open.get();
+                    let open_ended = open_ended(
+                        &next,
+                        open_failed,
+                        loop_saw_opening.get(),
+                        loop_pending_route_open.get(),
+                    );
                     if open_ended {
                         // The kick the recorder exists to explain: say
                         // which evidence fired it.
@@ -729,8 +781,8 @@ pub fn App() -> Element {
                              open pending",
                             lpa_studio_core::open_stage_label(&lpa_studio_core::open_stage())
                         ));
-                        router::replace(&StudioRoute::Devices);
-                        route.set(StudioRoute::Devices);
+                        router::replace(&StudioRoute::Home);
+                        route.set(StudioRoute::Home);
                     }
                 }
 
@@ -840,8 +892,12 @@ pub fn App() -> Element {
         StudioBridge {
             tx: handle.tx,
             delay: handle.delay,
+            graph,
         }
     });
+    // The Graph tab's page reaches core's editor through this.
+    let graph_handle = bridge.graph.clone();
+    use_context_provider(move || graph_handle);
 
     // route → actor: back/forward, in-app link clicks and manual URL edits
     // dispatch the matching action. Programmatic navigate/replace calls fire
@@ -865,6 +921,7 @@ pub fn App() -> Element {
     let nav_leaving = Rc::clone(&leaving_session);
     let nav_unsaved = Rc::clone(&unsaved);
     let nav_bound_route = Rc::clone(&bound_route_now);
+    let nav_session_lens_uid = Rc::clone(&session_lens_uid_now);
     let nav_pending_route_open = Rc::clone(&pending_route_open);
     let nav_library_uids = Rc::clone(&library_uids);
     let nav_pending_project = Rc::clone(&pending_project_route);
@@ -944,21 +1001,20 @@ pub fn App() -> Element {
             }
             crate::route_recording::note_route_reason_if_unset("browser-nav");
             route.set(new_route.clone());
+            // Already the document this tab has open (the editor's, or a
+            // connected session's on its card)? Then nothing opens again
+            // ([`already_bound`]).
+            let already_bound = already_bound(
+                &new_route,
+                nav_bound_route.borrow().as_ref(),
+                nav_open_ids
+                    .borrow()
+                    .as_ref()
+                    .map(|(open, _)| open.as_str()),
+                nav_session_lens_uid.borrow().as_deref(),
+            );
             match &new_route {
                 StudioRoute::Project { uid, on, .. } => {
-                    // already the focused document? The uid is the whole
-                    // comparison — a stale slug in the pasted link is the
-                    // same project, and play is ignored on purpose:
-                    // entering or leaving play must never re-open the
-                    // session.
-                    let uid_string = uid.to_string();
-                    let already_bound = matches!(
-                        &*nav_bound_route.borrow(),
-                        Some(StudioRoute::Project { uid: bound, .. }) if bound == uid
-                    ) || nav_open_ids
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|(open, _)| *open == uid_string);
                     if !already_bound
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
@@ -995,10 +1051,6 @@ pub fn App() -> Element {
                     // same stateless open an Explore card uses (D2). This
                     // dispatch bypasses `on_action`'s unsaved gate, so it
                     // carries its own (same message, same predicate).
-                    let already_bound = matches!(
-                        &*nav_bound_route.borrow(),
-                        Some(StudioRoute::Example { slug: bound, .. }) if bound == slug
-                    );
                     if !already_bound
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
@@ -1041,11 +1093,10 @@ pub fn App() -> Element {
                     //
                     // The actor owns readiness — a board still identifying
                     // holds the intent and attaches when it says hello —
-                    // so this dispatch never waits on the roster here.
-                    let already_bound = matches!(
-                        &*nav_bound_route.borrow(),
-                        Some(StudioRoute::Device { uid: bound, .. }) if bound == uid
-                    );
+                    // so this dispatch never waits on the roster here. The
+                    // board the session is already on (a connected one,
+                    // its address followed from its card) opens nothing
+                    // again.
                     if !already_bound
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
@@ -1066,9 +1117,7 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Devices
-                | StudioRoute::Projects
-                | StudioRoute::Home
+                StudioRoute::Home
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Unlock
@@ -1214,8 +1263,6 @@ pub fn App() -> Element {
                 }
                 StudioRoute::Home
                 | StudioRoute::Project { .. }
-                | StudioRoute::Devices
-                | StudioRoute::Projects
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Unlock
@@ -1316,9 +1363,8 @@ pub fn App() -> Element {
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
     // The app chat's drawer and draft: web chrome too (plan A2), held here
-    // so the header button, the home page's front door and the drawer —
-    // mounted below every route's body, so it stays open across
-    // navigation — share them.
+    // so the header button and the drawer — mounted below every route's
+    // body, so it stays open across navigation — share them.
     let app_chat = crate::app::agent::use_provide_app_chat_chrome();
     // Place (M7): the route and the chrome's open flags, reported to core
     // whenever they change. Core reads them (the agent's readout, ⌘K's
@@ -1333,9 +1379,9 @@ pub fn App() -> Element {
         session_panel_place,
     );
     // Bluetooth access: the Unlock sheet, the card's Connections group and
-    // "Who has access", and the Devices page's access settings all sit
-    // under the shell; their callback and the view slice they read ride
-    // one context instead of every layer.
+    // "Who has access", and the home page's "Unlocking your boards" all
+    // sit under this; their callback and the view slice they read ride one
+    // context instead of every layer.
     let access_bridge = bridge.clone();
     let on_access_command = use_hook(move || {
         Callback::new(move |command| {
@@ -1539,19 +1585,15 @@ pub fn App() -> Element {
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
-        // Explicit, not the catch-all: `/devices` must light the Devices
-        // tab (a catch-all once carried it and silently stopped when lens
-        // routes moved to Session — G3 finding).
-        StudioRoute::Devices => SiteSection::Devices,
-        StudioRoute::Projects => SiteSection::Projects,
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
         // Like Session: no tab lights. The avatar in the right cluster is
         // the account page's current-place marker.
         StudioRoute::Account => SiteSection::Account,
-        // A shared device password is about devices.
-        StudioRoute::Unlock => SiteSection::Devices,
+        // A shared board password is about boards, which live on the home
+        // page: the logo wears the underline.
+        StudioRoute::Unlock => SiteSection::Home,
         // Lens routes light NO tab — the header session·project control is
         // the current-place marker (single-session policy). The other
         // catch-all routes (stories, the standalone editors) never render
@@ -1636,7 +1678,6 @@ pub fn App() -> Element {
                     crate::app::HomePage {
                         on_action,
                         home: current_view.home.clone().map(|home| *home),
-                        app_agent: Some(current_view.app_agent.clone()),
                     }
                 },
                 StudioRoute::Account => rsx! {
@@ -1673,21 +1714,8 @@ pub fn App() -> Element {
                     // are leased controllers of their own (D2).
                     crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
-                StudioRoute::Projects => rsx! {
-                    StudioShell {
-                        view: current_view,
-                        running: false,
-                        gallery: crate::app::layout::ShellGallery::Projects,
-                        opening_frame,
-                        mismatch: mismatch.clone(),
-                        play,
-                        project_view,
-                        workbench_hrefs: workbench_hrefs.clone(),
-                        on_action,
-                    }
-                },
-                // Devices (`#/`) and the lens routes: the shell's default
-                // gallery page is Devices.
+                // The lens routes: the shell, whose no-editor arm draws the
+                // home page.
                 _ => rsx! {
                     StudioShell {
                         view: current_view,
@@ -1750,6 +1778,7 @@ pub fn App() -> Element {
                     on_access: move |command| {
                         sheet_bridge.tx.send(StudioCommand::Access(command));
                     },
+                    on_action,
                 }
             }
         }
@@ -1966,6 +1995,12 @@ fn nav_session_plan(
     if target.is_lens() {
         return NavSessionPlan::Keep;
     }
+    // A connected session belongs to the home page (the board card ADR,
+    // §4): going home keeps it, on its card. Done is what ends it. Every
+    // other site route still does.
+    if session.connected && matches!(target, StudioRoute::Home) {
+        return NavSessionPlan::Keep;
+    }
     // The story book and the standalone board editor reload the page
     // (their early returns in `App` run before any hooks), so the session
     // dies with the document whatever we dispatch here.
@@ -1978,6 +2013,67 @@ fn nav_session_plan(
     NavSessionPlan::Leave {
         teardown: session_teardown(session),
         said: session_stopped_line(session, dirty),
+    }
+}
+
+/// Whether the editor going away on a lens route means the open ENDED, so
+/// the address goes home (the view loop's "open-ended" kick): the home view
+/// shows with no open in flight, the open neither failed nor stopped at the
+/// mismatch page, an open was seen to start (`saw_opening`), and no
+/// route-dispatched open is still waiting to start (`route_open_pending`).
+///
+/// Never while the view's session is connected: that session is alive, on
+/// its card, and its editor is just not built until core hears the place
+/// (following its own address from `/` lands on its lens route first).
+fn open_ended(
+    next: &UiStudioView,
+    open_failed: bool,
+    saw_opening: bool,
+    route_open_pending: bool,
+) -> bool {
+    let opening_now = next
+        .home
+        .as_ref()
+        .is_some_and(|home| home.opening.is_some());
+    let connected = next
+        .session
+        .as_ref()
+        .is_some_and(|session| session.connected);
+    next.home.is_some()
+        && !connected
+        && !opening_now
+        && !open_failed
+        && next.open_mismatch.is_none()
+        && saw_opening
+        && !route_open_pending
+}
+
+/// Whether a navigation to `target` names the document this tab already
+/// has open, so the route listener dispatches no second open: the route
+/// the editor is bound to (`bound`); the open project (`open_project`, the
+/// view's `open_project_uid` — the editor's, or a connected session's on
+/// its card); the board the session is on (`lens_uid`). The uid is the
+/// whole comparison: a stale slug is the same project, and play is ignored
+/// on purpose — entering or leaving play must never re-open the session.
+fn already_bound(
+    target: &StudioRoute,
+    bound: Option<&StudioRoute>,
+    open_project: Option<&str>,
+    lens_uid: Option<&str>,
+) -> bool {
+    match target {
+        StudioRoute::Project { uid, .. } => {
+            matches!(bound, Some(StudioRoute::Project { uid: bound, .. }) if bound == uid)
+                || open_project.is_some_and(|open| open == uid.to_string())
+        }
+        StudioRoute::Example { slug, .. } => {
+            matches!(bound, Some(StudioRoute::Example { slug: bound, .. }) if bound == slug)
+        }
+        StudioRoute::Device { uid, .. } => {
+            matches!(bound, Some(StudioRoute::Device { uid: bound, .. }) if bound == uid)
+                || lens_uid == Some(uid.as_str())
+        }
+        _ => false,
     }
 }
 
@@ -2635,6 +2731,7 @@ mod tests {
             stat_line: None,
             update: None,
             link: lpa_studio_core::UiLinkKind::Usb,
+            connected: false,
         }
     }
 
@@ -2655,7 +2752,7 @@ mod tests {
     /// never a detach (PD8/Q15). The record stays behind (D46).
     #[test]
     fn leaving_the_studio_powers_the_tabs_sim_off() {
-        let plan = nav_session_plan(Some(&session()), &StudioRoute::Projects, false);
+        let plan = nav_session_plan(Some(&session()), &StudioRoute::Home, false);
 
         let NavSessionPlan::Leave { teardown, said } = plan else {
             panic!("a site route must end the session");
@@ -2682,7 +2779,7 @@ mod tests {
             ..session()
         };
         let NavSessionPlan::Leave { said, .. } =
-            nav_session_plan(Some(&wire), &StudioRoute::Projects, false)
+            nav_session_plan(Some(&wire), &StudioRoute::Home, false)
         else {
             panic!("a site route must end the session");
         };
@@ -2694,13 +2791,14 @@ mod tests {
 
     /// Every site section, not just the galleries the old detach arm
     /// covered — a session running behind a docs page is exactly the
-    /// thing the single-session policy is for.
+    /// thing the single-session policy is for. The home page's old
+    /// addresses (`/devices`, `/projects`) are Home and end it as Home does.
     #[test]
     fn every_site_route_ends_the_session() {
         for target in [
             StudioRoute::Home,
-            StudioRoute::Devices,
-            StudioRoute::Projects,
+            StudioRoute::parse("/devices"),
+            StudioRoute::parse("/projects"),
             StudioRoute::Explore,
             StudioRoute::Account,
             StudioRoute::Unlock,
@@ -2719,6 +2817,157 @@ mod tests {
                 target.path()
             );
         }
+    }
+
+    /// CD10: a CONNECTED session belongs to the home page, so going Home
+    /// keeps it on its card (the old home addresses too), dirty or not;
+    /// every other site route still ends it, with today's teardown and
+    /// line. (A session an address opened still ends going Home: the tests
+    /// above.)
+    #[test]
+    fn a_connected_session_survives_going_home_and_nothing_else() {
+        let connected = UiChromeSessionControl {
+            face: lpa_studio_core::DeviceFace::Wire,
+            name: "Porch sign".to_string(),
+            connected: true,
+            ..session()
+        };
+        for home in [
+            StudioRoute::Home,
+            StudioRoute::parse("/devices"),
+            StudioRoute::parse("/projects"),
+        ] {
+            for dirty in [false, true] {
+                assert!(
+                    matches!(
+                        nav_session_plan(Some(&connected), &home, dirty),
+                        NavSessionPlan::Keep
+                    ),
+                    "{} ended a connected session",
+                    home.path()
+                );
+            }
+        }
+        for target in [
+            StudioRoute::Explore,
+            StudioRoute::Account,
+            StudioRoute::Unlock,
+            StudioRoute::Boards { board: None },
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            },
+        ] {
+            let NavSessionPlan::Leave { teardown, said } =
+                nav_session_plan(Some(&connected), &target, false)
+            else {
+                panic!("{} kept a connected session alive", target.path());
+            };
+            assert_eq!(
+                teardown.op_as::<RuntimeOp>(),
+                Some(&RuntimeOp::CloseDeviceLens),
+                "{}",
+                target.path()
+            );
+            assert_eq!(
+                said,
+                Some("Closed Porch sign — the board keeps running".to_string())
+            );
+        }
+    }
+
+    /// CD10: the view loop's open-ended kick — the editor gone on a lens
+    /// route, home shown, nothing in flight — sends the address home, but
+    /// never while the view's session is connected: that session is alive
+    /// on its card, its editor just not built until core hears the place.
+    /// Done (no session) still sends it home.
+    #[test]
+    fn a_connected_session_never_trips_the_open_ended_kick() {
+        let home = lpa_studio_core::app::home::home_view_builder::build_home_view(None, None, None);
+        let view = |connected: Option<bool>| {
+            UiStudioView::new(Vec::new(), lpa_studio_core::UiConsoleView::empty())
+                .with_home(Some(home.clone()))
+                .with_session(connected.map(|connected| UiChromeSessionControl {
+                    face: lpa_studio_core::DeviceFace::Wire,
+                    connected,
+                    ..session()
+                }))
+        };
+        assert!(
+            !open_ended(&view(Some(true)), false, true, false),
+            "a connected session is alive"
+        );
+        assert!(
+            open_ended(&view(None), false, true, false),
+            "after Done the open has ended"
+        );
+        assert!(
+            open_ended(&view(Some(false)), false, true, false),
+            "a session going away by its address ends as it always did"
+        );
+        // Today's guards, unchanged.
+        assert!(!open_ended(&view(None), true, true, false), "a failed open");
+        assert!(
+            !open_ended(&view(None), false, false, false),
+            "nothing started"
+        );
+        assert!(
+            !open_ended(&view(None), false, true, true),
+            "a route open pending"
+        );
+        let opening = lpa_studio_core::app::home::home_view_builder::build_home_view(
+            None,
+            Some("prj-opening".to_string()),
+            None,
+        );
+        let mid_open = UiStudioView::new(Vec::new(), lpa_studio_core::UiConsoleView::empty())
+            .with_home(Some(opening));
+        assert!(
+            !open_ended(&mid_open, false, true, false),
+            "an open in flight"
+        );
+    }
+
+    /// CD10: following a link to the document the tab already has open
+    /// dispatches no second open. On the home page the editor is not bound
+    /// to a route, so a connected session's project is known by the view's
+    /// `open_project_uid`, and its board by the view's lens uid.
+    #[test]
+    fn a_link_to_the_connected_sessions_own_address_is_already_bound() {
+        let project = project_route();
+        let StudioRoute::Project { uid, .. } = &project else {
+            unreachable!("a project route");
+        };
+        let uid = uid.to_string();
+        // A Project route, with only `open_project_uid` (the home view).
+        assert!(already_bound(&project, None, Some(&uid), None));
+        assert!(
+            already_bound(&project.with_play(true), None, Some(&uid), None),
+            "play is the same document"
+        );
+        assert!(!already_bound(&project, None, Some("prj-another"), None));
+        assert!(!already_bound(&project, None, None, None));
+        // A Device route, with only the view's lens uid.
+        let device = StudioRoute::Device {
+            uid: "devporch0000000000".to_string(),
+            view: router::ProjectView::Play,
+        };
+        assert!(already_bound(
+            &device,
+            None,
+            None,
+            Some("devporch0000000000")
+        ));
+        assert!(!already_bound(
+            &device,
+            None,
+            None,
+            Some("devother000000000")
+        ));
+        assert!(!already_bound(&device, None, None, None));
+        // The editor's bound route, as before.
+        assert!(already_bound(&device, Some(&device), None, None));
+        assert!(already_bound(&project, Some(&project), None, None));
     }
 
     // -----------------------------------------------------------------
@@ -2927,7 +3176,7 @@ mod tests {
     fn a_tab_with_no_session_navigates_silently() {
         for target in [
             StudioRoute::Home,
-            StudioRoute::Projects,
+            StudioRoute::Explore,
             StudioRoute::Docs {
                 page: Some("intro".to_string()),
                 anchor: None,

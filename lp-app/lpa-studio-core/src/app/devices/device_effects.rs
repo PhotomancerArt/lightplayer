@@ -74,6 +74,22 @@ const LINK_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// [`DeviceEffects::sweep_departed_ports`].
 const HOTPLUG_SETTLE: Duration = Duration::from_millis(250);
 
+/// How long a port that left may take to come back before its board is
+/// gone ([`DeviceEffects::sweep_departed_ports`] for a closed port,
+/// [`Departure::depart`] for an open one).
+///
+/// A native-USB chip (the C6) re-enumerates on a watchdog reset: an erased
+/// one does it every few seconds, in its blank boot loop (bench 2026-08-30),
+/// and comes back under the same grant a moment later (session adoption
+/// keeps its endpoint). Detaching on the first sweep took the board offline
+/// and back on every turn of the loop, and its card left Online boards for
+/// Offline boards and came back, remounted each time: open details closed,
+/// an armed button disarmed, the card jumped ("the card periodically
+/// 'refreshes' which is jarring and resets the ui", Yona's C6, 2026-10-19).
+/// A running board re-enumerates the same way on any reset that takes USB
+/// with it. A board that is really unplugged reads offline this much later.
+pub(crate) const REENUMERATION_GRACE: Duration = Duration::from_millis(3_000);
+
 /// Links attached (or detached) per granted-port sweep.
 ///
 /// Ids are minted before the sweep awaits (a spawned future cannot hold
@@ -182,6 +198,9 @@ struct LinkSlot {
     inbox: ConversationInbox,
     /// The link's session resets, for those conversations (D9).
     resets: LinkResets,
+    /// The port died under this link ([`Departure`]): its endpoint is free
+    /// for the port that re-enumerates in its place.
+    departed: Rc<Cell<bool>>,
     /// Adopted by [`DeviceEffects::settle`] before its own `LinkAttached`
     /// folded. The model cannot route a link it has not heard of yet, so
     /// until that fold [`DeviceEffects::retain_links`] must not read its
@@ -197,6 +216,7 @@ struct Arrival {
     borrowed: BorrowToken,
     inbox: ConversationInbox,
     resets: LinkResets,
+    departed: Rc<Cell<bool>>,
 }
 
 /// Owns the links, the platform seams, and the spawning.
@@ -237,6 +257,8 @@ pub struct DeviceEffects {
     /// [`Event::GrantAnswered`] carries it, so a caller that opened a
     /// chooser can tell which answer is its own.
     last_grant_request: Option<LinkId>,
+    /// Which chooser that was.
+    last_grant_chooser: Option<GrantChooser>,
     /// The controller's clock (epoch seconds), for the update host.
     clock: Option<Rc<dyn Fn() -> f64>>,
     /// The over-the-air update's host (M7): one driver per device, fed the
@@ -245,6 +267,11 @@ pub struct DeviceEffects {
     /// What the fold knew about each board when its update leg was asked
     /// for, staged by the roster just before the leg's command is applied.
     update_legs: BTreeMap<(DeviceId, EffectId), super::update_host::LegFacts>,
+    /// The ports another tab's claims account for (one tab holds a board):
+    /// a sweep attaches them without opening them, and the model's open of
+    /// one is answered with `Event::LinkHeld` instead. Empty — nothing
+    /// gated — where no hold edge keeps it.
+    hold_gate: super::board_hold::SharedUsbHoldGate,
 }
 
 impl Default for DeviceEffects {
@@ -270,10 +297,19 @@ impl DeviceEffects {
             layout: super::device_layout_effect::LayoutEffects::default(),
             firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
             last_grant_request: None,
+            last_grant_chooser: None,
             clock: None,
             update: super::update_host::UpdateHost::new(),
             update_legs: BTreeMap::new(),
+            hold_gate: super::board_hold::SharedUsbHoldGate::default(),
         }
+    }
+
+    /// The ports held shut because another tab's claims account for them
+    /// ([`super::board_hold::UsbHoldGate`]); the controller keeps its
+    /// claims current.
+    pub fn hold_gate(&self) -> &super::board_hold::SharedUsbHoldGate {
+        &self.hold_gate
     }
 
     /// The over-the-air update's host.
@@ -510,6 +546,16 @@ impl DeviceEffects {
         self.last_grant_request
     }
 
+    /// The same, when the latest chooser was Web Serial's port chooser: the
+    /// only way back to a board on its cable, so a Connect that opened it
+    /// waits on its answer. A Bluetooth board also comes back by itself
+    /// (the browser watches its granted devices), so its chooser's answer
+    /// is not the whole story.
+    pub fn last_usb_grant_request(&self) -> Option<LinkId> {
+        self.last_grant_request
+            .filter(|_| self.last_grant_chooser == Some(GrantChooser::Usb))
+    }
+
     /// Whether the seams a real device needs are all installed.
     pub fn is_wired(&self) -> bool {
         self.transport.is_some() && self.spawn.is_some() && self.sink.is_some()
@@ -546,6 +592,7 @@ impl DeviceEffects {
         let borrowed = Rc::clone(&slot.borrowed);
         let inbox = Rc::clone(&slot.inbox);
         let resets = Rc::clone(&slot.resets);
+        let departure = self.departure(link, slot);
         let tap: super::device_transport::LensLineTap = {
             let sink = Rc::clone(&sink);
             Rc::new(move |event: super::device_transport::LensTapEvent| {
@@ -575,13 +622,16 @@ impl DeviceEffects {
                     }
                     // The pump's mark-gone rule, replayed for the lens: a
                     // port error means the port died underneath us, so the
-                    // fold hears the error, the close — and the DEPARTURE.
-                    // A dead port's controller cannot be reused (a replug
-                    // is a new port object), so the link leaves the roster
-                    // now; the connect edge's sweep attaches the board
-                    // afresh, and it re-identifies onto its own card. Left
-                    // attached-but-closed, the card would offer no way to
-                    // re-open it (bench, 2026-09-02).
+                    // fold hears the error, the close — and the DEPARTURE
+                    // ([`Departure`]). A dead port's controller cannot be
+                    // reused (a replug is a new port object), so the
+                    // connect edge's sweep attaches the board afresh and it
+                    // re-identifies onto its own card. The close is said
+                    // here, unlike the pump's: the editor holds itself
+                    // across a closed port ("Reconnecting…"). Left
+                    // attached-but-closed for good, the card would offer no
+                    // way to re-open it (bench, 2026-09-02), so a port that
+                    // does not come back still leaves.
                     LensTapEvent::PortError(message) => {
                         sink(Input::link(
                             link,
@@ -591,7 +641,11 @@ impl DeviceEffects {
                             link,
                             lpa_devices::link::LinkEvent::Closed { reason: message },
                         ));
-                        sink(Input::Event(Event::LinkDetached { link }));
+                        if let Some(departure) = &departure {
+                            departure.depart();
+                        } else {
+                            sink(Input::Event(Event::LinkDetached { link }));
+                        }
                     }
                 }
             })
@@ -706,6 +760,7 @@ impl DeviceEffects {
                     borrowed: arrival.borrowed,
                     inbox: arrival.inbox,
                     resets: arrival.resets,
+                    departed: arrival.departed,
                     awaiting_attach: true,
                 },
             );
@@ -729,6 +784,12 @@ impl DeviceEffects {
 
     fn apply_one(&mut self, command: Command) {
         match command {
+            // A port another tab holds is never opened here: the model hears
+            // that it is held instead, and its identify settles at once.
+            Command::Link {
+                link,
+                command: LinkCommand::Open { .. },
+            } if self.hold_gate.borrow().gates(link) => self.answer_held_open(link),
             Command::Link { link, command } => self.submit(link, command),
             Command::StartTimer { timer, after_ms } => self.start_timer(timer, after_ms),
             Command::RequestUsbGrant => self.request_grant(GrantChooser::Usb),
@@ -1045,6 +1106,17 @@ impl DeviceEffects {
         });
     }
 
+    /// The model asked to open `link`, whose port another tab holds: say
+    /// so instead (naming the board when the claims name exactly it), and
+    /// leave the port shut.
+    fn answer_held_open(&mut self, link: LinkId) {
+        let mac = self.hold_gate.borrow().association(link);
+        log::debug!("device link {link:?} is held by another tab; not opening it");
+        if let Some(sink) = &self.sink {
+            sink(Input::Event(Event::LinkHeld { link, mac }));
+        }
+    }
+
     fn submit(&mut self, link: LinkId, command: LinkCommand) {
         let Some(slot) = self.links.get(&link) else {
             // A command for a link that is gone is not a crash: the port
@@ -1082,6 +1154,7 @@ impl DeviceEffects {
         };
         let link = self.mint_link_id();
         self.last_grant_request = Some(link);
+        self.last_grant_chooser = Some(chooser);
         let register = self.registrar();
         spawn(Box::pin(async move {
             let picked = match chooser {
@@ -1140,19 +1213,24 @@ impl DeviceEffects {
         };
         // An arrival that has not settled yet holds its port too: a second
         // connect edge before the next fold would otherwise attach it again.
+        // A link whose port died holds nothing: the port that re-enumerated
+        // in its place attaches as that link's next generation.
         let held: Vec<EndpointKey> = self
             .links
             .values()
+            .filter(|slot| !slot.departed.get())
             .map(|slot| slot.info.endpoint.clone())
             .chain(
                 self.arrivals
                     .borrow()
                     .iter()
+                    .filter(|arrival| !arrival.departed.get())
                     .map(|arrival| arrival.info.endpoint.clone()),
             )
             .collect();
         let register = self.registrar();
         let ids: Vec<LinkId> = (0..MAX_SWEEP_LINKS).map(|_| self.mint_link_id()).collect();
+        let gate = Rc::clone(&self.hold_gate);
         spawn(Box::pin(async move {
             let granted = match transport.discover_granted().await {
                 Ok(granted) => granted,
@@ -1161,15 +1239,27 @@ impl DeviceEffects {
                     return;
                 }
             };
+            let fresh: Vec<GrantedLink> = granted
+                .into_iter()
+                .filter(|grant| !held.contains(&grant.info.endpoint))
+                .collect();
+            // Read the new ports against the claims as they stand NOW, after
+            // the discovery: a group of one kind that the other tabs' claims
+            // account for is attached and never opened.
+            let pairs: Vec<_> = fresh
+                .iter()
+                .map(|grant| super::board_hold::usb_pair_of(&grant.info))
+                .collect();
+            let gated = gate.borrow().gate_decisions(&pairs);
             let mut ids = ids.into_iter();
-            for grant in granted {
-                if held.contains(&grant.info.endpoint) {
-                    continue;
-                }
+            for ((grant, pair), gated) in fresh.into_iter().zip(pairs).zip(gated) {
                 let Some(link) = ids.next() else {
                     log::warn!("more granted ports than one sweep attaches; the rest wait");
                     return;
                 };
+                if let (true, Some(pair)) = (gated, pair) {
+                    gate.borrow_mut().gate(link, pair);
+                }
                 register(link, grant, Rc::clone(&sink));
             }
         }));
@@ -1190,9 +1280,15 @@ impl DeviceEffects {
     /// the browser answers both.
     ///
     /// See [`HOTPLUG_SETTLE`] for why the ask waits a beat, and
-    /// [`MAX_SWEEP_LINKS`] for the bound. Re-attachment needs nothing new:
-    /// the connect edge sweeps grants, and the model's endpoint supersede +
-    /// identity merge put the board back on its own card.
+    /// [`MAX_SWEEP_LINKS`] for the bound. A USB port missing from that
+    /// answer is asked about once more after [`REENUMERATION_GRACE`], and
+    /// only a port still missing then is detached: a native-USB chip that
+    /// re-enumerated is back by then under the same endpoint, and its board
+    /// never left. A network link missing from it is detached at once.
+    /// Re-attachment needs nothing new: the connect edge sweeps grants, and
+    /// the model's endpoint supersede + identity merge put the board back on
+    /// its own card. A link whose port died under it is its [`Departure`]'s
+    /// to settle, not this sweep's.
     pub fn sweep_departed_ports(&mut self) {
         let (Some(transport), Some(spawn), Some(make_timer), Some(sink)) = (
             self.transport.clone(),
@@ -1202,10 +1298,11 @@ impl DeviceEffects {
         ) else {
             return;
         };
-        let held: Vec<(LinkId, EndpointKey)> = self
+        let held: Vec<(LinkId, EndpointKey, Rc<Cell<bool>>)> = self
             .links
             .iter()
-            .map(|(link, slot)| (*link, slot.info.endpoint.clone()))
+            .filter(|(_, slot)| !slot.departed.get())
+            .map(|(link, slot)| (*link, slot.info.endpoint.clone(), Rc::clone(&slot.departed)))
             .collect();
         if held.is_empty() {
             return;
@@ -1213,30 +1310,52 @@ impl DeviceEffects {
         let sleep = (make_timer.borrow_mut())(HOTPLUG_SETTLE);
         spawn(Box::pin(async move {
             sleep.await;
-            let remaining: Vec<EndpointKey> = match transport.discover_granted().await {
-                Ok(granted) => granted
-                    .into_iter()
-                    .map(|grant| grant.info.endpoint)
-                    .collect(),
-                Err(error) => {
-                    // A discovery that FAILED says nothing about which board
-                    // left. Detaching on it would tear down every card over
-                    // a transient browser error.
-                    log::warn!("departure sweep could not list grants: {error}");
-                    return;
-                }
+            // A discovery that FAILED says nothing about which board left.
+            // Detaching on it would tear down every card over a transient
+            // browser error.
+            let Some(remaining) = granted_endpoints(&transport).await else {
+                return;
             };
+            // A network link (Bluetooth, the LAN, the relay) is gone now:
+            // its session redials by itself and needs the old link out of
+            // the way. A USB port may only be re-enumerating.
+            let (network, usb): (Vec<_>, Vec<_>) = held
+                .into_iter()
+                .filter(|(_, endpoint, _)| !remaining.contains(endpoint))
+                .partition(|(_, endpoint, _)| endpoint.is_network());
             let mut budget = MAX_SWEEP_LINKS;
-            for (link, endpoint) in held {
-                if remaining.contains(&endpoint) {
-                    continue;
+            let mut detach = |link: LinkId, departed: &Cell<bool>| {
+                // Its port died under it meanwhile: the departure settles it.
+                if departed.get() {
+                    return true;
                 }
                 if budget == 0 {
                     log::warn!("more departed ports than one sweep detaches; the rest wait");
-                    return;
+                    return false;
                 }
                 budget -= 1;
                 sink(Input::Event(Event::LinkDetached { link }));
+                true
+            };
+            for (link, _, departed) in network {
+                if !detach(link, &departed) {
+                    return;
+                }
+            }
+            if usb.is_empty() {
+                return;
+            }
+            // Gone, or re-enumerating: ask again once a re-enumerated port
+            // would be back.
+            let grace = (make_timer.borrow_mut())(REENUMERATION_GRACE);
+            grace.await;
+            let Some(remaining) = granted_endpoints(&transport).await else {
+                return;
+            };
+            for (link, endpoint, departed) in usb {
+                if !remaining.contains(&endpoint) && !detach(link, &departed) {
+                    return;
+                }
             }
         }));
     }
@@ -1256,6 +1375,13 @@ impl DeviceEffects {
     pub fn retain_links(&mut self, keep: impl Fn(LinkId) -> bool) {
         self.links
             .retain(|link, slot| slot.awaiting_attach || keep(*link));
+        // The gate forgets ports the model let go; an arrival not settled
+        // yet is still this tab's.
+        let links = &self.links;
+        let arrivals = self.arrivals.borrow();
+        self.hold_gate.borrow_mut().retain_links(|link| {
+            links.contains_key(&link) || arrivals.iter().any(|arrival| arrival.link == link)
+        });
     }
 
     fn drop_endpoint(&mut self, endpoint: &EndpointKey) {
@@ -1277,6 +1403,7 @@ impl DeviceEffects {
             let borrowed: BorrowToken = Rc::new(Cell::new(None));
             let inbox: ConversationInbox = Rc::new(RefCell::new(VecDeque::new()));
             let resets: LinkResets = Rc::new(Cell::new(0));
+            let departed = Rc::new(Cell::new(false));
             arrivals.borrow_mut().push(Arrival {
                 link,
                 info: info.clone(),
@@ -1284,8 +1411,18 @@ impl DeviceEffects {
                 borrowed: Rc::clone(&borrowed),
                 inbox: Rc::clone(&inbox),
                 resets: Rc::clone(&resets),
+                departed: Rc::clone(&departed),
             });
             if let (Some(spawn), Some(timer)) = (spawn.clone(), timer.clone()) {
+                let departure = Departure {
+                    link,
+                    departed,
+                    network: info.endpoint.is_network(),
+                    handle: Rc::downgrade(&handle),
+                    spawn: Rc::clone(&spawn),
+                    timer: Rc::clone(&timer),
+                    sink: Rc::clone(&sink),
+                };
                 spawn_pump(
                     &spawn,
                     &timer,
@@ -1296,6 +1433,7 @@ impl DeviceEffects {
                         inbox,
                         resets,
                         update: update.clone(),
+                        departure,
                     },
                     Rc::clone(&sink),
                 );
@@ -1307,6 +1445,85 @@ impl DeviceEffects {
     fn mint_link_id(&mut self) -> LinkId {
         self.next_link += 1;
         LinkId(self.next_link)
+    }
+
+    /// What `link` does when its port dies under it; `None` until the
+    /// platform seams are installed.
+    fn departure(&self, link: LinkId, slot: &LinkSlot) -> Option<Departure> {
+        Some(Departure {
+            link,
+            departed: Rc::clone(&slot.departed),
+            network: slot.info.endpoint.is_network(),
+            handle: Rc::downgrade(&slot.link),
+            spawn: self.spawn.clone()?,
+            timer: self.timer.clone()?,
+            sink: self.sink.clone()?,
+        })
+    }
+}
+
+/// A link whose port died under it: the pump, or the editor lens's io,
+/// heard the platform say so ([`port_is_gone`]).
+///
+/// A network link (Bluetooth, the LAN, the relay) leaves at once: its
+/// session redials by itself and needs the old link out of the way. A USB
+/// port may only be re-enumerating — a native-USB chip (the C6) does on any
+/// reset that takes USB with it — and comes back a moment later as a new
+/// port object under the same grant. A dead port's controller cannot be
+/// reused, so the link is not reopened: the connect edge's sweep attaches
+/// the new port as a new link, which the model takes as this link's next
+/// generation on the same board (its endpoint supersede). Until then the
+/// board stays where it was. Only a link nothing replaced within
+/// [`REENUMERATION_GRACE`] is detached, and its board goes offline.
+///
+/// Detaching at once (as before) took a board whose open port
+/// re-enumerated offline for that moment: its card left Online boards for
+/// Offline boards and came back, remounted, its open details closed
+/// (`docs/defects/2026-10-19-a-re-enumerating-board-remounts-its-card.md`).
+struct Departure {
+    link: LinkId,
+    /// Set once the port died, and never cleared: the pump stops reading
+    /// the dead port, a granted-port sweep no longer counts its endpoint as
+    /// held, and the departure sweep leaves the link to this.
+    departed: Rc<Cell<bool>>,
+    network: bool,
+    handle: Weak<RefCell<Box<dyn Link>>>,
+    spawn: Rc<dyn Fn(DeviceTaskFuture)>,
+    timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
+    sink: Rc<dyn Fn(Input)>,
+}
+
+impl Departure {
+    /// The port died: detach a network link now, and hold a USB one for
+    /// the grace. Once per link, whoever heard it first.
+    fn depart(&self) {
+        if self.departed.replace(true) {
+            return;
+        }
+        let link = self.link;
+        if self.network {
+            (self.sink)(Input::Event(Event::LinkDetached { link }));
+            return;
+        }
+        log::debug!("the port under {link:?} died; holding its board while it re-enumerates");
+        let grace = (self.timer.borrow_mut())(REENUMERATION_GRACE);
+        let handle = self.handle.clone();
+        let sink = Rc::clone(&self.sink);
+        (self.spawn)(Box::pin(async move {
+            grace.await;
+            // Replaced: the model let the dead link go when the board came
+            // back on a new one, and its slot went with it.
+            if handle.upgrade().is_none() {
+                return;
+            }
+            log::debug!("the port under {link:?} did not come back; its board is gone");
+            sink(Input::Event(Event::LinkDetached { link }));
+        }));
+    }
+
+    /// Whether the port died.
+    fn departed(&self) -> bool {
+        self.departed.get()
     }
 }
 
@@ -1338,10 +1555,17 @@ fn spawn_pump(
         inbox,
         resets,
         update,
+        departure,
     } = shared;
     let timer = Rc::clone(timer);
     spawn(Box::pin(async move {
         loop {
+            // A dead port has nothing more to say (its close, after the
+            // error, is not news: see `Departure`), and its session may be
+            // the one the port that replaced it opens next.
+            if departure.departed() {
+                return;
+            }
             let Some(strong) = handle.upgrade() else {
                 return;
             };
@@ -1377,17 +1601,20 @@ fn spawn_pump(
                 // The browser controller's own death notices ("The device
                 // has been lost", "Serial port disconnected") are a
                 // departure, not a closed port: the port object is gone
-                // and only a replug brings a new one. The departure sweep
-                // is meant to say so from `getPorts()`, but it did not on
-                // two hub power-cuts (2026-09-02), so the pump says it
-                // from the error itself.
+                // and only a replug (or a re-enumeration) brings a new
+                // one. The departure sweep is meant to say so from
+                // `getPorts()`, but it did not on two hub power-cuts
+                // (2026-09-02), so the pump says it from the error itself.
+                // The error is evidence; the close the link says after it
+                // is not passed on: a USB board stays as it was while its
+                // port may be re-enumerating (`Departure`).
                 let departed = matches!(
                     &event,
                     lpa_devices::link::LinkEvent::Error(message) if port_is_gone(message)
                 );
                 sink(Input::link(link, event));
                 if departed {
-                    sink(Input::Event(Event::LinkDetached { link }));
+                    departure.depart();
                     break;
                 }
             }
@@ -1405,6 +1632,25 @@ struct PumpShared {
     resets: LinkResets,
     /// Where channel-3 bytes go.
     update: super::update_host::UpdateHost,
+    /// What the link does when its port dies under it.
+    departure: Departure,
+}
+
+/// The endpoints the browser still grants, for the departure sweep; `None`
+/// when it could not say (logged), which says nothing about who left.
+async fn granted_endpoints(transport: &Rc<dyn DeviceTransport>) -> Option<Vec<EndpointKey>> {
+    match transport.discover_granted().await {
+        Ok(granted) => Some(
+            granted
+                .into_iter()
+                .map(|grant| grant.info.endpoint)
+                .collect(),
+        ),
+        Err(error) => {
+            log::warn!("departure sweep could not list grants: {error}");
+            None
+        }
+    }
 }
 
 /// Whether a link error is the platform saying the port itself is gone —
@@ -1432,7 +1678,7 @@ fn port_is_gone(message: &str) -> bool {
 }
 
 /// Which platform chooser a grant request pops.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GrantChooser {
     /// Web Serial's port chooser.
     Usb,
@@ -1901,6 +2147,7 @@ mod tests {
                 borrowed: Rc::new(Cell::new(None)),
                 inbox: Rc::new(RefCell::new(VecDeque::new())),
                 resets: Rc::new(Cell::new(0)),
+                departed: Rc::new(Cell::new(false)),
                 awaiting_attach: false,
             },
         );

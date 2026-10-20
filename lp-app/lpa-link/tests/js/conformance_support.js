@@ -33,6 +33,9 @@ const CYCLES_PER_US = 160;
 const CYCLES_PER_COMMAND = 16_000;
 
 let door = null;
+/// A SECOND bus on the same scripted door: a second page of one browser
+/// (`?emu-second-tab=1`). See `installSecondTab`.
+let secondBus = null;
 /// The tab backing, when the suite is running over Workers. Held so
 /// `uninstallShim` can end them: a Worker is not garbage-collected by
 /// dropping the port that was talking to it.
@@ -355,7 +358,7 @@ export async function installScripted(boardIds) {
   await watchReboots();
 }
 
-function nativeBackingOverScript() {
+function nativeBackingOverScript({ secondTab = false } = {}) {
   // Built here rather than imported so the transport injection is visible at
   // the one place a test could otherwise be fooled about what it is running.
   return {
@@ -363,12 +366,92 @@ function nativeBackingOverScript() {
     listBoards: async () => (await (await door.fetch("http://scripted.emu.invalid/boards")).json()).boards,
     connect: async (boardId, board) => {
       const { EmulatorPort } = (await load()).port;
-      return EmulatorPort.connect("http://scripted.emu.invalid/", boardId, board, {
-        WebSocketImpl: ScriptedSocket,
-        fetchImpl: (url) => door.fetch(url),
-      });
+      return EmulatorPort.connect(
+        "http://scripted.emu.invalid/",
+        boardId,
+        board,
+        {
+          WebSocketImpl: ScriptedSocket,
+          fetchImpl: (url) => door.fetch(url),
+        },
+        { secondTab },
+      );
     },
   };
+}
+
+/// A SECOND page of one browser against the SAME scripted door — `?emu-second-tab=1`
+/// when `secondTab`, the page as it always was when not. The first install
+/// (`installScripted`) holds every board's `/control`, so the door refuses the
+/// second page's claim (409) exactly as `emu serve` does.
+///
+/// Returns `"installed"`, or the name of the error the install failed with —
+/// `"NetworkError"` is the loud 409 a second page without the flag has always
+/// met. Built with `createBus`, not `install`, so the first page's
+/// `navigator.serial` is left where it is. `holds` is the dev page's D0 switch:
+/// a cable-less port must not send it (the cable's owner already did).
+export async function installSecondTab(secondTab) {
+  const { createBus } = await polyfill();
+  try {
+    secondBus = await createBus("http://scripted.emu.invalid/", {
+      backing: nativeBackingOverScript({ secondTab }),
+      holds: { 0: true },
+    });
+    return "installed";
+  } catch (error) {
+    secondBus = null;
+    return String(error?.name ?? error);
+  }
+}
+
+/// The second page's boards, described as the banner reads them
+/// (`describeBoards()`), as JSON: `cable`, `openAttempts`, `holds`, …
+export function secondTabBoardsJson() {
+  return JSON.stringify(secondBus?.describeBoards() ?? []);
+}
+
+/// `port.open()` on the second page's port for `boardId`, or on the FIRST
+/// page's when `first`: `"opened"`, or the error's name. A held port is
+/// `NetworkError`, as Chrome's is.
+export async function openPortOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  const port = bus.livePortFor(boardId);
+  try {
+    await port.open({ baudRate: 115_200 });
+    return "opened";
+  } catch (error) {
+    return String(error?.name ?? error);
+  }
+}
+
+/// `port.close()` on the same port; `"closed"` or the error's name.
+export async function closePortOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  const port = bus.livePortFor(boardId);
+  try {
+    await port.close();
+    return "closed";
+  } catch (error) {
+    return String(error?.name ?? error);
+  }
+}
+
+/// A cable verb on the second page's emulator port for `boardId`: `"ok"`, or
+/// `"<name>: <message>"`.
+export async function secondTabCableVerb(boardId, verb) {
+  const emulator = secondBus.livePortFor(boardId).emulator;
+  try {
+    await emulator[verb]();
+    return "ok";
+  } catch (error) {
+    return `${error?.name}: ${error?.message}`;
+  }
+}
+
+/// How many times `port.open()` ran for `boardId` on the second page (or the first).
+export async function openAttemptsOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  return bus.openAttemptsFor(boardId);
 }
 
 /// Install the polyfill over boards hosted **in this tab** — one Worker per
@@ -423,6 +506,10 @@ export async function installLive(baseUrl, boardIds) {
 
 export async function uninstallShim() {
   const { uninstall } = await polyfill();
+  if (secondBus) {
+    await secondBus.dispose().catch(() => {});
+    secondBus = null;
+  }
   await uninstall();
   door = null;
   // A Worker outlives the bus that was holding its port, and a suite that
@@ -687,6 +774,197 @@ export function canShadowNavigatorSerial() {
   }
   const removed = nav.serial !== sentinel;
   return JSON.stringify({ shadowed, removedAgain: removed });
+}
+
+// --- Chrome on Android: the same boards over WebUSB ------------------------
+//
+// Chrome on Android lists no wired board in Web Serial, so `browser_serial.js`
+// speaks to one over `navigator.usb` instead, through `usb_cdc_serial.js`
+// (`docs/adr/2026-10-18-android-usb-over-webusb.md`). `routeOverWebUsb` makes
+// this page look like that browser — no `navigator.serial` of the page's own,
+// a `navigator.usb`, and `userAgentData.platform` "Android" — and puts each
+// board the polyfill holds behind a `USBDevice` double. `browser_serial.js`
+// picks its backend from those facts itself; nothing tells it to.
+//
+// The double is CDC-ACM on the outside and the polyfill's own port inside, so
+// the board, its lines and its decoded reset dances are the scripted door's,
+// unchanged: SET_LINE_CODING opens the port, SET_CONTROL_LINE_STATE is one
+// `setSignals` naming both lines (as CDC sends them), and the bulk endpoints
+// are the port's byte streams.
+
+class UsbDeviceOverSerialPort {
+  constructor(port) {
+    this.port = port;
+    const info = port.getInfo();
+    this.vendorId = info.usbVendorId;
+    this.productId = info.usbProductId;
+    this.opened = false;
+    this.configuration = null;
+    this.reader = null;
+    this.writer = null;
+    this.forgotten = false;
+  }
+
+  async open() {
+    this.opened = true;
+  }
+
+  async selectConfiguration(configurationValue) {
+    const endpoint = (endpointNumber, direction, type) => ({ endpointNumber, direction, type, packetSize: 64 });
+    const iface = (interfaceNumber, interfaceClass, endpoints) => ({
+      interfaceNumber,
+      alternates: [{ alternateSetting: 0, interfaceClass, endpoints }],
+    });
+    this.configuration = {
+      configurationValue,
+      interfaces: [
+        iface(0, 0x02, [endpoint(2, "in", "interrupt")]),
+        iface(1, 0x0a, [endpoint(1, "in", "bulk"), endpoint(1, "out", "bulk")]),
+        iface(2, 0xff, [endpoint(2, "out", "bulk"), endpoint(3, "in", "bulk")]),
+      ],
+    };
+  }
+
+  async claimInterface() {}
+
+  async controlTransferOut(setup, data) {
+    if (setup.request === 0x20) {
+      const baudRate = new DataView(data.buffer, data.byteOffset).getUint32(0, true);
+      if (!this.port.opened) {
+        await this.port.open({ baudRate });
+        this.reader = this.port.readable.getReader();
+        this.writer = this.port.writable.getWriter();
+      }
+    } else if (setup.request === 0x22) {
+      await this.port.setSignals({
+        dataTerminalReady: Boolean(setup.value & 1),
+        requestToSend: Boolean(setup.value & 2),
+      });
+    }
+    return { status: "ok" };
+  }
+
+  // Transfers queue (the port keeps several in flight) and complete in the
+  // order they were submitted, each at most `length` bytes; what a read
+  // brought beyond that is the next transfer's.
+  transferIn(_endpointNumber, length) {
+    const turn = (this.inTurn ?? Promise.resolve()).then(() => this.takeIn(length));
+    this.inTurn = turn.catch(() => {});
+    return turn;
+  }
+
+  async takeIn(length) {
+    if (!this.leftover?.length) {
+      if (!this.reader) {
+        throw new DOMException("The device must be opened first.", "InvalidStateError");
+      }
+      let result;
+      try {
+        result = await this.reader.read();
+      } catch (error) {
+        throw new DOMException(`The transfer failed: ${error?.message ?? error}`, "NetworkError");
+      }
+      if (result.done) {
+        throw new DOMException("The transfer was cancelled.", "AbortError");
+      }
+      this.leftover = result.value;
+    }
+    const bytes = this.leftover.slice(0, length);
+    this.leftover = this.leftover.slice(length);
+    return { status: "ok", data: new DataView(bytes.buffer) };
+  }
+
+  async transferOut(_endpointNumber, data) {
+    await this.writer.write(new Uint8Array(data).slice());
+    return { status: "ok", bytesWritten: data.byteLength };
+  }
+
+  async clearHalt() {}
+
+  async close() {
+    this.opened = false;
+    this.leftover = null;
+    const { reader, writer } = this;
+    this.reader = null;
+    this.writer = null;
+    await reader?.cancel().catch(() => {});
+    reader?.releaseLock();
+    writer?.releaseLock();
+    if (this.port.opened) {
+      await this.port.close().catch(() => {});
+    }
+  }
+
+  async forget() {
+    this.forgotten = true;
+  }
+}
+
+class FakeNavigatorUsb extends EventTarget {
+  constructor(devices) {
+    super();
+    this.devices = devices;
+    this.lastFilters = null;
+  }
+
+  async requestDevice({ filters }) {
+    this.lastFilters = filters;
+    const device = this.devices.find((candidate) => !candidate.forgotten);
+    if (!device) throw new DOMException("No device selected.", "NotFoundError");
+    return device;
+  }
+
+  async getDevices() {
+    return this.devices.filter((device) => !device.forgotten);
+  }
+}
+
+let webUsbRoute = null;
+
+/// Put this page behind Chrome-on-Android's facts, every board the installed
+/// polyfill holds on a `USBDevice` double. Call after `installScripted` and
+/// before anything enumerates; `unrouteWebUsb` puts the page back.
+export async function routeOverWebUsb() {
+  const { bus } = await polyfill();
+  const nav = globalThis.navigator;
+  const serial = Object.getOwnPropertyDescriptor(nav, "serial");
+  const devices = bus().boardIds.map((id) => new UsbDeviceOverSerialPort(bus().livePortFor(id)));
+  const usb = new FakeNavigatorUsb(devices);
+  webUsbRoute = {
+    serial,
+    usb: Object.getOwnPropertyDescriptor(nav, "usb"),
+    userAgentData: Object.getOwnPropertyDescriptor(nav, "userAgentData"),
+    fake: usb,
+  };
+  delete nav.serial;
+  Object.defineProperty(nav, "usb", { value: usb, configurable: true });
+  Object.defineProperty(nav, "userAgentData", { value: { platform: "Android" }, configurable: true });
+}
+
+export function unrouteWebUsb() {
+  if (!webUsbRoute) return;
+  const nav = globalThis.navigator;
+  const restore = (name, descriptor) => {
+    if (descriptor) {
+      Object.defineProperty(nav, name, descriptor);
+    } else {
+      delete nav[name];
+    }
+  };
+  restore("usb", webUsbRoute.usb);
+  restore("userAgentData", webUsbRoute.userAgentData);
+  restore("serial", webUsbRoute.serial);
+  webUsbRoute = null;
+}
+
+/// Which backend the shipped `browser_serial.js` says this page has.
+export async function serialBackendKind() {
+  return (await load()).serial.serialBackendKind();
+}
+
+/// The filters the shipped chooser asked `navigator.usb` for, as JSON.
+export function webUsbChooserFilters() {
+  return JSON.stringify(webUsbRoute?.fake.lastFilters ?? null);
 }
 
 // --- the Bluetooth half (`tests/browser_ble_conformance.rs`, M5) -----------

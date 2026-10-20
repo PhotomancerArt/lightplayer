@@ -199,5 +199,5 @@ fn endpoint_row(label: &'static str, endpoint: &UiBindingEndpoint) -> UiSlotAspe
 /// gate — the DEF story lives here, not on the main-UI chip).
 pub(crate) fn default_origin_row() -> UiSlotAspectRow {
     UiSlotAspectRow::new("Origin", "default binding")
-        .with_detail("Declared by the slot itself; authoring a binding overrides it.")
+        .with_detail("Set by the slot itself. A binding you add will replace it.")
 }

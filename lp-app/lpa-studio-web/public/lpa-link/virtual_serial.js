@@ -111,11 +111,25 @@ let hadOwnProperty = false;
 /// board and the page (`mac_tty_model.js`): `0xFF`-heavy bytes the page reads
 /// late are dropped where a Mac drops them. Null (the default) is a lossless
 /// pipe. `index.html` turns it on for a page running on a Mac.
+/// `secondTab` — `?emu-second-tab=1`: this page is a second tab of one browser
+/// beside the page that holds the boards' cables. A board whose control
+/// channel is refused (409) is not an install failure but a CABLE-LESS port:
+/// it can `open()` and `close()` its bytes — all a tab needs to take a board
+/// over — and every cable verb rejects. Real Chrome lists a granted port in
+/// both tabs and refuses only the second `open()`; this is the door's way of
+/// being that. Ignored when the caller passes its own `backing`.
 export async function createBus(
   baseUrl,
-  { boards = null, backing = null, picker = null, holds = null, hostTty = null } = {},
+  {
+    boards = null,
+    backing = null,
+    picker = null,
+    holds = null,
+    hostTty = null,
+    secondTab = false,
+  } = {},
 ) {
-  const source = backing ?? nativeBacking(baseUrl);
+  const source = backing ?? nativeBacking(baseUrl, {}, { secondTab });
   const bus = new VirtualSerial(source, picker, holds);
   bus.hostTty = hostTty;
   await bus.load(boards);
@@ -207,6 +221,10 @@ class VirtualSerial extends EventTarget {
     this.holdErrors = new Map();
     // `"mac"` or null; see `createBus`.
     this.hostTty = null;
+    // How many times `port.open()` ran, per board, whatever came of it. A
+    // walk asserts zero for a port Studio had no reason to open (the gated
+    // one) — the proof that a tab never fought another tab for it.
+    this.openAttempts = new Map();
   }
 
   async load(only) {
@@ -242,11 +260,23 @@ class VirtualSerial extends EventTarget {
         this.noteState(this.newestPortFor(id));
         this.applyHolds(id).catch(() => {});
       });
-      if (this.defaultHolds.length > 0) {
+      // The page's default switches are the CABLE's: a cable-less port (a
+      // second tab's) leaves them to the page that holds the cable.
+      if (this.defaultHolds.length > 0 && emulator.hasCable !== false) {
         this.holds.set(id, new Map(this.defaultHolds));
         await this.applyHolds(id).catch(() => {});
       }
     }
+  }
+
+  /// `port.open()` ran for `boardId` (see `openAttempts`).
+  noteOpenAttempt(boardId) {
+    this.openAttempts.set(boardId, (this.openAttempts.get(boardId) ?? 0) + 1);
+  }
+
+  /// How many times `port.open()` ran for `boardId` in this page.
+  openAttemptsFor(boardId) {
+    return this.openAttempts.get(boardId) ?? 0;
   }
 
   // `GET /boards` is a CROSS-ORIGIN fetch whenever the page and the server
@@ -431,6 +461,9 @@ class VirtualSerial extends EventTarget {
       granted: this.granted.has(port),
       open: port.opened,
       attached: !port.dead,
+      // False for a second tab's port: another page holds the cable.
+      cable: port.emulator.hasCable !== false,
+      openAttempts: this.openAttemptsFor(port.boardId),
       holds: [...(this.holds.get(port.boardId) ?? [])].map(([pad, level]) => ({ pad, level })),
       holdError: this.holdErrors.get(port.boardId) ?? null,
     };
@@ -681,6 +714,7 @@ class VirtualSerialPort {
   }
 
   async open({ baudRate } = {}) {
+    this.bus.noteOpenAttempt(this.boardId);
     if (this.dead) {
       // A dead generation's `open()` fails instantly, exactly as Chrome's
       // does — the bench failure `getPort`'s adoption pass exists for.

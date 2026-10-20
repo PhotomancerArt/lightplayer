@@ -53,13 +53,13 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiA
             if empty && syncing {
                 div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-md tw:border tw:border-border-subtle tw:bg-card-subtle tw:p-4",
                     h3 { class: "tw:m-0 tw:text-base tw:text-strong-foreground", "Syncing project…" }
-                    p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "Node cards appear here once the project has synced." }
+                    p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "Node cards will appear here once the project has synced." }
                 }
             } else if empty {
                 div { class: "tw:grid tw:min-w-0 tw:justify-items-start tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-subtle tw:bg-card-subtle tw:p-4",
                     h3 { class: "tw:m-0 tw:text-base tw:text-strong-foreground", "This project is empty" }
                     p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground",
-                        "Nodes are a project's building blocks — clocks, shaders, fixtures, outputs. Add your first:"
+                        "Nodes are the parts of a project: clocks, shaders, fixtures and outputs. Add the first one:"
                     }
                 }
             } else {

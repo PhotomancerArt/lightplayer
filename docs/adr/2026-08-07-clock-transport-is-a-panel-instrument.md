@@ -403,3 +403,39 @@ None opened by this ADR. It closes two open items already indexed in
 `Debug`-naming follow-up (a) and `2026-08-04-time-is-a-product.md`'s
 "transport UI is still owed" item — both struck there in the same change
 that adds this ADR.
+
+## Amendment 2026-10-19: on a panel, the clock is one Speed knob
+
+Plan `lp2025/2026-10-19-0826-card-panel-pass`, Yona's direction for the
+connected board card: "the full tape view is nice mostly for debugging. just
+a knob would work". The clock stays on every panel by default (§7 stands:
+it is still the primary speed control), but what reaches a panel is the
+**rate alone, as a knob** (`UiPanelWidget::Speed`):
+
+- **The knob is the rate leaf's own control.** It sits on `clock.rate` with
+  that leaf's target, address and live reading, an ordinary one-channel
+  control in the module's flat strip (no "Clock" group). It is on a panel
+  exactly when the rate leaf is panel-public. Run/pause and scrub have no
+  panel presence at all.
+- **Its feel is the tape fader's:** log ¼×–8×, the octave stops magnetic
+  (the arrows step stop to stop, a double-click is 1×), with one change a
+  knob asks for: **1× sits at the top centre**, the left half spanning the
+  two slow octaves and the right half the three fast ones. The marks are
+  the octave stops. Its value reads `1×`, `2×`, `½×`.
+- **The clock node's own card keeps the whole tape**, the debug tool, with
+  its three wires (`UiClockFace::wires`): its fader and the panel's knob
+  write the same `clock.rate`, so holding one holds the other.
+
+What this changes above:
+
+- **§3's grouping rule no longer reaches a panel.** `panel = "show"` on the
+  `transport` record still promotes its three leaves, and §3's three facts
+  still govern the tape on the card (the faceplate renders whole, dispatch
+  is per leaf). On a panel, one control is one widget over one channel
+  (`2026-08-03-panel-visibility-is-derived.md` §1), so the anchor rule and
+  the grouped control's `UiPanelControl::wires` are gone; the wires live on
+  the clock face.
+- **§7 stands, in a smaller form:** default exposure, as a knob.
+- **§8 is overtaken.** The stripless fallback it documented was a smaller
+  tape; the panel now carries less than that fallback did — the rate only.
+

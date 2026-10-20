@@ -49,6 +49,12 @@ pub struct DeviceView {
     pub detail: Option<String>,
     /// Honest staleness ("last heard 12 s ago") instead of a stuck spinner.
     pub freshness_label: Option<String>,
+    /// How long ago the board was last heard, in milliseconds — the number
+    /// behind [`Self::freshness_label`], for a surface that says the age in
+    /// its own one phrasing (Studio's card: `Last heard` · `12 s ago`).
+    /// `None` until the board has been heard.
+    #[serde(default)]
+    pub heard_age_ms: Option<u64>,
     /// Strongest identity binding, for disambiguating two similar boards.
     pub identity_label: Option<String>,
     /// Chip read off the boot banner, normalized ("esp32c6"). What the
@@ -145,6 +151,11 @@ pub struct DeviceView {
     /// separate fact ([`crate::Evidence::announced_update_channel`]).
     #[serde(default)]
     pub update_blocked: Option<String>,
+    /// Another tab of this browser holds this board, and how: the board's
+    /// fact ([`crate::Evidence::held_elsewhere`]), independent of any link
+    /// this tab has to it. `None` = no other tab has said it holds it.
+    #[serde(default)]
+    pub held_elsewhere: Option<crate::held_elsewhere::HeldElsewhere>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -246,6 +257,10 @@ pub struct PendingLinkView {
     /// restart request, which waits for the board to answer.)
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// This link's port is held by another tab of this browser, so it was
+    /// not opened here ([`crate::Event::LinkHeld`]).
+    #[serde(default)]
+    pub held_by_tab: bool,
     /// Dismiss, expressed as [`Escape::Forget`].
     pub escapes: Vec<Escape>,
 }
@@ -295,8 +310,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     // The one verdict identify can END in is silence, and the escape from
     // silence must not be a replug: offer the re-ask whenever the link is
     // up, nothing is running, and the evidence still says nothing.
+    // A board Studio erased says nothing because it is blank: its way on
+    // is the firmware, and asking it again is no escape.
     if activity.is_none()
         && device.link().is_some()
+        && !device.known_blank()
         && matches!(
             device.evidence.classification,
             Classification::Quiet { .. } | Classification::Unknown
@@ -319,6 +337,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         state_label: state_label(device, status),
         detail: detail(device),
         freshness_label: freshness_label(device, now),
+        heard_age_ms: device.evidence.freshness.age_ms(now),
         identity_label: device.identity.strongest_label(),
         // A boot banner names the chip for a board seen booting; a board
         // that was already running when the tab attached never shows one,
@@ -357,7 +376,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .as_ref()
                     .and_then(|record| record.board_id.clone())
             }),
-        firmware_face: firmware_face(&device.evidence),
+        firmware_face: device_firmware_face(device),
         remembered_firmware: device
             .record
             .as_ref()
@@ -391,6 +410,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
         update_blocked: update_blocked(device),
+        held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
     }
 }
@@ -527,6 +547,16 @@ impl PendingLinkView {
     /// (an unsettled link projects [`FirmwareFace::Unknown`]).
     pub fn needs_firmware(&self) -> bool {
         self.firmware_face.wants_flash()
+    }
+}
+
+/// A device's face: its evidence's, except that a board Studio erased
+/// and that says nothing is the blank chip Studio knows it is
+/// ([`Device::known_blank`]).
+fn device_firmware_face(device: &Device) -> FirmwareFace {
+    match device.known_blank() {
+        true => FirmwareFace::Blank,
+        false => firmware_face(&device.evidence),
     }
 }
 
@@ -690,9 +720,14 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             None => words.to_string(),
         }
     });
+    let held_by_tab = entry.evidence().link_held_by_tab();
     let state_label = match entry.verdict() {
         _ if updating.is_some() => updating.clone().unwrap_or_default(),
         None => "New device found — identifying…".to_string(),
+        // Another tab of this browser said it holds this port, so it was
+        // never opened here: not a guess between "another app" and "another
+        // tab" (below), but the other tab's own word.
+        Some(_) if held_by_tab => "New device found — open in another Studio tab".to_string(),
         // Identify settled having heard nothing at all — the window's
         // classify() cascade bottoms out at `Unknown` (forced, if presence
         // ever lost attachment) or its own `Quiet` fallback, and either one
@@ -766,6 +801,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .endpoint
             .is_bluetooth()
             .then(|| FIRMWARE_NEEDS_USB.to_string()),
+        held_by_tab,
         escapes: vec![Escape::Forget],
     }
 }
@@ -785,6 +821,9 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
         DeviceStatus::Ready => "Ready".to_string(),
         DeviceStatus::Degraded => "Degraded".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
+        DeviceStatus::NeedsAttention if device.known_blank() => {
+            classification_label(&Classification::Blank)
+        }
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),
     }
 }
@@ -804,7 +843,10 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
         Classification::Foreign { label: None } => "Unrecognized firmware".to_string(),
-        Classification::Quiet { .. } => "Not responding".to_string(),
+        // The label of a board that never said hello and says nothing (a
+        // board that said hello and went quiet is `NotResponding`, whose
+        // own label is "Not responding").
+        Classification::Quiet { .. } => "No response — needs firmware".to_string(),
     }
 }
 

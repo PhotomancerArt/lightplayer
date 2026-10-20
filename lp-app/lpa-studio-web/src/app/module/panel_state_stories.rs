@@ -13,15 +13,13 @@
 //! stays device/roster health.
 
 use dioxus::prelude::*;
-use lpa_studio_core::PlayState;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, TRANSPORT_CHANNELS, held_root_face, palette_panel,
-    root_module_node_view, three_state_panel, transport_panel,
+    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, palette_panel, root_module_node_view,
+    speed_panel, speed_panel_held, three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
-use crate::app::node::face_story_fixtures::clock_transport;
 
 /// Panel stories render on a card surface so the states are judged against
 /// the background they will actually sit on.
@@ -164,19 +162,16 @@ fn palette_swatches() -> Element {
     }
 }
 
-// -- the grouped Transport control (P8) -----------------------------------
+// -- the clock's Speed knob ------------------------------------------------
 
 #[story(
-    description = "The clock's Transport as ONE grouped control on the module panel — the panel a phone opens onto, and the expected primary speed control. The whole tape instrument is the faceplate (streaming strip, digits, run/pause, log ׼–×8 fader with octave detents), taking the panel row's full width so the narrow controls wrap below it rather than squeezing it. It is one control with THREE wires: the fader writes clock.rate, run/pause writes clock.play_state, a strip drag writes clock.scrub. Judge it at sm first — that is the phone."
+    description = "The clock's speed on the module panel: ONE knob over clock.rate, in the flat strip beside the brightness and a hue knob. Log ¼×–8× with 1× at the top centre; the marks are the octave stops a drag seats on, the arrows step stop to stop and a double-click is 1×. The value reads as a speed (1×). Run/pause and the scrub strip are not on a panel: the clock's own card keeps the whole tape, the debug tool."
 )]
-fn transport() -> Element {
+fn speed_knob() -> Element {
     rsx! {
         PanelCanvas {
             ModulePanel {
-                panel: transport_panel(
-                    clock_transport(447.0, PlayState::Playing, 1.0, 0.0),
-                    TRANSPORT_CHANNELS,
-                ),
+                panel: speed_panel(1.0),
                 on_panel: move |_| {},
                 on_action: move |_| {},
             }
@@ -185,16 +180,13 @@ fn transport() -> Element {
 }
 
 #[story(
-    description = "Paused on the panel: the strip and digits hold still, the run button shows ▶ unlit, and nothing else about the control moves — pausing is calm, not a mode change. The setpoint went out as a state NOUN on clock.play_state (\"paused\"), so a consumer that reads it late still lands where the user asked."
+    description = "The Speed knob held at 2× (dragged one octave up): gold, seated on the 2× stop, its let-go glyph beside its label, exactly as every other held control. Letting go returns the clock to its authored rate."
 )]
-fn transport_paused() -> Element {
+fn speed_knob_held() -> Element {
     rsx! {
         PanelCanvas {
             ModulePanel {
-                panel: transport_panel(
-                    clock_transport(447.0, PlayState::Paused, 1.0, 0.0),
-                    TRANSPORT_CHANNELS,
-                ),
+                panel: speed_panel_held(2.0),
                 on_panel: move |_| {},
                 on_action: move |_| {},
             }
@@ -203,38 +195,24 @@ fn transport_paused() -> Element {
 }
 
 #[story(
-    description = "Scrubbed off-live at ×2: the tape box border goes amber and the offset reads on the amber line under the digits, tap-to-return. The three dimensions moved independently — the fader is seated on the ×2 detent while the scrub sits −12.4 s back — because they are three channels, not one packed record."
+    description = "The Speed knob slow and between stops: ½× (a quarter of the way round, one slow octave) beside 1.5× (between the 1× and 2× stops, said with one decimal)."
 )]
-fn transport_off_live() -> Element {
+fn speed_knob_slow_and_between() -> Element {
     rsx! {
-        PanelCanvas {
-            ModulePanel {
-                panel: transport_panel(
-                    clock_transport(447.0, PlayState::Playing, 2.0, -12.4),
-                    TRANSPORT_CHANNELS,
-                ),
-                on_panel: move |_| {},
-                on_action: move |_| {},
+        div { class: "tw:grid tw:gap-3",
+            PanelCanvas {
+                ModulePanel {
+                    panel: speed_panel(0.5),
+                    on_panel: move |_| {},
+                    on_action: move |_| {},
+                }
             }
-        }
-    }
-}
-
-#[story(
-    description = "PARTIAL wiring: the rate leaf has an authored binding onto a custom `speed` channel, which suppresses only its own default — its siblings keep clock.play_state and clock.scrub. Two things to check: the faceplate still renders WHOLE (rendering is a shape fact; wiring never subtracts a dimension from it), and the group re-anchors onto `speed`, since the group's identity is the rate leaf's EFFECTIVE channel."
-)]
-fn transport_partial_wiring() -> Element {
-    let mut channels = TRANSPORT_CHANNELS;
-    channels[0].1 = "speed";
-    rsx! {
-        PanelCanvas {
-            ModulePanel {
-                panel: transport_panel(
-                    clock_transport(447.0, PlayState::Playing, 1.5, 0.0),
-                    channels,
-                ),
-                on_panel: move |_| {},
-                on_action: move |_| {},
+            PanelCanvas {
+                ModulePanel {
+                    panel: speed_panel(1.5),
+                    on_panel: move |_| {},
+                    on_action: move |_| {},
+                }
             }
         }
     }

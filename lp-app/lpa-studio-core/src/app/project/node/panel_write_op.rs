@@ -35,7 +35,7 @@ impl ControllerOp for PanelWriteOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             "Set panel control",
-            "Hold this value on the channel until reset.",
+            "Hold this value until you reset it.",
             ActionPriority::Primary,
         )
     }
@@ -74,7 +74,7 @@ impl ControllerOp for PanelClearOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             "Reset panel control",
-            "Release the held value; authored wiring returns.",
+            "Release the held value. The project's own wiring takes over again.",
             ActionPriority::Primary,
         )
     }

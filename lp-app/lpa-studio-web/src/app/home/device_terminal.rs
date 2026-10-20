@@ -1,9 +1,12 @@
-//! The device card's terminal: what the board actually said, typed and
+//! The board's terminal: what the board actually said, typed and
 //! pinned. Renders straight off [`lpa_studio_core::DeviceTerminalLine`]
 //! (P1 of the device-card-v2 plan) — no view model in between.
 //!
-//! Three defects the old `TerminalPanel` (a flat `Vec<String>`, still in
-//! `device_roster_card.rs` until the swap) carried, fixed here:
+//! Drawn in the board card's status-corner details (the Terminal panel,
+//! `app/board_card/bar_detail_panel.rs`).
+//!
+//! Three defects the old `TerminalPanel` (a flat `Vec<String>`, on the
+//! retired device card until the swap) carried, fixed here:
 //!
 //! 1. **Reversed DOM order.** `TerminalPanel` was `flex-col-reverse` over
 //!    `.rev()`-iterated lines, so `Ctrl+F`, a screen reader, or a
@@ -50,8 +53,8 @@
 //! # One box, and flush inside it (D3; G1 2026-09-03)
 //!
 //! The terminal is content directly on the card's `bg-terminal` ground — no
-//! inner rounded/bordered sub-panel. The old `terminal_class()` in
-//! `device_roster_card.rs` drew its own box inside the zone's box; that is
+//! inner rounded/bordered sub-panel. The old `terminal_class()` on the
+//! retired device card drew its own box inside the zone's box; that is
 //! exactly the nesting the card's "one box" rule (AC1) forbids, so this
 //! component drops it.
 //!
@@ -111,9 +114,8 @@ const PIN_THRESHOLD_PX: f64 = 4.0;
 /// at mount is not enough.
 const PIN_RETRY_DELAYS_MS: [u32; 4] = [0, 50, 250, 1000];
 
-/// The card's terminal zone. `height_class` is the panel's fixed height —
-/// `tw:h-40` on a device card, the shorter `tw:h-24` on a pending link,
-/// which has far less to say (`device_roster_card.rs`).
+/// The board's terminal. `height_class` is the panel's fixed height (the
+/// status corner's details set it, `bar_detail_panel.rs`).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceTerminal(
@@ -160,6 +162,9 @@ pub(crate) fn DeviceTerminal(
                 }
                 div {
                     class: "{TERMINAL_CLASS} {height_class}",
+                    // The walk hook: what the board said, read by the walks
+                    // (`app/board_card/mod.rs`, "Walk hooks").
+                    "data-board-terminal": "true",
                     onmounted: move |event| {
                         let element = event.data();
                         terminal_element.set(Some(element.clone()));
@@ -391,12 +396,18 @@ mod tests {
         assert!(!is_pinned_to_bottom(95.0, 260, 160));
     }
 
-    /// FLUSH (G1 2026-09-03): the ground reaches the card's edges, so the
-    /// block carries no padding and no hairline of its own — the firmware
-    /// zone above owns the separator — and the ground itself keeps only the
-    /// small reading inset that stops text touching the edge.
+    /// FLUSH (G1 2026-09-03): in the board card's status corner details the
+    /// terminal's ground reaches the details card's edges, so the block
+    /// carries no padding and no hairline of its own — the section above it
+    /// owns the separator — and the ground itself keeps only the small
+    /// reading inset that stops text touching the edge. Its height is fixed
+    /// there, so a long log scrolls and never grows the card.
     #[test]
-    fn the_terminal_is_flush_with_the_cards_edges() {
+    fn the_terminal_sits_flush_in_the_corners_details() {
+        assert_eq!(
+            crate::app::board_card::bar_detail_panel::TERMINAL_HEIGHT_CLASS,
+            "tw:h-40"
+        );
         assert!(!ZONE_CLASS.contains("px-"), "{ZONE_CLASS}");
         assert!(!ZONE_CLASS.contains("py-"), "{ZONE_CLASS}");
         assert!(!ZONE_CLASS.contains("border"), "{ZONE_CLASS}");

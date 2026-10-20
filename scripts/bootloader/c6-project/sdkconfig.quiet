@@ -1,0 +1,3 @@
+# The stock bootloader, silent: its ~22 log lines at 115,200 baud were
+# ~145 ms of every boot.
+CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y

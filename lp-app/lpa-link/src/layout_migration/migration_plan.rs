@@ -26,10 +26,12 @@
 //! executor refuses it unconfirmed. A restore from a stored backup is steps
 //! 3–6.
 
+use super::fs_kind::FsKind;
 use super::legacy_layout::LEGACY_C6_V1_LPFS;
 use super::lpfs_geometry::{LPFS_BLOCK_SIZE, LpfsGeometry};
 use super::lpfs_repack::{RepackedImage, repack};
 use super::lpfs_tree::{LpfsTree, LpfsTreeError};
+use super::tree_migration_plan::{TreeSource, WriteOrder, plan_tree_migration, read_source};
 use crate::provider::partition_table::PartitionTable;
 
 const SECTOR: u32 = 4096;
@@ -50,6 +52,10 @@ pub struct MigrationSummary {
     pub tight: bool,
     /// `/.lp/device.json`'s uid, which the board must come back with.
     pub device_uid: Option<String>,
+    /// The filesystem the files are written into.
+    pub target_fs: FsKind,
+    /// A tree-store move's write order (`None` for a littlefs re-pack).
+    pub order: Option<WriteOrder>,
 }
 
 /// Why a migration will not run. Nothing has been written.
@@ -75,6 +81,19 @@ pub enum Refusal {
     RepackFailed(String),
     /// The target image has no `lpfs` row.
     NoTargetFilesystem,
+    /// A file whose path the tree store cannot hold (deeper than 32
+    /// components, an empty component, under the reserved
+    /// `/.lp/snapshots`, or a file named like a folder another file is in).
+    UnstorablePath(String),
+    /// The board's files are in a tree store (the newer filesystem), and the
+    /// firmware about to be written does not read it: it would find no
+    /// filesystem it knows and — an image from before 2026-10-16 — format
+    /// it.
+    TreeStoreNotRead,
+    /// The board's files are in a tree store, and the write would put a
+    /// littlefs filesystem over it (a restore) or move the partition it is
+    /// in (a layout change). Nothing here moves a tree store.
+    TreeStoreWouldBeWritten,
 }
 
 impl core::fmt::Display for Refusal {
@@ -103,6 +122,22 @@ impl core::fmt::Display for Refusal {
             Self::SourceUnreadable(error) => write!(f, "the board's files cannot be read: {error}"),
             Self::RepackFailed(error) => write!(f, "re-packing the files failed: {error}"),
             Self::NoTargetFilesystem => f.write_str("the new firmware has no filesystem partition"),
+            Self::UnstorablePath(path) => write!(
+                f,
+                "the file {path} has a path the new filesystem cannot hold (at most 32 folders \
+                 deep, no empty names, nothing under /.lp/snapshots, no file named like a \
+                 folder)"
+            ),
+            Self::TreeStoreNotRead => f.write_str(
+                "this board's files are in the tree store, a newer filesystem than this firmware \
+                 reads — writing it could erase them. Nothing was written; install a firmware \
+                 that reads the tree store",
+            ),
+            Self::TreeStoreWouldBeWritten => f.write_str(
+                "this board's files are in the tree store, a newer filesystem; this would write \
+                 over it (a restore, or a partition layout change), and nothing here moves a \
+                 tree store. Nothing was written",
+            ),
         }
     }
 }
@@ -232,6 +267,11 @@ pub enum LayoutDecision {
 ///   the user asked for it (`restore_requested` — the card's "Restore files
 ///   from backup", offered when the board came up with a freshly formatted
 ///   filesystem). A board's own files are never replaced unasked.
+/// - A tree store on the board (`TreeStore`) is never written over: the
+///   firmware is written only when it reads the store
+///   (`firmware_reads_tree_store`, the image's `fs.tree`) and the layout
+///   stays; no pending backup is restored over it. Anything else is
+///   refused — before 2026-10-16 a littlefs image formatted the store.
 ///
 /// A restore writes the firmware too, so it stays one action.
 pub fn decide(
@@ -240,9 +280,32 @@ pub fn decide(
     target_image_len: u32,
     pending_backup: Option<&LpfsTree>,
     restore_requested: bool,
+    firmware_reads_tree_store: bool,
 ) -> Result<LayoutDecision, Refusal> {
     use super::layout_state::LayoutState;
+    if inspection.target_fs == FsKind::Tree {
+        return decide_tree(
+            inspection,
+            target_table,
+            target_image_len,
+            pending_backup,
+            restore_requested,
+        );
+    }
     match inspection.state {
+        LayoutState::TreeStore => {
+            let same_layout = inspection
+                .device_table
+                .as_ref()
+                .is_some_and(|device| device.same_layout(target_table));
+            if !firmware_reads_tree_store {
+                Err(Refusal::TreeStoreNotRead)
+            } else if restore_requested || !same_layout {
+                Err(Refusal::TreeStoreWouldBeWritten)
+            } else {
+                Ok(LayoutDecision::Plain(plan_plain_flash()))
+            }
+        }
         LayoutState::Legacy | LayoutState::CurrentLegacyPresent => {
             let Some((geometry, image)) = &inspection.source else {
                 return Err(Refusal::SourceUnreadable(
@@ -278,7 +341,74 @@ pub fn decide(
         LayoutState::Blank
         | LayoutState::Foreign
         | LayoutState::CurrentMounts
+        | LayoutState::CurrentOtherFs
         | LayoutState::CurrentNothing => Ok(LayoutDecision::Plain(plan_plain_flash())),
+    }
+}
+
+/// [`decide`] for an image that mounts the tree store (the cutover).
+///
+/// - Files on the board — littlefs on an older layout or in place, or a
+///   tree store an interrupted migration finished — always move from the
+///   board: they are the truth.
+/// - A board whose region holds nothing readable (an interrupted
+///   migration's erased or rootless region) gets the pending backup back,
+///   when there is one; with none, the migration refuses and writes nothing.
+/// - The resume rule for a board already on the tree table is
+///   [`decide`]'s.
+fn decide_tree(
+    inspection: &super::layout_state::LayoutInspection,
+    target_table: &PartitionTable,
+    target_image_len: u32,
+    pending_backup: Option<&LpfsTree>,
+    restore_requested: bool,
+) -> Result<LayoutDecision, Refusal> {
+    use super::layout_state::LayoutState;
+    let restore = |tree: &LpfsTree, clear: Option<LpfsGeometry>| {
+        let (plan, summary, _) = plan_tree_migration(
+            target_table,
+            target_image_len,
+            TreeSource::StoredFiles { tree, clear },
+        )?;
+        Ok(LayoutDecision::Restore { plan, summary })
+    };
+    match inspection.state {
+        state if state.migrates() => {
+            let Some((geometry, image)) = &inspection.source else {
+                return Err(Refusal::SourceUnreadable(
+                    "the board's filesystem was not read".to_string(),
+                ));
+            };
+            match read_source(*geometry, inspection.source_fs, image) {
+                Ok(_) => {
+                    let (plan, summary, tree) = plan_tree_migration(
+                        target_table,
+                        target_image_len,
+                        TreeSource::Region {
+                            geometry: *geometry,
+                            fs: inspection.source_fs.expect("read_source read it"),
+                            image,
+                        },
+                    )?;
+                    Ok(LayoutDecision::Migrate {
+                        plan,
+                        summary,
+                        tree,
+                    })
+                }
+                Err(refusal) => match pending_backup {
+                    Some(tree) => restore(tree, Some(*geometry)),
+                    None => Err(refusal),
+                },
+            }
+        }
+        LayoutState::CurrentNothing | LayoutState::CurrentMounts
+            if pending_backup.is_some()
+                && (restore_requested || inspection.state == LayoutState::CurrentNothing) =>
+        {
+            restore(pending_backup.expect("checked"), None)
+        }
+        _ => Ok(LayoutDecision::Plain(plan_plain_flash())),
     }
 }
 
@@ -319,6 +449,8 @@ fn summarize(
         blocks_free: repacked.blocks_free,
         tight: repacked.tight,
         device_uid: tree.device_uid(),
+        target_fs: FsKind::Littlefs,
+        order: None,
     }
 }
 
@@ -475,7 +607,7 @@ mod tests {
         flash[0x31_0000..].copy_from_slice(&image);
         let inspection = inspect_flash(&flash, d1_table(), true);
         assert_eq!(inspection.state, LayoutState::Legacy);
-        let refusal = decide(&inspection, &d1_table(), 0x2D_0000, None, false).unwrap_err();
+        let refusal = decide(&inspection, &d1_table(), 0x2D_0000, None, false, false).unwrap_err();
         assert!(matches!(refusal, Refusal::DoesNotFit { .. }));
     }
 
@@ -524,11 +656,11 @@ mod tests {
         let empty = inspect_flash(&flash, d1_table(), true);
         assert_eq!(empty.state, LayoutState::CurrentNothing);
         assert!(matches!(
-            decide(&empty, &d1_table(), 0x2D_0000, Some(&tree()), false).unwrap(),
+            decide(&empty, &d1_table(), 0x2D_0000, Some(&tree()), false, false).unwrap(),
             LayoutDecision::Restore { .. }
         ));
         assert!(matches!(
-            decide(&empty, &d1_table(), 0x2D_0000, None, false).unwrap(),
+            decide(&empty, &d1_table(), 0x2D_0000, None, false, false).unwrap(),
             LayoutDecision::Plain(_)
         ));
 
@@ -537,8 +669,71 @@ mod tests {
         flash[0x35_0000..].copy_from_slice(&image);
         let mounts = inspect_flash(&flash, d1_table(), true);
         assert!(matches!(
-            decide(&mounts, &d1_table(), 0x2D_0000, Some(&tree()), false).unwrap(),
+            decide(&mounts, &d1_table(), 0x2D_0000, Some(&tree()), false, false).unwrap(),
             LayoutDecision::Plain(_)
         ));
+    }
+
+    /// A tree store is never written a littlefs filesystem and never handed
+    /// a firmware that does not read it: a littlefs image is refused, a
+    /// pending backup is not restored over it (asked or not), and only a
+    /// firmware that reads it, on its own layout, is written.
+    #[test]
+    fn a_tree_store_takes_only_firmware_that_reads_it() {
+        let flash = tree_chip(&d1_table(), 90);
+        let inspection = inspect_flash(&flash, d1_table(), true);
+        assert_eq!(inspection.state, LayoutState::TreeStore);
+        let d = |pending: Option<&LpfsTree>, asked: bool, reads: bool| {
+            decide(&inspection, &d1_table(), 0x2D_0000, pending, asked, reads)
+        };
+        assert_eq!(d(None, false, false), Err(Refusal::TreeStoreNotRead));
+        assert_eq!(
+            d(Some(&tree()), false, false),
+            Err(Refusal::TreeStoreNotRead)
+        );
+        assert_eq!(
+            d(Some(&tree()), true, false),
+            Err(Refusal::TreeStoreNotRead)
+        );
+        assert_eq!(
+            d(Some(&tree()), true, true),
+            Err(Refusal::TreeStoreWouldBeWritten)
+        );
+        assert!(matches!(
+            d(Some(&tree()), false, true),
+            Ok(LayoutDecision::Plain(_))
+        ));
+        assert!(matches!(d(None, false, true), Ok(LayoutDecision::Plain(_))));
+        let words = Refusal::TreeStoreNotRead.to_string();
+        assert!(words.contains("tree store") && words.contains("Nothing was written"));
+    }
+
+    /// A tree store on the legacy table: even a firmware that reads it would
+    /// move its partition, so nothing is written.
+    #[test]
+    fn a_tree_store_is_never_moved_to_a_new_layout() {
+        let flash = tree_chip(&legacy_c6_v1_table(), 0);
+        let inspection = inspect_flash(&flash, d1_table(), true);
+        assert_eq!(inspection.state, LayoutState::TreeStore);
+        assert_eq!(
+            decide(&inspection, &d1_table(), 0x2D_0000, None, false, true),
+            Err(Refusal::TreeStoreWouldBeWritten)
+        );
+    }
+
+    /// A chip on `table` whose `lpfs` holds a real tree store, its sectors
+    /// moved `rotate` places on.
+    fn tree_chip(table: &PartitionTable, rotate: usize) -> Vec<u8> {
+        let geometry = LpfsGeometry::from_table(table).unwrap();
+        let mut flash = vec![0xFFu8; 0x40_0000];
+        let bytes = table.to_bytes();
+        flash[0x8000..0x8000 + bytes.len()].copy_from_slice(&bytes);
+        let mut store = crate::layout_migration::tree_store_magic::tests::tree_store_image(
+            geometry.block_count,
+        );
+        store.rotate_right(rotate * SECTOR as usize);
+        let at = geometry.offset as usize;
+        flash[at..at + store.len()].copy_from_slice(&store);
+        flash
     }
 }

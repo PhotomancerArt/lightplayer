@@ -240,6 +240,15 @@ pub enum MachineRequest {
         /// crate owns the translation.
         cause: ResetSource,
     },
+    /// A flash power-cut plan fired: the supply went in the middle of a
+    /// program or erase command, the chip tore it and latched powered off
+    /// (`crate::engine::flash_cut`). The machine either stops the run or
+    /// power-cycles the board; either way the guest runs no further
+    /// instruction on this power. Only a chip that arms a plan ever sees
+    /// one.
+    PowerCut {
+        report: crate::engine::flash_cut::FlashCutReport,
+    },
 }
 
 /// How much of a register's behaviour is backed by evidence.
@@ -380,9 +389,18 @@ pub struct BusCx<'a> {
 impl BusCx<'_> {
     /// Ask the machine for something the peripheral cannot do itself. The
     /// first request in a slice wins; a second is logged and dropped, since
-    /// the machine stops at the first anyway.
+    /// the machine stops at the first anyway — with one exception: a
+    /// [`MachineRequest::PowerCut`] replaces a pending reset, because a chip
+    /// whose supply went has nothing left to reset.
     pub fn request(&mut self, request: MachineRequest) {
         if let Some(existing) = *self.request {
+            if matches!(request, MachineRequest::PowerCut { .. })
+                && !matches!(existing, MachineRequest::PowerCut { .. })
+            {
+                log::warn!("BusCx: {existing:?} replaced by {request:?}: the power went");
+                *self.request = Some(request);
+                return;
+            }
             log::warn!("BusCx: {request:?} dropped, the bus already holds {existing:?}");
             return;
         }

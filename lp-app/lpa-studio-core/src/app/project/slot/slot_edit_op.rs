@@ -109,7 +109,7 @@ impl ControllerOp for SlotEditOp {
             ),
             Self::Clear { .. } => ActionMeta::new(
                 "Clear",
-                "Clear this debug override; the slot returns to its default.",
+                "Clear this debug override and go back to the default.",
                 ActionPriority::Secondary,
             ),
         }

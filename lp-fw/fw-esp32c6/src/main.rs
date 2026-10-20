@@ -41,6 +41,16 @@ lpc_model::lp_embed_manifest_core! {
             cfg!(feature = "radio"),
             lpc_model::LpFeature::SvcRadioEspnow,
         ),
+        // The tree store on `lpfs` (every flash-backed build since the
+        // cutover): what hosts read before they route a core here
+        // (`requires.fsTree`, Studio's `NeedsFilesMoved`). A `memory_fs`
+        // build mounts no store and says so. The board's own update guard
+        // reads the core's mark instead (`fs_tree_core_guard`): this blob is
+        // linked into the engine, which an update writes after the core.
+        lpc_model::manifest::feature_fragment(
+            cfg!(all(feature = "fs-tree", not(feature = "memory_fs"))),
+            lpc_model::LpFeature::FsTree,
+        ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
     // The split image takes over-the-air updates in layout 1; a plain
@@ -129,8 +139,21 @@ mod io_thread_stack_diag;
 // their load generators instead.
 #[cfg(lp_net)]
 mod net;
+// The SHA accelerator: a split image's boot-path hashes (`ota/`), and the
+// tree store's record ids — split or not, so it lives outside `ota/`
+// (split-only).
+#[cfg(all(
+    not(fw_harness),
+    any(lp_split, all(feature = "server", not(feature = "memory_fs")))
+))]
+mod hw_sha;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
+// The heap's peak between heartbeats (`[heap] peak=…`), never shipped.
+#[cfg(all(feature = "heap_peak_diag", not(fw_harness)))]
+mod heap_peak_diag;
+#[cfg(all(feature = "heap_peak_diag", feature = "heap_map_diag"))]
+compile_error!("`heap_peak_diag` and `heap_map_diag` both own esp-alloc's hooks: pick one");
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -148,6 +171,13 @@ mod seams;
 #[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
 mod secure_link_probe;
 mod serial;
+// Time to first light and its parts: one `[perf] first light` line a boot.
+#[cfg(not(fw_harness))]
+mod first_light;
+// The core reads its flash in QIO when the part is ready for it: one
+// `[flash]` line a boot.
+#[cfg(all(not(fw_harness), not(feature = "memory_fs")))]
+mod flash_qio;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
@@ -168,18 +198,20 @@ use fw_esp32_common::time;
 mod bench;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod bootctl;
-// The `flash-tears` harness reads the same table to find `lpfs`.
+// The `flash-tears` and `flash-reprogram` harnesses read the same table to
+// find `lpfs`.
 #[cfg(any(
     all(not(feature = "memory_fs"), not(fw_harness)),
-    feature = "test_flash_tears"
+    feature = "test_flash_tears",
+    feature = "test_flash_tears_unaligned",
+    feature = "test_flash_reprogram"
 ))]
 mod flash_layout;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
-mod flash_storage;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
-mod legacy_layout;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
-use fw_esp32_common::lp_fs;
+// `lpfs` is the tree store (plan
+// `lp2025/2026-10-16-0848-tree-store-adoption`, A7: the default since the
+// cutover; littlefs is not linked). `memory_fs` replaces it.
+#[cfg(all(feature = "server", not(feature = "memory_fs"), not(fw_harness)))]
+mod tree_flash;
 
 #[cfg(all(
     feature = "radio",
@@ -227,7 +259,9 @@ mod tests {
     pub mod espnow_broadcast;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
-    #[cfg(feature = "test_flash_tears")]
+    #[cfg(feature = "test_flash_reprogram")]
+    pub mod flash_reprogram;
+    #[cfg(any(feature = "test_flash_tears", feature = "test_flash_tears_unaligned"))]
     pub mod flash_tears;
     #[cfg(feature = "test_fluid_demo")]
     pub mod fluid_demo;
@@ -312,12 +346,16 @@ fn log_heartbeat_stack_lines() {
     if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
         stack_probe::log_if_grown("heartbeat");
         c_heap::log_if_grown("heartbeat");
+        #[cfg(feature = "lp_sram_heap")]
+        board::esp32c6::lp_sram_heap::log_if_changed("heartbeat");
         #[cfg(feature = "io_thread_stack_diag")]
         io_thread_stack_diag::log_if_grown();
         #[cfg(feature = "net_thread_stack_diag")]
         net::net_thread_stack_diag::log_if_grown();
         #[cfg(lp_net)]
         net::net_heartbeat::log_line();
+        #[cfg(feature = "heap_peak_diag")]
+        heap_peak_diag::log_line();
     }
 }
 
@@ -357,6 +395,27 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_largest_block_bytes: 8 * 1024,
 };
 
+/// What a ProjectRead must leave free past its own estimated cost
+/// (`lpa_server::read_cost`): room for the link and radio tasks while it
+/// runs. Since 2026-10-09 this, not [`READ_GATE`]'s flat 40 KiB, is what a
+/// read is held to.
+///
+/// Measured (research experiment E7, `lp2025/2026-10-09-1203-ram-research`):
+///
+/// - [`READ_GATE`] was 4.7x the device card's read at the choker's 73 lamps
+///   (8,656 B emulated with its layout; 3,996 B on loose-c6 with a Bluetooth
+///   central), so a phone's ~18 KB link left the card refused at 40.6 KB
+///   free (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`),
+///   and 0.8–1.06x the same read at 512 lamps (38,716 B, three 10,240 B
+///   asks), so a 512-lamp board just over it could reset;
+/// - inside a read's window on silicon no other task's allocation showed:
+///   the card's read peaked at 3,996 B over BLE, the editor's at 13,040 B.
+///   16 KiB is the request-decode margin (`server_payload`) kept for the
+///   same job. It covers a second Bluetooth link's 7.1 KB link RAM opening
+///   mid-read, not the whole ~18 KB a phone's link was measured to cost.
+#[cfg(not(fw_harness))]
+const READ_COST_MARGIN: u32 = 16 * 1024;
+
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
     // At once when no project is loaded (the load gate's probe, after a
@@ -395,6 +454,28 @@ fn reboot_now() {
 #[cfg(not(fw_harness))]
 fn reset_now() -> ! {
     crate::board::esp32c6::restart::restart()
+}
+
+/// The server loop's one frame hook (`server_loop::set_frame_hook` holds
+/// one): the first-light count, a split image's update-light record, and
+/// the relay's answers (relay protocol 2's picture and project facts,
+/// `relay_probes`). Every frame, so each part is cheap when it has nothing
+/// to do.
+#[cfg(not(fw_harness))]
+fn frame_hook(server: &LpServer) {
+    first_light::on_served();
+    #[cfg(not(any(lp_split, lp_net)))]
+    let _ = server;
+    // The core's own hash, held back until the boot has lit: a slice a
+    // frame (`ota::core_hash_step`), and the unsolicited hello waits for it.
+    #[cfg(lp_split)]
+    if first_light::decided() {
+        ota::core_hash_step();
+    }
+    #[cfg(lp_split)]
+    output::status_light_note::persist(server);
+    #[cfg(lp_net)]
+    net::relay_probes::serve_relay(server);
 }
 
 #[cfg(not(fw_harness))]
@@ -480,6 +561,15 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // the link task. May block if no USB host is connected during boot.
     // Hasn't been observed yet but worth investigating if boot hangs occur.
 
+    // The app's entry, on the boot's clocks (`first_light`). Its report is
+    // called only from the engine (a frame), so name it here too: the split
+    // places code by reachability, and this keeps it in the core.
+    first_light::mark(first_light::Mark::App);
+    core::hint::black_box((
+        first_light::on_frame as fn(&[u8]),
+        first_light::on_served as fn(),
+    ));
+
     // Initialize board (clock, heap, runtime) and get hardware peripherals
     esp_println::println!("[INIT] Initializing board...");
     let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi, rwdt) =
@@ -554,6 +644,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(not(feature = "memory_fs"))]
     let (boot_control, flash, flash_layout) = {
         let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        // From here every flash read — the code cache, the mount, the
+        // project — goes four bits at a time when the part is ready for it.
+        // Right after esp-storage's own RDID size probe, before any ROM
+        // flash access (the rule below), so neither id read sees a ROM
+        // routine's leftovers on SPI1.
+        crate::flash_qio::enter();
         // The partition table, read once: `lpfs` for the filesystem, and
         // `factory` for a split image's region end.
         let flash_layout = crate::flash_layout::FlashLayout::locate(&mut flash_storage);
@@ -580,6 +676,13 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ota_state = ota::begin(None);
     }
 
+    // `heap_peak_diag` (never shipped) also times the mount, either
+    // filesystem: the tree store's perf figures (plan D5/Q17).
+    #[cfg(feature = "heap_peak_diag")]
+    let mount_t0 = embassy_time::Instant::now();
+    #[cfg(feature = "heap_peak_diag")]
+    let mount_heap0 = heap_peak_diag::restart();
+    first_light::mark(first_light::Mark::Mount);
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let (base_fs, fs_boot_state): (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) = {
         #[cfg(not(feature = "memory_fs"))]
@@ -598,45 +701,69 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                     );
                     (Box::new(LpFsMemory::new()), FsBootState::Memory)
                 }
-                // The legacy guard (crate::legacy_layout): a partition that
-                // will not mount is formatted only when no pre-repartition
-                // filesystem is waiting at the old offset.
-                Some(partition) => match lp_fs::LpFsFlash::init_guarded(
-                    crate::flash_storage::LpFlashStorage::new(flash_storage, partition),
-                    crate::flash_storage::lpfs_config,
-                    |storage| {
-                        if storage.legacy_lpfs_present() {
-                            lp_fs::FormatVerdict::Hold
-                        } else {
-                            lp_fs::FormatVerdict::Format
+                // The tree store: mount; a partition with no store on it is
+                // formatted (lazily) only when no littlefs superblock says a
+                // board's files are still in littlefs — in `lpfs` itself, or
+                // at `0x350000`, the 176-sector littlefs of a board that
+                // skipped the cutover's migration (AD3: held, never
+                // formatted; Studio moves them over USB). A store the mount
+                // will not adopt (a newer or damaged header) is REFUSED —
+                // nothing written, files kept, access locked (`fs: refused`).
+                Some(partition) => {
+                    use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
+                    let summary = |how: &str, s: lp_tree_store::MountSummary| {
+                        esp_println::println!(
+                            "[FS] tree store {how} ({} sectors, {} free, root {})",
+                            s.sectors,
+                            s.free_sectors,
+                            s.root_seq
+                        );
+                    };
+                    match init_tree_guarded(
+                        crate::tree_flash::tree_flash(flash_storage, partition),
+                        crate::hw_sha::StoreSha256,
+                        lp_tree_store::StoreConfig::default(),
+                        |flash| {
+                            if crate::tree_flash::littlefs_found(flash) {
+                                FormatVerdict::Hold
+                            } else {
+                                FormatVerdict::Format
+                            }
+                        },
+                    ) {
+                        TreeFsInit::Mounted(fs, s) => {
+                            esp_println::println!("[INIT] Flash filesystem mounted");
+                            summary("mounted", s);
+                            (Box::new(fs), FsBootState::Mounted)
                         }
-                    },
-                ) {
-                    // One line for both: the format itself is logged by
-                    // `lp_fs` ("Formatted and mounted fresh filesystem").
-                    Ok(lp_fs::FlashFsInit::Mounted(fs)) => {
-                        esp_println::println!("[INIT] Flash filesystem mounted");
-                        (Box::new(fs), FsBootState::Mounted)
+                        TreeFsInit::Formatted(fs, s) => {
+                            esp_println::println!("[INIT] Flash filesystem mounted");
+                            summary("formatted", s);
+                            (Box::new(fs), FsBootState::Formatted)
+                        }
+                        TreeFsInit::Held(_) => {
+                            esp_println::println!(
+                                "[FS] legacy-layout filesystem found — not formatting; files are \
+                                 held for migration (littlefs, not yet in the tree store); using \
+                                 memory FS"
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
+                        }
+                        TreeFsInit::Refused { why, .. } => {
+                            esp_println::println!(
+                                "[FS] tree store refused: a newer or damaged store header — \
+                                 files kept ({why}); using memory FS, access locked"
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::Refused)
+                        }
+                        TreeFsInit::FormatFailed => {
+                            esp_println::println!(
+                                "[WARN] tree store format failed, falling back to memory"
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::Memory)
+                        }
                     }
-                    Ok(lp_fs::FlashFsInit::Formatted(fs)) => {
-                        esp_println::println!("[INIT] Flash filesystem mounted");
-                        (Box::new(fs), FsBootState::Formatted)
-                    }
-                    Ok(lp_fs::FlashFsInit::Held) => {
-                        esp_println::println!(
-                            "[FS] legacy-layout filesystem found at {:#x} — not formatting; \
-                             files are held for migration; using memory FS",
-                            crate::legacy_layout::LEGACY_LPFS_V1_OFFSET
-                        );
-                        (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
-                    }
-                    Err(e) => {
-                        esp_println::println!(
-                            "[WARN] Flash FS failed: {e}, falling back to memory"
-                        );
-                        (Box::new(LpFsMemory::new()), FsBootState::Memory)
-                    }
-                },
+                }
             }
         }
         #[cfg(feature = "memory_fs")]
@@ -649,6 +776,21 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             )
         }
     };
+    first_light::mark(first_light::Mark::Mounted);
+    #[cfg(feature = "heap_peak_diag")]
+    // No `{:?}`: the image builds with `-Z fmt-debug=none`.
+    esp_println::println!("[perf] fs mount {} us", mount_t0.elapsed().as_micros());
+    #[cfg(feature = "heap_peak_diag")]
+    {
+        // The mount's own heap: its peak over what was live before it, and
+        // what it still holds (the store's resident structures).
+        let (peak, live) = heap_peak_diag::restart();
+        esp_println::println!(
+            "[perf] fs mount-heap peak=+{} held=+{} B",
+            peak.saturating_sub(mount_heap0.1),
+            live.saturating_sub(mount_heap0.1)
+        );
+    }
     #[cfg(feature = "memory_fs")]
     esp_println::println!("[INIT] In-memory filesystem created");
 
@@ -770,6 +912,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                 log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
                 false
             }
+            (false, _) if fs_boot_state == lpc_wire::FsBootState::Refused => {
+                log::info!(
+                    "[ble] off (file store refused: the device store waits on the flash with it)"
+                );
+                false
+            }
             (false, _) if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
                 log::info!(
                     "[ble] off (files held for the layout change: the device store waits with \
@@ -853,6 +1001,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(not(lp_split))]
     let _ = network_saved;
 
+    first_light::mark(first_light::Mark::Radio);
     CoreBoot {
         spawner,
         usb_link,
@@ -922,6 +1071,7 @@ fn lp_engine_entry(core: CoreBoot) {
         boot_assessment,
         ..
     } = core;
+    first_light::mark(first_light::Mark::Engine);
 
     // The server's side of the host link: whole wire messages on the link's
     // proto channel.
@@ -1010,6 +1160,11 @@ fn lp_engine_entry(core: CoreBoot) {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // Each read is held to its own cost (`lpa_server::read_cost`) plus
+    // `READ_COST_MARGIN`, so the card's 9 KB read is not refused for the
+    // editor's 25 KB one, and a 512-lamp read is refused rather than reset.
+    // `READ_GATE` above stays installed for a server built without it.
+    server.set_read_cost_margin(Some(READ_COST_MARGIN));
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
@@ -1048,6 +1203,10 @@ fn lp_engine_entry(core: CoreBoot) {
     // The server cannot derive any of it.
     server.set_hardware_identity(chip_identity());
     server.set_fs_boot_state(fs_boot_state);
+    // The filesystem this build serves, said in the hello as in the manifest
+    // core (the tree store; a `memory_fs` build serves none).
+    #[cfg(not(feature = "memory_fs"))]
+    server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
     // The board this firmware is running as, from the loaded manifest — the
     // catalog key a card needs to re-flash or wire a new project for it.
     server.set_board_id(Some(alloc::string::String::from(
@@ -1058,9 +1217,15 @@ fn lp_engine_entry(core: CoreBoot) {
     // core's update session says it, as it answers `Q` on channel 3.
     #[cfg(lp_split)]
     server.set_firmware_manifest(Some(ota::running_manifest));
-    // ...and records the strip its update light may drive.
+    // ...whose core hash is taken after first light (the frame hook): the
+    // unsolicited hello waits for it, so saying it never holds a frame. A
+    // host's own `Hello` before then is answered at once.
     #[cfg(lp_split)]
-    server_loop::set_frame_hook(output::status_light_note::persist);
+    server_loop::set_hello_gate(ota::hello_ready);
+    // ...and records the strip its update light may drive; the relay's
+    // answers (relay protocol 2); and the first-light count. One frame hook
+    // holds them all.
+    server_loop::set_frame_hook(frame_hook);
     // JSON Pack: answer a host's opt-in with what this image's transport
     // can write (`fw-esp32-common/json-pack`).
     server.set_packed_encoding_supported(
@@ -1120,6 +1285,7 @@ fn lp_engine_entry(core: CoreBoot) {
     // may be recovering exactly the loop the ladder saw.
     #[cfg(feature = "bench_render_loop")]
     let load_from = board::esp32c6::cycle_counter::read();
+    first_light::mark(first_light::Mark::Load);
     match boot_control.boot_action() {
         lp_bootctl::BootAction::LoadClamped { level } => {
             log::error!(
@@ -1143,6 +1309,7 @@ fn lp_engine_entry(core: CoreBoot) {
             boot::auto_load_project(&mut server);
         }
     }
+    first_light::mark(first_light::Mark::Loaded);
     #[cfg(feature = "bench_render_loop")]
     let load_cycles = board::esp32c6::cycle_counter::read().wrapping_sub(load_from);
 
@@ -1334,10 +1501,16 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_cycle_probe(spawner).await;
     }
 
-    #[cfg(feature = "test_flash_tears")]
+    #[cfg(any(feature = "test_flash_tears", feature = "test_flash_tears_unaligned"))]
     {
         use tests::flash_tears::run_flash_tears;
         run_flash_tears(spawner).await;
+    }
+
+    #[cfg(feature = "test_flash_reprogram")]
+    {
+        use tests::flash_reprogram::run_flash_reprogram;
+        run_flash_reprogram(spawner).await;
     }
 
     #[cfg(feature = "test_gpio_input")]

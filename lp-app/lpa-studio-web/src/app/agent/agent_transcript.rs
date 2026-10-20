@@ -294,7 +294,7 @@ fn ToolRow(
                 if let Some(entry) = &history_entry {
                     div {
                         class: "tw:relative tw:h-8 tw:w-8 tw:flex-none tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card",
-                        title: if entry.thumb.is_some() { "Edit {entry.turn} — how it looked" } else { "Edit {entry.turn} — no snapshot" },
+                        title: if entry.thumb.is_some() { "Edit {entry.turn}: how it looked" } else { "Edit {entry.turn}: no snapshot" },
                         match &entry.thumb {
                             Some(UiProductPreview::VisualSrgb8 { width, height, revision, bytes }) => rsx! {
                                 ProductPreviewCanvas {

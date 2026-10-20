@@ -714,6 +714,362 @@ label:has(> input:not(:disabled)) {
     overflow: hidden;
 }
 
+/* ---- the board card (`app/board_card/`, docs/style/ui.md "The board
+   card"; the look as decided: spikes/board-card-stack) ------------------
+   The card's rows are Tailwind on the pieces; this is only what Tailwind
+   cannot say: the picture's row height (a RULE — it is what keeps the card
+   one height in every state — and narrow when the CARD is, a container
+   query), the status corner's notch cut out of the picture, the flush
+   sections' leading edge in their row's tone, and the work spinner's size
+   in a 28px bar. */
+.ux-board-card {
+    container: board-card / inline-size;
+}
+
+.ux-board-picture-slot {
+    height: 138px;
+}
+
+/* A card in a phone's two-column grid is narrow: a shorter picture. */
+@container board-card (max-width: 239px) {
+    .ux-board-picture-slot {
+        height: 108px;
+    }
+}
+
+/* The update's light strip, centred in the picture (no sentence under it:
+   the firmware bar's details say it). */
+.ux-board-picture .ux-update-leds {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* The surface (`board_surface.rs`, round 3's concept B): over the picture
+   and under the corner, the state's icon in a circle in the state's tone,
+   then one or two plain sentences, centred, and the work's progress. The
+   tone is the icon's alone; the sentences stay plain. A picture under it
+   takes the cover's one dim (`.ux-board-picture-covered`) and the scrim. */
+.ux-board-surface {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    padding: 8px 18px;
+    text-align: center;
+}
+
+.ux-board-surface-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(7, 8, 10, 0.55);
+}
+
+.ux-board-picture-covered {
+    opacity: 0.22;
+    filter: saturate(0.6);
+}
+
+.ux-board-surface-inner {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ux-board-surface-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 50%;
+    background: var(--studio-color-surface-raised);
+    color: var(--studio-color-text-muted);
+}
+
+.ux-board-surface-icon[data-tone="attention"] {
+    border-color: var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+    color: var(--studio-status-attention-text);
+}
+
+/* Stripes mark a failure (ui.md), in the icon's circle as on a row. */
+.ux-board-surface-icon[data-tone="error"] {
+    border-color: var(--studio-status-error-border);
+    background-color: var(--studio-status-error-bg);
+    background-image: var(--studio-status-error-stripes);
+    color: var(--studio-status-error-text);
+}
+
+.ux-board-surface-icon .ux-board-spinner {
+    width: 15px;
+    height: 15px;
+}
+
+.ux-board-surface-first {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--studio-color-text-strong);
+    text-wrap: pretty;
+}
+
+.ux-board-surface-second {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--studio-color-text-muted);
+    text-wrap: pretty;
+}
+
+.ux-board-surface-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+}
+
+.ux-board-surface-track {
+    position: relative;
+    flex: 1;
+    max-width: 190px;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.ux-board-surface-fill {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    border-radius: 2px;
+}
+
+.ux-board-surface-percent {
+    font: 700 11px var(--studio-font-mono);
+    color: var(--studio-color-text-strong);
+}
+
+/* The narrow card (a phone's two-column grid, a 108px picture): the same
+   notice, smaller, so its longest sentences still fit ("Studio couldn't
+   reach this board over Wi‑Fi." with its retry). */
+@container board-card (max-width: 239px) {
+    .ux-board-surface {
+        padding: 6px 8px;
+    }
+
+    .ux-board-surface-inner {
+        gap: 3px;
+    }
+
+    .ux-board-surface-icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    .ux-board-surface-icon svg {
+        width: 11px;
+        height: 11px;
+    }
+
+    .ux-board-surface-icon .ux-board-spinner {
+        width: 11px;
+        height: 11px;
+    }
+
+    .ux-board-surface-first {
+        font-size: 11.5px;
+        line-height: 1.25;
+    }
+
+    .ux-board-surface-second {
+        font-size: 10.5px;
+        line-height: 1.25;
+    }
+}
+
+/* The status corner: a notch cut out of the picture's top-right corner, in
+   the card's own ground, its two inner corners rounded off by a radial
+   mask so the picture curves around it. */
+.ux-board-corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    height: 24px;
+    background: var(--studio-color-panel-primary);
+    border-bottom-left-radius: 9px;
+}
+
+.ux-board-corner::before,
+.ux-board-corner::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    pointer-events: none;
+    background: radial-gradient(
+        circle at 0 100%,
+        transparent 8.5px,
+        var(--studio-color-panel-primary) 9px
+    );
+}
+
+.ux-board-corner::before {
+    left: -9px;
+    top: 0;
+}
+
+.ux-board-corner::after {
+    right: 0;
+    bottom: -9px;
+}
+
+/* A flush row section's leading hairline (`ActionButtonVariant::RowEnd` /
+   `RowPrimary`), in its row's edge colour: a tinted bar sets
+   `--ux-row-flush-edge` to its family's border. */
+.ux-row-flush {
+    border-left-color: var(--ux-row-flush-edge, var(--studio-color-border));
+}
+
+/* The last bar's flush action follows the card's rounded corner. */
+.ux-board-bar:last-child .ux-row-flush {
+    border-bottom-right-radius: 7px;
+}
+
+/* Studio's conic spinner at a 28px bar's size. */
+.ux-board-bar .ux-board-spinner {
+    width: 11px;
+    height: 11px;
+}
+
+/* A row's kind (`stack_bar.rs`): a fixed column, so the names line up
+   down the card, wide enough for the longest link's name
+   ("lightplayer.app"). */
+.ux-board-bar-kind {
+    flex: none;
+    width: 84px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A row with something left to do (`UiStackBar::todo`, a new board's
+   setup list): the whole row lit, on a lighter flat ground — never a
+   gradient — its icon, kind and name at full strength, and its button on
+   the same ground with no fill of its own. Hover is one step lighter
+   (the trigger's own wash over the ground), so lit and hovered differ. */
+.ux-board-bar-todo {
+    background-color: var(--studio-color-surface-raised-strong);
+    --ux-row-flush-edge: var(--studio-color-panel-primary-border);
+}
+
+.ux-board-bar-todo .ux-board-bar-kind,
+.ux-board-bar-todo .ux-board-bar-name {
+    color: var(--studio-color-text-strong);
+}
+
+.ux-board-bar-todo svg {
+    color: var(--studio-color-text-strong);
+}
+
+.ux-board-bar-todo .ux-row-flush {
+    background: transparent;
+}
+
+/* The board's name in the name bar (`name_bar.rs`), pressable to rename:
+   the faint pencil brightens, and the name is underlined, on hover. */
+.ux-board-name:hover .ux-board-name-pencil,
+.ux-board-name:focus-visible .ux-board-name-pencil {
+    color: var(--studio-color-text-muted);
+}
+
+.ux-board-name:hover .ux-board-name-text {
+    text-decoration: underline;
+    text-decoration-color: var(--studio-color-text-faint);
+    text-underline-offset: 3px;
+}
+
+/* A row's name and its state (`stack_bar.rs`). The name is the row's
+   value and keeps its width; the state takes what is left. One 28px line
+   that wraps and clips: a state that can't fit its least beside the whole
+   name wraps to the hidden second line, so it is cut, then gone, before
+   the name is cut — and a name wider than the row alone is cut at its
+   end. The state takes the free space first (its grow is the larger), so
+   it sits at the row's end at its whole width once it fits. */
+.ux-board-bar-words {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    column-gap: 6px;
+    min-width: 0;
+    height: 28px;
+    overflow: hidden;
+    line-height: 28px;
+}
+
+.ux-board-bar-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A longer state: cut at its end, down to `--ux-aside-min`. */
+.ux-board-bar-aside {
+    flex: 1000 1 var(--ux-aside-min);
+    min-width: var(--ux-aside-min);
+    max-width: max-content;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A short state ("crashing"): whole, or wrapped off. */
+.ux-board-bar-aside-whole {
+    flex: none;
+    white-space: nowrap;
+}
+
+/* A narrow card (a phone's two-column grid): the primary's section pads
+   less, so the board's name keeps more of itself. The rows keep their kind
+   words, as every card in the grid does (P8): a value still too long
+   beside its button is cut at its end, and its details hold it whole. */
+@container board-card (max-width: 239px) {
+    [data-name-bar] .ux-row-flush {
+        padding-inline: 10px;
+    }
+
+    /* The kind column gives the value room; a link's longer name is cut at
+       its end, and the row's hover holds it whole. */
+    .ux-board-bar-kind {
+        width: 58px;
+    }
+}
+
+/* The end of the primary's word (" firmware" of "Update firmware",
+   `name_bar.rs`): gone, leaving the verb, on a card narrower than
+   `--ux-primary-need` — the width the whole word needs beside the board's
+   name at about twelve characters, which the name bar sets from its
+   words. A step, never a squeeze: the difference times a large number,
+   clamped, is either nothing or the whole tail. The text stays for a
+   screen reader. */
+.ux-label-tail {
+    display: inline-block;
+    overflow: hidden;
+    white-space: pre;
+    vertical-align: bottom;
+    max-width: clamp(0px, calc((100cqw - var(--ux-primary-need, 0px)) * 1000), 20em);
+}
+
 /* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the
    page, never in its flow. Off, it is invisible and lets clicks through;
    on, it fades in after a short beat (a blip that recovers at once never
@@ -6555,6 +6911,13 @@ select:focus-visible {
     gap: 6px;
     white-space: nowrap;
     transition: opacity 0.16s ease;
+}
+
+/* A menu row reads from its leading edge: both labels sit left in the
+   reserved cell, so arming swaps the words in place without centring the
+   resting one in the armed reading's width. */
+.ux-armed-labels.ux-armed-labels-start > span {
+    justify-content: flex-start;
 }
 
 /* `visibility` (not `display`) keeps the armed label in the layout so it

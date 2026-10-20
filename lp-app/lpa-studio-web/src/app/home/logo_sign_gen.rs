@@ -28,10 +28,27 @@ use lpc_mapping::{
     FilledPolygonShape, GridCorner, GridRouting, Map2dDoc, Map2dObject, Map2dShape, PathShape,
 };
 
-use crate::app::home::brand_hero::{
-    HERO_BOX, HERO_CORNER_RATIO, HERO_TRI, STAGE, WORD_BASELINE_Y, WORD_PX,
-};
 use crate::base::logo_mark::fillet_tri_corners;
+
+// The artwork's stage. These six numbers were the landing hero's
+// (`brand_hero.rs`, gone with the hero); the `catalog/logo-sign` mapping
+// still lays its canvas out on exactly this stage, so the artwork the
+// example opens is the artwork the hero used to show.
+
+/// The triangle window in CSS pixels, and the triangle inside it:
+/// circumradius and center, from the spike's landing mock (250×232,
+/// r = h/2, cx = 0.46w).
+const HERO_BOX: (f32, f32) = (250.0, 232.0);
+const HERO_TRI: (f32, f32, f32) = (115.0, 116.0, 116.0);
+/// Hero-specific fillet ratio (the mark keeps 0.16 — spike gate-4).
+const HERO_CORNER_RATIO: f32 = 0.10;
+/// The stage: ONE canvas behind BOTH brand objects. The triangle and the
+/// wordmark are two windows onto the same running shader.
+const STAGE: (f32, f32) = (300.0, 308.0);
+/// Wordmark inside the stage: size, and the SVG text baseline the clip
+/// glyphs sit on.
+const WORD_PX: f32 = 40.0;
+const WORD_BASELINE_Y: f32 = 292.0;
 
 /// The committed letter skeletons. Authored in the corpus SVG subset (one
 /// top-level group per letter, one straight-line polyline, one

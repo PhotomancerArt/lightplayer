@@ -1,4 +1,4 @@
-//! `devices/new-sim`: the add slot's "start a board here", as an offer that
+//! `devices/new-sim`: Connect a board's "start a board here", as an offer that
 //! takes which board and which runtime.
 //!
 //! The rows have always been core's ([`target_offer`] in the
@@ -23,7 +23,7 @@ pub const NEW_SIM_BOARD_PARAM: &str = "board";
 /// The New sim offer's runtime parameter.
 pub const NEW_SIM_BACKING_PARAM: &str = "backing";
 
-/// What the offer is called: the add slot's detour, said whole.
+/// What the offer is called: Connect a board's detour, said whole.
 const LABEL: &str = "Start a board here";
 
 /// `devices/new-sim`.

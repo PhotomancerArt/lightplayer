@@ -31,8 +31,8 @@ pub(crate) fn AppChatButton(
     });
     let title = match (is_open, pending_card) {
         (true, _) => "Close the assistant",
-        (false, true) => "Assistant — a card is waiting for your click",
-        (false, false) => "Assistant — tell it what you want your lights to do",
+        (false, true) => "Assistant: a card is waiting for your click",
+        (false, false) => "Assistant: tell it what you want your lights to do",
     };
     rsx! {
         button {

@@ -8,7 +8,10 @@
 //!   back as the SAME device (merged by MAC), its card saying "Wi‑Fi via
 //!   lightplayer.app";
 //! - a board the relay says is not online says so on its tile, in plain
-//!   words, and can be pressed again.
+//!   words, and can be pressed again;
+//! - signed out, the card's lightplayer.app row offers Sign in
+//!   (`devices/<board>/sign-in`), the person's own click, which asks the
+//!   page to sign in; signed in, it names the account instead.
 //!
 //! Every verb is pressed by its offer path, as the card and the app agent
 //! press it.
@@ -172,7 +175,7 @@ fn a_board_met_over_usb_is_reached_through_lightplayer_app_after_unplug_as_the_s
     assert_eq!(line.kind, crate::UiLinkKind::Relay);
     assert_eq!(
         line.line(),
-        "Wi\u{2011}Fi via lightplayer.app",
+        "lightplayer.app",
         "the card says how it is reached"
     );
     assert!(
@@ -180,6 +183,38 @@ fn a_board_met_over_usb_is_reached_through_lightplayer_app_after_unplug_as_the_s
         "a success says nothing"
     );
     bench.not_offered(&connect);
+}
+
+#[test]
+fn signed_out_the_cloud_row_offers_sign_in_which_asks_the_page_to_sign_in() {
+    let device = relay_light_player("dev00000relaycon03");
+    let (mut bench, tasks) = identified(&device, "usb-relay-connect-3");
+    let _rig = with_relay(&mut bench, &device);
+    bench.step(&tasks);
+    let target = bench.view().devices[0].id;
+    let sign_in = bench.device_verb(target, crate::SIGN_IN_VERB);
+    let offer = bench.offered(&sign_in);
+    assert_eq!(offer.label(), "Sign in");
+    assert!(
+        offer.action.meta().needs_user_activation,
+        "it leaves the page: the agent hands it to the person"
+    );
+    assert_eq!(bench.controller.view().sign_in_requests, 0);
+    bench
+        .press(&sign_in, OfferArgs::new())
+        .expect("Sign in is a press");
+    assert_eq!(
+        bench.controller.view().sign_in_requests,
+        1,
+        "the page sees the count advance and leaves for sign-in"
+    );
+
+    // Signed in, the account's keys are held: no Sign in.
+    bench
+        .controller
+        .apply_access_command(crate::AccessCommand::AccountKeys(Some(account(None))));
+    bench.step(&tasks);
+    bench.not_offered(&sign_in);
 }
 
 #[test]

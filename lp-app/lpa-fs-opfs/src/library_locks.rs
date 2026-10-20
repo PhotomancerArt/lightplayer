@@ -26,19 +26,17 @@
 //! with [`try_acquire_polling`] instead.
 //!
 //! Web Locks are origin-wide and auto-released when the holding context
-//! dies — a killed tab never strands its projects. Bound dynamically via
-//! `Reflect`: web-sys 0.3 gates its static Web Locks bindings behind the
-//! crate-wide `web_sys_unstable_apis` RUSTFLAGS cfg, which is not worth
-//! infecting every build for one getter. The API itself is
-//! baseline-stable in browsers.
+//! dies — a killed tab never strands its projects. The Web Locks mechanics
+//! themselves (the `Reflect` binding, the `ifAvailable` claim and its
+//! guard, the query) live in [`crate::named_locks`]; this module is the
+//! library's typed model over them.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use gloo_timers::future::TimeoutFuture;
-use js_sys::Promise;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+
+use crate::named_locks::{NamedLockGuard, held_lock_names, try_acquire_named_lock};
 
 /// Web Lock name prefix for per-project locks; the suffix is the project uid.
 const PROJECT_LOCK_PREFIX: &str = "lp-project:";
@@ -74,37 +72,25 @@ impl LibraryLock {
     }
 }
 
-/// A held Web Lock. Dropping releases it; prefer explicit
+/// A held library lock. Dropping releases it; prefer explicit
 /// [`LibraryLockGuard::release`] at flow ends — `Drop` is the safety net.
 ///
 /// Releasing resolves the promise the grant callback handed to the lock
 /// manager (synchronous from our side; the manager hands the lock on in a
 /// following task).
 pub struct LibraryLockGuard {
-    lock_name: String,
-    /// Resolve function of the held promise; taken exactly once on release.
-    held_resolve: Rc<RefCell<Option<js_sys::Function>>>,
-    /// The grant callback, kept alive for the guard's lifetime.
-    _callback: Closure<dyn FnMut(JsValue) -> JsValue>,
+    held: NamedLockGuard,
 }
 
 impl LibraryLockGuard {
     /// The Web Lock name this guard holds.
     pub fn lock_name(&self) -> &str {
-        &self.lock_name
+        self.held.lock_name()
     }
 
     /// Release the lock now (what `Drop` also does).
     pub fn release(self) {
-        // Drop does the work.
-    }
-}
-
-impl Drop for LibraryLockGuard {
-    fn drop(&mut self) {
-        if let Some(resolve) = self.held_resolve.borrow_mut().take() {
-            let _ = resolve.call1(&JsValue::NULL, &JsValue::NULL);
-        }
+        // Dropping the named guard does the work.
     }
 }
 
@@ -114,7 +100,9 @@ impl Drop for LibraryLockGuard {
 /// when the Web Locks API is unavailable (non-secure context, very old
 /// browser) — callers decide whether to proceed unguarded.
 pub async fn try_acquire(lock: &LibraryLock) -> Result<Option<LibraryLockGuard>, JsValue> {
-    try_acquire_named(&lock.name()).await
+    Ok(try_acquire_named_lock(&lock.name())
+        .await?
+        .map(|held| LibraryLockGuard { held }))
 }
 
 /// [`try_acquire`] retried on refusal: up to `attempts` shots, `delay_ms`
@@ -195,115 +183,17 @@ impl Drop for ProjectLockWait {
     }
 }
 
-/// [`try_acquire`] by raw Web Lock name (kept private: product code goes
-/// through the typed [`LibraryLock`]).
-async fn try_acquire_named(lock_name: &str) -> Result<Option<LibraryLockGuard>, JsValue> {
-    let locks = navigator_locks()?;
-
-    // resolved by the grant callback with "did we get the lock"
-    let acquired_resolver: Rc<RefCell<Option<js_sys::Function>>> = Rc::new(RefCell::new(None));
-    let resolver_slot = acquired_resolver.clone();
-    let acquired_signal = Promise::new(&mut move |resolve, _reject| {
-        *resolver_slot.borrow_mut() = Some(resolve);
-    });
-
-    // resolve function of the held promise; filled in on grant, drained by
-    // the guard on release
-    let held_resolve: Rc<RefCell<Option<js_sys::Function>>> = Rc::new(RefCell::new(None));
-    let held_slot = held_resolve.clone();
-
-    let callback = Closure::wrap(Box::new(move |granted: JsValue| -> JsValue {
-        let got_lock = !granted.is_null() && !granted.is_undefined();
-        if let Some(resolve) = acquired_resolver.borrow().as_ref() {
-            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_bool(got_lock));
-        }
-        if got_lock {
-            let held_slot = held_slot.clone();
-            Promise::new(&mut move |resolve, _reject| {
-                *held_slot.borrow_mut() = Some(resolve);
-            })
-            .into()
-        } else {
-            JsValue::NULL
-        }
-    }) as Box<dyn FnMut(JsValue) -> JsValue>);
-
-    let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"ifAvailable".into(), &JsValue::TRUE)?;
-    let request_fn: js_sys::Function =
-        js_sys::Reflect::get(&locks, &"request".into())?.dyn_into()?;
-    let request: Promise = request_fn
-        .call3(
-            &locks,
-            &JsValue::from_str(lock_name),
-            &options,
-            callback.as_ref(),
-        )?
-        .dyn_into()?;
-    // the request promise settles on refusal or after release; don't await
-    // it here — just keep it running.
-    wasm_bindgen_futures::spawn_local(async move {
-        let _ = JsFuture::from(request).await;
-    });
-
-    let acquired = JsFuture::from(acquired_signal).await?;
-    if acquired.as_bool().unwrap_or(false) {
-        Ok(Some(LibraryLockGuard {
-            lock_name: lock_name.to_string(),
-            held_resolve,
-            _callback: callback,
-        }))
-    } else {
-        // the callback has already run (it resolved the acquired signal),
-        // so dropping it here is safe
-        Ok(None)
-    }
-}
-
 /// All project uids whose `lp-project:` lock is currently held — by any
 /// tab, including this one (callers filter their own). Via
 /// `navigator.locks.query()`; absence of the API yields an empty list.
 pub async fn held_project_uids() -> Vec<String> {
-    let Ok(locks) = navigator_locks() else {
-        return Vec::new();
-    };
-    let Ok(query_fn) = js_sys::Reflect::get(&locks, &"query".into())
-        .and_then(|f| f.dyn_into::<js_sys::Function>())
-    else {
-        return Vec::new();
-    };
-    let Ok(promise) = query_fn.call0(&locks).and_then(|p| p.dyn_into::<Promise>()) else {
-        return Vec::new();
-    };
-    let Ok(state) = JsFuture::from(promise).await else {
-        return Vec::new();
-    };
-    let Ok(held) = js_sys::Reflect::get(&state, &"held".into()) else {
-        return Vec::new();
-    };
-
-    let mut uids = Vec::new();
-    for entry in js_sys::Array::from(&held).iter() {
-        let Ok(name) = js_sys::Reflect::get(&entry, &"name".into()) else {
-            continue;
-        };
-        if let Some(name) = name.as_string()
-            && let Some(uid) = LibraryLock::project_uid(&name)
-        {
-            uids.push(uid.to_string());
-        }
-    }
-    uids
-}
-
-fn navigator_locks() -> Result<JsValue, JsValue> {
-    let global = js_sys::global();
-    let navigator = js_sys::Reflect::get(&global, &"navigator".into())?;
-    let locks = js_sys::Reflect::get(&navigator, &"locks".into())?;
-    if locks.is_undefined() || locks.is_null() {
-        return Err(JsValue::from_str("navigator.locks unavailable"));
-    }
-    Ok(locks)
+    held_lock_names(PROJECT_LOCK_PREFIX)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|name| LibraryLock::project_uid(name))
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(test)]

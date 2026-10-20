@@ -1113,6 +1113,7 @@ impl Release {
             commit: COMMIT.into(),
             wire_proto: 36,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },

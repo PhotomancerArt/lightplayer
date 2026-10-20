@@ -18,10 +18,12 @@ Two profile modes per project:
 
 - **`startup`** — project load through the first *compiled* frame. Every
   perf-event window in the trace is recorded: `server-boot`, `project-load`, `shader-compile`,
-  `shader-link`, `frame`. Its `frame` window brackets frames 1–2, and frame 2
-  contains the shader compile (compiles are deferred one frame; see
-  `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`), so this
-  `frame` is a **cold-start** figure.
+  `shader-link`, `frame`. Its `frame` window is frame 1, which contains the
+  shader compile (a shader asks for its compile window as it is created, so
+  the first frame after a load compiles; see
+  `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`, amended
+  2026-10-16), so this `frame` is a **cold-start** figure: the per-LED
+  buffers the first frame allocates plus the compile's transient on top.
 - **`steady-render`** — two warm-up frames, then four captured steady frames.
   Only the `frame` window is recorded (the other windows lie outside the
   capture and would record zeros). This is the **steady-state** figure and the
@@ -221,10 +223,26 @@ board is flashed with — booted whole, run to its first heartbeat, and read fro
 the allocator figures the firmware itself reports over its own link. Since
 OTA M2 (2026-10-04) the C6's shipped image is the **split image**
 (`lp-fw-split`: loader, boot records, core, engine): the ratchet builds it with
-`just fw-esp32c6-split`, direct-loads its loader over its flashed `merged.bin`
+the shipped features and target, as a **figure build** (below), into
+`target/fw-split/figures`, direct-loads its loader over its flashed `merged.bin`
 (`lp-cli emu run --over`, held to a ROM-up boot by
 `lp-emu-esp32c6/tests/split_boot.rs`), and reads symbols from its `p2.elf`;
 `LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO` names an already-built split directory.
+
+**The C6's image is a figure build** (`LP_FIGURE_BUILD=1`,
+`tools/lp-app-version`): stamped with the fixed version `0000000` and
+`LP_BUILD_DIRTY=false`, whatever the tree's state. The version's length
+reaches the boot heap, and `lp-fw-split` stamps it afresh on every build, so
+until 2026-10-10 the re-check CI runs after a re-baseline — on the tree the
+re-baseline had just written to — was stamped `<sha>-dirty-<time>`, read
+~32 B more than the boot it was confirming, and never handed back a patch;
+and a desk's 9-character sha read 8 B off CI's 7
+(`docs/debt/heap-budget-record-churns-on-routine-changes.md`). The emulator
+suite's shipped split image is a figure build too, so the image CI uploads
+for `just fetch-ci-images` is the ratchet's bytes. Product builds never set
+the variable; `target/fw-split/shipped` keeps the tree's real version. Seven
+characters is CI's own short-sha length, so a change to the pin's length moves
+every C6 heap figure.
 
 ```bash
 just heap-budget-check-chips     # the ratchet, both chips
@@ -314,6 +332,16 @@ A mismatch in any of these is a finding, not a re-baseline. Statics growth on
 its own is no longer gated here: it is visible as the stack shrinking, which
 the run prints (`… B above the high-water band`).
 
+**On the C6 the demand is gated elsewhere.** The idle band says nothing about
+what a project needs from the stack (a loaded meteor is three times the idle
+mark), so `lp-cli/tests/emu_stack_peak.rs` loads the deepest catalog projects
+on the shipped split image, edits meteor's shader ten times, and fails unless
+the main stack exceeds every peak by 12 KiB. It runs in `Emulator C6 lp-cli
+(x64)` (`just test-emu-c6-cli-boards`), and it is what sizes `HEAP_MAIN`
+(`docs/adr/2026-09-02-esp32c6-ram-split.md`, 2026-10-16 amendment). The
+classic and the S3 have no such gate yet
+(`docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.md`).
+
 ### Silicon, printed beside it
 
 The record also carries `silicon_reference`: the same figures from a committed
@@ -347,6 +375,50 @@ the two paths' idle heap byte-identical on the C6, and
 application's entry on the classic, so the bootloader adds seconds of wall
 clock and nothing to the answer. The places that boot the whole chain are the
 walks, `scripts/emu/m4-walk.sh` and `scripts/emu/m4-walk-esp32v3.sh`.
+
+## The whole-RAM ledger
+
+The gate above grades the heap and the stack. It does not say where the *rest*
+of a chip's SRAM goes — the radio blobs' code, the statics, the idle windows.
+`scripts/ram-ledger.py` reads that off a linked ELF, for all three chips, in
+under a second, with no build:
+
+```bash
+just fetch-ci-images                                   # CI's own images, no firmware build
+just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
+just ram-ledger target/ci-images/<sha>/esp32v3/fw-esp32v3-shipped.elf --json /tmp/v3.json
+just ram-ledger <any-elf> --chip esp32s3 --top 12      # --chip is detected unless the ELF is odd
+just test-ram-ledger                                   # its self-test (synthetic ELF + a smoke run)
+```
+
+It prints a Markdown ledger whose rows (ROM reserve, cache, code in RAM, radio
+code by blob library, `.data`, `.bss` by crate, each heap region, the stack,
+idle bytes) **sum to the chip's SRAM or the script exits 2** (and exits 3 when
+more than `--max-unknown-pct`, default 1 %, is unknown — an image the map does
+not describe, such as the C6 loader), then the owners
+and top symbols per row and an "attribution" table saying how many bytes are
+named by a sized symbol, inferred from neighbours, held only by their section,
+or **unknown**. `--json` adds every address extent and every symbol over
+`--min-symbol` bytes (default 256) for scripts that census the statics.
+
+What it is and is not:
+
+- It is a **link-time** map. A heap's live bytes and a stack's high-water mark
+  are runtime facts — the ledger gives the region, never the fill.
+- The chip's windows, and the spans the firmware registers by constant at boot
+  (the classic's SRAM1 heap regions, its JIT region), are **hard-coded and
+  cited** in `CHIPS` (`scripts/ram-ledger.py`), because the ELF cannot say them.
+  A section that falls in a window the map says the image does not own is a
+  printed warning, so a drifted map announces itself.
+- The C6's radio-blob symbols are joined to the `lib*.a` archives of the
+  `esp-wifi-sys-esp32c6` version `Cargo.lock` pins (found under the cargo
+  registry; `--blobs DIR` overrides). The join was cross-checked against
+  `rust-nm` on the same archives and matched to the byte.
+- The Xtensa images carry no local labels, so anonymous constants in `.data`
+  show up as "section only" runs with their neighbours named. That is the
+  honest limit of an ELF without a link map.
+- The S3's top 32 KiB of SRAM2 is shown as data cache on the assumption of
+  ESP-IDF's 32 KiB default; the bootloader, not the app ELF, sets it.
 
 ## Ratchet, not ceiling
 

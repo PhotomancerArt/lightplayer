@@ -40,6 +40,19 @@
 //!
 //! Values render in **tabular numerals inside a reserved slot**, because a
 //! panel whose row reflows while you drag a fader is not a control panel.
+//!
+//! **Walk hooks**, on the control wherever a panel draws it (the editor,
+//! the play page, the board card): `data-panel-scope` and
+//! `data-panel-channel` (its identity, panel.md P1) and `data-panel-state`
+//! (`read-default`, `read-following`, `engaged`). A walk reads a control
+//! written in one session as held in the next — the board's own word, since
+//! a fresh session has no local echo.
+//!
+//! **At card size** (`compact`, the connected board card's panel — the
+//! card's five 28 px bars give way to it) the same control lays out
+//! tighter, never as another widget: a fader is one row across the card,
+//! label · fader · value; a palette is a strip across the card; a knob or a
+//! toggle keeps its column with its label and value close under it.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -52,7 +65,7 @@ use lpa_studio_core::{
 
 use crate::app::node::{
     HFaderField, KnobField, PaletteSwatchField, PanelEmit, SlotDetailButton, SlotUnitSuffix,
-    TapeTransport, ToggleField,
+    ToggleField, speed_words,
 };
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -68,15 +81,31 @@ const LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer t
 /// value string and the whole row shifts mid-drag.
 const FADER_CLASS: &str = "tw:grid tw:w-[184px] tw:flex-none tw:gap-1";
 
-/// The Transport's footprint: a whole instrument, so it takes the panel
+/// An instrument's footprint (the Pattern instrument): it takes the panel
 /// row's full width and wraps onto its own line rather than sharing one
-/// with the knobs. `basis-full` is what makes the phone layout work — the
-/// tape needs its width more than any neighbour does.
+/// with the knobs.
 const INSTRUMENT_CLASS: &str = "tw:grid tw:min-w-0 tw:basis-full tw:gap-1.5";
 
 /// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
 /// all occupy the same width and nothing moves during a drag.
 const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:flex-none tw:items-baseline tw:justify-center tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:tabular-nums";
+
+/// A fader at card size: one row across the card — label, fader, value —
+/// so the master fits a strip of the card's height. The label takes at
+/// most 38% of the row and truncates there (its trigger button may not
+/// outgrow the popover wrapper that centres it), so the fader keeps its
+/// reach on a phone's narrow card.
+const COMPACT_FADER_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:grid-cols-[fit-content(38%)_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:[&_button]:max-w-full";
+
+/// A palette at card size: the whole row, label over its strip.
+const COMPACT_STRIP_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:gap-1";
+
+/// A knob or a toggle at card size: an equal share of the row, the label
+/// and value close under the widget, the label truncating to the share.
+const COMPACT_COLUMN_CLASS: &str = "tw:flex tw:min-w-0 tw:flex-1 tw:basis-0 tw:flex-col tw:items-center tw:gap-0.5 tw:[&>span]:max-w-full tw:[&_button]:max-w-full";
+
+/// The value slot at card size sits on its own line box: no leading.
+const COMPACT_READOUT_CLASS: &str = "tw:leading-none";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -90,6 +119,10 @@ pub fn ModulePanelControl(
     /// Play mode renders the same control at a roomier size.
     #[props(default = false)]
     play: bool,
+    /// The board card renders the same control at card size (the module
+    /// doc's "At card size").
+    #[props(default = false)]
+    compact: bool,
     /// Panel gestures (reset). Absent = the control is display-only.
     #[props(default = None)]
     on_panel: Option<EventHandler<PanelGesture>>,
@@ -105,12 +138,13 @@ pub fn ModulePanelControl(
     let aspects = view.detail_aspects(&scope);
     let UiPanelControlView {
         // The channel rides inside `control.panel_target` for dispatch;
-        // the bare name is only the map key upstream.
-        channel: _,
+        // the bare name is the map key upstream, and the walk hook here.
+        channel,
         control,
         state,
         source: _,
     } = view;
+    let state_hook = panel_state_hook(state);
     let engaged = state.engaged();
     let label_class = panel_state_label_class(state);
     let readout_class = panel_state_readout_class(state);
@@ -128,17 +162,24 @@ pub fn ModulePanelControl(
         control.widget,
         UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch
     );
-    // The Transport is wider still: a whole instrument, not a control in a
-    // column. It takes the panel row's full width and wraps below the
-    // narrow controls at phone widths rather than squeezing the tape.
-    let is_instrument = matches!(
-        control.widget,
-        UiPanelWidget::Transport { .. } | UiPanelWidget::PatternPicker { .. }
-    );
+    // The Pattern instrument is wider still: a whole instrument, not a
+    // control in a column. It takes the panel row's full width and wraps
+    // below the narrow controls at phone widths.
+    let is_instrument = matches!(control.widget, UiPanelWidget::PatternPicker { .. });
+    let compact_fader = compact && matches!(control.widget, UiPanelWidget::Fader { .. });
+    // A palette at card size is a strip across the card, not the panel's
+    // fixed footprint.
+    let compact_strip = compact && matches!(control.widget, UiPanelWidget::PaletteSwatch);
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
+    } else if compact_fader {
+        COMPACT_FADER_CLASS
+    } else if compact_strip {
+        COMPACT_STRIP_CLASS
     } else if is_wide {
         FADER_CLASS
+    } else if compact {
+        COMPACT_COLUMN_CLASS
     } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
@@ -146,6 +187,10 @@ pub fn ModulePanelControl(
     };
     let anchor_class = if is_instrument {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1.5"
+    } else if compact_fader {
+        COMPACT_FADER_CLASS
+    } else if compact {
+        "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-0.5"
     } else if is_wide {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
     } else {
@@ -163,7 +208,7 @@ pub fn ModulePanelControl(
             button {
                 class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",
                 r#type: "button",
-                title: "Reset {reset_label} — drop the held value and follow the project again",
+                title: "Reset {reset_label} and let the project control it again",
                 aria_label: "Reset {reset_label}",
                 onclick: move |event| {
                     event.stop_propagation();
@@ -198,6 +243,7 @@ pub fn ModulePanelControl(
                             state,
                             readout_class,
                             label: anchor_label,
+                            compact,
                             on_action,
                         }
                     }
@@ -212,12 +258,18 @@ pub fn ModulePanelControl(
     };
 
     rsx! {
-        div { id: "{anchor_id}", class: column_class,
+        div {
+            id: "{anchor_id}",
+            class: column_class,
+            "data-panel-scope": "{scope}",
+            "data-panel-channel": "{channel}",
+            "data-panel-state": state_hook,
             ModulePanelControlBody {
                 control,
                 state,
                 readout_class,
                 label,
+                compact,
                 on_action,
                 on_panel,
             }
@@ -237,6 +289,9 @@ fn ModulePanelControlBody(
     /// The label element: the interactive trigger in flow, a static copy in
     /// the top-layer visual.
     label: Element,
+    /// At card size: a fader is one row, the value slot has no leading.
+    #[props(default)]
+    compact: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// Panel gestures (reset) for an instrument that carries its own resets
     /// (the Pattern instrument); `None` on the popup's top-layer copy.
@@ -257,8 +312,14 @@ fn ModulePanelControlBody(
     // strips below say WHICH palette; the full summary stays on hover and
     // in the label's detail popup.
     let palette = control.shown_palette();
+    let speed = matches!(control.widget, UiPanelWidget::Speed);
     let shown_value = if phasor {
         format!("{} s", control.shown_display())
+    } else if speed {
+        speed_words(control.live_numeric().unwrap_or(match control.value.kind {
+            UiSlotValueKind::F32(rate) => rate,
+            _ => 1.0,
+        }))
     } else if let Some(config) = &palette {
         format_gradient_chip(config)
     } else {
@@ -273,8 +334,9 @@ fn ModulePanelControlBody(
             .unwrap_or_else(|| control.value.display.clone()),
         None => String::new(),
     };
+    let readout_size = if compact { COMPACT_READOUT_CLASS } else { "" };
     let readout = rsx! {
-        span { class: "{READOUT_CLASS} {readout_class}",
+        span { class: "{READOUT_CLASS} {readout_class} {readout_size}",
             span { title: readout_title, "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
@@ -309,11 +371,7 @@ fn ModulePanelControlBody(
             let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
-            rsx! {
-                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
-                    {label}
-                    {readout}
-                }
+            let fader = rsx! {
                 HFaderField {
                     value,
                     live_value: control.live_numeric(),
@@ -328,6 +386,22 @@ fn ModulePanelControlBody(
                     emit,
                     on_action,
                 }
+            };
+            // At card size the fader is one row: the column's grid places
+            // label, fader and value side by side.
+            if compact {
+                return rsx! {
+                    {label}
+                    {fader}
+                    {readout}
+                };
+            }
+            rsx! {
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                {fader}
             }
         }
         UiPanelWidget::PaletteSwatch => {
@@ -350,19 +424,30 @@ fn ModulePanelControlBody(
                 }
             }
         }
-        // The one GROUPED control (P8): the shared tape instrument, rendered
-        // compactly. It gets no separate readout — the faceplate carries its
-        // own digits, its own ×rate, and its own off-live line — and its
-        // gestures resolve per dimension through `wires` rather than through
-        // the control's single `panel_target`.
-        UiPanelWidget::Transport { transport } => {
+        // The clock's Speed knob: a knob over the rate, its own mapping
+        // (log ¼×–8×, 1× at the top, the octave stops), its value said as a
+        // speed (`2×`).
+        UiPanelWidget::Speed => {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
+                return mismatch(&control.label, &control.value.display);
+            };
             rsx! {
-                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2", {label} }
-                TapeTransport {
-                    transport,
-                    wires: control.wires.clone(),
+                KnobField {
+                    value,
+                    live_value: control.live_numeric(),
+                    min: 0.25,
+                    max: 8.0,
+                    state: control.state.clone(),
+                    bound: following,
+                    engaged,
+                    speed: true,
+                    address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
+                    emit,
                     on_action,
                 }
+                {label}
+                {readout}
             }
         }
         // The playlist's Pattern instrument: the group's legend already
@@ -410,6 +495,16 @@ fn label_visual(label: &str, color_class: &'static str) -> Element {
                 StudioIcon { name: StudioIconName::InfoBare, size: 9 }
             }
         }
+    }
+}
+
+/// The walk hook's name for a panel state (`data-panel-state`): what a walk
+/// reads to tell the board's held control from one it only follows.
+pub(crate) fn panel_state_hook(state: UiPanelControlState) -> &'static str {
+    match state {
+        UiPanelControlState::ReadDefault => "read-default",
+        UiPanelControlState::ReadFollowing => "read-following",
+        UiPanelControlState::Engaged => "engaged",
     }
 }
 
@@ -474,7 +569,6 @@ mod tests {
                 unit: None,
                 state: UiSlotFieldState::editable(),
                 aspects: Vec::new(),
-                wires: Vec::new(),
             },
         )
         .with_state(state, source)

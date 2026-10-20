@@ -166,3 +166,22 @@ Shipped with the amendment:
   input resolve failures as node warning status") — bound-but-broken is
   diagnosable. The two rules meet at the binding's priority
   (`default_fallback` vs authored), the same fact origin derives from.
+
+## Amendment (2026-10-19): brightness on a panel is a knob
+
+Plan `lp2025/2026-10-19-0826-card-panel-pass` (Yona: "I want to try just a
+knob because of space concerns"). The fixture's brightness is drawn as a
+**knob on a panel** — the module panel, the play page, the connected board
+card — and the fixture's own card keeps its **fader**, the face's hero.
+
+This is the one place §1's "the SAME `UiPanelControl` the leaf card
+renders is the one the panel shows" bends, and it bends only the widget:
+the panel's control is the fixture face's own, with its fader re-drawn as a
+knob over the same range and step (`UiFixtureFace::panel_brightness`), on
+the same `(scope, channel)`, address, state and aspects. The derivation is
+still one; nothing about membership, dispatch or panel state can disagree
+between the two. The simpler alternative — a knob on the fixture's card
+too — was not taken, because the fixture card's fader is that card's hero
+(the clock's tape is the same kind of exception, amended the same day in
+`2026-08-07-clock-transport-is-a-panel-instrument.md`).
+

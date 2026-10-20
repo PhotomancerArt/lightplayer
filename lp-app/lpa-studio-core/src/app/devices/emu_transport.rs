@@ -270,7 +270,7 @@ impl DeviceTransport for EmuDeviceTransport {
         // chooser) but a refusal with the way in: an emu is created, and
         // the browser's port chooser has nothing to say about one.
         Box::pin(core::future::ready(Err(
-            "an emu is created from the Devices page, not from the browser's port chooser"
+            "an emu is created from Connect a board (start a board here), not from the browser's port chooser"
                 .to_string(),
         )))
     }
@@ -449,7 +449,7 @@ mod tests {
             Ok(_) => panic!("the chooser has nothing to say about an emu"),
         };
 
-        assert!(error.contains("Devices page"), "{error}");
+        assert!(error.contains("Connect a board"), "{error}");
     }
 
     /// The flash arm fetches the SAME manifest the esptool path would, by

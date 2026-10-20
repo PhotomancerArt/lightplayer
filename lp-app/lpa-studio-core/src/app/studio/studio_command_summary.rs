@@ -78,7 +78,18 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
             ("BluetoothReach".to_string(), format!("{reach:?}"))
         }
         StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
+        // A selection box or a drag sends one per move: the timeline keeps
+        // what they changed, not every one.
+        StudioCommand::Graph(note) => ("Graph".to_string(), format!("{note:?}")),
         StudioCommand::LibraryChanged => ("LibraryChanged".to_string(), String::new()),
+        StudioCommand::BoardHold { from, note } => (
+            format!("BoardHold/{}", variant_of(&bounded_debug(note))),
+            bounded_debug(format_args!("from {from}: {note:?}")),
+        ),
+        StudioCommand::HoldEdge(event) => (
+            format!("HoldEdge/{}", variant_of(&bounded_debug(event))),
+            bounded_debug(event),
+        ),
         StudioCommand::Shutdown => ("Shutdown".to_string(), String::new()),
     };
     Some(summary)
@@ -179,6 +190,21 @@ mod tests {
     #[test]
     fn ticks_and_device_link_events_are_skipped() {
         assert!(summarize_command(&StudioCommand::RefreshTick).is_none());
+    }
+
+    #[test]
+    fn a_hold_note_is_named_by_its_variant_and_says_who_said_it() {
+        let command = StudioCommand::BoardHold {
+            from: crate::TabId::new("tab-a"),
+            note: crate::HoldNote::Gone {
+                key: crate::HoldKey::network(
+                    crate::BoardKey::parse("a0f26287b48c").expect("a mac"),
+                ),
+            },
+        };
+        let (name, detail) = summarize_command(&command).unwrap();
+        assert_eq!(name, "BoardHold/Gone");
+        assert!(detail.starts_with("from tab-a: Gone {"), "{detail}");
     }
 
     #[test]

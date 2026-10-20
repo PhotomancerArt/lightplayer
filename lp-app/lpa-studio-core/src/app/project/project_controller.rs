@@ -84,6 +84,11 @@ pub struct ProjectController {
     /// request (lean-wire P5, ruling B). Cleared by the first explicit focus
     /// (`focus_editor_target`).
     focus_is_automatic: bool,
+    /// The visual products the Graph shows while it is the place (plan
+    /// D11): every render source's on a simulator lens, the selection's on
+    /// a device lens (`GraphController::wanted_pictures`). Probed beside
+    /// what the tree subscribes; empty off the Graph.
+    graph_pictures: BTreeSet<UiProductRef>,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -114,6 +119,9 @@ pub struct ProjectController {
     /// must sweep. Session bookkeeping only: the slot itself is Debug
     /// state and dies with the project either way.
     pulsed_outputs: BTreeSet<lpc_model::NodeId>,
+    /// Fixtures whose `selection` Debug slot the Graph last wrote
+    /// ([`Self::apply_fixture_selection`]), to sweep when it changes.
+    selected_fixtures: BTreeSet<lpc_model::NodeId>,
     /// Passive ticks left at the tightened verdict-chase interval. Set after
     /// an accepted asset-body apply so the node's compile verdict (error or
     /// clean) is pulled promptly instead of waiting a full device cadence;
@@ -455,6 +463,7 @@ impl ProjectController {
             lens_device_features: None,
             lens_transport: None,
             focus_is_automatic: false,
+            graph_pictures: BTreeSet::new(),
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -464,6 +473,7 @@ impl ProjectController {
             edit_buffer: BTreeMap::new(),
             asset_edit_buffer: BTreeMap::new(),
             pulsed_outputs: BTreeSet::new(),
+            selected_fixtures: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
             project_fs_root: None,
@@ -1164,6 +1174,16 @@ impl ProjectController {
     /// Whether the server is saving panel state for this project
     /// (panel.md P11), as of the last runtime read.
     ///
+    /// The lens session's newest composed picture across every output the
+    /// board has published, with the lens's own frame clock
+    /// ([`ProjectSync::frames_seen`]): what the device card draws while the
+    /// editor's session holds the wire (CD8). `None` until a read has
+    /// carried a frame.
+    pub fn lens_published_frame(&self) -> Option<(crate::UiControlProductPreview, u64)> {
+        let sync = self.sync.as_ref()?;
+        Some((sync.composed_published_frame()?, sync.frames_seen()))
+    }
+
     /// The P11 switch's READ path. It rides `ServerRuntimeStatus` on the
     /// ordinary project read Studio makes every refresh rather than a
     /// message of its own, so the toggle converges exactly the way engaged
@@ -1883,7 +1903,7 @@ impl ProjectController {
             .map(|node| node.label().to_string())
             .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string());
         let detail = match entry.body_len() {
-            Some(len) => asset_body_size_display(len),
+            Some(len) => crate::byte_size(len as u64),
             None => "deleted".to_string(),
         };
         let phase = if entry.summary.failed > 0 {
@@ -2370,7 +2390,7 @@ impl ProjectController {
             // promoted record — the clock's three transport leaves — must
             // decorate that leaf's own row. Keyed by first segment alone,
             // all three collapsed onto the single `transport` row and the
-            // grouped control could not tell which dimension was wired.
+            // tape's wires could not tell which dimension was wired.
             let Some(name) = crate::app::project::slot::binding_fact_slot_key(slot) else {
                 continue;
             };
@@ -3155,7 +3175,7 @@ impl ProjectController {
         }
         self.transient_fork_generation += 1;
         Ok(Some(UiNotice::info(
-            "Saved — this project is now in your library",
+            "Saved. This project is in your library now.",
         )))
     }
 
@@ -3682,7 +3702,7 @@ impl ProjectController {
         if local != remote {
             log::error!("library/runtime hash mismatch after save: {local} vs {remote}");
             return Ok(Some(UiNotice::warning(
-                "Saved, but the library copy differs from the running project — please report this",
+                "Saved, but the copy in your library differs from the running project. Please report this.",
             )));
         }
         Ok(None)
@@ -4238,16 +4258,6 @@ impl ProjectController {
                     if let Some(transport) = clock.transport.as_mut() {
                         transport.seconds = *seconds;
                     }
-                    // The grouped panel control carries its own copy of the
-                    // block (it travels onto the module panel without the
-                    // face), so the probe's anchor has to reach it too —
-                    // otherwise the panel's tape would render from 0:00
-                    // while the card's showed the real time (P8 item 4).
-                    for control in &mut clock.controls {
-                        if let crate::UiPanelWidget::Transport { transport } = &mut control.widget {
-                            transport.seconds = *seconds;
-                        }
-                    }
                     (
                         crate::UiTimebaseState::Live,
                         phasors
@@ -4751,29 +4761,11 @@ impl ProjectController {
 
         let controls = self.scoped_panel_controls(graph, scope, children);
 
-        // An INSTRUMENT control (the clock's Transport) gets its own child
-        // group wearing the owning node's name, not a slot in the module's
-        // flat strip — a tape deck between a brightness fader and a hue
-        // knob read as clutter (G2 feedback 2026-08-08). The group carries
-        // NO reset target: a group reset clears a whole scope's writers,
-        // which here is the module's, and the instrument already has
-        // per-dimension clears.
-        let (instruments, controls): (Vec<_>, Vec<_>) = controls.into_iter().partition(|view| {
-            matches!(view.control.widget, crate::UiPanelWidget::Transport { .. })
-        });
-        let mut groups: Vec<crate::UiPanelGroup> = instruments
-            .into_iter()
-            .map(|view| {
-                let node_path = view
-                    .control
-                    .address
-                    .as_ref()
-                    .map(|address| address.node.to_string())
-                    .unwrap_or_default();
-                let label = child_label(children, &node_path).unwrap_or_else(|| "Clock".into());
-                crate::UiPanelGroup::new(label, node_path).with_controls(vec![view])
-            })
-            .collect();
+        // The clock's Speed knob sits in the flat strip with every other
+        // one-channel control: its tape, the instrument that once had a
+        // group of its own here, stays on the clock's card (the card panel
+        // pass, 2026-10-19).
+        let mut groups: Vec<crate::UiPanelGroup> = Vec::new();
         // Presentation recursion (R8): each direct child module's finished
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
@@ -5193,11 +5185,11 @@ impl ProjectController {
 
         let notice = match (export, upgraded, downgraded) {
             (true, true, _) => UiNotice::info(format!(
-                "{folder} is exported — {project} is now a pattern project"
+                "{folder} is exported. {project} is a pattern project now."
             )),
             (true, false, _) => UiNotice::info(format!("{folder} is exported from {project}")),
             (false, _, true) => UiNotice::info(format!(
-                "{folder} is no longer exported — {project} is a general project again"
+                "{folder} is no longer exported. {project} is a general project again."
             )),
             (false, _, false) => UiNotice::info(format!("{folder} is no longer exported")),
         };
@@ -5379,7 +5371,7 @@ impl ProjectController {
             let (state, source) = self.panel_control_state(graph, scope, target);
             controls.push(crate::UiPanelControlView {
                 channel: target.channel.clone(),
-                control: control.clone(),
+                control: control.into_owned(),
                 state,
                 source,
             });
@@ -5467,7 +5459,6 @@ impl ProjectController {
             live_value: None,
             live_gradient: None,
             panel_target: cycle_target,
-            wires: Vec::new(),
             unit: None,
             state: crate::UiSlotFieldState::editable(),
             aspects: vec![
@@ -5974,6 +5965,7 @@ impl ProjectController {
         // per pull, so over a device wire it follows focus like every other
         // node product (see `always_live_products`).
         product_refs.extend(self.always_live_products());
+        product_refs.extend(self.graph_pictures.iter().copied());
         product_refs.into_iter().collect()
     }
 
@@ -6637,6 +6629,63 @@ impl ProjectController {
         Ok(run)
     }
 
+    /// Write each fixture's `selection` Debug slot (the mapping lab's
+    /// fixture overrides on the board, plan M4b) and clear the ones the last
+    /// write set and this one doesn't. Like [`Self::apply_patch_pulse`]: one
+    /// selection, never a trail; ordinary Debug-slot overlay edits, so they
+    /// reach whatever runs the engine and are never saved.
+    pub(crate) async fn apply_fixture_selection(
+        &mut self,
+        server: &mut StudioServerClient,
+        writes: Vec<(NodeId, String)>,
+    ) -> Result<(), UiError> {
+        let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
+        let stale: Vec<NodeId> = self
+            .selected_fixtures
+            .iter()
+            .filter(|node| !written.contains(node))
+            .copied()
+            .collect();
+        for node in stale {
+            if let Some(address) = self.fixture_selection_address(node) {
+                self.apply_slot_edit(server, SlotEditOp::Clear { address })
+                    .await?;
+            }
+        }
+        for (node, text) in writes {
+            if let Some(address) = self.fixture_selection_address(node) {
+                self.apply_slot_edit(
+                    server,
+                    SlotEditOp::SetValue {
+                        address,
+                        value: LpValue::String(text),
+                    },
+                )
+                .await?;
+            }
+        }
+        self.selected_fixtures = written;
+        Ok(())
+    }
+
+    /// Whether a fixture's firmware has the `selection` Debug slot (the
+    /// board said so in its shapes); a board that doesn't shows the
+    /// selection through the outputs' `highlight` instead.
+    pub(crate) fn graph_fixture_has_selection(&self, node: NodeId) -> bool {
+        self.node_by_runtime_id(node)
+            .is_some_and(|n| n.has_slot_root_field("selection"))
+    }
+
+    /// The `selection` Debug slot's address on one fixture node.
+    fn fixture_selection_address(&self, node: NodeId) -> Option<ProjectSlotAddress> {
+        let controller = self.node_by_runtime_id(node)?;
+        Some(ProjectSlotAddress::new(
+            controller.address().clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("selection").ok()?,
+        ))
+    }
+
     /// The `highlight` Debug slot's address on one output node, when the
     /// node is still in the tree.
     fn output_highlight_address(&self, node: NodeId) -> Option<ProjectSlotAddress> {
@@ -6961,9 +7010,9 @@ impl ProjectController {
         let changes = &commit.result.artifact_changes;
         let written = changes.added.len() + changes.changed.len() + changes.removed.len();
         let notice = if written == 0 {
-            UiNotice::info("Save found no persisted edits to write")
+            UiNotice::info("Nothing to save")
         } else {
-            UiNotice::info(format!("Saved {written} project file(s)"))
+            UiNotice::info("Saved")
         };
         let mut notices = UiNotices::new().with_notice(notice);
         let mut pulled = true;
@@ -6976,7 +7025,7 @@ impl ProjectController {
                     pulled = false;
                     log::warn!("save-as-pull failed (will retry on next save): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
-                        "Saved to the running project, but not yet to your library — will retry on the next save",
+                        "Saved to the running project, but not to your library yet. Studio will try again on the next save.",
                     ));
                 }
             }
@@ -7008,7 +7057,7 @@ impl ProjectController {
                 Err(e) => {
                     log::warn!("fork-at-save failed (session stays transient): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
-                        "Saved in this session, but couldn't add the project to your library — will retry on the next save",
+                        "Saved in this session, but couldn't add the project to your library. Studio will try again on the next save.",
                     ));
                 }
             }
@@ -7040,7 +7089,7 @@ impl ProjectController {
             .await?;
         let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
         let notices = if rejections.is_empty() {
-            UiNotices::new().with_notice(UiNotice::info("All pending edits reverted"))
+            UiNotices::new().with_notice(UiNotice::info("All unsaved changes reverted"))
         } else {
             rejection_notices(&rejections)
         };
@@ -7072,7 +7121,7 @@ impl ProjectController {
             .collect();
         if addresses.is_empty() {
             return Ok(ProjectEditRun::notice(UiNotice::info(format!(
-                "No pending edits under {node}"
+                "No unsaved changes in {node}"
             ))));
         }
 
@@ -7099,7 +7148,7 @@ impl ProjectController {
                 }
                 Err(reason) => {
                     notices = notices.with_notice(UiNotice::warning(format!(
-                        "Revert on {} could not reach the server overlay: {reason}",
+                        "Couldn't revert {}: {reason}",
                         address.path
                     )));
                 }
@@ -7133,7 +7182,7 @@ impl ProjectController {
         let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
         notices = if rejections.is_empty() {
             notices.with_notice(UiNotice::info(format!(
-                "Reverted {reverted} pending edit(s) under {node}"
+                "Reverted {reverted} change(s) in {node}"
             )))
         } else {
             rejections.iter().fold(notices, |notices, rejection| {
@@ -7224,7 +7273,7 @@ impl ProjectController {
                 }
                 Err(reason) => {
                     notices = notices.with_notice(UiNotice::warning(format!(
-                        "Clear on {} could not reach the server overlay: {reason}",
+                        "Couldn't clear {}: {reason}",
                         address.path
                     )));
                 }
@@ -7445,9 +7494,7 @@ impl ProjectController {
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
         match outcome.response {
-            WireCreateNodeResponse::Created {
-                artifact_changes, ..
-            } => {
+            WireCreateNodeResponse::Created { .. } => {
                 // Focus resolves once the created node's tree entry lands in
                 // an applied view (usually the refresh right below).
                 self.pending_focus = Some(PendingNodeFocus {
@@ -7472,10 +7519,8 @@ impl ProjectController {
                         log::warn!("post-create inventory read failed: {error:?}");
                     }
                 }
-                let mut notices = UiNotices::new().with_notice(UiNotice::info(format!(
-                    "Added {name} ({} file(s) written)",
-                    artifact_changes.added.len()
-                )));
+                let mut notices =
+                    UiNotices::new().with_notice(UiNotice::info(format!("Added {name}")));
                 // Creation committed files — pull them into the library so it
                 // lands as a Saved event (reload-safe). Same failure posture
                 // as save: the runtime already committed fine.
@@ -7485,7 +7530,7 @@ impl ProjectController {
                     Err(error) => {
                         log::warn!("create save-pull failed (will retry on next save): {error:?}");
                         notices = notices.with_notice(UiNotice::warning(
-                            "Added to the running project, but not yet to your library — will sync on the next save",
+                            "Added to the running project, but not to your library yet. Studio will try again on the next save.",
                         ));
                     }
                 }
@@ -8186,7 +8231,7 @@ impl ProjectController {
             Ok(artifact) => artifact,
             Err(reason) => {
                 return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "Revert on {} could not reach the server overlay: {reason}",
+                    "Couldn't revert {}: {reason}",
                     address.path
                 ))));
             }
@@ -8327,7 +8372,8 @@ impl ProjectController {
             Ok(artifact) => artifact,
             Err(reason) => {
                 return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "{verb} on {} could not reach the server overlay: {reason}",
+                    "Couldn't {} {}: {reason}",
+                    verb.to_lowercase(),
                     address.path
                 ))));
             }
@@ -9069,8 +9115,8 @@ impl ProjectController {
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
             let reason = format!(
-                "asset too large to send (limit {} KB)",
-                MAX_ASSET_BODY_BYTES / 1024
+                "asset too large to send (limit {})",
+                crate::byte_size(MAX_ASSET_BODY_BYTES as u64)
             );
             let notice = format!(
                 "Edit on {} was not sent: {reason}",
@@ -9299,6 +9345,94 @@ impl ProjectController {
             .map(|bytes| UiAssetContent::from_bytes(bytes, false, revision))
     }
 
+    /// The open project's revisions, for the Graph (`app/graph`): `None`
+    /// with no project synced.
+    pub(crate) fn graph_files_key(&self) -> Option<crate::app::graph::GraphFilesKey> {
+        let sync = self.sync.as_ref()?;
+        Some(crate::app::graph::GraphFilesKey {
+            root: self
+                .project_fs_root
+                .as_ref()
+                .map(|root| root.as_str().to_string())
+                .unwrap_or_default(),
+            revision: self.snapshot().sync.map(|sync| sync.revision),
+            overlay: sync.overlay_revision().0,
+            edits: self.edit_seq(),
+        })
+    }
+
+    /// The frame an output node last published, for the Graph's colours.
+    pub(crate) fn graph_output_frame(
+        &self,
+        node: NodeId,
+    ) -> Option<&crate::UiControlProductPreview> {
+        self.sync.as_ref()?.output_frame(node)
+    }
+
+    /// Ask for the visual products the Graph shows (plan D11), in place of
+    /// what it asked for before.
+    pub(crate) fn set_graph_pictures(&mut self, products: BTreeSet<UiProductRef>) {
+        self.graph_pictures = products;
+    }
+
+    /// Whether the lens runs over a device wire, where the Graph asks for
+    /// a picture only for what is selected (plan D11).
+    pub(crate) fn graph_lens_is_device(&self) -> bool {
+        self.lens_is_device()
+    }
+
+    /// The visual products a node publishes (a shader's picture).
+    pub(crate) fn graph_visual_products(&self, node: NodeId) -> Vec<UiProductRef> {
+        let Some(n) = self.node_by_runtime_id(node) else {
+            return Vec::new();
+        };
+        let mut products = Vec::new();
+        n.collect_produced_product_refs(&mut products);
+        products.retain(|p| matches!(p, UiProductRef::Visual { .. }));
+        products
+    }
+
+    /// The latest picture of a visual product, when the lens has one:
+    /// width, height and its `Srgb8` bytes.
+    pub(crate) fn graph_picture(&self, product: &UiProductRef) -> Option<(u32, u32, Rc<[u8]>)> {
+        match self.sync.as_ref()?.product_preview(product)? {
+            crate::UiProductPreview::VisualSrgb8 {
+                width,
+                height,
+                bytes,
+                ..
+            } => Some((*width, *height, bytes.clone())),
+            _ => None,
+        }
+    }
+
+    /// The revision of a visual product's latest picture, to know when the
+    /// Graph's frame is stale.
+    pub(crate) fn graph_picture_revision(&self, product: &UiProductRef) -> Option<i64> {
+        match self.sync.as_ref()?.product_preview(product)? {
+            crate::UiProductPreview::VisualSrgb8 { revision, .. } => Some(*revision),
+            _ => None,
+        }
+    }
+
+    /// How many engine frames the lens has seen, `None` with no project.
+    pub(crate) fn graph_frames_seen(&self) -> Option<u64> {
+        Some(self.sync.as_ref()?.frames_seen())
+    }
+
+    /// A node's tree path, as `editor.json` keys it.
+    pub(crate) fn graph_node_address(&self, node: NodeId) -> Option<String> {
+        Some(self.node_by_runtime_id(node)?.address().to_string())
+    }
+
+    /// The node whose definition lives in `artifact`.
+    pub(crate) fn graph_node_for_def(&self, artifact: &ArtifactLocation) -> Option<NodeId> {
+        self.def_artifacts
+            .iter()
+            .find(|(_, at)| *at == artifact)
+            .map(|(node, _)| *node)
+    }
+
     fn allocate_mutation_cmd_id(&mut self) -> MutationCmdId {
         let id = MutationCmdId::new(self.next_mutation_cmd_id);
         self.next_mutation_cmd_id += 1;
@@ -9370,7 +9504,7 @@ fn asset_extension(source_path: &str) -> String {
 fn attach_unavailable_notice(attach: &UiAttachTarget) -> UiNotice {
     match attach {
         UiAttachTarget::ProjectRoot => {
-            UiNotice::warning("Cannot add a node before the project tree has synced")
+            UiNotice::warning("Can't add a node until the project has loaded")
         }
         UiAttachTarget::Playlist { node } => UiNotice::warning(format!(
             "Cannot add to {node}: the playlist is not in the synced project, or its \
@@ -9581,22 +9715,39 @@ fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc
 /// through nested modules too — a leaf deep inside an embedded module can
 /// consume a channel that resolves in an OUTER scope (R5), and that control
 /// belongs on the outer module's panel.
-fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPanelControl> {
+fn subtree_panel_controls(
+    children: &[crate::UiNodeChild],
+) -> Vec<std::borrow::Cow<'_, crate::UiPanelControl>> {
+    use std::borrow::Cow;
+
     fn face_controls<'a>(
         face: Option<&'a crate::UiNodeFace>,
-        out: &mut Vec<&'a crate::UiPanelControl>,
+        out: &mut Vec<Cow<'a, crate::UiPanelControl>>,
     ) {
         match face {
-            Some(crate::UiNodeFace::Shader(shader)) => out.extend(shader.controls.iter()),
-            Some(crate::UiNodeFace::Fixture(fixture)) => out.push(&fixture.brightness),
-            Some(crate::UiNodeFace::Controls(group)) => {
-                out.extend(group.controls.iter().map(|view| &view.control));
+            Some(crate::UiNodeFace::Shader(shader)) => {
+                out.extend(shader.controls.iter().map(Cow::Borrowed));
             }
-            // The clock contributes at most ONE control: the grouped
-            // Transport (P8). Its phasor listing stays read-only (D10) —
-            // the one editable period lives on the consuming shader's knob,
-            // never here.
-            Some(crate::UiNodeFace::Clock(clock)) => out.extend(clock.controls.iter()),
+            // The fixture's brightness is a knob on a panel; its own card
+            // keeps the fader (the card panel pass, 2026-10-19).
+            Some(crate::UiNodeFace::Fixture(fixture)) => {
+                out.push(Cow::Owned(fixture.panel_brightness()));
+            }
+            Some(crate::UiNodeFace::Controls(group)) => {
+                out.extend(
+                    group
+                        .controls
+                        .iter()
+                        .map(|view| Cow::Borrowed(&view.control)),
+                );
+            }
+            // The clock contributes at most ONE control: the rate's Speed
+            // knob. Its phasor listing stays read-only (D10) — the one
+            // editable period lives on the consuming shader's knob, never
+            // here.
+            Some(crate::UiNodeFace::Clock(clock)) => {
+                out.extend(clock.controls.iter().map(Cow::Borrowed));
+            }
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
             // not controls; an output face carries wires, not panel widgets.
@@ -9608,7 +9759,7 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             | None => {}
         }
     }
-    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<&'a crate::UiPanelControl>) {
+    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<Cow<'a, crate::UiPanelControl>>) {
         for child in children {
             face_controls(child.face.as_ref(), out);
             walk(&child.children, out);
@@ -9617,22 +9768,6 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     let mut out = Vec::new();
     walk(children, &mut out);
     out
-}
-
-/// The display label of the subtree card at `node_path` (`UiNodeChild::
-/// detail` is the node's path string). Same walk shape as
-/// [`subtree_panel_controls`] — an instrument control found by that walk
-/// always has its owning card in the same subtree.
-fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<String> {
-    for child in children {
-        if child.detail == node_path {
-            return Some(child.label.clone());
-        }
-        if let Some(label) = child_label(&child.children, node_path) {
-            return Some(label);
-        }
-    }
-    None
 }
 
 /// The "unresolved" detail a channel row shows: the engine's error text, or
@@ -9998,15 +10133,6 @@ fn asset_edit_keys(
             .map(|node| (Some(node.clone()), artifact.clone()))
             .collect(),
         None => vec![(None, artifact.clone())],
-    }
-}
-
-/// Human-readable byte size for an asset body row ("824 B", "3.2 KB").
-fn asset_body_size_display(len: usize) -> String {
-    if len < 1024 {
-        format!("{len} B")
-    } else {
-        format!("{:.1} KB", len as f64 / 1024.0)
     }
 }
 
@@ -10514,7 +10640,7 @@ fn project_editor_stats(
         }
         stats.push(UiMetric::new("Buffers", runtime.runtime_buffer_count));
         if let Some(free_bytes) = runtime.free_bytes {
-            stats.push(UiMetric::new("Memory free", format_bytes(free_bytes)));
+            stats.push(UiMetric::new("Memory free", crate::byte_size(free_bytes)));
         }
     }
     stats
@@ -10526,14 +10652,6 @@ fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
         ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 {
-        format!("{} KB", bytes / 1024)
-    } else {
-        format!("{bytes} B")
     }
 }
 
@@ -11159,7 +11277,7 @@ mod tests {
         let error = project
             .migrate_package_on_open(&mut handle, 2.0)
             .expect_err("below the floor");
-        assert!(error.message().contains("Format 3"), "{error}");
+        assert!(error.message().contains("Format too old (3)"), "{error}");
         assert_eq!(
             handle.history.head(),
             before,
@@ -11172,7 +11290,7 @@ mod tests {
             panic!("expected the failed state, got {:?}", project.state);
         };
         assert!(
-            issue.message.contains("Format 3 — too old for this Studio"),
+            issue.message.contains("Format too old (3)"),
             "{}",
             issue.message
         );
@@ -14313,7 +14431,7 @@ mod tests {
         assert_eq!(products[0].tracking, UiProductTrackingState::Paused);
         assert_eq!(
             products[0].preview,
-            UiProductPreview::VisualSrgb8 {
+            crate::UiProductPreview::VisualSrgb8 {
                 width: 1,
                 height: 2,
                 revision: 8,
@@ -16653,7 +16771,7 @@ mod tests {
                 .action
                 .meta()
                 .summary
-                .contains("revert from the save panel"),
+                .contains("restore it from Changes"),
             "delete carries the composed pre-flight as its summary"
         );
         assert!(
@@ -17462,7 +17580,7 @@ mod tests {
         assert!(
             run.notices.notices[0]
                 .message
-                .contains("Reverted 2 pending edit(s)")
+                .contains("Reverted 2 change(s)")
         );
     }
 
@@ -17488,7 +17606,7 @@ mod tests {
         assert!(
             run.notices.notices[0]
                 .message
-                .contains("No pending edits under")
+                .contains("No unsaved changes in")
         );
     }
 
@@ -18593,7 +18711,10 @@ mod tests {
         let run = block_on_ready(project.save_overlay(&mut client)).unwrap();
 
         assert_eq!(run.notices.notices.len(), 1);
-        assert!(run.notices.notices[0].message.contains("Saved 1"));
+        assert_eq!(
+            run.notices.notices[0].message, "Saved",
+            "one file was written"
+        );
         assert_eq!(
             sent.borrow().len(),
             2,

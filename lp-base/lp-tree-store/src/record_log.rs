@@ -12,9 +12,9 @@ use alloc::vec::Vec;
 use crate::flash::Flash;
 use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
-use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader, encode_header};
+use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader, encode_header_by};
 use crate::record_kind::{ChunkCodec, RecordKind};
-use crate::sector_header::{HeadKind, KILLED_SECTOR_HEADER, SECTOR_HEADER_LEN, SectorHeader};
+use crate::sector_header::{HeadKind, KILL_SPANS, SECTOR_HEADER_LEN, SectorHeader, reads_killed};
 use crate::sector_table::{ERASED, NEEDS_ERASE, SectorTable};
 use crate::store_error::StoreError;
 
@@ -23,6 +23,7 @@ use crate::store_error::StoreError;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LogCounters {
     pub bytes_read: u64,
+    pub read_calls: u64,
     pub records_written: u64,
     pub record_bytes_written: u64,
     pub sectors_opened: u64,
@@ -92,8 +93,35 @@ impl<F: Flash> RecordLog<F> {
         stat!(self.largest_buffer = self.largest_buffer.max(_bytes));
     }
 
+    /// Whether `payload` belongs to the header bytes `raw`, by the flash's
+    /// CRC engine.
+    pub fn crc_ok(&self, raw: &[u8; RECORD_HEADER_LEN as usize], payload: &[u8]) -> bool {
+        RecordHeader::crc_ok_by(raw, payload, &|c, b| self.flash.crc32(c, b))
+    }
+
+    /// `len` bytes at `addr`, read as **one** read of the word-aligned span
+    /// around them into a word-aligned buffer (at most 6 bytes more): a part
+    /// that only takes word-aligned work (the C6's, through
+    /// `fw-esp32-common`'s `AlignedNorFlash`) takes it in one call instead of
+    /// one per bounce buffer, and a call costs the C6 more than a few hundred
+    /// bytes do. Never past the sector: sectors are whole words.
+    pub fn read_vec(&mut self, addr: u32, len: usize) -> R<Vec<u8>, F> {
+        let start = addr & !3;
+        let lead = (addr - start) as usize;
+        let span = (lead + len).next_multiple_of(4);
+        let mut v = vec![0u8; span + 3];
+        let skip = v.as_ptr().align_offset(4).min(3);
+        self.read(start, &mut v[skip..skip + span])?;
+        v.copy_within(skip + lead..skip + lead + len, 0);
+        v.truncate(len);
+        Ok(v)
+    }
+
     pub fn read(&mut self, addr: u32, buf: &mut [u8]) -> R<(), F> {
-        stat!(self.counters.bytes_read += buf.len() as u64);
+        stat!(
+            self.counters.bytes_read += buf.len() as u64;
+            self.counters.read_calls += 1;
+        );
         self.flash.read(addr, buf).map_err(StoreError::Flash)
     }
 
@@ -122,21 +150,40 @@ impl<F: Flash> RecordLog<F> {
         if h.id != id {
             return Err(StoreError::Corrupt("record id"));
         }
-        let mut payload = vec![0u8; usize::from(h.len)];
-        self.note(payload.len());
-        self.read(
+        let payload = self.read_vec(
             self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN),
-            &mut payload,
+            usize::from(h.len),
         )?;
-        if !RecordHeader::crc_ok(&raw, &payload) {
+        self.note(payload.capacity());
+        if !self.crc_ok(&raw, &payload) {
             return Err(StoreError::Corrupt("record CRC"));
         }
         Ok((h, payload))
     }
 
+    /// The payload of the record at `loc` whose header bytes `raw` were read
+    /// there, checked against its CRC (one read: the header is not read
+    /// again).
+    pub fn read_payload(
+        &mut self,
+        loc: RecordLoc,
+        raw: &[u8; RECORD_HEADER_LEN as usize],
+    ) -> R<Vec<u8>, F> {
+        let len = u16::from_le_bytes([raw[2], raw[3]]);
+        let payload = self.read_vec(
+            self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN),
+            usize::from(len),
+        )?;
+        self.note(payload.capacity());
+        if !self.crc_ok(raw, &payload) {
+            return Err(StoreError::Corrupt("record CRC"));
+        }
+        Ok(payload)
+    }
+
     /// The first `buf.len()` payload bytes at `loc`, unchecked (a deflated
-    /// chunk's logical length; the CRC was checked when it was scanned or
-    /// written).
+    /// chunk's logical length: mount reads no blob whole, so a damaged
+    /// chunk is found when its bytes are read, not here).
     pub fn read_payload_prefix(&mut self, loc: RecordLoc, buf: &mut [u8]) -> R<(), F> {
         self.read(self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN), buf)
     }
@@ -178,7 +225,8 @@ impl<F: Flash> RecordLog<F> {
         id: ObjectId,
         parts: &[&[u8]],
     ) -> R<RecordLoc, F> {
-        let header = encode_header(rkind, codec, id, parts);
+        let flash = &self.flash;
+        let header = encode_header_by(rkind, codec, id, parts, &|c, b| flash.crc32(c, b));
         let total = RECORD_HEADER_LEN + parts.iter().map(|p| p.len() as u32).sum::<u32>();
         if total > self.sector_capacity() {
             return Err(StoreError::TooLarge);
@@ -245,9 +293,11 @@ impl<F: Flash> RecordLog<F> {
             // reads back: a torn or worn header never shows the magic in
             // front of a wrong version (FORMAT.md "Sector": a reader refuses
             // the magic + a newer version).
-            self.program(addr + 4, &bytes[4..])?;
-            let mut ok = self.verify(addr + 4, &bytes[4..], &[])?;
-            if ok {
+            // (The `MagicFirst` mutant programs and verifies it whole.)
+            let first = if mutant!(MagicFirst) { 0 } else { 4 };
+            self.program(addr + first, &bytes[first as usize..])?;
+            let mut ok = self.verify(addr + first, &bytes[first as usize..], &[])?;
+            if ok && first == 4 {
                 self.program(addr, &bytes[..4])?;
                 ok = self.verify(addr, &bytes, &[])?;
             }
@@ -259,6 +309,7 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.end[pick as usize] = SECTOR_HEADER_LEN as u16;
             self.sectors.live[pick as usize] = 0;
             self.sectors.seq[pick as usize] = header.seq;
+            self.sectors.set_kind(pick, kind);
             self.heads[kind.index()] = Some(pick);
             stat!(self.counters.sectors_opened += 1);
             return Ok(pick);
@@ -271,19 +322,56 @@ impl<F: Flash> RecordLog<F> {
         self.index.remove_sector(s);
         self.sectors.end[s as usize] = NEEDS_ERASE;
         self.sectors.live[s as usize] = 0;
-        let addr = self.addr(s, 0);
-        self.program(addr, &KILLED_SECTOR_HEADER)?;
+        if !mutant!(SkipKill) {
+            self.kill_header(s)?;
+        }
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
         stat!(self.counters.erases += 1);
         let c = &mut self.sectors.erase_count[s as usize];
         *c = c.wrapping_add(1);
-        if !self.reads_erased(s, 0)? {
+        if !mutant!(OpenWithoutReadBack) && !self.reads_erased(s, 0)? {
             stat!(self.counters.verify_failures += 1);
             self.retire(s);
             return Ok(false);
         }
         self.sectors.end[s as usize] = ERASED;
         Ok(true)
+    }
+
+    /// Program `s`'s header magic, then its CRC, to zeros (FORMAT.md
+    /// "Writing and killing"): from then on it is untrusted on every read,
+    /// whatever the sector holds, and its erase count still reads. Program
+    /// only clears bits, so this also finishes a kill a power cut left weak.
+    pub fn kill_header(&mut self, s: u32) -> R<(), F> {
+        for (from, to) in KILL_SPANS {
+            self.program(self.addr(s, from), &[0u8; 4][..(to - from) as usize])?;
+        }
+        Ok(())
+    }
+
+    /// Whether `s`'s header reads killed (magic and CRC zero).
+    pub fn header_killed(&mut self, s: u32) -> R<bool, F> {
+        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+        self.read(self.addr(s, 0), &mut h)?;
+        Ok(reads_killed(&h))
+    }
+
+    /// Stop trusting a sector that holds no live record (nothing indexed in
+    /// it): kill its header, so a mount reads 24 bytes of it instead of its
+    /// records. It stays free and is erased when it is opened, as it would
+    /// have been.
+    pub fn forget_sector(&mut self, s: u32) -> R<(), F> {
+        self.index.remove_sector(s);
+        self.sectors.end[s as usize] = NEEDS_ERASE;
+        self.sectors.live[s as usize] = 0;
+        self.kill_header(s)
+    }
+
+    /// Whether `s`'s header reads `want`.
+    pub fn header_reads(&mut self, s: u32, want: u8) -> R<bool, F> {
+        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+        self.read(self.addr(s, 0), &mut h)?;
+        Ok(h.iter().all(|&b| b == want))
     }
 
     /// Never use `s` again: it keeps whatever records it holds (readable,
@@ -316,12 +404,34 @@ impl<F: Flash> RecordLog<F> {
         Ok(true)
     }
 
+    /// Program `first ++ parts…` at `addr` again — bytes that already read
+    /// back so, CRC-checked — and read them back. Program only clears bits,
+    /// so this changes no bit that reads 1 and finishes a clear a torn
+    /// program left weak: the bytes then read as they did on every read
+    /// (`record_scan.rs`, "settling a head's tail").
+    pub fn reprogram(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+        self.program(addr, first)?;
+        let mut a = addr + first.len() as u32;
+        for p in parts {
+            self.program(a, p)?;
+            a += p.len() as u32;
+        }
+        self.verify(addr, first, parts)
+    }
+
+    /// Program the record header at `offset` of `s` — one that did not
+    /// check — to zeros: it then fails to parse on every read, so a torn
+    /// record that read bad once can never read whole later.
+    pub fn kill_record(&mut self, s: u32, offset: u32) -> R<(), F> {
+        self.program(self.addr(s, offset), &[0u8; RECORD_HEADER_LEN as usize])
+    }
+
     fn program(&mut self, addr: u32, data: &[u8]) -> R<(), F> {
         self.flash.program(addr, data).map_err(StoreError::Flash)
     }
 
     /// Whether flash at `addr` reads `first ++ parts…`.
-    fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+    pub fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
         let mut buf = [0u8; 64];
         let mut a = addr;
         for p in core::iter::once(first).chain(parts.iter().copied()) {

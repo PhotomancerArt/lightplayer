@@ -50,6 +50,11 @@ impl Candidate for MemCandidate {
     }
 
     fn format(&self, flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
+        // Every slot erased: an older blob with a higher sequence must not
+        // outlive a format (the mount fuzz formats over arbitrary images).
+        for s in 0..cfg.sectors {
+            flash.erase_sector(s).map_err(flash_err)?;
+        }
         let mut store = MemStore {
             flash: flash.clone(),
             slots: self.slots(cfg),

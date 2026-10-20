@@ -4,6 +4,8 @@
 //!   lp-fw-split reach <elf> <map> --emit-ld <engine.x>
 //!   lp-fw-split verify <elf> <map>
 //!   lp-fw-split headroom <out>/split.json [--margin 65536]
+//!   lp-fw-split segments <core.bin>...
+//!   lp-fw-split bootloader <out>   (rebuild only our second stage into a build)
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -32,9 +34,15 @@ enum Command {
         /// fw-esp32c6 features (its defaults are always on).
         #[arg(long, default_value = "esp32c6,server")]
         features: String,
-        /// A bootloader to use instead of espflash 3.3.0's bundled one.
+        /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries
+        /// (default: the esp32c6-4mb build def's IDF bootloader,
+        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin).
         #[arg(long)]
         bootloader: Option<PathBuf>,
+        /// The second stage `merged.bin` boots through: `lightplayer` (our
+        /// own, the default) or `idf`. Both doors' images are always written.
+        #[arg(long, default_value = "lightplayer")]
+        door: lp_fw_split::Door,
         /// The partition table (default: lp-fw/fw-esp32c6/partitions.csv).
         #[arg(long)]
         partitions: Option<PathBuf>,
@@ -64,8 +72,24 @@ enum Command {
         #[arg(long)]
         emit_ld: PathBuf,
     },
+    /// Rebuild our second stage (the loader's bootloader flavour) into an
+    /// existing build: `bootloader.bin`, `merged-lp.bin`, and `merged.bin`
+    /// when that build's door is ours. Nothing else is relinked.
+    Bootloader {
+        /// A build's output directory.
+        out: PathBuf,
+        /// The repository root (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
     /// Check one (pass-2) link: no core section in the engine region.
     Verify { elf: PathBuf, map: PathBuf },
+    /// List core images' segments and fail when the loader cannot place one
+    /// (an address-0 padding segment, or any outside the core's flash and RAM).
+    Segments {
+        #[arg(required = true)]
+        images: Vec<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -85,18 +109,26 @@ fn run(command: Command) -> Result<bool> {
             out,
             features,
             bootloader,
+            door,
             partitions,
             repo,
             target,
         } => {
             let mut opts = BuildOptions::new(repo, out);
             opts.features = features;
-            opts.bootloader = bootloader;
+            if let Some(b) = bootloader {
+                opts.bootloader = Some(b);
+            }
+            opts.door = door;
             opts.target = target;
             if let Some(p) = partitions {
                 opts.partitions = p;
             }
             lp_fw_split::build(&opts)?;
+            Ok(true)
+        }
+        Command::Bootloader { out, repo } => {
+            lp_fw_split::split_build::rebuild_bootloader(&repo, &out)?;
             Ok(true)
         }
         Command::Reach { elf, map, emit_ld } => {
@@ -142,6 +174,23 @@ fn run(command: Command) -> Result<bool> {
                 return Ok(false);
             }
             Ok(true)
+        }
+        Command::Segments { images } => {
+            let mut ok = true;
+            for path in images {
+                let segs = lp_fw_split::core_segments::segments(&std::fs::read(&path)?)?;
+                let refused = segs.iter().filter(|s| s.placement().is_err()).count();
+                println!(
+                    "{}: {} segments, {refused} the loader cannot place",
+                    path.display(),
+                    segs.len()
+                );
+                for s in &segs {
+                    println!("{}", s.line());
+                }
+                ok &= refused == 0;
+            }
+            Ok(ok)
         }
         Command::Verify { elf, map } => {
             let v = lp_fw_split::verify(&elf, &map)?;

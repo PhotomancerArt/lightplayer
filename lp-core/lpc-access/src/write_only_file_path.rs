@@ -117,6 +117,24 @@ mod tests {
         assert!(is_write_only_file_path("/.LP/Network.JSON"));
     }
 
+    /// The tree store reserves `/.lp/snapshots/` for snapshots of a
+    /// project (`lp_tree_store::SNAPSHOT_DIR`, FORMAT.md "The snapshot
+    /// namespace"). A snapshot never takes a write-only file, and should a
+    /// copy of one ever sit there, it is still write-only: the predicate
+    /// matches the last two components wherever they are.
+    #[test]
+    fn a_copy_under_the_snapshot_namespace_is_still_write_only() {
+        assert!(is_write_only_file_path(
+            "/.lp/snapshots/choker/2026-10-16/.lp/access.json"
+        ));
+        assert!(is_write_only_file_path(
+            "/.lp/snapshots/choker/2026-10-16/.lp/network.json"
+        ));
+        assert!(!is_write_only_file_path(
+            "/.lp/snapshots/choker/2026-10-16/.lp/panel.json"
+        ));
+    }
+
     #[test]
     fn neighbours_are_not_write_only_files() {
         assert!(!is_write_only_file_path("/.lp/state.json"));

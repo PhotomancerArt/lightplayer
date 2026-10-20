@@ -918,7 +918,7 @@ async function createCapturePage(cdp) {
       // Chromium silently drops `backdrop-filter` from beyond-viewport
       // captures — even when the clip is entirely on screen — so glass
       // surfaces bake into baselines without their blur (see
-      // docs/defects/story-capture-drops-backdrop-filter.md). Ask for a
+      // docs/defects/2026-08-30-story-capture-drops-backdrop-filter.md). Ask for a
       // beyond-viewport capture only when the clip actually overflows the
       // viewport: `fitViewportToStory` restores the base height before the
       // shot, so tall stories still need it (flipping unconditionally

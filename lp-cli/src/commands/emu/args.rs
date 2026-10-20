@@ -64,6 +64,10 @@ pub enum Grade {
     /// The kernel-measured class costs, plus the flash cache's fills and the
     /// APB's wait states.
     T3,
+    /// `t3`, plus the flash interface's time: SPI transfers at the SCK and
+    /// line widths the registers give, the part's write-in-progress busy
+    /// time for programs and erases, and register-derived cache fills.
+    T4,
 }
 
 /// A run's pace (`lp_emu_esp_common::seam::net::lan_pace`): whether the
@@ -247,6 +251,19 @@ pub struct RunArgs {
     #[arg(long = "uart-faults", requires = "host_link")]
     pub uart_faults: Option<String>,
 
+    /// A TEST switch, off by default (the C6's): cut the power in the middle
+    /// of a flash command, in `lp-emu-esp32c6 --flash-cut`'s spec,
+    /// `<n>:<model>:<seed>[,range=<off>+<len>][,then=stop|power-cycle]`. The
+    /// `<n>`th (0-based, from power-on) program or erase command inside
+    /// `lpfs` (the chip's own table row, or `range=`) tears per an
+    /// `lp-nor-sim` model (`clean`, `byte_prefix`, `random_bits`,
+    /// `calibrated`, `calibrated_<shape>`). `then=stop` ends the run with the
+    /// cut; `power-cycle` power-cycles the board and runs on. The run prints
+    /// one `FLASH-CUT …` line and is labelled `<grade>+flash-cut`, which
+    /// `validate` refuses to record.
+    #[arg(long = "flash-cut", value_name = "SPEC")]
+    pub flash_cut: Option<String>,
+
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
     /// keep hosting the link (and writing the console) to the deadline.
@@ -352,6 +369,13 @@ pub struct RunArgs {
     /// board's `0.2`.
     #[arg(long = "efuse-rev")]
     pub efuse_rev: Option<String>,
+
+    /// The flash part on the board: `rom-default` (the mask ROM's own
+    /// default chip, status clear — what every transcript was captured
+    /// against), `cx1` or `xiao-c6` (the desk's C6 parts, read on silicon,
+    /// which power on with QE set, so the core reads its flash in QIO).
+    #[arg(long = "flash-part")]
+    pub flash_part: Option<String>,
 
     /// What `LP_CLKRST.reset_cause` says at power-on, and so what a ROM-up
     /// boot's banner prints: `poweron` (default), `usb-uart` or `tg0-wdt`.
@@ -528,6 +552,13 @@ pub struct ServeArgs {
     /// them by default).
     ///
     /// `pace=realtime|max` sets this board's pace, over `--pace`.
+    ///
+    /// `flash_cut=<n>:<model>:<seed>[;range=<off>+<len>][;then=stop|power-cycle]`
+    /// is `run --flash-cut` on this board, its own options joined with `;`
+    /// (a `,` ends the board option): a TEST switch that cuts the power in
+    /// the middle of the `<n>`th program or erase command inside `lpfs`. A
+    /// `then=stop` cut stops the board; `then=power-cycle` power-cycles it and
+    /// serves on. The server prints the cut's `FLASH-CUT …` line.
     #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
     pub board: Vec<String>,
 
@@ -678,6 +709,25 @@ mod tests {
             let entry = cfg.configuration(&label).expect("validate reads it");
             assert_eq!(entry.label(), label);
             assert_eq!(entry.pace.map(|p| p.as_str()), Some(pace.as_str()));
+        }
+    }
+
+    /// The emulator writes `+flash-cut` into a label and `validate` reads it
+    /// back as a flash-cut run: the two spellings, on either side of the
+    /// `lp-emu/` fence, agree.
+    #[test]
+    fn the_emulators_flash_cut_label_reads_back_through_validate() {
+        use lp_emu_esp32c6::flash_cut_spec::FLASH_CUT_MARKER as EMU_MARKER;
+        use lp_emu_validate::config::{FLASH_CUT_MARKER, ValidateConfig};
+        assert_eq!(EMU_MARKER, FLASH_CUT_MARKER);
+        let cfg = ValidateConfig::embedded();
+        for label in [
+            format!("lp-emu:esp32c6:t1{EMU_MARKER}"),
+            format!("lp-emu:esp32c6:t2+net=lan{EMU_MARKER}@pace=max"),
+        ] {
+            let entry = cfg.configuration(&label).expect("validate reads it");
+            assert!(entry.flash_cut, "{label}");
+            assert_eq!(entry.label(), label);
         }
     }
 

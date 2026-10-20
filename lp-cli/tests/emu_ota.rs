@@ -14,7 +14,8 @@
 //!
 //! - `x` — the packaged split image, app version `a0a0a0a0`;
 //! - `y` — the same tree at `b1b1b1b1`;
-//! - `y-dies` — `y` with `fixture-trial-dies`;
+//! - `y-dies` — `y` with `fixture-trial-dies`, at `c1c1c1c1`: a build id of its
+//!   own, so refusing it never refuses `y` (U19 heals `y` after it);
 //! - `x-untrusted` — `x` with `fixture-usb-untrusted`.
 //!
 //! A **power cut** after request N is the flash as it stood when the host had
@@ -40,9 +41,10 @@ const NONCE: u32 = 0x07A0_0001;
 const PAD: u8 = 18;
 /// The engine-less board's sector to erase: the engine header's.
 const SECTOR: usize = 0x1000;
-/// Everything below `lpfs` (0x350000 in the C6 table): what a refusal must
+/// Everything below `lpfs` (0x380000 in the C6 table since the tree-store
+/// cutover): what a refusal must
 /// leave byte-identical.
-const BELOW_LPFS: usize = 0x35_0000;
+const BELOW_LPFS: usize = 0x38_0000;
 /// Steps (250 µs of emulated time each) a whole update may take.
 const UPDATE_STEPS: u64 = 1_600_000;
 
@@ -90,8 +92,12 @@ fn u01_x_to_y_raw_with_a_read_back_and_the_identity() {
     let last = ota.manifests.last().unwrap();
     assert_eq!(last.state, BoardState::Running);
     identity(last, &y.manifest, "Y running");
-    // The hello's `firmware` is the same manifest `M` is.
-    let hello = last_hello_firmware(&host).expect("Y's hello carries firmware");
+    // The hello's `firmware` is the same manifest `M` is. Y's hello may come
+    // after its `M`: the board holds its hello until its core's hash is known
+    // (taken after first light, or at once for the session's `Q`).
+    let last = last.clone();
+    let summary = ota.summary();
+    let hello = hello_firmware_of(&mut host, &last.build_id).expect("Y's hello carries firmware");
     assert_eq!(
         (
             &hello.build_id,
@@ -110,8 +116,7 @@ fn u01_x_to_y_raw_with_a_read_back_and_the_identity() {
     report(
         "U1/U13/U17",
         &format!(
-            "X->Y raw: {}; read-back = X engine.bin; M = ota-manifest.json for X and Y",
-            ota.summary()
+            "X->Y raw: {summary}; read-back = X engine.bin; M = ota-manifest.json for X and Y"
         ),
     );
 }
@@ -718,6 +723,93 @@ fn u12_a_build_that_dies_on_trial_rolls_back_and_is_refused() {
     );
 }
 
+// --- U19: a power cycle after a failed trial and its heal ----------------------------------
+
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// X → Y puts Y's core high and its engine low; Y → Y-dies puts the dying
+/// core low, over Y's engine; the rollback to Y and the heal put Y's engine
+/// back low — over the dead core the newer record still names. Every power
+/// cycle after that must boot Y with its engine running.
+#[test]
+#[ignore = "needs the OTA images; `just test-emu-c6-ota`"]
+fn u19_power_cycles_after_a_failed_trial_and_its_heal_run_the_engine() {
+    let (Some(x), Some(y), Some(yd)) = (image("x"), image("y"), image("y-dies")) else {
+        return;
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let with_cache = |img: &Image| {
+        offer(img, |a| {
+            a.ota_no_z = true;
+            a.ota_cache = Some(cache.path().to_path_buf());
+        })
+    };
+    let mut host = hosted(x.merged(), Some(with_cache(&y)));
+    assert_eq!(
+        run_to_done(&mut host, None),
+        Finish::UpToDate,
+        "{}",
+        tail(&host)
+    );
+    expect_last_core(&host, &y, true);
+
+    let failed = lp_bootctl::build_hash(yd.build_id.as_bytes());
+    let refused = Finish::Stopped(StopReason::Decision(lpa_update::Decision::RefusedBuild {
+        build: failed,
+    }));
+    host.ota = OtaHost::from_args(&with_cache(&yd)).unwrap();
+    let now_ms = host.now_us() / 1_000;
+    host.ota.as_mut().unwrap().link_up(now_ms);
+    assert_eq!(run_to_done(&mut host, None), refused, "{}", tail(&host));
+    assert!(console_has(&host, "fixture-trial-dies"));
+
+    // The heal: Y offered again, its engine from the read-back.
+    host.ota = OtaHost::from_args(&with_cache(&y)).unwrap();
+    let now_ms = host.now_us() / 1_000;
+    host.ota.as_mut().unwrap().link_up(now_ms);
+    let finish = run_to_done(&mut host, None);
+    let last = host.ota.as_ref().unwrap().manifests.last().unwrap().clone();
+    assert_eq!(
+        (last.state, &last.build_id),
+        (BoardState::Running, &y.build_id),
+        "Y healed and runs ({finish:?}):\n{}",
+        tail(&host)
+    );
+    assert_eq!(last.refused_build, Some(failed));
+
+    // Power cycles: a fresh machine over the flash each time.
+    let mut chip = flash_of(&host);
+    for cycle in 1..=2 {
+        let mut host = hosted(chip, None);
+        let line = wait_line(&mut host, "[CORE] core @");
+        assert!(
+            line.is_some(),
+            "cycle {cycle}: no core line\n{}",
+            tail(&host)
+        );
+        host.run_until(host.board.machine.micros() + 3_000_000, None)
+            .expect("the run");
+        assert!(
+            !console_has(&host, "boot state not trusted"),
+            "cycle {cycle}: the core did not trust its boot state\n{}",
+            tail(&host)
+        );
+        expect_last_core(&host, &y, true);
+        let hello =
+            hello_firmware_of(&mut host, &y.build_id).expect("a hello after the power cycle");
+        assert_eq!(
+            (hello.state, hello.refused_build),
+            (BoardState::Running, Some(failed)),
+            "cycle {cycle}: Y runs and still refuses the dead build"
+        );
+        chip = flash_of(&host);
+    }
+    report(
+        "U19",
+        "X->Y, Y->Y-dies rolled back, Y healed; two power cycles: Y runs its engine, \
+         Y-dies still refused",
+    );
+}
+
 // --- U14: a host that goes away mid-core, and a new one that resumes ------------------------
 
 #[test]
@@ -796,7 +888,7 @@ struct Image {
 
 impl Image {
     fn merged(&self) -> Vec<u8> {
-        std::fs::read(self.dir.join("merged.bin")).expect("merged.bin")
+        std::fs::read(self.dir.join(merged_name())).expect(merged_name())
     }
 
     fn engine(&self) -> Vec<u8> {
@@ -885,12 +977,25 @@ fn with_store(img: &Image) -> Vec<u8> {
     )
 }
 
+/// The merged image to boot: `merged.bin` (the build's own door — our
+/// bootloader, by default), or with `LP_BOOT_DOOR=idf` the same `app.bin`
+/// behind the ESP-IDF bootloader (`merged-idf.bin`), the door every board
+/// flashed before the cutover still boots through. The recipe runs the
+/// scenarios once per door.
+fn merged_name() -> &'static str {
+    match std::env::var("LP_BOOT_DOOR").as_deref() {
+        Ok("idf") => "merged-idf.bin",
+        Ok("lp") | Ok("") | Err(_) => "merged.bin",
+        Ok(other) => panic!("LP_BOOT_DOOR={other}: expected idf or lp"),
+    }
+}
+
 /// Boot `img` once with `lp-cli emu run --host-link <extra>` over a flash
 /// file and return the flash as it was left.
 fn seeded(img: &Image, extra: &[&str], exit_on: &str) -> Vec<u8> {
     let tmp = tempfile::tempdir().unwrap();
     let flash = tmp.path().join("chip.bin");
-    std::fs::copy(img.dir.join("merged.bin"), &flash).unwrap();
+    std::fs::copy(img.dir.join(merged_name()), &flash).unwrap();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
         .current_dir(repo)
@@ -1044,6 +1149,22 @@ fn expect_last_core(host: &EmuLinkHost<C6Board>, img: &Image, engine: bool) {
 }
 
 /// The last hello's `firmware` block, read off the console.
+/// The newest hello's board manifest once it names `build_id`, stepping the
+/// board (at most a few emulated seconds) until one does; else the newest
+/// hello's, whatever it names.
+fn hello_firmware_of(host: &mut EmuLinkHost<C6Board>, build_id: &str) -> Option<BoardManifest> {
+    let until = host.board.machine.micros() + 5_000_000;
+    while host.board.machine.micros() < until {
+        if let Some(firmware) = last_hello_firmware(host)
+            && firmware.build_id == build_id
+        {
+            return Some(firmware);
+        }
+        host.step().expect("the run");
+    }
+    last_hello_firmware(host)
+}
+
 fn last_hello_firmware(host: &EmuLinkHost<C6Board>) -> Option<BoardManifest> {
     let line = host
         .console()

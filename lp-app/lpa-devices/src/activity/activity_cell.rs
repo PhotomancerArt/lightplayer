@@ -299,11 +299,18 @@ impl ActivityCell {
         }
     }
 
-    /// Whether this activity outlives its link. Only an Update does: its
-    /// board resets (and a native-USB port re-enumerates) as part of the
-    /// work, so a vanished link is a gap to wait out, not ground lost.
+    /// Whether this activity outlives its link. An Update does: its board
+    /// resets (and a native-USB port re-enumerates) as part of the work, so
+    /// a vanished link is a gap to wait out, not ground lost. So does an
+    /// Erase once the wipe is done and it only listens for the blank chip:
+    /// an erased native-USB chip re-enumerates on every watchdog reset of
+    /// its boot loop, and that is no reason to call the erase failed.
     pub(crate) fn survives_link_loss(&self) -> bool {
-        matches!(self.reducer, Reducer::Update(_))
+        match &self.reducer {
+            Reducer::Update(_) => true,
+            Reducer::Erase(erase) => erase.is_observing(),
+            _ => false,
+        }
     }
 
     /// The instant a reducer waiting on the user is bounded by — what

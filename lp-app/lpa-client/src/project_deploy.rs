@@ -1,8 +1,9 @@
 //! Helpers for planning project uploads over the server protocol.
 //!
-//! This module owns the common stop/write/load request order that Studio, CLI,
-//! and future agents should share when they deploy a project through a running
-//! `lp-server`.
+//! The conversation itself is [`crate::push_files::deploy_files`]; this
+//! module holds the paths, the file type, and the request list a board
+//! without transactions receives from a deploy (stop, begin — answered
+//! `atomic: false` — writes, load), for tests that drive a server with it.
 
 use lpc_wire::{ClientRequest, FsRequest, WireProjectHandle, WireServerMsgBody};
 
@@ -44,28 +45,32 @@ pub fn project_file_path(project_id: &str, relative_path: &str) -> String {
     )
 }
 
-/// Build write requests without changing project lifecycle.
+/// The write requests a push sends for `files`, without changing project
+/// lifecycle: deflated where that shrinks a file, else `Write` /
+/// `WriteChunk` runs ([`crate::push_files::file_requests`]).
 pub fn project_write_requests(
     project_id: &str,
     files: impl IntoIterator<Item = ProjectDeployFile>,
 ) -> Vec<ClientRequest> {
-    // chunk-aware: files larger than one frame's raw chunk budget become
-    // WriteChunk sequences instead of a single oversized Write frame
     files
         .into_iter()
         .flat_map(|file| {
-            crate::file_sync_ops::file_write_requests(project_id, &file.relative_path, &file.bytes)
+            crate::push_files::file_requests(project_id, &file.relative_path, &file.bytes, true)
         })
         .collect()
 }
 
-/// Build the current deploy flow: stop loaded projects, write files, load.
+/// What `deploy_project_files` sends a board without transactions: stop
+/// loaded projects, begin a batch (answered `atomic: false`, so nothing is
+/// opened), write the files, load. A board with transactions also gets a
+/// `CommitBatch` after the load.
 pub fn project_deploy_requests(
     project_id: &str,
     files: impl IntoIterator<Item = ProjectDeployFile>,
 ) -> Vec<ClientRequest> {
     let mut requests = Vec::new();
     requests.push(ClientRequest::StopAllProjects);
+    requests.push(ClientRequest::Filesystem(FsRequest::BeginBatch));
     requests.extend(project_write_requests(project_id, files));
     requests.push(ClientRequest::LoadProject {
         path: project_load_path(project_id),
@@ -81,6 +86,15 @@ pub fn validate_project_deploy_response(
     match (request, response) {
         (ClientRequest::StopAllProjects, WireServerMsgBody::StopAllProjects) => Ok(None),
         (
+            ClientRequest::Filesystem(
+                FsRequest::BeginBatch | FsRequest::CommitBatch | FsRequest::AbortBatch,
+            ),
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Batch { error, .. }),
+        ) => match error {
+            Some(error) => Err(ClientError::Server(format!("batch: {error}"))),
+            None => Ok(None),
+        },
+        (
             ClientRequest::Filesystem(FsRequest::Write { path, .. }),
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Write { error, .. }),
         ) => {
@@ -94,7 +108,9 @@ pub fn validate_project_deploy_response(
             }
         }
         (
-            ClientRequest::Filesystem(FsRequest::WriteChunk { path, .. }),
+            ClientRequest::Filesystem(
+                FsRequest::WriteChunk { path, .. } | FsRequest::WriteChunkDeflated { path, .. },
+            ),
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::WriteChunk { error, .. }),
         ) => {
             if let Some(error) = error {
@@ -127,6 +143,12 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::Filesystem(FsRequest::ChangesSince { .. }) => "fs.changes_since",
         ClientRequest::Filesystem(FsRequest::WriteChunk { .. }) => "fs.write_chunk",
         ClientRequest::Filesystem(FsRequest::HashPackage { .. }) => "fs.hash_package",
+        ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { .. }) => {
+            "fs.write_chunk_deflated"
+        }
+        ClientRequest::Filesystem(FsRequest::BeginBatch) => "fs.begin_batch",
+        ClientRequest::Filesystem(FsRequest::CommitBatch) => "fs.commit_batch",
+        ClientRequest::Filesystem(FsRequest::AbortBatch) => "fs.abort_batch",
         ClientRequest::LoadProject { .. } => "project.load",
         ClientRequest::UnloadProject { .. } => "project.unload",
         ClientRequest::ProjectRead { .. } => "project.read",
@@ -161,7 +183,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deploy_requests_stop_write_then_load() {
+    fn deploy_requests_stop_begin_write_then_load() {
         let requests = project_deploy_requests(
             "demo",
             [
@@ -172,17 +194,21 @@ mod tests {
 
         assert!(matches!(requests[0], ClientRequest::StopAllProjects));
         assert!(matches!(
-            &requests[1],
-            ClientRequest::Filesystem(FsRequest::Write { path, .. })
-                if path.as_str() == "/projects/demo/project.toml"
+            requests[1],
+            ClientRequest::Filesystem(FsRequest::BeginBatch)
         ));
         assert!(matches!(
             &requests[2],
             ClientRequest::Filesystem(FsRequest::Write { path, .. })
-                if path.as_str() == "/projects/demo/shader.glsl"
+                if path.as_str() == "/projects/demo/project.toml"
         ));
         assert!(matches!(
             &requests[3],
+            ClientRequest::Filesystem(FsRequest::Write { path, .. })
+                if path.as_str() == "/projects/demo/shader.glsl"
+        ));
+        assert!(matches!(
+            &requests[4],
             ClientRequest::LoadProject { path } if path == "projects/demo"
         ));
     }

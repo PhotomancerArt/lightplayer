@@ -44,6 +44,13 @@ impl Crc32 {
         Self(0xFFFF_FFFF)
     }
 
+    /// Go on from a finished CRC (`resume(0)` is [`new`](Self::new)): the
+    /// CRC of `a ‖ b` is `resume(crc32(a))` updated with `b`, finished.
+    #[must_use]
+    pub const fn resume(crc: u32) -> Self {
+        Self(crc ^ 0xFFFF_FFFF)
+    }
+
     /// Fold `bytes` in.
     pub fn update(&mut self, bytes: &[u8]) {
         for &byte in bytes {

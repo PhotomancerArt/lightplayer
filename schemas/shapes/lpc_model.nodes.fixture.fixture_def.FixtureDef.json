@@ -610,6 +610,20 @@
             }
           }
         }
+      },
+      {
+        "name": "selection",
+        "role": "debug",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
       }
     ],
     "meta": {}

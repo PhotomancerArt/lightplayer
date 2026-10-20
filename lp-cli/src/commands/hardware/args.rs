@@ -138,7 +138,9 @@ pub enum LpfsCommand {
     /// a backup ZIP. Reads only.
     Save(LpfsSaveArgs),
     /// Move a board's files to the layout of a firmware package, writing
-    /// the firmware too. Stores a backup first. WRITES THE BOARD.
+    /// the firmware too — across a repartition, or from littlefs into the
+    /// tree store (`--to tree`, every C6 image since the cutover). Stores a backup first.
+    /// WRITES THE BOARD (unless `--dry-run`).
     Migrate(LpfsMigrateArgs),
     /// Put a backup ZIP's files back onto a board already on the package's
     /// layout (the last-resort path). WRITES THE BOARD'S FILESYSTEM.
@@ -233,6 +235,24 @@ pub struct LpfsMigrateArgs {
     /// Do not wait for the board's hello afterwards.
     #[arg(long)]
     pub no_verify: bool,
+    /// The filesystem the files must end in: refuse unless the image mounts
+    /// it (`tree`: its manifest lists `fs.tree`). Without it, whatever the
+    /// image mounts.
+    #[arg(long, value_enum)]
+    pub to: Option<LpfsTargetFs>,
+    /// Read the board and print what would be written, step by step; write
+    /// nothing, store no backup.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// `lpfs migrate --to`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub enum LpfsTargetFs {
+    /// littlefs (every image before the tree store).
+    Littlefs,
+    /// The tree store (every C6 image since the tree-store cutover).
+    Tree,
 }
 
 #[derive(Debug, Args)]
@@ -283,6 +303,10 @@ pub struct LpfsFixtureArgs {
     /// The directory whose tree becomes the board's filesystem root.
     #[arg(long)]
     pub tree: PathBuf,
+    /// The filesystem to build it as (default littlefs, what every fielded
+    /// board holds).
+    #[arg(long, value_enum, default_value = "littlefs")]
+    pub fs: LpfsTargetFs,
     /// Where to write the 4 MiB chip image.
     #[arg(long)]
     pub out: PathBuf,

@@ -27,6 +27,10 @@
 //!   its committed length.
 //! - [`engine_digest`]: SHA-256 of the engine exactly as flashed, in the core.
 //! - [`loader_identity`]: the loader's version word.
+//! - [`BOOT_STAGE_RAM`]: the loader's RAM, which no radio DMA may reach
+//!   across a warm reset.
+//! - [`bootloader_identity`]: our second-stage bootloader's word at flash
+//!   `0x0` (absent under the IDF bootloader).
 //!
 //! These bind once a fielded core can install an update (see
 //! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`).
@@ -93,6 +97,8 @@ mod boot_choice;
 mod boot_control;
 mod boot_flags;
 mod boot_record;
+mod boot_stage_ram;
+pub mod bootloader_identity;
 pub mod engine_digest;
 pub mod engine_header;
 pub mod loader_identity;
@@ -100,12 +106,14 @@ mod reset_kind;
 mod sector;
 mod split_layout;
 
-pub use boot_choice::{BootChoice, choose, cold_retry_to_count, failed};
+pub use boot_choice::{BootChoice, booted_by, choose, cold_retry_to_count, failed};
 pub use boot_record::{
     ATTEMPTED_MARK_OFFSET, BOOT_RECORD_LEN, BOOT_RECORD_READ_LEN, BOOT_RECORD_VERSION, BootMarks,
     BootRecord, BootSlot, COLD_RETRY_CAP, COLD_TALLY_OFFSET, CONFIRMED_MARK_OFFSET, RECORD_MAGIC,
     STARTED_MARK_OFFSET, build_hash,
 };
+pub use boot_stage_ram::{BOOT_STAGE_RAM, split_at_boot_stage_ram};
+pub use bootloader_identity::{BOOTLOADER_VERSION, find_bootloader_version};
 pub use engine_header::{EngineHeader, EngineHeaderError};
 pub use loader_identity::{LOADER_VERSION, find_loader_version};
 pub use reset_kind::ResetKind;

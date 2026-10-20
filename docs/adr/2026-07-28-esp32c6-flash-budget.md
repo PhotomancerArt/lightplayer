@@ -213,6 +213,10 @@ Append; do not editorialize old entries.
 
 | Date | Spend | Bought | Clawback lever |
 |---|---|---|---|
+| 2026-10-17 | **A credit of +196,608 B of `factory`, against +16,528 B of core** — the tree-store cutover's default switch (plan `lp2025/2026-10-16-0848-tree-store-adoption` A7, held for the cutover; the amendment of the same date below). `lpfs` moves to 128 sectors at `0x380000` with its migration (`2026-10-16-c6-tree-store-cutover-migration.md`); littlefs leaves the C6. Core 1,421,776 → 1,438,304 B, engine 1,867,066 → 1,866,016 B (main `c20bf9a40` CI → the branch, local); **gated headroom 66,246 → 263,904 B**; **3,488 B to the core's next 32 KiB page** (20,016 B before) | Files in a store that survives a cut anywhere, mounts in tens of ms, cleans up while idle and refuses what it cannot read; one-slot pushes | **None to take back**: the store is the feature, and the 192 KB is what its smaller partition frees. Dropping littlefs's probe already saved 5,024 B of core |
+| 2026-10-15 | **A credit of up to ~20.7 KB, paid when the core's rodata crosses a 64 KiB page** — the core's `.text` follows its rodata (RAM research L2, `lp2025/2026-10-09-1203-ram-research`; the 2026-10-15 amendment below). Main's own image does not move (gated headroom 72,658 B both sides, core 7 → 5 segments, −16 B); main + 300 B of core rodata, the crossing main was 224 B from: **39,890 → 72,658 B gated headroom**, 20,664 B of padding gone | The next ordinary merge that grows core rodata past `0x4202fff8` no longer fails the size gate on every PR | **n/a — a credit.** Giving it back means linking the core with esp-hal's `.text_gap` again |
+| 2026-10-10 | **+560 B in the core, +6,588 B in the engine** — a push is one transaction (plan `lp2025/2026-10-08-2339-wire-push-boundary-and-deflate`, M6 of the tree-store device round; `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`): the batch verbs and the deflated write on the fs wire (the `FsRequest` deserializer +1,780 B), the server's batch state and its hooks in `tick_and_send` (+1,876 B), the link-reset hook in the USB/UART/radio transports, `LpFs::write_deflated_chunk` and the engine's own copy of `lp_deflate::inflate` (+2,962 B as an outlined symbol; the core keeps the update protocol's). Measured locally, split image, branch point `e68b9bb41` → `798664a74`: core 1,429,296 → 1,429,856 B, engine 1,851,110 → 1,857,698 B, `app.bin` 3,325,952 → 3,334,144 B; **gated headroom 82,202 → 75,614 B**; update headroom 491,520 B both | One-slot pushes on a tree-store board (a cut at any point leaves the old project), deflated writes (39 % fewer wire bytes on the corpus, 0.41x at rest), and a littlefs board that inflates them | **The engine's inflate (~3 KB)** might share the core's copy instead of linking its own — not tried or measured. The rest is the feature |
+| 2026-10-09 | **+3,280 B in the core, +3,430 B in the engine** — relay protocol 2, pictures through the cloud (plan `lp2025/2026-10-08-2050-pictures-through-the-cloud`, PR #1066, `docs/adr/2026-10-06-cloud-relay.md` amendment of the same date). Core: the relay client's protocol 2 half (the hello's firmware, the project report and its keyed tags, the picture schedule) and the picture hand-off; engine: the picture sampler and the frame hook's relay half. CI's builds: main `f5039fb93` (run 37905412888) core 1,426,368 B, engine 1,845,046 B, **gated headroom 88,266 B**, 15,424 B to the next core page; the PR's merge commit `2a42c672f` (run 37917190206) core 1,429,648 B, engine 1,848,476 B, **gated headroom 84,836 B**, **12,144 B to the next core page**. Local builds read the same growth (core +3,280 B, engine +3,412 B) | A board's colours and the name of its project on lightplayer.app, with no session open and nobody taking the board's one network slot | **None needed**: under the plan's 4 KB a side, and the page was not crossed. The one lever there was is taken: the board links only its direction's half of the relay codec (`decode_from_hub`/`encode_to_hub`), which saved 3,888 B of core (local). No new log line in the core |
 | 2026-10-08 | **−80 B code in the core, +386 B in the engine** — updates through the relay (plan `lp2025/2026-10-06-2249-ota-wifi-updates` PR C, #1044, `docs/adr/2026-10-06-ota-update-protocol.md` amendment of the same date): `LinkTrust::Relayed`, core-only serving a relayed link, the anonymous key refused there. Recorded on the PR, CI's builds: main `0cabfb52d` core 1,424,560 B, engine 1,841,556 B, **gated headroom 91,756 B**, 17,232 B to the next core page; the PR's `8b21192` core 1,424,480 B, engine 1,841,942 B, **gated headroom 91,370 B**, **17,312 B to the next core page** | A board updated from anywhere, through lightplayer.app, with the same rules as the LAN | **None, and nothing to claw back**: the cost is below the noise of a build. The core did not cross its page |
 | 2026-10-07 | **about +6,768 B code in the core** — Bluetooth updates (plan `lp2025/2026-10-05-0820-ota-studio-ble-updates` PR-3, #1005, `docs/adr/2026-10-06-ota-update-protocol.md` "Part C" amendment): core-only serves every Bluetooth link (receive window 32), the link mux passes a radio link's channel-3 messages to the core's session with the tier it was granted, core-only keeps the Wi-Fi controller. The figure is the one the relay row below recorded as arriving with #1005's merge; the PR itself recorded the gate: **158,448 B** at `4cad23fdb` (main merged), 4,848 B above the Wi-Fi ADR's then-floor of 153,600 B | A phone (Bluefy) that updates a board with no cable, and a core-only board that still answers on Bluetooth | **None short of the feature**: core-only must serve the radio links an update arrives on |
 | 2026-10-07 | **+8,448 B code in the core, −3,408 B in the engine** — updates over Wi-Fi (plan `lp2025/2026-10-06-2249-ota-wifi-updates` PR A, `docs/adr/2026-10-06-ota-update-protocol.md` amendment of the same date): core-only's own key answer for a LAN link (`lpc-update`'s `key_lookup`), core-only's radio and LAN links in `fw-esp32-common` (`core_only_links`, which replaced the chip crate's Bluetooth-only pump), the LAN's update-mode window and socket buffer, the keyed-`L` refusal, the trial core's three-minute deadline. Measured locally on #1019's head (`b44f7ab4a`) and on the branch: core 1,415,728 → 1,424,176 B, engine 1,844,166 → 1,840,758 B, `app.bin` 3,321,856 → 3,317,760 B; **gated headroom 89,146 → 92,554 B**, image headroom 86,016 → 90,112 B, update headroom 491,520 B both. The core stays in its 44th 32 KiB page (engine at `0x178000` both sides), **17,616 B short of the next one** (26,064 B before). The plan's estimate was +2.5–5.5 KB of core | A house board that takes its updates over Wi-Fi with no host on USB or Bluetooth, and a new core whose Wi-Fi fails gives the board back instead of waiting for a cable | **None short of the feature**: every piece is code core-only runs, and core-only must hold everything an update needs. The engine's −3,408 B was not attributed symbol by symbol (most likely shared code the core now reaches, which the split places in the core) |
@@ -276,6 +280,115 @@ core-only must reach them. Where the core sits now: **17,312 B short of its
 next 32 KiB page** (PR C's CI build), which is the number to watch, because
 crossing a page costs a whole page of update headroom at once (the relay row's
 688-byte log line is the example). The 64 KB floor holds at 91,370 B.
+
+*2026-10-09:* `main` moved the core 1,872 B closer before relay protocol 2
+(15,424 B short at `f5039fb93`, CI), and relay protocol 2 spent 3,280 B more
+(PR #1066, the ledger's top row): the core is now **12,144 B short of its
+next page**, gated headroom 84,836 B (CI's build of the PR's merge commit).
+
+## Amendment (2026-10-15): no 64 KiB gap between the core's rodata and its code
+
+The core had a second page cliff besides its 32 KiB one. esp-hal's
+`.text_gap` (`third_party/esp-hal/ld/esp32c6/esp32c6.x`) puts flash `.text`
+at the next 64 KiB page + `0x20` after rodata, because the IDF second-stage
+bootloader wants the two in separate segments. espflash lays a flash
+segment's bytes at its address's offset in a 64 KiB page, and fills the gap
+in front of `.text` with the core's RAM segments (~45 KB), then with zero
+padding. While rodata ended just under a page the gap was ~260 B and cost
+nothing; **once rodata ended past `0x4202fff8` it was a whole page, and the
+padding was up to ~20.7 KB** (made loadable into `.bss` by #1144, but still
+in the image). Main was 224 B of core rodata from that point.
+
+**The fix (RAM research L2):** the IDF bootloader never loads the split
+core. The split loader does, and it maps every page a flash segment touches,
+asking only that the segment's bytes sit at its address's offset in a page
+(`lp-fw/fw-esp32c6-loader/src/esp_image.rs`, unchanged since loader v1). So
+`lp-fw-split` links the core with the gap switched off (the esp-hal fork's
+sixth diff, `_lp_text_follows_rodata`), `.text` starts right after rodata, and
+espflash merges the two into one flash segment. The single image keeps the
+gap. No loader, boot-record or persisted-format change; every fielded loader
+(there is one, v1) boots the new cores: proven on CX1 over USB at
+`0x18000`, over the air from release 2026.10.15-1 to `0x1f0000`, and through
+a real power cut mid-core.
+
+What the cliff looked like, and that it is gone (split builds of `42114dda9`
+± the fix, with N bytes of synthetic core rodata; local, 2026-10-15):
+
+| N | rodata ends | before: `.text` at | before: padding | before: gate | after: padding | after: gate |
+|---:|---|---|---:|---:|---:|---:|
+| 0 | `0x4202ff18` | `0x42030020` | 0 | 72,658 B | 0 | 72,658 B |
+| 300 | `0x42030058` | `0x42040020` | 20,664 B | **39,890 B (fails)** | 0 | 72,658 B |
+| 8,000 | `0x42031e58` | `0x42040020` | 12,984 B | 39,890 B (fails) | 0 | 72,658 B |
+| 16,000 | `0x42033d98` | `0x42040020` | 4,984 B | 39,890 B (fails) | 0 | 72,658 B |
+| 21,500 | `0x42035318` | `0x42040020` | 0 | 39,890 B (fails) | 0 | 39,890 B (fails) |
+
+**The cliff that is left is the core's own 32 KiB page** (the engine starts
+on the first page after the core, `app_image::assemble`): the N = 21,500 row
+fails on both sides because the core's end crossed `0x178000`. With the fix,
+main's core is **about 18.8 KB short of that page** (18,832 B in a local build, core 1,422,960 B at `0x18000`),
+and that is the number to watch; the gap no longer subtracts from it.
+
+## Amendment (2026-10-17): the tree-store cutover moves `lpfs` once more, and the app gets 192 KB
+
+The tree store (`lp-base/lp-tree-store`) replaces littlefs as the C6's
+filesystem (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7, the
+default switch; held with A6 for the cutover gate). It was designed for 128
+sectors, so the table moves once more — **with its migration**, as Decision 4
+and AGENTS.md require: `partitions.csv` becomes `factory` `0x10000`+`0x370000`
+(3.4375 MB), `lpfs` `0x380000`+`0x80000` (512 KB, 128 sectors), and the
+176-sector table it replaces is frozen at
+`lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv`. The migration is
+`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md` (A6, #1151): Studio's
+USB update and `lp-cli hardware lpfs migrate --to tree` move every fielded
+board's files into the store in the same bootloader session that writes the
+new table and image; a plain flash is refused by the layout preflight, and a
+tree core that finds a littlefs superblock holds instead of formatting. The
+table never ships without the migration: both are in the same change.
+
+The switch spends and saves in the same build:
+
+- **+192 KB of `factory`** (196,608 B): the smaller store's gift to the app.
+- **littlefs leaves the core** (AD5): the tree core recognises a littlefs
+  board by its superblock's name only, and the legacy-layout probe (a
+  read-only littlefs mount at `0x310000`/`0x350000`) is gone. Against the
+  `fs-tree` image on the old table with the probe (same tree, local):
+  **core −5,024 B** (1,443,328 → 1,438,304 B), and the core falls back below
+  its 32 KiB page (engine at `0x178000` instead of `0x180000`).
+- **The tree store in the core**, against main's littlefs image: core
+  **+16,528 B** (1,421,776 → 1,438,304 B), engine −1,050 B
+  (1,867,066 → 1,866,016 B) — the store, its mount, lazy format, fast mount,
+  idle cleanup and the format-v3 provisions, less littlefs and its probe.
+
+Measured (`just fw-esp32c6-size-check`, split image, `esp32c6,server`):
+
+| | main `c20bf9a40` (CI run 39006059788), littlefs, `factory` `0x340000` | this branch `a86ff3aa7` (local), tree store, `factory` `0x370000` |
+|---|---:|---:|
+| core | 1,421,776 B | 1,438,304 B |
+| engine | 1,867,066 B @`0x178000` | 1,866,016 B @`0x178000` |
+| `app.bin` | 3,342,336 B | 3,342,336 B |
+| image headroom | 65,536 B | 262,144 B |
+| steady headroom (core low = core high) | 66,246 B | **263,904 B** |
+| update headroom | 491,520 B | 688,128 B |
+| **gated headroom** | **66,246 B** (710 B above the 64 KB floor) | **263,904 B** |
+| to the core's next 32 KiB page | 20,016 B | **3,488 B** |
+| legacy overlap | −196,608 B before `0x310000` (crossed) | 65,536 B before `0x350000` |
+
+What to watch now:
+
+- **The core is 3,488 B from its 32 KiB page.** Crossing it costs one page
+  (32,768 B) of steady and update headroom at once — survivable now (the
+  gate would read ~231 KB), but it is the next cliff, and a 3.5 KB core
+  change crosses it.
+- **The legacy overlap is the skipped-migration hold's margin.** A tree core
+  holds a fielded board that a plain flash put on the tree table only while
+  that flash left the littlefs superblock pair at `0x350000` whole —
+  `app.bin` (as flashed: core low, engine after it) ending below
+  `0x350000`. 64 KB of image growth crosses it. It is a net under the
+  layout preflight, never a gate: the migration reads the board first and
+  does not depend on it. Once fielded boards have moved, it stops mattering.
+- **No lpfs lever is left again.** 128 sectors is the store's design size
+  (the 8 MB store waits for 16 MB parts); shrinking it would need its own
+  migration.
 
 ## Alternatives Considered
 

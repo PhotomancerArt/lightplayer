@@ -1,5 +1,5 @@
 ---
-status: OPEN — root cause narrowed to the graphics stage, mechanism not yet named
+status: open           # root cause narrowed to the graphics stage, mechanism not yet named
 found: 2026-09-10      # emulator plan two, M6 (the walk with no board); Yona hit it by hand on 2026-09-09 as "F1"
 area: lp-emu/esp/lp-emu-esp32c6, lpc_engine graphics construction
 class: emulator-fidelity

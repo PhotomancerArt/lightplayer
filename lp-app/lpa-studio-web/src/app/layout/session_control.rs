@@ -69,7 +69,7 @@ use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
 use crate::app::agent::AgentMark;
-use crate::app::home::device_roster_card::DeviceRenameSection;
+use crate::app::home::device_rename_section::DeviceRenameSection;
 use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
@@ -683,7 +683,7 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         return rsx! {
             DetailSection {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
-                    "All saved \u{2014} nothing pending."
+                    "All changes saved."
                 }
             }
         };
@@ -692,7 +692,7 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
     rsx! {
         if dirty.persisted > 0 || !unsaved_entries.is_empty() {
             DetailSection {
-                title: "Unsaved (persisted)",
+                title: "Unsaved changes",
                 meta: dirty.persisted.to_string(),
                 tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                 PendingEditList { entries: unsaved_entries, on_action }
@@ -708,9 +708,9 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         }
         DetailSection { title: "Pending edits",
             ProjectDetailRow { label: "State", value: state_label(affordance).to_string() }
-            ProjectDetailRow { label: "Overlay revision", value: overlay_revision.to_string() }
+            ProjectDetailRow { label: "Revision", value: overlay_revision.to_string() }
             if edits_in_flight > 0 {
-                ProjectDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
+                ProjectDetailRow { label: "Sending", value: edits_in_flight.to_string() }
             }
         }
         if save.is_some() || revert.is_some() {
@@ -780,10 +780,9 @@ pub fn SessionHistoryPanel(
 fn save_receipt_line(next_version: Option<u64>) -> String {
     match next_version {
         Some(next) => {
-            format!("Already live in this session \u{2014} Save banks v{next} to your library.")
+            format!("Your changes are already live. Save to keep them as v{next} in your library.")
         }
-        None => "Already live in this session \u{2014} Save banks everything to your library."
-            .to_string(),
+        None => "Your changes are already live. Save to keep them in your library.".to_string(),
     }
 }
 
@@ -805,7 +804,7 @@ fn kind_icon(link: lpa_studio_core::UiLinkKind) -> StudioIconName {
 /// named (PD9 — a sim is a device, and the band on its card is what says
 /// which kind of device it is).
 fn device_title(session: &UiChromeSessionControl) -> String {
-    format!("This tab's session — {}", device_label(session))
+    format!("This tab's session: {}", device_label(session))
 }
 
 fn kind_glyph_class() -> &'static str {
@@ -985,7 +984,7 @@ fn run_word(session: &UiChromeSessionControl) -> RunWord {
 /// the consequence of navigating away is otherwise invisible. The document
 /// is durable (the draft overlay persists) — the SESSION is what ends.
 fn session_hint() -> &'static str {
-    "This tab is the editor on the device — navigate away to close it; the device keeps running."
+    "This tab is the editor for this device. Leaving the page will close the editor, and the device will keep running."
 }
 
 /// The device segment's accessible name: the device and, for a sim, the
@@ -1001,7 +1000,7 @@ fn device_label(session: &UiChromeSessionControl) -> String {
 /// it — the two things its face shows.
 fn project_label(project_name: Option<&str>, relationship: ProjectRelationship) -> String {
     match project_name {
-        Some(name) => format!("{name} — {}", relationship_face(relationship).word),
+        Some(name) => format!("{name}, {}", relationship_face(relationship).word),
         None => "No project open".to_string(),
     }
 }
@@ -1010,10 +1009,10 @@ fn project_label(project_name: Option<&str>, relationship: ProjectRelationship) 
 /// for the whole segment, so it has to carry both counts.
 fn changes_label(dirty: DirtySummary) -> String {
     match (dirty.persisted, dirty.failed) {
-        (0, 0) => "Changes — all saved".to_string(),
-        (persisted, 0) => format!("Changes — {persisted} unsaved"),
-        (0, failed) => format!("Changes — {failed} failed"),
-        (persisted, failed) => format!("Changes — {persisted} unsaved, {failed} failed"),
+        (0, 0) => "Changes: all saved".to_string(),
+        (persisted, 0) => format!("Changes: {persisted} unsaved"),
+        (0, failed) => format!("Changes: {failed} failed"),
+        (persisted, failed) => format!("Changes: {persisted} unsaved, {failed} failed"),
     }
 }
 
@@ -1101,9 +1100,9 @@ const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border
 /// failed-only project still counts something in the bar.
 const FAILED_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-error-foreground";
 /// The changes segment's tooltip: what the popup is about, in one line.
-const CHANGES_TITLE: &str = "Changes — live on this session, banked to your library on Save";
+const CHANGES_TITLE: &str = "Changes since your last save";
 /// The history segment's tooltip.
-const HISTORY_TITLE: &str = "History — this document's saved versions, read-only";
+const HISTORY_TITLE: &str = "History: this project's saved versions";
 
 #[cfg(test)]
 mod tests {
@@ -1122,6 +1121,7 @@ mod tests {
             stat_line: None,
             update: None,
             link: lpa_studio_core::UiLinkKind::Usb,
+            connected: false,
         }
     }
 
@@ -1234,7 +1234,7 @@ mod tests {
 
         assert_eq!(
             project_label(Some("small dome"), ProjectRelationship::Example),
-            "small dome — Example"
+            "small dome, Example"
         );
         // The honest-empty edge: no invented name anywhere.
         assert_eq!(
@@ -1242,17 +1242,17 @@ mod tests {
             "No project open"
         );
 
-        assert_eq!(changes_label(dirty(0, 0)), "Changes — all saved");
-        assert_eq!(changes_label(dirty(3, 0)), "Changes — 3 unsaved");
-        assert_eq!(changes_label(dirty(0, 2)), "Changes — 2 failed");
-        assert_eq!(changes_label(dirty(3, 2)), "Changes — 3 unsaved, 2 failed");
+        assert_eq!(changes_label(dirty(0, 0)), "Changes: all saved");
+        assert_eq!(changes_label(dirty(3, 0)), "Changes: 3 unsaved");
+        assert_eq!(changes_label(dirty(0, 2)), "Changes: 2 failed");
+        assert_eq!(changes_label(dirty(3, 2)), "Changes: 3 unsaved, 2 failed");
     }
 
     /// Leaving closes the editor and leaves the DEVICE running — for a sim
     /// exactly as for silicon (PD9), and the hint has to say so.
     #[test]
     fn the_hint_names_what_leaving_actually_ends() {
-        assert!(session_hint().ends_with("the device keeps running."));
+        assert!(session_hint().ends_with("the device will keep running."));
     }
 
     /// A device whose own NAME already carries its board wears no suffix
@@ -1361,11 +1361,11 @@ mod tests {
     fn the_receipt_names_the_version_save_banks() {
         assert_eq!(
             save_receipt_line(Some(13)),
-            "Already live in this session \u{2014} Save banks v13 to your library."
+            "Your changes are already live. Save to keep them as v13 in your library."
         );
         assert_eq!(
             save_receipt_line(None),
-            "Already live in this session \u{2014} Save banks everything to your library."
+            "Your changes are already live. Save to keep them in your library."
         );
     }
 

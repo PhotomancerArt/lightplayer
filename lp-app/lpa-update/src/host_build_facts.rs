@@ -28,6 +28,10 @@ pub struct HostBuildFacts {
     pub identity: HostIdentity,
     pub core: HostPieceFacts,
     pub engine: HostPieceFacts,
+    /// The build mounts the tree store (its `ota-manifest.json`'s
+    /// `requires.fsTree`): a board whose hello does not list `fs.tree` is
+    /// never sent it over the air — its files move over USB first.
+    pub needs_tree_store: bool,
     build_hash: u32,
 }
 
@@ -46,8 +50,17 @@ impl HostBuildFacts {
             identity,
             core,
             engine,
+            needs_tree_store: false,
             build_hash,
         }
+    }
+
+    /// These facts, for a build that does (or does not) mount the tree
+    /// store.
+    #[must_use]
+    pub fn with_tree_store(mut self, needs_tree_store: bool) -> Self {
+        self.needs_tree_store = needs_tree_store;
+        self
     }
 
     /// The build hash the board's records key on (`refusedBuild`,

@@ -238,7 +238,7 @@ fn PowerReadout(
     // "Estimated" is load-bearing, not hedging: every lamp preset ships
     // datasheet and community figures, and nothing here has met a meter.
     let mut title = format!(
-        "estimated draw from the lamp type's power model — not measured\n{} mA of {} mA budget",
+        "Estimated from the lamp type, not measured\n{} mA of {} mA budget",
         power.estimated_draw_ma, power.budget_ma
     );
     if tappable {

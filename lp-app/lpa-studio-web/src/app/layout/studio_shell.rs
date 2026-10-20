@@ -1,24 +1,13 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiLensCard, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
+use lpa_studio_core::{UiAction, UiLensCard, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::layout::ReconnectingCurtain;
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::project::MismatchPage;
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
-use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
+use crate::app::{HomePage, ProjectOpeningFrame};
 use crate::core::PaneView;
 use crate::router::ProjectView;
-
-/// Which gallery page the shell renders when the view has no open
-/// editor (P09 split): the route picks it — `#/` = Devices,
-/// `#/projects` = Projects. Lens routes leave the default; they only
-/// see the gallery in transient detach windows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ShellGallery {
-    #[default]
-    Devices,
-    Projects,
-}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -28,9 +17,6 @@ pub fn StudioShell(
     /// Fixed clock for home-gallery stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
-    /// The gallery page for no-editor renders (see [`ShellGallery`]).
-    #[props(default)]
-    gallery: ShellGallery,
     /// The route says a project but the view hasn't reached it yet: render
     /// the project-shaped opening frame instead of the gallery (the URL's
     /// intent picks the frame — no gallery flash on a project reload).
@@ -76,6 +62,8 @@ pub fn StudioShell(
         open_project_transient: _,
         open_transient_example: _,
         transient_fork_generation: _,
+        // consumed by the web shell's view loop, which leaves for sign-in
+        sign_in_requests: _,
         // the chrome renders the header session·project control (web_app
         // builds it from the editor pane's own view and this field)
         open_project_name: _,
@@ -103,6 +91,8 @@ pub fn StudioShell(
         app_agent: _,
         // every migrated surface below reads its verbs from here
         offers,
+        // the Graph view's slice, for the workbench
+        graph,
     } = view;
     // The offer tree reaches the surfaces through context, not props: a
     // node card nested any depth down asks for its own verbs
@@ -130,18 +120,12 @@ pub fn StudioShell(
         };
     }
 
+    // No editor: the home page, the same page `/` draws (PD1). This arm
+    // serves a cold `/device/<uid>` load, where the cards are the connect
+    // evidence, and a lens detaching.
     if let Some(home) = home {
-        return match gallery {
-            ShellGallery::Devices => rsx! {
-                div { class: "tw:grid tw:gap-7",
-                    DevicesPage { home: *home, on_action }
-                }
-            },
-            ShellGallery::Projects => rsx! {
-                div { class: "tw:grid tw:gap-7",
-                    ProjectsPage { home: *home, now_secs, on_action }
-                }
-            },
+        return rsx! {
+            HomePage { home: Some(*home), on_action: Some(on_action), now_secs }
         };
     }
 
@@ -194,6 +178,7 @@ pub fn StudioShell(
                     running,
                     now_secs,
                     hrefs,
+                    graph_view: graph,
                     on_action,
                 }
             }
@@ -244,32 +229,27 @@ fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_core::ProjectE
 
 /// The module face play mode renders: the workspace ROOT's, since the flat
 /// root is the single top-level card and its scope is the project's own
-/// (R8). Anything else — no editor yet, or a root wearing another kind's
-/// face — has no play surface, and the caller falls back.
+/// (R8) — core's [`ProjectEditorView::root_module_face`], the same face the
+/// docs embed and the board card's panel read. Anything else — no editor
+/// yet, or a root wearing another kind's face — has no play surface, and
+/// the caller falls back.
+///
+/// [`ProjectEditorView::root_module_face`]: lpa_studio_core::ProjectEditorView::root_module_face
 fn play_mode_face(
     editor: Option<&lpa_studio_core::ProjectEditorView>,
 ) -> Option<lpa_studio_core::UiModuleFace> {
-    match editor?.nodes.first()?.face.as_ref()? {
-        UiNodeFace::Module(face) => Some(face.clone()),
-        _ => None,
-    }
+    editor?.root_module_face().cloned()
 }
 
-/// The docked lens card: the roster's device card — the SAME `DeviceView`
-/// the gallery renders, for every runtime (PD9), with no picker lists (a
-/// device the editor is open on is running something; the empty face's
-/// picker belongs to the gallery).
+/// The docked lens card: the board card the home page draws for the device
+/// the editor is open on (D43) — core's card, with the editor holding it,
+/// for every runtime (PD9). No picker lists: a board the editor is open on
+/// is running something, and the project pick belongs to the home page.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
-    let UiLensCard::Device { card, runtime } = card;
+    let UiLensCard::Board(card) = card;
     rsx! {
-        crate::app::home::device_roster_card::DeviceRosterCard {
-            card,
-            runtime,
-            projects: Vec::new(),
-            examples: Vec::new(),
-            on_action,
-        }
+        crate::app::board_card::BoardCard { card: *card, on_action }
     }
 }

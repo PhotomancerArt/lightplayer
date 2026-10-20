@@ -24,6 +24,17 @@ fn main() {
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
     );
 
+    // Put this crate's directory on the linker search path so esp-hal's
+    // `INCLUDE "rwdata_hook.x"` resolves to `rwdata_hook.x` next to this file.
+    // esp-hal's `ld/sections/rwdata.x` ends the `.data` output section with
+    // that INCLUDE, gated on `ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK` (set in
+    // `.cargo/config.toml`); the linker resolves it through `-L`, and esp-hal
+    // only adds its own OUT_DIR. See `rwdata_hook.x` for what stays in RAM.
+    println!(
+        "cargo:rustc-link-search={}",
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
+    );
+
     emit_build_provenance();
     emit_partition_facts();
 
@@ -60,10 +71,14 @@ fn emit_build_provenance() {
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = match git_output(&["status", "--porcelain"]) {
-        Some(status) => !status.is_empty(),
-        None => false,
-    };
+    // A figure build is stamped clean, as it is stamped with a fixed version
+    // (`lp_app_version::figure_build`): the tree's state must not reach the
+    // image whose memory figures are recorded.
+    let dirty = !lp_app_version::figure_build()
+        && match git_output(&["status", "--porcelain"]) {
+            Some(status) => !status.is_empty(),
+            None => false,
+        };
     let profile = profile_dir_name()
         .or_else(|| std::env::var("PROFILE").ok())
         .unwrap_or_else(|| "unknown".into());

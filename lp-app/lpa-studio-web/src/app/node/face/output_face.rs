@@ -157,7 +157,7 @@ fn OutputPorts(
                 }
                 if face.board.is_none() {
                     p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                        "No board known for this device — wires are still fully editable; pin names are free text in the advanced drawer."
+                        "This device's board isn't known. You can still edit the wires, and type pin names in the advanced drawer."
                     }
                 }
                 if face.ports.is_empty() {
@@ -179,7 +179,7 @@ fn OutputPorts(
                     div { class: "tw:flex tw:min-w-0",
                         InlineButton {
                             label: "Add port {add_key}",
-                            title: "Add port {add_key} — a new wire at the end of the slice order",
+                            title: "Add port {add_key} as a new wire at the end",
                             icon: StudioIconName::Add,
                             text: "port",
                             on_press: move |_| {
@@ -198,8 +198,8 @@ fn OutputPorts(
                         } else {
                             "tw:m-0 tw:font-mono tw:text-[0.65rem] tw:text-dim-foreground"
                         },
-                        title: "The board's measured envelope: the total LEDs this board and firmware have run clean (heap-bound). Exceeding it proceeds with a warning — expect heap pressure.",
-                        "{budget.used} / {budget.budget} LEDs · measured envelope"
+                        title: "The most LEDs this board and firmware have been measured to run. You can go past it, but the board may run out of memory.",
+                        "{budget.used} / {budget.budget} LEDs · measured limit"
                     }
                 }
             }
@@ -264,20 +264,20 @@ fn OutputPortRow(
                     if status.waves {
                         span {
                             class: "tw:shrink-0 tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:font-mono tw:text-[0.6rem] tw:text-subtle-foreground",
-                            title: "This wire transmits in the second wave: it waits for a pooled transmitter slot each frame (worst wait {status.queue_wait_ms} ms). Structural at more wires than slots — not a fault.",
+                            title: "This wire sends in a second wave, after a transmitter frees up each frame (longest wait {status.queue_wait_ms} ms). This is normal with more wires than transmitters.",
                             "wave 2"
                         }
                     }
                     if status.torn > 0 {
                         span {
                             class: "tw:shrink-0 tw:font-mono tw:text-[0.6rem] tw:text-status-attention-foreground",
-                            title: "Frames truncated on the strand since boot (guard-word protection). A growing count is distress; a small constant one usually marks project uploads.",
+                            title: "Frames cut short on this strand since the board started. A growing count means trouble. A small, steady count usually comes from project uploads.",
                             "torn {status.torn}"
                         }
                     } else {
                         span {
                             class: "tw:shrink-0 tw:font-mono tw:text-[0.6rem] tw:text-dim-foreground",
-                            title: "Frames transmitted since boot, no tears.",
+                            title: "Frames sent since the board started, none cut short.",
                             "{status.sent} sent"
                         }
                     }
@@ -416,14 +416,14 @@ fn PortCountCell(
         return rsx! {
             span {
                 class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-baseline tw:gap-1 tw:rounded-xs tw:border tw:border-dashed tw:border-border-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-xs tw:text-muted-foreground",
-                title: "This wire takes whatever is left of the buffer",
+                title: "This wire takes whatever LEDs are left",
                 span { class: "tw:text-dim-foreground", "rest" }
                 span { {resolved.map_or_else(|| "—".to_string(), |count| count.to_string())} }
             }
             if let Some((count, handler)) = pin_count {
                 InlineButton {
-                    label: "Author this wire's count",
-                    title: "Author this wire's count as {count} instead of taking the remainder",
+                    label: "Set this wire's count",
+                    title: "Set this wire's count to {count} instead of taking what's left",
                     icon: StudioIconName::Add,
                     on_press: {
                         let face = face.clone();
@@ -462,7 +462,7 @@ fn PortCountCell(
         if let Some((address, handler)) = clear {
             InlineButton {
                 label: "Take the remainder",
-                title: "Drop the count — this wire takes whatever is left of the buffer",
+                title: "Remove the count so this wire takes whatever LEDs are left",
                 icon: StudioIconName::Remove,
                 on_press: move |_| {
                     handler.call(slot_remove_value_action(address.clone()));
@@ -767,9 +767,9 @@ fn spread_title(face: &UiOutputFaceData) -> String {
     }
     let plan = parts.join(" · ");
     if spread_snaps(face) {
-        format!("Rewrite the wire counts to {plan} — cut where the mapping's strips end")
+        format!("Set the wire counts to {plan}, split where the mapping's strips end")
     } else {
-        format!("Rewrite the wire counts to an even {plan}")
+        format!("Set the wire counts to an even {plan}")
     }
 }
 

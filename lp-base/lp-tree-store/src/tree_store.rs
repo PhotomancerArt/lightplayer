@@ -21,6 +21,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
+use crate::mount_verdict::{EMPTY_DIR, mount_failure};
 use crate::node_read::read_node_into;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::{IdTag, ObjectId};
@@ -38,6 +39,10 @@ pub(crate) type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
 
 /// Deepest path (components) the store accepts and mount follows.
 pub const MAX_DEPTH: usize = 32;
+
+/// Sectors `format` erases: 0 and 1, littlefs's superblock pair (FORMAT.md
+/// "Formatting").
+const LAZY_FORMAT_ERASES: u32 = 2;
 
 /// The committed root.
 #[derive(Clone, Debug)]
@@ -80,28 +85,74 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// Records a flush has written (or names) that nothing reachable names
     /// yet: marked live while it runs.
     pub(crate) inflight: Vec<(ObjectId, crate::gc_mark::MarkRole)>,
+    /// The last write GC could not make room for (RAM only: a mount forgets
+    /// it). See `store_space::Refusal`.
+    pub(crate) refused: Option<crate::store_space::Refusal>,
+    /// An idle step found nothing to do; until the next write, steps return
+    /// at once (`store_idle.rs`).
+    pub(crate) idle_settled: bool,
+    /// The idle packing pass under way: the first sector sequence it opened
+    /// and the waste when it began (`store_idle.rs`).
+    pub(crate) idle_pass: Option<(u32, u64)>,
+    /// The waste the last idle packing left (the least seen since): a new
+    /// pass starts only once the waste has grown a sector past it (RAM
+    /// only: after a mount, the first pass runs; `store_idle.rs`).
+    pub(crate) idle_packed_waste: Option<u64>,
+    /// The mark idle steps hold between them: each live record's length, by
+    /// index position (`store_idle.rs`). Any write or mark drops it.
+    pub(crate) idle_lens: Option<Vec<u16>>,
+    /// The victim idle steps are copying out of, and its pass's first
+    /// sequence.
+    pub(crate) idle_victim: Option<(u32, u32)>,
+    /// The victim the last idle step emptied: the next one erases it.
+    pub(crate) idle_emptied: Option<u32>,
+    /// `mutants`: a flush that computes ids and writes nothing.
+    #[cfg(feature = "mutants")]
+    pub(crate) dry: bool,
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
-    /// Kill and erase every sector (retiring any that will not erase), then
-    /// commit an empty tree. Works on any flash content.
-    pub fn format(flash: &mut F, hasher: &mut H, cfg: &StoreConfig) -> Res<(), F> {
-        check_config(flash.sector_count(), flash.sector_size(), cfg)?;
-        let mut st = TreeStore::<&mut F, &mut H>::empty(flash, hasher, cfg.clone());
-        for s in 0..st.log.sector_count {
-            st.log.kill_and_erase(s)?;
+    /// Make an empty store on any flash content, and mount it: the store
+    /// `mount` returns for this flash. **Lazy** (FORMAT.md "Formatting"):
+    /// it erases two sectors, not all of them — sectors 0 and 1 (littlefs's
+    /// superblock pair, so nothing reads the partition as littlefs again;
+    /// the two heads open there) — and kills the header of every other
+    /// sector that does not read erased (magic and CRC zeroed, no erase), so no
+    /// earlier store's sector is trusted again. Every other sector is
+    /// erased when it is first opened, as after any mount. A cut anywhere
+    /// leaves a flash that mounts as [`StoreError::NoStore`] (when the flash
+    /// had no store) or the empty store. Takes the flash and the
+    /// hasher **by value**, as `mount` does, so a firmware that mounts, and
+    /// on [`StoreError::NoStore`] formats what the mount handed back, links
+    /// one `TreeStore<F, H>` (a `&mut` format beside a by-value mount
+    /// linked the whole store twice). A failure hands the flash and the
+    /// hasher back.
+    ///
+    pub fn format(
+        flash: F,
+        hasher: H,
+        cfg: StoreConfig,
+    ) -> Result<Self, (StoreError<F::Error>, F, H)> {
+        if let Err(e) = check_config(flash.sector_count(), flash.sector_size(), &cfg) {
+            return Err((e, flash, hasher));
         }
-        let empty = st.write_dir_bytes(HeadKind::Cold, &[0, 0])?;
-        st.work = WorkDirs {
-            cold: empty,
-            hot: empty,
-        };
-        st.write_root()
+        let mut st = Self::empty(flash, hasher, cfg);
+        if let Err(e) = st.format_walk() {
+            return Err((e, st.log.flash, st.hasher));
+        }
+        let Self {
+            log, hasher, cfg, ..
+        } = st;
+        Self::mount(log.into_flash(), hasher, cfg)
     }
 
     /// Scan the flash and adopt the newest complete root (I1). Never panics
-    /// on any content; a flash with no complete root is an error, which
-    /// hands the flash and the hasher back.
+    /// on any content. A flash with no complete root is an error that says
+    /// what is there — [`StoreError::NoStore`] (nothing of a store, or only
+    /// an interrupted format's records: format it), [`StoreError::Damaged`]
+    /// (a store's records and no complete root: keep it) or
+    /// [`StoreError::Unsupported`] (a newer format: keep it) — and hands the
+    /// flash and the hasher back.
     pub fn mount(
         flash: F,
         hasher: H,
@@ -113,7 +164,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut st = Self::empty(flash, hasher, cfg);
         match st.load() {
             Ok(()) => Ok(st),
-            Err(e) => Err((e, st.log.flash, st.hasher)),
+            Err(e) => Err((mount_failure(e), st.log.flash, st.hasher)),
         }
     }
 
@@ -247,6 +298,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if self.txn != Txn::Explicit {
             return Ok(());
         }
+        self.wake_idle();
         self.commit_inner()?;
         self.txn = Txn::None;
         Ok(())
@@ -341,7 +393,42 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             stats: TreeStoreStats::default(),
             live_after_mark: 0,
             inflight: Vec::new(),
+            refused: None,
+            idle_settled: false,
+            idle_pass: None,
+            idle_packed_waste: None,
+            idle_lens: None,
+            idle_victim: None,
+            idle_emptied: None,
+            #[cfg(feature = "mutants")]
+            dry: false,
         }
+    }
+
+    /// Format's body: sectors 0 and 1 killed and erased; every other
+    /// header that does not read erased killed (and read back killed: a
+    /// kill that does not take is an erase, as `open_sector` would do);
+    /// then an empty directory and a root naming it.
+    fn format_walk(&mut self) -> Res<(), F> {
+        for s in 0..self.log.sector_count {
+            if s < LAZY_FORMAT_ERASES {
+                self.log.kill_and_erase(s)?;
+                continue;
+            }
+            if mutant!(FormatKeepsHeaders) || self.log.header_reads(s, 0xFF)? {
+                continue;
+            }
+            self.log.kill_header(s)?;
+            if !self.log.header_killed(s)? {
+                self.log.kill_and_erase(s)?;
+            }
+        }
+        let empty = self.write_dir_bytes(HeadKind::Cold, &EMPTY_DIR)?;
+        self.work = WorkDirs {
+            cold: empty,
+            hot: empty,
+        };
+        self.write_root()
     }
 
     pub(crate) fn max_payload(&self) -> usize {
@@ -355,6 +442,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// call's own answer is the `bool` (`delete`'s), ignored by the rest.
     #[inline(never)]
     pub(crate) fn op(&mut self, f: &mut dyn FnMut(&mut Self) -> Res<bool, F>) -> Res<bool, F> {
+        self.wake_idle();
         if self.txn == Txn::Explicit {
             if self.delta.ram_bytes() >= self.cfg.txn_delta_max as usize {
                 self.flush()?;
@@ -372,6 +460,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 
     /// Write the delta's directories, then a root if anything changed.
     pub(crate) fn commit_inner(&mut self) -> Res<(), F> {
+        #[cfg(feature = "mutants")]
+        if mutant!(RootBeforeDirs) && !self.delta.is_empty() {
+            return self.commit_root_first();
+        }
         self.flush()?;
         let unchanged = self.committed.as_ref().is_some_and(|c| {
             c.root.cold_dir == self.work.cold

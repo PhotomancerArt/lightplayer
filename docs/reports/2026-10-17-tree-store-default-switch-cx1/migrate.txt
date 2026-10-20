@@ -1,0 +1,103 @@
+Backup stored and read back: /private/tmp/claude-502/-Users-yona-dev-photomancer-lp2025--claude-worktrees-suspicious-bartik-a8767f/3fd259ee-6a38-45ce-9d2c-4283cdc33ba9/scratchpad/a7/cx1-run/backups/lightplayer-backup-14-c1-9f-e6-54-90-2026-10-17-0727.zip
+Moving 142 files (217 KB) to the tree store at 0x380000: 19 of 128 sectors of 4 KB, 109 free. The old filesystem stays whole until the firmware is switched.
+Written and read back. The board is restarting.
+Verified: the board's files mounted and it is still unnamed.
+  Connecting to /dev/cu.usbmodem112201
+[2026-10-17T07:27:04Z INFO  espflash::flasher] Using flash stub
+  Reading the board's layout — done
+  Reading the board's layout — done
+  Reading the board's files — done
+  Reading the board's files — done
+  board: layout with files at 0x350000, 704 KB → package: layout with files at 0x380000, 512 KB
+  Moving files — done
+  Moving files — done
+[2026-10-17T07:27:18Z INFO  espflash::connection] Staying in flasher stub
+[2026-10-17T07:27:18Z INFO  espflash::flasher] Binary successfully written to flash!
+  Moving files — done
+  Moving files — done
+[2026-10-17T07:27:18Z INFO  espflash::connection] Staying in flasher stub
+[2026-10-17T07:27:18Z INFO  espflash::flasher] Binary successfully written to flash!
+  Moving files — done
+  Moving files — done
+[2026-10-17T07:27:18Z INFO  espflash::connection] Staying in flasher stub
+[2026-10-17T07:27:18Z INFO  espflash::flasher] Binary successfully written to flash!
+  Verifying files — done
+  Verifying files — done
+  Verifying files — done
+  Verifying files — done
+  Verifying files — done
+  Verifying files — done
+  Writing 3407872 bytes at 0x0
+  Writing firmware — done
+  Writing firmware — done
+[2026-10-17T07:27:34Z INFO  espflash::connection] Staying in flasher stub
+[2026-10-17T07:27:34Z INFO  espflash::flasher] Binary successfully written to flash!
+  Verified 3407872 bytes at 0x0 (MD5 a2fe85cd04244958b9719e28de6fbf31)
+  Verifying files — done
+  Verifying files — done
+  Plan complete
+  Resetting device
+[device] readiness: engine start (budget 5s)
+[device] readiness: hello request sent
+[serial] [0;32mI (109) esp_image: segment 1: paddr=00010038 vaddr=40850000 size=000e0h (   224) load[0m
+[serial] [0;32mI (117) esp_image: segment 2: paddr=00010120 vaddr=42000120 size=00010h (    16) map[0m
+[serial] [0;32mI (125) esp_image: segment 3: paddr=00010138 vaddr=408500e0 size=00994h (  2452) load[0m
+[serial] [0;32mI (135) boot: Loaded app from partition at offset 0x10000[0m
+[serial] [0;32mI (140) boot: Disabling RNG early entropy source...[0m
+[serial] [LOADER] core @0x18000 (proven)
+[serial] [INIT] Initializing board...
+[serial] [INIT] Board initialized, starting runtime... (main stack 49056 B)
+[serial] [RECOVERY] boot: cause=user-reset level=green safe_mode=false prior_boot_complete=false
+[serial] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[serial] [INIT] Runtime started
+[serial] [INIT] fw-esp32 starting...
+[serial] [INIT] io thread: stack 3072 B, priority 1
+[serial] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[serial] [INIT] Flash filesystem mounted
+[serial] [FS] tree store mounted (128 sectors, 109 free, root 2)
+[serial] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[serial] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[serial] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[serial] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[serial] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[serial] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 84528 B (slots 2)
+[serial] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+[serial] [INIT] net thread: stack 8192 B, priority 1
+[serial] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+[serial] [INFO] fw_esp32c6::ota::engine_guard: [OTA] engine guard: the engine (1866016 B) matches its digest (240 ms)
+[serial] [INFO] fw_esp32c6: [CORE] core @0x18000 +1438304 (proven) build 30fb37f8e+30fb37f8ec88 · loader v1 · region end 0x380000 · page 0x8000 · engine 1866016 B · digest 762de111
+[serial] [INIT] Initializing RMT peripheral at 80MHz...
+[serial] [INIT] RMT peripheral initialized
+[serial] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+[serial] [INIT] Creating output provider...
+[serial] [INIT] Output provider created
+[serial] [INIT] Creating LpServer instance...
+[serial] [INIT] LpServer created
+[serial] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[serial] [INFO] fw_esp32_common::boot: Boot: found configured startup project: basic
+[serial] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/basic
+[serial] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 266748 B free / 105596 B used (260k / 103k)
+[serial] [INFO] lpa_server::project: [mem] project new start: 260k free / 103k used
+[serial] [INFO] lpa_server::project: [mem] project new after root path: 260k free / 103k used
+[serial] [INFO] lpa_server::project: [mem] project new after services: 260k free / 103k used
+[serial] [INFO] lpa_server::project: [mem] project new after core project: 227k free / 136k used
+[serial] [INFO] lpa_server::project: [mem] project new after graphics: 227k free / 136k used
+[serial] [INFO] lpa_server::project: [mem] project new after wrapper: 227k free / 136k used
+[serial] [INFO] lpa_server::project_manager: Project loaded: basic
+[serial] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 228600 B free / 143744 B used (223k / 140k)
+[serial] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/basic
+[serial] [INIT] Creating time provider...
+[serial] [INIT] Time provider created
+[serial] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=30fb37f8ec88 dirty=false
+[serial] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+[serial] [WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+[serial] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+[serial] [INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=723
+[serial] [INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[serial] [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 4365 bytes)
+[serial] [INFO] lpc_shared::memory: [mem] shader compile before: 179k free / 183k used
+[serial] [INFO] lpc_shared::memory: [mem] shader compile after: 164k free / 198k used
+[serial] [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=125ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=
+[serial] [INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 186 ms (1438304 B, cache)
+[device] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm, FsTree], package: "fw-esp32c6", version: "30fb37f8e", commit: "30fb37f8ec88", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: Some(BoardManifest { proto: 1, target: "esp32c6-4mb", chip: "esp32c6", version: "30fb37f8e", build_id: "30fb37f8e+30fb37f8ec88", wire_proto: 43, core_sha256: "a29b937d105f9eb39ec78aabdf94ebafee3c5ff967ce0c630dc53f6b63c2bbbd", core_len: 1438304, engine_sha256: "762de111b848781986b4e33f0fd35e8118172df5e2531e86c6303240687ae2ec", engine_len: Some(1866016), layout: 1, loader: 1, region_len: 3571712, state: Running, refused_build: None, transfer: None }) } }
+[device] state: Gone

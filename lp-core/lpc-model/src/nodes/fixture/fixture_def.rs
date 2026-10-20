@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
@@ -80,6 +80,14 @@ pub struct FixtureDef {
     /// ([`FixturePower::default`], 1000 mA); a stated budget of zero is the
     /// explicit unlimited opt-out.
     pub power: OptionSlot<ValueSlot<FixturePower>>,
+    /// What an editor's selection does to these lamps, in the fixture's
+    /// own lamp numbering: `dim`, `chase:<spans>`, `breath:<spans>`,
+    /// `;`-joined (the engine's `fixture_selection.rs`). A diagnostic the
+    /// editor drives while you work — the mapping lab's fixture overrides —
+    /// never authored: a Debug slot is never written to a project file and
+    /// an authored one is ignored. Empty: the lamps are as sampled.
+    #[slot(role = "debug")]
+    pub selection: ValueSlot<String>,
 }
 
 impl Default for FixtureDef {
@@ -100,6 +108,7 @@ impl Default for FixtureDef {
             brightness: default_brightness(),
             gamma_correction: default_gamma_correction(),
             power: OptionSlot::none(),
+            selection: ValueSlot::new(String::new()),
         }
     }
 }
@@ -395,6 +404,7 @@ mod tests {
             brightness: OptionSlot::none(),
             gamma_correction: OptionSlot::none(),
             power: OptionSlot::none(),
+            selection: ValueSlot::new(String::new()),
         };
         assert_eq!(def.kind(), NodeKind::Fixture);
     }

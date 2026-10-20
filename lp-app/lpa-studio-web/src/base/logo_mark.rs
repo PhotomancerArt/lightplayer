@@ -35,7 +35,8 @@ const PKG: (f32, f32, f32, f32, f32, f32) = (5.5, 5.5, 21.0, 21.0, 1.9, 1.25);
 const PADS: [(f32, f32); 4] = [(3.6, 8.2), (26.5, 8.2), (26.5, 19.6), (3.6, 19.6)];
 const PAD_SIZE: (f32, f32, f32) = (1.9, 4.2, 0.6);
 /// The grown triangle (spike gate-1/2): circumradius, center, and the
-/// fillet-radius ratio. The hero uses a tighter ratio (see brand_hero).
+/// fillet-radius ratio. (The landing hero used a tighter 0.10 at its
+/// larger size; the hero is gone, the mark keeps 0.16.)
 const TRI: (f32, f32, f32) = (15.4, 16.0, 7.6);
 const TRI_CORNER_RATIO: f32 = 0.16;
 
@@ -76,7 +77,7 @@ pub(crate) fn fillet_tri_corners(cx: f32, cy: f32, r: f32, rho: f32) -> [[(f32, 
 /// SVG path for the brand triangle: the [`fillet_tri_corners`] tangent
 /// points joined by straight edges and corner arcs. Sweep flag 1: the path
 /// winds clockwise in SVG's y-down space.
-pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
+fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
     let mut d = String::new();
     for (i, [p1, p2]) in fillet_tri_corners(cx, cy, r, rho).into_iter().enumerate() {
         let cmd = if i == 0 { 'M' } else { 'L' };
@@ -123,14 +124,9 @@ pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element 
 /// The wordmark text, shared by the lockup forms. `mono` renders it
 /// `currentColor` (print/one-color contexts); otherwise the whole word
 /// sweeps the LED rainbow.
-///
-/// `pub(crate)` for the landing hero (`app::home::brand_hero`), which
-/// stacks the word under a shader triangle rather than under the mark:
-/// one wordmark, one set of type metrics, one rainbow — a forked copy
-/// would drift the moment either changed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
+fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
     let style = format!("font-size:{word_px}px");
     let word_class = if mono { "" } else { "lp-brand-word" };
     rsx! {

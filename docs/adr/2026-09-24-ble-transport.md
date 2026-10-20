@@ -276,6 +276,8 @@ S4. **Play over Bluetooth is lean when idle.** Play is the steady state (a
    (`BLE_PLAY_IDLE_REFRESH_INTERVAL`). The editor over Bluetooth is authoring
    and keeps the device cadence; the device card's live picture feed does not
    run over Bluetooth at all. Measured over `?ble=emu`: see Consequences.
+   *Amended 2026-10-08 (below): the card's picture runs over Bluetooth at a
+   gentle pace; Play keeps its minute.*
 
 S5. **`?ble=emu` is a polyfill, and it proves the transport — not access.**
    Beside `?emu=`, `navigator.bluetooth` becomes
@@ -622,3 +624,96 @@ the no-flashing rule all sit above or beside the framing.
   note.
 - Plan directory: `lp2025/2026-09-28-1445-ble-on-lp-link` (`plan.md`,
   `notes.md`, phase files `p1`–`p5`).
+
+## Amendment 2026-10-08: the card's picture runs over Bluetooth, gently (S4)
+
+S4 kept the device card's picture feed off Bluetooth entirely, so a board
+reached that way never showed a live picture and its card said "No live
+picture over Bluetooth — Open in editor to see and control it." Yona,
+2026-10-08: "its annoying and seems unnecessary after all the work we did to
+get the data rates down". Reversed for the card; Play keeps its minute.
+
+- **The rule.** The card feed runs over Bluetooth at its own completion gap,
+  `DEVICE_CARD_FEED_BLE_INTERVAL` = 500 ms, against
+  `DEVICE_CARD_FEED_INTERVAL` = 150 ms over USB, the LAN and the relay
+  (`card_feed_gap_policy`, `lpa-studio-core/src/app/studio/refresh_cadence.rs`).
+  The period is the gap plus the read's own time, so a card sees about one to
+  two pictures a second and a bigger frame self-throttles. The rest of the
+  feed's rule is unchanged: it pulls only while its card is mounted and the
+  page is visible, never under the editor's borrow, and parks after three
+  unanswered reads. The card waits for its first picture with the sentence
+  every link uses ("No picture yet — the live feed is coming."), and its live
+  pill names the pace: "live · 43 fps · shown 1–2/s".
+- **What a card read costs, measured.** Off the wire tap of
+  `just walk-ble-emu` (`LP_EMU_WIRE_TAP`, `just wire-tap-stat --ledger card`):
+  a steady reply is the frame's raw sRGB bytes plus about 87 B — 254 B for
+  Peach (1D)'s 56 lamps, 811 B for Logo Sign's 241 — so about 0.5 KB at 128
+  lamps and 1.6 KB at 512. The request is 187 B. The first read after a
+  connect also carries the geometry once (2,814 B for Logo Sign). These sizes
+  are the wire's and do not depend on the link; the walk's read rates do (its
+  "Bluetooth" is the emulated board's USB link), so none of its rates is a
+  Bluetooth number. For scale on that same emulated link: the card put
+  ~0.3 KB/s up and 0.4–1.2 KB/s down, the editor 1.7 KB/s up and 2.8 KB/s
+  down.
+- **Why M5's reasons no longer hold.**
+  - *Size.* M5 sized the card against `M!` JSON lines with base64 pixels.
+    Since D8 the link is lp-link and replies are packed: pixels travel raw.
+  - *ESP-NOW.* The concern still applies in kind: a card on screen is traffic
+    on the air the board shares with ESP-NOW, and a project with a Radio node
+    loses some packets while it is watched. But this ADR's 2026-09-24
+    Amendment ruled a connected central an operating state whose ESP-NOW loss
+    is measured and reported, not gated. Connected and idle already costs
+    ~8–9 % against ~0.5 %, and the editor over Bluetooth, which is allowed,
+    reads every 75 ms. The card adds well under what the editor does, only
+    while a person is looking at the Devices page, and never while the board
+    uses Wi‑Fi (ESP-NOW is off then: `fw-esp32-common/src/net/radio_rule.rs`).
+    Steady state (Bluetooth on, nothing connected) is untouched.
+  - *The board's loop.* A reply of at most `SMALL_REPLY_BYTES` (1 KiB, about
+    310 lamps) is copied into the link's send ring and holds nothing; a larger
+    one holds the frame buffer only until the link has cut it into frames.
+    The board-side ceiling is the radio frame-rate budget's connected row
+    (`2026-10-06-radio-frame-rate-budget.md`: ≤ 50 % fps, p99 ≤ 1 s).
+- **Play keeps its minute** (`BLE_PLAY_IDLE_REFRESH_INTERVAL`). It is not the
+  same case: Play is held for hours on a phone at the piece, its read is the
+  lens's whole read (a 407 B request; ~1.2 KB replies for Logo Sign in the
+  editor), and its
+  surface puts the controls first and the picture in a slim banner. The
+  2026-09-24 re-ruling weakens S4's "Play is the steady state", so it is worth
+  revisiting, but with the card's desk measurement in hand, not by analogy.
+- **Measured on silicon (2026-10-09).** Board `loose-c6` (a XIAO ESP32-C6,
+  release 2026.10.08-23), running a copy of Logo Sign (241 lamps, on D10 and
+  D9: the catalog's IO13 is a USB data line on the C6), on the desk next to
+  the Mac. The central was a background Brave (Chromium 155, macOS 26.5)
+  driven over CDP by `spikes/ble-lab/scripts/cdp-central.mjs`; Mac Chrome saw
+  no Bluetooth devices at all that night. Fps and frame times are the board's
+  own `[perf]` lines over its USB console (`lp-cli link capture`); the bytes
+  and reads are counted at the page's GATT characteristics. Windows
+  alternated the card off screen (Studio on Projects, still connected) and on
+  screen: 2 × 2 minutes each, then 3 × 5 minutes each.
+
+  | | card off screen | card on screen |
+  |---|---|---|
+  | board fps (median of `[perf]`) | 30 in every window | 29 in every window |
+  | p99 frame time | ≤ 50 ms | ≤ 50 ms |
+  | slowest frame | 48–50 ms | 51–62 ms |
+  | frames over 100 ms | 0 | 0 |
+  | card reads | 0 | 0.94–1.24 a second |
+  | Bluetooth, page → board / board → page | ~9 / ~45 B/s | ~210–280 / ~800–1,060 B/s |
+  | link drops | 0 in ~19 min | 1 in ~19 min |
+
+  The cost is one frame a second of thirty, about 3 % — inside even the
+  radio budget's idle row (≤ 10 %), let alone the connected row (≤ 50 %).
+  The one drop was a supervision timeout (`0x08`) in a 2-minute window; Studio
+  reconnected by itself in about 5 s and the card came back live. The
+  15-minute soak that followed (card on and off, 5-minute windows) had none.
+  The 2026-09-24 Amendment's desk runs saw the same drop with nothing being
+  read (2 in Run J, 0 in ~15 min over K+L), so one drop does not say whether
+  the card makes them likelier.
+- **On a phone (2026-10-09).** Yona's iPhone in Bluefy, the same board running
+  the PLAYFUL Choker (lab rehearsal): the card drew the picture with the
+  Bluetooth pill, but only after a reboot. Before it, every read was refused
+  for memory: a connected central costs the C6 ~17.5 KB of heap, and the
+  choker was left under the 40 KiB read gate. Open defect,
+  `docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`.
+  Still owed: a 512-lamp board, and ESP-NOW loss beside a watched card
+  (`desk_espnow_meter`).

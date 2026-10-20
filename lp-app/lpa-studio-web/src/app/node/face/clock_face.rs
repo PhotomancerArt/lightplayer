@@ -10,9 +10,9 @@
 //!   `face.transport` is `Some` (an unread project falls back to the
 //!   compact [`ProducedProductView`]) and dispatches real gestures — drag
 //!   to scrub, the speed fader, run/pause, per-control clears — through
-//!   [`TapeTransport`]'s wires, the SAME derivation the module panel's
-//!   grouped Transport control renders (plan P8): holding the speed here
-//!   holds it there too.
+//!   [`TapeTransport`]'s wires (`UiClockFace::wires`): its fader writes the
+//!   same `clock.rate` the module panel's Speed knob does, so holding the
+//!   speed here holds it there too.
 //! - **The phasor listing (below) is a read-only debug surface.** There is
 //!   no gesture here at all: nothing creates, retunes, or deletes a
 //!   phasor, because phasors materialize on query and despawn on silence
@@ -128,7 +128,7 @@ pub fn ClockFace(
                                         IconActionButton {
                                             icon: StudioIconName::Revert,
                                             label: "Clear transport overrides",
-                                            title: "Clear this transport's debug overrides \u{2014} session only",
+                                            title: "Clear this transport's debug overrides",
                                             tone: IconMenuTone::Attention,
                                             on_press: move |_| {
                                                 if let Some(handler) = on_action {
@@ -149,12 +149,11 @@ pub fn ClockFace(
                             }
                         }
                     }
-                    // The card's tape and the module panel's grouped
-                    // Transport control are ONE derivation with two
-                    // presentations (P8 item 7): the card's gestures route
-                    // through the same per-dimension wiring, so holding the
-                    // speed here holds it on the panel too.
-                    TapeTransport { transport, wires: face.transport_wires(), on_action }
+                    // The card's tape writes each dimension through its own
+                    // wire: its fader and the module panel's Speed knob write
+                    // the same `clock.rate`, so holding the speed here holds
+                    // it on the panel too.
+                    TapeTransport { transport, wires: face.wires.clone(), on_action }
                 } else {
                     // No transport rows yet (unread project): the compact
                     // product pane stands in until the first read lands.
@@ -172,19 +171,19 @@ pub fn ClockFace(
                     // empty listing, which would read as "nothing running".
                     UiTimebaseState::Unread => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "Reading the timebase\u{2026}"
+                            "Reading the clock\u{2026}"
                         }
                     },
                     // A structured answer, not an error: a card asking about
                     // a node that just left the tree is not a fault.
                     UiTimebaseState::Unknown => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "This clock is not producing a timebase."
+                            "This clock has no time to show."
                         }
                     },
                     UiTimebaseState::Live if face.phasors.is_empty() => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "Nothing is riding this timebase."
+                            "Nothing is using this clock."
                         }
                     },
                     UiTimebaseState::Live => rsx! {
@@ -269,7 +268,7 @@ fn PhasorTraceCard(
                     }
                     span {
                         class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9px] tw:tabular-nums tw:text-dim-foreground",
-                        title: "Completed cycles since this integrator materialized",
+                        title: "Cycles completed since this clock started",
                         "\u{00d7}{reading.cycle}"
                     }
                 }

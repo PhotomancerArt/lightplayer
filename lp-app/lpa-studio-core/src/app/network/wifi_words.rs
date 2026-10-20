@@ -158,6 +158,42 @@ pub mod row {
     pub const SAVED: &str = "Saved";
 }
 
+/// What the board card's Wi‑Fi and lightplayer.app rows say: label voice,
+/// lower case, the state the fact and the button the fix
+/// (`docs/ux/anatomy/board-card.md`, the link rows).
+pub mod card {
+    /// The board is joining a saved network (its row's work).
+    pub const JOINING: &str = "joining";
+    /// A saved network refused its password.
+    pub const WRONG_PASSWORD: &str = "wrong password";
+    /// Joined, and lightplayer.app did not answer the board.
+    pub const CANT_REACH: &str = "can't reach";
+    /// The board dialling lightplayer.app.
+    pub const CONNECTING: &str = "connecting";
+    /// Networks a firmware saved and cannot join yet.
+    pub const SAVED: &str = "saved";
+    /// The Wi‑Fi row's fix for a board with nothing saved: its details.
+    pub const SET_UP: &str = "Set up";
+    /// The Wi‑Fi row's fix for a refused password: its details.
+    pub const CHANGE: &str = "Change";
+    /// The Wi‑Fi row's hush, under the network list, and its undoing.
+    pub const DISABLE_WIFI: &str = "Disable Wi\u{2011}Fi";
+    pub const ENABLE_WIFI: &str = "Enable Wi\u{2011}Fi";
+    /// A board whose Wi‑Fi is off.
+    pub const WIFI_DISABLED: &str =
+        "Wi\u{2011}Fi is disabled on this board. It reaches Studio over USB and Bluetooth only.";
+    /// The lightplayer.app row's hush, and its undoing.
+    pub const DISABLE_CLOUD: &str = "Disable lightplayer.app";
+    pub const ENABLE_CLOUD: &str = "Enable lightplayer.app";
+    /// A board whose Cloud relay is off.
+    pub const CLOUD_DISABLED: &str =
+        "lightplayer.app is disabled for this board: it never connects to the cloud.";
+    /// More than one saved network, none joined.
+    pub fn networks(count: usize) -> String {
+        format!("{count} networks")
+    }
+}
+
 /// The popover's own labels: its pages, buttons and fields.
 pub mod label {
     pub const WIFI: &str = "Wi‑Fi";

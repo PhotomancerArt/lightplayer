@@ -39,6 +39,14 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = [
     "std",
 ], optional = true }
 lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
+# The tree store a C6 moves to (`layout_migration`'s tree packer, reader and
+# probe): the host deflater (`host-deflate`, which brings `soft-sha` — a
+# browser has no SHA accelerator) and the read-only sector classifier
+# (`inspect`). `no_std` + alloc, so the browser build links it unchanged.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = [
+    "host-deflate",
+    "inspect",
+], optional = true }
 js-sys = { version = "0.3", optional = true }
 # Verifies the MD5 the ROM/stub sends after a raw flash read. Host-only:
 # the browser path gets its checksum from esptool-js.
@@ -76,6 +84,10 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 lpc-wire = { path = "../../lp-core/lpc-wire", features = ["ser-write-json"] }
 # golden-trace replay (tests/trace_replay.rs) parses the device-event JSONL
 serde_json = { workspace = true }
+# The layout probe's tree-store tests build a REAL store (`layout_migration::
+# tree_store_magic`): the magic and the store must never disagree.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim"] }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 
 # The real-Chrome conformance suite (`tests/browser_serial_conformance.rs`):
 # `wasm-bindgen-test` through `wasm-bindgen-test-runner` against a headless
@@ -96,7 +108,15 @@ default = []
 # Moving a board's files across a partition-layout change (the C6
 # repartition): the pure planner, the re-pack, the backup archive
 # (`layout_migration`). Every provider that flashes an ESP32 implies it.
-layout-migration = ["dep:littlefs-rust", "dep:serde_json", "dep:zip"]
+# `lpc-model` for the firmware's embedded manifest (does an image read the
+# tree store?); `lp-tree-store` for the cutover's packer, reader and probe.
+layout-migration = [
+    "dep:littlefs-rust",
+    "dep:lp-tree-store",
+    "dep:lpc-model",
+    "dep:serde_json",
+    "dep:zip",
+]
 browser-serial-esp32 = [
     "device-link",
     "device-session",
@@ -141,7 +161,8 @@ secure-link = ["device-link", "lpc-wire/secure-link"]
 # (`browser-serial-esp32`, `fake-device`) so a build that can open a device
 # can also drive the model — including plain `cargo test`, which unifies
 # `fake-device` in.
-device-link = ["dep:lpa-devices", "dep:lpc-update", "dep:lpc-wire"]
+# `lpc-model` (which `lpc-wire` already links) for the hello's features.
+device-link = ["dep:lpa-devices", "dep:lpc-model", "dep:lpc-update", "dep:lpc-wire"]
 # The worker envelope speaks the wire's published-frame vocabulary
 # (`OutputFrameEntry`, `RevisionGateRead`) so the preview host and the
 # device card feed read output frames through one set of types.

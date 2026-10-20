@@ -349,6 +349,23 @@ fn refuse_unrunnable_seams(entry: &crate::config::ConfigurationEntry, verb: &str
     Ok(())
 }
 
+/// **A flash-cut run never makes a transcript.** A power cut tears a flash
+/// command on purpose (`--flash-cut`, `lp_emu_esp_common::engine::flash_cut`):
+/// what such a run says is about one injected fault, not about the image on
+/// the chip, and no silicon run could be its twin. It is a fault injection,
+/// not a seam, so it has its own refusal rather than an overlay.
+fn refuse_a_flash_cut(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
+    if entry.flash_cut {
+        bail!(
+            "cannot {verb} on `{}`: a flash-cut run tears a flash command on purpose, and an \
+             injected fault never makes a transcript — {verb} on `{}`",
+            entry.label(),
+            entry.name
+        );
+    }
+    Ok(())
+}
+
 /// **A paced run never makes a transcript.** `realtime` holds the board to
 /// wall time, so what it records depends on the host's clock, and a
 /// transcript must be a function of the image. `max` is what every
@@ -387,6 +404,7 @@ pub fn run_set(
     let entry = cfg.configuration(configuration)?;
     refuse_unrunnable_seams(&entry, "run")?;
     refuse_a_pace(&entry, "run")?;
+    refuse_a_flash_cut(&entry, "run")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -625,6 +643,7 @@ pub fn record_set(
     let entry = cfg.configuration(configuration)?;
     refuse_unrunnable_seams(&entry, "record")?;
     refuse_a_pace(&entry, "record")?;
+    refuse_a_flash_cut(&entry, "record")?;
     let board = stated_identity("board", entry.board.as_deref(), provenance.board)?;
     let mac = stated_identity("mac", entry.mac.as_deref(), provenance.mac)?;
     let config = entry.parsed()?;
@@ -1215,6 +1234,70 @@ mod tests {
             assert!(err.contains("never paces a run"), "{err}");
             assert!(err.contains("on `lp-emu:esp32c6:t1`"), "{err}");
         }
+    }
+
+    /// A flash-cut run never makes a transcript, alone or composed with a
+    /// seam and a pace, and the refusal names the base to use instead.
+    #[test]
+    fn a_flash_cut_run_never_records_or_runs() {
+        let cfg = ValidateConfig::embedded();
+        let provenance = RecordProvenance {
+            date: "2026-10-10",
+            firmware_commit: "e68b9bb41",
+            firmware_dirty: None,
+            machine: None,
+            board: None,
+            mac: None,
+            note: None,
+        };
+        for name in [
+            "lp-emu:esp32c6:t1+flash-cut",
+            "lp-emu:esp32c6:t1+net=lan+flash-cut",
+            "lp-emu:esp32c6:t1+flash-cut+net=lan",
+        ] {
+            let entry = cfg.configuration(name).unwrap();
+            assert!(entry.flash_cut, "{name}");
+            let err = format!(
+                "{:#}",
+                record_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    &provenance,
+                    true,
+                )
+                .unwrap_err()
+            );
+            assert!(err.contains("never makes a transcript"), "{name}: {err}");
+            assert!(
+                err.contains("record on `lp-emu:esp32c6:t1`"),
+                "{name}: {err}"
+            );
+            let err = format!(
+                "{:#}",
+                run_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    true,
+                )
+                .unwrap_err()
+            );
+            assert!(err.contains("flash-cut run tears"), "{name}: {err}");
+        }
+        // The label round-trips: the seams, then the mark, then the pace.
+        let entry = cfg
+            .configuration("lp-emu:esp32c6:t1+flash-cut+net=lan@pace=max")
+            .unwrap();
+        assert_eq!(
+            entry.label(),
+            "lp-emu:esp32c6:t1+net=lan+flash-cut@pace=max"
+        );
+        assert!(!cfg.configuration("lp-emu:esp32c6:t1").unwrap().flash_cut);
     }
 
     /// A capability seam records: the plan asks the machine for exactly the

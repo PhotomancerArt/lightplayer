@@ -98,7 +98,10 @@ pub const FW_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_PROFILE: &str = "release-esp32";
 
 /// The shipped feature set: `default = ["esp32c6", "server", "radio",
-/// "json-pack"]` ([`FwImage::SHIPPED`] builds with the defaults on).
+/// "json-pack", …]` ([`FwImage::SHIPPED`] builds with the defaults on). Its
+/// filesystem is the tree store on the tree table since the tree-store
+/// cutover (`server` implies `fs-tree`); a littlefs board is a pinned
+/// reference image ([`ReferenceImage::FIELDED_LITTLEFS`]).
 pub const SHIPPED_FEATURES: &[&str] = &["esp32c6", "server", "radio"];
 
 /// One firmware image: a feature set, with or without the defaults.
@@ -195,6 +198,14 @@ impl FwImage {
         default_features: true,
     };
 
+    /// [`FwImage::SHIPPED`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`): the tree store's RAM and mount figures. Its
+    /// littlefs comparison is [`ReferenceImage::FIELDED_LITTLEFS_HEAP_PEAK`].
+    pub const SHIPPED_HEAP_PEAK: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "heap_peak_diag"],
+        default_features: true,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -270,6 +281,10 @@ const SOURCE_PATHS: &[&str] = &[
     "lp-base",
     "lp-shader",
     "lp-gfx",
+    // The server the image links (`ci-images.py`'s list names it too): an
+    // edit there moved the image and not this key, and a test ran the stale
+    // ELF (2026-10-10, the tree-store walks).
+    "lp-app/lpa-server",
     // The version every build stamps, and the split pipeline that links and
     // lays out a split image.
     "tools/lp-app-version",
@@ -493,7 +508,7 @@ fn cargo_build_fw(root: &Path, image: &FwImage) -> Result<(), String> {
 }
 
 /// A split image: the directory `lp-fw-split build` writes for one feature
-/// set. Only the four files a boot test reads are part of the artefact.
+/// set. Only the five files a boot test reads are part of the artefact.
 ///
 /// The emulator knows nothing of the layout inside (the MIT fence): a test
 /// boots [`merged`](Self::merged) from the reset vector, or direct-loads
@@ -507,11 +522,26 @@ pub struct SplitImage {
 
 impl SplitImage {
     /// The files that make the artefact, relative to [`Self::dir`].
-    pub const FILES: [&'static str; 4] = ["merged.bin", "loader.elf", "p2.elf", "split.json"];
+    pub const FILES: [&'static str; 5] = [
+        "merged.bin",
+        "merged-idf.bin",
+        "loader.elf",
+        "p2.elf",
+        "split.json",
+    ];
 
     /// The whole chip, padded to the part: what a flasher would have written.
+    /// Its second stage at `0x0` is the build's own door (LightPlayer's
+    /// bootloader, by default).
     pub fn merged(&self) -> PathBuf {
         self.dir.join("merged.bin")
+    }
+
+    /// The same `app.bin` behind the ESP-IDF second stage (the door every
+    /// board flashed before the cutover boots through): only `0x0..0x8000`
+    /// differs from [`Self::merged`].
+    pub fn merged_idf(&self) -> PathBuf {
+        self.dir.join("merged-idf.bin")
     }
 
     /// The RAM-only loader the bootloader starts.
@@ -550,7 +580,8 @@ pub fn split_slug(image: &FwImage) -> String {
 /// `LP_EMU_C6_IMAGE_DIR` replaces 2 and 3 with `tree/<SLUG>_SPLIT/`. Only a
 /// default-features image can be split (the pipeline keeps the defaults on).
 /// The shipped set is built as the target `esp32c6-4mb`, so its manifest core
-/// says what the packaged image's does.
+/// says what the packaged image's does, and as a figure build (version
+/// `0000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
     assert!(
         image.default_features,
@@ -579,7 +610,7 @@ pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
         .join("lp-emu-c6")
         .join(format!("{slug}-{key}"));
     // The directory is published by one rename, so `merged.bin` being there
-    // means the other three are too.
+    // means the others are too.
     let merged = resolve(
         &what,
         &[],
@@ -631,7 +662,14 @@ fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
         .arg("--features")
         .arg(image.features.join(","));
     if *image == FwImage::SHIPPED {
-        cmd.args(["--target", "esp32c6-4mb"]);
+        // A figure build (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`): a
+        // fixed version and a clean stamp, as `scripts/heap-budget-check.sh`
+        // builds the C6 heap ratchet's image. The version's length is a heap
+        // figure, so this is what makes the image CI uploads from this suite
+        // (`just fetch-ci-images`) the ratchet's bytes, and a desk's build
+        // CI's.
+        cmd.args(["--target", "esp32c6-4mb"])
+            .env("LP_FIGURE_BUILD", "1");
     }
     let status = cmd
         .status()
@@ -730,6 +768,17 @@ pub const SILICON_BOOT_IDLE_COMMIT: &str = "735af98ae";
 /// carries the commit that produced it.
 pub const SCENARIO_COMMIT: &str = "372392b9c";
 
+/// The commit the fielded littlefs image is built at
+/// ([`ReferenceImage::FIELDED_LITTLEFS`]): `origin/main` when the tree-store
+/// cutover's default switch (A7) branched, 2026-10-16 — the last littlefs
+/// `main`, the firmware every fielded C6 runs on the eve of the cutover:
+/// littlefs on the 2026-10 repartition's table, holding (never formatting) a
+/// tree store it meets (#1150, released first by AD4), with the
+/// `[perf] first light` line (#1152). (The migration's first walks, A6, ran
+/// `3fc9aa987`, before #1150.) Re-pin it to the cutover merge's first parent
+/// if main ships another littlefs release before the cutover lands.
+pub const FIELDED_LITTLEFS_COMMIT: &str = "1d5840a76";
+
 /// One of the reference images the script builds: a commit, with these
 /// features, optionally plus the `spike_uart0_link` feature applied as a
 /// dirty tree.
@@ -802,6 +851,32 @@ impl ReferenceImage {
         slug: "esp32c6+server+radio",
         features: "esp32c6,server,radio",
         commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+
+    /// What a board in a house runs on the eve of the tree-store cutover:
+    /// the shipped feature set (littlefs, the 176-sector table at
+    /// `0x350000`) at [`FIELDED_LITTLEFS_COMMIT`]. The cutover migration's
+    /// walks start from it (`lp-cli/tests/emu_layout_migration.rs`), and
+    /// every littlefs control (first light, RAM, mount, the littlefs core
+    /// that meets a tree store) runs it — pinned by commit, the "fielded
+    /// board" since the default switched. Boot it on its own table
+    /// ([`crate::flash::legacy_v2_partition_table_bytes`]), as a board in a
+    /// house has it.
+    pub const FIELDED_LITTLEFS: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio",
+        features: "esp32c6,server,radio",
+        commit: FIELDED_LITTLEFS_COMMIT,
+        spike: false,
+    };
+
+    /// [`ReferenceImage::FIELDED_LITTLEFS`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`, which that commit carries): the littlefs side of
+    /// the tree store's RAM and mount comparisons.
+    pub const FIELDED_LITTLEFS_HEAP_PEAK: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio+heap_peak_diag",
+        features: "esp32c6,server,radio,heap_peak_diag",
+        commit: FIELDED_LITTLEFS_COMMIT,
         spike: false,
     };
 

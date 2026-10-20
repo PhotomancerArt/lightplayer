@@ -64,8 +64,11 @@ OPTIONS:
                             and --flash is what keeps them. With rom-up an
                             --elf is optional and is never loaded [direct]
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
-    --time-grade t1|t2|t3   t1 = instruction count, t2 = the per-class model,
-                            t3 = the measured class costs plus cache and bus [t1]
+    --time-grade t1|t2|t3|t4
+                            t1 = instruction count, t2 = the per-class model,
+                            t3 = the measured class costs plus cache and bus,
+                            t4 = t3 plus the flash interface's time (SPI
+                            transfers, WIP busy, register-derived fills) [t1]
     --timeout <5s|1500ms|900us>
                             EMULATED time to run for [100ms]
     --wall-timeout <s>      host-clock safety net; exits 4. Sampled every 64th
@@ -106,6 +109,10 @@ OPTIONS:
                             the bootloader it stands in for would [64k, the
                             reset value; espflash 3.3.0's picks 32k on 4 MB]
     --flash-size <4M|8M>    the modelled chip's size [4M]
+    --flash-part <rom-default|cx1|xiao-c6>
+                            the part on the board: its JEDEC id and status
+                            register 2 at power-on; the desk parts power on
+                            with QE set, so the core reads in QIO [rom-default]
     --usb-host absent|attached|attached-idle
                             the USB-Serial-JTAG host at power-on: no cable
                             (P6's machine), a host with the port open and
@@ -119,6 +126,15 @@ OPTIONS:
                             host link's packets, e.g.
                             in-drop=0.5%,in-tail=0.5%,in-run=0.1%,out-drop=0.5%,seed=7
                             (lp_emu_esp_common::link_faults) [none]
+    --flash-cut <n>:<model>:<seed>[,range=<off>+<len>][,then=stop|power-cycle]
+                            a TEST switch, off by default: cut the power in
+                            the middle of the <n>th (0-based, from power-on)
+                            program or erase command inside lpfs (the chip's
+                            own table row, or range=), tearing it per an
+                            lp-nor-sim model (clean, byte_prefix,
+                            random_bits, calibrated, calibrated_<shape>).
+                            then=stop ends the run (exit 6); power-cycle runs
+                            on. Labels the run +flash-cut [none]
     --usb-sj stderr|file:<path>|tcp:<host:port>
                             where the bytes a USB host RECEIVED go — IN
                             packets a draining host took [kept in memory,
@@ -411,11 +427,13 @@ struct Args {
     usb_sj: UsbSjSink,
     flash: FlashBacking,
     flash_len: Option<u32>,
+    flash_part: Option<lp_emu_esp32c6::flash::FlashPart>,
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
     usb_in_free_lag_ns: u64,
     usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    flash_cut: Option<lp_emu_esp32c6::flash_cut_spec::FlashCutSpec>,
     usb_script: Vec<PathBuf>,
     pin_script: Vec<PathBuf>,
     wires: Vec<(PadId, PadId)>,
@@ -552,6 +570,9 @@ fn run() -> Result<ExitCode, String> {
     if let Some(faults) = args.usb_faults.clone() {
         builder = builder.usb_faults(faults);
     }
+    if let Some(spec) = args.flash_cut.clone() {
+        builder = builder.flash_cut(spec);
+    }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
     }
@@ -590,6 +611,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
+    }
+    if let Some(part) = args.flash_part {
+        builder = builder.flash_part(part);
     }
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
@@ -814,6 +838,11 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
             "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
             "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),
+            "--flash-part" => {
+                args.flash_part = Some(lp_emu_esp32c6::flash::FlashPart::parse(&value(
+                    "--flash-part",
+                )?)?);
+            }
             "--flash-size" => {
                 let text = value("--flash-size")?;
                 args.flash_len = Some(parse_flash_size(&text)?);
@@ -841,6 +870,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.usb_faults = Some(
                     lp_emu_esp_common::link_faults::LinkFaults::parse(&text)
                         .map_err(|e| format!("--usb-faults: {e}"))?,
+                );
+            }
+            "--flash-cut" => {
+                let text = value("--flash-cut")?;
+                args.flash_cut = Some(
+                    lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::parse(&text)
+                        .map_err(|e| format!("--flash-cut: {e}"))?,
                 );
             }
             "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
@@ -1557,6 +1593,9 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     if let Some((to_host, to_device)) = machine.usb_fault_counters() {
         eprintln!("usb-faults: device→host {to_host}; host→device {to_device}");
     }
+    for line in machine.flash_cut_summary() {
+        eprintln!("{line}");
+    }
     if let Some(tcp) = machine.control_tcp() {
         eprintln!(
             "control: {} listened, {} client(s) attached, {} command(s) applied",
@@ -1637,6 +1676,12 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             eprintln!("WALL TIMEOUT — the host-clock safety net, not a guest event")
         }
+        Outcome::PowerCut { report, .. } => eprintln!(
+            "POWER CUT at cycle {} ({} us) — {report}; the flash holds what the cut left \
+             (--flash-cut)",
+            report.cycle,
+            report.cycle / memmap::CYCLES_PER_US
+        ),
         Outcome::Seam { cycle, why } => eprintln!(
             "SEAM ERROR at cycle {cycle} ({} us): {why}",
             cycle / memmap::CYCLES_PER_US

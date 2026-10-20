@@ -64,7 +64,7 @@ impl WifiConnectFailure {
         Self::Unreachable { host }
     }
 
-    /// The sentence the card or the add slot says.
+    /// The sentence the card or Connect a board's Network row says.
     pub fn words(&self) -> String {
         match self {
             Self::Blocked => WIFI_BLOCKED_WORDS.to_string(),

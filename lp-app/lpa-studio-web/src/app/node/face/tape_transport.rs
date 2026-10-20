@@ -244,9 +244,8 @@ impl TransportGesture {
 ///
 /// `address` is the DTO's own editability encoding — the face builder
 /// withholds the address of a read-only row (`editable_row_address`) — and
-/// `wires` is the per-dimension wiring the grouping derivation attached
-/// (empty for a transport that reaches no panel, which is exactly the
-/// pre-P8 slot-edit behavior).
+/// `wires` is the clock face's per-dimension wiring (a wire with no panel
+/// target, or no wire at all, is a slot edit).
 fn transport_gesture(
     role: UiPanelWireRole,
     address: &Option<ProjectSlotAddress>,
@@ -267,8 +266,8 @@ fn transport_gesture(
     })
 }
 
-/// The tape transport instrument — the clock card's hero, and (since P8)
-/// the faceplate of the module panel's grouped Transport control.
+/// The tape transport instrument — the clock card's hero. (A module panel
+/// carries only the speed, as a knob: `UiPanelWidget::Speed`.)
 ///
 /// Every gesture — drag-scrub, fader, run/pause, tap-to-return — resolves
 /// ITS OWN dimension's target-or-address: a panel-public leaf writes its
@@ -281,9 +280,8 @@ fn transport_gesture(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn TapeTransport(
     transport: UiClockTransport,
-    /// Per-dimension wiring from the grouped control's derivation
-    /// ([`lpa_studio_core::UiClockFace::transport_wires`]). Empty = nothing
-    /// is panel-public and every gesture is a slot edit.
+    /// Per-dimension wiring ([`lpa_studio_core::UiClockFace::wires`]). Empty
+    /// = nothing is panel-public and every gesture is a slot edit.
     #[props(default)]
     wires: Vec<UiPanelWire>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
@@ -508,7 +506,7 @@ pub fn TapeTransport(
                 }
                 {override_clear_slot(
                     transport.play_state_override.clone(),
-                    "Clear the run/pause debug override \u{2014} session only",
+                    "Clear the run/pause debug override",
                     on_action,
                 )}
                 // The time cluster: driver-written digits with the amber
@@ -550,7 +548,7 @@ pub fn TapeTransport(
                 }
                 {override_clear_slot(
                     transport.scrub_override.clone(),
-                    "Clear the scrub debug override \u{2014} session only",
+                    "Clear the scrub debug override",
                     on_action,
                 )}
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-2",
@@ -582,7 +580,7 @@ pub fn TapeTransport(
                     }
                     {override_clear_slot(
                         transport.rate_override.clone(),
-                        "Clear the speed debug override \u{2014} session only",
+                        "Clear the speed debug override",
                         on_action,
                     )}
                 }

@@ -159,6 +159,18 @@ pub fn drop_lease(port: &str, holder: Option<&str>) -> Result<()> {
     }
 }
 
+/// Whether `holder` already holds the lease on the board at `port` — so a
+/// command that leases for its own write leaves a caller's lease alone
+/// instead of taking it over and dropping it when it finishes.
+pub fn held_by(port: &str, holder: &str) -> bool {
+    list().is_some_and(|boards| {
+        boards.iter().any(|b| {
+            b.port.as_deref() == Some(port)
+                && b.lease.as_ref().is_some_and(|lease| lease.holder == holder)
+        })
+    })
+}
+
 /// The bench's view of every board, or `None` without a working `board`.
 pub fn list() -> Option<Vec<BenchBoard>> {
     let board = board_binary()?;

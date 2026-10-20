@@ -18,7 +18,7 @@ compile/execute path to solve build, size, or `no_std` issues.
 - Firmware check and test harness modes behind feature flags.
 
 Chip-generic firmware logic (server loop, transport, logger, boot, output
-provider, littlefs glue) lives in `fw-esp32-common` and is consumed here;
+provider, the tree-store mount) lives in `fw-esp32-common` and is consumed here;
 this crate keeps only what is genuinely ESP32-C6: board init, RMT register
 code, USB-Serial-JTAG, the recovery backend and abort-tier panic path, and
 the hardware test harnesses (see
@@ -137,9 +137,12 @@ its handshake proves the holder's own key, which takes the slot. The leg's
 TCP and WebSocket buffers (5,830 B) exist only while the board may dial and
 the route's outgoing frame only while a route holds the slot, so a board with
 no account key holds no relay memory. Status: `NetworkStatus.relay`; the
-heartbeat says `[relay] state=… routes=… rx=… tx=…` (there is no line on a
-state change: a 688 B line crossed a flash page, see the budget ADR's
-ledger). Costs and what is not yet measured on silicon:
+heartbeat says `[relay] state=… routes=… rx=… tx=… · … · pictures N
+idle|watched|off` (there is no line on a state change: a 688 B line crossed
+a flash page, see the budget ADR's ledger). The board speaks relay protocol
+2: its hello carries the build's version, and it sends the relay its
+project's name and, when asked, a picture of its lamps (the frame hook
+makes it, `src/net/relay_probes.rs`). Costs and what is not yet measured on silicon:
 `docs/adr/2026-10-06-cloud-relay.md` ("Device side").
 
 `LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`) makes a **desk
@@ -181,15 +184,18 @@ rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
 
 ## Flash Budget And Diagnostics
 
-The app image must fit the 3.25 MB `factory` partition (`0x340000`; `lpfs` is
-the 704 KB after it, at `0x350000`). The 2026-10 repartition spent the
-reservation the budget ADR held for Wi-Fi: a board still on the old layout
-(`factory` 3 MB, `lpfs` 960 KB at `0x310000`) keeps its files through Studio's
+The app image must fit the 3.4375 MB `factory` partition (`0x370000`; `lpfs`
+is the tree store's 512 KB after it, at `0x380000`, since the tree-store
+cutover — before it `factory` was `0x340000` and `lpfs` a 704 KB littlefs at
+`0x350000`). The 2026-10 repartition spent the reservation the budget ADR
+held for Wi-Fi, and the cutover gave the app the 192 KB the smaller store
+frees: a board still on an old layout keeps its files through Studio's
 Update firmware or `lp-cli hardware lpfs migrate`, which move them; see
-`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`. The firmware
-reads its `lpfs` partition from the flashed table at boot, and never formats
-over an old-layout filesystem it finds instead (it boots on a memory
-filesystem and says `fs: legacy_held` in its hello).
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md` and
+`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`. The firmware reads
+its `lpfs` partition from the flashed table at boot, and never formats over a
+littlefs it finds instead (it boots on a memory filesystem and says `fs:
+legacy_held` in its hello).
 
 `.cargo/config.toml` buys ~155 KB of
 that by giving up on-device diagnostics, and `build-std`'s `optimize_for_size`
@@ -222,20 +228,99 @@ blob is kept) are in `docs/adr/2026-07-28-esp32c6-flash-budget.md`; the
 repartition that spent its lpfs reservation is
 `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
 
-## Moving a Board's Files (the 2026-10 repartition)
+## Moving a Board's Files (the repartition, then the tree store)
 
-Studio's Update firmware migrates an old-layout board itself. From a
-terminal, with the board in its bootloader on `<port>`:
+Studio's Update firmware migrates an old-layout board itself — a
+pre-2026-10 board (littlefs at `0x310000`) or a fielded littlefs board
+(`0x350000`, the 176-sector table) — straight into the tree store at
+`0x380000` (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`).
+From a terminal, with the board in its bootloader on `<port>`:
 
 ```bash
-cargo run -q -p lp-cli -- hardware lpfs report --port <port>    # how full, does it fit 704 KB
+cargo run -q -p lp-cli -- hardware lpfs report --port <port>    # how full, does it fit 128 sectors
 cargo run -q -p lp-cli -- hardware lpfs save --port <port> --out ~/lp-backups/
-cargo run -q -p lp-cli -- hardware lpfs migrate --port <port> --merged <merged.bin>
+cargo run -q -p lp-cli -- hardware lpfs migrate --to tree --port <port> --merged <merged.bin>
 just flash-fw-esp32c6 migrate=1                                  # the flash recipe, migrating
 ```
 
 `just flash-fw-esp32c6` refuses to write a table that does not match the
 board's (exit 3) unless told `migrate=1` or `discard=1`.
+
+## The tree store as `lpfs` (the C6's filesystem since the cutover)
+
+Every `server` build mounts the tree store (`lp-base/lp-tree-store`): the
+feature `fs-tree`, which `server` implies and the served build def names
+(plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7; built in
+`lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). `memory_fs`
+replaces it with a RAM filesystem (benchmark and no-flash emulator images;
+the hello then lists no `fs.tree`). **littlefs is not linked**: the C6 has
+no littlefs code since the default switch. Every board file goes through
+the store, because they all go through `base_fs`. The table is
+`partitions.csv`: `factory` `0x10000`+`0x370000`, `lpfs` `0x380000`+
+`0x80000` (128 sectors).
+
+- **Flash:** `src/tree_flash.rs`, over esp-storage through the
+  word-alignment shim (`fw_esp32_common::aligned_nor_flash`): esp-storage
+  here refuses an unaligned offset or length and panics on an unaligned
+  buffer, and the store writes records at any byte offset, so every read
+  goes through an aligned bounce buffer and every program is padded to
+  whole words with `0xFF`. **Every program reaches the ROM word-aligned.**
+- **Reads go through the flash cache** (the mount study's C7): `lpfs` is
+  mapped by the MMU into the top of the loader's old scratch window
+  (`0x4278_0000..0x4280_0000` for the 512 KiB `lpfs` since the cutover, at
+  32 KiB pages; the core and the
+  engine together never reach it) and the store reads it as memory, a
+  32-byte line fill instead of a ROM read call. After every program and
+  erase, `lp_tree_store::WindowedFlash` invalidates the range with the ROM's
+  `Cache_Invalidate_Addr` before the next read; a refused invalidate, or a
+  partition that does not fit the window, sends every read back to the ROM
+  calls (`[FS] lpfs is read by ROM calls: …` at boot for the latter).
+- **Hasher:** `src/hw_sha.rs` (`StoreSha256`): the SHA accelerator, or
+  software `sha2` while a boot hash holds it. Moved out of `ota/` because an
+  unsplit build has no `ota/`.
+- **Boot words** (`fw_esp32_common::tree_fs`; D2):
+  - `[FS] tree store mounted (<n> sectors, <free> free, root <seq>)` — `fs: mounted`;
+  - `[FS] tree store formatted (…)` — a partition with no store and no
+    littlefs superblock — `fs: formatted`; the format is lazy: it erases
+    sectors 0 and 1 and kills every other header;
+  - `[FS] legacy-layout filesystem found — not formatting; files are held
+    for migration (littlefs, not yet in the tree store); using memory FS` —
+    `fs: legacy_held`: a littlefs superblock (its name at byte 8 of block 0
+    or 1) in `lpfs` itself, or at `0x350000` where a fielded board that
+    skipped the migration keeps it (`tree_flash::littlefs_found`; magic
+    only, AD5). Nothing is written; Studio moves the files over USB (AD3).
+    The superblock at `0x350000` survives a plain flash only while
+    `app.bin` ends below it (`lp-fw-split headroom`'s "legacy overlap").
+    The pre-repartition `0x310000` is not probed: every image writes over
+    it;
+  - `[FS] tree store refused: a newer or damaged store header — files kept
+    (<why>); using memory FS, access locked` — `fs: refused`: nothing
+    written, the device store locked, Bluetooth off; read the files with
+    `lp-cli hardware tree extract`.
+- **Update guard** (D8): the split build's update session refuses a core
+  install that does not carry the tree-store mark in its own bytes
+  (`LP_CORE_FS_TREE_MARK`, `lpc_model::manifest::CORE_FS_TREE_MARK`; a core
+  root of the split link, and `lp-fw-split` fails a build whose manifest
+  lists `fs.tree` without it) — a littlefs core would format the store
+  (`fw_esp32_common::fs_tree_core_guard`). It used to read the manifest
+  blob, which the split link puts in the engine, and so refused every
+  core (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+- **The littlefs release's half** (adoption A5, released before the
+  cutover): that image, finding a partition littlefs will not mount, looks
+  for the tree store's sector magic `"LTS1"` before it formats, and holds a
+  store it finds (`fs: refused`, `[FS] this board's files are in the tree
+  store …`). It is the pinned fielded image the emulator tests boot
+  (`ReferenceImage::FIELDED_LITTLEFS`).
+
+One measurement feature rides with it, never shipped: `heap_peak_diag`
+(`[heap] peak=… live=… max_usage=… largest=…` after each heartbeat — the
+peak of requested bytes since the line before — and `[perf] fs mount <us>
+us` at boot; not with `heap_map_diag`). Size it with `just
+fw-esp32c6-size-check 65536 "" esp32c6,server,heap_peak_diag`. The
+emulator walks are `lp-cli/tests/emu_tree_store_{boot,cuts,ram,perf}.rs`;
+the reports are `docs/reports/2026-10-10-tree-store-emulator-walk.md` and
+the cutover's. See
+`docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md`.
 
 ## Feature Notes
 

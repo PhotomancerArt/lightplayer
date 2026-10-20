@@ -32,7 +32,13 @@
 //! - nobody holds the wire — a coarse effect or the editor lens pauses the
 //!   pump, and a pull then could never be answered (design pin: never pull
 //!   under a borrow);
-//! - the card is WANTED (mounted on the devices page) and the page is
+//! - the port is not being closed: once a Disconnect has folded (the
+//!   person's, or a hold let go to another tab) the port still reads open
+//!   until its close comes back, and a request on it then is never
+//!   answered — the pull would wait out its reply budget, five seconds,
+//!   with the actor and everything queued behind it
+//!   (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`);
+//! - the card is WANTED (mounted on the home page) and the page is
 //!   visible — a picture nobody can see is serial time the board would
 //!   rather spend on the wire's other traffic;
 //! - the feed is not PARKED: three consecutive pulls that timed out or
@@ -40,11 +46,14 @@
 //!   loaded-project change (the dead-wire backstop, mirroring the lens's
 //!   `LENS_DEAD_WIRE_FAILURES`). Card freshness stays the model's job.
 //!
-//! Cadence is the completion gap the sim feed uses
-//! (`DEVICE_CARD_FEED_INTERVAL`, counted from each pull's completion, so a
-//! big dome frame self-throttles) under `DEVICE_CARD_FEED_CLASS`: the
-//! actor's passive tick runs due pulls beside the sim's and a preempting
-//! gesture cancels the in-flight read at its next frame boundary.
+//! Cadence is a completion gap, counted from each pull's completion so a
+//! big dome frame self-throttles, and it follows the link ([`feed_gap`]):
+//! `DEVICE_CARD_FEED_INTERVAL` over USB, the LAN and the relay, and the
+//! gentler `DEVICE_CARD_FEED_BLE_INTERVAL` over Bluetooth — about one to two
+//! pictures a second, where the board's air is shared with ESP-NOW. Pulls
+//! run under `DEVICE_CARD_FEED_CLASS`: the actor's passive tick runs due
+//! pulls beside the sim's and a preempting gesture cancels the in-flight
+//! read at its next frame boundary.
 //!
 //! # The last frame outlives the tab
 //!
@@ -57,6 +66,7 @@
 //! the offline pill's age is honest across reloads. A seed never displaces
 //! a frame this session pulled, and the first live pull replaces the seed.
 
+use core::cell::Cell;
 use core::future::Future;
 use core::time::Duration;
 use std::collections::BTreeMap;
@@ -65,7 +75,7 @@ use lpa_client::{CancelSignal, LpClient, ProgressDeadline, PullOutcome};
 use lpa_devices::identity::DeviceId;
 use lpa_devices::link::LinkId;
 use lpa_devices::time::Millis;
-use lpa_devices::{Device, Roster};
+use lpa_devices::{ConnectionIntent, Device, Roster};
 use lpc_wire::{ClientRequest, ServerMsgBody, WireProjectHandle};
 
 use super::device_effects::DeviceEffects;
@@ -99,19 +109,9 @@ pub(crate) struct FeedTarget {
 /// `None` is the common case (no board, nothing running, an activity, a
 /// borrowed wire); the caller stamps the attempt and moves on.
 pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<FeedTarget> {
-    // No live card picture over Bluetooth (M5): a picture every 150 ms is a
-    // stream on a link whose air time the board shares with ESP-NOW, and a
-    // card is not what anyone is controlling. The card keeps its last frame.
-    if device
-        .identity
-        .endpoint
-        .as_ref()
-        .is_some_and(|endpoint| endpoint.is_bluetooth())
-    {
-        return None;
-    }
     let evidence = &device.evidence;
     if !evidence.presence.is_open()
+        || device.intent.connection == ConnectionIntent::Disconnected
         || !evidence.classification.is_light_player()
         || !evidence.has_hello()
         || device.activity.is_some()
@@ -129,6 +129,20 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
         loaded_path,
         hello_at: evidence.hello_heard_at(),
     })
+}
+
+/// The completion gap between one device's pulls, by the link it is on: a
+/// Bluetooth board's card pulls gently (see
+/// [`DEVICE_CARD_FEED_BLE_INTERVAL`](crate::DEVICE_CARD_FEED_BLE_INTERVAL)),
+/// every other board's at the card cadence.
+pub(crate) fn feed_gap(device: &Device) -> Duration {
+    crate::app::studio::card_feed_gap_policy(
+        device
+            .identity
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.is_bluetooth()),
+    )
 }
 
 /// The card's pull: one output-frame probe, no mirror queries — a picture,
@@ -251,10 +265,17 @@ impl DeviceFrameFeed {
         self.snapshot_write_at = Some(now);
     }
 
-    /// Seed this feed from the board's sidecar (see the module doc). A
-    /// seed counts as already written — it came FROM the store.
-    fn seed_snapshot(&mut self, frame: UiControlProductPreview, captured_at: f64) -> bool {
-        if !self.state.seed(frame, captured_at) {
+    /// Seed this feed from the board's sidecar (see the module doc), when
+    /// the sidecar is newer than a frame that is not `live`
+    /// ([`CardFeedState::seed_if_newer`]). A seed counts as already
+    /// written — it came FROM the store.
+    fn seed_snapshot(
+        &mut self,
+        frame: UiControlProductPreview,
+        captured_at: f64,
+        live: bool,
+    ) -> bool {
+        if !self.state.seed_if_newer(frame, captured_at, live) {
             return false;
         }
         self.snapshot_written_at = Some(captured_at);
@@ -292,6 +313,23 @@ pub struct DeviceFrameFeeds {
     /// The page is visible (`document.visibilityState`); a hidden tab
     /// feeds nothing.
     page_visible: bool,
+    /// The editor lens's frame clock as the card view last saw it: which
+    /// lens session, its `frames_seen`, and when this view FIRST read that
+    /// value. While the lens holds a device's wire the card draws the
+    /// lens's own picture (the feed never pulls under the borrow), and this
+    /// stamp is what ages it: a board that stops publishing goes amber
+    /// under the lens exactly as it does under the feed. An observation
+    /// stamp taken while building the view, hence the `Cell`; the lens
+    /// mirror keeps no clock of its own.
+    lens_clock: Cell<Option<LensFrameClock>>,
+}
+
+/// See [`DeviceFrameFeeds::observe_lens_frames`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LensFrameClock {
+    lens: crate::RuntimeId,
+    frames_seen: u64,
+    moved_at: f64,
 }
 
 impl Default for DeviceFrameFeeds {
@@ -307,7 +345,25 @@ impl DeviceFrameFeeds {
             // Honest default for a page that has not said otherwise: the
             // studio's own visibility signal flips it on first paint.
             page_visible: true,
+            lens_clock: Cell::new(None),
         }
+    }
+
+    /// Note the lens session's frame clock at `now` and answer how old its
+    /// newest frame is: zero when `frames_seen` moved (or the lens is a
+    /// different session — a reopened lens counts from one again), else
+    /// the seconds since it last moved.
+    pub fn observe_lens_frames(&self, lens: crate::RuntimeId, frames_seen: u64, now: f64) -> f64 {
+        let moved_at = match self.lens_clock.get() {
+            Some(clock) if clock.lens == lens && clock.frames_seen == frames_seen => clock.moved_at,
+            _ => now,
+        };
+        self.lens_clock.set(Some(LensFrameClock {
+            lens,
+            frames_seen,
+            moved_at,
+        }));
+        (now - moved_at).max(0.0)
     }
 
     pub fn get(&self, device: DeviceId) -> Option<&DeviceFrameFeed> {
@@ -318,7 +374,7 @@ impl DeviceFrameFeeds {
         self.page_visible
     }
 
-    /// The card's mount lease: `true` when a `DeviceRosterCard` for this
+    /// The card's mount lease: `true` when a board card for this
     /// device is on screen, `false` when it unmounts.
     pub fn set_wanted(&mut self, device: DeviceId, wanted: bool) {
         match self.by_device.get_mut(&device) {
@@ -343,20 +399,28 @@ impl DeviceFrameFeeds {
             .is_some_and(|feed| feed.frame().is_some())
     }
 
+    /// Whether `device`'s sidecar is worth reading: its feed has no
+    /// picture, or its picture is not `live` (the board's link is not open
+    /// here — another tab may hold it and write a newer one).
+    pub fn wants_snapshot(&self, device: DeviceId, live: bool) -> bool {
+        !live || !self.has_frame(device)
+    }
+
     /// Seed `device`'s feed from its persisted last frame, creating the
     /// feed if the card was never mounted (a remembered board's tile is
     /// not a card, and wants no pull). Returns whether it seeded — `false`
-    /// when the feed already has a picture.
+    /// when the feed's picture is live, or not older than the sidecar's.
     pub fn seed_snapshot(
         &mut self,
         device: DeviceId,
         frame: UiControlProductPreview,
         captured_at: f64,
+        live: bool,
     ) -> bool {
         self.by_device
             .entry(device)
             .or_insert_with(DeviceFrameFeed::new)
-            .seed_snapshot(frame, captured_at)
+            .seed_snapshot(frame, captured_at, live)
     }
 
     /// Every feed with a frame worth writing to its sidecar at `now`
@@ -384,8 +448,13 @@ impl DeviceFrameFeeds {
             .retain(|device, _| roster.device(*device).is_some());
     }
 
-    /// Devices whose feed would pull right now, with what they need.
-    fn active(&self, roster: &Roster, effects: &DeviceEffects) -> Vec<(DeviceId, FeedTarget)> {
+    /// Devices whose feed would pull right now, with what they need and
+    /// the gap their link asks for.
+    fn active(
+        &self,
+        roster: &Roster,
+        effects: &DeviceEffects,
+    ) -> Vec<(DeviceId, FeedTarget, Duration)> {
         if !self.page_visible {
             return Vec::new();
         }
@@ -401,7 +470,7 @@ impl DeviceFrameFeeds {
                 continue;
             };
             if feed.armed_for(&target) {
-                active.push((*id, target));
+                active.push((*id, target, feed_gap(device)));
             }
         }
         active
@@ -409,22 +478,30 @@ impl DeviceFrameFeeds {
 
     /// Time until the earliest due pull, for the actor's min-over-lanes
     /// delay. `None` when nothing is feeding — the common case.
-    pub fn due_in(
+    pub fn due_in(&self, now: f64, roster: &Roster, effects: &DeviceEffects) -> Option<Duration> {
+        self.active(roster, effects)
+            .into_iter()
+            .filter_map(|(id, _, gap)| self.by_device.get(&id).map(|feed| feed.due_in(now, gap)))
+            .min()
+    }
+
+    /// The gap `device`'s feed would pull at, when it is feeding (tests: the
+    /// Bluetooth cadence is a fact about this number).
+    #[cfg(test)]
+    pub(crate) fn active_gap_for_test(
         &self,
-        now: f64,
-        gap: Duration,
+        device: DeviceId,
         roster: &Roster,
         effects: &DeviceEffects,
     ) -> Option<Duration> {
         self.active(roster, effects)
             .into_iter()
-            .filter_map(|(id, _)| self.by_device.get(&id))
-            .map(|feed| feed.due_in(now, gap))
-            .min()
+            .find(|(id, _, _)| *id == device)
+            .map(|(_, _, gap)| gap)
     }
 
     /// Pull one published frame per feeding device whose completion gap
-    /// elapsed.
+    /// (its link's, [`feed_gap`]) elapsed.
     ///
     /// Returns `(preempted, new_frame)`: whether a due pull was skipped or
     /// cut short by cancellation (the actor's starvation floor), and
@@ -432,7 +509,6 @@ impl DeviceFrameFeeds {
     pub async fn run_due<MakeTimer, Timer, Cancel>(
         &mut self,
         now_secs: &dyn Fn() -> f64,
-        gap: Duration,
         deadline_budget: Duration,
         roster: &Roster,
         effects: &DeviceEffects,
@@ -448,11 +524,12 @@ impl DeviceFrameFeeds {
         let due: Vec<(DeviceId, FeedTarget)> = self
             .active(roster, effects)
             .into_iter()
-            .filter(|(id, _)| {
+            .filter(|(id, _, gap)| {
                 self.by_device
                     .get(id)
-                    .is_some_and(|feed| feed.due(now, gap))
+                    .is_some_and(|feed| feed.due(now, *gap))
             })
+            .map(|(id, target, _)| (id, target))
             .collect();
         let mut preempted = false;
         let mut new_frame = false;
@@ -710,7 +787,7 @@ mod tests {
         let mut feed = DeviceFrameFeed::new();
         assert!(feed.snapshot_due(100.0).is_none(), "no frame, nothing due");
 
-        assert!(feed.state.seed(frame(1), 100.0));
+        assert!(feed.state.seed_if_newer(frame(1), 100.0, false));
         // (`seed` on the state alone is the "a pull landed" stand-in here;
         // the feeds-level seed marks itself written, tested below.)
         assert_eq!(feed.snapshot_due(100.0).map(|(_, at)| at), Some(100.0));
@@ -719,7 +796,7 @@ mod tests {
 
         // A newer frame inside the window waits for the window.
         feed.state = CardFeedState::default();
-        feed.state.seed(frame(2), 103.0);
+        feed.state.seed_if_newer(frame(2), 103.0, false);
         assert!(feed.snapshot_due(105.0).is_none(), "inside the window");
         assert_eq!(
             feed.snapshot_due(100.0 + DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS)
@@ -734,8 +811,11 @@ mod tests {
         let device = DeviceId(9);
         assert!(!feeds.has_frame(device));
 
-        assert!(feeds.seed_snapshot(device, frame(4), 50.0));
+        assert!(feeds.wants_snapshot(device, true), "no picture yet");
+        assert!(feeds.seed_snapshot(device, frame(4), 50.0, false));
         assert!(feeds.has_frame(device));
+        assert!(!feeds.wants_snapshot(device, true), "a live picture stands");
+        assert!(feeds.wants_snapshot(device, false));
         assert!(
             feeds.get(device).is_some_and(|feed| !feed.is_wanted()),
             "a seeded feed wants no pull"
@@ -744,13 +824,46 @@ mod tests {
             feeds.snapshots_due(1_000.0).is_empty(),
             "what came from the store is not written back"
         );
-        assert!(!feeds.seed_snapshot(device, frame(5), 60.0), "seeded once");
+        assert!(
+            !feeds.seed_snapshot(device, frame(5), 50.0, false),
+            "the same sidecar again is not newer"
+        );
+        assert!(
+            !feeds.seed_snapshot(device, frame(5), 60.0, true),
+            "a live picture is never displaced"
+        );
         assert_eq!(
             feeds
                 .get(device)
                 .and_then(|feed| feed.frame())
                 .map(|f| f.revision),
             Some(4)
+        );
+    }
+
+    #[test]
+    fn the_lens_frame_clock_ages_from_the_first_sight_of_each_frame_count() {
+        let feeds = DeviceFrameFeeds::new();
+        let lens = crate::RuntimeId::new(1);
+        assert_eq!(feeds.observe_lens_frames(lens, 1, 10.0), 0.0);
+        assert_eq!(
+            feeds.observe_lens_frames(lens, 1, 12.5),
+            2.5,
+            "no new frame: it ages"
+        );
+        assert_eq!(
+            feeds.observe_lens_frames(lens, 2, 13.0),
+            0.0,
+            "a frame moved: fresh"
+        );
+        // A reopened lens is a new session whose count starts over; the
+        // same count on a different session is not the same frame.
+        let reopened = crate::RuntimeId::new(2);
+        assert_eq!(feeds.observe_lens_frames(reopened, 2, 20.0), 0.0);
+        assert_eq!(
+            feeds.observe_lens_frames(reopened, 2, 19.0),
+            0.0,
+            "never negative"
         );
     }
 

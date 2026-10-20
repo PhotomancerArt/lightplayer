@@ -28,7 +28,7 @@ use lpa_server::LpServer;
 use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, ServerTransport};
 
 use crate::link_upkeep::LinkUpkeep;
 use crate::time::Esp32TimeProvider;
@@ -54,6 +54,41 @@ fn run_frame_hook(server: &LpServer) {
         hook(server);
     }
 }
+
+/// The chip's hello gate (`0`: none, always open): see [`set_hello_gate`].
+static HELLO_GATE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Hold the loop's unsolicited hello until `ready` says it may go. The C6's
+/// split image takes its core's own SHA-256 — which the hello's board
+/// manifest carries — after the boot's first light rather than before it,
+/// and holds the hello for it, so building the hello never stalls the boot
+/// for the hash. Heartbeats wait for the unsolicited hello, which stays the
+/// first id-0 frame, and the hosts' requests wait with it (a host's first is
+/// its `Hello`, and answering it would build the hello). `ready(wanted)`:
+/// `wanted` says a host is waiting on a held request, so the chip may open
+/// the gate sooner and pay for the hello then. Nothing waits longer than
+/// [`HELLO_HOLD_MAX_MS`] from the loop's start. Unset, the hello goes on the
+/// first pass, as it always did.
+pub fn set_hello_gate(ready: fn(bool) -> bool) {
+    HELLO_GATE.store(ready as usize, core::sync::atomic::Ordering::Release);
+}
+
+fn hello_gate_open(wanted: bool) -> bool {
+    let raw = HELLO_GATE.load(core::sync::atomic::Ordering::Acquire);
+    if raw == 0 {
+        return true;
+    }
+    // SAFETY: only `set_hello_gate` stores here, and it stores a
+    // `fn(bool) -> bool`.
+    let ready: fn(bool) -> bool = unsafe { core::mem::transmute(raw) };
+    ready(wanted)
+}
+
+/// The longest the hello gate holds the hello, from the loop's start: past
+/// it the hello goes whatever the gate says (and on the C6 hashes the core
+/// then, as every boot did before the gate). A slow first light (a big
+/// shader's compile) must not keep a host waiting for its hello.
+pub const HELLO_HOLD_MAX_MS: u64 = 2_000;
 
 /// Performance logging interval.
 const PERF_LOG_INTERVAL_MS: u64 = 5000;
@@ -98,10 +133,13 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 ) -> ! {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
-    // docs/adr/2026-07-14-wire-hello-versioning.md).
-    if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
-        note_send_failure("hello", &e);
-    }
+    // docs/adr/2026-07-14-wire-hello-versioning.md). Sent at the top of the
+    // first pass the chip's hello gate is open ([`set_hello_gate`]), to the
+    // links open now; no heartbeat goes before it.
+    let mut hello_owed = true;
+    let mut boot_links = transport.links();
+    let mut held_links: Vec<Link> = Vec::new();
+    let mut held_asks: Vec<Incoming> = Vec::new();
 
     let mut last_tick = time_provider.now_ms();
     let mut frame_count = 0u32;
@@ -139,8 +177,24 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         crate::frame_pace_diag::frame_start();
 
         // A link that joined since the last frame (a radio connection) gets
-        // its own hello before anything else is sent to it.
-        send_owed_hellos(&server, &mut transport).await;
+        // its own hello before anything else is sent to it — once the hello
+        // is no longer held; until then it waits with the rest.
+        held_links.extend(transport.take_opened_links());
+        if hello_owed
+            && (hello_gate_open(!held_asks.is_empty())
+                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS)
+        {
+            hello_owed = false;
+        }
+        if !hello_owed && !(boot_links.is_empty() && held_links.is_empty()) {
+            send_hellos(
+                &server,
+                &mut transport,
+                core::mem::take(&mut boot_links),
+                core::mem::take(&mut held_links),
+            )
+            .await;
+        }
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
@@ -160,6 +214,16 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                     break;
                 }
             }
+        }
+        // While the hello is held, so are the hosts' requests: the first a
+        // host sends is its `Hello`, and answering it would build the hello
+        // the gate is holding (on the C6, hash the core before its first
+        // light). They are answered, in order, in the tick after it opens.
+        if hello_owed {
+            held_asks.append(&mut incoming_messages);
+        } else if !held_asks.is_empty() {
+            held_asks.append(&mut incoming_messages);
+            incoming_messages = core::mem::take(&mut held_asks);
         }
         let receive_done = time_provider.now_ms();
 
@@ -257,7 +321,8 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         // served: a long multi-frame read is exactly when the memory and
         // link-loss numbers matter most, and suppressing the heartbeat there
         // made a busy device doubly invisible.
-        if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
+        if !hello_owed && current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS
+        {
             let fps_current = fps_tracker
                 .instantaneous_fps(frame_count, current_time, startup_time)
                 .unwrap_or(0.0);
@@ -307,13 +372,23 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     }
 }
 
-/// The hello each newly opened link is owed (a single-link transport never
-/// owes one). A failure is logged and not retried: the link's own `Hello`
-/// request still gets an answer.
-async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, transport: &mut T) {
-    for link in transport.take_opened_links() {
+/// The hellos due, once the gate is open: the unsolicited one to every link
+/// that was open when the loop started (`boot`; what
+/// `fw_core::send_unsolicited_hello` sends), then the one each newly opened
+/// link is owed (`opened`; a single-link transport's is its session's `Up`),
+/// unless the unsolicited one just went to it: one hello per link per boot.
+/// A failure is logged and not retried: the link's own `Hello` request still
+/// gets an answer.
+async fn send_hellos<T: ServerTransport>(
+    server: &LpServer,
+    transport: &mut T,
+    boot: Vec<Link>,
+    opened: Vec<Link>,
+) {
+    let owed = opened.into_iter().filter(|link| !boot.contains(link));
+    for link in boot.iter().copied().chain(owed) {
         if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
-            note_send_failure("hello to a newly opened link", &e);
+            note_send_failure("hello", &e);
         }
     }
 }
@@ -439,10 +514,13 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
 ) -> LpServer {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
-    // docs/adr/2026-07-14-wire-hello-versioning.md).
-    if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
-        note_send_failure("hello", &e);
-    }
+    // docs/adr/2026-07-14-wire-hello-versioning.md). Sent at the top of the
+    // first pass the chip's hello gate is open ([`set_hello_gate`]), to the
+    // links open now; no heartbeat goes before it.
+    let mut hello_owed = true;
+    let mut boot_links = transport.links();
+    let mut held_links: Vec<Link> = Vec::new();
+    let mut held_asks: Vec<Incoming> = Vec::new();
 
     let mut last_tick = time_provider.now_ms();
     let mut frame_count = 0u32;
@@ -478,8 +556,24 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         }
 
         // A link that joined since the last frame (a radio connection) gets
-        // its own hello before anything else is sent to it.
-        send_owed_hellos(&server, &mut transport).await;
+        // its own hello before anything else is sent to it — once the hello
+        // is no longer held; until then it waits with the rest.
+        held_links.extend(transport.take_opened_links());
+        if hello_owed
+            && (hello_gate_open(!held_asks.is_empty())
+                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS)
+        {
+            hello_owed = false;
+        }
+        if !hello_owed && !(boot_links.is_empty() && held_links.is_empty()) {
+            send_hellos(
+                &server,
+                &mut transport,
+                core::mem::take(&mut boot_links),
+                core::mem::take(&mut held_links),
+            )
+            .await;
+        }
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
@@ -499,6 +593,16 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                     break;
                 }
             }
+        }
+        // While the hello is held, so are the hosts' requests: the first a
+        // host sends is its `Hello`, and answering it would build the hello
+        // the gate is holding (on the C6, hash the core before its first
+        // light). They are answered, in order, in the tick after it opens.
+        if hello_owed {
+            held_asks.append(&mut incoming_messages);
+        } else if !held_asks.is_empty() {
+            held_asks.append(&mut incoming_messages);
+            incoming_messages = core::mem::take(&mut held_asks);
         }
         let receive_done = time_provider.now_ms();
 
@@ -607,7 +711,8 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         // served: a long multi-frame read is exactly when the memory and
         // link-loss numbers matter most, and suppressing the heartbeat there
         // made a busy device doubly invisible.
-        if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
+        if !hello_owed && current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS
+        {
             let fps_current = fps_tracker
                 .instantaneous_fps(frame_count, current_time, startup_time)
                 .unwrap_or(0.0);

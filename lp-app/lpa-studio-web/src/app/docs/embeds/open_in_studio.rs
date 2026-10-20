@@ -38,7 +38,7 @@ pub(crate) fn OpenInStudioButton(
     let live = actions.as_ref().is_some_and(DocsStudioActions::is_live);
     let label = label.unwrap_or_else(|| "Open in Studio".to_string());
     let title = if live {
-        "Opens this example in the editor and keeps it in your projects".to_string()
+        "Open this example in the editor. Save a copy there to keep it.".to_string()
     } else {
         "Only available in the running app".to_string()
     };

@@ -13,7 +13,8 @@ use lpc_model::{
 };
 use lpc_model::{NodeDefLocation, NodeDefState};
 use lpc_model::{
-    SlotDirection, SlotName, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel,
+    SlotDirection, SlotName, SlotPathSegment, SlotShape, SlotShapeView, StaticSlotShape,
+    well_known_channel,
 };
 // `FixtureDef`/`MappingConfig` back `resolve_fixture_mapping` (node-fixture
 // only); `PlaylistDef` backs `playlist_runtime_entries` (node-playlist only)
@@ -1057,10 +1058,15 @@ impl ProjectLoader {
         projected_nodes: &[ProjectedNode],
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
-        for node in projected_nodes {
-            register_node_bindings(registry, runtime, projected_nodes, node, frame)?;
-        }
-        Ok(())
+        // Every `add_binding` invalidates the resolver's structure, and
+        // nothing resolves until the last one is in: one epoch, not one per
+        // binding.
+        runtime.resolver_mut().begin_structure_batch();
+        let result = projected_nodes.iter().try_for_each(|node| {
+            register_node_bindings(registry, runtime, projected_nodes, node, frame)
+        });
+        runtime.resolver_mut().end_structure_batch();
+        result
     }
 }
 
@@ -1564,8 +1570,52 @@ fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a Autho
     bindings.entries().get(slot)?.target_ref()
 }
 
-/// Def and state record shapes for a node kind, when static ones exist.
-fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
+/// A node kind's declared def and state record shapes, as the binding phase
+/// reads them.
+///
+/// Every kind's def and state derive `Slotted`, whose static descriptor is
+/// read where it lies: looking a slot up allocates nothing. A type with no
+/// static descriptor (none today) has its owned shape built instead. Building
+/// both owned shapes per lookup — several per binding — was a quarter of a
+/// one-shader project's load on the C6
+/// (`lp2025/2026-10-16-0848-tree-store-adoption`, A8).
+struct KindShapes {
+    def: Option<KindShape>,
+    state: Option<KindShape>,
+}
+
+enum KindShape {
+    Static(&'static lpc_model::StaticSlotShapeDescriptor),
+    Owned(SlotShape),
+}
+
+impl KindShape {
+    fn of<T: StaticSlotShape>() -> Self {
+        match T::STATIC_SLOT_SHAPE_DESCRIPTOR {
+            Some(descriptor) => Self::Static(descriptor),
+            None => Self::Owned(T::slot_shape()),
+        }
+    }
+
+    fn view(&self) -> SlotShapeView<'_> {
+        match self {
+            Self::Static(descriptor) => SlotShapeView::Static(descriptor),
+            Self::Owned(shape) => SlotShapeView::Dynamic(shape),
+        }
+    }
+}
+
+impl KindShapes {
+    /// The def's shape, then the state's: the order every lookup searches.
+    fn views(&self) -> impl Iterator<Item = SlotShapeView<'_>> {
+        [self.def.as_ref(), self.state.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(KindShape::view)
+    }
+}
+
+fn kind_shapes(kind: NodeKind) -> KindShapes {
     use lpc_model::nodes::button::ButtonState;
     use lpc_model::nodes::clock::ClockDef;
     use lpc_model::nodes::clock::ClockState;
@@ -1583,33 +1633,33 @@ fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
     use lpc_model::nodes::shader::{ComputeShaderDef, ShaderDef};
     use lpc_model::nodes::texture::TextureDef;
     use lpc_model::nodes::texture::TextureState;
-    let def_shape = match kind {
-        NodeKind::Button => Some(lpc_model::nodes::button::ButtonDef::slot_shape()),
-        NodeKind::PowerButton => Some(PowerButtonDef::slot_shape()),
-        NodeKind::Clock => Some(ClockDef::slot_shape()),
-        NodeKind::Fixture => Some(FixtureDef::slot_shape()),
-        NodeKind::Fluid => Some(FluidDef::slot_shape()),
-        NodeKind::Playlist => Some(PlaylistDef::slot_shape()),
-        NodeKind::ControlRadio => Some(ControlRadioDef::slot_shape()),
-        NodeKind::Shader => Some(ShaderDef::slot_shape()),
-        NodeKind::ComputeShader => Some(ComputeShaderDef::slot_shape()),
-        NodeKind::Output => Some(OutputDef::slot_shape()),
-        NodeKind::Texture => Some(TextureDef::slot_shape()),
+    let def = match kind {
+        NodeKind::Button => Some(KindShape::of::<lpc_model::nodes::button::ButtonDef>()),
+        NodeKind::PowerButton => Some(KindShape::of::<PowerButtonDef>()),
+        NodeKind::Clock => Some(KindShape::of::<ClockDef>()),
+        NodeKind::Fixture => Some(KindShape::of::<FixtureDef>()),
+        NodeKind::Fluid => Some(KindShape::of::<FluidDef>()),
+        NodeKind::Playlist => Some(KindShape::of::<PlaylistDef>()),
+        NodeKind::ControlRadio => Some(KindShape::of::<ControlRadioDef>()),
+        NodeKind::Shader => Some(KindShape::of::<ShaderDef>()),
+        NodeKind::ComputeShader => Some(KindShape::of::<ComputeShaderDef>()),
+        NodeKind::Output => Some(KindShape::of::<OutputDef>()),
+        NodeKind::Texture => Some(KindShape::of::<TextureDef>()),
         _ => None,
     };
-    let state_shape = match kind {
-        NodeKind::Button => Some(ButtonState::slot_shape()),
-        NodeKind::PowerButton => Some(PowerButtonState::slot_shape()),
-        NodeKind::Clock => Some(ClockState::slot_shape()),
-        NodeKind::Fixture => Some(FixtureState::slot_shape()),
-        NodeKind::Fluid => Some(FluidState::slot_shape()),
-        NodeKind::Playlist => Some(PlaylistState::slot_shape()),
-        NodeKind::ControlRadio => Some(ControlRadioState::slot_shape()),
-        NodeKind::Shader => Some(ShaderState::slot_shape()),
-        NodeKind::Texture => Some(TextureState::slot_shape()),
+    let state = match kind {
+        NodeKind::Button => Some(KindShape::of::<ButtonState>()),
+        NodeKind::PowerButton => Some(KindShape::of::<PowerButtonState>()),
+        NodeKind::Clock => Some(KindShape::of::<ClockState>()),
+        NodeKind::Fixture => Some(KindShape::of::<FixtureState>()),
+        NodeKind::Fluid => Some(KindShape::of::<FluidState>()),
+        NodeKind::Playlist => Some(KindShape::of::<PlaylistState>()),
+        NodeKind::ControlRadio => Some(KindShape::of::<ControlRadioState>()),
+        NodeKind::Shader => Some(KindShape::of::<ShaderState>()),
+        NodeKind::Texture => Some(KindShape::of::<TextureState>()),
         _ => None,
     };
-    (def_shape, state_shape)
+    KindShapes { def, state }
 }
 
 /// Declared direction of a node's root slot, looked up in the kind's def and
@@ -1620,18 +1670,11 @@ fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option
     let SlotPathSegment::Field(name) = slot.segments().first()? else {
         return None;
     };
-    let name = name.as_str();
-    let field_direction = |shape: SlotShape| match shape {
-        SlotShape::Record { fields, .. } => fields
-            .iter()
-            .find(|field| field.name.as_str() == name)
-            .map(|field| field.semantics.direction),
-        _ => None,
-    };
-    let (def_shape, state_shape) = kind_shapes(kind);
-    def_shape
-        .and_then(field_direction)
-        .or_else(|| state_shape.and_then(field_direction))
+    kind_shapes(kind).views().find_map(|shape| {
+        shape
+            .record_field_by_str(name.as_str())
+            .map(|(_, field)| field.semantics().direction)
+    })
 }
 
 /// The loader's binding phase: register every binding one projected node
@@ -1876,54 +1919,47 @@ fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath,
             "binding slot `{name}` must start with a field name"
         ));
     };
-    let (def_shape, state_shape) = kind_shapes(kind);
-    let field = [def_shape, state_shape]
-        .into_iter()
-        .flatten()
-        .find_map(|shape| match shape {
-            SlotShape::Record { fields, .. } => fields
-                .into_iter()
-                .find(|field| field.name.as_str() == first.as_str()),
-            _ => None,
-        })
+    let shapes = kind_shapes(kind);
+    let field = shapes
+        .views()
+        .find_map(|shape| shape.record_field_by_str(first.as_str()))
+        .map(|(_, field)| field)
         .ok_or_else(|| format!("binding `{name}` names no declared slot on {kind:?}"))?;
     let some_segment = || SlotPathSegment::Field(SlotName::parse("some").expect("valid name"));
     let mut out = alloc::vec![SlotPathSegment::Field(first.clone())];
     // `None` = walked past what the shape declares; stop verifying.
-    let mut shape = Some(field.shape);
+    let mut shape = Some(field.shape());
     for segment in segments {
         // Auto-descend option wrappers the author left implicit.
         let spells_some =
             matches!(segment, SlotPathSegment::Field(field) if field.as_str() == "some");
-        while !spells_some && matches!(shape, Some(SlotShape::Option { .. })) {
-            let Some(SlotShape::Option { some, .. }) = shape else {
-                unreachable!("matched above");
-            };
+        while !spells_some && let Some(some) = shape.and_then(SlotShapeView::option_some) {
             out.push(some_segment());
-            shape = Some(*some);
+            shape = Some(some);
         }
         let next = match (shape, segment) {
-            (Some(SlotShape::Option { some, .. }), SlotPathSegment::Field(_)) => Some(*some),
-            (Some(SlotShape::Record { fields, .. }), SlotPathSegment::Field(field)) => Some(
-                fields
-                    .into_iter()
-                    .find(|candidate| candidate.name == *field)
-                    .ok_or_else(|| {
-                        format!("binding `{name}`: no declared field `{field}` on {kind:?}")
-                    })?
-                    .shape,
-            ),
-            (Some(SlotShape::Enum { variants, .. }), SlotPathSegment::Field(field)) => Some(
-                variants
-                    .into_iter()
-                    .find(|candidate| candidate.name == *field)
+            (Some(view), SlotPathSegment::Field(_)) if view.option_some().is_some() => {
+                view.option_some()
+            }
+            (Some(view), SlotPathSegment::Field(field)) if view.record_fields_len().is_some() => {
+                Some(
+                    view.record_field_by_str(field.as_str())
+                        .ok_or_else(|| {
+                            format!("binding `{name}`: no declared field `{field}` on {kind:?}")
+                        })?
+                        .1
+                        .shape(),
+                )
+            }
+            (Some(view), SlotPathSegment::Field(field)) if view.is_enum() => Some(
+                view.enum_variant_by_str(field.as_str())
                     .ok_or_else(|| {
                         format!("binding `{name}`: no declared variant `{field}` on {kind:?}")
                     })?
-                    .shape,
+                    .shape(),
             ),
-            (Some(SlotShape::Map { value, .. }), SlotPathSegment::Key(_)) => Some(*value),
-            (Some(SlotShape::Map { .. }), SlotPathSegment::Field(field)) => {
+            (Some(view), SlotPathSegment::Key(_)) if view.map_key().is_some() => view.map_value(),
+            (Some(view), SlotPathSegment::Field(field)) if view.map_key().is_some() => {
                 return Err(format!(
                     "binding `{name}`: map slot takes a bracketed key, not field `{field}`"
                 ));
@@ -1934,9 +1970,9 @@ fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath,
         shape = next;
     }
     // A binding lands on the value-bearing interior of an option wrapper.
-    while let Some(SlotShape::Option { some, .. }) = shape {
+    while let Some(some) = shape.and_then(SlotShapeView::option_some) {
         out.push(some_segment());
-        shape = Some(*some);
+        shape = Some(some);
     }
     Ok(SlotPath::from_segments(out))
 }
@@ -1951,9 +1987,8 @@ fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath,
 /// — its three leaves each name their own `clock.*` channel.
 fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)> {
     let mut out = Vec::new();
-    let (def_shape, state_shape) = kind_shapes(kind);
-    for shape in [def_shape, state_shape].into_iter().flatten() {
-        collect_default_binds("", &shape, &mut out);
+    for shape in kind_shapes(kind).views() {
+        collect_default_binds("", shape, &mut out);
     }
     out
 }
@@ -1965,22 +2000,26 @@ fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)
 /// this node.
 fn collect_default_binds(
     prefix: &str,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     out: &mut Vec<(String, SlotDirection, String)>,
 ) {
-    let SlotShape::Record { fields, .. } = shape else {
+    let Some(len) = shape.record_fields_len() else {
         return;
     };
-    for field in fields {
+    for field in (0..len).filter_map(|index| shape.record_field(index)) {
         let name = if prefix.is_empty() {
-            field.name.as_str().to_string()
+            field.name_str().to_string()
         } else {
-            format!("{prefix}.{}", field.name)
+            format!("{prefix}.{}", field.name_str())
         };
-        if let Some(endpoint) = &field.default_bind {
-            out.push((name.clone(), field.semantics.direction, endpoint.clone()));
+        if let Some(endpoint) = field.default_bind() {
+            out.push((
+                name.clone(),
+                field.semantics().direction,
+                endpoint.to_string(),
+            ));
         }
-        collect_default_binds(&name, &field.shape, out);
+        collect_default_binds(&name, field.shape(), out);
     }
 }
 
@@ -2473,6 +2512,72 @@ mod binding_kind_tests {
             binding_kind(&produced("output"), &target, "output"),
             Kind::Color
         );
+    }
+}
+
+#[cfg(test)]
+mod kind_shapes_tests {
+    use lpc_model::nodes::button::{ButtonDef, ButtonState};
+    use lpc_model::nodes::clock::{ClockDef, ClockState};
+    use lpc_model::nodes::fixture::{FixtureDef, FixtureState};
+    use lpc_model::nodes::fluid::{FluidDef, FluidState};
+    use lpc_model::nodes::output::OutputDef;
+    use lpc_model::nodes::playlist::{PlaylistDef, PlaylistState};
+    use lpc_model::nodes::power_button::{PowerButtonDef, PowerButtonState};
+    use lpc_model::nodes::radio::{ControlRadioDef, ControlRadioState};
+    use lpc_model::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderState};
+    use lpc_model::nodes::texture::{TextureDef, TextureState};
+    use lpc_model::{NodeKind, StaticSlotShape};
+
+    use super::{KindShape, kind_shapes};
+
+    #[test]
+    fn every_kind_looks_its_slots_up_in_static_shapes() {
+        for kind in NodeKind::ALL {
+            let shapes = kind_shapes(kind);
+            for shape in [&shapes.def, &shapes.state].into_iter().flatten() {
+                assert!(
+                    matches!(shape, KindShape::Static(_)),
+                    "{kind:?} has no static shape: its binding lookups build owned ones"
+                );
+            }
+        }
+    }
+
+    /// The static descriptor is what the loader walks; the owned shape is
+    /// what it walked before. They must describe the same slots.
+    #[test]
+    fn static_kind_shapes_match_the_owned_ones() {
+        fn same<T: StaticSlotShape>() {
+            let descriptor = T::STATIC_SLOT_SHAPE_DESCRIPTOR
+                .unwrap_or_else(|| panic!("{} has no static shape", core::any::type_name::<T>()));
+            assert_eq!(
+                descriptor.to_owned_shape(),
+                T::slot_shape(),
+                "{}",
+                core::any::type_name::<T>()
+            );
+        }
+        same::<ButtonDef>();
+        same::<ButtonState>();
+        same::<PowerButtonDef>();
+        same::<PowerButtonState>();
+        same::<ClockDef>();
+        same::<ClockState>();
+        same::<FixtureDef>();
+        same::<FixtureState>();
+        same::<FluidDef>();
+        same::<FluidState>();
+        same::<PlaylistDef>();
+        same::<PlaylistState>();
+        same::<ControlRadioDef>();
+        same::<ControlRadioState>();
+        same::<ShaderDef>();
+        same::<ShaderState>();
+        same::<ComputeShaderDef>();
+        same::<OutputDef>();
+        same::<TextureDef>();
+        same::<TextureState>();
     }
 }
 
@@ -3127,37 +3232,31 @@ mod tests {
         );
     }
 
-    /// The boot path: the first frame defers the compile and requests a
-    /// window; the engine broadcasts exactly one `High` pressure at the top of
-    /// the next tick, and the compile runs inside that same frame.
+    /// The boot path: a shader that has never compiled asks for its window
+    /// as it is created, so the first tick broadcasts exactly one `High`
+    /// pressure and the compile runs inside that frame — the first frame
+    /// renders lit, with no black deferral frame (ADR
+    /// 2026-08-03-memory-pressure-at-compile-safe-points, amended 2026-10-16).
     #[test]
     fn compile_window_broadcasts_pressure_before_the_boot_compile() {
         let mut rt = loaded_basic_runtime();
         let levels = attach_pressure_probe(&mut rt);
-
-        rt.tick(40).expect("boot tick");
         assert!(
             levels.borrow().is_empty(),
-            "no pressure before any node requested a compile window"
-        );
-        assert!(
-            output_buffer_bytes(&rt, "/output.json")
-                .iter()
-                .all(|byte| *byte == 0),
-            "the deferral frame renders the black fallback"
+            "no pressure before the first tick"
         );
 
-        rt.tick(40).expect("window tick");
+        rt.tick(40).expect("boot tick");
         assert_eq!(
             &*levels.borrow(),
             &[crate::node::PressureLevel::High],
-            "exactly one High broadcast opens the compile window"
+            "exactly one High broadcast opens the boot compile window"
         );
         assert!(
             output_buffer_bytes(&rt, "/output.json")
                 .iter()
                 .any(|byte| *byte != 0),
-            "the compile ran inside the window frame, after the broadcast"
+            "the compile ran inside the first frame, after the broadcast"
         );
 
         rt.tick(40).expect("steady tick");
@@ -3201,16 +3300,19 @@ mod tests {
         ))));
         let levels = attach_pressure_probe(&mut rt);
 
-        // Boot: deferral frame, then the window frame compiles the idle shader.
-        tick_with_test_time(&mut rt, &time, 16, "boot deferral");
+        // Boot: every shader asks for its window as it is created, so the
+        // first frame opens one window and compiles the idle shader; the
+        // resident entries' shaders, not demanded, let theirs expire.
         tick_with_test_time(&mut rt, &time, 16, "boot window");
+        tick_with_test_time(&mut rt, &time, 16, "boot steady");
         let boot_broadcasts = levels.borrow().len();
         assert_eq!(boot_broadcasts, 1, "boot opens one compile window");
 
-        // Switch: the active-entry shader has never compiled. The switch
-        // frame captures the held frame (the idle entry, still shown); the
-        // next frame samples the incoming entry, which defers its compile;
-        // the tick after must broadcast again.
+        // Switch: the active-entry shader has never compiled, and its
+        // creation-time window expired at boot. The switch frame captures
+        // the held frame (the idle entry, still shown); the next frame
+        // samples the incoming entry, which defers its compile; the tick
+        // after must broadcast again.
         control.set_pressed(HwAddress::gpio(20), true);
         tick_with_test_time(&mut rt, &time, 16, "press candidate");
         tick_with_test_time(&mut rt, &time, 30, "press stable — switch, capture");

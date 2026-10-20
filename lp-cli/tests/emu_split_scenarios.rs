@@ -43,8 +43,9 @@ use std::path::PathBuf;
 const SECTOR: usize = 0x1000;
 /// The MMU page espflash 3.3.0's bootloader picks on a 4 MB C6.
 const PAGE: u32 = 0x8000;
-/// `factory` in `lp-fw/fw-esp32c6/partitions.csv`.
-const FACTORY: (u32, u32) = (0x1_0000, 0x34_0000);
+/// `factory` in `lp-fw/fw-esp32c6/partitions.csv` (the tree table since the
+/// tree-store cutover).
+const FACTORY: (u32, u32) = (0x1_0000, 0x37_0000);
 const NONCE: u32 = 0x5911_7C08;
 
 #[test]
@@ -369,6 +370,137 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// a trial that died warm was rolled back, and the heal wrote the running
+/// core's engine over the dead core's bytes. The newer record still names
+/// that trial (attempted, never started, no cold retries counted), so a
+/// cold boot picks it again, the loader finds the engine header where the
+/// core was and falls back to the proven core. That core must read the
+/// fallback as the rollback it is: trusted, the dead build refused, the
+/// engine started — on every power cycle.
+#[test]
+#[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
+fn s12_a_power_cycle_after_a_heal_over_a_dead_trial_boots_the_proven_core_and_its_engine() {
+    let (Some(x), Some(y)) = (image("x"), image("y-dies")) else {
+        return;
+    };
+    let mut chip = x.merged();
+    let proven = slot(&chip, 0);
+    assert!(proven.proven(), "the package's record 0 is proven");
+    // The dead trial's record: newer, naming where X's engine now is.
+    let dead = x.engine_offset();
+    write_record(
+        &mut chip,
+        1,
+        &BootRecord {
+            seq: proven.record.seq + 1,
+            core_off: dead,
+            core_len: y.core.len() as u32,
+            build: build_hash(y.build_id.as_bytes()),
+            trial: true,
+        },
+    );
+    let attempted = BOOT_RECORD_SECTORS[1] as usize + lp_bootctl::ATTEMPTED_MARK_OFFSET as usize;
+    chip[attempted..attempted + 4].fill(0);
+    for cycle in 1..=2 {
+        let mut host = hosted(chip, false);
+        let console = until(&mut host, "[CORE] core @", 30_000_000);
+        expect(&console, &format!("[LOADER] core @{dead:#x} skipped"));
+        expect(&console, "[LOADER] core @0x18000 (fallback)");
+        host.run_until(host.board.machine.micros() + 3_000_000, None)
+            .expect("the run");
+        let console = host.console().join("\n");
+        expect(
+            &console,
+            &format!(
+                "[CORE] rolled back: the newer core (build {:#010x}) failed its trial",
+                build_hash(y.build_id.as_bytes())
+            ),
+        );
+        assert!(
+            !console.contains("boot state not trusted") && !console.contains("[OTA] core-only"),
+            "cycle {cycle}: X did not trust its fallback:\n{console}"
+        );
+        let core = console
+            .lines()
+            .find(|l| l.contains("[CORE] core @0x18000"))
+            .unwrap_or_default();
+        assert!(
+            core.contains("(rolled back)") && core.contains(" B · digest"),
+            "cycle {cycle}: X's engine did not start: {core}"
+        );
+        chip = flash_of(&host.board.machine);
+        // Neither record changed (the engine guard may mark X's record
+        // `confirmed`, which the loader does not read on a proven record);
+        // the dead trial's marks are as the rollback left them.
+        assert_eq!(slot(&chip, 0).record, proven.record, "cycle {cycle}");
+        let dead_slot = slot(&chip, 1);
+        assert!(
+            dead_slot.marks.attempted
+                && !dead_slot.marks.started
+                && !dead_slot.marks.confirmed
+                && dead_slot.marks.cold_retries() == 0,
+            "cycle {cycle}: {dead_slot:?}"
+        );
+    }
+    report(
+        "S12",
+        "a dead trial's record over X's engine: two power cycles, the loader falls back, X \
+         reads it as the rollback, refuses the build and runs its engine",
+    );
+}
+
+/// The failed-trial bar of the tree-store cutover (plan
+/// `lp2025/2026-10-16-0848-tree-store-adoption`; rolling back to an older
+/// core is otherwise a non-goal): a board whose files are in the tree store
+/// takes a core on trial; the trial dies; the loader rolls back to X — a
+/// tree core too, since the cutover leaves no littlefs core in a boot
+/// record (AD4). X mounts the store, never formats it, and every file the
+/// trial core found is still there (read back on the host). Before the
+/// default switch this was A5's rollback onto a littlefs core that HELD the
+/// store; that core is the released one now
+/// (`emu_littlefs_on_tree_store.rs`).
+#[test]
+#[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
+fn s11_a_core_that_dies_on_trial_rolls_back_to_one_that_mounts_the_store() {
+    let (Some(x), Some(y)) = (image("x"), image("y-dies")) else {
+        return;
+    };
+    let (mut chip, high) = trial_over(&x, &y);
+    chip.resize(lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN as usize, 0xFF);
+    let store = tree_store_region();
+    let lpfs = lp_emu_esp32c6::flash::LPFS_OFFSET as usize..;
+    chip[lpfs.clone()][..store.len()].copy_from_slice(&store);
+    let mut host = hosted(chip, true);
+    let console = until(&mut host, "[CORE] rolled back", 60_000_000);
+    expect(&console, &format!("[LOADER] core @{high:#x} (trial)"));
+    expect(&console, "[FS] tree store mounted (");
+    expect(&console, "fixture-trial-dies");
+    expect(&console, "[LOADER] core @0x18000 (rolled back)");
+    // X's boot after the rollback (its mount line follows the loader's).
+    host.run_until(host.board.machine.micros() + 3_000_000, None)
+        .expect("the run");
+    let console = host.console().join("\n");
+    let after = console
+        .rsplit("[LOADER] core @0x18000 (rolled back)")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        after.contains("[FS] tree store mounted (") && !after.contains("tree store formatted"),
+        "X did not mount the store it rolled back onto:\n{console}"
+    );
+    let flash = flash_of(&host.board.machine);
+    assert_eq!(
+        store_files(&flash[lpfs][..store.len()]),
+        store_files(&store),
+        "a file changed across the trial and the rollback"
+    );
+    report(
+        "S11",
+        "a core's trial dies warm → X rolled back, mounts the tree store, every file kept",
+    );
+}
+
 #[test]
 #[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
 fn s10_an_engine_that_keeps_crashing() {
@@ -391,11 +523,24 @@ struct Image {
 
 impl Image {
     fn merged(&self) -> Vec<u8> {
-        std::fs::read(self.dir.join("merged.bin")).expect("merged.bin")
+        std::fs::read(self.dir.join(merged_name())).expect(merged_name())
     }
 
     fn engine_offset(&self) -> u32 {
         self.split["engine"]["offset"].as_u64().unwrap() as u32
+    }
+}
+
+/// The merged image to boot: `merged.bin` (the build's own door — our
+/// bootloader, by default), or with `LP_BOOT_DOOR=idf` the same `app.bin`
+/// behind the ESP-IDF bootloader (`merged-idf.bin`), the door every board
+/// flashed before the cutover still boots through. The recipe runs the
+/// scenarios once per door.
+fn merged_name() -> &'static str {
+    match std::env::var("LP_BOOT_DOOR").as_deref() {
+        Ok("idf") => "merged-idf.bin",
+        Ok("lp") | Ok("") | Err(_) => "merged.bin",
+        Ok(other) => panic!("LP_BOOT_DOOR={other}: expected idf or lp"),
     }
 }
 
@@ -445,6 +590,51 @@ fn trial_over(x: &Image, y: &Image) -> (Vec<u8>, u32) {
         },
     );
     (chip, high)
+}
+
+/// A whole `lpfs` holding a tree store with a few files, as an `fs-tree`
+/// core leaves it (built on the host by `lp-tree-store`).
+fn tree_store_region() -> Vec<u8> {
+    use lp_nor_sim::{NorFlashSim, NorGeometry};
+    use lp_tree_store::{SoftSha256, StoreConfig, TreeStore};
+    let sectors = lp_emu_esp32c6::flash::LPFS_LEN / SECTOR as u32;
+    let mut st = match TreeStore::format(
+        NorFlashSim::new(NorGeometry::c6(sectors)),
+        SoftSha256,
+        StoreConfig::default(),
+    ) {
+        Ok(st) => st,
+        Err((e, ..)) => panic!("format: {e:?}"),
+    };
+    st.put("/hardware.json", b"{\"board\":\"kept\"}").unwrap();
+    st.put("/projects/kept/project.json", b"{\"name\":\"kept\"}")
+        .unwrap();
+    let mut out = vec![0u8; sectors as usize * SECTOR];
+    st.flash().peek(0, &mut out);
+    out
+}
+
+/// Every file of a store region, mounted on the host.
+fn store_files(region: &[u8]) -> Vec<(String, Vec<u8>)> {
+    use lp_nor_sim::{NorFlashSim, NorGeometry};
+    use lp_tree_store::{SoftSha256, StoreConfig, TreeStore};
+    let sectors = (region.len() / SECTOR) as u32;
+    let mut f = NorFlashSim::new(NorGeometry::c6(sectors));
+    f.set_panic_on_violation(false);
+    for (s, chunk) in region.chunks(SECTOR).enumerate() {
+        if chunk.iter().any(|b| *b != 0xFF) {
+            f.program(s as u32 * SECTOR as u32, chunk)
+                .expect("program the copy");
+        }
+    }
+    let mut st = TreeStore::mount(f, SoftSha256, StoreConfig::default())
+        .unwrap_or_else(|(e, ..)| panic!("the store mounts on the host: {e:?}"));
+    let mut files = Vec::new();
+    for path in st.list("/").expect("list") {
+        let bytes = st.get(&path).expect("get").expect("a listed file");
+        files.push((path, bytes));
+    }
+    files
 }
 
 /// A record written into an erased sector, its marks erased.

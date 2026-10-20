@@ -5,6 +5,7 @@
 //! components in `lpa-studio-web/src/core` consume the same data.
 
 pub mod action;
+pub mod data_kinds;
 pub mod error;
 pub mod issue;
 pub mod log;
@@ -14,7 +15,6 @@ pub mod offer;
 pub mod progress;
 pub mod status;
 pub mod terminal_line;
-pub mod time_ago;
 pub mod view;
 
 pub use crate::app::studio::ui_studio_view::UiStudioView;

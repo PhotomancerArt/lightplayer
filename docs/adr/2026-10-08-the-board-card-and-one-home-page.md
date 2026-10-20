@@ -205,8 +205,9 @@ with how.
   says so and offers the same take-over. The board allows a take-over
   only when the newcomer proves the holder's own key.
 
-Take-over is not offered on the card. Studio finds out when you press
-Connect, and offers it then.
+Take-over is not a button on the card. Studio knows from the holder's
+claim; Connect is itself the take-over, and its tint is the warning (see
+the Amendment 2026-10-09: how a port gets one holder tab).
 
 ### 6. No wire, persisted-format or firmware change
 
@@ -299,3 +300,432 @@ Each amended record carries a reciprocal note dated 2026-10-08.
   "Start a board here" stays in Connect a board. The runtime band's words
   move to the hardware bar. How a project starts on a stand-in from the
   home page is open (the roadmap's "Editing without the board").
+
+- **`2026-09-09-studio-device-stack-over-a-virtual-serial-port`** (note
+  dated 2026-10-09): a second page may install with `?emu-second-tab=1`,
+  holding a board's bytes and not its cable, for the one-tab-holds-a-board
+  walk. The door's one client per endpoint and rule 1 are unchanged.
+
+## Amendment 2026-10-09: how the page is built
+
+Section 1 stands. This is how the home page is built (plan
+`lp2025/2026-10-08-2050-one-home-page`), and where the build departs from
+the spike. It is not a new decision.
+
+- **The page's data is core's.** `UiHomeView.sections` holds it: the online
+  and offline boards, the Connect a board offers, Other projects, Projects,
+  Your patterns (as `prj…` uids), and `newcomer` (no board of any kind and no
+  library project of any kind: a first visit, with no tabs, no switch, and
+  Connect a board first with its one hint). `UiHomeTab::shows` is the tab
+  rule, the one table of which tab shows which section. The web draws and
+  decides nothing about which board or project sits in which section.
+- **The sections come from the board↔project join** (`BoardProjects`). A
+  project is under Other projects when no board plays it, and a project an
+  offline board plays is on a board. The Online/Offline split is the
+  roster's own status.
+- **The Projects tab lists every library project,** so a board's project,
+  even an offline board's, keeps Rename, Duplicate, Download and Delete and
+  still opens on a sim, each saying which boards play it ("On Desk C6").
+  **Other projects** (the All tab) lists only the unattached.
+- **Tabs are view state, not offers.** So are the cards/list switch and the
+  "Unlocking your boards" fold: no `UiAction`, not in the offer tree. The
+  switch is remembered in `localStorage` under `lp.home.view.v1` (`"cards"`
+  or `"list"`; anything else reads as cards; every access is inside a
+  try/catch). The tab is not remembered.
+- **The top bar has no Devices or Projects tab;** the logo is Home's tab.
+  `/devices`, `/projects`, `/home`, and a bare `/device` or junk under it,
+  parse as Home and heal to `/` with the page's query kept (every flag, not
+  `?on=`). The route, site-section and page variants for the two are gone,
+  and "Back to devices" is "Back home".
+- **`StudioShell`'s no-editor arm draws the same page,** because that arm
+  also serves a cold `/device/<uid>` load (the cards are the connect
+  evidence) and a lens detaching.
+- **`BoardCardSlot` is the one place a board's card is mounted,** keyed by
+  the section entry, so the board card (the roadmap's card milestone) swaps
+  one body.
+
+**Deliberate differences from the spike:**
+
+- no stage (Q28);
+- the tabs are All · Boards · Projects · Patterns, not group tabs (Q31);
+- Network opens an inline address row under the squares, as the spike drew
+  it; the vision's Q12 said "a small sheet", so the page's visual gate asks;
+- patterns draw as cards;
+- "Unlocking your boards" is a closed fold under the boards;
+- a newcomer sees one quiet project add row (Other projects is only New ·
+  Import · Paste);
+- the sign-in line reads "Sign in to unlock your boards from any browser."
+  because what an account keeps today is the key that unlocks a board in any
+  browser; the account's own board list is step 2.
+
+## Amendment 2026-10-09: how the card is built
+
+Sections 2 and 3 stand. This is how the card was built (plan
+`lp2025/2026-10-08-2050-the-board-card`), with the director's rulings on
+where this record and the build disagreed. It is not a new decision.
+
+- **Unlock is not a drop in `lint-web-actions`** (§3 said it was). That
+  ratchet does not count access commands, and today's card was not in it.
+  The proof that the web no longer builds `AccessCommand::LogIn` is a core
+  test that presses `devices/<board ref>/unlock` by path, and
+  `git grep "AccessCommand::LogIn" lp-app/lpa-studio-web/src` coming back
+  empty. Widening the ratchet to access commands is separate work.
+- **Edit is the interim primary.** Until Connect (the lens in the card) and
+  Done land, the primary on a ready board that runs a project is **Edit**,
+  a new offer, `devices/<board ref>/edit` (`RuntimeOp::OpenDeviceLens`). It
+  is never "Connect" meaning the editor. When Connect lands it becomes the
+  primary and Edit moves to the project bar, as §2 says. Today's "Open in
+  editor" was a link, so a cmd-click to a new tab is lost with it.
+- **The project bar's empty words are "Nothing on it yet",** with "Add a
+  project" as its action, not "Nothing loaded".
+- **A board reached through lightplayer.app reads "Wi‑Fi via
+  lightplayer.app"** on its connection bar, the link's own label, with the
+  cloud icon (not "Cloud · live").
+- **"also cloud" / "direct only" show only once the board has said** its
+  Cloud relay setting. Before that the connection bar says nothing about
+  the cloud, so an unread board is never called "also cloud".
+- **The hardware bar of a stand-in reads "Emulated XIAO ESP32-C6"** (or
+  "Simulated …") with "in this tab" as its aside; its speed or tier is in
+  the details.
+- **The LED count is left out.** Nothing the card reads knows a project's
+  LED count (and today's card never showed it), so the hardware details do
+  not carry it yet.
+- **The firmware bar says the version alone, whatever it is:** a release's
+  `2026.10.08-9`, a dev build's `dev 5eb70a7`, or the label the board said
+  hello with.
+- **The layout question is the firmware bar's details,** opened by core
+  (`raised`) while the question is open, holding the question, its
+  Download backup, Cancel and Continue. The page-level overlay is gone.
+  Continue acts on one press there: the details are the question.
+- **A bar's Done and Failed are watched in studio core** (`ActivityEnds`,
+  read off the device journal), with no change to the device model: Done
+  shows for about three seconds, Failed until the next activity replaces
+  it.
+- **One popover at a time.** A pick in a bar's details (the project pick,
+  the board pick) is a row there; pressing it closes the details and opens
+  the picker over the same bar.
+
+## Amendment 2026-10-09: how a port gets one holder tab (M5)
+
+Section 5 stands. This is how it was built (plan
+`lp2025/2026-10-08-2330-one-tab-holds-a-board`), and where the build
+departs from the section. It is not a new decision.
+
+The acceptance, in Yona's words of 2026-10-09:
+
+> One tab of this browser holds each board, over USB or Wi‑Fi. Other tabs
+> show its last picture and that another tab has it, and Connect there
+> takes it over. When someone else holds a board's Wi‑Fi connection, the
+> card says "Someone else connected" and offers Retry; taking a board over
+> from another person is sharing's question (step 3).
+
+- **The key.** The browser gives no serial number before a port opens
+  (Web Serial's `getInfo()` is vendor and product only), so the board's
+  lock cannot be named before its port is open. The lock is
+  `lp-board:usb:<vid>:<pid>:<mac>` (lowercase hex, the MAC without
+  colons), taken **after the hello** has said the MAC. The OS's own
+  exclusive `open()` is the mutex; the lock is the holder's name and its
+  liveness (a crashed tab's lock vanishes). The first design, a lock named
+  by the board before the port opens, was not possible. Two others were
+  weighed and left: a pre-open lock keyed by vendor:product and the port's
+  index in `getPorts()` (the order is unspecified, and a wrong index lets
+  go of the wrong board), and WebUSB serial numbers (a second permission
+  prompt, and nothing for the CH340 bridge).
+- **The order.** Claim: open the port, hello, take the lock, announce.
+  Release: close the port, release the lock, announce.
+- **The channel.** Tabs of one browser tell each other on a
+  `BroadcastChannel` named `lp-board-holds`. Each message is a JSON
+  envelope with `v: 1`, the sender's tab id and one note (`holds`, `gone`,
+  `ask`, `answer`, `who`). A message of another version, malformed text,
+  or the tab's own echo is ignored: lightplayer.app redeploys daily and a
+  tab can live for days, so a stale tab and a fresh one share the channel.
+  Nothing is persisted, and there is no compatibility code.
+- **Take-over.** One offer, `devices/<board ref>/take-over`, drawn as
+  **Connect**. It is Routine when the holder only watches, **Undoable**
+  when the holder has the editor open (or has not said), and disabled with
+  its reason ("Busy in the other tab: <what it is doing>") when the holder
+  is flashing, updating or pushing. The asker waits 5 s for an answer
+  ("That tab didn't answer", with Retry). The holder closes its editor,
+  writes its last picture, closes the port, releases the lock, then says
+  so. The offer names the board by its MAC and never pairs ports: the
+  asker opens the ports it was refused, and the one that opens is that
+  board.
+- **No tab opens a port on its own.** When a holder lets go or dies, the
+  other tabs' fact clears and the card offers the ordinary Connect.
+  Closing a tab must not make another tab grab a port that a flashing tool
+  was about to use.
+- **The network slot.** The board takes its one network slot silently for
+  a newcomer that proves the holder's key, and closes the holder with an
+  ordinary close; it refuses anyone else. Every tab of one browser
+  presents the same keys, so the slot is held the same way (the lock
+  `lp-board:net:<mac>`), the offer exists only where the holder is another
+  tab of this browser, and a tab that hears another tab take its network
+  board closes its own session by request instead of redialling. This
+  replaces section 5's third bullet, which read the firmware as offering a
+  take-over. A refusal from anyone else stays **Someone else connected**,
+  with Retry and nothing more; taking a board over from another person is
+  sharing's question (vision Q20). An older redial loop between two
+  clients with one key (a tab and lp-cli, or two browsers) is filed
+  (`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`).
+- **Pictures.** A tab that holds a board writes its picture to the
+  library; another tab's card shows it, dimmed, with its age. A newer
+  sidecar frame replaces one that is not live, and a holder writes a final
+  frame when it lets go.
+- **Held boards are Online.** A board another tab holds is plugged in and
+  running, so it sits under Online boards (`split_roster` counts the fact
+  as connected), not Offline boards.
+- **What the emulator proves, and does not.** `just walk-two-tabs-emu`
+  walks two tabs of one headless Chrome against one emulated board: the
+  hold, the card, the take-over both ways, and a holder that closes. The
+  shim's `?emu-second-tab=1` gives the second page the board's bytes and
+  not its cable (the door admits one `/control` client). It does **not**
+  prove Chrome's real exclusive `open()` across tabs (the door's
+  one-client rule stands in for it), how a long-hidden holder behaves
+  (both pages are visible), or a taker with a cable. The network take-over
+  is proved by core tests with scripted LAN and relay sources, not by a
+  two-tab Wi‑Fi walk. No claim here is a hardware claim. The check on a
+  real Chrome and a leased board is queued, and it does not block merging.
+- **The chooser path, found by the walk.** A port granted at load is read
+  against the other tabs' claims and attached without being opened. A port
+  picked in the chooser is registered without that gate (it may be a
+  different board), so a tab that picks a port another tab holds asks for
+  it once, is refused, and reads the refusal against the claims after the
+  identify deadline. The card shows a second "new device" card for the
+  board until then. Filed in `docs/defects/`; no behaviour changed here.
+  *Fixed 2026-10-10:* the refusal is read against the claims when it
+  arrives, so the port sits on the board's card at once; and a take-over
+  whose holder let go opens every port of its kind the tab could not open,
+  once each, including a port whose refusal is heard after the release. A
+  holder that lets go by itself still opens nothing here. The pick still
+  asks for the port (the chooser stays ungated); see
+  `docs/defects/2026-10-09-a-chooser-pick-of-a-held-usb-port-is-not-gated.md`.
+
+## Amendment 2026-10-10: how connected is built (M4)
+
+Section 4 stands. This is how it was built (plan
+`lp2025/2026-10-08-2330-connected-in-the-card`), with the director's
+rulings where the build had to choose. It is not a new decision.
+
+- **"Connected" is a fact beside the runtime pool, not a change to it.**
+  `ConnectedBoard` (`lpa-studio-core`, `app/studio/connected_board.rs`)
+  records which pool session the home page holds, on which board, whether
+  an Edit is waiting for the editor, and how far the open has got. Connect,
+  and Edit from a card, set it; every road that ends the session clears it,
+  and a session that left the pool by any road reads as not connected
+  (`ConnectedBoard::rides`). The pool keeps one session, one lens id, its
+  install and eviction rules and its borrow of the wire: this is wiring, not
+  the pool's model.
+- **Which surface the open session shows follows where the user is.** The
+  editor shows while an Edit is waiting or while the reported place is the
+  session's own page (`/p/<its uid>` or `/device/<its uid>`, any view, play
+  included); otherwise the session shows on its card, and the home view
+  stays (`ConnectedBoard::shows_editor`). A waiting Edit ends at the first
+  report that changes the page. Core reads the place to pick a surface and
+  nothing else: it opens, closes and navigates nothing because of it.
+- **Three verbs, each at `devices/<board ref>/…`.**
+  - `connect` has one meaning: this board's session, held by the home page,
+    on its card (`RuntimeOp::ConnectDevice`, `app/devices/connect_offer.rs`).
+    On a ready board it opens the session. On a closed port it opens the
+    port first; on an offline board Studio can reach, it reaches it first
+    (Wi‑Fi, then lightplayer.app, then the cable). Either way it is one
+    press: the intent is held (`PendingLens::connect`) and gives up after
+    `CONNECT_INTENT_GRACE` (60 s) with "The board didn't answer in time"
+    and Retry, or at once when the board turns out locked or needs
+    firmware (its own primary takes over). On a ready board running no
+    project it is disabled ("No project"), and the card's primary is Add a
+    project instead: a primary is never a greyed verb (the feel gate's
+    first round, below).
+  - `done` closes the session (`RuntimeOp::CloseDeviceLens`,
+    `app/devices/done_offer.rs`), on the card and on the editor's docked
+    card. It is Routine even with unsaved edits: they live on the board as
+    its overlay, and the next Connect or Edit rebuilds them as unsaved.
+  - `edit` (`RuntimeOp::EditDevice`) shows the editor on the session
+    already open, with nothing reopened; on a board that is not connected
+    it connects first.
+- **Hand-over** is the lens's existing rule: Connect on a second board
+  closes the first session, then opens the second. The first card shows its
+  facts at once; the second says "Connecting…".
+- **While connected, Edit sits at the end of the All controls row** (Q19).
+  The project bar gives way to the panel with the other bars, so the row
+  that leads to the board's play page carries Edit, or its lock (`unlock`)
+  on a play-only board, flush at its end. All controls itself is a plain
+  link to the session's play address (`router::play_address` in the web).
+- **The card's panel is a pick of the project's root panel**
+  (`UiBoardPanel`, `board_panel_picks.rs`): the master (a `brightness`
+  fader, the root's first, else the first nested group's), then knobs and
+  toggles in panel order, four controls at most; every other control counts
+  toward "· N more". The auto-save switch and the panel-wide reset are not
+  on the card, and auto-save is offered only at the edit tier. The play
+  page and the docs embed read the same root face
+  (`ProjectEditorView::root_module_face`). The web draws the picks with the
+  panel's own widgets at the five bars' height (`CompactPanel`), so the
+  card keeps one height.
+- **The picture is the session's own.** While the lens holds the wire the
+  card draws the lens's published frames (`LensFrameSource`,
+  `PictureSource::Lens`), closed PR #571 redone.
+- **Over Bluetooth, connecting never makes the picture slower than
+  watching it** (Q4, ruled). A connected card is not a play view: the lens
+  on its card keeps the session's own cadence (`DEVICE_REFRESH_INTERVAL`,
+  the editor's), which reads at least as often as a watched card's feed
+  (`DEVICE_CARD_FEED_BLE_INTERVAL`). The Play budget stays the play page's.
+  The airtime is the editor's.
+- **Going home keeps a session the home page holds** (the web's
+  `nav_session_plan`); every other site route still ends it. The "open
+  ended" kick never fires while a session is connected, and following a
+  link to the open session's own address (All controls, Forward) opens
+  nothing twice (`already_bound` reads the connected session's project).
+- **The editor always has a page.** When Edit shows the editor from a
+  non-lens route and the session has no project address, the lens sync
+  emits `/device/<uid>` (Q3, the 2026-09-22 record's amendment of the same
+  date). A board's `/device/<uid>/play` keeps play when it heals to
+  `/p/…/play` (`docs/defects/2026-10-08-the-device-play-address-loses-play.md`).
+- **The play password is enough to connect, not to adopt** (R3). A
+  play-only link opens the session and writes the panel, but adoption's uid
+  stamp is a file write, which the board refuses below the edit tier. A
+  play-only board running an identity-free project stays unbound: its
+  address is `/device/<uid>`, and All controls goes to
+  `/device/<uid>/play`. The emulator answers at the edit tier, so the play
+  tier is proven by core tests and stories; a desk check is queued.
+- **No connected session survives a reload,** and nothing new is
+  persisted: no wire, persisted-format or firmware change.
+
+### The feel gate's first round (2026-10-14)
+
+Yona looked at the connected card and asked for words and one rule. What
+changed, none of it a new decision:
+
+- **A primary is never a greyed verb.** With no project on a ready board,
+  the primary is the next step, Add a project (the project bar's `push`,
+  which the bar then does not repeat). A primary that cannot be pressed
+  says why in its own word, as "Connecting…" did: "Updating · 42%",
+  "Offline · 2 weeks", "Identifying…", "Busy in the other tab".
+- **Every bar names its subject:** "No project" (there is firmware on the
+  board), "Project not known", "Access not known · when it's back",
+  "Firmware not known", "Board not known". A stand-in says what it is:
+  "Simulated · running", "Emulated · off". "also cloud" became the cloud
+  icon alone at the connection bar's end, lit while lightplayer.app can
+  reach the board.
+- **A board's files are gone only on evidence it had some**, never on a
+  fresh install's formatted first boot, and the notice offers Start fresh
+  (`devices/<board>/start-fresh`, Routine) beside the restores. The choice
+  is kept per board in this browser's `localStorage` until the board runs a
+  project again: a convenience, not a persisted format.
+- **The identify asks a board what it runs** when it has not said, so a sim
+  (which sends no heartbeat) reads "No project" with Add a project
+  (`lpa-devices`, `IdentifyActivity`).
+- **A Connect that opened the port chooser waits on its answer**: nothing
+  picked lets it go at once. "Couldn't connect" goes once the board is
+  reached another way.
+
+The defects are filed under `docs/defects/2026-10-14-*`.
+
+## Amendment 2026-10-19: the connected card holds the whole panel
+
+Plan `lp2025/2026-10-19-0826-card-panel-pass`. Yona, on the PLAYFUL choker
+connected (2026-10-18): "we only show a few controls, and we don't make
+great use of the space. and 'all controls' takes us to a new page that's a
+bit awkward"; then (2026-10-19) "I'm OK with the card changing height once
+when connecting". This changes §4 ("as many controls as fit at the card's
+height … then All controls") and the M4 amendment's panel bullets ("four
+controls at most", "· N more", "the card keeps one height"):
+
+- **Connected, the card holds every panel control** (`board_panel_picks`):
+  the root's own controls with the master (the `brightness` channel, whatever
+  its widget) leading, then each nested group's under its name, depth
+  first. There is no cap, no "· N more" and no All controls row.
+- **The card grows once, on connect, and back on Done.** Its last grid row
+  is as tall as the panel. Knobs and toggles fill rows, as many to a row as
+  the card is wide (three on a phone's narrow card); a palette, a fader or
+  the Pattern instrument takes a row of its own; a nested group's controls
+  sit under a quiet heading. The home page's grid keeps every other card at
+  its own height (`2026-09-03-device-card-fixed-height-and-disconnect-disappears.md`,
+  its 2026-10-19 amendment).
+- **On the panel, brightness is a knob and the clock is one Speed knob**
+  (`2026-08-03-panel-visibility-is-derived.md` and
+  `2026-08-07-clock-transport-is-a-panel-instrument.md`, each amended the
+  same day), so the panel spends its room on controls.
+- **The panel reset and the auto-save switch move into the card's ⋯**
+  (`UiDetailPanel::PanelSettings`, in the status corner's details while
+  connected): Held controls with Reset (offered while one is held) and, at
+  the edit tier only, Auto-save. They still send their panel commands from
+  the web, as the play page's do; making them offers is the agentic UI
+  roadmap's.
+- **Edit, or its lock on a play-only board, stays at the bottom**, at the
+  end of the panel's foot (CD15 stands, its row renamed).
+- **The play page stays an address, not a link from the card.** `/p/…/play`
+  and `/device/<uid>/play` still open it (phones, shared links, the
+  editor's Play toggle); the card no longer links there, and the router's
+  `play_address` went with the link.
+
+
+## Amendment 2026-10-19: the rows are a new board's setup list
+
+Plan `lp2025/2026-10-19-1350-board-setup-rows`; the spike
+`spikes/install-network-setup` (converged at `2b83061f6`). Sean flashed his
+first board from lightplayer.app on 2026-10-18 and nothing asked for his
+Wi‑Fi, and he couldn't find where to add it. Yona: "the rows of the card
+are actually a great benefit here. its almost a todo list. all we have to
+do is call out each item", and three principles for a new board's setup:
+make it obvious what to do; teach the UI and keep things in place, so setup
+isn't a one-off; minimize decisions, especially repeat decisions. This
+changes §2's "stack of bars" and §3's bar model:
+
+- **Eight rows, the links in the middle:** Project, USB, Wi‑Fi,
+  Bluetooth, lightplayer.app, Access, Firmware, Hardware (`BarLayer::ALL`).
+  The Link row is gone: each link has its own row, whose kind is the link's
+  own name, and each says what that link reaches or how it stands — USB
+  "connected" / "not connected", Wi‑Fi the network it joined, Bluetooth the
+  name a phone sees, lightplayer.app the account. "connected" beside a
+  network, a name or an account marks the link this tab is using. What this
+  tab is doing about reaching the board (connecting, reconnecting, a Connect
+  that failed, a board held by another tab or a stranger, a board that
+  stopped answering) is said on the row of the link it is about
+  (`link_session.rs`), and the surface quiets that row. lightplayer.app has
+  its own row for privacy ("lightplayer.app · disabled" is a clean thing to
+  say) and for its journey. Every resting card is still one height, now
+  eight 28 px rows; a stand-in keeps the rows ("Simulated · running" on
+  USB, "—" on the radios). Offline, every row keeps its last value, dimmed:
+  the controllers keep a board's last network status and Bluetooth switch
+  while it is on the roster (`BoardLinks`).
+- **A row with something left to do is lit** (`UiStackBar::todo`): the
+  whole row on a lighter flat ground, its words at full strength, its
+  button on the same ground. No gradient, no dot. Project none · Add, Wi‑Fi
+  not connected · Set up, lightplayer.app not connected · Sign in, Firmware
+  none · Install. Never on a toned, disabled or working row, nor on a row
+  whose fix is another row's (lightplayer.app waiting on Wi‑Fi). The
+  Project row's Add and the Firmware row's Install repeat the primary's
+  pick: the row teaches where the thing lives, the primary says what is
+  next.
+- **The state says the fact, the button says the fix:** "not connected" on
+  USB, Wi‑Fi and lightplayer.app alike, with Set up or Sign in as the fix.
+- **Hushing a row is switching it off, at the top of its details:** Wi‑Fi,
+  Bluetooth and lightplayer.app each lead their details with one switch
+  line, drawn alike (`UiBarDetails::switch`, a `UiDetailSwitch`: the row's
+  icon and name, and the board's own switch), as macOS draws the top of its
+  Wi‑Fi and Bluetooth menus. The switches are the board's own:
+  `wifi/enabled`, `wifi/cloud-relay`, and `devices/<board>/bluetooth/enabled`
+  (a new core offer, which replaced the Bluetooth switch the web built). At
+  the gate Yona turned down the first draft — Disable buttons in three
+  places with three looks — for this one line. The row then says
+  "disabled", plain, and wants nothing; the same switch turns it back on.
+  The choice lives on the board, so it holds across browsers and is true.
+- **Sign in is a core offer,** `devices/<board>/sign-in`: the controller
+  counts the presses (`UiStudioView::sign_in_requests`) and the page leaves
+  for sign-in when the count moves. It needs the person's own click.
+- **The primary is the likely next step:** Install firmware, then Add a
+  project, then Connect. Wi‑Fi and lightplayer.app never take it ("'Set up
+  Wi-Fi' probably shouldn't be the primary CTA"). A board that runs no
+  project always offers Add a project, and the surface says it aloud.
+- **The board is renamed where its name is:** the name bar's name, with a
+  faint pencil always shown; pressing it puts a field in its place, Enter
+  or clicking away keeps it, Esc doesn't (`UiNameBar::rename`). Hardware's
+  details no longer hold a name field.
+- **The struck cloud mark is gone;** lightplayer.app's row says it.
+
+Out of this amendment, in the secrets-vault plan: where Studio keeps
+secrets (the account's and the browser's), the "Remember…" switch on the
+Wi‑Fi form, the second board joining a remembered network with no press,
+new-board defaults for lightplayer.app and Bluetooth, and account settings.
+This change leaves the seams: no "Remember…" switch yet, and a row's
+account mark (`UiBarMark`) is drawn only once a store says a value came
+from the account.
