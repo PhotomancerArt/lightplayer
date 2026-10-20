@@ -6,7 +6,10 @@
 //! answers with [`HubAction`]s — bytes for a leg, or a leg to close — which
 //! the registry hands to the legs' tasks. It never awaits, never reads a
 //! clock (times arrive as arguments, f64 epoch seconds), and never touches
-//! the store: the account check happened before a board is registered here.
+//! the store: the account check happened before a board is registered here,
+//! and what the account board list should record it *returns* as
+//! [`BoardRecordWrite`]s ([`RelayHub::take_writes`]), which the registry's
+//! caller applies through the store.
 //!
 //! What it holds:
 //!
@@ -16,7 +19,8 @@
 //!   [`MAX_ROUTES_PER_BOARD`]).
 //! - **Routes**: browser leg → (board, route id), and back.
 //! - **Pictures** ([`PictureCache`]): each protocol 2 board's last
-//!   picture, kept after the board leaves, gone when the process goes.
+//!   picture, kept after the board leaves, gone when the process goes (and
+//!   written behind to the board list, below).
 //! - **Watches**: until when a member watching a board keeps it fast.
 //!
 //! The rules, each pinned by a test below:
@@ -48,11 +52,19 @@
 //!   [`super::picture_cache`]).
 //! - Shutdown closes every leg [`RelayCloseCode::GoingAway`], so boards
 //!   take the short backoff, and forgets every picture.
+//! - **The board list** (the account board list ADR): a board joins each
+//!   account it proved as it registers (`Seen`); a new project name is
+//!   written once (`Project`); its last picture is written behind — at
+//!   most every [`PICTURE_WRITE_EVERY_S`] while it is online, checked when
+//!   a picture arrives, never per picture — and, with when it was last
+//!   seen, when it leaves and when the relay goes away. A `BoardPictures`
+//!   read of a board this process holds no picture of answers from the
+//!   picture written behind to the reader's own record of it.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use lp_cloud_domain::BoardAccounts;
+use lp_cloud_domain::{BoardAccounts, BoardRecordWrite, StoredPicture};
 use lpc_cloud_api::{Base64Bytes, BoardPicture, BoardPresence, KnownPicture, MAX_ACCOUNT_BOARDS};
 use lpc_history::PrefixedUid;
 use lpc_relay::{
@@ -72,6 +84,12 @@ pub type LegId = u64;
 /// `ListAccountBoards` answers, at most this many anyway
 /// ([`MAX_ACCOUNT_BOARDS`]).
 pub const MAX_BOARDS_PER_ACCOUNT: usize = MAX_ACCOUNT_BOARDS;
+
+/// How often, at most, an online board's last picture is written behind to
+/// its accounts' board lists (the account board list plan's D1): never per
+/// picture. It is also written when the board leaves and when the relay
+/// goes away, so a crash loses at most this much picture.
+pub const PICTURE_WRITE_EVERY_S: f64 = 600.0;
 
 /// What the hub asks the legs to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +134,12 @@ pub struct OnlineBoard {
     /// When the watched window the board was last sent ends, f64 epoch
     /// seconds (at or before now: not watched).
     told_watched_until: f64,
+    /// Whether the board has reported a project on this leg (its
+    /// registration's `None` is silence until it has).
+    project_reported: bool,
+    /// When its picture was last written behind to its accounts' lists (or
+    /// when it registered): the next is due [`PICTURE_WRITE_EVERY_S`] later.
+    picture_written_at: f64,
 }
 
 impl OnlineBoard {
@@ -185,6 +209,11 @@ pub struct RelayHub {
     /// apart from the online boards, so a board that comes back while
     /// someone watches is fast at once. Expired entries are dropped.
     watched_until: HashMap<RelayBoardId, f64>,
+    /// Board → the `seq` of the picture last written behind, so a leaving
+    /// board writes only a newer one.
+    written_seq: HashMap<RelayBoardId, u64>,
+    /// Board-list writes decided and not yet taken ([`Self::take_writes`]).
+    writes: Vec<BoardRecordWrite>,
 }
 
 impl Default for RelayHub {
@@ -212,7 +241,17 @@ impl RelayHub {
             pictures: PictureCache::new(first_seq),
             settings,
             watched_until: HashMap::new(),
+            written_seq: HashMap::new(),
+            writes: Vec::new(),
         }
+    }
+
+    /// The board-list writes decided since the last call, in order: the
+    /// registry applies each through the store, once
+    /// ([`lp_cloud_domain::apply_board_record_write`]). The hub decides
+    /// *when* a board's record changes; it never touches the store.
+    pub fn take_writes(&mut self) -> Vec<BoardRecordWrite> {
+        std::mem::take(&mut self.writes)
     }
 
     /// Put a board online, replacing (and closing) any older leg with its
@@ -235,14 +274,14 @@ impl RelayHub {
             return Err(RefuseReason::TooManyBoards);
         }
         let mut actions = Vec::new();
+        let now = registration.since;
         if let Some(old) = self.boards.get(&id).map(|old| old.registration.leg) {
             actions.push(HubAction::Close {
                 leg: old,
                 code: RelayCloseCode::BoardGone,
             });
-            actions.extend(self.board_gone(old));
+            actions.extend(self.board_gone(old, now));
         }
-        let now = registration.since;
         self.pictures.registered(id, &registration.accounts.users);
         self.device_legs.insert(registration.leg, id);
         let mut board = OnlineBoard {
@@ -250,7 +289,10 @@ impl RelayHub {
             routes: Vec::new(),
             next_route: 1,
             told_watched_until: now,
+            project_reported: false,
+            picture_written_at: now,
         };
+        self.writes.push(seen_write(&board, now));
         if let Some(rate) = self.rate_on_registering(&board, now) {
             board.told_watched_until = now + f64::from(rate.watched_for_s);
             actions.extend(to_board(&board, RelayFrame::PictureRate(rate).encode()));
@@ -259,15 +301,19 @@ impl RelayHub {
         Ok(actions)
     }
 
-    /// A device leg closed: its board goes offline (if the leg is still
-    /// the board's), and every session on it ends. Its picture stays.
-    pub fn board_gone(&mut self, leg: LegId) -> Vec<HubAction> {
+    /// A device leg closed at `now`: its board goes offline (if the leg is
+    /// still the board's), and every session on it ends. Its picture stays.
+    /// Its accounts' lists say it was last seen at `now`, and get its
+    /// picture if a newer one came since the last write.
+    pub fn board_gone(&mut self, leg: LegId, now: f64) -> Vec<HubAction> {
         let Some(id) = self.device_legs.remove(&leg) else {
             return Vec::new();
         };
         let Some(board) = self.boards.remove(&id) else {
             return Vec::new();
         };
+        self.writes.push(seen_write(&board, now));
+        self.write_picture_if_newer(id);
         self.pictures.offline(id);
         board
             .routes
@@ -374,19 +420,35 @@ impl RelayHub {
                 Vec::new()
             }
             RelayFrame::Project(project) if speaks_2 => {
+                let name = |project: &Option<RelayProject>| {
+                    project.as_ref().map(|project| project.name.clone())
+                };
+                if !board.project_reported || name(&board.registration.project) != name(&project) {
+                    self.writes.push(BoardRecordWrite::Project {
+                        board: id,
+                        users: board.registration.accounts.users.clone(),
+                        project: name(&project),
+                        at: now,
+                    });
+                }
+                board.project_reported = true;
                 self.pictures.set_project(id, project.clone());
                 board.registration.project = project;
                 Vec::new()
             }
             RelayFrame::Picture(picture) if speaks_2 => {
                 let registration = &board.registration;
-                self.pictures.put(
+                let taken = self.pictures.put(
                     id,
                     &registration.accounts.users,
                     picture,
                     registration.project.clone(),
                     now,
                 );
+                if taken && now - board.picture_written_at >= PICTURE_WRITE_EVERY_S {
+                    board.picture_written_at = now;
+                    self.write_picture_if_newer(id);
+                }
                 Vec::new()
             }
             RelayFrame::Hello(_)
@@ -402,7 +464,7 @@ impl RelayHub {
                     leg,
                     code: RelayCloseCode::PolicyViolation,
                 }];
-                actions.extend(self.board_gone(leg));
+                actions.extend(self.board_gone(leg, now));
                 actions
             }
         }
@@ -446,12 +508,18 @@ impl RelayHub {
     /// [`MAX_ACCOUNT_BOARDS`] asked-for boards that `user` may read (the
     /// rest are simply absent), colours left out where the caller already
     /// holds that `seq`; and, with `watch`, each of those boards watched.
+    ///
+    /// A board this process holds no picture of answers from `stored`: the
+    /// last picture written behind to `user`'s own record of it, which the
+    /// caller read from the store (only one the board took while it had
+    /// proved `user`). Its `seq` is [`stored_picture_seq`].
     pub fn pictures_for(
         &mut self,
         user: PrefixedUid,
         asked: &[KnownPicture],
         watch: bool,
         now: f64,
+        stored: &HashMap<RelayBoardId, StoredPicture>,
     ) -> (Vec<BoardPicture>, Vec<HubAction>) {
         let mut pictures = Vec::new();
         let mut actions = Vec::new();
@@ -463,6 +531,18 @@ impl RelayHub {
                 actions.extend(self.watch(user, id, now));
             }
             let Some(entry) = self.pictures.readable(id, user) else {
+                if let Some(picture) = stored.get(&id) {
+                    let seq = stored_picture_seq(picture.at);
+                    pictures.push(BoardPicture {
+                        id: id.to_string(),
+                        online: self.boards.contains_key(&id),
+                        seq,
+                        at: picture.at,
+                        outputs: picture.outputs.clone(),
+                        colors: (known.seq != Some(seq))
+                            .then(|| Base64Bytes(picture.colors.clone())),
+                    });
+                }
                 continue;
             };
             pictures.push(BoardPicture {
@@ -500,9 +580,18 @@ impl RelayHub {
             .collect()
     }
 
-    /// Close every leg, boards first, with "going away"; forget every
-    /// picture and every watch.
-    pub fn shutdown(&mut self) -> Vec<HubAction> {
+    /// Close every leg, boards first, with "going away", at `now`; forget
+    /// every picture and every watch. Every online board's accounts' lists
+    /// are written first: last seen `now`, and its picture if a newer one
+    /// came since the last write (take them with [`Self::take_writes`]).
+    pub fn shutdown(&mut self, now: f64) -> Vec<HubAction> {
+        let mut online: Vec<RelayBoardId> = self.boards.keys().copied().collect();
+        online.sort();
+        for id in online {
+            let write = seen_write(&self.boards[&id], now);
+            self.writes.push(write);
+            self.write_picture_if_newer(id);
+        }
         let mut actions: Vec<HubAction> = self
             .device_legs
             .keys()
@@ -520,6 +609,7 @@ impl RelayHub {
         self.browser_legs.clear();
         self.pictures.clear();
         self.watched_until.clear();
+        self.written_seq.clear();
         actions
     }
 
@@ -533,6 +623,27 @@ impl RelayHub {
     #[must_use]
     pub fn picture_count(&self) -> usize {
         self.pictures.len()
+    }
+
+    /// Write board `id`'s cached picture behind, if it is newer than the
+    /// last one written.
+    fn write_picture_if_newer(&mut self, id: RelayBoardId) {
+        let Some(entry) = self.pictures.get(id) else {
+            return;
+        };
+        if self.written_seq.get(&id) == Some(&entry.seq) {
+            return;
+        }
+        self.written_seq.insert(id, entry.seq);
+        self.writes.push(BoardRecordWrite::Picture {
+            board: id,
+            picture: StoredPicture {
+                at: entry.at,
+                outputs: entry.picture.outputs.clone(),
+                colors: entry.picture.colors.clone(),
+                accounts: entry.accounts.clone(),
+            },
+        });
     }
 
     /// The rate a board registering at `now` is sent: protocol 2 only,
@@ -569,6 +680,39 @@ impl RelayHub {
             .filter(|board| Some(board.registration.id) != except && board.has_account(user))
             .count()
     }
+}
+
+/// What `board` writes to its accounts' lists at `now`: its name and
+/// firmware from its hello, its project once it reported one, last seen
+/// `now`.
+fn seen_write(board: &OnlineBoard, now: f64) -> BoardRecordWrite {
+    let registration = &board.registration;
+    BoardRecordWrite::Seen {
+        board: registration.id,
+        users: registration.accounts.users.clone(),
+        label: registration.label.clone(),
+        firmware: registration
+            .firmware
+            .clone()
+            .filter(|firmware| !firmware.is_empty()),
+        project: board.project_reported.then(|| {
+            registration
+                .project
+                .as_ref()
+                .map(|project| project.name.clone())
+        }),
+        at: now,
+    }
+}
+
+/// The `seq` a picture read back from the board list answers with: its
+/// `at` in whole milliseconds. Live pictures are numbered from the process
+/// start in *micro*seconds (see [`super::picture_cache`]), so a stored
+/// picture's `seq` can never equal a live one's, in this process or any
+/// other, and an unchanged stored picture keeps its `seq`.
+#[must_use]
+pub fn stored_picture_seq(at: f64) -> u64 {
+    (at * 1e3) as u64
 }
 
 /// The one way the hub puts bytes on a board's device leg: never a frame
@@ -692,7 +836,7 @@ mod tests {
         );
         assert_eq!(hub.board(id(1)).unwrap().registration.leg, 20);
         assert!(
-            hub.board_gone(10).is_empty(),
+            hub.board_gone(10, 0.0).is_empty(),
             "the old leg's close is a no-op"
         );
         assert!(hub.board(id(1)).is_some(), "and leaves the new leg online");
@@ -804,7 +948,7 @@ mod tests {
         hub.open_route(100, id(1)).unwrap();
         hub.open_route(101, id(1)).unwrap();
         let mut closed: Vec<LegId> = hub
-            .board_gone(10)
+            .board_gone(10, 0.0)
             .into_iter()
             .map(|action| match action {
                 HubAction::Close {
@@ -861,7 +1005,7 @@ mod tests {
         let mut hub = RelayHub::new();
         hub.register(registration(1, 10, &[ALICE])).unwrap();
         hub.open_route(100, id(1)).unwrap();
-        let actions = hub.shutdown();
+        let actions = hub.shutdown(0.0);
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|action| matches!(
             action,
@@ -902,7 +1046,8 @@ mod tests {
         for t in 0..40 {
             let now = 2.0 + f64::from(t);
             actions.extend(hub.watch(user(ALICE), id(1), now));
-            let (pictures, watched) = hub.pictures_for(user(ALICE), &known(&[1, 2]), true, now);
+            let (pictures, watched) =
+                hub.pictures_for(user(ALICE), &known(&[1, 2]), true, now, &no_stored());
             assert!(pictures.is_empty(), "a protocol 1 board has no picture");
             actions.extend(watched);
         }
@@ -916,7 +1061,7 @@ mod tests {
         // It re-registers (a reboot), then the process goes away.
         actions.extend(hub.register(registration(1, 13, &[ALICE])).unwrap());
         actions.extend(hub.watch(user(ALICE), id(1), 60.0));
-        actions.extend(hub.shutdown());
+        actions.extend(hub.shutdown(0.0));
 
         assert_protocol_1_only(&actions, 10);
         assert_protocol_1_only(&actions, 13);
@@ -1009,14 +1154,14 @@ mod tests {
         // Someone watches; the board drops and comes back 5 s later: fast at
         // once, for what is left of the watch.
         hub.watch(user(ALICE), id(1), 100.0);
-        hub.board_gone(10);
+        hub.board_gone(10, 0.0);
         assert_eq!(
             hub.register(registration_v2(1, 12, &[ALICE], 105.0))
                 .unwrap(),
             [rate_for(12, 60, 500, 10)]
         );
         // Long after the watch: idle only.
-        hub.board_gone(12);
+        hub.board_gone(12, 0.0);
         assert_eq!(
             hub.register(registration_v2(1, 13, &[ALICE], 200.0))
                 .unwrap(),
@@ -1085,7 +1230,7 @@ mod tests {
         hub.from_board(10, RelayFrame::Project(Some(project("Rocaille"))), 0.5);
         hub.from_board(10, RelayFrame::Picture(picture(1)), 1.0);
 
-        let (first, _) = hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0);
+        let (first, _) = hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0, &no_stored());
         assert_eq!(first.len(), 1);
         assert!(first[0].online);
         assert_eq!(first[0].at, 1.0);
@@ -1099,17 +1244,23 @@ mod tests {
             seq: Some(seq),
         }];
         assert_eq!(
-            hub.pictures_for(user(ALICE), &again, false, 2.0).0[0].colors,
+            hub.pictures_for(user(ALICE), &again, false, 2.0, &no_stored())
+                .0[0]
+                .colors,
             None
         );
         hub.from_board(10, RelayFrame::Picture(picture(2)), 3.0);
-        let newer = &hub.pictures_for(user(ALICE), &again, false, 4.0).0[0];
+        let newer = &hub
+            .pictures_for(user(ALICE), &again, false, 4.0, &no_stored())
+            .0[0];
         assert_eq!(newer.seq, seq + 1);
         assert_eq!(newer.colors, Some(Base64Bytes(picture(2).colors)));
 
         // The board leaves: the picture stays, offline.
-        hub.board_gone(10);
-        let offline = &hub.pictures_for(user(ALICE), &known(&[1]), true, 5.0).0[0];
+        hub.board_gone(10, 0.0);
+        let offline = &hub
+            .pictures_for(user(ALICE), &known(&[1]), true, 5.0, &no_stored())
+            .0[0];
         assert!(!offline.online);
         assert_eq!(offline.seq, seq + 1);
         assert_eq!(
@@ -1130,7 +1281,7 @@ mod tests {
             "dropped, never closed"
         );
         assert!(hub.board(id(1)).is_some());
-        let (pictures, _) = hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0);
+        let (pictures, _) = hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0, &no_stored());
         assert_eq!(pictures[0].colors, Some(Base64Bytes(picture(1).colors)));
     }
 
@@ -1141,38 +1292,38 @@ mod tests {
             .unwrap();
         hub.from_board(10, RelayFrame::Picture(picture(1)), 1.0);
         assert_eq!(
-            hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0)
+            hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0, &no_stored())
                 .0
                 .len(),
             1
         );
         assert_eq!(
-            hub.pictures_for(user(BOB), &known(&[1]), false, 2.0)
+            hub.pictures_for(user(BOB), &known(&[1]), false, 2.0, &no_stored())
                 .0
                 .len(),
             1
         );
         assert!(
-            hub.pictures_for(user(CAROL), &known(&[1]), false, 2.0)
+            hub.pictures_for(user(CAROL), &known(&[1]), false, 2.0, &no_stored())
                 .0
                 .is_empty()
         );
         assert!(
-            hub.pictures_for(guest(), &known(&[1]), true, 2.0)
+            hub.pictures_for(guest(), &known(&[1]), true, 2.0, &no_stored())
                 .0
                 .is_empty()
         );
 
         // It registers again without Bob: Bob reads nothing, at once.
-        hub.board_gone(10);
+        hub.board_gone(10, 0.0);
         hub.register(registration_v2(1, 11, &[ALICE], 3.0)).unwrap();
         assert!(
-            hub.pictures_for(user(BOB), &known(&[1]), false, 4.0)
+            hub.pictures_for(user(BOB), &known(&[1]), false, 4.0, &no_stored())
                 .0
                 .is_empty()
         );
         assert_eq!(
-            hub.pictures_for(user(ALICE), &known(&[1]), false, 4.0)
+            hub.pictures_for(user(ALICE), &known(&[1]), false, 4.0, &no_stored())
                 .0
                 .len(),
             1
@@ -1191,7 +1342,7 @@ mod tests {
                 .unwrap();
             hub.from_board(leg, RelayFrame::Picture(picture(1)), f64::from(n));
             if n >= 4 {
-                hub.board_gone(leg);
+                hub.board_gone(leg, 0.0);
             }
         }
         assert_eq!(hub.picture_count(), MAX_CACHED_PICTURES);
@@ -1214,12 +1365,12 @@ mod tests {
         hub.register(registration_v2(1, 10, &[ALICE], 0.0)).unwrap();
         hub.from_board(10, RelayFrame::Picture(picture(1)), 1.0);
         hub.watch(user(ALICE), id(1), 1.0);
-        hub.board_gone(10);
+        hub.board_gone(10, 0.0);
         assert_eq!(hub.picture_count(), 1);
-        hub.shutdown();
+        hub.shutdown(0.0);
         assert_eq!(hub.picture_count(), 0);
         assert!(
-            hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0)
+            hub.pictures_for(user(ALICE), &known(&[1]), false, 2.0, &no_stored())
                 .0
                 .is_empty()
         );
@@ -1241,7 +1392,7 @@ mod tests {
             hub.from_board(leg, RelayFrame::Picture(picture(1)), 1.0);
         }
         let all: Vec<u8> = (0..65).collect();
-        let (pictures, _) = hub.pictures_for(user(BOB), &known(&all), false, 2.0);
+        let (pictures, _) = hub.pictures_for(user(BOB), &known(&all), false, 2.0, &no_stored());
         assert_eq!(pictures.len(), MAX_ACCOUNT_BOARDS);
         assert!(
             !pictures
@@ -1253,10 +1404,211 @@ mod tests {
             seq: None,
         }];
         assert!(
-            hub.pictures_for(user(BOB), &garbage, true, 2.0)
+            hub.pictures_for(user(BOB), &garbage, true, 2.0, &no_stored())
                 .0
                 .is_empty()
         );
+    }
+
+    // ---- the board list's writes ---------------------------------------
+
+    #[test]
+    fn registering_joins_each_proving_account_with_the_hellos_facts() {
+        let mut hub = RelayHub::new();
+        hub.register(registration_v2(1, 10, &[ALICE, BOB], 5.0))
+            .unwrap();
+        assert_eq!(
+            hub.take_writes(),
+            [BoardRecordWrite::Seen {
+                board: id(1),
+                users: vec![user(ALICE), user(BOB)],
+                label: "board 1".to_string(),
+                firmware: Some("2026.10.09-1".to_string()),
+                project: None,
+                at: 5.0,
+            }]
+        );
+        assert!(hub.take_writes().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_project_is_written_when_it_changes_and_not_when_it_repeats() {
+        let mut hub = RelayHub::new();
+        hub.register(registration_v2(1, 10, &[ALICE], 5.0)).unwrap();
+        hub.take_writes();
+        hub.from_board(10, RelayFrame::Project(Some(project("Rocaille"))), 6.0);
+        hub.from_board(10, RelayFrame::Project(Some(project("Rocaille"))), 7.0);
+        hub.from_board(10, RelayFrame::Project(None), 8.0);
+        assert_eq!(
+            hub.take_writes(),
+            [
+                BoardRecordWrite::Project {
+                    board: id(1),
+                    users: vec![user(ALICE)],
+                    project: Some("Rocaille".to_string()),
+                    at: 6.0,
+                },
+                BoardRecordWrite::Project {
+                    board: id(1),
+                    users: vec![user(ALICE)],
+                    project: None,
+                    at: 8.0,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn leaving_writes_when_it_left_and_its_picture_only_when_newer() {
+        let mut hub = RelayHub::new();
+        hub.register(registration_v2(1, 10, &[ALICE], 5.0)).unwrap();
+        hub.from_board(10, RelayFrame::Project(Some(project("Rocaille"))), 6.0);
+        hub.from_board(10, RelayFrame::Picture(picture(7)), 7.0);
+        hub.take_writes();
+
+        hub.board_gone(10, 50.0);
+        let writes = hub.take_writes();
+        assert_eq!(
+            writes[0],
+            BoardRecordWrite::Seen {
+                board: id(1),
+                users: vec![user(ALICE)],
+                label: "board 1".to_string(),
+                firmware: Some("2026.10.09-1".to_string()),
+                project: Some(Some("Rocaille".to_string())),
+                at: 50.0,
+            }
+        );
+        assert_eq!(
+            writes[1],
+            BoardRecordWrite::Picture {
+                board: id(1),
+                picture: StoredPicture {
+                    at: 7.0,
+                    outputs: vec![3],
+                    colors: vec![7; 9],
+                    accounts: vec![user(ALICE)],
+                },
+            }
+        );
+        assert_eq!(writes.len(), 2);
+
+        // Back, and gone again with no new picture: the old one is not
+        // written twice.
+        hub.register(registration_v2(1, 11, &[ALICE], 60.0))
+            .unwrap();
+        hub.board_gone(11, 70.0);
+        let writes = hub.take_writes();
+        assert!(
+            writes
+                .iter()
+                .all(|write| matches!(write, BoardRecordWrite::Seen { .. })),
+            "{writes:?}"
+        );
+    }
+
+    #[test]
+    fn an_online_boards_picture_is_written_at_most_every_ten_minutes() {
+        let mut hub = RelayHub::new();
+        hub.register(registration_v2(1, 10, &[ALICE], 0.0)).unwrap();
+        hub.take_writes();
+        let pictures_written = |hub: &mut RelayHub| {
+            hub.take_writes()
+                .into_iter()
+                .filter_map(|write| match write {
+                    BoardRecordWrite::Picture { picture, .. } => Some(picture.at),
+                    _ => None,
+                })
+                .collect::<Vec<f64>>()
+        };
+
+        for at in [1.0, 300.0, 599.0] {
+            hub.from_board(10, RelayFrame::Picture(picture(1)), at);
+        }
+        assert!(pictures_written(&mut hub).is_empty(), "not per picture");
+        hub.from_board(10, RelayFrame::Picture(picture(2)), 600.0);
+        assert_eq!(pictures_written(&mut hub), [600.0]);
+        hub.from_board(10, RelayFrame::Picture(picture(3)), 900.0);
+        assert!(pictures_written(&mut hub).is_empty());
+        hub.from_board(10, RelayFrame::Picture(picture(4)), 1_200.0);
+        assert_eq!(pictures_written(&mut hub), [1_200.0]);
+    }
+
+    #[test]
+    fn going_away_writes_every_online_boards_last_sighting_and_newer_picture() {
+        let mut hub = RelayHub::new();
+        hub.register(registration_v2(1, 10, &[ALICE], 0.0)).unwrap();
+        hub.register(registration_v2(2, 11, &[BOB], 0.0)).unwrap();
+        hub.from_board(10, RelayFrame::Picture(picture(1)), 1.0);
+        hub.take_writes();
+
+        hub.shutdown(99.0);
+        let writes = hub.take_writes();
+        let seen: Vec<(RelayBoardId, f64)> = writes
+            .iter()
+            .filter_map(|write| match write {
+                BoardRecordWrite::Seen { board, at, .. } => Some((*board, *at)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seen, [(id(1), 99.0), (id(2), 99.0)]);
+        let pictures: Vec<RelayBoardId> = writes
+            .iter()
+            .filter_map(|write| match write {
+                BoardRecordWrite::Picture { board, .. } => Some(*board),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pictures, [id(1)], "board 2 sent none");
+    }
+
+    #[test]
+    fn a_stored_picture_answers_when_the_process_holds_none() {
+        let mut hub =
+            RelayHub::with_settings(RelayPictureSettings::default(), 1_760_000_000_000_000);
+        let stored_at = 1_760_000_123.25;
+        let mut stored = HashMap::new();
+        stored.insert(
+            id(1),
+            StoredPicture {
+                at: stored_at,
+                outputs: vec![2],
+                colors: vec![9; 6],
+                accounts: vec![user(ALICE)],
+            },
+        );
+        let (pictures, _) =
+            hub.pictures_for(user(ALICE), &known(&[1]), false, stored_at + 5.0, &stored);
+        assert_eq!(pictures.len(), 1);
+        let answered = &pictures[0];
+        assert!(!answered.online);
+        assert_eq!(answered.seq, stored_picture_seq(stored_at));
+        assert_eq!(answered.colors, Some(Base64Bytes(vec![9; 6])));
+
+        // Asked again holding that seq: no colours.
+        let asked = [KnownPicture {
+            id: id(1).to_string(),
+            seq: Some(answered.seq),
+        }];
+        let (again, _) = hub.pictures_for(user(ALICE), &asked, false, stored_at + 6.0, &stored);
+        assert_eq!(again[0].colors, None);
+
+        // The board comes back and sends a picture: the live one wins, and
+        // its seq is from another range than any stored picture's.
+        hub.register(registration_v2(1, 10, &[ALICE], stored_at + 7.0))
+            .unwrap();
+        hub.from_board(10, RelayFrame::Picture(picture(4)), stored_at + 8.0);
+        let (live, _) = hub.pictures_for(user(ALICE), &asked, false, stored_at + 9.0, &stored);
+        assert!(live[0].online);
+        assert!(live[0].seq >= 1_760_000_000_000_000);
+        assert!(stored_picture_seq(stored_at) < 1_760_000_000_000_000);
+        assert_eq!(live[0].colors, Some(Base64Bytes(vec![4; 9])));
+    }
+
+    /// No picture written behind: what every read in a hub test without a
+    /// store holds.
+    fn no_stored() -> HashMap<RelayBoardId, StoredPicture> {
+        HashMap::new()
     }
 
     const ALICE: u8 = 1;

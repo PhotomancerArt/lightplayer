@@ -15,8 +15,10 @@ use lp_cloud_server::app_state::AppState;
 use lp_cloud_server::config::ServerConfig;
 use lp_cloud_server::page::static_site::StaticSite;
 use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
+use lp_cloud_server::relay::relay_registry::apply_relay_writes;
 use lp_cloud_server::router::build_router;
 use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
+use lp_cloud_store_sqlite::SqliteMetaStore;
 use lpc_cloud_api::{
     AccountBoard, Ack, Actor, Base64Bytes, BoardPictureList, BoardPictures, BoardPresence,
     CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest, CloudResponse, KnownPicture,
@@ -396,7 +398,7 @@ async fn a_protocol_2_board_gets_its_rate_and_its_picture_is_read_through_the_ap
 }
 
 #[tokio::test]
-async fn a_picture_outlives_its_board_until_the_server_restarts() {
+async fn a_picture_outlives_its_board_in_the_process_that_saw_it() {
     let server = Server::start().await;
     let alice = server.account("alice").await;
     let hello = RelayHello::new(MAC, "Lamp", 39, None, vec![alice.salt]).with_firmware("raw-2");
@@ -407,27 +409,81 @@ async fn a_picture_outlives_its_board_until_the_server_restarts() {
 
     board.ws.close(None).await.unwrap();
     drop(board);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !server.online_boards(&alice.cookie).await.is_empty() {
-        assert!(Instant::now() < deadline, "the board never left");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    server.wait_offline(&alice.cookie).await;
     let kept = server
         .board_pictures(&alice.cookie, &[(BOARD_ID, None)], true)
         .await;
     assert_eq!(kept.pictures.len(), 1);
     assert!(!kept.pictures[0].online);
-    assert_eq!(kept.pictures[0].seq, seen.seq);
+    assert_eq!(kept.pictures[0].seq, seen.seq, "the live picture, kept");
     assert_eq!(
         kept.pictures[0].colors,
         Some(Base64Bytes(fake_picture().colors))
     );
+}
 
-    // A deploy: the process goes away, and every picture with it.
-    server.state.relay().going_away();
+/// The board list over a deploy: a board registers, reports its project,
+/// sends a picture and leaves; the relay goes away (its last writes
+/// applied); a new process opens the same SQLite file. The board's
+/// prover still lists it, offline, with its name, firmware, project and
+/// when the relay last saw it, and reads its last picture; another account
+/// sees neither.
+#[tokio::test]
+async fn a_boards_record_and_picture_survive_a_new_process_for_its_prover_only() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cloud.sqlite");
+    let server = Server::start_on(AnyMetaStore::new(SqliteMetaStore::open(&path))).await;
+    let alice = server.account("alice").await;
+    let bob = server.account("bob").await;
+    let hello = RelayHello::new(MAC, "Lamp", 39, None, vec![alice.salt]).with_firmware("raw-2");
+    let mut board = RawBoard::register(&server, &alice, hello).await;
+    board.next_frame().await; // its rate
+    board
+        .send(&RelayFrame::Project(Some(RelayProject {
+            name: "Rocaille".into(),
+            uid_tag: None,
+            content_tag: None,
+        })))
+        .await;
+    board.send(&RelayFrame::Picture(fake_picture())).await;
+    let live = server.wait_for_picture(&alice.cookie, BOARD_ID).await;
+    board.ws.close(None).await.unwrap();
+    drop(board);
+    server.wait_offline(&alice.cookie).await;
+
+    let writes = server.state.relay().going_away();
+    apply_relay_writes(&server.state, writes).await;
+    let next = Server::start_on(AnyMetaStore::new(SqliteMetaStore::open(&path))).await;
+
+    let listed = next.account_boards(&alice.cookie).await;
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    let row = &listed[0];
+    assert_eq!(row.id, BOARD_ID);
+    assert_eq!(row.label, "Lamp");
+    assert_eq!(row.firmware.as_deref(), Some("raw-2"));
+    assert_eq!(row.project.as_deref(), Some("Rocaille"));
+    assert_eq!(row.model, None, "the relay hears no model");
+    assert!(row.seen.relay.is_some_and(|at| at >= row.joined_at));
+    assert_eq!(row.online, None);
+
+    let stored = next
+        .board_pictures(&alice.cookie, &[(BOARD_ID, Some(live.seq))], true)
+        .await;
+    assert_eq!(stored.pictures.len(), 1);
+    let picture = &stored.pictures[0];
+    assert!(!picture.online);
+    assert_eq!(picture.at, live.at);
+    assert_eq!(picture.outputs, fake_picture().outputs);
+    assert_ne!(picture.seq, live.seq, "a stored picture is numbered apart");
+    assert_eq!(
+        picture.colors,
+        Some(Base64Bytes(fake_picture().colors)),
+        "the old process's seq does not hold the colours back"
+    );
+
+    assert!(next.account_boards(&bob.cookie).await.is_empty());
     assert!(
-        server
-            .board_pictures(&alice.cookie, &[(BOARD_ID, None)], false)
+        next.board_pictures(&bob.cookie, &[(BOARD_ID, None)], false)
             .await
             .pictures
             .is_empty()
@@ -517,6 +573,11 @@ impl Account {
 
 impl Server {
     async fn start() -> Self {
+        Self::start_on(AnyMetaStore::new(MemMetaStore::new())).await
+    }
+
+    /// A server over `meta` (a SQLite file, to stand for a deploy).
+    async fn start_on(meta: AnyMetaStore) -> Self {
         let config = ServerConfig::from_vars(|name| match name {
             "LP_CLOUD_STORE" | "LP_CLOUD_BLOBS" => Some("mem".to_string()),
             _ => None,
@@ -524,7 +585,7 @@ impl Server {
         .expect("the test configuration parses");
         let state = AppState::new(
             config,
-            AnyMetaStore::new(MemMetaStore::new()),
+            meta,
             AnyBlobStore::new(MemBlobStore::new()),
             StaticSite::open(None),
         );
@@ -658,6 +719,26 @@ impl Server {
     }
 
     /// Board `id`'s picture, once the hub has one (within 5 s).
+    /// Until the account has no board online (its leave applied).
+    async fn wait_offline(&self, cookie: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !self.online_boards(cookie).await.is_empty() {
+            assert!(Instant::now() < deadline, "the board never left");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // The leave's writes land on the leg's own task, just after.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self
+            .account_boards(cookie)
+            .await
+            .iter()
+            .any(|board| board.seen.relay.is_none_or(|at| at <= board.joined_at))
+        {
+            assert!(Instant::now() < deadline, "the leave was never written");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     async fn wait_for_picture(&self, cookie: &str, id: &str) -> lpc_cloud_api::BoardPicture {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {

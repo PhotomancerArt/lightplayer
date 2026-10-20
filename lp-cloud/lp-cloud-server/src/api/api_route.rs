@@ -21,6 +21,7 @@
 //!
 //! [`TransportError`]: https://docs.rs/lpa-cloud-client
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use axum::Json;
@@ -29,11 +30,12 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use lp_cloud_domain::account_board_list::{account_board, with_presence};
-use lp_cloud_domain::{Caller, MetaStore, session_token_hash};
+use lp_cloud_domain::{Caller, MetaStore, StoredPicture, session_token_hash};
 use lpc_cloud_api::{
     AccountBoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall, CloudError,
     CloudReply, CloudRequest, CloudResponse, check_version,
 };
+use lpc_relay::RelayBoardId;
 use serde::Deserialize;
 
 use crate::app_state::AppState;
@@ -138,23 +140,43 @@ async fn list_account_boards(
 /// `BoardPictures`: the relay's last pictures, in this process's memory, so
 /// answered here like `ListAccountBoards`, for the same viewer. A guest reads
 /// nothing and watches nothing; a board the viewer may not read, or with no
-/// picture, is simply absent (no oracle about other people's boards).
+/// picture, is simply absent (no oracle about other people's boards). A
+/// board the relay holds no picture of (it has not sent one since the last
+/// deploy) answers from the picture written behind to the viewer's own
+/// record of it, when the board took it while it had proved the viewer.
 async fn board_pictures(
     state: &AppState,
     token: Option<Vec<u8>>,
     request: BoardPictures,
 ) -> Result<CloudResponse, CloudError> {
-    let viewer = state
+    let (viewer, stored) = state
         .with_service(move |core| {
             let actor = core.actor_for(token.as_deref());
-            core.service.board_list_viewer(actor)
+            let viewer = core.service.board_list_viewer(actor)?;
+            let stored: HashMap<RelayBoardId, StoredPicture> = viewer
+                .map(|user| {
+                    core.service
+                        .store()
+                        .board_records_for_user(user)
+                        .into_iter()
+                        .filter_map(|record| {
+                            let picture = record.picture?;
+                            picture
+                                .accounts
+                                .contains(&user)
+                                .then_some((record.board, picture))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok::<_, CloudError>((viewer, stored))
         })
         .await?;
     let pictures = viewer
         .map(|user| {
             state
                 .relay()
-                .pictures_for(user, &request.boards, request.watch)
+                .pictures_for(user, &request.boards, request.watch, &stored)
         })
         .unwrap_or_default();
     Ok(BoardPictureList { pictures }.into())

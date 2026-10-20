@@ -16,6 +16,7 @@ use lp_cloud_server::app_state::AppState;
 use lp_cloud_server::config::ServerConfig;
 use lp_cloud_server::page::static_site::StaticSite;
 use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
+use lp_cloud_server::relay::relay_registry::apply_relay_writes;
 use lp_cloud_server::router::build_router;
 use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpa_client::transport_relay::RelayTarget;
@@ -265,11 +266,14 @@ impl Cloud {
         }
     }
 
-    /// A deploy: every leg told "going away", the process gone, a new one
-    /// on the same port with the same accounts (the store survives a
-    /// deploy; presence does not).
+    /// A deploy: every leg told "going away" (its last board-list writes
+    /// applied), the process gone, a new one on the same port with the same
+    /// accounts and board lists (the store survives a deploy; presence does
+    /// not).
     pub fn restart(&mut self) {
-        self.state.relay().going_away();
+        let writes = self.state.relay().going_away();
+        self.runtime
+            .block_on(apply_relay_writes(&self.state, writes));
         self.serve.abort();
         let _ = self.runtime.block_on(&mut self.serve);
         let old = self.state.clone();
@@ -281,15 +285,19 @@ impl Cloud {
                 .into_iter()
                 .map(|user| {
                     let access = store.account_access(user.uid);
-                    (user, access)
+                    let boards = store.board_records_for_user(user.uid);
+                    (user, access, boards)
                 })
                 .collect::<Vec<_>>()
         }));
         self.runtime.block_on(new.with_service(move |core| {
-            for (user, access) in rows {
+            for (user, access, boards) in rows {
                 core.service.store_mut().put_user(user);
                 if let Some(access) = access {
                     core.service.store_mut().put_account_access(access);
+                }
+                for board in boards {
+                    core.service.store_mut().put_board_record(board);
                 }
             }
         }));

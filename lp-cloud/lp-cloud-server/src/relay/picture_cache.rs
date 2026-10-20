@@ -5,13 +5,14 @@
 //! presence, so any number of readers share one upstream and nobody takes
 //! the board's one network slot to see it.
 //!
-//! **Memory only** (the plan's D4, following the vision: "the cloud keeps
-//! the latest frame in memory beside presence"). An entry outlives its
-//! board — marked offline — until the process ends; a deploy drops every
-//! entry, and online boards refill theirs within seconds (each sends a
-//! picture as soon as the new hub asks). Persisting a board's last picture
-//! is new persisted cloud data, and belongs with the account's board list
-//! (the boards-and-projects roadmap's M7), designed once, there.
+//! **Memory, and written behind to the account board list.** An entry
+//! outlives its board — marked offline — until the process ends; a deploy
+//! drops every entry, and online boards refill theirs within seconds (each
+//! sends a picture as soon as the new hub asks). The hub writes a board's
+//! picture behind to its accounts' board lists (when the board leaves, when
+//! the relay goes away, and at most every ten minutes while it is online:
+//! the account board list ADR), so an offline board's picture survives a
+//! deploy there; this cache never touches the store itself.
 //!
 //! The rules, each pinned by a test (here and in `relay_hub.rs`):
 //!
@@ -24,8 +25,12 @@
 //!   accepted one is dropped**: a guard against a broken board, never a
 //!   close.
 //! - **`seq`** moves on every picture accepted, across every board, from a
-//!   base the process picks at start, so a reader holding a `seq` from an
-//!   earlier process never mistakes a new picture for the one it has.
+//!   base the process picks at start (its start time in microseconds), so
+//!   a reader holding a `seq` from an earlier process never mistakes a new
+//!   picture for the one it has. A picture read back from the board list
+//!   is numbered by its `at` in *milli*seconds
+//!   ([`super::relay_hub::stored_picture_seq`]): a range no live `seq` ever
+//!   reaches, so the two can never be taken for each other.
 
 use std::collections::HashMap;
 
