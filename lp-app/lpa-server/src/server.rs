@@ -947,6 +947,10 @@ impl LpServer {
         // A request that changes files (or a batch verb) ends the
         // filesystem's quiet; reads and polls do not.
         let mut fs_busy = false;
+        // Set when a send reports `ConnectionLost`: the rest of the batch has
+        // no one to answer. Any other send failure (a `host link busy` drop)
+        // ends only that reply.
+        let mut connection_lost = false;
         for message in incoming {
             let Incoming {
                 link,
@@ -956,6 +960,10 @@ impl LpServer {
             let link = Link { id: link, trust };
             self.access.see(link);
             let msg_id = client_msg.id;
+            // The peer is gone: nothing left to answer. The frame still runs.
+            if connection_lost {
+                break;
+            }
 
             // THE GATE. Every request is classified (exhaustively — a new
             // variant does not compile until it is), and one its link's tier
@@ -965,16 +973,16 @@ impl LpServer {
             if let Some(needs) = required.needs()
                 && !required.permits(self.access.tier(link, &*self.base_fs))
             {
-                transport
-                    .send(
-                        link.id,
-                        WireServerMessage::new(
-                            msg_id,
-                            lpc_wire::server::ServerMsgBody::NotPermitted { needs },
-                        ),
-                    )
-                    .await
-                    .map_err(|error| ServerError::Core(format!("{error}")))?;
+                send_reply(
+                    transport,
+                    link.id,
+                    WireServerMessage::new(
+                        msg_id,
+                        lpc_wire::server::ServerMsgBody::NotPermitted { needs },
+                    ),
+                    &mut connection_lost,
+                )
+                .await;
                 response_count += 1;
                 continue;
             }
@@ -1004,16 +1012,16 @@ impl LpServer {
                     None => None,
                 };
                 if let Some(answer) = answer {
-                    transport
-                        .send(
-                            link.id,
-                            WireServerMessage::new(
-                                msg_id,
-                                lpc_wire::server::ServerMsgBody::Filesystem(answer),
-                            ),
-                        )
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(
+                            msg_id,
+                            lpc_wire::server::ServerMsgBody::Filesystem(answer),
+                        ),
+                        &mut connection_lost,
+                    )
+                    .await;
                     response_count += 1;
                     continue;
                 }
@@ -1032,18 +1040,24 @@ impl LpServer {
                         &*self.base_fs,
                         loaded.iter().map(|path| path.as_str()),
                     );
-                    transport
-                        .send(link.id, WireServerMessage::new(msg_id, body))
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(msg_id, body),
+                        &mut connection_lost,
+                    )
+                    .await;
                     response_count += 1;
                 }
                 ClientRequest::LoginAnswer { macs } => {
                     let body = self.access.answer_login(link.id, &macs);
-                    transport
-                        .send(link.id, WireServerMessage::new(msg_id, body))
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(msg_id, body),
+                        &mut connection_lost,
+                    )
+                    .await;
                     response_count += 1;
                 }
                 // Who has access: edit tier (the gate above has already
@@ -1074,10 +1088,13 @@ impl LpServer {
                     {
                         notice(&access_store::read_device_store(fs));
                     }
-                    transport
-                        .send(link.id, WireServerMessage::new(msg_id, body))
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(msg_id, body),
+                        &mut connection_lost,
+                    )
+                    .await;
                     response_count += 1;
                 }
                 // Network settings: edit tier (the gate above has already
@@ -1093,10 +1110,13 @@ impl LpServer {
                 | ClientRequest::NetworkForget { .. }
                 | ClientRequest::NetworkSet { .. } => {
                     let body = self.network_answer(client_msg.msg);
-                    transport
-                        .send(link.id, WireServerMessage::new(msg_id, body))
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(msg_id, body),
+                        &mut connection_lost,
+                    )
+                    .await;
                     response_count += 1;
                 }
                 ClientRequest::ProjectRead { handle, request } => {
@@ -1148,33 +1168,30 @@ impl LpServer {
                         let message = refusal.message();
                         log::warn!("tick_and_send: {message}");
                         if let Err(send_error) = sink.send_terminal_error(message).await {
-                            log::warn!(
-                                "tick_and_send: failed to send read-refusal error for \
-                                 id={msg_id}: {send_error}"
-                            );
+                            reply_dropped(msg_id, &send_error, &mut connection_lost);
                         }
                         response_count += 1;
                         continue;
                     }
                     let Some(project) = self.project_manager.get_project_mut(handle) else {
-                        transport
-                            .send(
-                                link.id,
-                                WireServerMessage::new(
-                                    msg_id,
-                                    lpc_wire::server::ServerMsgBody::Error {
-                                        error: format!(
-                                            "{}",
-                                            ServerError::ProjectNotFound(format!(
-                                                "handle {}",
-                                                handle.id()
-                                            ))
-                                        ),
-                                    },
-                                ),
-                            )
-                            .await
-                            .map_err(|error| ServerError::Core(format!("{error}")))?;
+                        send_reply(
+                            transport,
+                            link.id,
+                            WireServerMessage::new(
+                                msg_id,
+                                lpc_wire::server::ServerMsgBody::Error {
+                                    error: format!(
+                                        "{}",
+                                        ServerError::ProjectNotFound(format!(
+                                            "handle {}",
+                                            handle.id()
+                                        ))
+                                    ),
+                                },
+                            ),
+                            &mut connection_lost,
+                        )
+                        .await;
                         response_count += 1;
                         continue;
                     };
@@ -1202,36 +1219,33 @@ impl LpServer {
                     // Every arm below records its outcome and falls
                     // through to one `emit_end!`: an early `?` here
                     // would leave the window open forever.
-                    let finish_result = match stream_result {
-                        Ok(()) => sink
-                            .finish()
-                            .await
-                            .map_err(|error| ServerError::Core(format!("{error}"))),
+                    match stream_result {
+                        Ok(()) => {
+                            if let Err(error) = sink.finish().await {
+                                reply_dropped(msg_id, &error, &mut connection_lost);
+                            }
+                        }
                         Err(error) => {
                             // Signalable failures (event too large for an
                             // empty frame, other serialization/budget
                             // errors) still have a live connection: send a
-                            // terminal `Error` frame for this request id
-                            // and continue the tick. Transport-write
-                            // failures cannot be signaled and propagate.
+                            // terminal `Error` frame for this request id.
+                            // Transport-write failures cannot be signaled;
+                            // they end this reply and the tick goes on.
                             match classify_project_read_stream_error(error) {
                                 ProjectReadStreamOutcome::Signalable(message) => {
                                     if let Err(send_error) = sink.send_terminal_error(message).await
                                     {
-                                        log::warn!(
-                                            "tick_and_send: failed to send terminal \
-                                             project-read error for id={msg_id}: \
-                                             {send_error}"
-                                        );
+                                        reply_dropped(msg_id, &send_error, &mut connection_lost);
                                     }
-                                    Ok(())
                                 }
-                                ProjectReadStreamOutcome::Fatal(server_error) => Err(server_error),
+                                ProjectReadStreamOutcome::Fatal(error) => {
+                                    reply_dropped(msg_id, &error, &mut connection_lost);
+                                }
                             }
                         }
-                    };
+                    }
                     lp_perf::emit_end!(lp_perf::EVENT_PROJECT_READ);
-                    finish_result?;
                     response_count += 1;
                 }
                 msg => {
@@ -1278,12 +1292,12 @@ impl LpServer {
                     // produced it only if a hook exists.
                     let acked_reboot =
                         matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
-                    transport
-                        .send(link.id, response)
-                        .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    let sent = send_reply(transport, link.id, response, &mut connection_lost).await;
                     response_count += 1;
-                    if acked_reboot && let Some(reboot) = self.reboot_hook.clone() {
+                    if sent
+                        && acked_reboot
+                        && let Some(reboot) = self.reboot_hook.clone()
+                    {
                         // Answer, THEN reset. `send` returns once the
                         // transport reports the frame written, so the
                         // client has its ack before the board goes
@@ -1795,8 +1809,8 @@ enum ProjectReadStreamOutcome {
     /// The connection is still alive; send a terminal `Error` frame carrying
     /// this message for the request id, then continue the tick.
     Signalable(alloc::string::String),
-    /// A transport-write failure that cannot be signaled; abort the tick.
-    Fatal(ServerError),
+    /// A transport-write failure that cannot be signaled; it ends the read.
+    Fatal(lpc_wire::TransportError),
 }
 
 /// Classify a project-read stream failure into signalable vs. fatal.
@@ -1823,6 +1837,34 @@ pub fn read_frame_budget(link_budget: usize, largest_block: Option<u32>) -> usiz
     }
 }
 
+/// Send one reply on `link`. A reply the transport cannot send ends only
+/// that reply: a busy drop has told the peer (a drop notice) and the tick
+/// goes on to answer the rest and render. `ConnectionLost` sets
+/// `connection_lost` so the tick stops answering. Returns whether it went out.
+async fn send_reply<T: ServerTransport>(
+    transport: &mut T,
+    link: LinkId,
+    reply: WireServerMessage,
+    connection_lost: &mut bool,
+) -> bool {
+    let id = reply.id;
+    match transport.send(link, reply).await {
+        Ok(()) => true,
+        Err(error) => {
+            reply_dropped(id, &error, connection_lost);
+            false
+        }
+    }
+}
+
+/// Log a reply that did not go out, and note a lost connection.
+fn reply_dropped(msg_id: u64, error: &lpc_wire::TransportError, connection_lost: &mut bool) {
+    log::warn!("tick_and_send: reply id={msg_id} dropped: {error}");
+    if matches!(error, lpc_wire::TransportError::ConnectionLost) {
+        *connection_lost = true;
+    }
+}
+
 fn classify_project_read_stream_error(
     error: lpc_engine::ProjectReadEventStreamError<lpc_wire::TransportError>,
 ) -> ProjectReadStreamOutcome {
@@ -1834,7 +1876,7 @@ fn classify_project_read_stream_error(
             if transport_error_is_signalable(&transport_error) {
                 ProjectReadStreamOutcome::Signalable(format!("{transport_error}"))
             } else {
-                ProjectReadStreamOutcome::Fatal(ServerError::Core(format!("{transport_error}")))
+                ProjectReadStreamOutcome::Fatal(transport_error)
             }
         }
     }

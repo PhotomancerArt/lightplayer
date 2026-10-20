@@ -275,7 +275,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
             Err(e) => {
                 let tick_done = time_provider.now_ms();
                 server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
-                log::warn!("run_server_loop: Server tick error: {e:?}");
+                log::warn!("run_server_loop: Server tick error: {e}");
                 // Server error - continue
                 (
                     tick_done.saturating_sub(tick_start),
@@ -669,7 +669,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
             Err(e) => {
                 let tick_done = time_provider.now_ms();
                 server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
-                log::warn!("run_server_loop: Server tick error: {e:?}");
+                log::warn!("run_server_loop: Server tick error: {e}");
                 // Server error - continue
                 (
                     tick_done.saturating_sub(tick_start),
