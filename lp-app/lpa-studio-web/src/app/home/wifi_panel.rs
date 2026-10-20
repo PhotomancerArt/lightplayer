@@ -1,8 +1,9 @@
 //! The device's Wi‑Fi popover: the detail card the Connections group's
 //! Wi‑Fi row opens — and, on the board card, a section of the Wi‑Fi row's
 //! details (`in_card`: the section's divider, no frame of its own, and no
-//! switches: the Wi‑Fi and lightplayer.app rows' Disable and Enable are
-//! theirs) —
+//! switches or root heading: the row's details lead with their own switch
+//! line, "Wi‑Fi" and the board's switch, and lightplayer.app's switch is
+//! its own row's) —
 //! three pages, the UX spike's 2B (`spikes/wifi-networks/index.html`,
 //! chosen 2026-10-05).
 //!
@@ -86,18 +87,19 @@ pub(crate) fn WifiPanel(
     #[props(default)]
     test_preview: Option<UiWifiTest>,
     /// Drawn as a section of a details card (the board card's Wi‑Fi row's
-    /// details), not as a popover's whole body: its divider, no frame, and
-    /// no switches (the rows' Disable and Enable are theirs).
+    /// details), not as a popover's whole body: its divider, no frame, no
+    /// switches and no root heading (the details' switch line is both).
     #[props(default)]
     in_card: bool,
 ) -> Element {
     let mut page = use_signal(|| page_preview.clone().unwrap_or(WifiPage::Networks));
+    // In a card a root page draws no heading ([`PageHead`]).
+    use_context_provider(|| InCard(in_card));
     let panel_class = panel_class(in_card);
     let args = use_signal(|| args_preview.clone().unwrap_or_default());
     let mut verbs = WifiVerbs::of(&offers);
-    // On the board card the two switches are the rows' own verbs: Disable
-    // Wi‑Fi under this list (the Wi‑Fi row's foot), and the
-    // lightplayer.app row's Disable / Enable.
+    // On the board card the two switches are the rows' own: the Wi‑Fi
+    // row's switch line above this list, and the lightplayer.app row's.
     if in_card {
         verbs.enabled = None;
         verbs.cloud_relay = None;
@@ -482,8 +484,14 @@ impl WifiVerbs {
     }
 }
 
+/// Whether the panel is drawn in a board card's details ([`WifiPanel`]'s
+/// `in_card`), for its page heads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InCard(bool);
+
 /// A page's header: back (or the Wi‑Fi glyph), the title, and the board's
-/// Wi‑Fi switch on the root page.
+/// Wi‑Fi switch on the root page. In a card a root page (no Back) draws
+/// none: the details' switch line above it is its heading and its switch.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PageHead(
@@ -492,6 +500,10 @@ fn PageHead(
     #[props(default)] switch: Option<UiOffer>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let in_card = use_hook(try_consume_context::<InCard>).is_some_and(|InCard(in_card)| in_card);
+    if in_card && on_back.is_none() {
+        return rsx! {};
+    }
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:text-status-neutral-foreground",
             if let Some(on_back) = on_back {

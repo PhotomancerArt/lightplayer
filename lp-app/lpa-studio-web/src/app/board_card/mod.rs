@@ -82,6 +82,7 @@ pub(crate) mod board_surface;
 pub(crate) mod card_action;
 #[cfg(test)]
 pub(crate) mod card_test_fixtures;
+pub(crate) mod detail_switch_head;
 pub(crate) mod link_counters_section;
 pub(crate) mod name_bar;
 pub(crate) mod other_version_form;

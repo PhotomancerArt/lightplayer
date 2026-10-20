@@ -25,7 +25,7 @@ use crate::app::home::wifi_panel::{WifiPage, WifiPanel};
 // --- 1 · The row ------------------------------------------------------------
 
 #[story(
-    description = "On a board joined to Wi‑Fi, over USB: the USB row says \"connected\" and the Wi‑Fi row its network, \"Starlink Truck\"; the Wi‑Fi row's details are the Wi‑Fi panel, with Disable Wi‑Fi under it."
+    description = "On a board joined to Wi‑Fi, over USB: the USB row says \"connected\" and the Wi‑Fi row its network, \"Starlink Truck\"; the Wi‑Fi row's details are its switch line (Wi‑Fi, on) over the Wi‑Fi panel."
 )]
 fn wifi_row_on_the_card() -> Element {
     rsx! {

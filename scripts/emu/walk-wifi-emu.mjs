@@ -24,7 +24,7 @@
 //       → reload the page, connect again → both networks read back from the
 //         board, the Wi‑Fi row says "2 networks · saved" (Studio never
 //         stores a password)
-//       → Disable lightplayer.app (Cloud relay, on by default) from its
+//       → lightplayer.app's switch off (Cloud relay, on by default) in its
 //         row's details → open the first network's page →
 //         Forget (two clicks) → only the second is left
 //
@@ -321,7 +321,7 @@ async function main() {
       return `${how}; the Wi‑Fi row says 2 networks saved; both listed`;
     });
 
-    await step("relay-off", "Disable lightplayer.app from its row (Cloud relay is on by default): the board's answer says so", async () => {
+    await step("relay-off", "lightplayer.app's switch off, at the top of its row's details (Cloud relay is on by default): the board's answer says so", async () => {
       await driver.waitBar("cloud", /^lightplayer\.app (?!disabled)/, { board: CARD, timeoutMs: STEP_MS });
       await driver.pressOffer("wifi/cloud-relay", { board: CARD, bar: "cloud", timeoutMs: STEP_MS });
       await driver.waitBar("cloud", "lightplayer.app disabled", { board: CARD, timeoutMs: STEP_MS });

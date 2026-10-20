@@ -296,6 +296,7 @@ fn details(
         sections.push(play_only);
     }
     UiBarDetails {
+        switch: None,
         sections: without_empty(sections),
         panels: panel
             .cloned()
@@ -303,7 +304,6 @@ fn details(
             .into_iter()
             .collect(),
         raised: false,
-        foot: Vec::new(),
     }
 }
 

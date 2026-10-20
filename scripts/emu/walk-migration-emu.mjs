@@ -661,13 +661,13 @@ const CARDS_NOW = `[...document.querySelectorAll('[data-board-card]')].map((card
     .map((m) => m.getAttribute('data-offer-path').split('/').pop()),
 }))`;
 
-/// Page-side: the Bluetooth switch in the card's open Bluetooth row's
-/// details — its Disable Bluetooth (on) or Enable Bluetooth (off), the core
-/// offer `bluetooth/enabled`, drawn once the card holds the board's access
-/// list — as `{ on, disabled }`, or null.
+/// Page-side: the Bluetooth switch at the top of the card's open Bluetooth
+/// row's details — the core offer `bluetooth/enabled` as a
+/// `button[role=switch]`, drawn once the card holds the board's access list
+/// — as `{ on, disabled }`, or null.
 function bluetoothSwitch(board) {
-  return `(() => { const sw = ${barPanel(board, "bluetooth")}?.querySelector('[data-offer-path$="/bluetooth/enabled"] button');
-    return sw ? { on: (sw.textContent || '').includes('Disable'), disabled: sw.disabled } : null; })()`;
+  return `(() => { const sw = ${barPanel(board, "bluetooth")}?.querySelector('[data-detail-switch="bluetooth"] [data-offer-path$="/bluetooth/enabled"] [role="switch"]');
+    return sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null; })()`;
 }
 
 /// Page-side: one fact in the card's open `layer` details (`dt` → `dd`), or

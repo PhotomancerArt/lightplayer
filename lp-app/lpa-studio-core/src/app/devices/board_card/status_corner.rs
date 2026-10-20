@@ -254,6 +254,7 @@ mod tests {
         UiStackBar {
             tone,
             details: UiBarDetails {
+                switch: None,
                 sections: vec![RichSection {
                     title: layer_title(layer).to_string(),
                     tone,
@@ -265,7 +266,6 @@ mod tests {
                 }],
                 panels: Vec::new(),
                 raised: false,
-                foot: Vec::new(),
             },
             ..UiStackBar::new(layer, "chip", "")
         }

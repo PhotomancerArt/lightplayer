@@ -324,9 +324,10 @@ The rules:
   with no hue: never a gradient, never a dot, never on a toned row (orange
   and red keep their tone), a disabled one, one whose fix is another row's,
   or one at work.
-- **A row is hushed by disabling its thing,** from its details (Disable
-  Wi‑Fi, Disable lightplayer.app, Disable Bluetooth): the row then says
-  `disabled`, plain, and wants nothing.
+- **A row is hushed by switching its thing off,** with the switch line at
+  the top of its details — the row's icon and name, and the board's own
+  `ux-switch` at the line's end — drawn the same for Wi‑Fi, Bluetooth and
+  lightplayer.app: the row then says `disabled`, plain, and wants nothing.
 - **The rows go quiet** while the surface says their problem: the row keeps
   its state word and its own button, and loses its orange or red. The
   surface is the card's one loud place.

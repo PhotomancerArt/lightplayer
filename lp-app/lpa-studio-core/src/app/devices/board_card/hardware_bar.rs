@@ -93,6 +93,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         aside: aside.filter(|_| work.is_none()),
         work,
         details: UiBarDetails {
+            switch: None,
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(reset.map(own_words).into_iter().collect()),
@@ -100,7 +101,6 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             ]),
             panels: Vec::new(),
             raised: false,
-            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }
@@ -136,6 +136,7 @@ pub(crate) fn pending_hardware_bar(
         aside,
         work: identifying.then(|| UiBarWork::running("identifying", None)),
         details: UiBarDetails {
+            switch: None,
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(
@@ -148,7 +149,6 @@ pub(crate) fn pending_hardware_bar(
             ]),
             panels: Vec::new(),
             raised: false,
-            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Hardware, "chip", summary)
     }

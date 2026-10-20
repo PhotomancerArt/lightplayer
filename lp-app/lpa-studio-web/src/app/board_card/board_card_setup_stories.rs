@@ -1,8 +1,8 @@
 //! The board card's eight rows as a new board's setup list (plan
 //! `2026-10-19-1350-board-setup-rows`, the spike `spikes/install-network-setup`):
 //! the lit to-do rows across a board's first minutes, every state of the
-//! four link rows, each radio row's own details with its Disable and
-//! Enable, the card at a phone's two-up width, and the name renamed where
+//! four link rows, each radio row's own details led by its switch line,
+//! the card at a phone's two-up width, and the name renamed where
 //! it is.
 //!
 //! Every card is core's own (`StoryBoardCard` calls `board_card` over the
@@ -237,7 +237,7 @@ fn board_card_link_row_states() -> Element {
 // --- Each radio row's own details --------------------------------------------
 
 #[story(
-    description = "The Wi‑Fi row's details on a new board (AC3, AC5): Set up opens them at the Wi‑Fi panel — nothing saved, so it opens on what the board hears — and under the list, Disable Wi‑Fi: hushing the row is turning the board's Wi‑Fi off. The panel draws no switches of its own on the card: the row's Disable, and lightplayer.app's, are theirs."
+    description = "The Wi‑Fi row's details on a new board (AC3, AC5): the switch line first — Wi‑Fi and the board's own switch, on — as macOS draws the top of its Wi‑Fi menu; then Set up's Wi‑Fi panel, nothing saved, so it opens on what the board hears. Hushing the row is flipping that switch off. The panel draws no heading or switches of its own on the card: the switch line is both."
 )]
 fn board_card_setup_wifi_details() -> Element {
     let mut wifi = nothing_saved();
@@ -266,7 +266,7 @@ fn board_card_setup_wifi_details() -> Element {
 }
 
 #[story(
-    description = "The lightplayer.app row's details, signed out: what signing in gets you (\"Sign in to reach this board from any browser, through lightplayer.app.\") with Sign in — the person's own click, it leaves the page — and Disable lightplayer.app beside it; then that nothing goes to lightplayer.app until you sign in."
+    description = "The lightplayer.app row's details, signed out: the switch line first (lightplayer.app and the board's Cloud relay switch, on), then what signing in gets you (\"Sign in to reach this board from any browser, through lightplayer.app.\") with Sign in — the person's own click, it leaves the page — and that nothing goes to lightplayer.app until you sign in."
 )]
 fn board_card_setup_cloud_details() -> Element {
     details_story(rsx! {
@@ -282,7 +282,7 @@ fn board_card_setup_cloud_details() -> Element {
 }
 
 #[story(
-    description = "The Bluetooth row's details on an open board: the name a phone sees, what it is for, that anyone nearby can connect and edit it with no password yet, and Disable Bluetooth — a core offer now, Undoable (the error tint): it restarts the board to apply it."
+    description = "The Bluetooth row's details on an open board: the switch line first (Bluetooth and the board's switch, on; its hover says a flip restarts the board), then the name a phone sees, what it is for, and that anyone nearby can connect and edit it with no password yet."
 )]
 fn board_card_setup_bluetooth_details() -> Element {
     details_story(rsx! {
@@ -298,7 +298,7 @@ fn board_card_setup_bluetooth_details() -> Element {
 }
 
 #[story(
-    description = "A hushed row's details: Wi‑Fi disabled says \"Wi‑Fi is disabled on this board. It reaches Studio over USB and Bluetooth only.\" and offers Enable Wi‑Fi; the row itself says disabled, plain, and wants nothing."
+    description = "A hushed row's details: Wi‑Fi disabled — its switch line stands off over \"Wi‑Fi is disabled on this board. It reaches Studio over USB and Bluetooth only.\"; flipping it on is the way back. The row itself says disabled, plain, and wants nothing."
 )]
 fn board_card_setup_disabled_details() -> Element {
     details_story(rsx! {

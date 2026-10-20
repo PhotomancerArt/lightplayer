@@ -17,10 +17,10 @@
 //! | saved, none joined (out of range) | "`ssid` · not connected" ("2 networks" for more) | — | Neutral |
 //!
 //! Nothing saved is a new board's to-do: the row is lit, and Set up opens
-//! the details at the network list. Hushing it is turning Wi‑Fi off:
-//! "Disable Wi‑Fi" under the network list (the board's own switch,
-//! `devices/<board>/wifi/enabled`), after which the row says "disabled"
-//! and wants nothing, and its details offer "Enable Wi‑Fi".
+//! the details at the network list. Hushing it is turning Wi‑Fi off: the
+//! switch at the top of its details (the board's own,
+//! `devices/<board>/wifi/enabled`; [`super::row_switch`]), after which the
+//! row says "disabled" and wants nothing, and the switch turns it back on.
 //!
 //! Its details are the Wi‑Fi panel (the board's networks, and adding one),
 //! and "Connect over Wi‑Fi" when the primary doesn't already offer it. A
@@ -30,17 +30,17 @@
 use lpc_wire::server::{LastAttempt, NetworkStatus, StationFailure, StationState};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{facts, help, verbs};
+use super::detail_sections::{facts, help};
 use super::link_bar::{LinkFacts, connect_verb, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_CONNECTED, NOT_KNOWN};
+use super::row_switch::{SwitchOffer, row_switch};
 use super::ui_bar_work::UiBarWork;
-use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::network::WIFI_ENABLED_PARAM;
 use crate::app::network::wifi_words::card;
-use crate::{OfferArgs, RichLine, UiStatusKind};
+use crate::{RichLine, UiStatusKind};
 
 /// The Wi‑Fi row.
 pub(crate) fn wifi_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -140,37 +140,34 @@ fn refused(status: &NetworkStatus) -> Option<&str> {
         .map(|network| network.ssid.as_str())
 }
 
-/// The row's details: the Wi‑Fi panel while the board answers on a link
-/// that may see it, with Disable Wi‑Fi under it; "Wi‑Fi is disabled…" and
-/// Enable Wi‑Fi while it is off; for a board that is away, what it last
-/// said.
+/// The row's details: the board's Wi‑Fi switch at the top while it
+/// answers, then the Wi‑Fi panel while it is on (on a link that may see
+/// it), or "Wi‑Fi is disabled…" while it is off; for a board that is
+/// away, what it last said.
 fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
-    let switch = |on: bool, word: &str| {
-        input.offer_under(&["wifi", "enabled"]).map(|offer| {
-            UiCardAction::press_with(
-                offer,
-                word,
-                OfferArgs::new().with(WIFI_ENABLED_PARAM, on.to_string()),
-            )
-            .with_icon("wifi")
-        })
-    };
     let live = input.wifi.filter(|_| !input.offline());
-    match (live, status) {
-        (Some(_), Some(status)) if !status.wifi => {
-            details
-                .sections
-                .push(help("Wi\u{2011}Fi", card::WIFI_DISABLED));
-            details
-                .sections
-                .push(verbs(switch(true, card::ENABLE_WIFI).into_iter().collect()));
+    let on = live.and(status).map(|status| status.wifi);
+    details.switch = on.map(|on| {
+        row_switch(
+            input,
+            BarLayer::Wifi,
+            "wifi",
+            on,
+            SwitchOffer {
+                under: &["wifi", "enabled"],
+                param: WIFI_ENABLED_PARAM,
+                turn_off: card::DISABLE_WIFI,
+                turn_on: card::ENABLE_WIFI,
+            },
+        )
+    });
+    match (live, on) {
+        (Some(_), Some(false)) => {
+            details.sections.push(help("", card::WIFI_DISABLED));
         }
         (Some(wifi), _) => {
             details.panels.push(UiDetailPanel::Wifi(wifi.clone()));
-            details.foot.push(verbs(
-                switch(false, card::DISABLE_WIFI).into_iter().collect(),
-            ));
         }
         (None, _) => {
             if let Some(StationState::Connected { ssid, ip, .. }) =
@@ -372,6 +369,43 @@ mod tests {
         fixture.runtime = Some(crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None));
         fixture.wifi = Some(joined());
         assert_eq!(wifi_bar(&fixture.input()).summary, "\u{2014}");
+    }
+
+    /// The board's Wi‑Fi switch leads the details: on, over the network
+    /// list, it flips off; off, it flips on over "Wi‑Fi is disabled…" and
+    /// no list. Offline, there is nothing to flip.
+    #[test]
+    fn its_details_lead_with_the_wifi_switch() {
+        let mut fixture = CardFixture::ready();
+        fixture.wifi = Some(joined());
+        let details = wifi_bar(&fixture.input()).details;
+        let switch = details.switch.expect("a switch at the top");
+        assert_eq!(
+            (switch.label.as_str(), switch.icon.as_str(), switch.on),
+            ("Wi\u{2011}Fi", "wifi", true)
+        );
+        let flip = switch.flip.expect("this link may flip it");
+        assert_eq!(flip.word, card::DISABLE_WIFI);
+        assert!(flip.offer.to_string().ends_with("/wifi/enabled"));
+        assert_eq!(flip.args.get(WIFI_ENABLED_PARAM), Some("false"));
+        assert!(matches!(details.panels[..], [UiDetailPanel::Wifi(_)]));
+
+        fixture.wifi = Some(wifi(Some(StationState::Off), &["home"], false));
+        let details = wifi_bar(&fixture.input()).details;
+        let switch = details.switch.expect("a switch at the top");
+        assert!(!switch.on);
+        assert_eq!(switch.flip.expect("flips on").word, card::ENABLE_WIFI);
+        let sentences: Vec<&str> = details
+            .sections
+            .iter()
+            .filter_map(|section| section.sentence.as_deref())
+            .collect();
+        assert_eq!(sentences, [card::WIFI_DISABLED]);
+        assert!(details.panels.is_empty());
+
+        let mut fixture = CardFixture::offline();
+        fixture.wifi = Some(joined());
+        assert!(wifi_bar(&fixture.input()).details.switch.is_none());
     }
 
     fn joined() -> UiDeviceWifi {

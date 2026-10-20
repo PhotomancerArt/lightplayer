@@ -214,6 +214,19 @@ The card's bars share one shape in code (icon · summary · aside · tone ·
 action). Their words had no shared grammar until the anatomy gave them one:
 [board card](anatomy/board-card.md).
 
+The same holds for one control across siblings. Three radio rows that can
+each be turned off turn off the same way, in the same place:
+
+```text
+do:   ≋ Wi‑Fi              (●━━)    # the first line of each row's details: icon, name,
+      ᛒ Bluetooth          (●━━)    #   the board's own switch at the line's end,
+      ☁ lightplayer.app    (●━━)    #   as macOS draws the top of its Wi‑Fi and Bluetooth menus
+
+bad:  Disable Wi‑Fi under the network list · Disable lightplayer.app beside Sign in ·
+      a red Disable Bluetooth in an Actions list
+                                    # Yona 10-19: "rendered differently in each of the three sections"
+```
+
 ## P9. useful structure
 
 Every line, box, icon and word is there to say something. If you can't

@@ -698,13 +698,17 @@ changes §2's "stack of bars" and §3's bar model:
   next.
 - **The state says the fact, the button says the fix:** "not connected" on
   USB, Wi‑Fi and lightplayer.app alike, with Set up or Sign in as the fix.
-- **Hushing a row is disabling it, from its details:** Disable Wi‑Fi under
-  the network list, Disable lightplayer.app beside Sign in (the board's own
-  switches, `wifi/enabled` and `wifi/cloud-relay`), Disable Bluetooth (the
-  new core offer `devices/<board>/bluetooth/enabled`, which replaced the
-  Bluetooth switch the web built). The row then says "disabled", plain, and
-  wants nothing; its details offer Enable. The choice lives on the board,
-  so it holds across browsers and is true.
+- **Hushing a row is switching it off, at the top of its details:** Wi‑Fi,
+  Bluetooth and lightplayer.app each lead their details with one switch
+  line, drawn alike (`UiBarDetails::switch`, a `UiDetailSwitch`: the row's
+  icon and name, and the board's own switch), as macOS draws the top of its
+  Wi‑Fi and Bluetooth menus. The switches are the board's own:
+  `wifi/enabled`, `wifi/cloud-relay`, and `devices/<board>/bluetooth/enabled`
+  (a new core offer, which replaced the Bluetooth switch the web built). At
+  the gate Yona turned down the first draft — Disable buttons in three
+  places with three looks — for this one line. The row then says
+  "disabled", plain, and wants nothing; the same switch turns it back on.
+  The choice lives on the board, so it holds across browsers and is true.
 - **Sign in is a core offer,** `devices/<board>/sign-in`: the controller
   counts the presses (`UiStudioView::sign_in_requests`) and the page leaves
   for sign-in when the count moves. It needs the person's own click.

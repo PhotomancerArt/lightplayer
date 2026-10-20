@@ -6,7 +6,7 @@
 //! |---|---|---|
 //! | Terminal | [`DeviceTerminal`], flush | the status corner's details |
 //! | Access | [`DeviceAccessPanel`] (its own sections) | the access bar's |
-//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`; its Wi‑Fi and Cloud relay switches are the Wi‑Fi and lightplayer.app rows' Disable and Enable) | the Wi‑Fi row's |
+//! | Wi‑Fi | [`WifiPanel`], in-card (its verbs at `<board>/wifi/…`; no root heading and no switches of its own: the Wi‑Fi and lightplayer.app rows' switch lines are both) | the Wi‑Fi row's |
 //! | Link counters | [`LinkCountersSection`] | the row of the link in use |
 //! | Layout | [`DeviceLayoutSheet`]: the question or the refusal | the firmware bar's (raised) |
 //! | Other version | [`OtherVersionForm`], inline | the firmware bar's |
@@ -17,8 +17,8 @@
 //! unchanged; their verbs are offers drawn from the tree. The access
 //! panel's edits and the Wi‑Fi refresh still send their access and network
 //! commands, and the panel settings their panel commands, as today (out of
-//! scope here). The Bluetooth switch is a core offer now, pressed from the
-//! Bluetooth row's details as Disable / Enable Bluetooth.
+//! scope here). The Bluetooth switch is a core offer now, the switch line
+//! at the top of the Bluetooth row's details.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceId, OfferPath, UiAction, UiDetailPanel, UiDeviceWifi, UiLayoutPanel};
@@ -278,7 +278,9 @@ mod tests {
         match panel {
             UiDetailPanel::Terminal { .. } => ("3", None),
             UiDetailPanel::Access(_) => ("Access", None),
-            UiDetailPanel::Wifi(_) => ("Wi", None),
+            // In a card the panel has no heading (the row's switch line is
+            // it): what it draws while it reads the board.
+            UiDetailPanel::Wifi(_) => ("Reading", None),
             UiDetailPanel::LinkCounters(_) => ("Link", None),
             UiDetailPanel::Layout(layout) => (
                 "lays its files out differently",

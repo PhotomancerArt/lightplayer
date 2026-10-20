@@ -18,7 +18,7 @@
 //!
 //! - Types: [`ui_board_card`], [`ui_board_picture`], [`ui_board_surface`],
 //!   [`ui_status_corner`], [`ui_name_bar`], [`ui_stack_bar`], [`ui_bar_work`],
-//!   [`ui_card_action`], [`ui_detail_panel`], [`ui_board_panel`],
+//!   [`ui_card_action`], [`ui_detail_panel`], [`ui_detail_switch`], [`ui_board_panel`],
 //!   [`board_connection`].
 //! - Building: [`board_card_input`] (with [`board_links`], what the link
 //!   rows know beyond the link in use), [`board_card_builder`], and one file
@@ -55,6 +55,7 @@ pub(crate) mod link_session;
 pub mod primary_action;
 pub mod project_bar;
 pub mod roster_board_cards;
+pub(crate) mod row_switch;
 pub mod status_corner;
 pub mod ui_bar_work;
 pub mod ui_board_card;
@@ -63,6 +64,7 @@ pub mod ui_board_picture;
 pub mod ui_board_surface;
 pub mod ui_card_action;
 pub mod ui_detail_panel;
+pub mod ui_detail_switch;
 pub mod ui_name_bar;
 pub mod ui_stack_bar;
 pub mod ui_status_corner;
@@ -105,6 +107,7 @@ pub use ui_board_surface::{
 };
 pub use ui_card_action::{UiActionDraw, UiCardAction};
 pub use ui_detail_panel::UiDetailPanel;
+pub use ui_detail_switch::UiDetailSwitch;
 pub use ui_name_bar::{UiNameBar, UiPrimary};
 pub use ui_stack_bar::{BarLayer, UiBarDetails, UiBarMark, UiStackBar};
 pub use ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};

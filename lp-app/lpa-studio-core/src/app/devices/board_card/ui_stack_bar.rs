@@ -20,6 +20,7 @@ use crate::{RichSection, RichWeight, UiStatusKind};
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
+use super::ui_detail_switch::UiDetailSwitch;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 
 /// One row.
@@ -202,18 +203,18 @@ impl BarLayer {
 }
 
 /// A bar's details: Studio's detail card, merged with the bar that opened
-/// it. A notice first, a Danger section last.
+/// it. The row's switch at the top, a notice first, a Danger section last.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiBarDetails {
+    /// The row's own on/off switch, drawn first, beside the row's name
+    /// (Wi‑Fi, Bluetooth, lightplayer.app): [`UiDetailSwitch`].
+    pub switch: Option<UiDetailSwitch>,
     /// Facts and verbs (`RichSection<UiCardAction>`): the bar's notice
     /// first (Actionable, in the bar's tone), its facts, its verbs, and a
     /// [`RichWeight::Danger`] section last.
     pub sections: Vec<RichSection<UiCardAction>>,
     /// Today's panels, named ([`UiDetailPanel`]).
     pub panels: Vec<UiDetailPanel>,
-    /// Sections drawn after the panels, before the Danger section: a
-    /// row's hush under its list ("Disable Wi‑Fi" under the networks).
-    pub foot: Vec<RichSection<UiCardAction>>,
     /// A question that must be answered now (the layout question, Q40): the
     /// web opens these details while it is set.
     pub raised: bool,

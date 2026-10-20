@@ -254,19 +254,21 @@ async function main() {
       if (reason !== "Firmware updates need USB") {
         throw new Error(`the firmware details do not say \`Firmware updates need USB\` (they say ${JSON.stringify(reason)})`);
       }
-      // The Bluetooth row is the link in use, and over it Disable
-      // Bluetooth is refused: it is the link you are on.
+      // The Bluetooth row is the link in use, and over it its switch is
+      // locked on, saying why: it is the link you are on.
       await driver.waitBar("bluetooth", /^Bluetooth \S+ connected$/, { timeoutMs: STEP_DEADLINE_MS });
       await driver.openBar("bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const locked = await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
                   const panel = card.querySelector('[data-bar="bluetooth"] [id^="ux-popover-panel"]');
-                  const off = panel?.querySelector('[data-offer-path$="/bluetooth/enabled"] button');
-                  return Boolean(off) && off.disabled && (off.textContent || '').includes('Disable Bluetooth'); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's Disable Bluetooth, refused over Bluetooth" },
+                  const head = panel?.querySelector('[data-detail-switch="bluetooth"]');
+                  const sw = head?.querySelector('[data-offer-path$="/bluetooth/enabled"] [role="switch"]');
+                  const why = head?.querySelector('[data-detail-switch-refused]')?.textContent || '';
+                  return Boolean(sw) && sw.disabled && sw.getAttribute('aria-checked') === 'true' && why.includes('turned off by USB'); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Bluetooth row's switch, locked on over Bluetooth, saying why" },
       );
       await driver.closeDetails();
-      if (!locked) throw new Error("the card's Disable Bluetooth is not refused over Bluetooth");
+      if (!locked) throw new Error("the card's Bluetooth switch is not locked over Bluetooth");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
       );

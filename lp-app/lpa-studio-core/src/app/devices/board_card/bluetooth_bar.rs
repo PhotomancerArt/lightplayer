@@ -21,29 +21,29 @@
 //! (`BoardCardInput::link`), never `UiDeviceAccess::over_bluetooth`, which
 //! has called a LAN or relay board "Bluetooth" before.
 //!
-//! Hushing it is turning Bluetooth off: "Disable Bluetooth" in its details
-//! (the core offer `devices/<board>/bluetooth/enabled`, which refuses off
-//! over Bluetooth — the link you are on — and restarts a board on USB to
-//! apply it). Off, the row says "disabled" and its details offer "Enable
-//! Bluetooth".
+//! Hushing it is turning Bluetooth off with the switch at the top of its
+//! details (the core offer `devices/<board>/bluetooth/enabled`, which
+//! refuses off over Bluetooth — the link you are on — and restarts a board
+//! on USB to apply it). Off, the row says "disabled" and the switch turns
+//! it back on.
 //!
-//! Its details: the name, what the name is for, and — on a board open to
-//! anyone — that anyone nearby can edit it; then Disable (or Enable).
+//! Its details: the switch, then the name, what the name is for, and — on
+//! a board open to anyone — that anyone nearby can edit it.
 
 use lpa_devices::view::LoadedProject;
 use lpc_access::{OpenTo, Tier};
 
 use super::board_card_input::BoardCardInput;
-use super::detail_sections::{facts, help, verbs};
+use super::detail_sections::{facts, help};
 use super::link_bar::{LinkFacts, link_bar};
 use super::link_session::{CONNECTED, DISABLED, NOT_KNOWN};
-use super::ui_card_action::UiCardAction;
+use super::row_switch::{SwitchOffer, row_switch};
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::access::{
     BLUETOOTH_ENABLED_PARAM, DISABLE_BLUETOOTH, ENABLE_BLUETOOTH, bluetooth_restart_words,
 };
 use crate::app::devices::ui_link_kind::UiLinkKind;
-use crate::{BoardRef, OfferArgs, RichLine};
+use crate::{BoardRef, RichLine};
 
 /// What the name is for.
 pub const BLUETOOTH_NAME_SENTENCE: &str =
@@ -118,20 +118,25 @@ pub(crate) fn advertised_name(input: &BoardCardInput<'_>) -> Option<String> {
     Some(format!("LP-{:02x}{:02x}", octets[4], octets[5]))
 }
 
-/// The row's details: the name and what it means, then Disable; off, that
-/// it is off, then Enable; and while a change applies, the restart's words.
+/// The row's details: the board's Bluetooth switch at the top while it
+/// answers ([`super::row_switch`]); then the name and what it means, or,
+/// off, that it is off; and while a change applies, the restart's words.
 fn details(input: &BoardCardInput<'_>, on: Option<bool>, name: Option<&str>) -> UiBarDetails {
     let mut details = UiBarDetails::default();
-    let switch = |on: bool, word: &str| {
-        input.offer_under(&["bluetooth", "enabled"]).map(|offer| {
-            UiCardAction::press_with(
-                offer,
-                word,
-                OfferArgs::new().with(BLUETOOTH_ENABLED_PARAM, on.to_string()),
-            )
-            .with_icon("bluetooth")
-        })
-    };
+    details.switch = on.filter(|_| !input.offline()).map(|on| {
+        row_switch(
+            input,
+            BarLayer::Bluetooth,
+            "bluetooth",
+            on,
+            SwitchOffer {
+                under: &["bluetooth", "enabled"],
+                param: BLUETOOTH_ENABLED_PARAM,
+                turn_off: DISABLE_BLUETOOTH,
+                turn_on: ENABLE_BLUETOOTH,
+            },
+        )
+    });
     let applying = input
         .access
         .and_then(|access| access.panel.as_ref())
@@ -146,7 +151,7 @@ fn details(input: &BoardCardInput<'_>, on: Option<bool>, name: Option<&str>) -> 
         (Some(true), name) => {
             // One section: the name a phone sees, and what it is for.
             let mut named = facts(
-                "Bluetooth",
+                "",
                 name.map(|name| RichLine::new("Name", name))
                     .into_iter()
                     .collect(),
@@ -161,14 +166,9 @@ fn details(input: &BoardCardInput<'_>, on: Option<bool>, name: Option<&str>) -> 
             details
                 .sections
                 .extend(applying.map(|words| help("Restarting", words)));
-            details.sections.push(verbs(
-                switch(false, DISABLE_BLUETOOTH).into_iter().collect(),
-            ));
         }
         (Some(false), _) => {
-            let mut off = help("Bluetooth", BLUETOOTH_DISABLED_SENTENCE);
-            off.affordances.extend(switch(true, ENABLE_BLUETOOTH));
-            details.sections.push(off);
+            details.sections.push(help("", BLUETOOTH_DISABLED_SENTENCE));
             details
                 .sections
                 .extend(applying.map(|words| help("Restarting", words)));
@@ -272,10 +272,12 @@ mod tests {
         assert_eq!(bar.summary, "\u{2014}");
     }
 
-    /// Its details: the name and what it is for, on an open board that
-    /// anyone nearby can edit it, then Disable Bluetooth; off, Enable.
+    /// Its details: the switch at the top, on, flipping off; then the name
+    /// and what it is for, and on an open board that anyone nearby can
+    /// edit it. Off, the switch stands off and flips on. Nothing in the
+    /// sections presses the switch's offer: the switch is the one way.
     #[test]
-    fn its_details_say_what_the_name_is_for_and_offer_disable() {
+    fn its_details_lead_with_the_switch_then_say_what_the_name_is_for() {
         let mut fixture = CardFixture::ready();
         let mut access = usb_access(Some(true));
         access.panel.as_mut().unwrap().open = OpenTo::Edit;
@@ -288,29 +290,49 @@ mod tests {
             .filter_map(|section| section.sentence.as_deref())
             .collect();
         assert_eq!(sentences, [BLUETOOTH_NAME_SENTENCE, OPEN_BOARD_SENTENCE]);
-        let disable = only_verb(&bar);
-        assert_eq!(disable.word, "Disable Bluetooth");
-        assert!(disable.offer.to_string().ends_with("/bluetooth/enabled"));
-        assert_eq!(disable.args.get(BLUETOOTH_ENABLED_PARAM), Some("false"));
-        assert_eq!(disable.refused, None);
+        let switch = bar.details.switch.clone().expect("a switch at the top");
+        assert_eq!(
+            (switch.label.as_str(), switch.icon.as_str()),
+            ("Bluetooth", "bluetooth")
+        );
+        assert!(switch.on);
+        let flip = switch.flip.expect("this link may flip it");
+        assert_eq!(flip.word, "Disable Bluetooth");
+        assert!(flip.offer.to_string().ends_with("/bluetooth/enabled"));
+        assert_eq!(flip.args.get(BLUETOOTH_ENABLED_PARAM), Some("false"));
+        assert_eq!(flip.refused, None);
+        assert_eq!(section_presses(&bar), 0, "no Disable beside the switch");
 
         fixture.access = Some(usb_access(Some(false)));
         let bar = bluetooth_bar(&fixture.input());
         assert_eq!(bar.summary, "disabled");
         assert!(!bar.todo, "disabled wants nothing");
-        assert_eq!(only_verb(&bar).word, "Enable Bluetooth");
+        let switch = bar.details.switch.clone().expect("a switch at the top");
+        assert!(!switch.on);
+        assert_eq!(switch.flip.expect("flips on").word, "Enable Bluetooth");
+        assert_eq!(section_presses(&bar), 0, "no Enable beside the switch");
     }
 
-    /// Over Bluetooth, Disable says why it waits: it is the link you are on.
+    /// Over Bluetooth, the switch says why it won't turn off: it is the
+    /// link you are on.
     #[test]
-    fn over_bluetooth_disable_says_why_it_waits() {
+    fn over_bluetooth_the_switch_says_why_it_waits() {
         let mut fixture = CardFixture::ready().over(UiLinkKind::Bluetooth);
         fixture.access = Some(usb_access(Some(true)));
         let bar = bluetooth_bar(&fixture.input());
+        let flip = bar.details.switch.and_then(|switch| switch.flip);
         assert_eq!(
-            only_verb(&bar).refused.as_deref(),
+            flip.and_then(|flip| flip.refused).as_deref(),
             Some(crate::OFF_OVER_BLUETOOTH)
         );
+    }
+
+    /// Offline, there is no switch to flip: the board can't hear it.
+    #[test]
+    fn an_offline_board_has_no_switch() {
+        let mut fixture = CardFixture::offline();
+        fixture.remembered_bluetooth = Some(true);
+        assert!(bluetooth_bar(&fixture.input()).details.switch.is_none());
     }
 
     #[test]
@@ -321,16 +343,14 @@ mod tests {
         assert_eq!(bluetooth_bar(&fixture.input()).summary, "\u{2014}");
     }
 
-    fn only_verb(bar: &UiStackBar) -> UiCardAction {
-        let verbs: Vec<&UiCardAction> = bar
-            .details
+    /// How many of the details' section buttons press the switch's offer.
+    fn section_presses(bar: &UiStackBar) -> usize {
+        bar.details
             .sections
             .iter()
             .flat_map(|section| section.affordances.iter())
             .filter(|action| action.offer.to_string().contains("/bluetooth/"))
-            .collect();
-        assert_eq!(verbs.len(), 1, "{verbs:?}");
-        verbs[0].clone()
+            .count()
     }
 
     fn usb_access(ble_enabled: Option<bool>) -> UiDeviceAccess {

@@ -319,11 +319,11 @@ fn wifi_verb(bench: &mut DeviceBench, device: crate::DeviceId, verb: &str) -> cr
     bench.device_verb(device, "wifi").child(verb)
 }
 
-/// The radio rows hush from their own details (the setup rows' P3): Disable
-/// Wi‑Fi under the network list, then Enable Wi‑Fi once it is off; Disable
-/// lightplayer.app, then Enable — each the board's own switch, pressed by
-/// the offer path and args the card carries, and the row says "disabled"
-/// and wants nothing while it is off.
+/// The radio rows hush from the switch at the top of their own details
+/// (the setup rows' P3, a switch since Yona's gate): Wi‑Fi off, then on
+/// again; lightplayer.app off, then on — each the board's own switch,
+/// pressed by the offer path and args the card's switch carries, and the
+/// row says "disabled" and wants nothing while it is off.
 #[test]
 fn the_radio_rows_hush_from_their_own_details() {
     let device = wifi_light_player("dev000000wifi00009");
@@ -336,37 +336,37 @@ fn the_radio_rows_hush_from_their_own_details() {
     assert_eq!(wifi.summary, "not connected");
     assert_eq!(wifi.opens_details, Some("Set up"));
     assert!(wifi.todo, "nothing saved: a new board's to-do");
-    let disable = verb_of(&wifi.details.foot, "Disable Wi\u{2011}Fi");
+    let disable = switch_flip(wifi, true, "Disable Wi\u{2011}Fi");
     bench
         .press(&disable.offer, disable.args.clone())
-        .expect("Disable Wi‑Fi presses the board's switch");
+        .expect("the switch turns the board's Wi‑Fi off");
     assert!(!wifi_status(&mut bench, &tasks, target).wifi);
     let card = home_card(&bench, target);
     let wifi = card.bar(crate::BarLayer::Wifi);
     assert_eq!(wifi.summary, "disabled");
     assert!(!wifi.todo, "disabled wants nothing");
     assert_eq!(wifi.opens_details, None);
-    let enable = verb_of(&wifi.details.sections, "Enable Wi\u{2011}Fi");
+    let enable = switch_flip(wifi, false, "Enable Wi\u{2011}Fi");
     bench
         .press(&enable.offer, enable.args.clone())
-        .expect("Enable Wi‑Fi presses it back");
+        .expect("the switch turns it back on");
     assert!(wifi_status(&mut bench, &tasks, target).wifi);
 
     let card = home_card(&bench, target);
     let cloud = card.bar(crate::BarLayer::Cloud);
-    let disable = verb_of(&cloud.details.sections, "Disable lightplayer.app");
+    let disable = switch_flip(cloud, true, "Disable lightplayer.app");
     bench
         .press(&disable.offer, disable.args.clone())
-        .expect("Disable lightplayer.app presses Cloud relay");
+        .expect("the switch turns Cloud relay off");
     assert!(!wifi_status(&mut bench, &tasks, target).cloud_relay);
     let card = home_card(&bench, target);
     let cloud = card.bar(crate::BarLayer::Cloud);
     assert_eq!(cloud.summary, "disabled");
     assert!(!cloud.todo);
-    let enable = verb_of(&cloud.details.sections, "Enable lightplayer.app");
+    let enable = switch_flip(cloud, false, "Enable lightplayer.app");
     bench
         .press(&enable.offer, enable.args.clone())
-        .expect("Enable lightplayer.app presses it back");
+        .expect("the switch turns it back on");
     assert!(wifi_status(&mut bench, &tasks, target).cloud_relay);
 }
 
@@ -384,24 +384,33 @@ fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard
         .unwrap_or_else(|| panic!("no card for {device:?}"))
 }
 
-/// The verb worded `word` among `sections`' affordances.
+/// The flip of `bar`'s switch, which must stand at `on` and flip in
+/// `word`; no section of its details presses the same offer.
 #[track_caller]
-fn verb_of(
-    sections: &[crate::RichSection<crate::UiCardAction>],
-    word: &str,
-) -> crate::UiCardAction {
-    sections
+fn switch_flip(bar: &crate::UiStackBar, on: bool, word: &str) -> crate::UiCardAction {
+    let switch = bar
+        .details
+        .switch
+        .as_ref()
+        .unwrap_or_else(|| panic!("no switch atop {:?}'s details", bar.layer));
+    assert_eq!(switch.on, on, "{switch:?}");
+    let flip = switch.flip.clone().expect("this link may flip it");
+    assert_eq!(flip.word, word);
+    let beside = bar
+        .details
+        .sections
         .iter()
         .flat_map(|section| section.affordances.iter())
-        .find(|action| action.word == word)
-        .cloned()
-        .unwrap_or_else(|| panic!("no {word:?} in {sections:?}"))
+        .filter(|action| action.offer == flip.offer)
+        .count();
+    assert_eq!(beside, 0, "the switch is the one way to flip it");
+    flip
 }
 
 /// Bluetooth on and off is a core offer (`devices/<board>/bluetooth/enabled`):
-/// the Bluetooth row's Disable presses it by path over USB, the board's
+/// the Bluetooth row's switch presses it by path over USB, the board's
 /// access file says off once it is back (Studio restarts it to apply), and
-/// the row says "disabled" with Enable in its details.
+/// the row says "disabled" with its switch standing off.
 #[test]
 fn disable_bluetooth_is_a_core_offer_pressed_from_its_row() {
     let device = wifi_light_player("dev000000wifi00010");
@@ -419,7 +428,7 @@ fn disable_bluetooth_is_a_core_offer_pressed_from_its_row() {
     let card = home_card(&bench, target);
     let bluetooth = card.bar(crate::BarLayer::Bluetooth);
     assert_eq!(bluetooth.summary, "LP-0b0d");
-    let disable = verb_of(&bluetooth.details.sections, crate::DISABLE_BLUETOOTH);
+    let disable = switch_flip(bluetooth, true, crate::DISABLE_BLUETOOTH);
     assert_eq!(
         disable.offer,
         bench.device_verb(target, "bluetooth").child("enabled")
@@ -431,7 +440,7 @@ fn disable_bluetooth_is_a_core_offer_pressed_from_its_row() {
     );
     bench
         .press(&disable.offer, disable.args.clone())
-        .expect("Disable Bluetooth presses the core offer");
+        .expect("the switch presses the core offer");
     bench.run_until(&tasks, "the board to say Bluetooth is off", |bench| {
         bench
             .controller
@@ -444,5 +453,5 @@ fn disable_bluetooth_is_a_core_offer_pressed_from_its_row() {
     let card = home_card(&bench, target);
     let bluetooth = card.bar(crate::BarLayer::Bluetooth);
     assert_eq!(bluetooth.summary, "disabled");
-    verb_of(&bluetooth.details.sections, crate::ENABLE_BLUETOOTH);
+    switch_flip(bluetooth, false, crate::ENABLE_BLUETOOTH);
 }

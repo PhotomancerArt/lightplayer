@@ -308,10 +308,10 @@ pub(crate) fn pending_firmware_bar(
         todo: install.is_some(),
         action: install,
         details: UiBarDetails {
+            switch: None,
             sections: vec![said],
             panels: Vec::new(),
             raised: false,
-            foot: Vec::new(),
         },
         ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
     }
@@ -593,10 +593,10 @@ fn details(
     sections.push(verbs(actions));
 
     UiBarDetails {
+        switch: None,
         sections: without_empty(sections),
         panels,
         raised: layout.is_some_and(|layout| layout.panel.is_some()),
-        foot: Vec::new(),
     }
 }
 

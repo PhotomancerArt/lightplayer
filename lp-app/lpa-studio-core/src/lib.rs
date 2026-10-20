@@ -64,9 +64,9 @@ pub use app::devices::board_card::{
     SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
     UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBoardCard, UiBoardPanel,
     UiBoardPanelSection, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
-    UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
-    UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words, board_card,
-    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    UiCardControl, UiCornerDetails, UiDetailPanel, UiDetailSwitch, UiNameBar, UiPrimary,
+    UiStackBar, UiStatusCorner, UiSurfaceNotice, account_words, activity_bar, activity_words,
+    board_card, board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
     roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]

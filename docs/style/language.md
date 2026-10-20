@@ -218,11 +218,13 @@ For a new board the rows are its setup list. A row with something left to
 do is lit and carries the verb that does it: Project **Add** (the same
 project pick as the primary's Add a project), Wi‑Fi **Set up** (its
 details, at the network list), lightplayer.app **Sign in**, Firmware
-**Install** (the primary's own board pick). **Hushing a row is disabling
-it** from its details: **Disable Wi‑Fi**, **Disable lightplayer.app**,
-**Disable Bluetooth**; the row then says **disabled** and wants nothing,
-and its details offer **Enable Wi‑Fi**, **Enable lightplayer.app**,
-**Enable Bluetooth**.
+**Install** (the primary's own board pick). **Hushing a row is switching
+it off**, with the switch at the top of its details, named as the row is
+(**Wi‑Fi**, **Bluetooth**, **lightplayer.app**); the row then says
+**disabled** and wants nothing. A flip's own words, for the agent and the
+switch's hover, are **Disable Wi‑Fi** / **Enable Wi‑Fi**, **Disable
+Bluetooth** / **Enable Bluetooth**, **Disable lightplayer.app** / **Enable
+lightplayer.app**.
 
 | Row | Name · state | Examples |
 |---|---|---|

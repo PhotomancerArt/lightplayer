@@ -90,9 +90,15 @@ impl UiBoardCard {
             {
                 actions.push(retry);
             }
-            for section in bar.details.sections.iter().chain(&bar.details.foot) {
+            for section in &bar.details.sections {
                 actions.extend(section.affordances.iter());
             }
+            actions.extend(
+                bar.details
+                    .switch
+                    .as_ref()
+                    .and_then(|switch| switch.flip.as_ref()),
+            );
         }
         actions
     }

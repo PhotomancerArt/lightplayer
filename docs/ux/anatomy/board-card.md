@@ -265,11 +265,29 @@ bad:  Wi‑Fi   not set up   │ Set up │      # Yona 10-19: "isn't dry": the 
 bad:  a gradient across the lit row, or a dot  # Yona 10-19: "the lit row alone"
 ```
 
-**Hushing a row is disabling it, from its details.** Wi‑Fi's details offer
-Disable Wi‑Fi under the network list, lightplayer.app's Disable
-lightplayer.app beside Sign in, Bluetooth's Disable Bluetooth: each the
-board's own switch, so the choice holds across browsers and is true. The row
-then says `disabled`, plain, with no button; its details offer Enable.
+**Hushing a row is switching it off, at the top of its details.** Wi‑Fi,
+Bluetooth and lightplayer.app each open on one line, drawn alike, as macOS
+draws the top of its Wi‑Fi and Bluetooth menus: the row's icon and name,
+and the board's own switch at the line's end (on in the good tone). Each is
+the board's own setting, so the choice holds across browsers and is true.
+Off, the row says `disabled`, plain, with no button, and the same switch
+turns it back on. Where this link may not flip it the switch is dimmed, and
+a refusal says why under the line ("Bluetooth can only be turned off by
+USB…"); its hover says what a flip does, in the offer's words (Bluetooth's
+restarts the board).
+
+```text
+ᛒ Bluetooth        LP-3f2a                 › │   the row, which opened them
+──────────────────────────────────────────────
+ᛒ Bluetooth                         (●━━)    │   the switch line: icon, name, the board's switch
+  A phone or laptop nearby can connect to it by this name.
+  NAME   LP-3f2a
+```
+
+```text
+bad:  ACTIONS · Disable Wi‑Fi under the list; Disable lightplayer.app beside Sign in; a red Disable Bluetooth   # Yona 10-19: "rendered differently in each of the three sections"
+do:   one switch line atop each: icon, name, switch — the same in all three
+```
 
 Short of room, a row's state gives way first (cut at its end, then gone).
 The kind column stays, so every card in a grid reads alike (P8, P1); where
@@ -337,11 +355,12 @@ and its link counters.
 ≋ Wi‑Fi            Cedar Lane        (dim)   # offline: the network it last said
 ```
 
-Its details are the Wi‑Fi panel (its networks, adding one), with Disable
-Wi‑Fi under the list, and Connect over Wi‑Fi where the primary doesn't
-already offer it. Disabled: "Wi‑Fi is disabled on this board. It reaches
-Studio over USB and Bluetooth only." and Enable Wi‑Fi. The panel draws no
-switches of its own on the card: the rows' Disable and Enable are theirs.
+Its details: the switch line (Wi‑Fi and the board's switch), then the
+Wi‑Fi panel (its networks, adding one), and Connect over Wi‑Fi where the
+primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi is
+disabled on this board. It reaches Studio over USB and Bluetooth only."
+The panel draws no heading or switches of its own on the card: the switch
+line is both, and lightplayer.app's switch is its own row's.
 
 ### Bluetooth ᛒ: the board's own radio
 
@@ -353,11 +372,13 @@ switches of its own on the card: the rows' Disable and Enable are theirs.
 ᛒ Bluetooth        disabled
 ```
 
-Its details: the name, "A phone or laptop nearby can connect to it by this
-name.", on an open board "No password yet: anyone nearby or on the same
-Wi‑Fi can connect and edit it.", and Disable Bluetooth (Undoable: it
-restarts the board to apply it; refused over Bluetooth, the link you are
-on). Disabled: Enable Bluetooth.
+Its details: the switch line (Bluetooth and the board's switch: a flip
+restarts the board to apply it, so it is Undoable, and off is refused over
+Bluetooth, the link you are on), then the name, "A phone or laptop nearby
+can connect to it by this name.", and on an open board "No password yet:
+anyone nearby or on the same Wi‑Fi can connect and edit it." Off: the switch
+stands off over "Bluetooth is disabled on this board: nothing nearby can
+connect by it."
 
 ### lightplayer.app ☁: the board through the cloud
 
@@ -372,13 +393,14 @@ on). Disabled: Enable Bluetooth.
 ☁ lightplayer.app  disabled                  # hushed, for privacy
 ```
 
-Signed out, its details say "Sign in to reach this board from any browser,
-through lightplayer.app." with Sign in (the person's own click: it leaves
-the page) and Disable lightplayer.app beside it, then "Nothing goes to
-lightplayer.app until you sign in." Signed in: the account, how it stands
-now, "Lets lightplayer.app reach this board through the cloud.", and
-Disable lightplayer.app. Disabled: "lightplayer.app is disabled for this
-board: it never connects to the cloud." and Enable lightplayer.app.
+Its details open on the switch line (lightplayer.app and the board's Cloud
+relay switch). Signed out, then "Sign in to reach this board from any
+browser, through lightplayer.app." with Sign in (the person's own click: it
+leaves the page), and "Nothing goes to lightplayer.app until you sign in."
+Signed in: the account, how it stands now, and "Lets lightplayer.app reach
+this board through the cloud." Off: the switch stands off over
+"lightplayer.app is disabled for this board: it never connects to the
+cloud."
 
 ```text
 bad:  USB · connected  ☁̸        # the struck cloud: Yona's desk, 10-19. lightplayer.app's row says it now
@@ -581,6 +603,7 @@ S1  the rows are a new board's setup list: eight rows, the links in the middle  
 S2  a row with something left to do is lit: the whole row, flat, no gradient, no dot   (Yona: "the lit row alone")
 S3  the state says the fact, the button the fix: "not connected" on USB, Wi‑Fi and lightplayer.app   (Yona)
 S4  hushing a row is disabling it from its details; the row then says "disabled"   (Yona)
+S4a …with one switch line atop the details, the same for Wi‑Fi, Bluetooth and lightplayer.app, as macOS draws it   (Yona, the gate)
 S5  the board is renamed where its name is, a faint pencil always shown   (Yona)
 S6  the primary is Install firmware, Add a project, Connect; Wi‑Fi and lightplayer.app ask through their rows   (Yona)
 S7  the struck cloud mark is gone: lightplayer.app's row says it   (Yona)

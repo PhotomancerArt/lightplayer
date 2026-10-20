@@ -314,10 +314,10 @@ pub(crate) fn pending_project_bar(pending: &lpa_devices::view::PendingLinkView) 
     );
     UiStackBar {
         details: UiBarDetails {
+            switch: None,
             sections: vec![known],
             panels: Vec::new(),
             raised: false,
-            foot: Vec::new(),
         },
         ..UiStackBar::new(
             BarLayer::Project,
@@ -431,10 +431,10 @@ fn details(
             .collect(),
     ));
     UiBarDetails {
+        switch: None,
         sections: without_empty(sections),
         panels,
         raised: false,
-        foot: Vec::new(),
     }
 }
 
