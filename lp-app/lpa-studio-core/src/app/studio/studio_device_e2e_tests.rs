@@ -2846,11 +2846,10 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
 }
 
 /// Over Bluetooth the card gets a picture too (2026-10-08; until then it
-/// had none), at the gentler Bluetooth gap: once a frame has landed, a
-/// pull that USB's 150 ms would have made by now waits for Bluetooth's
-/// 500 ms, and then it comes.
+/// had none), at the Bluetooth gap: once a frame has landed, the next pull
+/// waits for that gap, and then it comes.
 #[test]
-fn a_bluetooth_board_feeds_its_card_at_the_gentle_gap() {
+fn a_bluetooth_board_feeds_its_card_at_its_own_gap() {
     let (mut bench, tasks) =
         running_board_wanting_a_picture("dev000000daqf6dvvt8", "ble:QkxFLWZlZWQ");
     let device = bench.view().devices[0].id;
@@ -2886,8 +2885,8 @@ fn a_bluetooth_board_feeds_its_card_at_the_gentle_gap() {
     let stamp = pulled_at(&bench);
     assert!(stamp.is_some(), "the gap had elapsed: a pull ran");
 
-    // Past USB's gap, short of Bluetooth's: nothing is asked.
-    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_INTERVAL) {
+    // Half the Bluetooth gap: nothing is asked.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL / 2) - 2 {
         bench.step(&tasks);
     }
     feed_tick(&mut bench, &tasks, 5.0);

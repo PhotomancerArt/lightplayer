@@ -48,9 +48,10 @@
 //!
 //! Cadence is a completion gap, counted from each pull's completion so a
 //! big dome frame self-throttles, and it follows the link ([`feed_gap`]):
-//! `DEVICE_CARD_FEED_INTERVAL` over USB, the LAN and the relay, and the
-//! gentler `DEVICE_CARD_FEED_BLE_INTERVAL` over Bluetooth — about one to two
-//! pictures a second, where the board's air is shared with ESP-NOW. Pulls
+//! `DEVICE_CARD_FEED_INTERVAL` over USB, the LAN and the relay, and
+//! `DEVICE_CARD_FEED_BLE_INTERVAL` over Bluetooth — the same gap since
+//! 2026-10-20, which the air's own read time stretches to two or three
+//! pictures a second. Pulls
 //! run under `DEVICE_CARD_FEED_CLASS`: the actor's passive tick runs due
 //! pulls beside the sim's and a preempting gesture cancels the in-flight
 //! read at its next frame boundary.
@@ -132,7 +133,7 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
 }
 
 /// The completion gap between one device's pulls, by the link it is on: a
-/// Bluetooth board's card pulls gently (see
+/// Bluetooth board's card pulls at its own gap (see
 /// [`DEVICE_CARD_FEED_BLE_INTERVAL`](crate::DEVICE_CARD_FEED_BLE_INTERVAL)),
 /// every other board's at the card cadence.
 pub(crate) fn feed_gap(device: &Device) -> Duration {

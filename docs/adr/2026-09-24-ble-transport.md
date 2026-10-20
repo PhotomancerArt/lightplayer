@@ -634,7 +634,8 @@ picture over Bluetooth — Open in editor to see and control it." Yona,
 get the data rates down". Reversed for the card; Play keeps its minute.
 
 - **The rule.** The card feed runs over Bluetooth at its own completion gap,
-  `DEVICE_CARD_FEED_BLE_INTERVAL` = 500 ms, against
+  `DEVICE_CARD_FEED_BLE_INTERVAL` = 500 ms (150 ms since the 2026-10-20
+  Amendment, below), against
   `DEVICE_CARD_FEED_INTERVAL` = 150 ms over USB, the LAN and the relay
   (`card_feed_gap_policy`, `lpa-studio-core/src/app/studio/refresh_cadence.rs`).
   The period is the gap plus the read's own time, so a card sees about one to
@@ -717,3 +718,89 @@ get the data rates down". Reversed for the card; Play keeps its minute.
   `docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`.
   Still owed: a 512-lamp board, and ESP-NOW loss beside a watched card
   (`desk_espnow_meter`).
+
+## Amendment 2026-10-20: the card's Bluetooth picture moves to USB's gap
+
+The 2026-10-08 Amendment set the card's Bluetooth gap at 500 ms before
+anything was measured. Yona asked whether Bluetooth can carry a faster
+picture (more than two a second would be nice; a picture that speeds up
+under a live stroke is a later want). Measured on silicon at four gaps, it
+can: `DEVICE_CARD_FEED_BLE_INTERVAL` is now **150 ms**, the same gap as
+`DEVICE_CARD_FEED_INTERVAL` over USB, the LAN and the relay. The air's own
+read time stretches it to about two and a half to three pictures a second,
+against USB's five to seven. Play's `BLE_PLAY_IDLE_REFRESH_INTERVAL` is
+unchanged (Yona's call).
+
+- **How it was measured.** A dev flag, `?card-ble-gap-ms=N`
+  (`lpa-studio-web/src/dev_url_flags.rs`, clamped to 0–2000 ms, no UI, no
+  persistence), sets the gap at page load, so every gap ran on one build.
+  Board `c6-button` (CX2: a XIAO ESP32-C6, `E4:B3:23:AE:80:98`), release
+  2026.10.20-2, running a copy of Logo Sign (241 lamps on D10 and D9), on the
+  desk next to the Mac. Unlike 2026-10-09, the board was also joined to the
+  bench Wi-Fi with the relay connected, so Bluetooth shared the radio with
+  Wi-Fi throughout (and ESP-NOW was off). The central was a background
+  **Mac Chrome 155** (macOS 26.5.2) driven over CDP by
+  `spikes/ble-lab/scripts/cdp-central.mjs`, against a release build of
+  Studio served locally. A scratch Brave with `BraveWebBluetoothAPI` saw no
+  Bluetooth devices at all that night, the reverse of 2026-10-09. Fps and
+  frame times are the board's own `[perf]` lines over its USB console
+  (`lp-cli link capture`). Bytes are counted at the page's GATT
+  characteristics and pictures at the card's canvas paints, both through a
+  script injected over CDP. Each window reloaded the page with its gap,
+  rejoined the board, settled 40 s and measured 4 minutes. The control is
+  the card off screen (the home page's Projects tab, still connected).
+  Order: 500, 75, off, 150, 250, 500, 75, off, 250, 150, 500, 75, 150, 75,
+  150, 75.
+
+  | | card off screen | 500 ms | 250 ms | 150 ms | 75 ms |
+  |---|---|---|---|---|---|
+  | windows (4 min each) | 2 | 3 | 2 | 4 | 5 |
+  | board fps (median of `[perf]`) | 39 | 39 | 39 | 38–39 | 38 |
+  | p99 frame time | ≤ 33 ms | ≤ 50 ms | ≤ 50 ms | ≤ 50 ms | ≤ 50 ms |
+  | slowest frame | 36–40 ms | 39–56 ms | 40–41 ms | 41–45 ms | 41–43 ms |
+  | frames over 100 ms | 0 | 0 | 0 | 0 | 0 |
+  | pictures a second | 0 | 1.2–1.3 | 1.9 | 2.5–2.9 | 2.9–3.5 |
+  | page → board, B/s | ~8 | 284–293 | 425–428 | 567–643 | 688–786 |
+  | board → page, B/s | ~41 | 1,116–1,153 | 1,664–1,675 | 2,157–2,503 | 2,494–3,029 |
+  | link drops | 0 | 0 | 0 | 0 | 0 |
+
+  (p99 is the `[perf]` histogram's bucket bound, so ≤ 33 and ≤ 50 are
+  neighbouring buckets, not a measured 17 ms rise.)
+
+- **What it costs.** At 150 ms the board runs 38–39 fps against 39 with the
+  card off, about 1–3 %. The radio budget's idle row (≤ 10 % fps, p99
+  ≤ 100 ms; `2026-10-06-radio-frame-rate-budget.md`) holds with room to
+  spare at every gap measured, and so does the connected row. These are
+  ceilings, not targets.
+- **Why 150 ms and not 75 ms.** 75 ms was inside the budget too: 38 fps,
+  no drops in 20 minutes. It bought about a sixth more pictures for about a
+  sixth more bytes, and it would make a Bluetooth card read more eagerly
+  than a USB one, which turns the policy upside down. The card's gap is now
+  one number on every link, and the slower link throttles itself by the
+  time its reads take. The flag stays for the next measurement (a phone, a
+  bigger board, the stroke).
+- **One window that did drop.** A first pass, earlier the same night, saw
+  four supervision timeouts (`0x08`) in one 4-minute window at 150 ms. It
+  ran two minutes after the Mac, lid closed, had woken from a "Dark Wake
+  Thermal Emergency" sleep, under a load average near 245 from other
+  builds. Two of the four came in the first second of a reconnect, on the
+  connect's own 720 ms supervision timeout, before the board's parameters
+  (15 ms interval, 4 s timeout) took. The 250 ms window just before it,
+  in the same state, had none. That pass is not in the table. With the Mac
+  held awake (`caffeinate`), the 16 windows above (64 minutes) and the
+  settling between them saw no supervision timeout at any gap. The
+  2026-10-08 Amendment's one drop in ~19 minutes, and the 2026-09-24 runs'
+  drops with nothing read, say a drop now and then is the link's, not the
+  card's. But a central under that much load is where to look first if
+  drops come back.
+- **Still owed** (each needs hands or a different desk):
+  - Yona's iPhone in Bluefy at the new gap. iOS's central is not Mac
+    Chrome, and the phone defect above (a connected central's heap cost on a
+    full board) is still open.
+  - A 512-lamp board. A reply is ~1.6 KB there, so each read takes longer
+    on the air and the rate should self-throttle below 241 lamps' rate.
+    That is the claim to check.
+  - ESP-NOW loss beside a watched card (`desk_espnow_meter`), on a board
+    that is not on Wi-Fi.
+- Plan: none (a side session's desk run). PR: the one carrying this
+  Amendment.

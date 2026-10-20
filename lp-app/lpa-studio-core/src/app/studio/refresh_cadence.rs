@@ -187,7 +187,9 @@ pub const DEVICE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 
 /// Completion-gap for the device card's picture over a BLUETOOTH link:
-/// about one to two pictures a second instead of USB's five to seven.
+/// the same gap as USB's ([`DEVICE_CARD_FEED_INTERVAL`]), which over the
+/// air lands at about two and a half to three pictures a second, against
+/// USB's five to seven.
 ///
 /// Until 2026-10-08 a Bluetooth card had no picture at all (BLE M5: a
 /// picture every 150 ms is a stream, on air the board shares with
@@ -197,19 +199,22 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// the wire tap; ~0.5 KB at 128 lamps, ~1.6 KB at 512 — beside a 187 B
 /// request; and a connected central was re-ruled an operating state whose
 /// ESP-NOW cost is measured, not gated (`docs/adr/2026-09-24-ble-transport.md`,
-/// its 2026-09-24 and 2026-10-08 amendments). The editor over Bluetooth
-/// already reads at the device cadence; a card at this gap moves a fraction
-/// of what the editor does.
+/// its 2026-09-24 and 2026-10-08 amendments). It was 500 ms from 2026-10-08,
+/// a cautious pick from before anything was measured.
 ///
 /// Under completion-based pacing the real period is this gap plus the
-/// read's own time on the air, so a bigger frame self-throttles. At the
-/// Mac's measured 5–12 KB/s of notifications a 512-lamp reply is a few
-/// hundred milliseconds, which still lands near a picture a second; a small
-/// one near two. On silicon (2026-10-09, a XIAO C6 running 241 lamps, Brave on
-/// a Mac as the central) the card got 0.94–1.24 pictures a second and the
-/// board ran 29 fps against 30 with the card off screen. The feed still pulls
-/// only while its card is mounted and the page is visible.
-pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(500);
+/// read's own time on the air, so a bigger frame self-throttles. Measured
+/// on silicon (2026-10-20, a XIAO C6 running 241 lamps, Mac Chrome as the
+/// central; the BLE ADR's 2026-10-20 amendment), 4-minute windows: at 150 ms
+/// the card got 2.5–2.9 pictures a second, the board ran 38–39 fps against
+/// 39 with the card off screen, no frame passed 100 ms and the link never
+/// dropped; 500 ms got 1.2–1.3 pictures, 250 ms 1.9, and 75 ms 2.9–3.5 at
+/// 38 fps. It stays at USB's gap rather than 75 ms: a Bluetooth card that
+/// read more eagerly than a USB one would turn the policy upside down for
+/// about a sixth more pictures. The feed still pulls only while its card is
+/// mounted and the page is visible; `?card-ble-gap-ms=N` moves it for a
+/// measurement ([`set_card_feed_ble_gap_override`]).
+pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(150);
 
 /// The card feed's completion gap for a board, by the link it is reached
 /// over: Bluetooth's gentle one (or its dev override), or
@@ -396,14 +401,14 @@ mod tests {
         assert!(BLE_PLAY_IDLE_REFRESH_INTERVAL >= Duration::from_secs(30));
     }
 
-    /// A Bluetooth card gets a picture, gently: slower than USB's, and
+    /// A Bluetooth card gets a picture, never more eagerly than USB's, and
     /// still a picture at least once a second plus its read — well inside
     /// the five seconds after which the card calls a frame stale.
     #[test]
     fn a_card_over_bluetooth_pulls_gently() {
         assert_eq!(card_feed_gap_policy(false), DEVICE_CARD_FEED_INTERVAL);
         assert_eq!(card_feed_gap_policy(true), DEVICE_CARD_FEED_BLE_INTERVAL);
-        assert!(DEVICE_CARD_FEED_BLE_INTERVAL > DEVICE_CARD_FEED_INTERVAL);
+        assert!(DEVICE_CARD_FEED_BLE_INTERVAL >= DEVICE_CARD_FEED_INTERVAL);
         assert!(DEVICE_CARD_FEED_BLE_INTERVAL <= Duration::from_secs(1));
         assert!(DEVICE_CARD_FEED_BLE_INTERVAL.as_secs_f64() * 4.0 < FRAME_STALE_AFTER_SECS);
     }
