@@ -803,6 +803,102 @@ fn an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone() {
     });
 }
 
+/// The open-port half of the same defect: a running board whose USB
+/// re-enumerates (any reset that takes a native-USB chip's USB with it)
+/// while Studio holds its port open. The read pump hears the dead port's
+/// own error, and used to detach the link at once: the board was Offline
+/// for the moment it took to come back, and its card left Online boards
+/// and came back, remounted. Now the board is held for the grace while the
+/// new port attaches as its link's next generation: the card stays Online
+/// at every step, its surface does not move while the port is gone, and
+/// once the port is back it only re-identifies the board on the new link
+/// (honest: Studio is asking the board who it is). A board whose port dies
+/// and does not come back is offline after the grace.
+#[test]
+fn a_running_board_re_enumerating_with_its_port_open_holds_its_card() {
+    let device = light_player_running("dev000000reenumopen", identity_free_project());
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-card-reenum-open");
+    let running = |bench: &DeviceBench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.state_label == "Ready"
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    };
+    bench.run_until(&tasks, "the running board to settle", running);
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    assert_eq!(
+        card.surface.state,
+        crate::SurfaceState::AllWell,
+        "{:?}",
+        card.surface
+    );
+    let held = |bench: &DeviceBench, re_identifying: bool| {
+        let home = bench.controller.view().home.expect("the home view");
+        let sections = &home.sections;
+        assert!(
+            sections.online.iter().any(|board| board.id == id)
+                && sections.offline.iter().all(|board| board.id != id),
+            "the card stays under Online boards: {sections:?}"
+        );
+        let card = home
+            .devices
+            .cards
+            .into_iter()
+            .find(|card| card.device == id)
+            .expect("the board's card");
+        assert_eq!(
+            card.presence,
+            crate::UiBoardPresence::Online,
+            "{:?}",
+            card.surface
+        );
+        let allowed = match re_identifying {
+            false => &[crate::SurfaceState::AllWell][..],
+            true => &[
+                crate::SurfaceState::AllWell,
+                crate::SurfaceState::Identifying,
+            ][..],
+        };
+        assert!(allowed.contains(&card.surface.state), "{:?}", card.surface);
+        assert!(bench.view().pending.is_empty(), "never a new board");
+    };
+
+    let steps = |seconds: f64| (seconds / STEP_MS) as usize;
+    for _ in 0..3 {
+        // The port dies under the open link and the grant is gone.
+        bench.lose_port();
+        for _ in 0..steps(1.0) {
+            bench.step(&tasks);
+            held(&bench, false);
+        }
+        // A new port under the same grant: the link's next generation.
+        bench.port_back();
+        for _ in 0..steps(4.0) {
+            bench.step(&tasks);
+            held(&bench, true);
+        }
+        assert!(running(&bench), "{:?}", bench.view().devices);
+        assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+        assert_eq!(bench.view().devices[0].id, id, "the same card");
+    }
+
+    // Unplugged for good with the port open: held for the grace, then
+    // offline.
+    bench.lose_port();
+    let grace = crate::app::devices::device_effects::REENUMERATION_GRACE.as_secs_f64();
+    for _ in 0..steps(grace - 0.5) {
+        bench.step(&tasks);
+        held(&bench, false);
+    }
+    bench.run_until(&tasks, "the board to be offline", |bench| {
+        card_of(bench, id).presence == crate::UiBoardPresence::Offline
+    });
+}
+
 /// The layout question rides the firmware bar: while it is open the bar's
 /// details are raised (the web opens them) and hold the Layout panel, its
 /// work is the flash's own step, and Continue — Lasting — is pressed by

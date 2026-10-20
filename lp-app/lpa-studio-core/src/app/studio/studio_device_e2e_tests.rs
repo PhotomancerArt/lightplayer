@@ -244,6 +244,9 @@ struct ScriptedTransport {
     /// Every file set a push effect was handed — the bytes Studio sent
     /// down the wire, captured before the conversation runs.
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
+    /// Which enumeration of the board's USB the ports handed out now
+    /// belong to ([`DeviceBench::lose_port`]).
+    enumeration: Rc<Cell<u32>>,
 }
 
 /// What an erase effect leaves the board doing: booting its blank flash
@@ -306,9 +309,88 @@ impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
         let info = fake_link_info(&self.endpoint);
         GrantedLink {
-            link: Box::new(bench_link(info.clone(), &self.device)),
+            link: Box::new(EnumeratedPort {
+                inner: bench_link(info.clone(), &self.device),
+                born: self.enumeration.get(),
+                enumeration: Rc::clone(&self.enumeration),
+                open: false,
+                death: None,
+            }),
             info,
         }
+    }
+}
+
+/// One port object onto the scripted board, belonging to one enumeration
+/// of its USB. When the board's USB goes away ([`DeviceBench::lose_port`]:
+/// a re-enumeration, or an unplug) the port dies the way Chrome's does: an
+/// open one says the browser controller's death notice and closes, a
+/// closed one says nothing, and nothing it is asked to do reaches the board
+/// again. A port enumerated after that is a new object.
+struct EnumeratedPort {
+    inner: lpa_link::device_link::fake::FakeDeviceLink,
+    born: u32,
+    enumeration: Rc<Cell<u32>>,
+    open: bool,
+    /// What the dead port has left to say, once it has died.
+    death: Option<VecDeque<lpa_devices::link::LinkEvent>>,
+}
+
+impl EnumeratedPort {
+    /// The port died: its board went away under it.
+    fn die(&mut self) -> &mut VecDeque<lpa_devices::link::LinkEvent> {
+        use lpa_devices::link::{LinkCommand, LinkEvent};
+        let open = self.open;
+        self.death.get_or_insert_with(|| {
+            let mut death = VecDeque::new();
+            if open {
+                death.push_back(LinkEvent::Error(
+                    "browser serial error: NetworkError: The device has been lost.".to_string(),
+                ));
+                death.push_back(LinkEvent::Closed {
+                    reason: "browser serial error".to_string(),
+                });
+            }
+            death
+        });
+        // The board's end of the dead port goes with it, as the old byte
+        // channel does under a real re-enumeration.
+        if open {
+            lpa_devices::link::Link::submit(&mut self.inner, LinkCommand::Close);
+            self.open = false;
+        }
+        self.death.as_mut().expect("set above")
+    }
+
+    fn dead(&self) -> bool {
+        self.enumeration.get() != self.born
+    }
+}
+
+impl lpa_devices::link::Link for EnumeratedPort {
+    fn info(&self) -> &lpa_devices::LinkInfo {
+        lpa_devices::link::Link::info(&self.inner)
+    }
+
+    fn submit(&mut self, command: lpa_devices::link::LinkCommand) {
+        if self.dead() {
+            return;
+        }
+        lpa_devices::link::Link::submit(&mut self.inner, command);
+    }
+
+    fn poll_event(&mut self) -> Option<lpa_devices::link::LinkEvent> {
+        use lpa_devices::link::LinkEvent;
+        if self.dead() {
+            return self.die().pop_front();
+        }
+        let event = lpa_devices::link::Link::poll_event(&mut self.inner)?;
+        match &event {
+            LinkEvent::Opened { .. } => self.open = true,
+            LinkEvent::Closed { .. } => self.open = false,
+            _ => {}
+        }
+        Some(event)
     }
 }
 
@@ -856,6 +938,8 @@ struct DeviceBench {
     remove_plan: Rc<Cell<RemovePlan>>,
     erase_plan: Rc<Cell<ErasePlan>>,
     pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
+    /// The board's USB enumeration ([`Self::lose_port`]).
+    enumeration: Rc<Cell<u32>>,
     /// The sim half of the transport, when this bench has one. Held so a
     /// row can assert what is RUNNING as opposed to what is remembered.
     sims: Option<Rc<SimDeviceTransport>>,
@@ -1111,6 +1195,7 @@ impl DeviceBench {
         let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
         let erase_plan: Rc<Cell<ErasePlan>> = Rc::new(Cell::new(ErasePlan::default()));
         let pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>> = Rc::new(RefCell::new(Vec::new()));
+        let enumeration = Rc::new(Cell::new(0));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -1123,6 +1208,7 @@ impl DeviceBench {
             remove_plan: Rc::clone(&remove_plan),
             erase_plan: Rc::clone(&erase_plan),
             pushed: Rc::clone(&pushed),
+            enumeration: Rc::clone(&enumeration),
         }));
 
         // Where a layout migration's backup goes before anything is written
@@ -1144,6 +1230,7 @@ impl DeviceBench {
             remove_plan,
             erase_plan,
             pushed,
+            enumeration,
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
@@ -1189,6 +1276,25 @@ impl DeviceBench {
         drive(self.controller.run_network_lens_step());
         // What this turn asked the boards is answered before time moves on.
         self.wire.settle();
+    }
+
+    /// The board's USB goes away, as an unplug or a re-enumeration does: its
+    /// port dies under whatever had it open, the grant leaves the browser's
+    /// list, and `navigator.serial` fires `disconnect`. [`Self::port_back`]
+    /// is the re-enumeration's other half.
+    fn lose_port(&mut self) {
+        self.enumeration.set(self.enumeration.get() + 1);
+        self.granted.set(false);
+        self.controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    }
+
+    /// The board's USB is back: a new port object under the same grant, and
+    /// `connect`.
+    fn port_back(&mut self) {
+        self.granted.set(true);
+        self.controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
     }
 
     fn run_until(&mut self, tasks: &TaskPool, what: &str, ready: impl Fn(&Self) -> bool) {
@@ -1813,6 +1919,68 @@ fn a_replug_under_the_lens_resumes_the_same_editor_session() {
         Some(_) => panic!("the resumed lens should pull at once, and succeed"),
         None => panic!("the resumed lens had nothing to pull"),
     }
+}
+
+/// The editor is a lens on a running board whose USB re-enumerates under
+/// it (a reset that takes a C6's USB with it): the port dies under the
+/// lens's own io, and a new port is back under the same grant a moment
+/// later. The board is never offline, so its card never leaves Online
+/// boards; the editor holds behind "Reconnecting…" and the same session
+/// resumes on the new link.
+#[test]
+fn a_re_enumeration_under_the_lens_never_takes_the_board_offline() {
+    let (mut bench, tasks, device) = lens_on_a_running_board("dev000000daqf6dvvra", "usb-lens-10");
+    let session = bench.lens_session_id();
+    let old_link = lens_link(&bench);
+    let online = |bench: &DeviceBench| {
+        assert_ne!(
+            bench.view().devices[0].status,
+            lpa_devices::device::DeviceStatus::Offline,
+            "a port back within the grace never takes the board offline"
+        );
+    };
+
+    // The port dies under the lens, and the grant leaves the browser's list.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.lose_port();
+    // The editor's next pull meets the dead port.
+    let _ = bench.tick();
+    bench.run_until(&tasks, "the lens to be held on the dead port", |bench| {
+        online(bench);
+        bench.controller.lens_is_held()
+    });
+    for _ in 0..(1.0 / STEP_MS) as usize {
+        bench.step(&tasks);
+        online(&bench);
+    }
+
+    // A new port under the same grant.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.port_back();
+    bench.run_until(&tasks, "the board to be Ready on the new link", |bench| {
+        online(bench);
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.lens_is_held() {
+        let _ = bench.tick();
+        bench.step(&tasks);
+        online(&bench);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never resumed"
+        );
+    }
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    assert_eq!(bench.lens_session_id(), session, "the same session resumed");
+    assert_ne!(lens_link(&bench), old_link, "on the new link");
 }
 
 /// The replug-under-the-lens flake, made deterministic: a link whose

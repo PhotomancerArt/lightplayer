@@ -5178,6 +5178,18 @@ walk-ble-emu *args:
 walk-factory-reset-emu *args:
     node scripts/emu/walk-factory-reset-emu.mjs {{ args }}
 
+# A running board whose OPEN port re-enumerates (a reset that takes a C6's
+# USB with it) keeps its card in place: an emulated C6 on the packaged
+# firmware over `?emu=`, its Hardware details open, its open port killed and
+# a new one adopted under the same grant a second later (the shim's, three
+# times): the same card element, under Online boards at every change the page
+# made, its details still open. A port that stays gone puts the card under
+# Offline boards. Needs a Studio on this worktree's port, or `--serve-release`
+# (after `just studio-web-story-build`, `just studio-firmware-package-served`
+# and `cargo build -p lp-cli`). Not a real C6's re-enumeration timing. Not CI.
+walk-reenumerate-emu *args:
+    node scripts/emu/walk-reenumerate-emu.mjs {{ args }}
+
 # The desk's Android test phone over adb (scripts/phone/README.md):
 # `just phone status|pair <code>|connect|awake|cdp|serve <port>|open <url>|shot <png>|snoop <dir>`.
 phone *args:

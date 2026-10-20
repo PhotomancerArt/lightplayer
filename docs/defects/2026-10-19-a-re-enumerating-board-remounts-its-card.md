@@ -1,8 +1,8 @@
 ---
 status: fixed
 found: 2026-10-19      # how: Yona's install walk, a real ESP32-C6 over Web Serial on a laptop, around a Factory reset
-fixed: this change     # PR #1198
-area: lpa-studio-core `DeviceEffects::sweep_departed_ports` (the departure sweep); lpa-devices Erase activity (link loss while it listens)
+fixed: 2026-10-19      # PR #1198 (closed port), PR #1202 (open port)
+area: lpa-studio-core `DeviceEffects::sweep_departed_ports` (the departure sweep) and the read pump's `Departure`; lpa-devices Erase activity (link loss while it listens)
 class: state-conflation
 related:
   - docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md
@@ -46,24 +46,53 @@ erased chip said nothing, the Erase ended on its deadline with the port
 open (before #1197's reboot, the erased chip stayed in the stub), and
 the first cable turn remounted the card.
 
+**The open port (#1202)** — a port Studio held OPEN when it re-enumerated
+still departed at once: the read pump (or the editor lens's io) heard the
+dead port's own error (`The device has been lost.`) and detached the link
+then and there. A healthy board whose reset took its USB with it was
+offline for the moment it was gone, and its card moved sections and
+remounted all the same. Now a USB link whose port died is held for the
+same grace (`Departure` in `device_effects.rs`): the error is passed on,
+the close that follows is not, so the board stays exactly as it was; the
+dead link's endpoint stops counting as held, so the connect edge's sweep
+attaches the re-enumerated port as a new link, which the model takes as
+the same board's next generation (its endpoint supersede); and only a link
+nothing replaced within the grace is detached. A dead port's controller is
+still never reused. A network link is still detached at once.
+
 **Regression tests** — `lpa-studio-core` `board_card_tests.rs`:
 `an_erased_board_re_enumerating_holds_its_card_until_it_is_really_gone`
 (three turns of the loop: the card stays Online and blank at every step;
-with no grace it goes Offline). `lpa-devices` `tests/scenarios.rs`:
+with no grace it goes Offline), and
+`a_running_board_re_enumerating_with_its_port_open_holds_its_card` (a
+running board, its port open, three re-enumerations: Online and under
+Online boards at every step, its surface unmoved while the port is gone;
+unplugged for good it is offline after the grace; with the old detach it
+is Offline in the gap). `studio_device_e2e_tests.rs`:
+`a_re_enumeration_under_the_lens_never_takes_the_board_offline` (the
+editor open on it: never offline, the same session resumes on the new
+link). `lpa-devices` `tests/scenarios.rs`:
 `a_factory_reset_outlives_the_erased_chips_re_enumeration`, and
 `a_factory_reset_board_that_says_nothing_is_blank_not_unresponsive` (the
-quiet window gives the port back). The emulator walk,
-`just walk-factory-reset-emu`, re-enumerates the board three times under
-the blank card with its details open.
+quiet window gives the port back). The emulator walks:
+`just walk-factory-reset-emu` re-enumerates the erased board three times
+under the blank card with its details open, and `just walk-reenumerate-emu`
+re-enumerates a running board's OPEN port three times with its Hardware
+details open (the same card element, under Online boards at every change
+the page made), then lets the port stay gone (Offline boards) and brings
+it back.
 
-**Not covered** — a port that was OPEN when it re-enumerated still departs
-at once: the pump hears the dead port's own error and detaches (a dead
-port's controller cannot be reused). An erased board's port is closed once
-its Erase ends, or once an identify hears its boot loop, so the loop meets
-a closed port. A healthy board whose open port re-enumerates (a reset that
-takes USB with it) still moves sections for the moment it is gone. That is
-a follow-up of its own: hold a card in place across a brief departure. The emulator does not re-enumerate on a
-chip reset (the shim's ruling: a C6's USB-Serial-JTAG survives a reset the
-serial channel asks for). Its walk re-enumerates the board through the
-shim (the old port dead, a new one under the same grant, a second apart)
-for the watchdog's, so the real cadence is the desk's to see.
+**Not covered** — a board whose open port re-enumerated is re-identified
+on its new link: its card's top says "Identifying this board." until the
+board says hello again (one bench step; on a C6 that just reset, about its
+boot), then shows nothing for the moment before the new window hears what
+the board runs (`identifying → all-well → no-project` on the walk, as after
+any identify). Holding its old face across that would mean carrying a verdict
+about the machine that reset, which the model rules out ("no sticky
+verdicts"). The card stays mounted and in place through it. A port that
+takes longer than the grace to come back still moves the card to Offline
+boards and back. The emulator does not re-enumerate on a chip reset (the
+shim's ruling: a C6's USB-Serial-JTAG survives a reset the serial channel
+asks for). Its walks re-enumerate the board through the shim (the old port
+dead, a new one under the same grant, a second apart) for the reset's, so
+the real cadence is the desk's to see.
