@@ -104,7 +104,12 @@ async function main() {
   const door = TAB ? null : await startDoor({
     root: ROOT,
     id: "walk-drop",
-    boards: [`${BOARD}={fw}`],
+    // `pace=realtime`: Studio is a wall-clock peer (the page reads through the
+    // Mac serial model, 255 B per 16 ms). An unpaced `emu serve` board skips
+    // idle time at `wfi`, so its emulated SEND_ROOM_WAIT / stall_after budgets
+    // run out before the page drains a frame and it drops the next one (defect
+    // 2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board).
+    boards: [`${BOARD}={fw},pace=realtime`],
     stateDir: path.join(out, "state"),
     consoleDir: path.join(out, "console"),
     logFile: path.join(out, "serve.log"),
