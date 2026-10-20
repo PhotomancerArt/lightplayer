@@ -1100,8 +1100,9 @@ impl StudioController {
 
     /// Their pictures, as `BoardPictures` answered.
     pub fn take_account_board_pictures(&mut self, pictures: Vec<crate::AccountBoardPicture>) {
-        self.account_boards.take_pictures(pictures);
-        self.mark_dirty();
+        if self.account_boards.take_pictures(pictures) {
+            self.mark_dirty();
+        }
     }
 
     /// Where the user is, as the web reports it: the page and the panels

@@ -124,7 +124,10 @@ fn start_asking(
             .await;
             match answer {
                 Ok(list) if current() => {
-                    let pictures = account_board_pictures(list);
+                    // An unchanged picture comes back without its colours:
+                    // nothing to hand in.
+                    let mut pictures = account_board_pictures(list);
+                    pictures.retain(|picture| picture.colors.is_some());
                     if !pictures.is_empty() {
                         tx.send(StudioCommand::AccountBoardPictures(pictures));
                     }

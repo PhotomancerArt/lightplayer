@@ -115,8 +115,9 @@ impl AccountBoards {
 
     /// A `BoardPictures` answer: each picture of a listed board replaces
     /// its last one. One that repeats the `seq` already held, without its
-    /// colours, changes nothing.
-    pub fn take_pictures(&mut self, pictures: Vec<AccountBoardPicture>) {
+    /// colours, changes nothing. Whether any picture changed.
+    pub fn take_pictures(&mut self, pictures: Vec<AccountBoardPicture>) -> bool {
+        let mut changed = false;
         for picture in pictures {
             let Some(key) = board_key(&picture.id).filter(|key| self.rows.contains_key(key)) else {
                 continue;
@@ -133,7 +134,9 @@ impl AccountBoards {
                     colors,
                 },
             );
+            changed = true;
         }
+        changed
     }
 
     /// Whether `key` is online at lightplayer.app, by the last answer.

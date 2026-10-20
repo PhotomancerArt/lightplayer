@@ -179,7 +179,7 @@ async function main() {
     const steps = [
       `T1 lp-cli wifi add <usb door> ${NET.ssid} → status connected, relay noAccount; Studio signed in, ?emu= → the USB square → ${A}'s card ready (push or edit offered) → status relay connected`,
       `T2 no cookie, no ?emu= → ${A}'s card under Offline boards, and no connect-relay ("${WORDS.connectRelay}") on it, face or link row's details`,
-      `T3 signed in, no ?emu= → ${A}'s offline card → connect-relay → hub: member session open; board: [relay] route … secure session opening → its card (${A}'s MAC) ready, lightplayer.app row "lightplayer.app … connected", one device`,
+      `T3 signed in, no ?emu= → ${A}'s card under Online boards (lightplayer.app … online) → connect-relay → hub: member session open; board: [relay] route … secure session opening → its card (${A}'s MAC) ready, lightplayer.app row "lightplayer.app … connected", one device`,
       `T4 the device leg cut and refused → card offline → connect-relay → link row "${WORDS.offline}" (failed); leg allowed → board: [relay] leg open → press → ready`,
       `T5 a fresh profile, signed in, never met ${A} → its card under Online boards (data-picture=cloud, lightplayer.app … online) → connect-relay (the primary) → board: [relay] route … secure session opening → ready`,
     ];
