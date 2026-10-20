@@ -4921,11 +4921,13 @@ ci-durations *args:
 desk-images *args:
     cargo run -q -p lp-cli --features desk-images -- hardware desk-images {{ args }}
 
-# List attached serial hardware (passive; never hangs). Identify chips with
+# List attached serial hardware (passive; never opens a port, but may first wait
+# on cargo's build lock or a rebuild; once built, `./target/debug/lp-cli
+# hardware list` skips that). Identify chips with
 # `just hardware-list --probe` (resets idle boards; per-port timeout), filter
 # with `--chip esp32s3`, script with `--json`.
 hardware-list *args:
-    cargo run -q -p lp-cli -- hardware list {{ args }}
+    cargo run -p lp-cli -- hardware list {{ args }}
 
 # Remove the WebSerial chooser dialog for local dev servers by granting Brave
 # standing serial access via the Chromium enterprise policy
