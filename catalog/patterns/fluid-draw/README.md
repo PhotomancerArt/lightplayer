@@ -20,7 +20,10 @@ for two seconds and three slow emitters (the "friends") come back to stir it.
   works on any lamp shape.
 - Knobs: **Fade** and **Viscosity**. They live on the draw shader, where an
   unwritten channel falls back to its default, and are handed to the Fluid
-  node. Brush size and the idle time are the shader's own settings.
+  node. Brush size and the idle time are constants in `draw.glsl`
+  (`BRUSH`, `IDLE_AFTER`): every declared input costs the shader's
+  definition about a kilobyte, and a board sends a definition in one 16 KiB
+  frame (`docs/defects/2026-10-20-a-node-def-over-a-read-frame-cannot-be-read.md`).
 
 ## Notes
 

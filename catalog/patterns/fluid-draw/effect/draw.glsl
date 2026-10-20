@@ -11,7 +11,7 @@
 // Colour comes from where a stroke starts (lp2014's hue formula) and stays
 // with that finger until it lifts.
 //
-// When nobody has touched for `idle_after` seconds, three wandering
+// When nobody has touched for `IDLE_AFTER` seconds, three wandering
 // "friends" (projects/test/fluid's choreography) fade in, and fade out
 // again within a third of a second of the next touch.
 //
@@ -26,6 +26,13 @@ const int FRIENDS = 3;
 // by-key merge keeps them apart.
 const int STROKE_BASE = 3;
 const uint STROKE_ID_BASE = 16u;
+// The pattern's own settings (not knobs): the stroke's radius in pattern
+// units (the lamps' long side is 2), and how long the fluid must go
+// untouched before the friends come back. Kept as constants: every declared
+// input costs the node's definition about a kilobyte on the wire, and a
+// board sends a definition in one frame.
+const float BRUSH = 0.12;
+const float IDLE_AFTER = 2.0;
 
 uint prev_id[4];
 vec2 prev_pos[4];
@@ -59,7 +66,7 @@ void tick() {
     if (!seeded) {
         seeded = true;
         prev_time = time;
-        last_touch = time - idle_after;
+        last_touch = time - IDLE_AFTER;
         friends = 1.0;
     }
     float dt = clamp(time - prev_time, 0.0, 0.25);
@@ -121,7 +128,7 @@ void tick() {
             emitters[i].id = STROKE_ID_BASE + uint(k * STEPS + s);
             emitters[i].pos = mix(from, tpos[k], t);
             emitters[i].dir = dir;
-            emitters[i].radius = brush;
+            emitters[i].radius = BRUSH;
             emitters[i].color = color;
             emitters[i].velocity = min(speed * 0.01, 0.05);
             emitters[i].intensity = 0.5;
@@ -133,8 +140,8 @@ void tick() {
         prev_hue[k] = next_hue[k];
     }
 
-    // Friends: in after `idle_after` s without a touch, out fast on one.
-    float target = (time - last_touch) >= idle_after ? 1.0 : 0.0;
+    // Friends: in after `IDLE_AFTER` s without a touch, out fast on one.
+    float target = (time - last_touch) >= IDLE_AFTER ? 1.0 : 0.0;
     float rate = target > friends ? 1.0 : 3.0;
     friends = clamp(friends + (target - friends) * min(dt * rate * 4.0, 1.0), 0.0, 1.0);
     if (friends < 0.01) {
@@ -142,11 +149,15 @@ void tick() {
         clear_emitter(1);
         clear_emitter(2);
     } else {
-        float breathe = 0.5 + 0.5 * sin(TAU * wave_breathe);
+        // One phasor per friend; each wanders a Lissajous path off it, its
+        // second axis an integer multiple so the path stays periodic.
         vec2 centre = vec2(0.0, 0.0);
+        float a = TAU * wave_a;
+        float b = TAU * wave_b;
+        float c = TAU * wave_c;
 
         emitters[0].id = 1u;
-        emitters[0].pos = vec2(-0.76 + 0.24 * sin(TAU * wave_a), 0.30 * sin(TAU * wave_a2));
+        emitters[0].pos = vec2(-0.76 + 0.24 * sin(a), 0.30 * sin(2.0 * a + 0.7));
         emitters[0].dir = normalize(centre - emitters[0].pos + vec2(0.0001, 0.0));
         emitters[0].radius = 0.25;
         emitters[0].color = vec3(1.0, 0.25, 0.05);
@@ -154,7 +165,7 @@ void tick() {
         emitters[0].intensity = 0.40 * friends;
 
         emitters[1].id = 2u;
-        emitters[1].pos = vec2(0.76 + 0.16 * sin(TAU * wave_b2), 0.30 * sin(TAU * wave_b));
+        emitters[1].pos = vec2(0.76 + 0.16 * sin(2.0 * b + 1.3), 0.30 * sin(b));
         emitters[1].dir = normalize(centre - emitters[1].pos + vec2(0.0001, 0.0));
         emitters[1].radius = 0.2;
         emitters[1].color = vec3(0.05, 0.45, 1.0);
@@ -162,9 +173,9 @@ void tick() {
         emitters[1].intensity = 0.36 * friends;
 
         emitters[2].id = 3u;
-        emitters[2].pos = vec2(0.68 * sin(TAU * wave_c), -0.30 + 0.12 * sin(TAU * wave_c2));
+        emitters[2].pos = vec2(0.68 * sin(c), -0.30 + 0.12 * sin(3.0 * c + 0.4));
         emitters[2].dir = normalize(centre - emitters[2].pos + vec2(0.0001, 0.0));
-        emitters[2].radius = 0.17 + breathe * 0.04;
+        emitters[2].radius = 0.17 + 0.04 * (0.5 + 0.5 * sin(2.0 * c));
         emitters[2].color = vec3(0.1, 1.0, 0.25);
         emitters[2].velocity = 0.006;
         emitters[2].intensity = 0.32 * friends;

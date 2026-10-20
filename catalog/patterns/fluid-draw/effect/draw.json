@@ -55,24 +55,6 @@
       "label": "Time",
       "description": "Seconds from the scope's time product"
     },
-    "idle_after": {
-      "kind": "value",
-      "value": "f32",
-      "default": 2,
-      "min": 0.5,
-      "max": 10,
-      "label": "Idle after",
-      "description": "Seconds without a touch before the drifting emitters come back"
-    },
-    "brush": {
-      "kind": "value",
-      "value": "f32",
-      "default": 0.12,
-      "min": 0.03,
-      "max": 0.5,
-      "label": "Brush",
-      "description": "Stroke radius in pattern units (the lamps' long side is 2)"
-    },
     "wave_a": {
       "kind": "phasor",
       "value": "f32",
@@ -82,31 +64,7 @@
         "phase_offset": 0.0
       },
       "default": 0,
-      "label": "Emitter A swing",
-      "description": "Cycle position (0-1)"
-    },
-    "wave_a2": {
-      "kind": "phasor",
-      "value": "f32",
-      "phasor": {
-        "period_seconds": 27.7648497,
-        "waveform": "ramp",
-        "phase_offset": 0.0
-      },
-      "default": 0,
-      "label": "Emitter A rise",
-      "description": "Cycle position (0-1)"
-    },
-    "wave_b2": {
-      "kind": "phasor",
-      "value": "f32",
-      "phasor": {
-        "period_seconds": 33.7261701,
-        "waveform": "ramp",
-        "phase_offset": 0.2707226
-      },
-      "default": 0,
-      "label": "Emitter B swing",
+      "label": "Friend A",
       "description": "Cycle position (0-1)"
     },
     "wave_b": {
@@ -118,7 +76,7 @@
         "phase_offset": 0.3342254
       },
       "default": 0,
-      "label": "Emitter B rise",
+      "label": "Friend B",
       "description": "Cycle position (0-1)"
     },
     "wave_c": {
@@ -130,31 +88,7 @@
         "phase_offset": 0.6684507
       },
       "default": 0,
-      "label": "Emitter C swing",
-      "description": "Cycle position (0-1)"
-    },
-    "wave_c2": {
-      "kind": "phasor",
-      "value": "f32",
-      "phasor": {
-        "period_seconds": 49.3573094,
-        "waveform": "ramp",
-        "phase_offset": 0.447862
-      },
-      "default": 0,
-      "label": "Emitter C rise",
-      "description": "Cycle position (0-1)"
-    },
-    "wave_breathe": {
-      "kind": "phasor",
-      "value": "f32",
-      "phasor": {
-        "period_seconds": 34.906586,
-        "waveform": "ramp",
-        "phase_offset": 0.0
-      },
-      "default": 0,
-      "label": "Breathe",
+      "label": "Friend C",
       "description": "Cycle position (0-1)"
     }
   },
