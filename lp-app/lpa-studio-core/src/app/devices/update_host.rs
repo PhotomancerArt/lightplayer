@@ -1542,14 +1542,7 @@ impl HostState {
         }
         end_leg_with(&seams, device, effect_id, outcome);
         if outcome.is_up_to_date() {
-            if let Some(hex) = self.pins.remove(&device) {
-                let cache = Rc::clone(&seams.cache);
-                (seams.spawn)(Box::pin(async move {
-                    if let Err(error) = cache.set_held(&hex, false).await {
-                        log::debug!("engine cache: {hex} not released: {error}");
-                    }
-                }));
-            }
+            self.release_pin(&seams, device);
             self.blocks.remove(&device);
         } else {
             self.blocks.insert(
@@ -1563,6 +1556,24 @@ impl HostState {
                 },
             );
         }
+    }
+
+    /// Let go of `device`'s backup pin. The cache's hold is one flag per
+    /// engine, not a count, so the engine is released only when no other
+    /// device's pin names it: two boards on the same old engine share it.
+    fn release_pin(&mut self, seams: &UpdateSeams, device: DeviceId) {
+        let Some(hex) = self.pins.remove(&device) else {
+            return;
+        };
+        if self.pins.values().any(|other| *other == hex) {
+            return;
+        }
+        let cache = Rc::clone(&seams.cache);
+        (seams.spawn)(Box::pin(async move {
+            if let Err(error) = cache.set_held(&hex, false).await {
+                log::debug!("engine cache: {hex} not released: {error}");
+            }
+        }));
     }
 
     // ---- The store ---------------------------------------------------------------------
@@ -1771,5 +1782,103 @@ fn lpc_wire_type(bytes: &[u8]) -> String {
         Some(ty) if ty.is_ascii_graphic() => char::from(*ty).to_string(),
         Some(ty) => format!("{ty:#04x}"),
         None => "empty message".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::task::{Context, Poll};
+    use std::future::Future;
+
+    use lpa_firmware_store::{EngineSource as Source, MemoryEngineCache};
+    use lpc_firmware_release::sha256_hex;
+
+    use super::*;
+
+    #[test]
+    fn a_backup_two_boards_share_stays_pinned_until_the_last_of_them_finishes() {
+        let engine = b"the old engine both boards run".to_vec();
+        let hex = sha256_hex(&engine);
+        let cache = MemoryEngineCache::new();
+        block_on(cache.put(
+            EngineCacheEntry::new(hex.clone(), engine.len() as u64, Source::Installed, 1.0),
+            engine,
+        ))
+        .expect("cached");
+        let tasks: Rc<RefCell<Vec<DeviceTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        let host = UpdateHost::new();
+        host.set_seams(UpdateSeams {
+            spawn: Rc::new({
+                let tasks = Rc::clone(&tasks);
+                move |task| tasks.borrow_mut().push(task)
+            }),
+            timer: Rc::new(RefCell::new(|_| {
+                Box::pin(std::future::pending()) as DeviceTimerFuture
+            })),
+            sink: Rc::new(|_| {}),
+            clock: Rc::new(|| 1.0),
+            cache: Rc::new(cache.clone()),
+            store: None,
+        });
+        let as_cache: Rc<dyn EngineCache> = Rc::new(cache.clone());
+        let (first, second) = (DeviceId(1), DeviceId(2));
+        for device in [first, second] {
+            host.state.borrow_mut().runs.insert(device, run());
+            block_on(pin(&as_cache, &hex, &Rc::downgrade(&host.state), device));
+        }
+        let held = || block_on(cache.index()).get(&hex).is_some_and(|e| e.held);
+        assert!(held(), "both boards pinned the backup");
+
+        host.state
+            .borrow_mut()
+            .finish(first, UpdateOutcomeFacts::UpToDate, None);
+        drain(&tasks);
+        assert!(held(), "the second board still needs the backup");
+
+        host.state
+            .borrow_mut()
+            .finish(second, UpdateOutcomeFacts::UpToDate, None);
+        drain(&tasks);
+        assert!(!held(), "the last board to finish let it go");
+    }
+
+    fn run() -> UpdateRun {
+        UpdateRun {
+            generation: 1,
+            intent: UpdateIntentFacts::Auto,
+            serve: ServeConfig::USB,
+            link_word: UpdateLink::Usb,
+            phase: RunPhase::New,
+            leg: None,
+            last_effect: EffectId(1),
+            link: LinkId(1),
+            facts: None,
+            names: None,
+            narration: UpdateNarration::default(),
+            backup_sha: None,
+            read_back: false,
+            session_reset: false,
+            asked_unanswered_at: None,
+            heard_this_leg: false,
+        }
+    }
+
+    /// Run every future the host spawned (the cache's are immediately ready).
+    fn drain(tasks: &Rc<RefCell<Vec<DeviceTaskFuture>>>) {
+        let spawned: Vec<_> = tasks.borrow_mut().drain(..).collect();
+        for task in spawned {
+            block_on(task);
+        }
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut cx = Context::from_waker(core::task::Waker::noop());
+        let mut future = core::pin::pin!(future);
+        for _ in 0..1_000 {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+                return output;
+            }
+        }
+        panic!("a test future did not complete");
     }
 }
