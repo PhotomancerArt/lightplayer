@@ -1653,6 +1653,7 @@ impl DeskTransport {
             remove_plan: Rc::new(Cell::new(RemovePlan::default())),
             erase_plan: Rc::new(Cell::new(ErasePlan::default())),
             pushed: Rc::new(RefCell::new(Vec::new())),
+            enumeration: Rc::new(Cell::new(0)),
         }
     }
 }
