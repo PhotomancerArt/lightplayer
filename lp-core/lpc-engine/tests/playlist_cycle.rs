@@ -215,6 +215,22 @@ fn re_picking_the_same_entry_restarts_the_cycle_there() {
     );
 }
 
+/// A pick restored before the first tick (`.lp/panel.json`, panel.md P10)
+/// is settled into the playlist before it ever ticks, so the first tick's
+/// residency step swaps the authored entry out before anything renders:
+/// no frame ever shows the authored entry (playlists-on-the-bus Q3).
+#[test]
+fn a_pick_settled_before_the_first_tick_is_the_first_entry_shown() {
+    let mut show = Show::boot(Authored::default());
+    show.activate(BLUE);
+    show.rt.engine_mut().settle_load_deciding_panel_values();
+
+    let frames = show.run(HALF_SECOND * 2);
+    println!("restored pick blue: {:?}", visited(&frames));
+    assert_eq!(frames[0], [BLUE], "the first tick has already swapped");
+    assert_eq!(visited(&frames), [BLUE], "and it holds");
+}
+
 /// The cycle follows the clock (plan A3): at rate 2× a step takes half the
 /// frames, and a paused clock holds the cycle where it is.
 #[test]

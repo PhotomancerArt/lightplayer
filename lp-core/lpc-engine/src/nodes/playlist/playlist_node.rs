@@ -797,6 +797,39 @@ impl NodeRuntime for PlaylistNode {
         Ok(())
     }
 
+    fn load_deciding_slots(&self) -> &'static [&'static str] {
+        &["idle_entry"]
+    }
+
+    /// A restored (or still-held) pick, before the first tick: make it the
+    /// selected entry and ask for it instead of the authored one, so the
+    /// first tick's residency step swaps them before anything renders —
+    /// nothing is shown yet, so there is no frame to hold. The first
+    /// produce reads the same write and sees no new pick.
+    fn settle_consumed_panel_value(&mut self, slot: &str, value: &lpc_model::LpValue, write: u64) {
+        // Only a playlist that has not ticked yet: one already playing has
+        // read its pick, and a settle after an edit elsewhere must not move
+        // it.
+        if slot != "idle_entry" || self.pick_seen.is_some() {
+            return;
+        }
+        let Ok(entry) = u32::from_lp_value(value) else {
+            return;
+        };
+        if self.runtime_entry(entry).is_none() {
+            // A key the playlist no longer has: the first produce falls back
+            // to the authored entry, which is the one loaded.
+            return;
+        }
+        self.pick_seen = Some((entry, Some(write)));
+        self.picked = entry;
+        self.current_entry = entry;
+        self.pending_request = self.request_for(entry);
+        if self.is_loaded(entry) {
+            self.active_entry = entry;
+        }
+    }
+
     fn residency_request(&mut self) -> Option<ResidencyRequest> {
         self.pending_request.take()
     }

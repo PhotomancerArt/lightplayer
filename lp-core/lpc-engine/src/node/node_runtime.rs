@@ -98,6 +98,25 @@ pub trait NodeRuntime {
         Ok(())
     }
 
+    /// The consumed slots whose value decides what this node loads before
+    /// it ever ticks — a playlist's pick decides its resident entry. Before
+    /// the first tick after a load (and after a structural reattach), the
+    /// engine hands each one a panel writer that supplies it
+    /// ([`Self::settle_consumed_panel_value`]). Default: none.
+    fn load_deciding_slots(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// A panel writer supplies `slot` (one of [`Self::load_deciding_slots`])
+    /// before the first tick: adopt it now, so the first tick's residency
+    /// step loads what the node will show instead of what it was authored
+    /// with (playlists-on-the-bus Q3). `write` is the writer's
+    /// [`crate::dataflow::panel_writers::PanelWriter::write`]. Default:
+    /// nothing.
+    fn settle_consumed_panel_value(&mut self, slot: &str, value: &lpc_model::LpValue, write: u64) {
+        let _ = (slot, value, write);
+    }
+
     /// Refresh a referenced asset after the project registry reports an effective asset change.
     ///
     /// Nodes that compile or cache asset bodies should compare the incoming asset's revision to

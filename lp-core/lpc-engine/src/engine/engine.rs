@@ -704,6 +704,42 @@ impl Engine {
         Ok(())
     }
 
+    /// Before the first tick after a load or a structural reattach: hand
+    /// every node the panel writers that supply its load-deciding slots
+    /// ([`NodeRuntime::load_deciding_slots`]), so a restored playlist pick
+    /// is the entry the first tick's residency step loads — the authored
+    /// entry is never sampled or compiled (playlists-on-the-bus Q3; the
+    /// scarf rule, panel.md P10). Writers that are nodes resolve on the
+    /// first produce as before.
+    pub fn settle_load_deciding_panel_values(&mut self) {
+        let mut settled: Vec<(NodeId, &'static str, lpc_model::LpValue, u64)> = Vec::new();
+        for entry in self.tree.entries() {
+            let NodeEntryState::Alive(runtime) = entry.state.value() else {
+                continue;
+            };
+            for slot in runtime.load_deciding_slots() {
+                let Ok(path) = SlotPath::parse(slot) else {
+                    continue;
+                };
+                let Some((scope, channel)) =
+                    consumed_slot_bus_provenance(&self.tree, &self.panel_writers, entry.id, &path)
+                else {
+                    continue;
+                };
+                if let Some(writer) = self.panel_writers.get(scope, &channel) {
+                    settled.push((entry.id, slot, writer.value.clone(), writer.write));
+                }
+            }
+        }
+        for (node, slot, value, write) in settled {
+            if let Some(entry) = self.tree.get_mut(node)
+                && let NodeEntryState::Alive(runtime) = entry.state.get_mut()
+            {
+                runtime.settle_consumed_panel_value(slot, &value, write);
+            }
+        }
+    }
+
     pub fn runtime_output_sink_buffer_id(&self, node_id: NodeId) -> Option<RuntimeBufferId> {
         let entry = self.tree.get(node_id)?;
         match entry.state.value() {
@@ -1437,6 +1473,31 @@ impl Engine {
     }
 }
 
+/// Where a consumed slot's value comes from, when a bus channel with a live
+/// writer supplies it: the channel and the scope of the writer that wins
+/// the R5 walk outward from the reader (panel writers included).
+fn consumed_slot_bus_provenance(
+    tree: &RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    panel_writers: &crate::dataflow::panel_writers::PanelWriterStore,
+    node: NodeId,
+    slot: &SlotPath,
+) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
+    let (_, entry) = tree.binding_for_consumed_slot(node, slot)?;
+    let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
+        return None;
+    };
+    let channel = channel.clone();
+    let mut scope = tree.bus_read_scope(node)?;
+    loop {
+        if panel_writers.get(scope, &channel).is_some()
+            || !tree.providers_for_bus_in_scope(scope, &channel).is_empty()
+        {
+            return Some((scope, channel));
+        }
+        scope = tree.parent_scope(scope)?;
+    }
+}
+
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 /// The synthetic provider an engaged panel writer contributes: a literal
 /// source at panel priority, owned by the scope's introducing node. The
@@ -1823,23 +1884,7 @@ impl ResolveHost for EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
-        let (_, entry) = self.tree.binding_for_consumed_slot(node, slot)?;
-        let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
-            return None;
-        };
-        let channel = channel.clone();
-        let mut scope = self.node_scope(node)?;
-        loop {
-            if self.panel_writers.get(scope, &channel).is_some()
-                || !self
-                    .tree
-                    .providers_for_bus_in_scope(scope, &channel)
-                    .is_empty()
-            {
-                return Some((scope, channel));
-            }
-            scope = self.tree.parent_scope(scope)?;
-        }
+        consumed_slot_bus_provenance(self.tree, self.panel_writers, node, slot)
     }
 
     fn consumed_slot_panel_write(&self, node: NodeId, slot: &SlotPath) -> Option<u64> {
