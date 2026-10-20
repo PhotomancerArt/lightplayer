@@ -410,7 +410,7 @@ impl Editor {
     }
 
     /// ⇧2: the selection. A fixture is framed with the outputs it feeds,
-    /// or its rules name (an empty fixture still shows where its lamps
+    /// or its placements name (an empty fixture still shows where its lamps
     /// will go), so you see both ends of its patch; anything else, on its
     /// own.
     pub fn frame_selection(&mut self) {
@@ -437,7 +437,11 @@ impl Editor {
             Target::Node(id) if let Some(f) = p.fixture(id) => union(
                 std::iter::once(id.clone())
                     .chain(p.outputs_of(id))
-                    .chain(f.rules.iter().map(|r| r.output().clone()))
+                    .chain(
+                        f.places
+                            .iter()
+                            .filter_map(|r| r.wire.as_ref()?.output().cloned()),
+                    )
                     .filter_map(|n| p.node_rect(&n)),
             ),
             Target::Node(id) => p.node_rect(id),

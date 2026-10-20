@@ -964,14 +964,17 @@ fn deleting_an_output_leaves_problems_not_retargets() {
         .map(|x| p.node_name(&x.fixture))
         .collect();
     assert_eq!(broken, vec!["ring display", "strip"]);
-    assert!(patch.problems.iter().all(|x| x.missing == main));
+    assert!(
+        patch
+            .problems
+            .iter()
+            .all(|x| x.gone == Gone::Output(main.clone()))
+    );
     let ring = node_id(&e, "ring display");
     assert_eq!(
-        p.fixture(&ring).unwrap().rules,
-        vec![PatchRule::Auto {
-            output: main.clone()
-        }],
-        "the rule still names main"
+        p.fixture(&ring).unwrap().places,
+        vec![auto_onto(&main)],
+        "the placement still names main"
     );
     assert!(patch.spans.iter().all(|s| s.fixture == node_id(&e, "tail")));
     // The notice says so.
@@ -2869,14 +2872,10 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
         );
         let object = ObjectId::new(&path, "path");
-        p.fixture_mut(&f).unwrap().rules.push(PatchRule::Place {
-            object: object.clone(),
-            output: out.clone(),
-            port: "0".into(),
-            pixel: 10,
-            reversed,
-            rotation: 2,
-        });
+        p.fixture_mut(&f)
+            .unwrap()
+            .places
+            .push(placed_at(&object, &out, "0", 10, reversed, 2));
         let got: Vec<u32> = (0..5)
             .map(|i| match p.pixel_of_lamp(&object, i) {
                 Some(Target::Pixel { index, .. }) => index,
@@ -2939,18 +2938,9 @@ fn auto_flows_after_placed_runs() {
         &a,
         ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
     );
-    p.fixture_mut(&a).unwrap().rules = vec![
-        PatchRule::Place {
-            object: ObjectId::new(&a2, "path"),
-            output: out.clone(),
-            port: "0".into(),
-            pixel: 10,
-            reversed: false,
-            rotation: 0,
-        },
-        PatchRule::Auto {
-            output: out.clone(),
-        },
+    p.fixture_mut(&a).unwrap().places = vec![
+        placed_at(&ObjectId::new(&a2, "path"), &out, "0", 10, false, 0),
+        auto_onto(&out),
     ];
     let b = p.add_fixture(None, "b").unwrap();
     let b1 = add(
@@ -2985,14 +2975,14 @@ fn without_an_auto_rule_unplaced_lamps_are_dark() {
         &f,
         ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
     );
-    p.fixture_mut(&f).unwrap().rules = vec![PatchRule::Place {
-        object: ObjectId::new(&a2, "path"),
-        output: out.clone(),
-        port: "0".into(),
-        pixel: 0,
-        reversed: false,
-        rotation: 0,
-    }];
+    p.fixture_mut(&f).unwrap().places = vec![placed_at(
+        &ObjectId::new(&a2, "path"),
+        &out,
+        "0",
+        0,
+        false,
+        0,
+    )];
     let patch = p.effective_patch();
     assert_eq!(patch.spans.len(), 1);
     assert_eq!(patch.unpatched.len(), 1);
@@ -3036,22 +3026,19 @@ fn a_rule_on_a_gone_port_is_a_problem() {
         &f,
         ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     );
-    p.fixture_mut(&f).unwrap().rules = vec![
-        PatchRule::Place {
-            object: ObjectId::new(&a1, "path"),
-            output: out.clone(),
-            port: "7".into(),
-            pixel: 0,
-            reversed: false,
-            rotation: 0,
-        },
-        PatchRule::Auto {
-            output: out.clone(),
-        },
+    p.fixture_mut(&f).unwrap().places = vec![
+        placed_at(&ObjectId::new(&a1, "path"), &out, "7", 0, false, 0),
+        auto_onto(&out),
     ];
     let patch = p.effective_patch();
     assert_eq!(patch.problems.len(), 1);
-    assert_eq!(patch.problems[0].gone, Gone::Port("7".into()));
+    assert_eq!(
+        patch.problems[0].gone,
+        Gone::Port {
+            output: out.clone(),
+            port: "7".into()
+        }
+    );
     assert_eq!(patch.spans.len(), 1, "auto still places it");
     assert!(patch.problems[0].notice(&p).why.is_some());
 }
@@ -3885,4 +3872,35 @@ fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
         .iter()
         .map(|l| l.pos)
         .collect()
+}
+
+/// An object on `pixel` of `port`, reversed and turned: its own placement.
+fn placed_at(
+    object: &ObjectId,
+    output: &NodeId,
+    port: &str,
+    pixel: u32,
+    reversed: bool,
+    rotation: u32,
+) -> PatchPlace {
+    PatchPlace {
+        on: PatchTarget::Object(object.clone()),
+        wire: Some(Wire::At {
+            output: output.clone(),
+            port: port.into(),
+            pixel,
+        }),
+        direction: reversed.then_some(Direction::Reversed),
+        turn: (rotation != 0).then_some(rotation),
+    }
+}
+
+/// The fixture's own wire, auto onto `output`.
+fn auto_onto(output: &NodeId) -> PatchPlace {
+    PatchPlace {
+        wire: Some(Wire::Auto {
+            output: output.clone(),
+        }),
+        ..PatchPlace::on(PatchTarget::Fixture)
+    }
 }

@@ -334,9 +334,9 @@ impl Editor {
                 &[GraphVerb::Auto],
             ));
             let placed = p.fixture(&fixture).is_some_and(|f| {
-                f.rules
-                    .iter()
-                    .any(|r| matches!(r, crate::domain::patch::PatchRule::Place { .. }))
+                f.places.iter().any(|r| {
+                    r.on != crate::domain::patch_place::PatchTarget::Fixture && r.wire.is_some()
+                })
             });
             if placed {
                 out.push(hv("⇧U", "unpatch all", &[GraphVerb::UnpatchAll]));

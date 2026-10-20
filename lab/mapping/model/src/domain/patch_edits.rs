@@ -1,16 +1,17 @@
-//! Patching by hand: the edits a person makes to a fixture's rules, one
-//! object at a time (the lab roadmap's stage 4).
+//! Patching by hand: the edits a person makes to placements
+//! (`patch_place.rs`), on a fixture, a component or an object.
 //!
-//! Every edit here writes place rules (`patch.rs`): put an object's run
-//! on a port's pixel, take it off, reverse it, turn it, shift it, swap two.
-//! The effective patch is derived afterwards, as always (D7).
+//! Every edit sets or clears one setting — wire, direction or turn — on one
+//! thing; what isn't set follows its parent. The effective patch is derived
+//! afterwards, as always (D7).
 //!
 //! **A wiring edit moves only what it edits.** Auto flows a fixture's
-//! other lamps on after its own runs, and other auto fixtures after every
-//! run on the output (`patch.rs`, the product's arithmetic). So placing
-//! one object by hand can move objects nobody touched. When it would,
-//! the edit pins each of them where it was, as a place rule of its own,
-//! and says how many it pinned. Nothing the person didn't touch moves.
+//! other objects on after its own runs, and other auto fixtures after every
+//! run on the output (`patch.rs`, the product's arithmetic). So placing one
+//! object by hand can move objects nobody touched. When it would, the edit
+//! pins each of them where it was, with a wire of its own, and says how
+//! many it pinned. A placed component's own objects are not held: when one
+//! leaves its run, the others close up behind it (plan D10).
 //!
 //! Turning is **direction-aware**, as lp2014's keys were: one step moves
 //! where the data enters the object back one lamp, whichever way its run
@@ -20,7 +21,8 @@ use std::collections::HashMap;
 
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
-use crate::domain::patch::{PatchRule, Span};
+use crate::domain::patch::{ObjectRun, Span};
+use crate::domain::patch_place::{Direction, PatchTarget, Wire};
 use crate::domain::project::Project;
 
 /// What an edit did besides what it was asked: how many other objects it
@@ -33,7 +35,7 @@ pub struct PatchEdit {
 /// How an object is on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OnWire {
-    /// A place rule puts it there.
+    /// Its own placement puts it at an address.
     Placed {
         output: NodeId,
         port: String,
@@ -41,7 +43,7 @@ pub enum OnWire {
         reversed: bool,
         rotation: u32,
     },
-    /// Its fixture's auto rule flows it on.
+    /// It lands, by what it follows (auto, or its component's address).
     Flowing,
     /// No pixel shows it.
     Nowhere,
@@ -59,32 +61,96 @@ pub enum PortEdge {
 impl Project {
     /// How an object is on the wire right now.
     pub fn on_wire(&self, object: &ObjectId) -> OnWire {
-        if let Some(PatchRule::Place {
-            output,
-            port,
-            pixel,
-            reversed,
-            rotation,
-            ..
-        }) = self.place_rule(object)
+        let patch = self.effective_patch();
+        if let Some(r) = patch.resolved(object)
+            && let (
+                Some(Wire::At {
+                    output,
+                    port,
+                    pixel,
+                }),
+                Some(PatchTarget::Object(_)),
+            ) = (&r.wire, &r.wire_from)
         {
             return OnWire::Placed {
                 output: output.clone(),
                 port: port.clone(),
                 pixel: *pixel,
-                reversed: *reversed,
-                rotation: *rotation,
+                reversed: r.direction.is_reversed(),
+                rotation: r.turn,
             };
         }
-        if self.effective_patch().lands(object) {
+        if patch.lands(object) {
             OnWire::Flowing
         } else {
             OnWire::Nowhere
         }
     }
 
-    /// Put an object's run on `pixel` of `output`'s port `port`. A placed
-    /// object moves there and keeps its direction and turn.
+    /// The fixture a placement target belongs to (`None` for the fixture
+    /// itself, which names no fixture on its own).
+    pub fn fixture_of_place(&self, target: &PatchTarget) -> Option<NodeId> {
+        match target {
+            PatchTarget::Fixture => None,
+            PatchTarget::Component(c) => self.fixture_of(c).map(|n| n.id.clone()),
+            PatchTarget::Object(o) => self.fixture_of(&o.component).map(|n| n.id.clone()),
+        }
+    }
+
+    /// The objects a placement on `target` reaches.
+    pub fn objects_of_place(&self, fixture: &NodeId, target: &PatchTarget) -> Vec<ObjectId> {
+        match target {
+            PatchTarget::Fixture => self
+                .objects_in(fixture)
+                .iter()
+                .map(|o| o.id.clone())
+                .collect(),
+            PatchTarget::Component(c) => {
+                self.objects_under(c).iter().map(|o| o.id.clone()).collect()
+            }
+            PatchTarget::Object(o) => vec![o.clone()],
+        }
+    }
+
+    /// Set (or, with `None`, clear) a thing's wire. Clearing it makes it
+    /// follow its parent.
+    pub fn set_wire(
+        &mut self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+        wire: Option<Wire>,
+    ) -> Option<PatchEdit> {
+        self.fixture(fixture)?;
+        let edited = self.objects_of_place(fixture, target);
+        Some(self.hand_edit(&edited, |p| {
+            if let Some(f) = p.fixture_mut(fixture) {
+                f.place_mut(target).wire = wire;
+                f.tidy_places();
+            }
+        }))
+    }
+
+    /// Set (or clear) a thing's direction. Moves nothing on the wire: an
+    /// object keeps its window and runs the other way inside it; a placed
+    /// component keeps its run and lays its objects in the other order.
+    pub fn set_direction(
+        &mut self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+        direction: Option<Direction>,
+    ) -> Option<PatchEdit> {
+        self.fixture(fixture)?;
+        let edited = self.objects_of_place(fixture, target);
+        Some(self.hand_edit(&edited, |p| {
+            if let Some(f) = p.fixture_mut(fixture) {
+                f.place_mut(target).direction = direction;
+                f.tidy_places();
+            }
+        }))
+    }
+
+    /// Put an object's run on `pixel` of `output`'s port `port`: a wire of
+    /// its own. It keeps its direction and turn.
     pub fn patch_object(
         &mut self,
         object: &ObjectId,
@@ -92,83 +158,88 @@ impl Project {
         port: &str,
         pixel: u32,
     ) -> Option<PatchEdit> {
-        self.fixture_of(&object.component)?;
-        Some(self.hand_edit(&[object.clone()], |p| {
-            let (output, port) = (output.clone(), port.to_string());
-            match p.place_rule_mut(object) {
-                Some(PatchRule::Place {
-                    output: o,
-                    port: k,
-                    pixel: x,
-                    ..
-                }) => {
-                    *o = output;
-                    *k = port;
-                    *x = pixel;
-                }
-                _ => p.push_place(object, output, port, pixel, false, 0),
-            }
-        }))
+        let fixture = self.fixture_of_place(&PatchTarget::Object(object.clone()))?;
+        let wire = Wire::At {
+            output: output.clone(),
+            port: port.to_string(),
+            pixel,
+        };
+        self.set_wire(&fixture, &PatchTarget::Object(object.clone()), Some(wire))
     }
 
-    /// Take an object's place rules away. Under auto it flows again; in a
-    /// manual fixture it goes dark. False when it had none.
+    /// Take an object's own wire away, so it follows its parent again.
+    /// False when it had none.
     pub fn unpatch_object(&mut self, object: &ObjectId) -> bool {
-        if self.place_rule(object).is_none() {
+        let target = PatchTarget::Object(object.clone());
+        let Some(fixture) = self.fixture_of_place(&target) else {
+            return false;
+        };
+        let own = self
+            .fixture(&fixture)
+            .and_then(|f| f.place(&target))
+            .is_some_and(|p| p.wire.is_some());
+        if !own {
             return false;
         }
-        self.hand_edit(&[object.clone()], |p| p.remove_place_rules(object));
+        self.set_wire(&fixture, &target, None);
         true
     }
 
-    /// Write a place rule where a flowing object lands now, so a wiring
-    /// edit can change it. Nothing to do for a placed one; `None` for one
-    /// that lands nowhere (there is no "where it is" to keep).
+    /// Give a following object a wire of its own where it lands now, so a
+    /// wiring edit can move it. Nothing to do for one placed already;
+    /// `None` for one that lands nowhere (there is no "where it is" to
+    /// keep).
     pub fn pin_object(&mut self, object: &ObjectId) -> Option<PatchEdit> {
         match self.on_wire(object) {
             OnWire::Placed { .. } => Some(PatchEdit::default()),
             OnWire::Nowhere => None,
             OnWire::Flowing => {
-                let spans: Vec<Span> = self.effective_patch().spans_of(object).cloned().collect();
-                Some(self.hand_edit(&[object.clone()], |p| p.pin_at(object, &spans)))
+                let run = self
+                    .effective_patch()
+                    .runs
+                    .iter()
+                    .find(|r| &r.object == object)?
+                    .clone();
+                Some(self.hand_edit(&[object.clone()], |p| p.pin_at(&run)))
             }
         }
     }
 
-    /// Lay an object's run the other way along its window: the first lamp
-    /// lands where the last did. A flowing object is pinned first.
+    /// Lay an object's run the other way inside its window. It stays where
+    /// it is, following or not: a direction of its own.
     pub fn reverse_placement(&mut self, object: &ObjectId) -> Option<PatchEdit> {
-        let pinned = self.pin_object(object)?;
-        let edit = self.hand_edit(&[object.clone()], |p| {
-            if let Some(PatchRule::Place { reversed, .. }) = p.place_rule_mut(object) {
-                *reversed = !*reversed;
-            }
-        });
-        Some(PatchEdit {
-            pinned: pinned.pinned + edit.pinned,
-        })
+        let target = PatchTarget::Object(object.clone());
+        let fixture = self.fixture_of_place(&target)?;
+        let now = self
+            .effective_patch()
+            .resolved(object)
+            .map(|r| r.direction)
+            .unwrap_or_default();
+        self.set_direction(&fixture, &target, Some(now.flipped()))
     }
 
     /// Turn an object's run inside its own window by `lamps`: each step
     /// moves where the data enters it back one lamp, whichever way it runs.
     pub fn turn_placement(&mut self, object: &ObjectId, lamps: i64) -> Option<PatchEdit> {
         let n = self.object(object)?.lamps.len() as i64;
-        let pinned = self.pin_object(object)?;
+        let target = PatchTarget::Object(object.clone());
+        let fixture = self.fixture_of_place(&target)?;
         if n == 0 {
-            return Some(pinned);
+            return Some(PatchEdit::default());
         }
-        let edit = self.hand_edit(&[object.clone()], |p| {
-            if let Some(PatchRule::Place {
-                reversed, rotation, ..
-            }) = p.place_rule_mut(object)
-            {
-                let step = if *reversed { -lamps } else { lamps };
-                *rotation = (*rotation as i64 + step).rem_euclid(n) as u32;
+        let (reversed, turn) = self
+            .effective_patch()
+            .resolved(object)
+            .map_or((false, 0), |r| (r.direction.is_reversed(), r.turn));
+        let step = if reversed { -lamps } else { lamps };
+        let to = (turn as i64 + step).rem_euclid(n) as u32;
+        let edited = vec![object.clone()];
+        Some(self.hand_edit(&edited, |p| {
+            if let Some(f) = p.fixture_mut(&fixture) {
+                f.place_mut(&target).turn = (to != 0).then_some(to);
+                f.tidy_places();
             }
-        });
-        Some(PatchEdit {
-            pinned: pinned.pinned + edit.pinned,
-        })
+        }))
     }
 
     /// The big turn: a third of the object (a dome panel's side, lp2014's
@@ -178,13 +249,15 @@ impl Project {
         ((n as f64 / 3.0).round() as u32).max(1)
     }
 
-    /// Move an object's start `pixels` along its port. It can't leave the
-    /// port: past either end is refused, and nothing changes.
+    /// Move an object's start `pixels` along its port. A following object
+    /// gets a wire of its own first. It can't leave the port: past either
+    /// end is refused, and nothing changes.
     pub fn shift_placement(
         &mut self,
         object: &ObjectId,
         pixels: i64,
     ) -> Result<PatchEdit, PortEdge> {
+        let before = self.clone();
         let Some(pinned) = self.pin_object(object) else {
             return Err(PortEdge::Start);
         };
@@ -198,21 +271,24 @@ impl Project {
             return Err(PortEdge::Start);
         };
         let to = pixel as i64 + pixels;
-        if to < 0 {
-            return Err(PortEdge::Start);
-        }
         let counted = self
             .output(&output)
             .and_then(|o| o.port(&port))
             .and_then(|p| p.pixels);
-        if counted.is_some_and(|n| to >= n as i64) {
-            return Err(PortEdge::End);
+        let edge = if to < 0 {
+            Some(PortEdge::Start)
+        } else if counted.is_some_and(|n| to >= n as i64) {
+            Some(PortEdge::End)
+        } else {
+            None
+        };
+        if let Some(edge) = edge {
+            *self = before;
+            return Err(edge);
         }
-        let edit = self.hand_edit(&[object.clone()], |p| {
-            if let Some(PatchRule::Place { pixel, .. }) = p.place_rule_mut(object) {
-                *pixel = to as u32;
-            }
-        });
+        let edit = self
+            .patch_object(object, &output, &port, to as u32)
+            .unwrap_or_default();
         Ok(PatchEdit {
             pinned: pinned.pinned + edit.pinned,
         })
@@ -231,30 +307,26 @@ impl Project {
                 port,
                 pixel,
                 ..
-            } => Some((output, port, pixel)),
+            } => Some(Wire::At {
+                output,
+                port,
+                pixel,
+            }),
             _ => None,
         };
         let (at_a, at_b) = (place(self, a), place(self, b));
         if at_a.is_none() && at_b.is_none() {
             return None;
         }
+        let fixture_a = self.fixture_of_place(&PatchTarget::Object(a.clone()))?;
+        let fixture_b = self.fixture_of_place(&PatchTarget::Object(b.clone()))?;
         let edit = self.hand_edit(&[a.clone(), b.clone()], |p| {
-            for (object, to) in [(a, at_b.clone()), (b, at_a.clone())] {
-                match to {
-                    Some((output, port, pixel)) => match p.place_rule_mut(object) {
-                        Some(PatchRule::Place {
-                            output: o,
-                            port: k,
-                            pixel: x,
-                            ..
-                        }) => {
-                            *o = output;
-                            *k = port;
-                            *x = pixel;
-                        }
-                        _ => p.push_place(object, output, port, pixel, false, 0),
-                    },
-                    None => p.remove_place_rules(object),
+            for (fixture, object, to) in [(&fixture_a, a, at_b), (&fixture_b, b, at_a)] {
+                if let Some(f) = p.fixture_mut(fixture) {
+                    // Off the wire when the other had no place to give.
+                    f.place_mut(&PatchTarget::Object(object.clone())).wire =
+                        Some(to.unwrap_or(Wire::Off));
+                    f.tidy_places();
                 }
             }
         });
@@ -263,129 +335,108 @@ impl Project {
         })
     }
 
-    /// Turn a fixture's auto rule on or off. On, it flows every lamp no
-    /// place rule claims onto the output its rules already reach (or the
-    /// first output); off, those lamps go dark. Returns the output auto
-    /// flows onto, when it is on.
+    /// Turn a fixture's auto on or off: its own wire, auto onto the output
+    /// its placements already reach (or the first output), or unset. Off,
+    /// what follows the fixture goes dark. Returns the output auto flows
+    /// onto, when it is on.
     pub fn set_auto(&mut self, fixture: &NodeId, on: bool) -> Option<NodeId> {
         let named = self.control_outputs(fixture).into_iter().next();
         let first = self.outputs().first().map(|n| n.id.clone());
+        let current = self.auto_output(fixture);
         let f = self.fixture_mut(fixture)?;
-        let current = f.rules.iter().find_map(|r| match r {
-            PatchRule::Auto { output } => Some(output.clone()),
-            _ => None,
-        });
         if on {
             if current.is_some() {
                 return current;
             }
             let output = named.or(first)?;
-            f.rules.push(PatchRule::Auto {
+            f.place_mut(&PatchTarget::Fixture).wire = Some(Wire::Auto {
                 output: output.clone(),
             });
             Some(output)
         } else {
-            f.rules.retain(|r| !matches!(r, PatchRule::Auto { .. }));
+            f.place_mut(&PatchTarget::Fixture).wire = None;
+            f.tidy_places();
             None
         }
     }
 
-    /// Whether a fixture flows its unplaced lamps on by itself.
-    pub fn is_auto(&self, fixture: &NodeId) -> bool {
-        self.fixture(fixture)
-            .is_some_and(|f| f.rules.iter().any(|r| matches!(r, PatchRule::Auto { .. })))
+    /// The output a fixture's own wire flows onto, when it is auto.
+    pub fn auto_output(&self, fixture: &NodeId) -> Option<NodeId> {
+        match self
+            .fixture(fixture)?
+            .place(&PatchTarget::Fixture)?
+            .wire
+            .as_ref()?
+        {
+            Wire::Auto { output } => Some(output.clone()),
+            _ => None,
+        }
     }
 
-    /// Take every one of a fixture's objects off the wire by hand: every
-    /// place rule goes. Under auto, they all flow again; manual, the
-    /// fixture goes dark. Returns how many rules went.
+    /// Whether a fixture flows its following lamps on by itself.
+    pub fn is_auto(&self, fixture: &NodeId) -> bool {
+        self.auto_output(fixture).is_some()
+    }
+
+    /// Put every component and object of a fixture back to following the
+    /// fixture: every wire set below it goes. Under auto they all flow
+    /// again; with the fixture's wire unset, it goes dark. Returns how many
+    /// wires went.
     pub fn unpatch_all(&mut self, fixture: &NodeId) -> usize {
         let Some(f) = self.fixture_mut(fixture) else {
             return 0;
         };
-        let before = f.rules.len();
-        f.rules.retain(|r| !matches!(r, PatchRule::Place { .. }));
-        before - f.rules.len()
+        let mut n = 0;
+        for p in f.places.iter_mut() {
+            if p.on != PatchTarget::Fixture && p.wire.take().is_some() {
+                n += 1;
+            }
+        }
+        f.tidy_places();
+        n
     }
 
     // ---- helpers -----------------------------------------------------------
 
-    /// The place rule that places an object: the first naming it.
-    fn place_rule(&self, object: &ObjectId) -> Option<&PatchRule> {
-        let f = self.fixture_of(&object.component)?.fixture()?;
-        f.rules
-            .iter()
-            .find(|r| matches!(r, PatchRule::Place { object: o, .. } if o == object))
-    }
-
-    fn place_rule_mut(&mut self, object: &ObjectId) -> Option<&mut PatchRule> {
-        let fixture = self.fixture_of(&object.component)?.id.clone();
-        self.fixture_mut(&fixture)?
-            .rules
-            .iter_mut()
-            .find(|r| matches!(r, PatchRule::Place { object: o, .. } if o == object))
-    }
-
-    fn push_place(
-        &mut self,
-        object: &ObjectId,
-        output: NodeId,
-        port: String,
-        pixel: u32,
-        reversed: bool,
-        rotation: u32,
-    ) {
-        let Some(fixture) = self.fixture_of(&object.component).map(|n| n.id.clone()) else {
+    /// A wire of its own for an object, at the window `run` gives it (what
+    /// it follows put it there).
+    fn pin_at(&mut self, run: &ObjectRun) {
+        let Some(out) = self.output(&run.output) else {
             return;
         };
-        if let Some(f) = self.fixture_mut(&fixture) {
-            f.rules.push(PatchRule::Place {
-                object: object.clone(),
-                output,
+        let Some((i, pixel)) = out.port_at(run.wire) else {
+            return;
+        };
+        let port = out.ports[i].key.clone();
+        let target = PatchTarget::Object(run.object.clone());
+        if let Some(f) = self.fixture_mut(&run.fixture) {
+            f.place_mut(&target).wire = Some(Wire::At {
+                output: run.output.clone(),
                 port,
                 pixel,
-                reversed,
-                rotation,
             });
         }
     }
 
-    fn remove_place_rules(&mut self, object: &ObjectId) {
-        let Some(fixture) = self.fixture_of(&object.component).map(|n| n.id.clone()) else {
-            return;
-        };
-        if let Some(f) = self.fixture_mut(&fixture) {
-            f.rules
-                .retain(|r| !matches!(r, PatchRule::Place { object: o, .. } if o == object));
-        }
-    }
-
-    /// A place rule that lays an object exactly where `spans` (its spans
-    /// as auto flowed it: forward, unturned) put it.
-    fn pin_at(&mut self, object: &ObjectId, spans: &[Span]) {
-        let Some(first) = spans.first() else {
-            return;
-        };
-        let Some(out) = self.output(&first.output) else {
-            return;
-        };
-        let Some(port_start) = out.port_start(&first.port) else {
-            return;
-        };
-        // Where lamp 0 sits on the output's flat wire.
-        let wire = (port_start + first.start_pixel).saturating_sub(first.lamps.start);
-        let (port, pixel) = match out.port_at(wire) {
-            Some((i, pixel)) => (out.ports[i].key.clone(), pixel),
-            None => (first.port.clone(), first.start_pixel),
-        };
-        let output = first.output.clone();
-        self.push_place(object, output, port, pixel, false, 0);
-    }
-
-    /// Run an edit to the rules, then pin every object it moved that it
-    /// wasn't asked to move, where it was, until nothing else has moved.
+    /// Run an edit to the placements, then pin every object it moved that
+    /// it wasn't asked to move, where it was, until nothing else has moved.
     fn hand_edit(&mut self, edited: &[ObjectId], edit: impl FnOnce(&mut Project)) -> PatchEdit {
         let before = spans_by_object(&self.effective_patch().spans);
+        // Only what auto flowed is held still: a placed component's
+        // objects close up behind one that leaves it (plan D10).
+        let flowing: Vec<ObjectId> = self
+            .effective_patch()
+            .resolved
+            .iter()
+            .filter(|r| matches!(r.wire, Some(Wire::Auto { .. })))
+            .map(|r| r.object.clone())
+            .collect();
+        let runs_before: HashMap<ObjectId, ObjectRun> = self
+            .effective_patch()
+            .runs
+            .iter()
+            .map(|r| (r.object.clone(), r.clone()))
+            .collect();
         edit(self);
         let mut pinned = 0;
         // Objects a pin couldn't hold (their output or port is gone).
@@ -397,18 +448,24 @@ impl Project {
             let moved: Vec<ObjectId> = before
                 .iter()
                 .filter(|(o, was)| !edited.contains(o) && after.get(*o) != Some(*was))
-                .filter(|(o, _)| !stuck.contains(o) && self.place_rule(o).is_none())
+                .filter(|(o, _)| flowing.contains(o) && !stuck.contains(o))
+                .filter(|(o, _)| !matches!(self.on_wire(o), OnWire::Placed { .. }))
                 .map(|(o, _)| o.clone())
                 .collect();
             if moved.is_empty() {
                 return PatchEdit { pinned };
             }
             for o in moved {
-                self.pin_at(&o, &before[&o]);
-                if self.place_rule(&o).is_some() {
-                    pinned += 1;
-                } else {
-                    stuck.push(o);
+                match runs_before.get(&o) {
+                    Some(run) => {
+                        self.pin_at(run);
+                        if matches!(self.on_wire(&o), OnWire::Placed { .. }) {
+                            pinned += 1;
+                        } else {
+                            stuck.push(o);
+                        }
+                    }
+                    None => stuck.push(o),
                 }
             }
         }

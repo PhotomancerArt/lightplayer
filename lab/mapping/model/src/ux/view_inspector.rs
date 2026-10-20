@@ -4,7 +4,6 @@
 
 use crate::domain::node::{NodeId, NodeKind};
 use crate::domain::object::ObjectId;
-use crate::domain::patch::PatchRule;
 use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -230,11 +229,8 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
         .iter()
         .filter(|o| matches!(p.on_wire(&o.id), OnWire::Placed { .. }))
         .count();
-    let auto = match p
-        .fixture(fixture)
-        .and_then(|f| f.rules.iter().find(|r| matches!(r, PatchRule::Auto { .. })))
-    {
-        Some(r) => format!("Auto onto {}", p.node_name(r.output())),
+    let auto = match p.auto_output(fixture) {
+        Some(o) => format!("Auto onto {}", p.node_name(&o)),
         None => "Auto off".to_string(),
     };
     let mut out = vec![
@@ -380,11 +376,11 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 // Auto and how much is on the wire first, with what changes
                 // them (patching by hand), then the rules themselves.
                 rules.extend(patch_facts(p, id));
-                if fx.rules.is_empty() {
-                    rules.push(UiItem::Rule("No rule: its lamps go nowhere yet".into()));
+                if fx.places.is_empty() {
+                    rules.push(UiItem::Rule("Not placed: its lamps go nowhere yet".into()));
                 }
-                for r in &fx.rules {
-                    rules.push(UiItem::Rule(p.rule_label(r)));
+                for r in &fx.places {
+                    rules.push(UiItem::Rule(p.place_label(id, r)));
                 }
                 let lands: Vec<String> = p.ports_of(t).iter().map(|x| p.long_label(x)).collect();
                 if !lands.is_empty() {
@@ -396,7 +392,12 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     .filter(|u| &u.fixture == id)
                     .map(|u| u.lamps.len())
                     .sum();
-                let working = fx.rules.iter().any(|r| p.node(r.output()).is_some());
+                let working = fx.places.iter().any(|r| {
+                    r.wire
+                        .as_ref()
+                        .and_then(|w| w.output())
+                        .is_some_and(|o| p.node(o).is_some())
+                });
                 if left > 0 && working {
                     rules.push(UiItem::Rule(format!(
                         "{left} lamps past the end of its ports"

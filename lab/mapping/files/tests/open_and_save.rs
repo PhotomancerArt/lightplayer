@@ -5,7 +5,8 @@
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
 use lab_mapping_files::{DirFiles, MemFiles, Opened};
 use lab_mapping_model::{
-    Channel, ColorOrder, ComponentKind, NodeId, NodeKind, PatchRule, Project, Target,
+    Channel, ColorOrder, ComponentKind, Direction, NodeId, NodeKind, PatchPlace, PatchTarget,
+    Project, Target, Wire,
 };
 
 /// The choker opens with all five nodes, 12 paths and 73 lamps, its one
@@ -29,9 +30,12 @@ fn the_choker_opens() {
     let out = NodeId::new("output");
     assert_eq!(p.output(&out).unwrap().ports[0].pixels, None);
     assert_eq!(
-        f.rules,
-        vec![PatchRule::Auto {
-            output: out.clone()
+        f.places,
+        vec![PatchPlace {
+            wire: Some(Wire::Auto {
+                output: out.clone()
+            }),
+            ..PatchPlace::on(PatchTarget::Fixture)
         }]
     );
     assert_eq!(p.port_fill(&out, "0"), (73, 73));
@@ -91,19 +95,22 @@ fn the_radiance_dome_opens() {
             .iter()
             .all(|n| n.output().unwrap().ports.len() == 32)
     );
-    assert_eq!(f.rules.len(), 275);
-    assert!(f.rules.iter().all(|r| matches!(r, PatchRule::Place { .. })));
+    assert_eq!(f.places.len(), 275);
+    assert!(f.places.iter().all(|r| matches!(
+        (&r.on, &r.wire),
+        (PatchTarget::Object(_), Some(Wire::At { .. }))
+    )));
     assert_eq!(
-        f.rules
+        f.places
             .iter()
-            .filter(|r| matches!(r, PatchRule::Place { reversed: true, .. }))
+            .filter(|r| r.direction == Some(Direction::Reversed))
             .count(),
         1
     );
     assert_eq!(
-        f.rules
+        f.places
             .iter()
-            .filter(|r| matches!(r, PatchRule::Place { rotation, .. } if *rotation != 0))
+            .filter(|r| r.turn.is_some_and(|t| t != 0))
             .count(),
         1
     );
@@ -224,15 +231,17 @@ fn a_new_place_rule_writes_a_patch() {
     let out = NodeId::new("output");
     let fixture = NodeId::new("fixture");
     let a = p.fixture(&fixture).unwrap().components[2].id.clone();
-    p.fixture_mut(&fixture).unwrap().rules.insert(
+    p.fixture_mut(&fixture).unwrap().places.insert(
         0,
-        PatchRule::Place {
-            object: lab_mapping_model::ObjectId::new(&a, "path"),
-            output: out.clone(),
-            port: "0".into(),
-            pixel: 100,
-            reversed: true,
-            rotation: 0,
+        PatchPlace {
+            on: PatchTarget::Object(lab_mapping_model::ObjectId::new(&a, "path")),
+            wire: Some(Wire::At {
+                output: out.clone(),
+                port: "0".into(),
+                pixel: 100,
+            }),
+            direction: Some(Direction::Reversed),
+            turn: None,
         },
     );
     let saved = o.files.save(&p).unwrap();
@@ -243,8 +252,8 @@ fn a_new_place_rule_writes_a_patch() {
     );
     let again = reopen(&CHOKER, &saved.writes);
     assert_eq!(
-        again.project.fixture(&fixture).unwrap().rules,
-        p.fixture(&fixture).unwrap().rules
+        again.project.fixture(&fixture).unwrap().places,
+        p.fixture(&fixture).unwrap().places
     );
 }
 
@@ -290,6 +299,38 @@ fn the_desk_saves_as_a_new_project() {
         w
     };
     assert_eq!(wire(&again), wire(&desk));
+
+    // A circle placed whole, reversed, with one ring turned back the way it
+    // was drawn: today's rows can't say that (plan D14), so it saves as each
+    // ring at its address, and opens landing exactly as it did.
+    let mut placed = Project::seed();
+    let ring_display = placed.named("ring display").unwrap().id.clone();
+    let main = placed.named("main").unwrap().id.clone();
+    let circle = lab_mapping_model::ComponentId::new("circle1");
+    let target = PatchTarget::Component(circle.clone());
+    placed.set_wire(
+        &ring_display,
+        &target,
+        Some(Wire::At {
+            output: main.clone(),
+            port: "0".into(),
+            pixel: 5,
+        }),
+    );
+    placed.set_direction(&ring_display, &target, Some(Direction::Reversed));
+    placed.set_direction(
+        &ring_display,
+        &PatchTarget::Object(lab_mapping_model::ObjectId::new(&circle, "r2")),
+        Some(Direction::AsDrawn),
+    );
+    let saved = empty.save(&placed).unwrap();
+    let mut files = MemFiles::new(saved.writes.clone());
+    files.files.insert(
+        "project.json".into(),
+        r#"{"format": 11, "name": "desk"}"#.into(),
+    );
+    let again = Opened::open(&files).unwrap().project;
+    assert_eq!(wire(&again), wire(&placed));
 }
 
 /// A grid and a ring of several rings open whole (plan M4): the plasma

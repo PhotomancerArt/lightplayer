@@ -303,9 +303,10 @@ fn armed_the_board_previews_the_pair() {
     assert_ne!(unarmed, armed);
 }
 
-/// R reverses the placement while Move & draw is off, and the path's own
-/// direction (its points and flag) stays as drawn; with Move & draw on, R
-/// reverses the path itself.
+/// R reverses the placement while Move & draw is off: the object keeps
+/// its window, still flowing on auto, and runs the other way inside it,
+/// and the path's own direction (its points and flag) stays as drawn. With
+/// Move & draw on, R reverses the path itself.
 #[test]
 fn r_reverses_the_placement_with_move_and_draw_off() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3]);
@@ -321,10 +322,8 @@ fn r_reverses_the_placement_with_move_and_draw_off() {
         path,
         "the path is as drawn"
     );
-    assert!(matches!(
-        e.project.on_wire(&objects[0]),
-        OnWire::Placed { reversed: true, .. }
-    ));
+    assert_eq!(pixels(&e.project, &objects[0]), vec![2, 1, 0]);
+    assert_eq!(e.project.on_wire(&objects[0]), OnWire::Flowing);
     key(&mut e, Key::Char('d'), none());
     key(&mut e, Key::Char('r'), none());
     assert_ne!(
@@ -418,6 +417,104 @@ fn every_offered_patching_verb_does_something() {
     }
 }
 
+// ---- placements, inherited down the tree (plan D8–D11) ----------------------
+
+/// A fixture's objects follow its auto unless they say otherwise.
+#[test]
+fn objects_follow_the_fixtures_auto() {
+    let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3, 4]);
+    p.auto_patch(&f, &out);
+    assert_eq!(pixels(&p, &objects[0]), vec![0, 1, 2]);
+    assert_eq!(pixels(&p, &objects[1]), vec![3, 4, 5, 6]);
+    let r = p.effective_patch().resolved(&objects[1]).unwrap();
+    assert_eq!(r.wire_from, Some(PatchTarget::Fixture));
+}
+
+/// Placing a circle at a pixel puts its rings there end to end, in order.
+#[test]
+fn placing_a_circle_puts_its_rings_there_in_order() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        10,
+    );
+    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
+    assert_eq!(pixels(&p, &r1), (10..18).collect::<Vec<_>>());
+    assert_eq!(pixels(&p, &r2), (18..22).collect::<Vec<_>>());
+}
+
+/// Reversing a placed circle runs its rings in the other order, each the
+/// other way: that is "inside first", with no setting of its own.
+#[test]
+fn reversing_a_placed_circle_runs_its_rings_the_other_way_round() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    let target = PatchTarget::Component(circle.clone());
+    place(&mut p, &f, &target, &out, "0", 10);
+    p.set_direction(&f, &target, Some(Direction::Reversed))
+        .unwrap();
+    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
+    assert_eq!(pixels(&p, &r2), vec![13, 12, 11, 10]);
+    assert_eq!(pixels(&p, &r1), (14..22).rev().collect::<Vec<_>>());
+}
+
+/// I can reverse the direction of the leds on one ring without manually
+/// choosing its address: it keeps its slot in the circle's run.
+#[test]
+fn one_ring_reverses_without_an_address() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        10,
+    );
+    let r2 = ObjectId::new(&circle, "r2");
+    p.reverse_placement(&r2).unwrap();
+    assert_eq!(pixels(&p, &r2), vec![21, 20, 19, 18]);
+    let r = p.effective_patch().resolved(&r2).unwrap();
+    assert_eq!(r.wire_from, Some(PatchTarget::Component(circle.clone())));
+    assert_eq!(r.direction_from, Some(PatchTarget::Object(r2.clone())));
+}
+
+/// An object placed on its own leaves its component's run, and the others
+/// close up behind it; clearing its own wire puts it back.
+#[test]
+fn an_object_leaves_its_components_run_and_comes_back() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40), ("D1", 40)]);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        0,
+    );
+    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
+    p.patch_object(&r1, &out, "1", 5).unwrap();
+    assert_eq!(pixels(&p, &r2), vec![0, 1, 2, 3], "r2 closes up");
+    assert_eq!(landing(&p, &r1, 0), Some(("1".into(), 5)));
+    assert!(p.unpatch_object(&r1));
+    assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
+    assert_eq!(pixels(&p, &r2), vec![8, 9, 10, 11]);
+}
+
+/// Turn is an object's alone: a turn on a component turns nothing.
+#[test]
+fn turn_is_an_objects_alone() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    let target = PatchTarget::Component(circle.clone());
+    place(&mut p, &f, &target, &out, "0", 0);
+    p.fixture_mut(&f).unwrap().place_mut(&target).turn = Some(3);
+    let r1 = ObjectId::new(&circle, "r1");
+    assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
+}
+
 // ---- the piece ------------------------------------------------------------
 
 /// The piece shows the board's pixels through its true wiring, not the
@@ -468,19 +565,25 @@ fn a_hand_patch_matches_the_piece_when_done() {
             .collect::<Vec<_>>()
     };
     assert_eq!(kinds(&p), vec![DifferenceKind::NotPatched; 2]);
+    // Unpatching takes wires away; each object keeps its own direction and
+    // turn, so patching it back is all it takes.
     p.patch_object(a, &out, "0", 10).unwrap();
     p.patch_object(b, &out, "0", 0).unwrap();
+    assert!(piece.matches(&p));
+    // Reversed and turned wrong, it says which.
+    p.reverse_placement(b).unwrap();
     assert_eq!(kinds(&p), vec![DifferenceKind::Reversed]);
     p.reverse_placement(b).unwrap();
+    p.turn_placement(b, 1).unwrap();
     assert_eq!(kinds(&p), vec![DifferenceKind::Turned]);
-    p.turn_placement(b, 2).unwrap();
+    p.turn_placement(b, -1).unwrap();
     assert!(piece.matches(&p));
 }
 
 // ---- helpers --------------------------------------------------------------
 
 /// A bare project: one fixture `f` with a straight path per count, and an
-/// output `out` with these ports. No rules: the fixture is manual.
+/// output `out` with these ports. Nothing placed: the fixture is manual.
 fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec<ObjectId>) {
     let mut p = Project::new("t");
     p.add_shader(None, "rainbow", Pattern::Rainbow);
@@ -549,6 +652,32 @@ fn segment(output: &NodeId, port: &str, pixels: std::ops::Range<u32>) -> PairEnd
         port: port.into(),
         pixels,
     }
+}
+
+/// A bare project with one circle `circle` of two rings, r1 (8 lamps)
+/// then r2 (4), in a fixture `f` with nothing placed.
+fn circle(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId, ComponentId) {
+    let mut p = Project::new("t");
+    p.add_shader(None, "rainbow", Pattern::Rainbow);
+    let f = p.add_fixture(None, "f").unwrap();
+    let out = p.add_output(None, "out", ports).unwrap();
+    let c = p
+        .add(
+            &f,
+            ComponentKind::circle(Vec2::new(50.0, 50.0), &[(30.0, 8), (15.0, 4)]),
+        )
+        .unwrap();
+    (p, f, out, c)
+}
+
+/// Give a thing a wire at a port's pixel.
+fn place(p: &mut Project, f: &NodeId, t: &PatchTarget, out: &NodeId, port: &str, pixel: u32) {
+    let wire = Wire::At {
+        output: out.clone(),
+        port: port.into(),
+        pixel,
+    };
+    p.set_wire(f, t, Some(wire)).unwrap();
 }
 
 /// The project as the page has it: laid out, so its lamps sit in their

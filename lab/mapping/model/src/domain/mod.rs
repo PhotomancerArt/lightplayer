@@ -21,6 +21,8 @@ pub mod output;
 pub mod output_overrides;
 pub mod patch;
 pub mod patch_edits;
+pub mod patch_place;
+pub mod patch_resolve;
 pub mod pattern;
 pub mod picture;
 pub mod piece;
