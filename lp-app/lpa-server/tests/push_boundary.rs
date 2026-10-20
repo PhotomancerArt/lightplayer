@@ -112,11 +112,18 @@ fn text_that_spells_base64_is_pushed_and_read_back_as_text() {
         let WireServerMsgBody::Filesystem(FsResponse::Read { data, error, .. }) = answer else {
             panic!("{path}: {answer:?}");
         };
-        assert_eq!((data.as_deref(), error), (Some(bytes), None), "{path} as read");
+        assert_eq!(
+            (data.as_deref(), error),
+            (Some(bytes), None),
+            "{path} as read"
+        );
     }
 
     // A short write (under the deflate threshold) of each, by hand.
-    for (path, bytes) in [("/projects/demo/w1.txt", &b"abcd"[..]), ("/w2.bin", &binary[..])] {
+    for (path, bytes) in [
+        ("/projects/demo/w1.txt", &b"abcd"[..]),
+        ("/w2.bin", &binary[..]),
+    ] {
         let answer = board.request(
             &mut client,
             ClientRequest::Filesystem(FsRequest::Write {

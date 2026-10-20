@@ -18,7 +18,14 @@
 //! letters, never three binary bytes). Which form a body takes is decided by
 //! its bytes alone, so each body has exactly one encoding.
 //!
+//! Since wire 44 the filesystem messages carry their files the same way
+//! (`FsRequest::Write`, `WriteChunk`, `FsResponse::Read` and a changes page's
+//! `FileChunk`), so one rule holds for every file body on the wire; before,
+//! they shared one string slot between text and base64 and a text file
+//! spelling base64 (`abcd`) read back as binary.
+//!
 //! Use as `#[serde(with = "lpc_model::body_bytes")]` on a `Vec<u8>`, or
+//! `#[serde(with = "lpc_model::body_bytes::option")]` on an `Option<Vec<u8>>`, or
 //! [`BodyRef`]/[`BodyBuf`] where the bytes sit inside another container.
 
 use alloc::string::String;

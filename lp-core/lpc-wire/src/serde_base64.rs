@@ -452,7 +452,10 @@ mod tests {
     /// The body `json` (one of [`file_messages`]) carries, read by `name`'s
     /// type from a `&str` and from a `&[u8]`, which must agree.
     fn body_read_back(name: &str, json: &str) -> Vec<u8> {
-        fn both<T: serde::de::DeserializeOwned>(json: &str, data: impl Fn(T) -> Vec<u8>) -> Vec<u8> {
+        fn both<T: serde::de::DeserializeOwned>(
+            json: &str,
+            data: impl Fn(T) -> Vec<u8>,
+        ) -> Vec<u8> {
             let from_str = data(crate::json::from_str::<T>(json).unwrap());
             let from_slice = data(crate::json::from_slice::<T>(json.as_bytes()).unwrap());
             assert_eq!(from_str, from_slice, "{json}");
@@ -495,7 +498,12 @@ mod tests {
     #[test]
     fn binary_and_empty_bodies_round_trip_in_every_file_message() {
         let every_byte: Vec<u8> = (0..=255u8).collect();
-        for body in [&BINARY[..], &[0xff][..], &every_byte[..], &[0u8, 159, 146, 150][..]] {
+        for body in [
+            &BINARY[..],
+            &[0xff][..],
+            &every_byte[..],
+            &[0u8, 159, 146, 150][..],
+        ] {
             for (name, json) in file_messages(body) {
                 assert!(json.contains(r#""data":{"base64":""#), "{name}: {json}");
                 assert_eq!(body_read_back(name, &json), body, "{name}");
