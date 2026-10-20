@@ -31,9 +31,10 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     OfferArgs, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM, PLAYLIST_ENTRY_PARAM,
-    PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_SKIP_VERB,
-    PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, UiAction,
-    UiOffer, UiPanelTarget, UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry,
+    PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_RESET_VERB,
+    PLAYLIST_SKIP_VERB, PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB,
+    PLAYLIST_STEP_SHORTER_VERB, UiAction, UiOffer, UiPanelTarget, UiPatternEntryState,
+    UiPatternPicker, UiPatternPickerEntry,
 };
 
 use crate::app::module::PanelGesture;
@@ -78,6 +79,8 @@ pub fn PatternPicker(
     let next = verb(PLAYLIST_NEXT_VERB);
     let play = verb(PLAYLIST_PLAY_VERB);
     let skip = verb(PLAYLIST_SKIP_VERB);
+    // Offered only while the pick, the cycle or the switches are held.
+    let reset = verb(PLAYLIST_RESET_VERB);
     let cycle = PickerCycleVerbs {
         cycle: verb(PLAYLIST_CYCLE_VERB),
         shorter: verb(PLAYLIST_STEP_SHORTER_VERB),
@@ -110,6 +113,14 @@ pub fn PatternPicker(
                     title: "Next pattern",
                     offer: next,
                     on_action,
+                }
+                if reset.is_some() {
+                    ActionBlock {
+                        label: "↺",
+                        title: "Back to the authored patterns",
+                        offer: reset,
+                        on_action,
+                    }
                 }
             }
             // 2. cycle

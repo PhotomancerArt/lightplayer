@@ -4,7 +4,8 @@
 //! between the shared knobs and the playing pattern's own knobs:
 //!
 //! - the set's display names in authored order, the playing one marked —
-//!   tap one to play it (a dormant entry loads);
+//!   tap one to pick it (a dormant entry loads; the pick holds and survives
+//!   a reboot);
 //! - a cycle switch with its step time;
 //! - a per-pattern on/off, where off means "skip it in the cycle";
 //! - next and previous.
@@ -13,12 +14,13 @@
 //! playlist's offers, published under [`UiPatternPicker::verbs`]
 //! (`app/project/node/playlist_offers.rs`): `play` and `skip` with an
 //! `entry`, `cycle` with its toggle, `step-shorter`/`step-longer`, and
-//! `prev`/`next`. The widget presses them and decides nothing: a tap is a
-//! `PlaylistActivateOp`, the cycle and the on/off switches are whole-value
-//! panel writes on the playlist's `playlist.cycle` / `playlist.skip`
-//! channels, and next/prev are activates of a key core already chose (plan
-//! PD7 — no wire command for them). A verb core does not publish (no step
-//! left on the ladder, no other entry to go to) draws inert.
+//! `prev`/`next`, and `reset`. The widget presses them and decides nothing:
+//! a tap, next and prev are panel writes on the playlist's `playlist.entry`
+//! (a key core already chose), the cycle and the on/off switches are
+//! whole-value panel writes on `playlist.cycle` / `playlist.skip`, and
+//! reset lets all three go back to what was authored. A verb core does not
+//! publish (no step left on the ladder, no other entry to go to) draws
+//! inert.
 
 use crate::{OfferPath, UiPanelTarget};
 
@@ -44,6 +46,9 @@ pub struct UiPatternPicker {
     pub cycle_target: Option<UiPanelTarget>,
     /// Where an on/off write lands, and whether the panel holds it now.
     pub skip_target: Option<UiPanelTarget>,
+    /// Where a pick lands (`playlist.entry`), and whether the panel holds
+    /// one now.
+    pub entry_target: Option<UiPanelTarget>,
 }
 
 impl UiPatternPicker {
@@ -118,6 +123,7 @@ mod tests {
             cycle,
             cycle_target: None,
             skip_target: None,
+            entry_target: None,
         }
     }
 

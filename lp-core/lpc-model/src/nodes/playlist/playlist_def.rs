@@ -25,7 +25,13 @@ pub struct PlaylistDef {
     )]
     pub trigger: MapSlot<u32, ControlMessage>,
 
-    /// Entry shown when no triggered sequence is active.
+    /// The picked entry: where the playlist rests, and where the cycle
+    /// starts. The authored value is the default; Play mode overrides it
+    /// with a remembered panel write on `bus:playlist.entry`, which holds
+    /// and survives a reboot, and Clear returns it to the authored entry
+    /// (playlists-on-the-bus vision D1). A pick naming no authored entry
+    /// plays [`Self::effective_idle_entry`].
+    #[slot(consumed, default_bind = "bus:playlist.entry", panel = "show")]
     pub idle_entry: ValueSlot<u32>,
 
     /// Default outgoing crossfade duration in seconds.
@@ -85,14 +91,15 @@ impl PlaylistDef {
         crate::NodeKind::Playlist
     }
 
-    /// The entry this playlist plays when nothing else chose one: its
-    /// authored `idle_entry` when that names an authored entry, otherwise the
-    /// first authored entry by key — a dangling `idle_entry` plays the first
-    /// entry rather than nothing (multi-pattern plan, director ruling DD7).
-    /// With no entries at all, the authored value.
+    /// The authored entry this playlist rests on when nothing picked one:
+    /// its authored `idle_entry` when that names an authored entry,
+    /// otherwise the first authored entry by key — a dangling `idle_entry`
+    /// plays the first entry rather than nothing (multi-pattern plan,
+    /// director ruling DD7). With no entries at all, the authored value.
     ///
-    /// This is the entry the registry makes resident at load and the entry
-    /// the runtime playlist treats as idle, so the two always agree.
+    /// The registry makes this entry resident at load; a restored pick on
+    /// `bus:playlist.entry` replaces it before the first tick, and a pick
+    /// naming no authored entry falls back to it.
     pub fn effective_idle_entry(&self) -> u32 {
         let idle = *self.idle_entry.value();
         if self.entries.entries.contains_key(&idle) {
@@ -205,15 +212,16 @@ mod tests {
         assert!(def.prev_trigger_ids.data.is_none());
     }
 
-    /// Cycle and skip are consumed, default-bound to their playlist channels
+    /// The pick, cycle and skip are consumed, default-bound to their playlist channels
     /// and promoted to the panel: the authored value is the default, and a
     /// Play-mode panel write overrides it (plan A1).
     #[test]
-    fn cycle_and_skip_are_panel_public_default_bindings() {
+    fn pick_cycle_and_skip_are_panel_public_default_bindings() {
         let SlotShape::Record { fields, .. } = PlaylistDef::slot_shape() else {
             panic!("record shape");
         };
         for (name, channel) in [
+            ("idle_entry", "bus:playlist.entry"),
             ("cycle", "bus:playlist.cycle"),
             ("skip", "bus:playlist.skip"),
         ] {
@@ -287,5 +295,22 @@ mod tests {
             9,
             "no entries → authored value"
         );
+    }
+
+    /// The pick going on the bus changes no bytes: an authored `idle_entry`
+    /// reads and writes back as the same plain key.
+    #[test]
+    fn an_authored_idle_entry_round_trips_unchanged() {
+        let json = r#"{ "kind": "Playlist", "idle_entry": 3 }"#;
+        let registry = crate::SlotShapeRegistry::default();
+        let def = NodeDef::read_json(&registry, json).expect("playlist");
+        let NodeDef::Playlist(playlist) = &def else {
+            panic!("playlist def");
+        };
+        assert_eq!(*playlist.idle_entry.value(), 3);
+        let written = def.write_json(&registry).expect("write");
+        assert!(written.contains("\"idle_entry\": 3"), "{written}");
+        let again = NodeDef::read_json(&registry, &written).expect("re-read");
+        assert_eq!(again, def);
     }
 }

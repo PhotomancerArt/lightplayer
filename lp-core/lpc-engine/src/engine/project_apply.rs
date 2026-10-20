@@ -197,6 +197,10 @@ impl Engine {
                 &add_targets,
                 frame,
             )?;
+            // A reattached playlist is built on its authored entry; the
+            // pick it holds (a panel writer that survived the edit) decides
+            // its resident entry again before the next tick.
+            self.settle_load_deciding_panel_values();
             for location in add_targets {
                 if reattach_roots.contains(&location) {
                     if !result.reattached_nodes.contains(&location) {

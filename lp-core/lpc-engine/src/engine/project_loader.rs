@@ -909,6 +909,12 @@ impl ProjectLoader {
             }
         }
 
+        // One playlist per module (playlists-on-the-bus D10): two playlists
+        // reading one scope share its `playlist.entry`, `playlist.cycle` and
+        // `playlist.skip`. Said once at load, not as the playlist's status
+        // (Studio parses that for failed entries).
+        #[cfg(feature = "node-playlist")]
+        let mut playlist_scopes: Vec<crate::node::ScopeRef> = Vec::new();
         for node in projected_nodes {
             if !should_attach_projected_node(node, targets) {
                 continue;
@@ -918,6 +924,17 @@ impl ProjectLoader {
             }
             #[cfg(feature = "node-playlist")]
             {
+                if let Some(scope) = runtime.tree().bus_read_scope(node.id) {
+                    if playlist_scopes.contains(&scope) {
+                        log::warn!(
+                            "playlist {}: another playlist in the same module shares its \
+                             pick, cycle and skip list; put each playlist in its own module",
+                            node_label(node)
+                        );
+                    } else {
+                        playlist_scopes.push(scope);
+                    }
+                }
                 let (idle_entry, default_fade, entries, next_ids, prev_ids) = {
                     let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                         continue;

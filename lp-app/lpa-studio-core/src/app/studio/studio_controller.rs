@@ -49,11 +49,11 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, Controller, ControllerContext, ModuleExportOp,
     NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp,
-    NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState, SlotEditOp,
-    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    NodeRevertOp, PanelAutoSaveOp, PanelBatchOp, PanelClearOp, PanelWriteOp, PatchPulseOp,
+    PlaylistPickOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
@@ -4886,9 +4886,13 @@ impl StudioController {
                 self.mark_dirty();
                 return Ok(crate::core::notice::UiNotices::new());
             }
-            if action.op_as::<PlaylistActivateOp>().is_some() {
-                let op = action.into_op::<PlaylistActivateOp>()?;
-                return self.execute_playlist_activate_op(op).await;
+            if action.op_as::<PlaylistPickOp>().is_some() {
+                let op = action.into_op::<PlaylistPickOp>()?;
+                return self.execute_playlist_pick_op(op).await;
+            }
+            if action.op_as::<PanelBatchOp>().is_some() {
+                let op = action.into_op::<PanelBatchOp>()?;
+                return self.execute_panel_batch_op(op).await;
             }
             if action.op_as::<PanelWriteOp>().is_some() {
                 let op = action.into_op::<PanelWriteOp>()?;
@@ -9364,16 +9368,34 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Playlist entry-strip click: dispatch the activate-entry runtime
-    /// command (the non-overlay command channel). Quiet on acceptance —
-    /// the ACTIVE placard follows via the tightened refresh ticks; a
-    /// rejection comes back as a warning notice.
-    async fn execute_playlist_activate_op(&mut self, op: PlaylistActivateOp) -> UiResult {
+    /// A pattern pick (tap, next, prev, the entry strip): a panel write on
+    /// the playlist's `playlist.entry`. Quiet on acceptance — the playing
+    /// mark follows via the tightened refresh ticks.
+    async fn execute_playlist_pick_op(&mut self, op: PlaylistPickOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.activate_playlist_entry(server, op).await
+            self.project.pick_playlist_entry(server, op).await
         };
         self.record_project_edit_run(run)
+    }
+
+    /// Several panel writes, then clears, in order (the Pattern zone's
+    /// reset; the cycle switched off with the playing pattern picked).
+    async fn execute_panel_batch_op(&mut self, op: PanelBatchOp) -> UiResult {
+        let mut notices = crate::core::notice::UiNotices::new();
+        for write in op.writes {
+            notices
+                .notices
+                .extend(self.execute_panel_write_op(write).await?.notices);
+        }
+        for request in op.clears {
+            notices.notices.extend(
+                self.execute_panel_clear_op(PanelClearOp { request })
+                    .await?
+                    .notices,
+            );
+        }
+        Ok(notices)
     }
 
     /// Panel-control gesture: dispatch the `(scope, channel)` panel write

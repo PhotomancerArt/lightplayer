@@ -37,6 +37,14 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 44: a playlist pick is a panel write (plan
+///   `lp2025/2026-10-20-0001-playlists-on-the-bus`, vision D1/D15) — the
+///   runtime node-command channel is gone: `WireProjectCommand::NodeCommand`,
+///   its response arm, `WireNodeCommand` (`PlaylistActivateEntry`, its only
+///   variant) and `WireNodeCommandResponse`. A pick, next and previous are
+///   `PanelWrite`s on `playlist.entry`, which hold and survive a reboot.
+///   `PACK_FORMAT_VERSION` is unchanged. See
+///   `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`.
 /// - 43: `FsBootState::Refused` (`fs: refused`; plan
 ///   `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D1) — an
 ///   `fs-tree` board that found a newer or damaged tree-store header
@@ -443,7 +451,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 43;
+pub const WIRE_PROTO_VERSION: u32 = 44;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -874,7 +882,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 43,
+            WIRE_PROTO_VERSION, 44,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

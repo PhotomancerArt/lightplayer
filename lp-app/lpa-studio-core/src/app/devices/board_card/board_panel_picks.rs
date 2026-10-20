@@ -310,6 +310,7 @@ mod tests {
             cycle: lpc_model::PlaylistCycle::Hold,
             cycle_target: None,
             skip_target: None,
+            entry_target: None,
         }
     }
 }

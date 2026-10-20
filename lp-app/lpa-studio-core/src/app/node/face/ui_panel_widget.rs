@@ -53,9 +53,9 @@ pub enum UiPanelWidget {
     /// set's names with tap-to-play, the cycle switch and step, per-pattern
     /// on/off, next/prev.
     ///
-    /// A whole instrument with several gestures, not all of them panel
-    /// writes — tap and next/prev are `PlaylistActivateOp` runtime
-    /// commands — so each one rides the picker as a ready action.
+    /// A whole instrument with several gestures on three channels (the
+    /// pick, the cycle, the skip list), so each one rides the picker as a
+    /// playlist offer.
     PatternPicker {
         /// Names, states, cycle and every gesture's action.
         picker: crate::UiPatternPicker,

@@ -704,31 +704,39 @@ impl Engine {
         Ok(())
     }
 
-    /// Dispatch a runtime node command (`WireProjectCommand::NodeCommand`)
-    /// to the addressed node's live runtime.
-    ///
-    /// The runtime command channel is the non-overlay client→engine write
-    /// path (`docs/adr/2026-07-27-runtime-node-command-channel.md`): the
-    /// command acts on live runtime state only — no staging, no
-    /// persistence, no revision bump here (effects surface through the
-    /// node's own runtime slots on the next produce). Unknown/not-alive
-    /// nodes and runtime-refused commands come back as errors for the
-    /// server to answer as a normal `Rejected` response.
-    pub fn handle_node_command(
-        &mut self,
-        node: NodeId,
-        command: &lpc_wire::WireNodeCommand,
-    ) -> Result<(), EngineError> {
-        let time_s = self.frame_time.total_ms as f32 / 1000.0;
-        let entry = self
-            .tree
-            .get_mut(node)
-            .ok_or(EngineError::UnknownNode(node))?;
-        match entry.state.get_mut() {
-            NodeEntryState::Alive(runtime) => runtime
-                .handle_command(command, time_s)
-                .map_err(|e| EngineError::node(node, e)),
-            _ => Err(EngineError::NotAlive(node)),
+    /// Before the first tick after a load or a structural reattach: hand
+    /// every node the panel writers that supply its load-deciding slots
+    /// ([`NodeRuntime::load_deciding_slots`]), so a restored playlist pick
+    /// is the entry the first tick's residency step loads — the authored
+    /// entry is never sampled or compiled (playlists-on-the-bus Q3; the
+    /// scarf rule, panel.md P10). Writers that are nodes resolve on the
+    /// first produce as before.
+    pub fn settle_load_deciding_panel_values(&mut self) {
+        let mut settled: Vec<(NodeId, &'static str, lpc_model::LpValue, u64)> = Vec::new();
+        for entry in self.tree.entries() {
+            let NodeEntryState::Alive(runtime) = entry.state.value() else {
+                continue;
+            };
+            for slot in runtime.load_deciding_slots() {
+                let Ok(path) = SlotPath::parse(slot) else {
+                    continue;
+                };
+                let Some((scope, channel)) =
+                    consumed_slot_bus_provenance(&self.tree, &self.panel_writers, entry.id, &path)
+                else {
+                    continue;
+                };
+                if let Some(writer) = self.panel_writers.get(scope, &channel) {
+                    settled.push((entry.id, slot, writer.value.clone(), writer.write));
+                }
+            }
+        }
+        for (node, slot, value, write) in settled {
+            if let Some(entry) = self.tree.get_mut(node)
+                && let NodeEntryState::Alive(runtime) = entry.state.get_mut()
+            {
+                runtime.settle_consumed_panel_value(slot, &value, write);
+            }
         }
     }
 
@@ -1465,6 +1473,31 @@ impl Engine {
     }
 }
 
+/// Where a consumed slot's value comes from, when a bus channel with a live
+/// writer supplies it: the channel and the scope of the writer that wins
+/// the R5 walk outward from the reader (panel writers included).
+fn consumed_slot_bus_provenance(
+    tree: &RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    panel_writers: &crate::dataflow::panel_writers::PanelWriterStore,
+    node: NodeId,
+    slot: &SlotPath,
+) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
+    let (_, entry) = tree.binding_for_consumed_slot(node, slot)?;
+    let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
+        return None;
+    };
+    let channel = channel.clone();
+    let mut scope = tree.bus_read_scope(node)?;
+    loop {
+        if panel_writers.get(scope, &channel).is_some()
+            || !tree.providers_for_bus_in_scope(scope, &channel).is_empty()
+        {
+            return Some((scope, channel));
+        }
+        scope = tree.parent_scope(scope)?;
+    }
+}
+
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 /// The synthetic provider an engaged panel writer contributes: a literal
 /// source at panel priority, owned by the scope's introducing node. The
@@ -1851,23 +1884,14 @@ impl ResolveHost for EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
-        let (_, entry) = self.tree.binding_for_consumed_slot(node, slot)?;
-        let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
-            return None;
-        };
-        let channel = channel.clone();
-        let mut scope = self.node_scope(node)?;
-        loop {
-            if self.panel_writers.get(scope, &channel).is_some()
-                || !self
-                    .tree
-                    .providers_for_bus_in_scope(scope, &channel)
-                    .is_empty()
-            {
-                return Some((scope, channel));
-            }
-            scope = self.tree.parent_scope(scope)?;
-        }
+        consumed_slot_bus_provenance(self.tree, self.panel_writers, node, slot)
+    }
+
+    fn consumed_slot_panel_write(&self, node: NodeId, slot: &SlotPath) -> Option<u64> {
+        let (scope, channel) = self.consumed_slot_bus_provenance(node, slot)?;
+        self.panel_writers
+            .get(scope, &channel)
+            .map(|writer| writer.write)
     }
 
     fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
@@ -3869,67 +3893,5 @@ mod tests {
         ) -> Result<(), NodeError> {
             Ok(())
         }
-    }
-
-    #[test]
-    #[cfg(feature = "node-playlist")]
-    fn node_command_dispatches_to_the_addressed_runtime() {
-        use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
-        use lpc_wire::WireNodeCommand;
-
-        let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
-        let root = eng.tree().root();
-        let node = eng
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("playlist").expect("name"),
-                lpc_model::NodeName::parse("playlist").expect("kind"),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                test_placeholder_spine(),
-                Revision::new(1),
-            )
-            .expect("add node");
-        let entries = alloc::vec![PlaylistRuntimeEntry::dormant(1).loaded(NodeId::new(99))];
-        eng.attach_runtime_node(
-            node,
-            Box::new(PlaylistNode::new(node, 1, 0.0, entries)),
-            Revision::new(1),
-        )
-        .expect("attach node");
-
-        eng.handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 1 })
-            .expect("known entry accepted");
-
-        let err = eng
-            .handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 9 })
-            .expect_err("unknown entry rejected");
-        assert!(err.to_string().contains("no entry 9"), "{err}");
-
-        let err = eng
-            .handle_node_command(
-                NodeId::new(4242),
-                &WireNodeCommand::PlaylistActivateEntry { entry: 1 },
-            )
-            .expect_err("unknown node rejected");
-        assert!(matches!(err, EngineError::UnknownNode(_)));
-    }
-
-    /// Nodes without a `handle_command` override reject every command —
-    /// the channel is opt-in per runtime.
-    #[test]
-    fn node_command_default_is_rejected() {
-        use lpc_wire::WireNodeCommand;
-
-        let mut node = FailingNode;
-        let err = NodeRuntime::handle_command(
-            &mut node,
-            &WireNodeCommand::PlaylistActivateEntry { entry: 0 },
-            0.0,
-        )
-        .expect_err("default rejects");
-        assert!(err.to_string().contains("accepts no runtime commands"));
     }
 }
