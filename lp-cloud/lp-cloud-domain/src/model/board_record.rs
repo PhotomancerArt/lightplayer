@@ -7,11 +7,13 @@ use alloc::vec::Vec;
 use lpc_history::PrefixedUid;
 use lpc_relay::RelayBoardId;
 
-/// The most boards one account's list holds. A board new to a full list
-/// does not join it: the relay still lets the board online, and a Studio
-/// report is refused by name. The cap is the domain's rule, applied where a
-/// record is created; the store holds whatever it is given.
-pub const MAX_ACCOUNT_BOARDS: usize = 64;
+/// The most boards one account's list holds — the wire's one constant
+/// (`lpc_cloud_api::MAX_ACCOUNT_BOARDS`), so the list and its answer cannot
+/// disagree. A board new to a full list does not join it: the relay still
+/// lets the board online, and a Studio report is refused by name. The cap
+/// is the domain's rule, applied where a record is created; the store holds
+/// whatever it is given.
+pub use lpc_cloud_api::MAX_ACCOUNT_BOARDS;
 
 /// One board on one account's list.
 ///

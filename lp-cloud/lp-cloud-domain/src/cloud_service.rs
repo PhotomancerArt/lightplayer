@@ -11,14 +11,17 @@ use lpc_cloud_api::response::{
     Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, BoardList, BoardPictureList,
-    CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions, HeadInfo,
-    LoginOptionsInfo, MeInfo, MemberInfo, MemberRole, OidcOption, SessionInfo, SessionList,
-    SidecarMeta,
+    Access, AccountAccessInfo, AccountBoardList, AccountPasswordTier, Ack, Actor, BoardPictureList,
+    CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions, ForgetBoard, HeadInfo,
+    LoginOptionsInfo, MAX_ACCOUNT_BOARDS, MeInfo, MemberInfo, MemberRole, OidcOption, ReportBoard,
+    SeenOn, SessionInfo, SessionList, SidecarMeta,
 };
 use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
+use lpc_relay::{MAX_FIRMWARE_BYTES, MAX_LABEL_BYTES, MAX_PROJECT_NAME_BYTES, RelayBoardId};
 
+use crate::account_board_list::{account_board, with_presence};
 use crate::model::account_access::AccountAccess;
+use crate::model::board_record::{BoardFacts, BoardRecord, BoardSightings};
 use crate::model::caller::Caller;
 use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
@@ -40,6 +43,11 @@ const MAX_NAME_LEN: usize = 200;
 /// password is typed on a phone or shared as words; this only stops the
 /// field from being used as storage.
 const MAX_ACCOUNT_PASSWORD_LEN: usize = 128;
+
+/// Longest hardware model name `ReportBoard` stores. The relay has no limit
+/// of its own for it (its hello carries no model); a model is a product
+/// name ("XIAO ESP32-C6"), and this only stops the field being storage.
+const MAX_MODEL_BYTES: usize = 64;
 
 /// How many accounts the dev picker offers at once (`MetaStore::users`'s
 /// `limit`). Local dev only, and generous: a seeded-profile picker with
@@ -156,11 +164,11 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             }
             CloudRequest::ResetAccountKey => self.reset_account_key(caller).map(Into::into),
             // Presence is the relay's, in the edge's memory: lp-cloud-server
-            // answers `ListBoards` itself, asking `board_list_viewer` who is
-            // asking. A service with no relay attached knows no board online.
-            CloudRequest::ListBoards => self
-                .board_list_viewer(actor)
-                .map(|_| BoardList::default().into()),
+            // joins it onto these rows itself. A service with no relay
+            // attached knows no board online.
+            CloudRequest::ListAccountBoards => self.list_account_boards(actor).map(Into::into),
+            CloudRequest::ReportBoard(request) => self.report_board(actor, request).map(Into::into),
+            CloudRequest::ForgetBoard(request) => self.forget_board(actor, request).map(Into::into),
             // Pictures are the relay's too, and answered by the edge the
             // same way: a service with no relay holds none.
             CloudRequest::BoardPictures(_) => self
@@ -751,13 +759,95 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
 
     // ---- the relay ----------------------------------------------------
 
-    /// Whose boards a `ListBoards` caller sees: a signed-in account's own
-    /// (`Some(uid)`); a guest's, which are none (no board holds a guest's
-    /// key: guests are refused an account key), as `None`; and an anonymous
-    /// caller is `NotAuthenticated`.
+    /// Whose boards a `ListAccountBoards` or `BoardPictures` caller sees:
+    /// a signed-in account's own (`Some(uid)`); a guest's, which are none
+    /// (no board holds a guest's key: guests are refused an account key),
+    /// as `None`; and an anonymous caller is `NotAuthenticated`.
     pub fn board_list_viewer(&self, actor: Actor) -> Result<Option<PrefixedUid>, CloudError> {
         let user = self.require_user(actor)?;
         Ok((!user.anonymous).then_some(user.uid))
+    }
+
+    // ---- the account's board list -------------------------------------
+
+    /// The caller's board list, every row offline: the edge joins the
+    /// relay's presence on (`account_board_list::with_presence`). A guest's
+    /// list is empty. A record is only ever read for the caller's own uid.
+    fn list_account_boards(&self, actor: Actor) -> Result<AccountBoardList, CloudError> {
+        let Some(user) = self.board_list_viewer(actor)? else {
+            return Ok(AccountBoardList::default());
+        };
+        let rows = self
+            .store
+            .board_records_for_user(user)
+            .iter()
+            .map(account_board)
+            .collect();
+        Ok(AccountBoardList {
+            boards: with_presence(rows, Vec::new()),
+        })
+    }
+
+    /// A Studio found the caller's current account key on a board over
+    /// `seen_on`: put the board on the caller's list, or freshen its
+    /// record. Label, firmware and project take the report's word (cut to
+    /// the relay's own limits); the model only when the report names one;
+    /// `seen_on`'s sighting is now. A board new to a full list
+    /// ([`MAX_ACCOUNT_BOARDS`]) is refused `BoardListFull`; a board
+    /// already on it always updates. It grants nothing: only the caller's
+    /// own list moves.
+    fn report_board(&mut self, actor: Actor, report: ReportBoard) -> Result<Ack, CloudError> {
+        let user = self.require_signed_in(actor)?;
+        let board = parse_board_id(&report.id)?;
+        let now = self.clock.now();
+        let mut seen = BoardSightings::default();
+        match report.seen_on {
+            SeenOn::Usb => seen.usb = Some(now),
+            SeenOn::Ble => seen.ble = Some(now),
+            SeenOn::Lan => seen.lan = Some(now),
+        }
+        let facts = BoardFacts {
+            label: Some(cut_utf8(&report.label, MAX_LABEL_BYTES).into()),
+            model: report
+                .model
+                .map(|model| cut_utf8(&model, MAX_MODEL_BYTES).into()),
+            firmware: report
+                .firmware
+                .map(|firmware| cut_utf8(&firmware, MAX_FIRMWARE_BYTES).into()),
+            project: Some(
+                report
+                    .project
+                    .map(|project| cut_utf8(&project, MAX_PROJECT_NAME_BYTES).into()),
+            ),
+            seen,
+        };
+        let record = match self.store.board_record(user.uid, board) {
+            Some(mut record) => {
+                record.absorb(facts);
+                record
+            }
+            None => {
+                if self.store.board_records_for_user(user.uid).len() >= MAX_ACCOUNT_BOARDS {
+                    return Err(CloudError::BoardListFull {
+                        max: MAX_ACCOUNT_BOARDS as u32,
+                    });
+                }
+                BoardRecord::joining(user.uid, board, facts, now)
+            }
+        };
+        self.store.put_board_record(record);
+        Ok(Ack)
+    }
+
+    /// Take a board off the caller's own list. It keeps its keys, and it
+    /// joins again when it next proves the account's key. A board that was
+    /// not on the list is acknowledged all the same: a second press after a
+    /// reload is not an error.
+    fn forget_board(&mut self, actor: Actor, request: ForgetBoard) -> Result<Ack, CloudError> {
+        let user = self.require_signed_in(actor)?;
+        let board = parse_board_id(&request.id)?;
+        self.store.delete_board_record(user.uid, board);
+        Ok(Ack)
     }
 
     /// The account's stored access record, or a freshly minted one (stored
@@ -1036,6 +1126,26 @@ fn validate_email(email: &str) -> Result<String, CloudError> {
     } else {
         Err(invalid("email must look like name@domain"))
     }
+}
+
+/// A board id from the wire: twelve hex digits.
+fn parse_board_id(id: &str) -> Result<RelayBoardId, CloudError> {
+    id.parse::<RelayBoardId>()
+        .map_err(|_| invalid("a board id is twelve hex digits (its MAC)"))
+}
+
+/// The longest prefix of `text` that fits `max` bytes and ends on a
+/// character boundary — the relay's own cut, so a reported name is stored
+/// exactly as the relay would have stored it.
+fn cut_utf8(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 fn invalid(detail: &str) -> CloudError {

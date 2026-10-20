@@ -5,7 +5,7 @@
 //! Studio core does not know the cloud. This bridge follows the session
 //! and, signed in (a guest counts as signed out, as for the account's keys):
 //!
-//! - asks `ListBoards` at once, then every 30 s while the page is visible
+//! - asks `ListAccountBoards` at once, then every 30 s while the page is visible
 //!   (D4), and hands the answer to core as
 //!   [`StudioCommand::AccountBoards`], stamped with this page's clock. An
 //!   answer that does not come is `None`: core keeps nothing. Signing out
@@ -29,7 +29,9 @@ use lpa_studio_core::{
     AccountBoardPicture, AccountBoardRow, AccountBoardRows, CloudPictureAsk, StudioCommand,
     UiStudioView,
 };
-use lpc_cloud_api::{BoardList, BoardPicture, BoardPictureList, BoardPresence, KnownPicture};
+use lpc_cloud_api::{
+    AccountBoardList, BoardPicture, BoardPictureList, BoardPresence, KnownPicture,
+};
 
 use crate::cloud::CloudSession;
 
@@ -72,7 +74,7 @@ fn start_asking(
 ) {
     use gloo_timers::future::TimeoutFuture;
     use lpc_cloud_api::BoardPictures;
-    use lpc_cloud_api::request::ListBoards;
+    use lpc_cloud_api::request::ListAccountBoards;
 
     use crate::cloud::FetchCloudPort;
 
@@ -88,7 +90,8 @@ fn start_asking(
                 return;
             }
             if page_visible() {
-                let answer = lpa_cloud_client::call(&FetchCloudPort::new(), ListBoards).await;
+                let answer =
+                    lpa_cloud_client::call(&FetchCloudPort::new(), ListAccountBoards).await;
                 if !list_current() {
                     return;
                 }
@@ -165,11 +168,17 @@ pub fn picture_asks(view: &UiStudioView) -> Vec<CloudPictureAsk> {
         .unwrap_or_default()
 }
 
-/// `ListBoards`' answer as core's rows, stamped `at`.
-pub fn account_board_rows(list: BoardList, at: f64) -> AccountBoardRows {
+/// `ListAccountBoards`' answer as core's rows, stamped `at`: the boards
+/// online at lightplayer.app now.
+pub fn account_board_rows(list: AccountBoardList, at: f64) -> AccountBoardRows {
     AccountBoardRows {
         at,
-        boards: list.boards.into_iter().map(account_board_row).collect(),
+        boards: list
+            .boards
+            .into_iter()
+            .filter_map(|board| board.online)
+            .map(account_board_row)
+            .collect(),
     }
 }
 
@@ -218,18 +227,28 @@ mod tests {
 
     #[test]
     fn a_list_becomes_core_rows_stamped_with_the_pages_clock() {
+        let presence = BoardPresence {
+            id: "10bda3b08e30".to_string(),
+            label: "Fabric Test".to_string(),
+            wire_proto: 42,
+            lan: Some("192.168.4.20:80".to_string()),
+            same_network: true,
+            since: 5.0,
+            relay_proto: 2,
+            firmware: Some(String::new()),
+            project: Some("rainbow".to_string()),
+        };
         let rows = account_board_rows(
-            BoardList {
-                boards: vec![BoardPresence {
-                    id: "10bda3b08e30".to_string(),
-                    label: "Fabric Test".to_string(),
-                    wire_proto: 42,
-                    lan: Some("192.168.4.20:80".to_string()),
-                    same_network: true,
-                    since: 5.0,
-                    relay_proto: 2,
-                    firmware: Some(String::new()),
-                    project: Some("rainbow".to_string()),
+            AccountBoardList {
+                boards: vec![lpc_cloud_api::AccountBoard {
+                    id: presence.id.clone(),
+                    label: presence.label.clone(),
+                    model: None,
+                    firmware: None,
+                    project: None,
+                    joined_at: 1.0,
+                    seen: lpc_cloud_api::BoardSeen::default(),
+                    online: Some(presence),
                 }],
             },
             9.0,

@@ -213,9 +213,9 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         "emu_relay_link: boot → registered in {:.1} s wall (lp-emu:esp32c6:t1+net=lan)",
         booted.elapsed().as_secs_f64()
     );
-    let list = cloud.list_boards(&alice.session);
-    assert_eq!(list.boards.len(), 1);
-    let presence = &list.boards[0];
+    let list = cloud.online_boards(&alice.session);
+    assert_eq!(list.len(), 1);
+    let presence = &list[0];
     assert!(
         presence
             .lan
@@ -305,8 +305,8 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     // the accounts the board proved read its picture.
     let named = Instant::now();
     loop {
-        let list = cloud.list_boards(&alice.session);
-        let project = list.boards.first().and_then(|b| b.project.clone());
+        let list = cloud.online_boards(&alice.session);
+        let project = list.first().and_then(|b| b.project.clone());
         if project.as_deref() == Some(BASIC_NAME) {
             break;
         }
@@ -656,9 +656,9 @@ fn a_protocol_1_core_at_the_new_hub_is_answered_as_before() {
     eprintln!(
         "emu_relay_link (protocol 1): registered by itself (the board answers: relay connected)"
     );
-    let list = cloud.list_boards(&alice.session);
-    assert_eq!(list.boards.len(), 1);
-    let presence = &list.boards[0];
+    let list = cloud.online_boards(&alice.session);
+    assert_eq!(list.len(), 1);
+    let presence = &list[0];
     assert_eq!(presence.relay_proto, 1, "{presence:?}");
     assert_eq!(presence.firmware, None, "{presence:?}");
     assert_eq!(presence.project, None, "{presence:?}");
@@ -741,8 +741,8 @@ fn a_protocol_1_core_at_the_new_hub_is_answered_as_before() {
         board.output()
     );
     let session = cloud.session_for(alice.uid);
-    let list = cloud.list_boards(&session);
-    assert_eq!(list.boards[0].relay_proto, 1, "{:?}", list.boards[0]);
+    let list = cloud.online_boards(&session);
+    assert_eq!(list[0].relay_proto, 1, "{:?}", list[0]);
     // Two more status answers through the console, so a leg that would
     // drop on the new hub's first frames has had time to say so.
     console.wait_answers(2);

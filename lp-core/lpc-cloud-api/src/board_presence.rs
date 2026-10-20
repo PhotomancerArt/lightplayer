@@ -1,12 +1,12 @@
-//! A board online at the relay, as `ListBoards` reports it.
+//! A board online at the relay, as `ListAccountBoards` reports it
+//! ([`crate::account_board::AccountBoard::online`]).
 
 use alloc::string::String;
-use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// One of the signed-in account's boards that is connected to the relay
-/// right now. Presence lives in the relay's memory only: a board that is
-/// offline is simply absent, and Studio shows it from its own list.
+/// right now. Presence lives in the relay's memory only: an offline board's
+/// row on the account's list simply has none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BoardPresence {
@@ -42,67 +42,57 @@ pub struct BoardPresence {
     pub project: Option<String>,
 }
 
-/// Answers [`crate::request::ListBoards`]: at most
-/// [`MAX_LISTED_BOARDS`] boards, oldest registration first.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct BoardList {
-    /// The account's online boards.
-    pub boards: Vec<BoardPresence>,
-}
-
-/// The most boards one `ListBoards` answer carries.
-pub const MAX_LISTED_BOARDS: usize = 16;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::string::ToString;
-    use alloc::vec;
 
     #[test]
     fn pinned_json_literal() {
-        let list = BoardList {
-            boards: vec![BoardPresence {
-                id: "10bda3b08e30".to_string(),
-                label: "Lamp".to_string(),
-                wire_proto: 39,
-                lan: Some("192.168.4.20:80".to_string()),
-                same_network: true,
-                since: 1.5,
-                relay_proto: 1,
-                firmware: None,
-                project: None,
-            }],
+        let presence = BoardPresence {
+            id: "10bda3b08e30".to_string(),
+            label: "Lamp".to_string(),
+            wire_proto: 39,
+            lan: Some("192.168.4.20:80".to_string()),
+            same_network: true,
+            since: 1.5,
+            relay_proto: 1,
+            firmware: None,
+            project: None,
         };
-        let json = serde_json::to_string(&list).unwrap();
+        let json = serde_json::to_string(&presence).unwrap();
         assert_eq!(
             json,
-            r#"{"boards":[{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":"192.168.4.20:80","sameNetwork":true,"since":1.5,"relayProto":1}]}"#
+            r#"{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":"192.168.4.20:80","sameNetwork":true,"since":1.5,"relayProto":1}"#
         );
-        assert_eq!(serde_json::from_str::<BoardList>(&json).unwrap(), list);
+        assert_eq!(
+            serde_json::from_str::<BoardPresence>(&json).unwrap(),
+            presence
+        );
     }
 
     /// v6: a protocol 2 board's firmware and project name.
     #[test]
     fn pinned_json_literal_with_firmware_and_project() {
-        let list = BoardList {
-            boards: vec![BoardPresence {
-                id: "10bda3b08e30".to_string(),
-                label: "Lamp".to_string(),
-                wire_proto: 39,
-                lan: None,
-                same_network: false,
-                since: 1.5,
-                relay_proto: 2,
-                firmware: Some("2026.10.09-1".to_string()),
-                project: Some("Rocaille".to_string()),
-            }],
+        let presence = BoardPresence {
+            id: "10bda3b08e30".to_string(),
+            label: "Lamp".to_string(),
+            wire_proto: 39,
+            lan: None,
+            same_network: false,
+            since: 1.5,
+            relay_proto: 2,
+            firmware: Some("2026.10.09-1".to_string()),
+            project: Some("Rocaille".to_string()),
         };
-        let json = serde_json::to_string(&list).unwrap();
+        let json = serde_json::to_string(&presence).unwrap();
         assert_eq!(
             json,
-            r#"{"boards":[{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":null,"sameNetwork":false,"since":1.5,"relayProto":2,"firmware":"2026.10.09-1","project":"Rocaille"}]}"#
+            r#"{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":null,"sameNetwork":false,"since":1.5,"relayProto":2,"firmware":"2026.10.09-1","project":"Rocaille"}"#
         );
-        assert_eq!(serde_json::from_str::<BoardList>(&json).unwrap(), list);
+        assert_eq!(
+            serde_json::from_str::<BoardPresence>(&json).unwrap(),
+            presence
+        );
     }
 }

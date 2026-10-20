@@ -42,6 +42,7 @@
 
 extern crate alloc;
 
+pub mod account_board_list;
 pub mod cloud_service;
 pub mod model;
 pub mod ports;

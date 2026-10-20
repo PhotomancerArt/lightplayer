@@ -18,8 +18,9 @@ use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
 use lp_cloud_server::router::build_router;
 use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpc_cloud_api::{
-    Actor, Base64Bytes, BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall,
-    CloudReply, CloudRequest, CloudResponse, KnownPicture,
+    AccountBoard, Ack, Actor, Base64Bytes, BoardPictureList, BoardPictures, BoardPresence,
+    CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest, CloudResponse, KnownPicture,
+    ReportBoard, SeenOn,
 };
 use lpc_relay::{
     LanAddress, PictureRate, RELAY_PROTO_VERSION, RefuseReason, RelayAccount, RelayAction,
@@ -43,9 +44,9 @@ async fn a_board_registers_and_its_account_lists_it_on_the_same_network() {
     let board = FakeBoard::spawn(server.port, vec![alice.relay_account()]);
     board.wait_for(RelayState::Connected).await;
 
-    let boards = server.list_boards(&alice.cookie).await;
-    assert_eq!(boards.boards.len(), 1);
-    let listed = &boards.boards[0];
+    let boards = server.online_boards(&alice.cookie).await;
+    assert_eq!(boards.len(), 1);
+    let listed = &boards[0];
     assert_eq!(listed.id, BOARD_ID);
     assert_eq!(listed.label, "Lamp");
     assert_eq!(listed.wire_proto, 39);
@@ -53,7 +54,40 @@ async fn a_board_registers_and_its_account_lists_it_on_the_same_network() {
     assert!(listed.same_network, "both legs come from 127.0.0.1");
 
     let bob = server.account("bob").await;
-    assert!(server.list_boards(&bob.cookie).await.boards.is_empty());
+    assert!(server.online_boards(&bob.cookie).await.is_empty());
+}
+
+/// A board a Studio reported (it found the account's key on it over USB)
+/// is on the account's list while it is nowhere near the relay: offline,
+/// with the report's facts. Another account's list does not have it.
+#[tokio::test]
+async fn a_reported_board_is_listed_offline_for_its_reporter_only() {
+    let server = Server::start().await;
+    let alice = server.account("alice").await;
+    let bob = server.account("bob").await;
+    let report = CloudRequest::ReportBoard(ReportBoard {
+        id: BOARD_ID.to_string(),
+        label: "Lamp".to_string(),
+        model: Some("XIAO ESP32-C6".to_string()),
+        firmware: Some("2026.10.20-1".to_string()),
+        project: Some("Rocaille".to_string()),
+        seen_on: SeenOn::Usb,
+    });
+    assert_eq!(
+        server.call(&alice.cookie, report).await,
+        CloudResponse::Ack(Ack)
+    );
+
+    let listed = server.account_boards(&alice.cookie).await;
+    assert_eq!(listed.len(), 1);
+    let board = &listed[0];
+    assert_eq!(board.id, BOARD_ID);
+    assert_eq!(board.label, "Lamp");
+    assert_eq!(board.model.as_deref(), Some("XIAO ESP32-C6"));
+    assert_eq!(board.project.as_deref(), Some("Rocaille"));
+    assert!(board.seen.usb.is_some());
+    assert_eq!(board.online, None);
+    assert!(server.account_boards(&bob.cookie).await.is_empty());
 }
 
 #[tokio::test]
@@ -201,7 +235,7 @@ async fn a_reconnect_storm_of_fifty_boards_does_not_starve_the_api() {
             server.state.relay().board_count()
         );
         let asked = Instant::now();
-        server.list_boards(&accounts[0].cookie).await;
+        server.online_boards(&accounts[0].cookie).await;
         slowest = slowest.max(asked.elapsed());
         calls += 1;
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -216,10 +250,7 @@ async fn a_reconnect_storm_of_fifty_boards_does_not_starve_the_api() {
     for board in &boards {
         board.wait_for(RelayState::Connected).await;
     }
-    assert_eq!(
-        server.list_boards(&accounts[0].cookie).await.boards.len(),
-        10
-    );
+    assert_eq!(server.online_boards(&accounts[0].cookie).await.len(), 10);
 }
 
 /// Protocol 1, the bytes every fielded core speaks: a board registered by
@@ -234,12 +265,12 @@ async fn a_protocol_1_board_registers_and_routes_as_before() {
     let hello = RelayHello::new(MAC, "Old lamp", 39, None, vec![alice.salt]);
     let mut board = RawBoard::register(&server, &alice, hello).await;
 
-    let listed = server.list_boards(&alice.cookie).await;
-    assert_eq!(listed.boards.len(), 1);
-    assert_eq!(listed.boards[0].label, "Old lamp");
-    assert_eq!(listed.boards[0].relay_proto, 1);
-    assert_eq!(listed.boards[0].firmware, None);
-    assert_eq!(listed.boards[0].project, None);
+    let listed = server.online_boards(&alice.cookie).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].label, "Old lamp");
+    assert_eq!(listed[0].relay_proto, 1);
+    assert_eq!(listed[0].firmware, None);
+    assert_eq!(listed[0].project, None);
 
     let mut session = server.browser(BOARD_ID, Some(&alice.cookie)).await;
     let RelayFrame::Open { route } = board.next_frame().await else {
@@ -340,7 +371,7 @@ async fn a_protocol_2_board_gets_its_rate_and_its_picture_is_read_through_the_ap
         "no rate for a non-member's watch"
     );
 
-    let listed = &server.list_boards(&alice.cookie).await.boards[0];
+    let listed = &server.online_boards(&alice.cookie).await[0];
     assert_eq!(
         (
             listed.relay_proto,
@@ -377,7 +408,7 @@ async fn a_picture_outlives_its_board_until_the_server_restarts() {
     board.ws.close(None).await.unwrap();
     drop(board);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !server.list_boards(&alice.cookie).await.boards.is_empty() {
+    while !server.online_boards(&alice.cookie).await.is_empty() {
         assert!(Instant::now() < deadline, "the board never left");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -421,7 +452,7 @@ async fn protocol_1_and_2_boards_share_one_hub() {
 
     let picture = server.wait_for_picture(&alice.cookie, BOARD_ID).await;
     assert_eq!(picture.colors, Some(Base64Bytes(fake_picture().colors)));
-    let mut listed = server.list_boards(&alice.cookie).await.boards;
+    let mut listed = server.online_boards(&alice.cookie).await;
     listed.sort_by(|a, b| a.id.cmp(&b.id));
     let seen: Vec<(&str, u16, Option<&str>, Option<&str>)> = listed
         .iter()
@@ -546,24 +577,23 @@ impl Server {
         cookie(&token)
     }
 
-    async fn list_boards(&self, cookie: &str) -> BoardList {
-        let reply: CloudReply = reqwest::Client::new()
-            .post(format!("http://127.0.0.1:{}/api", self.port))
-            .header("cookie", cookie)
-            .json(&CloudCall {
-                version: CLOUD_API_VERSION,
-                request: CloudRequest::ListBoards,
-            })
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        match reply.result.unwrap() {
-            CloudResponse::BoardList(list) => list,
+    /// `ListAccountBoards` through `/api`: every board on the account's
+    /// list, online or not.
+    async fn account_boards(&self, cookie: &str) -> Vec<AccountBoard> {
+        match self.call(cookie, CloudRequest::ListAccountBoards).await {
+            CloudResponse::AccountBoardList(list) => list.boards,
             other => panic!("{other:?}"),
         }
+    }
+
+    /// The account's boards that are online now: `ListAccountBoards`'
+    /// rows that carry presence, in its order (by when they came online).
+    async fn online_boards(&self, cookie: &str) -> Vec<BoardPresence> {
+        self.account_boards(cookie)
+            .await
+            .into_iter()
+            .filter_map(|board| board.online)
+            .collect()
     }
 
     async fn browser(&self, id: &str, cookie: Option<&str>) -> Ws {

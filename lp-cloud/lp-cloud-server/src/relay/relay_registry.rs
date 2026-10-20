@@ -227,7 +227,8 @@ impl RelayRegistry {
         inner.apply(actions);
     }
 
-    /// `ListBoards` for `user`, calling from `ip`.
+    /// The boards `user` proved that are online, for `ListAccountBoards`,
+    /// calling from `ip`.
     pub fn boards_for(&self, user: PrefixedUid, ip: Option<IpAddr>) -> Vec<BoardPresence> {
         self.lock().hub.boards_for(user, ip)
     }

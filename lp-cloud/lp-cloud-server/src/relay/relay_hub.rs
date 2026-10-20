@@ -53,7 +53,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use lp_cloud_domain::BoardAccounts;
-use lpc_cloud_api::{Base64Bytes, BoardPicture, BoardPresence, KnownPicture, MAX_LISTED_BOARDS};
+use lpc_cloud_api::{Base64Bytes, BoardPicture, BoardPresence, KnownPicture, MAX_ACCOUNT_BOARDS};
 use lpc_history::PrefixedUid;
 use lpc_relay::{
     LanAddress, MAX_ROUTES_PER_BOARD, PictureRate, RELAY_PROTO_2, RefuseReason, RelayBoardId,
@@ -68,9 +68,10 @@ pub type LegId = u64;
 
 /// The most boards one account may have online at once. A registration
 /// whose every account is already at it is refused
-/// [`RefuseReason::TooManyBoards`]; `ListBoards` shows at most this many
-/// anyway ([`MAX_LISTED_BOARDS`]).
-pub const MAX_BOARDS_PER_ACCOUNT: usize = MAX_LISTED_BOARDS;
+/// [`RefuseReason::TooManyBoards`]. The account's board list holds, and
+/// `ListAccountBoards` answers, at most this many anyway
+/// ([`MAX_ACCOUNT_BOARDS`]).
+pub const MAX_BOARDS_PER_ACCOUNT: usize = MAX_ACCOUNT_BOARDS;
 
 /// What the hub asks the legs to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,7 +131,8 @@ impl OnlineBoard {
         self.routes.len()
     }
 
-    /// The board as `ListBoards` shows it to a caller at `caller_ip`.
+    /// The board as `ListAccountBoards` shows it online to a caller at
+    /// `caller_ip`.
     #[must_use]
     pub fn presence(&self, caller_ip: Option<IpAddr>) -> BoardPresence {
         let board = &self.registration;
@@ -441,7 +443,7 @@ impl RelayHub {
     }
 
     /// `BoardPictures` for `user` at `now`: the pictures of the first
-    /// [`MAX_LISTED_BOARDS`] asked-for boards that `user` may read (the
+    /// [`MAX_ACCOUNT_BOARDS`] asked-for boards that `user` may read (the
     /// rest are simply absent), colours left out where the caller already
     /// holds that `seq`; and, with `watch`, each of those boards watched.
     pub fn pictures_for(
@@ -453,7 +455,7 @@ impl RelayHub {
     ) -> (Vec<BoardPicture>, Vec<HubAction>) {
         let mut pictures = Vec::new();
         let mut actions = Vec::new();
-        for known in asked.iter().take(MAX_LISTED_BOARDS) {
+        for known in asked.iter().take(MAX_ACCOUNT_BOARDS) {
             let Ok(id) = known.id.parse::<RelayBoardId>() else {
                 continue;
             };
@@ -476,8 +478,8 @@ impl RelayHub {
         (pictures, actions)
     }
 
-    /// The boards `user` sees in `ListBoards`, oldest first, at most
-    /// [`MAX_LISTED_BOARDS`], with `sameNetwork` against `caller_ip`.
+    /// The boards `user` sees online in `ListAccountBoards`, oldest first, at most
+    /// [`MAX_ACCOUNT_BOARDS`], with `sameNetwork` against `caller_ip`.
     #[must_use]
     pub fn boards_for(&self, user: PrefixedUid, caller_ip: Option<IpAddr>) -> Vec<BoardPresence> {
         let mut boards: Vec<&OnlineBoard> = self
@@ -493,7 +495,7 @@ impl RelayHub {
         });
         boards
             .into_iter()
-            .take(MAX_LISTED_BOARDS)
+            .take(MAX_ACCOUNT_BOARDS)
             .map(|board| board.presence(caller_ip))
             .collect()
     }
@@ -1229,22 +1231,22 @@ mod tests {
     }
 
     #[test]
-    fn a_read_asks_about_at_most_sixteen_boards() {
+    fn a_read_asks_about_at_most_sixty_four_boards() {
         let mut hub = RelayHub::new();
-        for n in 0..17u8 {
+        for n in 0..65u8 {
             let leg = u64::from(n) + 10;
-            // Bob is on all seventeen; each board's other account has room.
+            // Bob is on all sixty-five; each board's other account has room.
             hub.register(registration_v2(n, leg, &[BOB, 100 + n], 0.0))
                 .unwrap();
             hub.from_board(leg, RelayFrame::Picture(picture(1)), 1.0);
         }
-        let all: Vec<u8> = (0..17).collect();
+        let all: Vec<u8> = (0..65).collect();
         let (pictures, _) = hub.pictures_for(user(BOB), &known(&all), false, 2.0);
-        assert_eq!(pictures.len(), MAX_LISTED_BOARDS);
+        assert_eq!(pictures.len(), MAX_ACCOUNT_BOARDS);
         assert!(
             !pictures
                 .iter()
-                .any(|picture| picture.id == id(16).to_string())
+                .any(|picture| picture.id == id(64).to_string())
         );
         let garbage = vec![KnownPicture {
             id: "not a board".into(),

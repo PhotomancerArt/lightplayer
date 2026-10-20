@@ -30,14 +30,22 @@ use crate::error::CloudError;
 /// [`AccountAccessInfo`](crate::account_access_info::AccountAccessInfo).
 ///
 /// v5 = the cloud relay (2026-10-06): `ListBoards`, answered by
-/// [`BoardList`](crate::board_presence::BoardList) — the signed-in account's
-/// boards online at the relay.
+/// `BoardList` — the signed-in account's boards online at the relay
+/// (replaced in v7).
 ///
 /// v6 = pictures through the cloud (2026-10-08): `BoardPictures`, answered
 /// by [`BoardPictureList`](crate::board_picture::BoardPictureList) — a
 /// board's last picture, kept by the relay, read by the board's accounts;
 /// and `BoardPresence.relayProto` / `firmware` / `project`.
-pub const CLOUD_API_VERSION: u32 = 6;
+///
+/// v7 = the account's board list (2026-10-20):
+/// [`ListAccountBoards`](crate::request::ListAccountBoards), answered by
+/// [`AccountBoardList`](crate::account_board::AccountBoardList) — every
+/// board on the account's list, online or not, with its presence where it
+/// is online; [`ReportBoard`](crate::account_board::ReportBoard) and
+/// [`ForgetBoard`](crate::account_board::ForgetBoard);
+/// [`CloudError::BoardListFull`]. `ListBoards` and `BoardList` are removed.
+pub const CLOUD_API_VERSION: u32 = 7;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///

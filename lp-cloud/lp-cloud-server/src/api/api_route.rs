@@ -28,9 +28,10 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use lp_cloud_domain::{Caller, session_token_hash};
+use lp_cloud_domain::account_board_list::{account_board, with_presence};
+use lp_cloud_domain::{Caller, MetaStore, session_token_hash};
 use lpc_cloud_api::{
-    BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall, CloudError,
+    AccountBoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall, CloudError,
     CloudReply, CloudRequest, CloudResponse, check_version,
 };
 use serde::Deserialize;
@@ -72,7 +73,7 @@ pub async fn post_api(
 
     let token = session_token(&headers);
     let result = match call.request {
-        CloudRequest::ListBoards => list_boards(&state, token, ip).await,
+        CloudRequest::ListAccountBoards => list_account_boards(&state, token, ip).await,
         CloudRequest::BoardPictures(request) => board_pictures(&state, token, request).await,
         request => {
             state
@@ -96,28 +97,46 @@ pub async fn post_api(
     .into_response()
 }
 
-/// `ListBoards`: presence is the relay's, in this process's memory, so it is
-/// answered here rather than by the domain — which still decides who is
-/// asking ([`board_list_viewer`](lp_cloud_domain::CloudService::board_list_viewer)).
-async fn list_boards(
+/// `ListAccountBoards`: the records are the store's, presence is the
+/// relay's (in this process's memory), so the two are joined here. The
+/// domain still decides who is asking
+/// ([`board_list_viewer`](lp_cloud_domain::CloudService::board_list_viewer))
+/// and builds the rows; presence is attached only for boards the relay says
+/// the viewer proved (a record grants nothing), and an online board the
+/// viewer proved with no record yet is listed from its presence.
+async fn list_account_boards(
     state: &AppState,
     token: Option<Vec<u8>>,
     ip: Option<IpAddr>,
 ) -> Result<CloudResponse, CloudError> {
-    let viewer = state
+    let (viewer, rows) = state
         .with_service(move |core| {
             let actor = core.actor_for(token.as_deref());
-            core.service.board_list_viewer(actor)
+            let viewer = core.service.board_list_viewer(actor)?;
+            let rows = viewer
+                .map(|user| {
+                    core.service
+                        .store()
+                        .board_records_for_user(user)
+                        .iter()
+                        .map(account_board)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok::<_, CloudError>((viewer, rows))
         })
         .await?;
-    let boards = viewer
+    let online = viewer
         .map(|user| state.relay().boards_for(user, ip))
         .unwrap_or_default();
-    Ok(BoardList { boards }.into())
+    Ok(AccountBoardList {
+        boards: with_presence(rows, online),
+    }
+    .into())
 }
 
 /// `BoardPictures`: the relay's last pictures, in this process's memory, so
-/// answered here like `ListBoards`, for the same viewer. A guest reads
+/// answered here like `ListAccountBoards`, for the same viewer. A guest reads
 /// nothing and watches nothing; a board the viewer may not read, or with no
 /// picture, is simply absent (no oracle about other people's boards).
 async fn board_pictures(

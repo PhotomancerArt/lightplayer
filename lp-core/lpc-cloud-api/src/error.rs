@@ -44,6 +44,14 @@ pub enum CloudError {
         /// Human-readable detail; not stable, not for programmatic matching.
         detail: String,
     },
+    /// A [`crate::account_board::ReportBoard`] named a board new to the
+    /// account's list, and the list already holds `max` boards. Nothing
+    /// was written; the caller removes a board to make room.
+    BoardListFull {
+        /// How many boards a list holds
+        /// ([`MAX_ACCOUNT_BOARDS`](crate::account_board::MAX_ACCOUNT_BOARDS)).
+        max: u32,
+    },
 }
 
 #[cfg(test)]
@@ -111,5 +119,14 @@ mod tests {
             .unwrap(),
             r#"{"versionMismatch":{"client":1,"server":2}}"#
         );
+    }
+
+    /// v7's refusal for a full board list, pinned.
+    #[test]
+    fn pinned_json_literal_board_list_full() {
+        let err = CloudError::BoardListFull { max: 64 };
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, r#"{"boardListFull":{"max":64}}"#);
+        assert_eq!(serde_json::from_str::<CloudError>(&json).unwrap(), err);
     }
 }
