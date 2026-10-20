@@ -57,8 +57,8 @@ use lp_emu_esp_common::{RegGrade, Strap};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::{EfuseIdentity, ResetCause};
 use lp_emu_esp32c6::machine::{
-    BootMode, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, Uart0Sink, UsbHost,
-    UsbSjDrain, UsbSjSink,
+    BootMode, BuildError, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, Uart0Sink,
+    UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::test_support::{ReferenceImage, merged_image, skip_notice};
 
@@ -123,10 +123,54 @@ fn efuse() -> EfuseIdentity {
     }
 }
 
-/// A port nothing else holds: bound, read back and dropped.
+/// A port nothing held a moment ago: bound, read back and dropped.
+///
+/// "A moment ago" is the catch: once the listener drops, a test running in
+/// parallel can be handed the same number before the machine binds it. Never
+/// use this alone; [`on_a_free_port`] is what retries that loss.
 fn free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
     listener.local_addr().expect("its address").port()
+}
+
+/// How many ports [`on_a_free_port`] tries before it gives up.
+const PORT_TRIES: usize = 8;
+
+/// Build something that listens on a `127.0.0.1:<port>` address and return it
+/// with the address it actually got.
+///
+/// # Why this retries instead of binding port 0
+///
+/// The machine binds the address itself (`UsbSjSink::Tcp(addr)`), inside
+/// `build()`, and nothing reports a port-0 bind back: `Esp32C6Machine` has no
+/// accessor for the address its listener took. So the port is picked first
+/// and the machine is built on it, and another test picking in between wins
+/// the port. `Address already in use` is that loss, and only that loss is
+/// retried: any other build error panics at once, and so does the last try.
+///
+/// `pick` and `build` are parameters so the retry can be driven by a test.
+fn bind_with_retry<T>(
+    mut pick: impl FnMut() -> u16,
+    mut build: impl FnMut(&str) -> Result<T, BuildError>,
+) -> (T, String) {
+    let mut tried = Vec::new();
+    for _ in 0..PORT_TRIES {
+        let port = pick();
+        let addr = format!("127.0.0.1:{port}");
+        match build(&addr) {
+            Ok(built) => return (built, addr),
+            Err(BuildError::Io(m)) if m.contains("Address already in use") => tried.push(port),
+            Err(e) => panic!("the download-console machine builds: {e:?}"),
+        }
+    }
+    panic!(
+        "no free port in {PORT_TRIES} tries; every one was taken before the machine bound it: {tried:?}"
+    );
+}
+
+/// The download console on a port nobody took: see [`bind_with_retry`].
+fn on_a_free_port(chip: &std::path::Path, strict: bool) -> (Esp32C6Machine, String) {
+    bind_with_retry(free_port, |addr| build_console(chip, addr, strict))
 }
 
 /// The machine a flasher talks to: ROM-up from a WRITABLE chip with the
@@ -136,8 +180,8 @@ fn free_port() -> u16 {
 /// on purpose — it is the image a gate named — and here the image is the
 /// flasher's INPUT, not the chip's contents. The chip is a `--flash` file,
 /// the backing that keeps a run's writes.
-fn download_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
-    console_machine(chip, addr, true)
+fn download_console(chip: &std::path::Path) -> (Esp32C6Machine, String) {
+    on_a_free_port(chip, true)
 }
 
 /// The same machine with the bus's refusal turned off, so an access to an
@@ -146,11 +190,15 @@ fn download_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
 /// Used by exactly one test, and only to answer a question the strict run
 /// cannot: *is the block below the first gap, or the only one?* An unmapped
 /// MMIO read returning 0 is not a claim about silicon — see that test.
-fn permissive_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
-    console_machine(chip, addr, false)
+fn permissive_console(chip: &std::path::Path) -> (Esp32C6Machine, String) {
+    on_a_free_port(chip, false)
 }
 
-fn console_machine(chip: &std::path::Path, addr: &str, strict: bool) -> Esp32C6Machine {
+fn build_console(
+    chip: &std::path::Path,
+    addr: &str,
+    strict: bool,
+) -> Result<Esp32C6Machine, BuildError> {
     let mut b = Esp32C6Builder::new()
         .boot_mode(BootMode::RomUp)
         .reset_cause(ResetCause::UsbUartHpSys)
@@ -167,7 +215,7 @@ fn console_machine(chip: &std::path::Path, addr: &str, strict: bool) -> Esp32C6M
             .strict_grade(Some(RegGrade::Documented))
             .strict_grade_blocks(Some(SCOPE.to_vec()));
     }
-    b.build().expect("the download-console machine builds")
+    b.build()
 }
 
 /// Pump one pty end to the machine's socket and back, until `done`.
@@ -349,8 +397,7 @@ struct Report {
 fn espflash_syncs_with_the_mask_rom_and_reads_the_runs_own_efuses() {
     let chip = scratch("info");
     let _ = std::fs::remove_file(&chip);
-    let addr = format!("127.0.0.1:{}", free_port());
-    let mut m = download_console(&chip, &addr);
+    let (mut m, addr) = download_console(&chip);
 
     let (report, early) = with_flasher(&mut m, &addr, 20_000_000, false, |flasher| {
         let mut r = Report::default();
@@ -393,8 +440,7 @@ fn what_espflash_writes_is_byte_identical_to_the_image() {
 
     let chip = scratch("write");
     let _ = std::fs::remove_file(&chip);
-    let addr = format!("127.0.0.1:{}", free_port());
-    let mut m = download_console(&chip, &addr);
+    let (mut m, addr) = download_console(&chip);
 
     let payload = region.clone();
     let (report, early) = with_flasher(&mut m, &addr, 600_000_000, false, move |flasher| {
@@ -503,8 +549,7 @@ fn the_flasher_stub_runs_and_stops_at_a_block_the_c6_boot_set_does_not_map() {
 
     let chip = scratch("stub-strict");
     let _ = std::fs::remove_file(&chip);
-    let addr = format!("127.0.0.1:{}", free_port());
-    let mut m = download_console(&chip, &addr);
+    let (mut m, addr) = download_console(&chip);
 
     let (_report, early) = with_flasher(&mut m, &addr, 600_000_000, true, move |flasher| {
         let mut r = Report::default();
@@ -574,8 +619,7 @@ fn the_stub_writes_the_image_once_the_unmapped_block_reads_zero() {
 
     let chip = scratch("stub-permissive");
     let _ = std::fs::remove_file(&chip);
-    let addr = format!("127.0.0.1:{}", free_port());
-    let mut m = permissive_console(&chip, &addr);
+    let (mut m, addr) = permissive_console(&chip);
 
     let payload = region.clone();
     let (report, early) = with_flasher(&mut m, &addr, 600_000_000, true, move |flasher| {
@@ -630,5 +674,43 @@ fn the_stub_writes_the_image_once_the_unmapped_block_reads_zero() {
         "the stub read an address nothing claims a different number of times"
     );
 
+    let _ = std::fs::remove_dir_all(chip.parent().unwrap());
+}
+
+/// The retry itself: the first port offered is held by this test, so the
+/// machine's bind fails with `Address already in use`, and the helper must go
+/// on to the next. Not `#[ignore]`d: like the sync test above it opens no
+/// flash image, so no firmware is needed.
+#[test]
+fn a_port_another_test_took_is_retried_on_a_fresh_one() {
+    let held = TcpListener::bind("127.0.0.1:0").expect("a port to hold");
+    let held_port = held.local_addr().expect("its address").port();
+    let chip = scratch("retry");
+    let _ = std::fs::remove_file(&chip);
+
+    let mut offered = Vec::new();
+    let (m, addr) = bind_with_retry(
+        || {
+            // The first offer is the held port; after that, real free ones.
+            let port = if offered.is_empty() {
+                held_port
+            } else {
+                free_port()
+            };
+            offered.push(port);
+            port
+        },
+        |addr| build_console(&chip, addr, true),
+    );
+
+    assert!(
+        offered.len() >= 2,
+        "the held port was not retried: {offered:?}"
+    );
+    assert_eq!(offered[0], held_port);
+    assert_ne!(addr, format!("127.0.0.1:{held_port}"), "got the held port");
+    assert_eq!(addr, format!("127.0.0.1:{}", offered.last().unwrap()));
+    drop(m);
+    drop(held);
     let _ = std::fs::remove_dir_all(chip.parent().unwrap());
 }
