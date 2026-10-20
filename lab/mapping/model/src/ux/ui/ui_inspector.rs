@@ -59,12 +59,24 @@ pub enum UiItem {
         text: String,
         verb: GraphVerb,
     },
-    /// A Patch row with a choice (`patch_section.rs`): `chosen` is `None`
-    /// when the selection doesn't share one.
+    /// A Patch row with a value of its own, as a choice
+    /// (`patch_section.rs`): `chosen` is `None` when the selection doesn't
+    /// share one. `reset` names what it would follow again, when it can
+    /// (Reset); a fixture has nothing above it.
     PatchChoice {
         label: &'static str,
         options: Vec<String>,
         chosen: Option<usize>,
+        reset: Option<String>,
+        field: PatchField,
+    },
+    /// A Patch row whose value comes from above: the value in words, where
+    /// it is set (a link that selects it; `None` for a default nothing
+    /// sets), and Override, which makes it the thing's own.
+    PatchInherited {
+        label: &'static str,
+        value: String,
+        from: Option<(String, Target)>,
         field: PatchField,
     },
     /// A button that selects something else: a span's object.

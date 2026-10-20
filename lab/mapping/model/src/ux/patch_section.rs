@@ -4,12 +4,20 @@
 //!
 //! ```text
 //! Patch
-//!   Wire        [ Follows circle1 ▾ ]   Follows <parent> · Auto onto <output> ·
-//!                                       <output> · <port> (every port) · Not on the wire
-//!   Start       [ − ]  40  [ + ]        only when its own wire is a port
-//!   Direction   [ Follows circle1 ▾ ]   Follows <parent> · As drawn · Reversed
-//!   Turn        [ − ]  0   [ + ]        objects only
+//!   Wire        Auto onto main                      [Override]   inherited:
+//!               from fixture ring display ↗                      the value, a link to
+//!                                                                where it is set
+//!   Wire        [ D0 of main ▾ ]  [Reset]           its own: Auto onto <output> ·
+//!                                                   <output> · <port> · Not on the wire
+//!   Start       [ − ]  40  [ + ]                    only when its own wire is a port
+//!   Direction   As drawn                [Override]  or [ Reversed ▾ ] [Reset]
+//!   Turn        [ − ]  0   [ + ]                    objects only
 //! ```
+//!
+//! An inherited value says what it is and where it is set, never just
+//! "follows": the link selects that place. Override makes the value the
+//! thing's own without moving anything, and Reset hands it back. A
+//! fixture has nothing above it, so its rows are always its own.
 //!
 //! A row's options are worked out from the project, so a choice names this
 //! project's own outputs and ports; that is why these are rows of their
@@ -39,6 +47,10 @@ pub enum PatchField {
 pub enum PatchInput {
     /// The option at this index of the row's list.
     Choose { field: PatchField, option: usize },
+    /// Make an inherited value the thing's own, as it is now.
+    Override { field: PatchField },
+    /// Drop the thing's own value and follow what is above it again.
+    Reset { field: PatchField },
     /// − or + on a number row.
     Nudge { field: PatchField, by: i64 },
     /// A gap's "Patch here": this object (by its index in
@@ -49,8 +61,6 @@ pub enum PatchInput {
 /// One option of a choice row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchOption {
-    /// Unset: follow the thing above.
-    Follows,
     Auto(NodeId),
     Port(NodeId, String),
     Off,
@@ -103,25 +113,34 @@ impl Editor {
         let mut items = Vec::new();
 
         // Wire.
-        let wires = self.wire_options(fixture, first);
-        let chosen = self.shared(&targets, |f, t| {
-            let own = self.own_wire(f, t);
-            Some(match own {
-                None => PatchOption::Follows,
-                Some(Wire::Auto { output }) => PatchOption::Auto(output),
-                Some(Wire::At { output, port, .. }) => PatchOption::Port(output, port),
-                Some(Wire::Off) => PatchOption::Off,
-            })
-        });
-        items.push(UiItem::PatchChoice {
-            label: "Wire",
-            options: wires
-                .iter()
-                .map(|o| self.option_words(fixture, first, o))
-                .collect(),
-            chosen: chosen.and_then(|c| wires.iter().position(|o| *o == c)),
-            field: PatchField::Wire,
-        });
+        if targets.iter().all(|(f, t)| self.wire_inherited(f, t)) {
+            let value = self.shared(&targets, |f, t| {
+                Some(self.wire_value_words(f, t, self.inherited_wire(f, t).0.as_ref()))
+            });
+            items.push(UiItem::PatchInherited {
+                label: "Wire",
+                value: value.unwrap_or_else(|| "mixed".into()),
+                from: self.shared_from(&targets, |f, t| self.inherited_wire(f, t).1),
+                field: PatchField::Wire,
+            });
+        } else {
+            let wires = self.wire_options();
+            let chosen = self.shared(&targets, |f, t| {
+                Some(match self.own_wire(f, t) {
+                    // A fixture not on the wire is simply unset.
+                    None | Some(Wire::Off) => PatchOption::Off,
+                    Some(Wire::Auto { output }) => PatchOption::Auto(output),
+                    Some(Wire::At { output, port, .. }) => PatchOption::Port(output, port),
+                })
+            });
+            items.push(UiItem::PatchChoice {
+                label: "Wire",
+                options: wires.iter().map(|o| self.option_words(o)).collect(),
+                chosen: chosen.and_then(|c| wires.iter().position(|o| *o == c)),
+                reset: self.reset_words(fixture, first),
+                field: PatchField::Wire,
+            });
+        }
 
         // Start: the pixel of its own wire, when that is a port.
         let starts = self.shared(&targets, |f, t| match self.own_wire(f, t)? {
@@ -141,25 +160,31 @@ impl Editor {
         }
 
         // Direction.
-        let directions = self.direction_options(first);
-        let chosen = self.shared(&targets, |f, t| {
-            Some(
-                match self.project.fixture(f)?.place(t).and_then(|p| p.direction) {
-                    None => PatchOption::Follows,
-                    Some(Direction::AsDrawn) => PatchOption::AsDrawn,
-                    Some(Direction::Reversed) => PatchOption::Reversed,
-                },
-            )
-        });
-        items.push(UiItem::PatchChoice {
-            label: "Direction",
-            options: directions
-                .iter()
-                .map(|o| self.option_words(fixture, first, o))
-                .collect(),
-            chosen: chosen.and_then(|c| directions.iter().position(|o| *o == c)),
-            field: PatchField::Direction,
-        });
+        if targets.iter().all(|(f, t)| self.direction_inherited(f, t)) {
+            let value = self.shared(&targets, |f, t| {
+                Some(direction_option(self.inherited_direction(f, t).0))
+            });
+            items.push(UiItem::PatchInherited {
+                label: "Direction",
+                value: value.map_or_else(|| "mixed".into(), |o| self.option_words(&o)),
+                from: self.shared_from(&targets, |f, t| self.inherited_direction(f, t).1),
+                field: PatchField::Direction,
+            });
+        } else {
+            let directions = [PatchOption::AsDrawn, PatchOption::Reversed];
+            let chosen = self.shared(&targets, |f, t| {
+                Some(direction_option(
+                    self.own_direction(f, t).unwrap_or_default(),
+                ))
+            });
+            items.push(UiItem::PatchChoice {
+                label: "Direction",
+                options: directions.iter().map(|o| self.option_words(o)).collect(),
+                chosen: chosen.and_then(|c| directions.iter().position(|o| *o == c)),
+                reset: self.reset_words(fixture, first),
+                field: PatchField::Direction,
+            });
+        }
 
         // Turn: objects only.
         if targets
@@ -216,21 +241,20 @@ impl Editor {
             return;
         }
         let targets = self.patch_targets();
-        let Some((fixture, first)) = targets.first().cloned() else {
+        if targets.is_empty() {
             return;
-        };
+        }
         self.checkpoint();
         match input {
             PatchInput::Choose {
                 field: PatchField::Wire,
                 option,
             } => {
-                let Some(o) = self.wire_options(&fixture, &first).get(option).cloned() else {
+                let Some(o) = self.wire_options().get(option).cloned() else {
                     return;
                 };
                 for (f, t) in &targets {
                     let wire = match &o {
-                        PatchOption::Follows => None,
                         PatchOption::Auto(out) => Some(Wire::Auto {
                             output: out.clone(),
                         }),
@@ -251,7 +275,10 @@ impl Editor {
                 field: PatchField::Direction,
                 option,
             } => {
-                let Some(o) = self.direction_options(&first).get(option).cloned() else {
+                let Some(o) = [PatchOption::AsDrawn, PatchOption::Reversed]
+                    .get(option)
+                    .cloned()
+                else {
                     return;
                 };
                 let direction = match o {
@@ -261,6 +288,58 @@ impl Editor {
                 };
                 for (f, t) in &targets {
                     self.project.set_direction(f, t, direction);
+                }
+            }
+            PatchInput::Override {
+                field: PatchField::Wire,
+            } => {
+                for (f, t) in &targets {
+                    if !self.wire_inherited(f, t) {
+                        continue;
+                    }
+                    let wire = match self.inherited_wire(f, t).0 {
+                        // On a port: where it lands now, so nothing moves.
+                        Some(Wire::At {
+                            output,
+                            port,
+                            pixel,
+                        }) => Some(Wire::At {
+                            pixel: self.lands_at(f, t, &output, &port).unwrap_or(pixel),
+                            output,
+                            port,
+                        }),
+                        Some(w) => Some(w),
+                        None => Some(Wire::Off),
+                    };
+                    self.project.set_wire(f, t, wire);
+                }
+            }
+            PatchInput::Override {
+                field: PatchField::Direction,
+            } => {
+                for (f, t) in &targets {
+                    if self.direction_inherited(f, t) {
+                        let d = self.inherited_direction(f, t).0;
+                        self.project.set_direction(f, t, Some(d));
+                    }
+                }
+            }
+            PatchInput::Reset {
+                field: PatchField::Wire,
+            } => {
+                for (f, t) in &targets {
+                    if *t != PatchTarget::Fixture {
+                        self.project.set_wire(f, t, None);
+                    }
+                }
+            }
+            PatchInput::Reset {
+                field: PatchField::Direction,
+            } => {
+                for (f, t) in &targets {
+                    if *t != PatchTarget::Fixture {
+                        self.project.set_direction(f, t, None);
+                    }
                 }
             }
             PatchInput::Nudge {
@@ -301,8 +380,11 @@ impl Editor {
                     }
                 }
             }
-            PatchInput::Choose { .. } | PatchInput::Nudge { .. } | PatchInput::PatchHere { .. } => {
-            }
+            PatchInput::Choose { .. }
+            | PatchInput::Override { .. }
+            | PatchInput::Reset { .. }
+            | PatchInput::Nudge { .. }
+            | PatchInput::PatchHere { .. } => {}
         }
         self.after_edit();
     }
@@ -326,14 +408,156 @@ impl Editor {
         self.project.fixture(fixture)?.place(target)?.wire.clone()
     }
 
-    /// The Wire row's options for a target: follow its parent (not for a
-    /// fixture), auto onto each output, every port, not on the wire.
-    fn wire_options(&self, _fixture: &NodeId, target: &PatchTarget) -> Vec<PatchOption> {
+    /// A thing's own direction, unset or not.
+    fn own_direction(&self, fixture: &NodeId, target: &PatchTarget) -> Option<Direction> {
+        self.project.fixture(fixture)?.place(target)?.direction
+    }
+
+    /// Whether a thing's wire comes from above: it sets none, and it has an
+    /// above (a fixture's is always its own).
+    fn wire_inherited(&self, fixture: &NodeId, target: &PatchTarget) -> bool {
+        *target != PatchTarget::Fixture && self.own_wire(fixture, target).is_none()
+    }
+
+    fn direction_inherited(&self, fixture: &NodeId, target: &PatchTarget) -> bool {
+        *target != PatchTarget::Fixture && self.own_direction(fixture, target).is_none()
+    }
+
+    /// The wire a thing would follow, and the placement that sets it: the
+    /// first one above it that has one.
+    fn inherited_wire(
+        &self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+    ) -> (Option<Wire>, Option<PatchTarget>) {
+        let p = &self.project;
+        let Some(f) = p.fixture(fixture) else {
+            return (None, None);
+        };
+        for t in p.place_chain(target).into_iter().skip(1) {
+            if let Some(w) = f.place(&t).and_then(|pl| pl.wire.clone()) {
+                return (Some(w), Some(t));
+            }
+        }
+        (None, None)
+    }
+
+    /// The direction a thing would follow, and where it is set (`None`: as
+    /// drawn, by default).
+    fn inherited_direction(
+        &self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+    ) -> (Direction, Option<PatchTarget>) {
+        let p = &self.project;
+        let Some(f) = p.fixture(fixture) else {
+            return (Direction::AsDrawn, None);
+        };
+        for t in p.place_chain(target).into_iter().skip(1) {
+            if let Some(d) = f.place(&t).and_then(|pl| pl.direction) {
+                return (d, Some(t));
+            }
+        }
+        (Direction::AsDrawn, None)
+    }
+
+    /// Where the targets' values are set, when they share one place: its
+    /// words and the target that selects it.
+    fn shared_from(
+        &self,
+        targets: &[(NodeId, PatchTarget)],
+        from: impl Fn(&NodeId, &PatchTarget) -> Option<PatchTarget>,
+    ) -> Option<(String, Target)> {
+        let (fixture, place) = self.shared(targets, |f, t| Some((f.clone(), from(f, t)?)))?;
+        Some((
+            self.place_words(&fixture, &place),
+            self.place_selection(&fixture, &place),
+        ))
+    }
+
+    /// What Reset would follow again, in words; `None` for a fixture.
+    fn reset_words(&self, fixture: &NodeId, target: &PatchTarget) -> Option<String> {
+        let parent = self.project.place_chain(target).into_iter().nth(1)?;
+        Some(self.place_words(fixture, &parent))
+    }
+
+    /// A placement's place in words, a fixture named as one: "fixture ring
+    /// display", "circle1", "ring r1 of circle1".
+    fn place_words(&self, fixture: &NodeId, place: &PatchTarget) -> String {
+        let p = &self.project;
+        match place {
+            PatchTarget::Fixture => format!("fixture {}", p.node_name(fixture)),
+            PatchTarget::Component(_) => p.target_words(fixture, place),
+            PatchTarget::Object(o) => p.long_label(&p.object_target(o)),
+        }
+    }
+
+    /// The selection that shows a placement's place.
+    fn place_selection(&self, fixture: &NodeId, place: &PatchTarget) -> Target {
+        match place {
+            PatchTarget::Fixture => Target::Node(fixture.clone()),
+            PatchTarget::Component(c) => Target::Component(c.clone()),
+            PatchTarget::Object(o) => self.project.object_target(o),
+        }
+    }
+
+    /// An inherited wire in words, with where the thing lands when it is on
+    /// a port: "D0 of main · pixels 24–63".
+    fn wire_value_words(
+        &self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+        wire: Option<&Wire>,
+    ) -> String {
+        match wire {
+            None | Some(Wire::Off) => self.option_words(&PatchOption::Off),
+            Some(Wire::Auto { output }) => self.option_words(&PatchOption::Auto(output.clone())),
+            Some(Wire::At { output, port, .. }) => {
+                let at = self.option_words(&PatchOption::Port(output.clone(), port.clone()));
+                match self.landed_pixels(fixture, target, output, port) {
+                    Some(px) if px.len() == 1 => format!("{at} · pixel {}", px.start),
+                    Some(px) => format!("{at} · pixels {}–{}", px.start, px.end - 1),
+                    None => at,
+                }
+            }
+        }
+    }
+
+    /// The pixels a placement's objects cover on one port, first to last.
+    fn landed_pixels(
+        &self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+        output: &NodeId,
+        port: &str,
+    ) -> Option<std::ops::Range<u32>> {
+        let p = &self.project;
+        let objects = p.objects_of_place(fixture, target);
+        p.effective_patch()
+            .pixel_runs
+            .iter()
+            .filter(|r| &r.output == output && r.port == port && objects.contains(&r.object))
+            .map(|r| r.pixels())
+            .reduce(|a, b| a.start.min(b.start)..a.end.max(b.end))
+    }
+
+    /// Where a placement's objects start on a port now.
+    fn lands_at(
+        &self,
+        fixture: &NodeId,
+        target: &PatchTarget,
+        output: &NodeId,
+        port: &str,
+    ) -> Option<u32> {
+        self.landed_pixels(fixture, target, output, port)
+            .map(|px| px.start)
+    }
+
+    /// The Wire row's options: auto onto each output, every port, not on
+    /// the wire.
+    fn wire_options(&self) -> Vec<PatchOption> {
         let p = &self.project;
         let mut out = Vec::new();
-        if *target != PatchTarget::Fixture {
-            out.push(PatchOption::Follows);
-        }
         for n in p.outputs() {
             out.push(PatchOption::Auto(n.id.clone()));
         }
@@ -344,29 +568,10 @@ impl Editor {
         out
     }
 
-    fn direction_options(&self, target: &PatchTarget) -> Vec<PatchOption> {
-        let mut out = Vec::new();
-        if *target != PatchTarget::Fixture {
-            out.push(PatchOption::Follows);
-        }
-        out.push(PatchOption::AsDrawn);
-        out.push(PatchOption::Reversed);
-        out
-    }
-
-    /// An option in words. "Follows" says what it follows and what that is
-    /// now, so an inherited value is never a mystery.
-    fn option_words(&self, fixture: &NodeId, target: &PatchTarget, o: &PatchOption) -> String {
+    /// An option in words.
+    fn option_words(&self, o: &PatchOption) -> String {
         let p = &self.project;
         match o {
-            PatchOption::Follows => {
-                let chain = p.place_chain(target);
-                let parent = chain
-                    .get(1)
-                    .map(|t| p.target_words(fixture, t))
-                    .unwrap_or_default();
-                format!("Follows {parent}")
-            }
             PatchOption::Auto(out) => format!("Auto onto {}", p.node_name(out)),
             PatchOption::Port(out, port) => p.long_label(&Target::Port {
                 output: out.clone(),
@@ -401,5 +606,12 @@ impl Editor {
             .find(|r| r.len() as u32 >= n)
             .or(free.first())
             .map_or(0, |r| r.start)
+    }
+}
+
+fn direction_option(d: Direction) -> PatchOption {
+    match d {
+        Direction::AsDrawn => PatchOption::AsDrawn,
+        Direction::Reversed => PatchOption::Reversed,
     }
 }

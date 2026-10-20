@@ -524,7 +524,8 @@ fn turn_is_an_objects_alone() {
 // ---- the Patch section (plan P6) ----------------------------------------------
 
 /// Selecting an object, a component or a fixture shows the same Patch
-/// rows, each with its own value; a ring says what it follows.
+/// rows, each with its own value; a ring's comes from above, and nothing
+/// above sets one.
 #[test]
 fn the_patch_section_is_the_same_at_every_level() {
     let (p, f, _, circle) = circle(&[("D0", 40)]);
@@ -534,17 +535,16 @@ fn the_patch_section_is_the_same_at_every_level() {
             .unwrap()
             .iter()
             .filter_map(|i| match i {
-                UiItem::PatchChoice { label, .. } | UiItem::PatchNumber { label, .. } => {
-                    Some(*label)
-                }
+                UiItem::PatchChoice { label, .. }
+                | UiItem::PatchInherited { label, .. }
+                | UiItem::PatchNumber { label, .. } => Some(*label),
                 _ => None,
             })
             .collect()
     };
     e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
     assert_eq!(labels(&e), vec!["Wire", "Direction", "Turn"]);
-    let wire = choice(&e, "Wire");
-    assert_eq!(wire.0[wire.1.unwrap()], "Follows circle1");
+    assert_eq!(inherited(&e, "Wire"), ("Not on the wire".into(), None));
     e.select(vec![Target::Component(circle.clone())]);
     assert_eq!(labels(&e), vec!["Wire", "Direction"]);
     e.select(vec![Target::Node(f.clone())]);
@@ -557,6 +557,9 @@ fn choosing_a_port_places_it_and_start_moves_it() {
     let (p, _, out, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
     e.select(vec![Target::Component(circle.clone())]);
+    e.patch_input(PatchInput::Override {
+        field: PatchField::Wire,
+    });
     let (options, _) = choice(&e, "Wire");
     let d0 = options.iter().position(|o| o.starts_with("D0")).unwrap();
     e.patch_input(PatchInput::Choose {
@@ -589,6 +592,9 @@ fn reversing_one_ring_from_the_section_keeps_its_address() {
     let mut e = editor_of(p);
     let r2 = ObjectId::new(&circle, "r2");
     e.select(vec![Target::Object(r2.clone())]);
+    e.patch_input(PatchInput::Override {
+        field: PatchField::Direction,
+    });
     let (options, _) = choice(&e, "Direction");
     let reversed = options.iter().position(|o| o == "Reversed").unwrap();
     e.patch_input(PatchInput::Choose {
@@ -612,6 +618,9 @@ fn two_objects_edit_together_and_say_mixed() {
             .collect(),
     );
     assert_eq!(choice(&e, "Wire").1, None, "mixed");
+    e.patch_input(PatchInput::Override {
+        field: PatchField::Direction,
+    });
     let (options, _) = choice(&e, "Direction");
     let reversed = options.iter().position(|o| o == "Reversed").unwrap();
     e.patch_input(PatchInput::Choose {
@@ -642,6 +651,68 @@ fn turn_in_the_section_is_the_turn_key() {
         by_key.project.effective_patch().pixel_runs,
         by_row.project.effective_patch().pixel_runs
     );
+}
+
+/// An inherited value says what it is and where it is set, a fixture
+/// named as one, and the link selects that place (G2: "follows ring
+/// display" said neither).
+#[test]
+fn an_inherited_value_names_where_it_is_set() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
+    place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 10);
+    p.set_direction(&f, &PatchTarget::Fixture, Some(Direction::Reversed))
+        .unwrap();
+    let mut e = editor_of(p);
+    e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
+    let (value, from) = inherited(&e, "Wire");
+    assert_eq!(value, "D0 of out · pixels 10–13");
+    let (words, target) = from.unwrap();
+    assert_eq!(words, "fixture f");
+    assert_eq!(target, Target::Node(f.clone()));
+    assert_eq!(inherited(&e, "Direction").0, "Reversed");
+    e.select(vec![target]);
+    assert_eq!(e.selection, vec![Target::Node(f)]);
+}
+
+/// Override makes an inherited value the thing's own and moves nothing;
+/// Reset hands it back.
+#[test]
+fn override_moves_nothing_and_reset_follows_again() {
+    let (mut p, f, out, rings) = circle(&[("D0", 40)]);
+    place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 10);
+    let mut e = editor_of(p);
+    let before = e.project.effective_patch().pixel_runs.clone();
+    let r2 = Target::Object(ObjectId::new(&rings, "r2"));
+    e.select(vec![r2]);
+    for field in [PatchField::Wire, PatchField::Direction] {
+        e.patch_input(PatchInput::Override { field });
+    }
+    assert_eq!(e.project.effective_patch().pixel_runs, before);
+    let (options, chosen) = choice(&e, "Wire");
+    assert_eq!(options[chosen.unwrap()], "D0 of out");
+    assert_eq!(
+        choice(&e, "Direction").0[choice(&e, "Direction").1.unwrap()],
+        "As drawn"
+    );
+    for field in [PatchField::Wire, PatchField::Direction] {
+        e.patch_input(PatchInput::Reset { field });
+    }
+    assert_eq!(e.project.effective_patch().pixel_runs, before);
+    assert_eq!(inherited(&e, "Wire").1.unwrap().0, "fixture f");
+
+    // On auto too: each ring taking the fixture's auto as its own keeps
+    // the flow's order.
+    let (mut p, f, out, rings) = circle(&[("D0", 40)]);
+    p.auto_patch(&f, &out);
+    let mut e = editor_of(p);
+    let before = e.project.effective_patch().pixel_runs.clone();
+    for ring in ["r2", "r1"] {
+        e.select(vec![Target::Object(ObjectId::new(&rings, ring))]);
+        e.patch_input(PatchInput::Override {
+            field: PatchField::Wire,
+        });
+        assert_eq!(e.project.effective_patch().pixel_runs, before, "{ring}");
+    }
 }
 
 // ---- spans (plan P7, D12, D13) -----------------------------------------------
@@ -693,6 +764,9 @@ fn a_spans_patch_section_edits_its_object() {
     p.auto_patch(&f, &out);
     let mut e = editor_of(p);
     e.select(vec![e.project.spans(&out, "0")[0].target()]);
+    e.patch_input(PatchInput::Override {
+        field: PatchField::Direction,
+    });
     let (options, _) = choice(&e, "Direction");
     let reversed = options.iter().position(|o| o == "Reversed").unwrap();
     e.patch_input(PatchInput::Choose {
@@ -879,6 +953,23 @@ fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
                 chosen,
                 ..
             } if l == label => Some((options, chosen)),
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// A Patch inherited row's value and where it is set.
+fn inherited(e: &Editor, label: &str) -> (String, Option<(String, Target)>) {
+    e.patch_section()
+        .unwrap()
+        .into_iter()
+        .find_map(|i| match i {
+            UiItem::PatchInherited {
+                label: l,
+                value,
+                from,
+                ..
+            } if l == label => Some((value, from)),
             _ => None,
         })
         .unwrap()

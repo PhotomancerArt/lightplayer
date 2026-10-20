@@ -264,6 +264,17 @@
     /* A Patch row's number between its − and +. */
     .num-value { min-width: 2.5em; text-align: center; font-variant-numeric: tabular-nums; }
     .num-note { color: var(--text-subtle); margin-left: 4px; }
+    /* A Patch row: its own value (a choice, then Reset), or an inherited
+       one (the value and Override, then a link to where it is set). */
+    .patch-own { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .patch-own .choice { flex: 1; min-width: 0; }
+    .patch-inherited { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .patch-inherited-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .patch-value { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .patch-button { flex: none; }
+    .patch-from { align-self: flex-start; padding: 0; border: none; background: none; color: var(--hover); font: inherit; font-size: 11px; cursor: pointer; text-align: left; }
+    .patch-from:hover { text-decoration: underline; }
+    .patch-from-default { font-size: 11px; color: var(--text-subtle); }
 
     /* A shader's GLSL in the inspector: shown, never run. */
     .glsl { margin: 6px 0 0; padding: 6px 8px; max-height: 240px; overflow: auto; font: 10px/1.35 var(--mono); color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; white-space: pre; }

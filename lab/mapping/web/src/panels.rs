@@ -138,27 +138,87 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
             label,
             options,
             chosen,
+            reset,
             field,
-        } => rsx! {
-            div { class: "prop",
-                span { class: "prop-label", "{label}" }
-                select {
-                    class: "choice",
-                    onkeydown: move |evt| evt.stop_propagation(),
-                    onchange: move |evt| {
-                        if let Ok(option) = evt.value().parse::<usize>() {
-                            ed.input(GraphInput::Patch(PatchInput::Choose { field, option }));
+        } => {
+            let choose = ed.clone();
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "patch-own",
+                        select {
+                            class: "choice",
+                            onkeydown: move |evt| evt.stop_propagation(),
+                            onchange: move |evt| {
+                                if let Ok(option) = evt.value().parse::<usize>() {
+                                    choose.input(GraphInput::Patch(PatchInput::Choose { field, option }));
+                                }
+                            },
+                            if chosen.is_none() {
+                                option { value: "", selected: true, disabled: true, "mixed" }
+                            }
+                            for (i, word) in options.iter().enumerate() {
+                                option { value: "{i}", selected: chosen == Some(i), "{word}" }
+                            }
                         }
-                    },
-                    if chosen.is_none() {
-                        option { value: "", selected: true, disabled: true, "mixed" }
-                    }
-                    for (i, word) in options.iter().enumerate() {
-                        option { value: "{i}", selected: chosen == Some(i), "{word}" }
+                        if let Some(parent) = reset {
+                            button {
+                                class: "patch-button",
+                                tabindex: "-1",
+                                title: "Follow {parent} again",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Patch(PatchInput::Reset { field }));
+                                },
+                                "Reset"
+                            }
+                        }
                     }
                 }
             }
-        },
+        }
+        UiItem::PatchInherited {
+            label,
+            value,
+            from,
+            field,
+        } => {
+            let over = ed.clone();
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "patch-inherited",
+                        div { class: "patch-inherited-line",
+                            span { class: "patch-value", "{value}" }
+                            button {
+                                class: "patch-button",
+                                tabindex: "-1",
+                                title: "Give it a {label} of its own",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    over.input(GraphInput::Patch(PatchInput::Override { field }));
+                                },
+                                "Override"
+                            }
+                        }
+                        if let Some((words, target)) = from {
+                            button {
+                                class: "patch-from",
+                                tabindex: "-1",
+                                title: "Select {words}",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Select(vec![target.clone()]));
+                                },
+                                "from {words} ↗"
+                            }
+                        } else {
+                            span { class: "patch-from-default", "by default" }
+                        }
+                    }
+                }
+            }
+        }
         UiItem::Select { text, target } => rsx! {
             div { class: "fact action-fact",
                 button {
