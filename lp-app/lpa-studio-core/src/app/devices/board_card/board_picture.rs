@@ -185,9 +185,9 @@ fn picture_feed<'a>(input: &BoardCardInput<'a>) -> Option<&'a DeviceCardFeedView
 /// how old it is are the "Frame rate" and "Last frame" facts.
 ///
 /// Over Bluetooth the card pulls at a gentler pace
-/// (`DEVICE_CARD_FEED_BLE_INTERVAL`, one to two pictures a second), so the
-/// details say so: the board's "43 fps" beside a picture that steps once a
-/// second would read as a stall.
+/// (`DEVICE_CARD_FEED_BLE_INTERVAL`, two or three pictures a second), so the
+/// details say so: the board's "43 fps" beside a picture that steps a few
+/// times a second would read as a stall.
 pub(crate) fn source_words(
     feed: &DeviceCardFeedView,
     activity: Option<&ActivityView>,
@@ -213,7 +213,7 @@ pub(crate) fn source_words(
 }
 
 /// How often a Bluetooth card's picture moves (see [`source_words`]).
-const BLUETOOTH_PICTURE_PACE: &str = "Shown once or twice a second over Bluetooth.";
+const BLUETOOTH_PICTURE_PACE: &str = "Shown two or three times a second over Bluetooth.";
 
 /// lightplayer.app's picture of a board no link here reaches.
 const CLOUD_PICTURE_WORDS: &str = "From lightplayer.app.";

@@ -1142,11 +1142,13 @@ same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
 `/relay` (WebSocket upgrades included) to the `lp-cloud-server` on 2812 — but
 `lp-cli serve` binds 2812 for its own socket, so the two do not share a desk.
 
-Two more dev-only flags tune the device wire for a measurement (read once at
+Three more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
-and `?wire=json` stops the page asking boards to pack their replies, so JSON
+`?card-ble-gap-ms=N` sets the device card picture's gap between reads over a
+Bluetooth link (`DEVICE_CARD_FEED_BLE_INTERVAL`; clamped to 0–2000 ms; USB,
+the LAN and the relay keep theirs), and `?wire=json` stops the page asking boards to pack their replies, so JSON
 and JSON Pack can be compared on one build (`?wire=packed` is the default,
 spelled out). Studio otherwise asks every board
 whose hello offers this build's pack format; what the board answered is one
