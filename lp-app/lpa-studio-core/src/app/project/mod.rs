@@ -100,10 +100,10 @@ pub use node::{
     NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
     PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM,
     PLAYLIST_ENTRY_PARAM, PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB,
-    PLAYLIST_SKIP_VERB, PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB,
-    PLAYLIST_STEP_SHORTER_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
+    PLAYLIST_RESET_VERB, PLAYLIST_SKIP_VERB, PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB,
+    PLAYLIST_STEP_SHORTER_VERB, PanelAutoSaveOp, PanelBatchOp, PanelClearOp, PanelWriteOp,
+    PlaylistPickOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
+    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,

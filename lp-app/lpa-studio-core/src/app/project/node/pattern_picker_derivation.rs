@@ -10,9 +10,12 @@
 //! be tested without a server:
 //!
 //! - **States**, in precedence: playing, failed, skipped, available.
-//! - **Next/prev** = the adjacent authored key after the playing one,
-//!   wrapping, passing over skipped and failed entries (plan PD7 — Studio
-//!   picks the key and sends an activate; there is no wire command).
+//! - **A pick** = a panel write of the entry's key on `playlist.entry`; it
+//!   holds and survives a reboot (playlists-on-the-bus vision D1).
+//! - **Next/prev** = [`lpc_model::playlist_step`], the rule the engine's
+//!   next/prev buttons use too: the adjacent authored key, wrapping,
+//!   passing over skipped and failed entries, from the entry being picked
+//!   (a pick on its way) or else the one playing.
 //! - **On/off** = the whole skip list, rewritten with one key changed.
 //! - **Cycle** = the whole `PlaylistCycle`: off is `Hold`; on is a cycle at
 //!   the authored step (or [`DEFAULT_STEP_SECONDS`]); the step moves along
@@ -72,6 +75,14 @@ pub struct PatternPickerFacts {
     pub cycle_target: Option<UiPanelTarget>,
     /// The skip channel's write target.
     pub skip_target: Option<UiPanelTarget>,
+    /// The pick channel's write target (`playlist.entry`).
+    pub entry_target: Option<UiPanelTarget>,
+    /// The picked entry (live before authored): where the playlist rests.
+    pub picked: Option<u32>,
+    /// Where next/prev step from: a pick still on its way to the device,
+    /// else the playing entry. Stepping from the playing entry alone would
+    /// send the same key twice for two quick presses.
+    pub stepping_from: Option<u32>,
 }
 
 /// The Pattern instrument for one playlist.
@@ -85,6 +96,7 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
         failed,
         cycle_target,
         skip_target,
+        entry_target,
         ..
     } = facts;
 
@@ -117,6 +129,7 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
         cycle,
         cycle_target,
         skip_target,
+        entry_target,
     }
 }
 
@@ -129,36 +142,14 @@ pub enum StepDirection {
     Previous,
 }
 
-/// The key next/prev plays: the nearest authored key after (or before)
-/// `current` that `enabled` accepts, wrapping around the set. `None` when no
-/// OTHER key qualifies — stepping onto the entry already playing is not a
-/// step.
-///
-/// `current` need not itself be enabled (a skipped entry played by a tap
-/// still has neighbours), nor even in `keys` (a key the def no longer
-/// carries starts the walk from the top).
-pub fn adjacent_enabled_key(
-    keys: &[u32],
-    current: u32,
-    direction: StepDirection,
-    enabled: impl Fn(u32) -> bool,
-) -> Option<u32> {
-    let len = keys.len();
-    if len == 0 {
-        return None;
+impl StepDirection {
+    /// The step count [`lpc_model::playlist_step`] takes.
+    pub fn steps(self) -> i32 {
+        match self {
+            Self::Next => 1,
+            Self::Previous => -1,
+        }
     }
-    let start = keys.iter().position(|key| *key == current);
-    (1..=len)
-        .map(|offset| {
-            let index = match (start, direction) {
-                (Some(start), StepDirection::Next) => (start + offset) % len,
-                (Some(start), StepDirection::Previous) => (start + len - offset % len) % len,
-                (None, StepDirection::Next) => offset - 1,
-                (None, StepDirection::Previous) => len - offset,
-            };
-            keys[index]
-        })
-        .find(|key| *key != current && enabled(*key))
 }
 
 /// The skip list with `key` skipped (`skipped`) or included: sorted and
@@ -233,69 +224,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_and_prev_wrap_and_pass_over_disabled_keys() {
-        let keys = [1, 2, 3, 4, 5];
-        let enabled = |key: u32| key != 2 && key != 5;
-        use StepDirection::*;
-        assert_eq!(adjacent_enabled_key(&keys, 1, Next, enabled), Some(3));
-        assert_eq!(
-            adjacent_enabled_key(&keys, 4, Next, enabled),
-            Some(1),
-            "wraps past 5"
-        );
-        assert_eq!(
-            adjacent_enabled_key(&keys, 1, Previous, enabled),
-            Some(4),
-            "wraps past 5"
-        );
-        assert_eq!(
-            adjacent_enabled_key(&keys, 3, Previous, enabled),
-            Some(1),
-            "passes 2"
-        );
-    }
-
-    #[test]
-    fn a_skipped_entry_playing_by_tap_still_has_neighbours() {
-        let keys = [1, 2, 3];
-        let enabled = |key: u32| key != 2;
-        assert_eq!(
-            adjacent_enabled_key(&keys, 2, StepDirection::Next, enabled),
-            Some(3)
-        );
-        assert_eq!(
-            adjacent_enabled_key(&keys, 2, StepDirection::Previous, enabled),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn with_nothing_else_enabled_there_is_no_step() {
-        assert_eq!(
-            adjacent_enabled_key(&[1, 2], 1, StepDirection::Next, |key| key == 1),
-            None
-        );
-        assert_eq!(
-            adjacent_enabled_key(&[7], 7, StepDirection::Previous, |_| true),
-            None
-        );
-        assert_eq!(
-            adjacent_enabled_key(&[], 1, StepDirection::Next, |_| true),
-            None
-        );
-    }
-
-    #[test]
-    fn an_unknown_current_key_walks_from_the_ends() {
-        let keys = [3, 4, 5];
-        assert_eq!(
-            adjacent_enabled_key(&keys, 9, StepDirection::Next, |_| true),
-            Some(3)
-        );
-        assert_eq!(
-            adjacent_enabled_key(&keys, 9, StepDirection::Previous, |_| true),
-            Some(5)
-        );
+    fn a_step_direction_is_one_step_of_the_shared_rule() {
+        assert_eq!(StepDirection::Next.steps(), 1);
+        assert_eq!(StepDirection::Previous.steps(), -1);
     }
 
     #[test]
@@ -442,6 +373,9 @@ mod tests {
             failed: Vec::new(),
             cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
             skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
+            entry_target: Some(target(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+            picked: Some(1),
+            stepping_from: Some(1),
         };
         edit(&mut facts);
         facts

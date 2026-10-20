@@ -35,10 +35,9 @@ use crate::app::studio::studio_edit_e2e_tests::{
 use crate::{
     OfferArgs, OfferPath, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM, PLAYLIST_ENTRY_PARAM,
     PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_SKIP_VERB,
-    PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, PanelWriteOp, PlaylistActivateOp,
-    ProjectOp, StudioActor, StudioCommand, StudioController, StudioServerClient, UiAction,
-    UiNodeFace, UiOffer, UiPanelGroup, UiPanelWidget, UiPatternEntryState, UiPatternPicker,
-    UiStudioView,
+    PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, PanelWriteOp, PlaylistPickOp, ProjectOp,
+    StudioActor, StudioCommand, StudioController, StudioServerClient, UiAction, UiNodeFace,
+    UiOffer, UiPanelGroup, UiPanelWidget, UiPatternEntryState, UiPatternPicker, UiStudioView,
 };
 
 #[test]
@@ -212,8 +211,8 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     });
 }
 
-/// P8, D11: activating a dormant entry — from the strip chip's action, the
-/// same `PlaylistActivateOp` the Pattern picker's tap sends — loads AND
+/// P8, D11: picking a dormant entry — from the strip chip's action, the
+/// same `PlaylistPickOp` the Pattern picker's tap sends — loads AND
 /// opens the entry's card. `aurora` starts dormant (Soft Noise is idle);
 /// tapping it plays it, and once its subtree lands in a synced view, its
 /// card is the focused one, with no second click.
@@ -412,10 +411,7 @@ fn picker(view: &UiStudioView) -> UiPatternPicker {
 }
 
 fn activated(action: &UiAction) -> u32 {
-    action
-        .op_as::<PlaylistActivateOp>()
-        .expect("an activate")
-        .entry
+    action.op_as::<PlaylistPickOp>().expect("a pick").entry
 }
 
 const PATTERN_SET_DIR: &str = "/projects/pattern-set-e2e";

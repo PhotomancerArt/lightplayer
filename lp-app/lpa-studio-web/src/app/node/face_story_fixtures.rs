@@ -1185,6 +1185,7 @@ pub(crate) fn playlist_strip_offers() -> lpa_studio_core::UiOfferTree {
         failed: Vec::new(),
         cycle_target: None,
         skip_target: None,
+        entry_target: None,
     };
     let mut tree = lpa_studio_core::UiOfferTree::new();
     for offer in lpa_studio_core::app::project::node::playlist_offers(&facts) {

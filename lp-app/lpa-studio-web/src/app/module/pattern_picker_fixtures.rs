@@ -81,6 +81,7 @@ pub(crate) fn set_facts(names: &[&str], active: u32) -> PatternPickerFacts {
         failed: Vec::new(),
         cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
         skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
+        entry_target: Some(target(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
     }
 }
 
@@ -153,7 +154,7 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         aspects: Vec::new(),
     };
     UiPanelGroup::new("Pattern", "/playful.module/playlist.playlist").with_controls(vec![
-        UiPanelControlView::new(lpc_model::PLAYLIST_CYCLE_CHANNEL, control)
+        UiPanelControlView::new(lpc_model::PLAYLIST_ENTRY_CHANNEL, control)
             .with_state(state, None::<String>),
     ])
 }
@@ -169,16 +170,42 @@ pub(crate) fn picker_offers(facts: &PatternPickerFacts) -> UiOfferTree {
 }
 
 /// Apply one of the picker's own actions to the facts, the way the device
-/// answers it: an activate plays that entry, a cycle or skip write replaces
-/// the value and the panel holds it. The walkable story's whole engine.
+/// answers it: a pick plays that entry, a cycle or skip write replaces the
+/// value and the panel holds it, a reset lets all three go. The walkable
+/// story's whole engine.
 pub(crate) fn apply_picker_action(facts: &mut PatternPickerFacts, action: &UiAction) {
-    if let Some(op) = action.op_as::<lpa_studio_core::PlaylistActivateOp>() {
+    if let Some(op) = action.op_as::<lpa_studio_core::PlaylistPickOp>() {
         facts.active = Some(op.entry);
+        facts.picked = Some(op.entry);
+        facts.stepping_from = Some(op.entry);
         return;
     }
-    let Some(op) = action.op_as::<lpa_studio_core::PanelWriteOp>() else {
+    if let Some(batch) = action.op_as::<lpa_studio_core::PanelBatchOp>() {
+        for write in &batch.writes {
+            apply_panel_write(facts, write);
+        }
+        if !batch.clears.is_empty() {
+            facts.cycle = facts.authored_cycle.unwrap_or_default();
+            facts.skip = Vec::new();
+            for target in [
+                &mut facts.cycle_target,
+                &mut facts.skip_target,
+                &mut facts.entry_target,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                target.engaged = false;
+            }
+        }
         return;
-    };
+    }
+    if let Some(op) = action.op_as::<lpa_studio_core::PanelWriteOp>() {
+        apply_panel_write(facts, op);
+    }
+}
+
+fn apply_panel_write(facts: &mut PatternPickerFacts, op: &lpa_studio_core::PanelWriteOp) {
     match op.channel.as_str() {
         lpc_model::PLAYLIST_CYCLE_CHANNEL => {
             if let Ok(cycle) = PlaylistCycle::from_lp_value(&op.value) {

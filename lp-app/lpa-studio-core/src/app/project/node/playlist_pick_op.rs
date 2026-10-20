@@ -1,5 +1,4 @@
-//! Playlist activate-entry operation (the runtime command channel's first
-//! UI consumer).
+//! Playlist pick operation: Play mode's tap, next and previous.
 
 use core::any::Any;
 
@@ -8,38 +7,35 @@ use crate::{
     ProjectNodeAddress,
 };
 
-/// Make one playlist entry active NOW, via
-/// `WireProjectCommand::NodeCommand` → `PlaylistNode` (entry-strip click,
-/// node-card P4 follow-up). A runtime poke, not an edit: nothing is staged
-/// in the overlay, nothing shows in the Save panel, and the effect lands on
-/// the engine's next frame — the strip's ACTIVE placard follows through
-/// ordinary project reads.
+/// Pick one playlist entry: a panel write of its key on the playlist's
+/// `playlist.entry` channel (playlists-on-the-bus vision D1). The pick
+/// holds, survives a reboot, and Clear returns the authored entry.
 ///
-/// Dispatched to `ProjectController::NODE_ID` like [`crate::SlotEditOp`];
-/// the controller resolves the playlist's CURRENT runtime `NodeId` from the
-/// stable authored address at dispatch time, so a queued click can never
-/// address a stale runtime id across a project reload.
+/// A panel write with one thing more than [`crate::PanelWriteOp`]: the
+/// editor opens the picked entry's card once it lands (load-to-edit,
+/// multi-pattern D11), which is why it names the playlist.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PlaylistActivateOp {
-    /// Stable address of the playlist node whose entry is activated.
+pub struct PlaylistPickOp {
+    /// Stable address of the playlist node whose entry is picked.
     pub node: ProjectNodeAddress,
-    /// The `entries`-map key to activate (the u32
-    /// `PlaylistState.active_entry` reports).
+    /// The `entries`-map key to pick (what `PlaylistState.active_entry`
+    /// reports once it plays).
     pub entry: u32,
+    /// The scope the playlist reads `playlist.entry` in: where the write
+    /// lands.
+    pub scope: lpc_wire::WireScopeRef,
 }
 
-impl ControllerOp for PlaylistActivateOp {
+impl ControllerOp for PlaylistPickOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
-            "Activate entry",
-            "Switch the playlist to this entry now.",
+            "Play pattern",
+            "Switch the playlist to this pattern and stay on it.",
             ActionPriority::Primary,
         )
     }
 
     fn action_class(&self) -> ActionClass {
-        // Same editor foreground class as the slot-level edit ops: a click
-        // should feel immediate, and a rejection surfaces as a notice.
         ActionClass::Foreground {
             deadline: PROJECT_EDITOR_ACTION_DEADLINE,
         }
@@ -67,10 +63,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activate_is_editor_foreground_class_with_activate_meta() {
-        let op = PlaylistActivateOp {
+    fn a_pick_is_editor_foreground_class() {
+        let op = PlaylistPickOp {
             node: ProjectNodeAddress::parse("/demo.module/show.playlist").unwrap(),
             entry: 2,
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            },
         };
 
         assert_eq!(
@@ -79,7 +78,6 @@ mod tests {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             }
         );
-        assert_eq!(op.default_action_meta().label, "Activate entry");
         assert_eq!(op.default_action_meta().priority, ActionPriority::Primary);
     }
 }
