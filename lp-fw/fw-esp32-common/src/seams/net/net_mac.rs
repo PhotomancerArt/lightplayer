@@ -16,6 +16,6 @@ lp_seam::seam_fn! {
 lp_seam::engaged_byte!(net_mac);
 
 /// This seam's entry in the chip's [`crate::seam_table!`].
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub const ENTRY: lp_seam::table::SeamEntry =
     lp_seam::table::SeamEntry::new(&DECL, ADDRESS, ENGAGED_ADDRESS);

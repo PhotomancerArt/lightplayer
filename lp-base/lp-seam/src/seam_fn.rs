@@ -24,9 +24,33 @@
 //! `clobber_abi("C")` — so LLVM cannot see a Rust call at all, and must
 //! materialise every argument and read `a0` afterwards.
 //!
-//! On a target that is not `riscv32` (host unit tests, the Xtensa firmwares'
-//! builds of shared code) the shim calls the silicon body directly and no
-//! seam function exists. Xtensa seams are the emulator seams roadmap's M7.
+//! On a target that is neither `riscv32` nor `xtensa` (host unit tests) the
+//! shim calls the silicon body directly and no seam function exists.
+//!
+//! # Xtensa (S3 radio M5)
+//!
+//! The same three rules, by different means, because the windowed ABI makes
+//! a hand-written call the wrong tool:
+//!
+//! - **the hint** is `movi {scratch}, <hint>` into a register the `asm!`
+//!   declares clobbered (Xtensa has no zero register to write): a real
+//!   instruction with the seam's unique immediate, so the body is neither
+//!   deleted nor merged. The assembler may emit it as `movi.n` when the
+//!   immediate fits; an emulator accepts either, a few instructions after the
+//!   function's `entry`.
+//! - **the call shim** calls the seam function through a function pointer
+//!   read with `read_volatile` from a static. LLVM cannot know which
+//!   function it calls, so it keeps the C ABI, materialises every argument
+//!   and reads the result — the three things the RV32 `asm!` call buys —
+//!   and the compiler emits the ordinary windowed call (`callx8`) for it,
+//!   with the window save areas and `PS.CALLINC` exactly as any call has
+//!   them. An `asm!` `callx8` would have to reproduce all of that by hand.
+//!
+//! An emulator answers an Xtensa seam **before** the callee's `entry`
+//! rotates the window: at the patched entry, `PS.CALLINC` = *n* names the
+//! caller's registers — the return address in `a[4n]`, the arguments from
+//! `a[4n+2]`, the result back to `a[4n+2]` — and the answer returns to the
+//! caller as `retw` would, with the window never moved.
 //!
 //! # Usage
 //!
@@ -41,7 +65,7 @@
 //! // elsewhere: seams::test_echo::call(1, 2, 4)
 //! ```
 //!
-//! generates `call(…)`, the shim firmware calls; on `riscv32` also
+//! generates `call(…)`, the shim firmware calls; on `riscv32` and `xtensa` also
 //! `seam_function` (exported `lp_seam_test_echo`) and `ADDRESS`, its
 //! [`crate::table::Addr`] for the table entry; and `DECL`, the seam's
 //! declaration.
@@ -72,6 +96,17 @@ macro_rules! seam_fn {
             }
             result
         }
+
+        /// The call shim (xtensa): the seam function through a function
+        /// pointer LLVM cannot see through (the module docs, "Xtensa").
+        #[cfg(target_arch = "xtensa")]
+        #[inline(always)]
+        pub fn call($($arg: $ty),*) -> $ret {
+            static FUNCTION: $crate::$name::Signature = seam_function;
+            // SAFETY: reads an initialised `static` of a `Copy` type.
+            let f = unsafe { ::core::ptr::read_volatile(&FUNCTION) };
+            f($($arg),*)
+        }
     };
     ($name:ident => fn($($arg:ident : $ty:ty),* $(,)?) $body:block) => {
         $crate::__seam_fn_common!($name => ($($arg : $ty),*) -> () $body);
@@ -91,6 +126,16 @@ macro_rules! seam_fn {
                 );
             }
         }
+
+        /// The call shim (xtensa): as above, with no result.
+        #[cfg(target_arch = "xtensa")]
+        #[inline(always)]
+        pub fn call($($arg: $ty),*) {
+            static FUNCTION: $crate::$name::Signature = seam_function;
+            // SAFETY: reads an initialised `static` of a `Copy` type.
+            let f = unsafe { ::core::ptr::read_volatile(&FUNCTION) };
+            f($($arg),*)
+        }
     };
 }
 
@@ -106,6 +151,26 @@ macro_rules! __seam_fn_common {
         #[inline(always)]
         #[allow(clippy::unused_unit, reason = "a seam with no result is declared `-> ()`")]
         fn silicon($($arg: $ty),*) -> $ret $body
+
+        /// The seam function the emulator patches and answers (xtensa).
+        #[cfg(target_arch = "xtensa")]
+        #[unsafe(export_name = concat!("lp_seam_", stringify!($name)))]
+        #[inline(never)]
+        pub extern "C" fn seam_function($($arg: $ty),*) -> $ret {
+            // SAFETY: writes a scratch register the block declares clobbered
+            // and nothing else. Not `pure`, so the body and every call to it
+            // stay; the immediate is unique per seam, so nothing can fold
+            // two bodies.
+            unsafe {
+                ::core::arch::asm!(
+                    "movi {scratch}, {hint}",
+                    scratch = out(reg) _,
+                    hint = const $crate::$name::HINT,
+                    options(nomem, nostack, preserves_flags),
+                );
+            }
+            silicon($($arg),*)
+        }
 
         /// The seam function the emulator patches and answers.
         #[cfg(target_arch = "riscv32")]
@@ -125,16 +190,17 @@ macro_rules! __seam_fn_common {
             silicon($($arg),*)
         }
 
-        #[cfg(target_arch = "riscv32")]
+        #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
         const _: $crate::$name::Signature = seam_function;
 
         /// The seam function's address, for its table entry.
-        #[cfg(target_arch = "riscv32")]
+        #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
         pub const ADDRESS: $crate::table::Addr =
             $crate::table::Addr(seam_function as *const ());
 
-        /// The call shim (not riscv32): the silicon body, directly.
-        #[cfg(not(target_arch = "riscv32"))]
+        /// The call shim (neither riscv32 nor xtensa): the silicon body,
+        /// directly.
+        #[cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))]
         #[inline(always)]
         #[allow(clippy::unused_unit, reason = "a seam with no result is declared `-> ()`")]
         pub fn call($($arg: $ty),*) -> $ret {

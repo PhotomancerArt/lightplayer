@@ -90,9 +90,9 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 lp-gfx = { path = "../../lp-gfx/lp-gfx", optional = true, features = ["null-backend"] }
 
 # Emulator seams (`src/seams/`; ADR docs/adr/2026-10-05-emulator-seams.md):
-# the seam ABI, MIT, no_std, no deps. RISC-V only — the seam functions are RV32
-# assembly — so the Xtensa firmwares that build this crate do not even see it.
-[target.'cfg(target_arch = "riscv32")'.dependencies]
+# the seam ABI, MIT, no_std, no deps. RISC-V and, since S3 radio M5, Xtensa:
+# the targets whose seam functions an emulator can answer.
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 lp-seam = { path = "../../lp-base/lp-seam" }
 
 [features]

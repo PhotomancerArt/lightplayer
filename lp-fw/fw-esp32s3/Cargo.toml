@@ -155,6 +155,14 @@ test_loopback = ["lp-ws281x/test_hooks"]
 # registry/manifest and driver types the button driver is built on.
 test_button = ["server"]
 
+# The Xtensa emulator seam ABI under the real release build (S3 radio M5):
+# this image's seam table carries the two TEST ONLY seams and two of the
+# network seam's calls, and the entrypoint calls them
+# (`src/tests/test_seam_abi.rs`). The emulator's test
+# (`lp-emu-esp32s3/tests/seam_abi_harness.rs`) proves the arguments, the
+# result and the caller's window survive an answer. Never shipped.
+test_seam_abi = []
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
