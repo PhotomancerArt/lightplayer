@@ -24,7 +24,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Emit build provenance for the wire hello (`ServerHello.fw`):
-/// `LP_BUILD_COMMIT` (short git commit or "unknown"), `LP_BUILD_DIRTY`
+/// `LP_BUILD_COMMIT` (short git commit or "unknown", fixed in a figure
+/// build — `lp_app_version::commit`), `LP_BUILD_DIRTY`
 /// ("true"/"false", false when git is absent so vendored builds still
 /// compile), `LP_BUILD_PROFILE` (the cargo profile directory name,
 /// e.g. "release-esp32", falling back to the coarse `PROFILE` env), and
