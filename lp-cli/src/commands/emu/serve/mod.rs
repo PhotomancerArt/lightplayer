@@ -65,7 +65,8 @@ use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::loader::EfuseIdentity;
 
 use super::args::{EmuChip, PaceArg, ServeArgs};
-use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
+pub(super) use board::default_mac;
+use board::{Board, BoardKind, BoardOptions, BoardSpec, format_mac};
 use door::Registry;
 use served_lan::{LanSeat, ServedLan, is_path_segment, parse_lans};
 

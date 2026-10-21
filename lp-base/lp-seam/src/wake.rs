@@ -10,8 +10,10 @@
 //!   `pending` field (`0` = this image has no wake), one bit per endpoint the
 //!   firmware assigns;
 //! - **one line**, the CPU software interrupt [`WAKE_FROM_CPU_INTR`] (on the
-//!   ESP32-C6 the interrupt source [`WAKE_SOURCE_ESP32C6`]), bound at
-//!   priority [`WAKE_PRIORITY`].
+//!   ESP32-C6 the interrupt source [`WAKE_SOURCE_ESP32C6`], raised through
+//!   `INTPRI`; on the ESP32-S3 the source [`WAKE_SOURCE_ESP32S3`], raised
+//!   through `SYSTEM.cpu_intr_from_cpu_3`), bound at priority
+//!   [`WAKE_PRIORITY`].
 //!
 //! The protocol, in this order on each side:
 //!
@@ -50,6 +52,11 @@ pub const WAKE_FROM_CPU_INTR: u8 = 3;
 
 /// `FROM_CPU_INTR3`'s interrupt-matrix source number on the ESP32-C6.
 pub const WAKE_SOURCE_ESP32C6: u16 = 25;
+
+/// `FROM_CPU_INTR3`'s interrupt-matrix source number on the ESP32-S3: the
+/// four software interrupts are sources 79..=82, levels in `SYSTEM`'s
+/// `cpu_intr_from_cpu_0..3` (S3 radio M5).
+pub const WAKE_SOURCE_ESP32S3: u16 = 82;
 
 /// The priority the guest binds the wake line at.
 pub const WAKE_PRIORITY: u8 = 1;

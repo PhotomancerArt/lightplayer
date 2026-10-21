@@ -865,6 +865,63 @@ the wall-clock net. And a cut inside the first format is
 next boot mounts a filesystem that refuses writes (open; the tree store,
 M7 P9, is the expected end of it).
 
+## Emulator seams, the wake and `net=lan` (S3 radio M5)
+
+The C6's seams (`docs/adr/2026-10-05-emulator-seams.md`, its §13 for
+Xtensa), on this chip: `src/seams/` is the C6's `src/seams/` file for file,
+over the same chip-neutral `lp_emu_esp_common::seam`.
+
+| flag | where | what |
+|---|---|---|
+| `--seams <atoms\|none>` | `lp-emu-esp32s3` and `lp-cli emu run --chip esp32s3 --host-link` | engage seams, STRICT (a seam that cannot engage exits 64, `Outcome::Seam`) |
+| `--seams-prefer <atoms>` | both | the same, SOFT: engage what the image allows, else `SEAM none engaged: <why>` |
+| `--seams-info <image>` | both | print an image's seam tables and exit |
+| `--lan <fixture>`, `--pace`, `--seam-trace` | `lp-cli emu run --chip esp32s3 --host-link` | the C6's: the board on a virtual LAN of its own, its forward printed as `forward lan:127.0.0.1:<port>`; a board on a LAN with no `--efuse-mac` gets `emu serve`'s first board's locally administered MAC, because this machine's default eFuse MAC is all zeros |
+
+With neither `--seams` flag the capability defaults (`net=lan`) are asked for
+softly, exactly as on the C6; `--seams none` scans nothing.
+
+**What is Xtensa's here.**
+
+- **Arming** checks that a site opens with an `entry` and that its hint
+  (`movi`/`movi.n` of the seam's immediate) follows within 64 bytes, decoding
+  both by hand (`seams::seam_arming::holds_xtensa_seam_hint`; `lp-xt-inst` is
+  outside the MIT fence), then plants `break 1, 15` over the three-byte
+  `entry` in the cache window — never in the chip — and re-arms after every
+  fill and restore.
+- **Answering** happens at that `break`, before `entry` rotates the window:
+  `n = PS.CALLINC`, arguments at `a(4n+2)..`, the result to `a(4n+2)`, the
+  return to the windowed return address's low 30 bits under the pc's top two
+  (the 1 GiB rule below). On whichever core reached the site.
+- **The wake** raises `SYSTEM.cpu_intr_from_cpu_3` (source 82), the S3's
+  software interrupt, not the C6's `INTPRI`; the run loop feeds the cores at
+  once and bounds the window and the all-cores-in-`waiti` skip by the
+  pacer's next raise and the LAN's next due cycle.
+- **The app has started** when core 0 first runs from the IROM window (the
+  C6 waits for its one flash window the same way), so a ROM-up boot's
+  bootloader, which reads the app through the window to check it, never
+  sees a patch.
+
+`tests/seam_abi_harness.rs` runs `fw-esp32s3 --features test_seam_abi` (a
+harness image that never ships): silicon's answers with seams off; the
+emulator's `test=echo` and `test=take` answers through the release build's
+LTO; `net=lan` engaged by default with `net_mac` writing the eFuse MAC
+through its out-pointer; and the wake reaching a core asleep in `waiti`,
+each queue delivered exactly once. `just test-emu-esp32s3-boot` builds the
+image and runs them with `--features test-seams`.
+
+⚠️ **The shipped S3 image declares no seam yet** (no network stack before
+the roadmap's M4), so on it every default run says `SEAM none engaged: no
+seam table` and its label stays `lp-emu:esp32s3:t1`. `emu serve` still holds
+C6 boards only; S3 boards there, and the two-board LAN walk, come with the
+first S3 image that has Wi‑Fi.
+
+⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
+interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
+to 0 (below): an unarmed core takes `EXCCAUSE=32` inside `save_context` and
+ends in the double-exception vector. The app path's `init` arms it; the seam
+harness does too, before it binds the wake.
+
 ## Three things about this machine that its siblings do not have
 
 1. **SRAM1 is one region with two doors.** `0x3FC8_8000` on the data bus and

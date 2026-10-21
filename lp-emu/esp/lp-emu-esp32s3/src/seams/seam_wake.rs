@@ -36,6 +36,12 @@ use crate::machine::Machine;
 use crate::memmap;
 use crate::periph::system::CPU_INTR_FROM_CPU0;
 
+// The line this file raises is the source `lp_seam` names for this chip.
+const _: () = assert!(
+    crate::regs::source::FROM_CPU_INTR0 + lp_seam::wake::WAKE_FROM_CPU_INTR as u16
+        == lp_seam::wake::WAKE_SOURCE_ESP32S3
+);
+
 impl Machine {
     /// Whether this chip start has a wake to drive at all. False on every
     /// seam-off run and on every image without a pending word.

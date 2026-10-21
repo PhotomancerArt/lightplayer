@@ -194,6 +194,25 @@ the milestone gate that first has a use for the button; this harness exists so
 the driver cannot rot uncompiled — see
 `docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
 
+### `test_seam_abi` (emulator only)
+
+```bash
+just build-fw-esp32s3 test_seam_abi   # then `just test-emu-esp32s3-boot` runs it
+```
+
+The Xtensa emulator-seam ABI under the real `release-esp32s3` build (S3
+radio M5; `docs/adr/2026-10-05-emulator-seams.md` §13). It calls
+`test_echo(1, 2, 4)`, drains `test_take`, and — when the network seam's
+engaged byte reads 1 — `net_mac` and `net_link`, each through the shim
+`lp_seam::seam_fn!` generates for Xtensa, with a value kept live across every
+call; then, with the take engaged, it binds the S3's wake handler
+(`seams::seam_wake_handler`, `SYSTEM.cpu_intr_from_cpu_3`) and sleeps in
+`waiti`, draining the take on every wake. It is the only image with a seam
+table (`src/seams/`); the shipped image declares none until it has a network
+stack. On silicon it prints `echo=7`, `take engaged=false`,
+`net engaged=false` and idles. The emulator's side is
+`lp-emu/esp/lp-emu-esp32s3/tests/seam_abi_harness.rs`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
