@@ -993,7 +993,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                 lan_port,
                 will_join,
                 relay,
-                net::net_chip::NET_CHIP,
+                &net::net_chip::NET_CHIP,
             );
         }
     }

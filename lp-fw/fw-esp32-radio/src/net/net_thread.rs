@@ -47,8 +47,8 @@ use super::mdns_task::MdnsBuffers;
 use lpc_relay::RelayClientConfig;
 
 /// What the chip decides about `lp-net`, and the chip code the network
-/// calls into. Copied into the thread at [`start`].
-#[derive(Clone, Copy)]
+/// calls into. The chip passes a `&'static` one (a constant, so it lives in
+/// flash and each task holds one pointer to it, not a copy).
 pub struct NetChip {
     /// The thread's stack, bytes.
     pub stack_bytes: usize,
@@ -102,7 +102,7 @@ struct Args {
     port: SharedPort,
     buffers: Option<NetBuffers>,
     relay: RelayClientConfig,
-    chip: NetChip,
+    chip: &'static NetChip,
 }
 
 // SAFETY: `Args` is moved to the new thread exactly once, through
@@ -124,7 +124,7 @@ pub fn start(
     port: SharedPort,
     will_join: bool,
     relay: RelayClientConfig,
-    chip: NetChip,
+    chip: &'static NetChip,
 ) {
     let buffers = will_join.then(NetBuffers::leak);
     let args = Box::into_raw(Box::new(Args {
@@ -177,7 +177,7 @@ extern "C" fn entry(param: *mut c_void) {
     let resources = Box::leak(Box::new(StackResources::<SOCKET_SLOTS>::new()));
     // The radio, or (an emulated board that engaged `net=lan`) the network
     // seam: one read of its engaged byte (`net_bringup`).
-    let (device, control) = super::net_bringup::choose(controller, station, &chip);
+    let (device, control) = super::net_bringup::choose(controller, station, chip);
     let (stack, runner) = embassy_net::new(device, Config::default(), resources, seed);
     let executor = Box::leak(Box::new(esp_rtos::embassy::Executor::new()));
     executor.run(move |spawner| {

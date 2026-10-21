@@ -81,7 +81,7 @@ pub async fn station_task(
     mut control: BoardStation,
     stack: Stack<'static>,
     host: String,
-    chip: NetChip,
+    chip: &'static NetChip,
 ) {
     let mut policy = StationPolicy::new(host);
     // The boot's settings are on the board before this thread starts
@@ -106,7 +106,7 @@ pub async fn station_task(
             }
         }
         while let Some(action) = queue.pop_front() {
-            for event in run(&mut control, stack, &file, &policy, action, &chip).await {
+            for event in run(&mut control, stack, &file, &policy, action, chip).await {
                 queue.extend(policy.handle(now_ms(), event));
             }
             STATION_BOARD.publish(&policy);

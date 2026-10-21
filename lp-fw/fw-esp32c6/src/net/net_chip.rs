@@ -10,8 +10,9 @@ pub const STACK_BYTES: usize = 8 * 1024;
 /// `lp-net`'s priority: the link thread's (`io_thread`).
 pub const PRIORITY: u32 = 1;
 
-/// What `net_thread::start` is given on this chip.
-pub const NET_CHIP: NetChip = NetChip {
+/// What `net_thread::start` is given on this chip (by reference: a
+/// `static`, in flash).
+pub static NET_CHIP: NetChip = NetChip {
     stack_bytes: STACK_BYTES,
     priority: PRIORITY,
     on_thread_start,
