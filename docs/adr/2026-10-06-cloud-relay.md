@@ -636,6 +636,9 @@ the account's boards.
 The Follow-ups' "draw a board's cloud picture on its card" and M8's "the
 board list" (for online boards) are done by this; the stored list, the
 automatic LAN move and the share link remain.
+(2026-10-21: the automatic LAN move is built, with no change to the relay's
+bytes or `RELAY_PROTO_VERSION`: [studio-network-links, its 2026-10-21
+amendment](2026-10-08-studio-network-links.md).)
 
 ## Amendment (2026-10-20): the hub writes the account's board list; `ListBoards` is replaced
 

@@ -552,9 +552,15 @@ which the home page can hold (`app/studio/connected_board.rs`,
   board closes first: one board is connected at a time. Connect reaches the
   board if it must, then opens its panel, in one press: on a closed port
   (`device_offers.rs`) it opens the port; on an offline board it takes the
-  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
-  then the cable (`ConnectReach`, the same code `connect-wifi`,
-  `connect-relay` and `reconnect` run). Then it holds the intent
+  first of its roads (`devices/best_link.rs`, pure): Wi‑Fi — at the address
+  the account's list gives while it says the board shares this network,
+  else the remembered one; skipped while the list says another network or
+  the page cannot reach the LAN (`LanReach`, reported by the web) — then
+  lightplayer.app, then the cable (`ConnectReach`, the same code
+  `connect-wifi`, `connect-relay` and `reconnect` run). A Wi‑Fi try that
+  fails goes on to lightplayer.app in the same press (`connect_flow.rs`,
+  `fall_through`), with one log line. The list's address is read in one
+  place (`studio_controller/lan_hint.rs`) and never stored. Then it holds the intent
   (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
   board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
   "The board didn't answer in time" (`StudioController::connect_failure`),
@@ -625,7 +631,23 @@ controller joins them onto the roster (`studio_controller/account_boards_flow.rs
   that board.
 
 `connect-relay` is offered while someone is signed in, the board is online
-there, and no link of this tab reaches it.
+there, and no link of this tab reaches it. A board never met whose list row
+says it shares this network is offered `connect-wifi` first, as its Connect:
+pressed, a Wi‑Fi try that fails goes on through lightplayer.app.
+
+**The move onto Wi‑Fi** (`devices/lan_move.rs`, the machine;
+`studio_controller/lan_move_flow.rs`, driven from the refresh tick): a board
+reached through lightplayer.app, idle, holding a tier, whose list row says
+it shares this network at an address, moves onto the LAN once per page
+load. Its LAN link presents the relay's keys first
+(`NetworkLinkKeys::present_as_relay`, for as long as it is on Wi‑Fi), its
+relay session is parked (`RelayLinkSource::park`) before the LAN dial, and
+once the board's own link is the LAN's (8 s at most) the editor is rebound
+onto it in one step (`rebind_lens_onto`, shared with the held lens's
+resume) and the relay session is let go. A failure stays, in one log line.
+A moved board whose Wi‑Fi link goes is back through lightplayer.app after
+5 s, unless the link closed with 1000 or the list no longer names it
+(`docs/adr/2026-10-08-studio-network-links.md`, its 2026-10-21 amendment).
 
 **The report and the two forgets** (`studio_controller/account_board_requests_flow.rs`,
 `AccountBoardRequest`): when the access controller reads a board's list (USB,

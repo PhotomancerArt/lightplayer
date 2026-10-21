@@ -73,3 +73,21 @@ code for both, the other side picks one meaning for both. Here it picked
 "come back", and two peers that each come back make a loop. Any
 "newest wins" slot needs the loser told that it lost, in a form its
 reconnect logic reads.
+
+## Since the account's board list (2026-10-21)
+
+Since "your boards follow you" (M1–M3), any signed-in computer reaches a
+board through lightplayer.app with one press, and every one of them
+presents the same account key. So the loop is now reachable between two
+browsers of one person (a phone and a computer, say): the second press takes
+the slot, the first page redials and takes it back. M5's hold channel covers
+only tabs of one browser, and nothing here fixes another browser.
+
+What the move onto the LAN (M3) does not do: it does not make this worse. It
+moves once per page load; it parks its own relay session before its LAN
+connection takes the slot (`park` in `browser_websocket.js`), so its own two
+links never trade the slot; and a moved board whose Wi‑Fi link is closed with
+code 1000 is not taken back through lightplayer.app
+(`studio-network-links` ADR, its 2026-10-21 amendment). The fix this entry
+needs is unchanged: a firmware "taken by your own key" close reason and a
+relay-protocol version, so every page reads "you lost the slot" and stops.

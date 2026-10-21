@@ -144,7 +144,7 @@ connect failed              Studio couldn't connect to this board over USB.
 not answering (it said      This board stopped responding over USB.
   hello, now says nothing)  Retry to reconnect.                                            ↻ Retry
 sim off                     This simulated board is off.                                   ▶ Power on
-online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect
+online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect (≋ Connect while it shares your network)
   (no link here)            (no picture yet, or relay protocol 1: the dark, no words)
 offline, another way        This board isn't plugged in.
   reaches it                Connect over Wi‑Fi to use it.                                  ↔ Connect
