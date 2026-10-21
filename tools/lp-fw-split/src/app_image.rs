@@ -154,6 +154,43 @@ mod tests {
     /// The sizes of `76959e7a4`'s packaged image, whose last 254 bytes the
     /// host flasher dropped on the bench C6: `app.bin` ended at `0x2F55FE`.
     #[test]
+    fn layout_2_puts_the_core_at_its_region_and_the_engine_on_a_64_kib_page() {
+        // The spike's S3 sizes: loader 2,704 B, core 280,656 B, engine
+        // 2,172,645 B, in today's 6 MB `factory`.
+        let img = assemble_in(
+            0x1_0000,
+            0x2_0000,
+            &[1; 2704],
+            &vec![2; 280_656],
+            &vec![3; 2_172_645],
+            0x61_0000,
+            7,
+        )
+        .unwrap();
+        assert_eq!(img.core_off, 0x2_0000);
+        assert_eq!(
+            img.engine_off, 0x7_0000,
+            "the first 64 KiB page after the core"
+        );
+        let at = |off: u32| (off - LOADER_OFFSET) as usize;
+        assert_eq!(img.bytes[at(0x2_0000)], 2);
+        assert!(
+            img.bytes[at(0x2_0000 + 280_656)..at(0x7_0000)]
+                .iter()
+                .all(|b| *b == 0xff)
+        );
+        let slot =
+            BootSlot::decode(&img.bytes[at(BOOT_RECORD_SECTORS[0])..][..BOOT_RECORD_READ_LEN])
+                .unwrap();
+        assert_eq!(slot.record.core_off, 0x2_0000);
+        assert!(image_end_is_aligned(LOADER_OFFSET, img.bytes.len()));
+        assert!(
+            assemble_in(0x1_0000, 0x2_0000, &[1; 4], &[2; 4], &[3; 4], 0x61_8000, 7).is_err(),
+            "a region that does not end on a 64 KiB page"
+        );
+    }
+
+    #[test]
     fn the_76959e7a4_sizes_end_on_a_sector() {
         let (core, engine) = (1_161_104usize, 1_824_254usize);
         let img = assemble(&[1; 2800], &vec![2; core], &vec![3; engine], 0x35_0000, 1).unwrap();

@@ -234,6 +234,21 @@ pub fn crate_of(name: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_node_with_no_symbol_is_named_by_its_section() {
+        assert_eq!(
+            demangled_section(".text._RNvCskBLnKYXHd9w_10fw_esp32s315lp_engine_entry"),
+            "fw_esp32s3::lp_engine_entry"
+        );
+        assert_eq!(
+            crate_of(&demangled_section(
+                ".literal._RNvCskBLnKYXHd9w_10fw_esp32s315lp_engine_entry"
+            )),
+            Some("fw_esp32s3")
+        );
+        assert_eq!(demangled_section(".rodata.cst16"), ".rodata.cst16");
+    }
     use crate::section_graph::Node;
 
     fn node(vma: u64, out: &str) -> Node {

@@ -165,6 +165,27 @@ mod tests {
     }
 
     #[test]
+    fn the_s3_counts_from_its_own_region_and_has_no_legacy_overlap() {
+        // The spike's S3 image in today's 6 MB `factory`.
+        let mut r = report(280_656, 2_172_645);
+        r.chip = SplitChip::Esp32s3;
+        r.layout = 2;
+        r.page = 0x1_0000;
+        r.region_start = 0x2_0000;
+        r.region_end = 0x61_0000;
+        r.core.offset = 0x2_0000;
+        r.engine.offset = 0x7_0000;
+        r.app_bin.size_bytes = 0x7_0000 + 2_172_645 - 0x1_0000;
+        let h = Headroom::of(&r, 0x60_0000);
+        assert_eq!(h.steady_low, 0x61_0000 - 0x7_0000 - 2_172_645);
+        let high = (0x61_0000i64 - 280_656) / 0x1_0000 * 0x1_0000;
+        assert_eq!(h.steady_high, high - 0x2_0000 - 2_172_645);
+        assert_eq!(h.update, high - 0x7_0000);
+        assert_eq!(h.legacy_overlap, None);
+        assert!(!h.lines().iter().any(|l| l.contains("legacy")));
+    }
+
+    #[test]
     fn an_image_too_big_goes_negative() {
         let h = Headroom::of(&report(1_700_000, 1_700_000), 0x34_0000);
         assert!(h.update < 0);
