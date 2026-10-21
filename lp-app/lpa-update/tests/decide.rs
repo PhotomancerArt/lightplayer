@@ -228,10 +228,20 @@ fn e8_another_chip_layout_an_old_loader_or_no_room_needs_usb() {
             }
         }
     );
+    // A layout the table knows but this build is not linked for (an S3's
+    // layout 2 under a C6 build): another layout.
+    let mut m = board_x();
+    m.layout = 2;
+    assert_eq!(
+        decide_for(m),
+        Decision::NeedsUsb {
+            why: NeedsUsbWhy::OtherLayout
+        }
+    );
     // A layout or chip this host's code table does not know: the board
     // cannot be updated over a link at all.
     let mut m = board_x();
-    m.layout = 2;
+    m.layout = 3;
     assert_eq!(
         decide_for(m),
         Decision::NeedsUsb {
