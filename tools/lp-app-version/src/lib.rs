@@ -16,8 +16,9 @@
 //! Resolution order:
 //!
 //! 0. [`FIGURE_VERSION`], for a **figure build** (`LP_FIGURE_BUILD=1`; see
-//!    [`figure_build`]): an image built only to have its memory figures read
-//!    and recorded, never one that ships.
+//!    [`figure_build`]): an image built only to have its figures (memory,
+//!    first light) read and recorded, never one that ships. Its commit
+//!    stamp is pinned too ([`FIGURE_COMMIT`], through [`commit`]).
 //! 1. `APP_VERSION`, when exported and non-empty. The deploy workflows
 //!    (`deploy-cloud.yml`, `deploy-pages-channel.yml`) resolve it right after
 //!    checkout, before the build writes generated files into the tree, so a
@@ -51,7 +52,7 @@ pub const UNKNOWN: &str = "unknown";
 /// builds whose memory figures are read and recorded — the C6 heap ratchet's
 /// image (`scripts/heap-budget-check.sh`) and the emulator suite's shipped
 /// split image (`lp_emu_esp32c6::test_support`), which CI uploads for
-/// `just fetch-ci-images`.
+/// `just fetch-ci-images` and the first-light ratchet boots.
 pub const FIGURE_BUILD_ENV: &str = "LP_FIGURE_BUILD";
 
 /// The version a figure build carries, whatever the tree's state.
@@ -71,13 +72,50 @@ pub const FIGURE_BUILD_ENV: &str = "LP_FIGURE_BUILD";
 /// figure.
 pub const FIGURE_VERSION: &str = "0000000";
 
+/// The commit a figure build is stamped with (`LP_BUILD_COMMIT`), whatever
+/// commit is checked out.
+///
+/// The commit's bytes reach the image's layout, not only its text: the C6
+/// carries it in five strings, and the linker merges the core's `.rodata`
+/// strings by content, so two commits with identical firmware sources linked
+/// ~900 read-only constants in a different order, and every instruction that
+/// addresses one differently. `lp-emu:esp32c6:t4` charges for where code and
+/// data land in flash and cache, so the first-light ratchet read 386 or
+/// 391 ms by the commit alone, on PRs that changed no firmware
+/// (`docs/defects/2026-10-21-first-light-flipped-with-the-commit.md`).
+///
+/// Twelve lowercase hex digits: the length of the real stamp
+/// (`git rev-parse --short=12`), so what a stamp's length reaches (the boot
+/// heap) reads what it read before the pin.
+pub const FIGURE_COMMIT: &str = "000000000000";
+
 /// Whether this build is a figure build (`LP_FIGURE_BUILD=1`). A figure
-/// build is stamped [`FIGURE_VERSION`] and clean (the firmware build scripts
-/// report `LP_BUILD_DIRTY=false` for it), so nothing the tree's state can
-/// change reaches the image. The commit stays real: it is the same length
-/// on every machine (`--short=12`) and the same bytes on one commit.
+/// build is stamped [`FIGURE_VERSION`], [`FIGURE_COMMIT`] and clean (the
+/// firmware build scripts report `LP_BUILD_DIRTY=false` for it), so nothing
+/// the checkout can change — its commit or its tree's state — reaches the
+/// image: two commits with the same firmware sources build the same bytes.
 pub fn figure_build() -> bool {
     std::env::var(FIGURE_BUILD_ENV).is_ok_and(|v| v.trim() == "1")
+}
+
+/// This build's commit stamp, for a firmware build script's
+/// `LP_BUILD_COMMIT`: [`FIGURE_COMMIT`] for a figure build, otherwise
+/// `git rev-parse --short=12 HEAD` from the crate's manifest directory, or
+/// [`UNKNOWN`] when git cannot say (a source tarball).
+///
+/// A product or release build is never a figure build, so its stamp — and
+/// the build id (`"<version>+<commit>"`) its boot records and its release's
+/// ota-manifest are made from — is the real commit, exactly as before.
+pub fn commit() -> String {
+    if figure_build() {
+        return FIGURE_COMMIT.to_string();
+    }
+    let manifest_dir = PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("lp-app-version runs inside a build script"),
+    );
+    git(&manifest_dir, &["rev-parse", "--short=12", "HEAD"])
+        .filter(|commit| !commit.is_empty())
+        .unwrap_or_else(|| UNKNOWN.to_string())
 }
 
 /// Resolve this build's version, set `LP_APP_VERSION` for the crate being
@@ -228,6 +266,18 @@ mod tests {
     #[test]
     fn a_crate_outside_any_tree_finds_no_script() {
         assert_eq!(find_script(Path::new("/")), None);
+    }
+
+    #[test]
+    fn the_figure_commit_is_as_long_as_a_real_stamp() {
+        // `--short=12`, the firmware build scripts' real stamp: a length
+        // change would move the figures the pin exists to hold still.
+        assert_eq!(FIGURE_COMMIT.len(), 12);
+        assert!(
+            FIGURE_COMMIT
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
     }
 
     #[test]
