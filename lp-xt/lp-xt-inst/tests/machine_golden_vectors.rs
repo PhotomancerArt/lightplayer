@@ -832,3 +832,28 @@ fn ssai_reserved_field_must_be_zero() {
         );
     }
 }
+
+/// `salt` / `saltu` — LX7 only. Assembled with `xtensa-esp32s3-elf-as` and
+/// read back with its objdump (2026-10-21); `xtensa-esp32-elf-as` refuses
+/// both mnemonics ("unknown opcode or format name"), so unlike the vectors
+/// above these have no LX6 twin. The first is the word the esp-radio blobs'
+/// `_vsnprintf` executes on the S3 (`0x422ae197` in the M1 radio probe).
+#[test]
+fn set_ar_if_less_than() {
+    for (bytes, text) in [
+        ([0x60u8, 0xa8, 0x62], "saltu\ta10, a8, a6"),
+        ([0x60, 0xa8, 0x72], "salt\ta10, a8, a6"),
+        ([0x30, 0x12, 0x72], "salt\ta1, a2, a3"),
+    ] {
+        dec(&bytes);
+        agrees_with_objdump(&bytes, text);
+    }
+    assert_eq!(
+        dec(&[0x60, 0xa8, 0x62]),
+        Inst::Rrr(AluRrr::Saltu, a(10), a(8), a(6))
+    );
+    assert_eq!(
+        dec(&[0x60, 0xa8, 0x72]),
+        Inst::Rrr(AluRrr::Salt, a(10), a(8), a(6))
+    );
+}
