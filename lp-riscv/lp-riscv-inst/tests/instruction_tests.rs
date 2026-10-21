@@ -100,6 +100,31 @@ fn test_atomic_instructions() {
 }
 
 #[test]
+fn test_amo_min_max_instructions() {
+    // funct5 = 0x10 / 0x14 / 0x18 / 0x1c in bits [31:27], funct3 = 2, opcode 0x2f;
+    // each as `<op> a0, a1, (a2)`.
+    let cases: [(u32, &str); 4] = [
+        (0x10, "amomin.w"),
+        (0x14, "amomax.w"),
+        (0x18, "amominu.w"),
+        (0x1c, "amomaxu.w"),
+    ];
+    for (funct5, name) in cases {
+        let word = (funct5 << 27) | (11 << 20) | (12 << 15) | (0x2 << 12) | (10 << 7) | 0x2f;
+        let inst = decode_instruction(word).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (rd, rs1, rs2) = match inst {
+            Inst::AmominW { rd, rs1, rs2 }
+            | Inst::AmomaxW { rd, rs1, rs2 }
+            | Inst::AmominuW { rd, rs1, rs2 }
+            | Inst::AmomaxuW { rd, rs1, rs2 } => (rd, rs1, rs2),
+            other => panic!("{name}: decoded as {other:?}"),
+        };
+        assert_eq!((rd, rs1, rs2), (Gpr::A0, Gpr::A2, Gpr::A1), "{name}");
+        assert_eq!(inst.format(), format!("{name} a0, a1, (a2)"));
+    }
+}
+
+#[test]
 fn test_compressed_instructions() {
     // Test compressed instruction decoding
     // C.ADDI: 0x0001 (c.addi x0, 0) - but this is actually C.NOP
