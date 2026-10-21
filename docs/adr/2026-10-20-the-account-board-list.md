@@ -163,4 +163,7 @@ the board still shows from the account) and **Remove from your account**
 - The account owns a board's name (roadmap future work).
 - The model in the relay hello, with the next relay protocol.
 - The best link and the automatic move onto the LAN (roadmap M3); the
-  extended emulated walks (M4).
+  extended emulated walks (M4). Both done, 2026-10-21: M4's lane `just
+  walk-wifi-emu studio-relay-account` walks a board joining the list over
+  USB with no Wi‑Fi, two boards offline on a never-met profile with their
+  last facts, and Remove from your account.

@@ -1125,7 +1125,10 @@ lightplayer.app (`relay:<mac>`, the relay's browser leg
 someone is signed in and no USB, Bluetooth or LAN link of the tab reaches
 the board: on a remembered board (it said its MAC over any link; an offline
 one says "The board isn't online." on its tile), and on every board the
-account's list says is online. **The account keeps a board list** (cloud
+account's list says is online. **One click takes the best link** (USB, then
+the LAN, then the relay): a board never met here whose list row says it
+shares this network is offered "Connect over Wi‑Fi" first, and a refused
+Wi‑Fi try goes on through lightplayer.app in the same press. **The account keeps a board list** (cloud
 API v7, `docs/adr/2026-10-20-the-account-board-list.md`): one record per
 board in the cloud's store (`account_boards`, migration `0007`), joined when
 the board registers with the relay proving the account and when Studio reads
@@ -1143,13 +1146,26 @@ boards, an offline one in Offline boards on every computer (its last
 picture the one the relay wrote behind, dimmed; no Connect), and one this
 browser never met is an in-memory entry under `mac-<12 hex>`, never written
 to `/registry.json`, until its hello makes it a remembered board. The card's
-`forget` reads **Forget on this browser**. The automatic move onto the LAN
-is not built yet (M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
+`forget` reads **Forget on this browser**. **A relay session moves itself
+onto the LAN** when the list says the board shares this network
+(`devices/lan_move.rs`; idle boards only, once per page load, the editor
+rebound in one step with no "Reconnecting…"), and back through
+lightplayer.app 5 s after that Wi‑Fi link drops, unless it closed with 1000
+(another connection took the board's slot;
+`docs/adr/2026-10-08-studio-network-links.md`, 2026-10-21 amendment). A
+relay link presents held keys only — the account's, then
 the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
 stays as a dev shortcut that dials those boards at page load (like `?lan=`);
 there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks
-for nothing). `just walk-wifi-emu studio-relay` walks it on an emulated C6
-through a local `lp-cloud-server`. Locally, serve the Studio bundle from a
+for nothing). Three lanes of `just walk-wifi-emu` walk it on emulated C6s
+through a local `lp-cloud-server`, each under ten minutes: `studio-relay`
+(the relay connect, and a never-met profile seeing an online board),
+`studio-relay-move` (the move onto Wi‑Fi and back, the best link; a
+page-side shim, `scripts/emu/walk-lan-shim.mjs`, stands in for the LAN's
+reachability, so nothing there says how Chrome's Local Network prompt
+behaves) and `studio-relay-account` (a board with no Wi‑Fi joining the
+list over USB, two boards offline on a never-met profile with their last
+facts, Remove from your account). Locally, serve the Studio bundle from a
 `lp-cloud-server` (`LP_CLOUD_STATIC_DIR`, dev login) so the relay is
 same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
 (`LP_CLOUD_SESSION` = the dev login's session); `Dioxus.toml` also forwards
