@@ -26,6 +26,9 @@ use littlefs_rust::{Config, Error as LfsError, Storage};
 /// Partition label to mount as the LightPlayer filesystem. Must match
 /// `partitions.csv`.
 const LPFS_LABEL: &str = "lpfs";
+/// The app partition: a split image's loader, records, core and engine.
+#[cfg(lp_split)]
+const FACTORY_LABEL: &str = "factory";
 
 /// Block size: 4KB (matches ESP32 flash sector).
 const BLOCK_SIZE: u32 = 4096;
@@ -59,6 +62,17 @@ impl LpfsPartition {
             offset: entry.offset(),
             len: entry.len(),
         })
+    }
+
+    /// The `factory` partition's `(offset, len)`, by label: where a split
+    /// image's region ends (the C6 reads the same row, `flash_layout.rs`).
+    /// `None` when the table has none.
+    #[cfg(lp_split)]
+    pub fn locate_factory(flash: &mut impl embedded_storage::Storage) -> Option<(u32, u32)> {
+        let mut buf = [0u8; partitions::PARTITION_TABLE_MAX_LEN];
+        let table = partitions::read_partition_table(flash, &mut buf).ok()?;
+        let entry = table.iter().find(|e| e.label_as_str() == FACTORY_LABEL)?;
+        Some((entry.offset(), entry.len()))
     }
 
     /// Number of 4KB littlefs blocks in the partition.
