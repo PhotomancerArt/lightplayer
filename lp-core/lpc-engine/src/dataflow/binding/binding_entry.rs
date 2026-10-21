@@ -41,10 +41,14 @@ pub struct BindingDraft {
 #[derive(Clone, Debug)]
 pub enum BindingSource {
     Literal(LpValue),
-    /// A literal `u32`-keyed set of leaves, materialized as `SlotData::Map`.
-    /// Only an engaged panel writer holding a map contributes one (a touch
-    /// set, panel.md P14); authored bindings never do.
-    LiteralMap(alloc::vec::Vec<(u32, LpValue)>),
+    /// The engaged panel writer at `(scope, channel)` (panel.md P1). Its
+    /// value is read from the writer store when the route resolves, never
+    /// cached in the route: re-writing an engaged writer (a knob turn, a
+    /// finger moving) changes no structure. Only panel providers carry it.
+    PanelWriter {
+        scope: crate::node::ScopeRef,
+        channel: ChannelName,
+    },
     ProducedSlot {
         node: NodeId,
         slot: SlotPath,

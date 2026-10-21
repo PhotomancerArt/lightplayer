@@ -13,7 +13,7 @@ use crate::dataflow::resolver::resolve_error::SessionResolveError;
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
-use crate::dataflow::resolver::resolver::{materialize_literal_map, materialize_literal_product};
+use crate::dataflow::resolver::resolver::materialize_literal_product;
 use crate::dataflow::resolver::route::{ResolvedRoute, RouteTarget};
 use lpc_model::{
     ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMapKey, SlotMerge, SlotPath,
@@ -328,7 +328,10 @@ impl<'a> EngineSession<'a> {
     ) -> RouteTarget {
         match source {
             BindingSource::Literal(spec) => RouteTarget::Literal(spec.clone()),
-            BindingSource::LiteralMap(entries) => RouteTarget::LiteralMap(entries.clone()),
+            BindingSource::PanelWriter { scope, channel } => RouteTarget::PanelWriter {
+                scope: *scope,
+                channel: channel.clone(),
+            },
             BindingSource::ProducedSlot { node, slot } => {
                 RouteTarget::Query(self.resolver.intern_query(&QueryKey::ProducedSlot {
                     node: *node,
@@ -496,12 +499,12 @@ impl<'a> EngineSession<'a> {
                 let product = materialize_literal_product(spec, self.revision);
                 Ok(Production::leaf(product, ProductionSource::Literal))
             }
-            RouteTarget::LiteralMap(entries) => {
+            RouteTarget::PanelWriter { scope, channel } => {
                 self.resolver.counters_mut().literal_materializations += 1;
-                Ok(Production::new(
-                    materialize_literal_map(entries, self.revision),
-                    ProductionSource::Literal,
-                ))
+                host.panel_writer_production(*scope, channel)
+                    .ok_or_else(|| SessionResolveError::NoBusProvider {
+                        channel: channel.clone(),
+                    })
             }
             RouteTarget::Query(id) => {
                 let mut pv = self.resolve_id(host, *id)?;

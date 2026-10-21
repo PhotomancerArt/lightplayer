@@ -512,6 +512,68 @@ fn probe_reports_engaged_writers_with_panel_origin() {
 }
 
 #[test]
+fn re_writing_an_engaged_panel_writer_costs_no_structural_work() {
+    // A knob turn or a finger moving re-writes a writer that is already
+    // engaged: the winning provider set is the same, so the next frame must
+    // not re-derive the graph (on the C6 that rebuild cost ~40 ms a write).
+    // Engaging and releasing still do. The reader sees every new value.
+    let mut h = EngineTestBuilder::new()
+        .shader("writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("writer", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+    let writer = h.node("writer");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[writer, reader]);
+    let channel = lpc_model::ChannelName(alloc::string::String::from("chan"));
+    h.tick(16).expect("warm-up tick");
+
+    h.engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(0.5),
+        Some(400),
+    );
+    h.tick(16).expect("engage tick");
+    assert_eq!(h.output_f32("reader"), Some(0.5));
+    assert!(
+        h.engine.resolver().frame_counters().structural_work() > 0,
+        "engaging a writer changes the provider set"
+    );
+
+    for value in [0.6, 0.7, 0.8] {
+        h.engine.panel_write(
+            root_scope,
+            channel.clone(),
+            lpc_model::LpValue::F32(value),
+            Some(400),
+        );
+        h.tick(16).expect("re-write tick");
+        assert_eq!(
+            h.output_f32("reader"),
+            Some(value),
+            "the reader sees the new value"
+        );
+        let counters = *h.engine.resolver().frame_counters();
+        assert_eq!(
+            counters.structural_work(),
+            0,
+            "a re-write re-derived the graph: {counters:?}"
+        );
+    }
+
+    h.engine.panel_clear(root_scope, &channel);
+    h.tick(16).expect("release tick");
+    assert_eq!(
+        h.output_f32("reader"),
+        Some(0.25),
+        "the authored writer returns"
+    );
+}
+
+#[test]
 fn momentary_writers_despawn_on_ttl_expiry() {
     // panel.md P14: gesture channels write while active and despawn past
     // their renewal deadline — the despawn IS the release fallback for a
