@@ -462,6 +462,10 @@ struct UpdateRun {
     asked_unanswered_at: Option<u64>,
     /// The board said something on channel 3 during this leg.
     heard_this_leg: bool,
+    /// When the board last said anything on this link (bench/host ms): what
+    /// a reconnect line times the board's time away from. Cleared when a
+    /// leg starts, so a gap is never counted twice.
+    last_heard_ms: Option<u64>,
     /// The driver reported a stage past backing up: the board has changed,
     /// so an end without an outcome keeps the backup pinned.
     board_touched: bool,
@@ -566,6 +570,7 @@ impl HostState {
                     session_reset: false,
                     asked_unanswered_at: None,
                     heard_this_leg: false,
+                    last_heard_ms: None,
                     board_touched: false,
                 },
             );
@@ -579,6 +584,7 @@ impl HostState {
         run.session_reset = false;
         run.asked_unanswered_at = None;
         run.heard_this_leg = false;
+        run.last_heard_ms = None;
         run.facts = start.facts.facts.clone();
         let replaced = run.leg.replace(Leg {
             link: start.link,
@@ -634,7 +640,7 @@ impl HostState {
                 );
             }
         }
-        if let Some(line) = run.narration.link_down(now) {
+        if let Some(line) = run.narration.link_down(now, run.last_heard_ms) {
             seams.say(device, leg.effect_id, line);
         }
         seams.marker(
@@ -1409,7 +1415,7 @@ impl HostState {
         }
         run.session_reset = true;
         let effect = run.last_effect;
-        if let Some(line) = run.narration.link_down(now) {
+        if let Some(line) = run.narration.link_down(now, run.last_heard_ms) {
             seams.say(device, effect, line);
         }
     }
@@ -1464,6 +1470,7 @@ impl HostState {
         }
         if let Some(run) = self.runs.get_mut(&device) {
             run.heard_this_leg = true;
+            run.last_heard_ms = Some(now);
             run.asked_unanswered_at = None;
         }
         match self.runs.get_mut(&device).map(|run| &mut run.phase) {
@@ -2172,6 +2179,7 @@ mod tests {
             session_reset: false,
             asked_unanswered_at: None,
             heard_this_leg: false,
+            last_heard_ms: None,
             board_touched: false,
         }
     }

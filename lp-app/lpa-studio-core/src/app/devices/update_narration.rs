@@ -163,7 +163,12 @@ impl UpdateNarration {
     /// after a whole piece is the board doing its job, and so is one before
     /// a piece moved a byte — the board's reset after its last commit
     /// reports the next stage at 0% first).
-    pub fn link_down(&mut self, now_ms: u64) -> Option<String> {
+    ///
+    /// The gap is timed from the last word heard (`last_heard_ms`, clamped
+    /// to `now_ms`), not from when the link was noticed gone: a resetting
+    /// board sends no FIN, so a socket's close arrives about when the board
+    /// is back.
+    pub fn link_down(&mut self, now_ms: u64, last_heard_ms: Option<u64>) -> Option<String> {
         for piece in [&mut self.backup, &mut self.core, &mut self.engine] {
             piece.close_leg();
         }
@@ -172,7 +177,8 @@ impl UpdateNarration {
         let interrupted = self.last_progress.take().filter(|(done, total)| {
             *done > 0 && u64::from(*done) + u64::from(CHUNK) < u64::from(*total)
         });
-        self.down = Some((now_ms, interrupted.is_some()));
+        let away_since = last_heard_ms.map_or(now_ms, |heard| heard.min(now_ms));
+        self.down = Some((away_since, interrupted.is_some()));
         let (done, total) = interrupted?;
         // The stage the drop happened in; an unstaged progress reads as the
         // core's, the first part.
@@ -292,7 +298,7 @@ mod tests {
         );
         n.progress(81_000, UpdateStageFacts::BackingUp, 1_818_000, 1_822_000);
         n.offered();
-        assert_eq!(n.link_down(81_500), None, "a reset after the offer");
+        assert_eq!(n.link_down(81_500, None), None, "a reset after the offer");
         assert_eq!(
             n.link_up(82_700).as_deref(),
             Some("board reset · reconnected in 1.2 s")
@@ -300,7 +306,7 @@ mod tests {
         n.progress(83_000, UpdateStageFacts::Updating, 0, 1_160_000);
         n.progress(135_000, UpdateStageFacts::Updating, 400_000, 1_160_000);
         assert_eq!(
-            n.link_down(135_100).as_deref(),
+            n.link_down(135_100, None).as_deref(),
             Some("link dropped during update at 17%")
         );
         assert_eq!(n.link_up(136_000).as_deref(), Some("reconnected in 0.9 s"));
@@ -317,10 +323,31 @@ mod tests {
     fn a_reset_at_zero_percent_is_the_boards_not_a_drop() {
         let mut n = UpdateNarration::default();
         n.progress(1_000, UpdateStageFacts::Finishing, 0, 1_822_000);
-        assert_eq!(n.link_down(1_500), None);
+        assert_eq!(n.link_down(1_500, None), None);
         assert_eq!(
             n.link_up(4_500).as_deref(),
             Some("board reset · reconnected in 3.0 s")
+        );
+    }
+
+    /// The gap is the board's time away, from the last word heard: a socket
+    /// that closes late (no FIN from a resetting board) and a knock that
+    /// reopens it a second later are not the board's reset time.
+    #[test]
+    fn the_reconnect_is_timed_from_the_last_word_heard() {
+        let mut n = UpdateNarration::default();
+        n.progress(1_000, UpdateStageFacts::Finishing, 0, 1_822_000);
+        // Heard at 10.0 s; the close was only noticed at 13.0 s.
+        assert_eq!(n.link_down(13_000, Some(10_000)), None);
+        assert_eq!(
+            n.link_up(14_000).as_deref(),
+            Some("board reset · reconnected in 4.0 s")
+        );
+        // A last word from after the down is no earlier than now.
+        assert_eq!(n.link_down(20_000, Some(25_000)), None);
+        assert_eq!(
+            n.link_up(21_000).as_deref(),
+            Some("board reset · reconnected in 1.0 s")
         );
     }
 }
