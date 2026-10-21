@@ -193,6 +193,9 @@ impl EmuUsbBoard for S3Board {
         };
         match self.machine.run_until(&stop) {
             Outcome::Deadline { .. } => Ok(()),
+            // `--flash-cut … then=stop`: the run ends on the cut, the flash
+            // as it left it (`finish` writes it back to a `--rom-up-flash`).
+            Outcome::PowerCut { report, .. } => Err(format!("power cut: {report}")),
             other => Err(format!("{other:?}")),
         }
     }
@@ -226,6 +229,8 @@ impl EmuUsbBoard for S3Board {
         if m.reboots() > 0 {
             lines.push(format!("{} reboot(s)", m.reboots()));
         }
+        // `--flash-cut`: the cut, the power cycles and the in-range census.
+        lines.extend(m.flash_cut_summary());
         lines
     }
 }

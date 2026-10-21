@@ -108,7 +108,7 @@ pub(super) fn apply_image(
 }
 
 /// A merged image's length, which must be a whole flash part.
-fn whole_part_len(merged: &Path) -> Result<u32> {
+pub(super) fn whole_part_len(merged: &Path) -> Result<u32> {
     let len = std::fs::metadata(merged)
         .with_context(|| format!("reading {}", merged.display()))?
         .len();
@@ -147,8 +147,10 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip != EmuChip::Esp32C6 && args.pace.is_some() {
         bail!("--pace is the C6's: a pace is held at its network seam's LAN pump");
     }
-    if args.chip != EmuChip::Esp32C6 && args.flash_cut.is_some() {
-        bail!("--flash-cut is the C6's: only its flash chip arms a power cut yet");
+    // The C6 and, since S3 radio M7 P5, the S3: both chips' flash runs on
+    // the common NOR engine that arms a cut. The classic's does not yet.
+    if args.chip == EmuChip::Esp32V3 && args.flash_cut.is_some() {
+        bail!("--flash-cut is the C6's and the S3's: the classic's flash arms no power cut yet");
     }
     let flash_cut = args
         .flash_cut
@@ -159,10 +161,13 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip != EmuChip::Esp32C6 && (args.seams.is_some() || args.seams_prefer.is_some()) {
         bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
     }
-    if args.chip != EmuChip::Esp32C6
+    if args.chip == EmuChip::Esp32V3
         && (args.ota.ota_offer.is_some() || args.rom_up_flash.is_some())
     {
-        bail!("--ota-offer and --rom-up-flash are the C6's: only its image is split");
+        bail!(
+            "--ota-offer and --rom-up-flash are the C6's and the S3's: the classic has no \
+             update path yet"
+        );
     }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
