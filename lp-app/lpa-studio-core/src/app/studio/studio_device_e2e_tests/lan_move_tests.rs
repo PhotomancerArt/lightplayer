@@ -60,6 +60,20 @@ fn an_idle_relay_session_moves_onto_wifi_with_the_editor_open_and_no_curtain() {
     rig.tick_until("the relay session to be let go", |rig| {
         !rig.slot.borrow().relay_present
     });
+    // The relay link's departure (the page's `disconnect` edge, its sweep)
+    // does not take the board, now on Wi‑Fi, with it: the editor is never
+    // held, and nothing goes back through lightplayer.app — past core's 5 s
+    // too (the emulated walk's T6 found both).
+    let relay_dials = rig.slot.borrow().relay_connects;
+    for _ in 0..50 {
+        assert!(!rig.tick(), "the editor held after the relay link left");
+    }
+    rig.bench.clock.set(rig.bench.clock.get() + 6.0);
+    for _ in 0..50 {
+        assert!(!rig.tick(), "the editor held after the relay link left");
+    }
+    assert_eq!(rig.slot.borrow().relay_connects, relay_dials, "no way back");
+    assert!(rig.on_lan(), "still on Wi‑Fi");
     // The editor is on the new link, still open, still connected.
     assert_eq!(
         rig.lens_endpoint().as_deref(),
@@ -73,15 +87,16 @@ fn an_idle_relay_session_moves_onto_wifi_with_the_editor_open_and_no_curtain() {
     let card = &rig.bench.controller.device_roster_view().lan_links[&rig.id];
     assert_eq!(card.kind, crate::UiLinkKind::Wifi);
     assert_eq!(rig.said("Moved to Wi\u{2011}Fi on your network"), 1);
-    // The relay's order was for the move only: the LAN's own is back (this
-    // browser's key, then the account's).
+    // While the board is on Wi‑Fi its LAN link keeps the relay's order: a
+    // change of its best key would rekey the link, and the board closes a
+    // keyed session that restarts.
     let keys = rig.bench.controller.network_link_keys();
     let presented = keys.keys_for(ROW_URL);
     assert_eq!(presented.len(), 2, "this browser's key and the account's");
-    assert_ne!(
+    assert_eq!(
         presented.first().map(|key| key.key_id),
         rig.slot.borrow().holder,
-        "without the move, the LAN would lead with the key the board refuses"
+        "the key the board holds the slot with, still first"
     );
 
     // Never again this page load.

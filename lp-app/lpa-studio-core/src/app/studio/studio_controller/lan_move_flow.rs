@@ -8,7 +8,10 @@
 //!
 //! 1. its LAN link will present the relay's keys first
 //!    ([`crate::NetworkLinkKeys::present_as_relay`]), so the board hands its
-//!    one network slot over instead of answering busy;
+//!    one network slot over instead of answering busy — and keeps presenting
+//!    them while the board is on Wi‑Fi: a change of the link's best key
+//!    rekeys it, and the board closes a keyed session that restarts (the
+//!    emulated walk's T6 found it), so the order ends with the move;
 //! 2. its relay session is parked ([`crate::RelayDeviceTransport::park`]):
 //!    when the board closes it for the LAN connection, it is not redialled
 //!    to take the slot back;
@@ -45,7 +48,8 @@ impl StudioController {
         for key in self.lan_moves.active() {
             let look = self.lan_move_look(key);
             match self.lan_moves.look(key, look, now) {
-                LanMoveStep::Wait | LanMoveStep::Over => {}
+                LanMoveStep::Wait => {}
+                LanMoveStep::Over => self.end_relay_order(key),
                 LanMoveStep::Bound { url } => self.finish_lan_move(key, &url).await,
                 LanMoveStep::GaveUp { url } => {
                     self.forget_lan_session(&url);
@@ -266,9 +270,6 @@ impl StudioController {
                 .unwrap_or(attachment);
             self.hold_device_lens(&holding);
         }
-        self.access
-            .network_link_keys()
-            .present_as_relay(&board, false);
         if let (Some(relay), Some(spawner)) =
             (self.relay_transport.clone(), self.wifi_spawner.clone())
         {
@@ -302,9 +303,7 @@ impl StudioController {
         if let Some(relay) = &self.relay_transport {
             relay.unpark(&board);
         }
-        self.access
-            .network_link_keys()
-            .present_as_relay(&board, false);
+        self.end_relay_order(key);
         let why = why.trim_end_matches('.');
         self.push_log(UiLogDraft::new(
             UiLogLevel::Info,
@@ -317,6 +316,7 @@ impl StudioController {
     /// redialling) and reach the board through lightplayer.app again.
     fn return_to_relay(&mut self, key: BoardKey, url: &str) {
         self.forget_lan_session(url);
+        self.end_relay_order(key);
         let started = self
             .device_for_board(key)
             .map(|device| self.start_relay_connect(crate::RelayConnectOp { device }));
@@ -344,6 +344,7 @@ impl StudioController {
     /// the list no longer names the board.
     fn no_return(&mut self, key: BoardKey, url: &str, why: LanMoveEnd) {
         log::info!("wi-fi: {key}: not going back through lightplayer.app ({why:?})");
+        self.end_relay_order(key);
         if why == LanMoveEnd::Taken {
             self.forget_lan_session(url);
             self.wifi_connects.finish(
@@ -352,6 +353,14 @@ impl StudioController {
                 Err(crate::WifiConnectFailure::Busy),
             );
         }
+    }
+
+    /// `key`'s LAN link presents the LAN's own key order again: its move is
+    /// over.
+    fn end_relay_order(&self, key: BoardKey) {
+        self.access
+            .network_link_keys()
+            .present_as_relay(&key.to_string(), false);
     }
 
     /// Let the LAN session at `url` go by request.
