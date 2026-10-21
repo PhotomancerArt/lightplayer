@@ -53,6 +53,7 @@ impl Headroom {
     /// The numbers for a split image in a `factory` of `factory_len` bytes.
     pub fn of(report: &SplitReport, factory_len: u32) -> Self {
         let layout = SplitLayout {
+            region_start: REGION_START,
             region_end: LOADER_OFFSET + factory_len,
             page: report.page,
         };
