@@ -1906,7 +1906,11 @@ impl Link for RigLink {
     fn poll_event(&mut self) -> Option<LinkEvent> {
         let mut board = self.board.borrow_mut();
         let now = board.clock.get();
-        if board.pending_close.as_ref().is_some_and(|(due, _)| now >= *due) {
+        if board
+            .pending_close
+            .as_ref()
+            .is_some_and(|(due, _)| now >= *due)
+        {
             let (_, reason) = board.pending_close.take().expect("checked");
             board.events.push_back(LinkEvent::Closed { reason });
             board.dropped_at = Some(now);
