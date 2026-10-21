@@ -227,6 +227,19 @@ function prerequisites() {
   ].map(([what, at]) => ({ what, at, present: existsSync(at) }));
 }
 
+/// A firmware version as Studio words it (`firmware_version.rs`): a
+/// release `v2026.10.16-1`, a local build `dev c688c99`, from the version a
+/// record holds, with or without the hello's target (`fw-esp32c6 …`);
+/// `null` when nothing in it reads as a version.
+function firmwareWords(version) {
+  for (const word of String(version ?? "").split(/\s+/)) {
+    const bare = word.replace(/^v/, "");
+    if (/^\d{4}\.\d{2}\.\d{2}-\d+$/.test(bare)) return `v${bare}`;
+    if (/^[0-9a-f]{7,40}$/.test(bare)) return `dev ${bare.slice(0, 7)}`;
+  }
+  return null;
+}
+
 /// The bars of a board card, by their `data-bar` layer.
 const BARS = ["project", "usb", "wifi", "bluetooth", "cloud", "access", "firmware", "hardware"];
 
@@ -657,7 +670,7 @@ async function main() {
     hold = await holdConsole({ doorAddr: door.addr, board: A, file: path.join(consoleDir, `${A}.link.log`) });
     await hold.console.waitFor("[link] up (session", { what: "its USB link up for the capture" });
 
-    if (!options.move) {
+    if (!options.move && !options.account) {
     await step("T2", `no cable, signed out: ${A}'s tile does not offer "${WORDS.connectRelay}"`, async (seen) => {
       await signIn(false);
       await load(plainUrl);
@@ -1069,6 +1082,9 @@ async function main() {
       const rowA = rows.find((b) => b.id === board);
       const rowB = rows.find((b) => b.id === idB);
       if (!rowA || !rowB) throw new Error(`lightplayer.app's list lost a board: ${JSON.stringify(rows.map((b) => b.id))}`);
+      seen.rowA = rowA;
+      seen.rowB = rowB;
+      seen.offAt = offAt;
       if (rowA.online || rowB.online) throw new Error(`a board is still online at lightplayer.app: ${JSON.stringify(rows)}`);
       const lastSeenA = Math.max(...Object.values(rowA.seen ?? {}));
       seen.lastSeenAfterOffS = Math.round((lastSeenA - offAt) * 10) / 10;
@@ -1081,8 +1097,9 @@ async function main() {
         if (facts.section !== "offline") throw new Error(`${who}'s card is under ${facts.section}, not Offline boards`);
         if (facts.name !== row.label) throw new Error(`${who}'s card is named ${JSON.stringify(facts.name)}, not the board's ${JSON.stringify(row.label)}`);
         if (!/last seen/.test(facts.second ?? "")) throw new Error(`${who}'s card says no "last seen": ${JSON.stringify([facts.first, facts.second])}`);
-        if (!row.firmware || !(facts.lines.firmware ?? "").includes(row.firmware)) {
-          throw new Error(`${who}'s firmware row says ${JSON.stringify(facts.lines.firmware)}, the record ${JSON.stringify(row.firmware)}`);
+        const firmware = firmwareWords(row.firmware);
+        if (!firmware || !(facts.lines.firmware ?? "").includes(firmware)) {
+          throw new Error(`${who}'s firmware row says ${JSON.stringify(facts.lines.firmware)}, the record ${JSON.stringify(row.firmware)} (${JSON.stringify(firmware)})`);
         }
         if (!row.project || !(facts.lines.project ?? "").toLowerCase().includes(row.project.toLowerCase())) {
           throw new Error(`${who}'s project row says ${JSON.stringify(facts.lines.project)}, the record ${JSON.stringify(row.project)}`);
