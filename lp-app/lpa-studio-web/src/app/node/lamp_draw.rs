@@ -217,32 +217,39 @@ fn pointer_sample(event: &Event<PointerData>) -> (i32, [f64; 2], [f64; 2]) {
     )
 }
 
-/// The drawing surface's CSS box, read off the event's own target.
+/// The drawing surface's CSS box. Dioxus delegates events, so the event's
+/// `currentTarget` is the app's root, not the surface: read the surface off
+/// the real target instead ([`surface_element`]).
 fn surface_size(event: &Event<PointerData>) -> Option<[f64; 2]> {
+    let surface = surface_element(event)?;
+    Some([
+        f64::from(surface.client_width()).max(1.0),
+        f64::from(surface.client_height()).max(1.0),
+    ])
+}
+
+/// Keep a finger's events on the surface while it drags past the edge. The
+/// capture goes on the surface itself: capturing on `currentTarget` (the
+/// root, under delegation) sent every later move and lift to the root, and
+/// the surface heard only the press.
+fn capture_pointer(event: &Event<PointerData>) {
+    use dioxus::web::WebEventExt;
+
+    let Some(web_event) = event.data().try_as_web_event() else {
+        return;
+    };
+    if let Some(surface) = surface_element(event) {
+        let _ = surface.set_pointer_capture(web_event.pointer_id());
+    }
+}
+
+/// The `.ux-lamp-draw` element the event happened in: its target or the
+/// target's nearest such ancestor.
+fn surface_element(event: &Event<PointerData>) -> Option<web_sys::Element> {
     use dioxus::web::WebEventExt;
     use wasm_bindgen::JsCast;
 
     let web_event = event.data().try_as_web_event()?;
-    let target = web_event
-        .current_target()?
-        .dyn_into::<web_sys::Element>()
-        .ok()?;
-    Some([
-        f64::from(target.client_width()).max(1.0),
-        f64::from(target.client_height()).max(1.0),
-    ])
-}
-
-/// Keep a finger's events on the surface while it drags past the edge.
-fn capture_pointer(event: &Event<PointerData>) {
-    use dioxus::web::WebEventExt;
-    use wasm_bindgen::JsCast;
-
-    if let Some(web_event) = event.data().try_as_web_event()
-        && let Some(target) = web_event
-            .current_target()
-            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    {
-        let _ = target.set_pointer_capture(web_event.pointer_id());
-    }
+    let target = web_event.target()?.dyn_into::<web_sys::Element>().ok()?;
+    target.closest(".ux-lamp-draw").ok().flatten()
 }
