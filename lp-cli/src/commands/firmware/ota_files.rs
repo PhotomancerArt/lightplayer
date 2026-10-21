@@ -29,7 +29,9 @@ use lpc_firmware_release::{
     is_release_version, sha256_hex,
 };
 use lpc_update::PieceKind;
-use lpc_update::code_table::{CHUNK, ENCODING_1, LAYOUT_1, LOADER_1};
+use lpc_update::code_table::{
+    CHIP_ESP32C6, CHIP_ESP32S3, CHUNK, ENCODING_1, LAYOUT_1, LAYOUT_2, LOADER_1, chip_code,
+};
 use lpc_update::dictionary_rule::WINDOW;
 
 use super::build_def::BuildDef;
@@ -144,7 +146,7 @@ pub fn write_ota_files(
         split.build_id
     );
 
-    let requires = requires_of(split, &image)?;
+    let requires = requires_of(split, &image, &identity.chip)?;
 
     // The pieces: the files beside the package, which must be the image's
     // bytes where the split block places them.
@@ -291,13 +293,17 @@ impl CoreIdentity {
 
 /// `requires`, from the split block and the loader's own version word:
 /// `layout` is the block's layout integer (which must be the code table's
-/// layout 1), `loader` the word's version (which must be the code table's
-/// loader 1, the split image's loader), and `fsTree` whether the image's
-/// manifest core lists `fs.tree` (the image mounts the tree store).
-pub fn requires_of(split: &SplitBlock, image: &[u8]) -> Result<Requires> {
+/// layout for the image's `chip`: [`layout_of_chip`]), `loader` the word's
+/// version (which must be the code table's loader 1, the split image's
+/// loader), and `fsTree` whether the image's manifest core lists `fs.tree`
+/// (the image mounts the tree store).
+pub fn requires_of(split: &SplitBlock, image: &[u8], chip: &str) -> Result<Requires> {
+    let layout = layout_of_chip(chip).with_context(|| {
+        format!("no split layout for chip `{chip}`: the code table names none for it")
+    })?;
     ensure!(
-        split.layout == u32::from(LAYOUT_1),
-        "the split block's layout is {}, but lpc_update's code table knows only layout {LAYOUT_1}",
+        split.layout == u32::from(layout),
+        "the split block's layout is {}, but an {chip} image is laid out as layout {layout}",
         split.layout
     );
     let in_image = lp_bootctl::find_loader_version(split.loader.slice(image)?);
@@ -317,9 +323,20 @@ pub fn requires_of(split: &SplitBlock, image: &[u8]) -> Result<Requires> {
     );
     Ok(Requires {
         fs_tree: lpa_link::layout_migration::image_fs_kind(image) == lpa_link::FsKind::Tree,
-        layout: LAYOUT_1,
+        layout,
         loader: declared,
     })
+}
+
+/// The layout a chip's split images use: layout 1 on the C6 (32 KiB MMU
+/// pages), layout 2 on the S3 (64 KiB pages). A layout code names offsets,
+/// not a chip; this is which offsets each chip's builds are linked for.
+pub fn layout_of_chip(chip: &str) -> Option<u16> {
+    match chip_code(chip)? {
+        CHIP_ESP32C6 => Some(LAYOUT_1),
+        CHIP_ESP32S3 => Some(LAYOUT_2),
+        _ => None,
+    }
 }
 
 /// The full commit for a manifest core's short one, checked to extend it.
@@ -508,11 +525,69 @@ mod tests {
         fx.edit_package(|m| m["split"]["layout"] = 2.into());
         let error = fx.write().unwrap_err().to_string();
         assert!(error.contains("layout is 2"), "{error}");
+        assert!(
+            error.contains("esp32c6 image is laid out as layout 1"),
+            "{error}"
+        );
 
         let fx = Fixture::new("2026.10.05-3");
         fx.edit_package(|m| m["split"]["loader"]["version"] = 2.into());
         let error = fx.write().unwrap_err().to_string();
         assert!(error.contains("loader version 2"), "{error}");
+    }
+
+    /// An S3 split package is layout 2: its OTA manifest says so, and is
+    /// format 1 as the C6's (the split keeps both pieces).
+    #[test]
+    fn an_s3_package_requires_layout_2() {
+        let fx = as_target(Fixture::new("2026.10.05-3"), "esp32s3-8mb", "esp32s3");
+        fx.edit_package(|m| m["split"]["layout"] = 2.into());
+        let written = fx.write().unwrap().expect("a release with a commit writes");
+        let m = &written.manifest;
+        assert_eq!((m.chip.as_str(), m.requires.layout), ("esp32s3", 2));
+        assert_eq!(m.format, 1);
+        let bytes = std::fs::read(fx.ota_dir().join(OTA_MANIFEST_FILE)).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        super::super::release_check::schema_errors(&value).unwrap();
+        OtaManifest::parse_valid(&bytes).unwrap();
+
+        // An S3 image laid out as layout 1 is refused.
+        let fx = as_target(Fixture::new("2026.10.05-3"), "esp32s3-8mb", "esp32s3");
+        let error = fx.write().unwrap_err().to_string();
+        assert!(
+            error.contains("esp32s3 image is laid out as layout 2"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_chip_has_its_layout_and_a_chip_with_none_is_refused() {
+        assert_eq!(layout_of_chip("esp32c6"), Some(LAYOUT_1));
+        assert_eq!(layout_of_chip("esp32s3"), Some(LAYOUT_2));
+        assert_eq!(layout_of_chip("esp32"), None);
+        let fx = as_target(Fixture::new("2026.10.05-3"), "esp32v3-4mb", "esp32");
+        let error = fx.write().unwrap_err().to_string();
+        assert!(
+            error.contains("no split layout for chip `esp32`"),
+            "{error}"
+        );
+    }
+
+    /// The fixture's package as another build def's: the def, and the
+    /// manifest core's target and chip (the image and the parts unchanged).
+    fn as_target(mut fx: Fixture, target: &str, chip: &str) -> Fixture {
+        fx.def = super::super::build_def::load_build_def(
+            &super::super::build_def::find_repo_root().unwrap(),
+            target,
+        )
+        .unwrap();
+        fx.edit_package(|m| {
+            m["firmwareId"] = target.into();
+            m["core"]["target"] = target.into();
+            m["core"]["platform"]["chip"] = chip.into();
+            m["core"]["platform"]["cargoTarget"] = fx.def.cargo_target.clone().into();
+        });
+        fx
     }
 
     #[test]
