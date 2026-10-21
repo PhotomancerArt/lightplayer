@@ -38,7 +38,12 @@ included. And Studio's live pictures took no pointer at all.
    `.lp/panel.json` and `LpValue`, both persisted, are unchanged. The engine
    materializes a map writer as `SlotData::Map` (`BindingSource::LiteralMap`).
    A finger renews by writing again, and a dropped link releases within the
-   ttl with no help from anyone. Wire 44 → 45.
+   ttl with no help from anyone. **A writer's route reads the store**
+   (`BindingSource::PanelWriter`): engaging a writer changes the graph, and
+   re-writing an engaged one does not. Before this, every panel write
+   rebuilt the whole binding graph (~40 ms on the C6), which halved a
+   drawing pattern's frame rate
+   (`docs/defects/2026-10-20-every-panel-write-rebuilt-the-whole-graph.md`). Wire 44 → 45.
 4. **The Fluid node in pattern space.** `"coords": "pattern"` on
    `fluid.json`, the shader def's key and values. The grid spans the lamp
    box, and emitters are read in pattern units, y up, so a stamp is round on
@@ -99,6 +104,11 @@ included. And Studio's live pictures took no pointer at all.
 - Found and pinned, not changed: in pixels mode the Fluid reads its dye
   back half a cell up and left of where it stamps it, and it reads a plain
   strip's one-lane points as pairs.
+- A pattern's knobs on a compute shader (fluid-draw's Fade and Viscosity,
+  meteor's Meteors and Speed) do not reach a card's panel: only shader,
+  fixture and clock faces carry panel controls, and a compute shader has
+  no face. The channels are public and writable; a face for compute
+  shaders is follow-up work.
 - Follow-ups: palette colour for strokes (compute shaders cannot sample a
   palette yet); the Fluid grid could take the lamp box's aspect by itself;
   compute shaders could receive `patternExtent`.
