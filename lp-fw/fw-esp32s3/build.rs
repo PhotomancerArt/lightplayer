@@ -69,8 +69,10 @@ fn emit_build_provenance() {
     lp_app_version::emit();
     lp_app_version::emit_target();
     emit_git_head_watches();
-    let commit =
-        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    // A figure build is stamped with a fixed commit, as with a fixed version
+    // (`lp_app_version::FIGURE_COMMIT`): the commit's bytes move the image's
+    // layout.
+    let commit = lp_app_version::commit();
     // A figure build is stamped clean, as it is stamped with a fixed version
     // (`lp_app_version::figure_build`): the tree's state must not reach the
     // image whose memory figures are recorded.
