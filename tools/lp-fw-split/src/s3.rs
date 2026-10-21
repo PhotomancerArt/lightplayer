@@ -185,7 +185,7 @@ pub fn build_s3(opts: &S3Options) -> Result<()> {
         loader.len(),
         S3_REGION_START,
         app.1,
-        layout.region_end - app.1 - engine.len() as u32
+        layout.region_end.saturating_sub(app.1 + engine.len() as u32)
     );
     fs::write(out.join("summary.txt"), &summary)?;
     eprint!("{summary}");
@@ -775,11 +775,27 @@ pub fn assemble(
         bail!("loader is {} B, over {LOADER_MAX_LEN}", loader.len());
     }
     let core_len = core.len() as u32;
-    let engine_off = (S3_REGION_START + core_len).div_ceil(S3_PAGE) * S3_PAGE;
-    if engine_off + engine.len() as u32 > layout.region_end {
+    // `LP_S3_CORE_HIGH=1`: the core at the region's high end and the engine
+    // at its start — where every other update leaves them.
+    let high = std::env::var_os("LP_S3_CORE_HIGH").is_some();
+    let (core_off, engine_off) = if high {
+        let at = layout
+            .next_core_offset(S3_REGION_START, engine.len() as u32, core_len)
+            .context("no room for a high core")?;
+        (at, S3_REGION_START)
+    } else {
+        (
+            S3_REGION_START,
+            (S3_REGION_START + core_len).div_ceil(S3_PAGE) * S3_PAGE,
+        )
+    };
+    if engine_off + engine.len() as u32 > layout.region_end
+        || (high && engine_off + engine.len() as u32 > core_off)
+    {
         bail!("core + engine do not fit the region");
     }
-    let mut bytes = vec![0xffu8; (engine_off + engine.len() as u32 - LOADER_OFFSET) as usize];
+    let end = (engine_off + engine.len() as u32).max(core_off + core_len);
+    let mut bytes = vec![0xffu8; (end - LOADER_OFFSET) as usize];
     let mut put = |at: u32, data: &[u8]| {
         let at = (at - LOADER_OFFSET) as usize;
         bytes[at..at + data.len()].copy_from_slice(data);
@@ -787,13 +803,13 @@ pub fn assemble(
     put(LOADER_OFFSET, loader);
     let record = BootRecord {
         seq: 1,
-        core_off: S3_REGION_START,
+        core_off,
         core_len,
         build,
         trial: false,
     };
     put(BOOT_RECORD_SECTORS[0], &record.encode());
-    put(S3_REGION_START, core);
+    put(core_off, core);
     put(engine_off, engine);
     pad_image_end(&mut bytes, LOADER_OFFSET);
     Ok((bytes, engine_off))
