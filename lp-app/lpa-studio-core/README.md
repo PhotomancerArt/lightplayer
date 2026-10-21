@@ -668,6 +668,14 @@ row of lamps per output (`cloud_board_picture.rs`). The card's state is
 `SurfaceState::OnlineAtCloud`: the picture, no words, Connect
 (`docs/ux/anatomy/board-card.md`).
 
+All of this is walked end to end on the shipped C6 image through a local
+lp-cloud-server, in three lanes of `just walk-wifi-emu`: `studio-relay`
+(the relay connect, a never-met profile seeing an online board),
+`studio-relay-move` (the move onto Wi‑Fi and back, the best link) and
+`studio-relay-account` (a board with no Wi‑Fi reported over USB, both
+boards offline on a never-met profile with their last facts, Remove from
+your account).
+
 ### Which board plays which project
 
 A board's heartbeat says that something runs, never which library project it

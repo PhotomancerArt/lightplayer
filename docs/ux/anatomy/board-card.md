@@ -265,6 +265,14 @@ keeps its own saved picture.
 └──────────────────────────────────────────┘
 ```
 
+As walked on a profile that never met the board (`just walk-wifi-emu
+studio-relay-account`, T10, 2026-10-21), two rows read otherwise than the
+drawing above, which is the remembered board's: the name has no ✎ (a board
+never met here offers no rename; its name is the one the board reports, D5),
+and Access reads `unknown` rather than `—`. USB reads `not connected`, as on
+every card with no cable. A board that never reached lightplayer.app (one
+joined over USB with no Wi‑Fi) has no picture: the dark, under the notice.
+
 ```text
 bad:  the board is on the phone's account, and the computer shows nothing while it is unplugged   # M2's reason to be
 ```

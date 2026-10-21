@@ -5327,6 +5327,15 @@ walk-two-tabs-emu *args:
 # (T8). A page-side shim (`scripts/emu/walk-lan-shim.mjs`) stands in for
 # the LAN's reachability: a loopback http page never sees Chrome's Local
 # Network prompt. Same prerequisites. Not CI.
+#
+# `studio-relay-account` (your boards follow you, M4; the same script, plus
+# `c6-b` with no network): T1, then the account's list — `c6-b` gets the
+# account's key over USB and joins the list, never the relay (T9); the
+# door stops (the power) and a never-met profile shows both boards under
+# Offline boards with their last facts (T10); Remove from your account, two
+# clicks, takes `c6-b` off on every computer (T11). The cloud's own
+# `ListAccountBoards` answers are the words once the boards are off. Same
+# prerequisites. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 

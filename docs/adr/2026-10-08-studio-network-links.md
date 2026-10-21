@@ -261,7 +261,10 @@ editor open, T7 the way back and the 1000, T8 the best link) run the shipped
 C6 image (`lp-emu:esp32c6:t1+net=lan`, lp-emu 9348e7191) through a local
 lp-cloud-server, with a page-side shim standing in for the LAN's
 reachability. A loopback http page never sees Chrome's Local Network
-prompt, so nothing there says how Mac or Android Chrome behave. For the desk
+prompt, so nothing there says how Mac or Android Chrome behave. A third
+lane, `studio-relay-account` (M4), walks the account's list: a board with
+no Wi‑Fi reported over USB, both boards offline on a never-met profile, and
+Remove from your account. For the desk
 sitting (Q1), still blank:
 
 - a WebSocket alone raises the prompt (Mac Chrome): ___
@@ -274,6 +277,9 @@ sitting (Q1), still blank:
 - P06–P08, after the domain-model and device-UX pass: your boards from
   `ListBoards`, the automatic move onto the LAN, and the end-to-end walk
   with the Local Network prompt and `.local` (N12) recorded on a desk.
+  (2026-10-21: the first two and the emulated walks are done, by the
+  amendments above and `lp2025/2026-10-19-2300-your-boards-follow-you`;
+  the desk recording is that roadmap's desk sitting, still to run.)
 - The full-access-file ruling (auto-queue
   `2026-10-07-full-access-file-blocks-relay`).
 - Typed passwords and sharing over the relay (a guest reaching a board
