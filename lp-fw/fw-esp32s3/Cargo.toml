@@ -233,6 +233,8 @@ esp-radio-rtos-driver = { version = "0.3.0", optional = true }
 # rest of the crate is stripped at link time.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+# SPIKE (`spike-s3-split-image`): the boot records and the engine header.
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 
 # Direct dep for `stack_probe::paint`, which masks interrupts while it writes
 # the paint pattern into the unused main stack. The implementation comes from

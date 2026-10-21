@@ -105,6 +105,8 @@ pub mod loader_identity;
 mod reset_kind;
 mod sector;
 mod split_layout;
+/// SPIKE: the ESP32-S3's split layout (`spike-s3-split-image`).
+pub mod split_layout_s3;
 
 pub use boot_choice::{BootChoice, booted_by, choose, cold_retry_to_count, failed};
 pub use boot_record::{

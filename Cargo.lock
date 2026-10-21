@@ -4312,6 +4312,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-app-version",
+ "lp-bootctl",
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-shader",

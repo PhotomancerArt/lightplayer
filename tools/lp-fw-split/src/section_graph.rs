@@ -224,6 +224,12 @@ pub struct Relocations {
 }
 
 pub fn read_relocations(data: &[u8]) -> Result<Relocations> {
+    read_relocations_skipping(data, SKIP_RELOCS)
+}
+
+/// [`read_relocations`] with the target ISA's own list of relocation types
+/// that name no target (SPIKE `spike-s3-split-image`: Xtensa's differ).
+pub fn read_relocations_skipping(data: &[u8], skip: &[u32]) -> Result<Relocations> {
     let header = object::elf::FileHeader32::<Endianness>::parse(data)?;
     let endian = header.endian()?;
     let sections = header.sections(endian, data)?;
@@ -250,7 +256,7 @@ pub fn read_relocations(data: &[u8]) -> Result<Relocations> {
         };
         for rela in relas {
             let r_type = rela.r_type(endian);
-            if SKIP_RELOCS.contains(&r_type) {
+            if skip.contains(&r_type) {
                 continue;
             }
             let sym = symbols.symbol(object::SymbolIndex(rela.r_sym(endian) as usize))?;

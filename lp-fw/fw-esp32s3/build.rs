@@ -48,6 +48,14 @@ fn main() {
     // them. That tracking has to sit in the crate where the macro expands, not
     // in the crate that turns the feature on.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    // SPIKE (`spike-s3-split-image`): split-link builds, as fw-esp32c6's
+    // build.rs sets them (`LP_SPLIT_LINK` from tools/lp-fw-split). The core
+    // reaches the engine only through its header.
+    println!("cargo::rustc-check-cfg=cfg(lp_split)");
+    println!("cargo:rerun-if-env-changed=LP_SPLIT_LINK");
+    if std::env::var_os("LP_SPLIT_LINK").is_some() {
+        println!("cargo::rustc-cfg=lp_split");
+    }
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {
         println!("cargo::rustc-cfg=fw_harness");

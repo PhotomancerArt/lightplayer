@@ -115,6 +115,8 @@ mod output;
 mod recovery;
 #[cfg(not(fw_harness))]
 mod serial;
+#[cfg(all(lp_split, not(fw_harness)))]
+mod split;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(fw_harness)]
@@ -429,9 +431,29 @@ struct FirmwareApp {
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
 
+/// Everything the core hands the engine (SPIKE `spike-s3-split-image`, the
+/// C6's `CoreBoot`): what `core_boot` brought up, by value, through
+/// `lp_engine_entry`. Core and engine come from one link, so this crosses the
+/// boundary as an ordinary Rust value.
+#[cfg(not(fw_harness))]
+pub(crate) struct CoreBoot {
+    spawner: embassy_executor::Spawner,
+    usb_link: &'static UsbLinkShared,
+    rmt_peripheral: esp_hal::peripherals::RMT<'static>,
+    base_fs: Box<dyn lpfs::LpFs>,
+    fs_boot_state: lpc_wire::FsBootState,
+    watchdog: recovery::watchdog::WatchdogFeeder,
+    boot_guard: Option<lp_recovery::FrameGuard>,
+    boot_assessment: lp_recovery::BootAssessment,
+}
+
+/// The core's half of the boot: the board, the heap, recovery and the
+/// watchdog, the runtime, the host link and the filesystem — everything a
+/// board needs to stay reachable. On a split image, everything that is not
+/// the engine.
 #[cfg(not(fw_harness))]
 #[inline(never)]
-fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init` — the
     // boot skeleton that used to call it directly here is gone, and the harness
@@ -508,9 +530,40 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // lines above are raw text outside frames.
     log_ring_logger::init();
 
-    let transport = UsbLinkTransport::new(usb_link);
-
     let (base_fs, fs_boot_state) = mount_filesystem(flash);
+
+    CoreBoot {
+        spawner,
+        usb_link,
+        rmt_peripheral,
+        base_fs,
+        fs_boot_state,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+    }
+}
+
+/// The engine door: the hardware system, the output provider, the server and
+/// the on-device JIT, the project's auto-load, and the server loop as its own
+/// task. A plain build calls this directly after `core_boot`; a split build
+/// reaches it only through the engine header's `entry` (`split.rs`), so
+/// everything reachable from here and not from the core links into the
+/// engine, the shader compiler included.
+#[cfg(not(fw_harness))]
+#[inline(never)]
+pub(crate) fn lp_engine_entry(core: CoreBoot) {
+    let CoreBoot {
+        spawner,
+        usb_link,
+        rmt_peripheral,
+        base_fs,
+        fs_boot_state,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+    } = core;
+    let transport = UsbLinkTransport::new(usb_link);
 
     // The compiled-in fallback is the XIAO ESP32-S3 Plus profile — the desk
     // board. It is deliberately partial (no user LED, no castellated pads); see
@@ -658,12 +711,42 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // a far stronger claim than "reached the end of boot".
     drop(boot_guard);
 
-    FirmwareApp {
-        server,
-        transport,
-        time_provider,
-        watchdog,
-    }
+    // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
+    // literally by `lpa_link::device_session::device_readiness` (and by lp-cli
+    // fwcheck through it). It is chip-agnostic on purpose — writing
+    // "fw-esp32s3" here would leave the host waiting for a readiness line that
+    // never arrives. The provenance suffix is additive only.
+    esp_println::println!(
+        "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
+        lpc_wire::WIRE_PROTO_VERSION,
+        env!("LP_BUILD_COMMIT"),
+        env!("LP_BUILD_DIRTY"),
+    );
+    spawner.spawn(
+        engine_task(FirmwareApp {
+            server,
+            transport,
+            time_provider,
+            watchdog,
+        })
+        .unwrap(),
+    );
+}
+
+/// The server loop, as its own task (spawned by the engine door): the door
+/// returns to the core, which has nothing left to do.
+#[cfg(not(fw_harness))]
+#[embassy_executor::task]
+async fn engine_task(app: FirmwareApp) {
+    let mut watchdog = app.watchdog;
+    OutlinedPoll(run_server_loop(
+        app.server,
+        app.transport,
+        app.time_provider,
+        heartbeat_memory_stats,
+        move |now_ms| watchdog.feed(now_ms),
+    ))
+    .await;
 }
 
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
@@ -704,29 +787,15 @@ fn mount_filesystem(
 #[cfg(not(fw_harness))]
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
-    let app = boot_firmware(spawner);
-
-    // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
-    // literally by `lpa_link::device_session::device_readiness` (and by lp-cli
-    // fwcheck through it). It is chip-agnostic on purpose — writing
-    // "fw-esp32s3" here would leave the host waiting for a readiness line that
-    // never arrives. The provenance suffix is additive only.
-    esp_println::println!(
-        "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
-        lpc_wire::WIRE_PROTO_VERSION,
-        env!("LP_BUILD_COMMIT"),
-        env!("LP_BUILD_DIRTY"),
-    );
-
-    let mut watchdog = app.watchdog;
-    OutlinedPoll(run_server_loop(
-        app.server,
-        app.transport,
-        app.time_provider,
-        heartbeat_memory_stats,
-        move |now_ms| watchdog.feed(now_ms),
-    ))
-    .await;
+    let core = core_boot(spawner);
+    #[cfg(not(lp_split))]
+    lp_engine_entry(core);
+    // SPIKE: a split build enters the engine through its header, or stays
+    // core-only (`split.rs`).
+    #[cfg(lp_split)]
+    split::split_boot(core);
+    // The engine's server loop is a task of its own; the main task idles.
+    core::future::pending::<()>().await;
 }
 
 /// Keeps `run_server_loop`'s future out of `main`'s own generator frame.

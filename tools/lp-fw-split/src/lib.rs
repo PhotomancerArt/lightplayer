@@ -28,6 +28,8 @@ pub mod image_end;
 pub mod merged_image;
 pub mod pass_link;
 pub mod reachability;
+/// SPIKE: the same split for fw-esp32s3 (`spike-s3-split-image`).
+pub mod s3;
 pub mod section_graph;
 pub mod split_artifacts;
 pub mod split_build;

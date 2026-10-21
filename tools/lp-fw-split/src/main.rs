@@ -82,6 +82,21 @@ enum Command {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
     },
+    /// SPIKE (`spike-s3-split-image`): the split for fw-esp32s3.
+    BuildS3 {
+        #[arg(long)]
+        out: PathBuf,
+        /// fw-esp32s3 features beyond its defaults.
+        #[arg(long)]
+        features: Option<String>,
+        /// The S3 loader's ELF; without it the build stops at core/engine.
+        #[arg(long)]
+        loader_elf: Option<PathBuf>,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
+    /// SPIKE: verify one fw-esp32s3 pass-2 link.
+    VerifyS3 { elf: PathBuf, map: PathBuf },
     /// Check one (pass-2) link: no core section in the engine region.
     Verify { elf: PathBuf, map: PathBuf },
     /// List core images' segments and fail when the loader cannot place one
@@ -126,6 +141,25 @@ fn run(command: Command) -> Result<bool> {
             }
             lp_fw_split::build(&opts)?;
             Ok(true)
+        }
+        Command::BuildS3 {
+            out,
+            features,
+            loader_elf,
+            repo,
+        } => {
+            lp_fw_split::s3::build_s3(&lp_fw_split::s3::S3Options {
+                repo,
+                out,
+                features,
+                loader_elf,
+            })?;
+            Ok(true)
+        }
+        Command::VerifyS3 { elf, map } => {
+            let v = lp_fw_split::s3::verify_s3(&elf, &map)?;
+            print!("{}", v.report(30));
+            Ok(v.passed())
         }
         Command::Bootloader { out, repo } => {
             lp_fw_split::split_build::rebuild_bootloader(&repo, &out)?;
