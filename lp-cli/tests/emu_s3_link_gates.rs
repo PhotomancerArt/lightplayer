@@ -194,7 +194,12 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     println!(
         "LEDGER TRIPLE (lp-emu:esp32s3:t1), elicited by a stop-all over the link:\n  {}\n  {}\n  \
          {}\nhost link {} frames out / {} in, {} resent",
-        stack[stack.len() - 1], mem[1], jit[1], counters.frames_tx, counters.frames_rx, counters.resends
+        stack[stack.len() - 1],
+        mem[1],
+        jit[1],
+        counters.frames_tx,
+        counters.frames_rx,
+        counters.resends
     );
 }
 
