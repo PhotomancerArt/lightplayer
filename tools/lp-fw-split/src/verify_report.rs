@@ -39,6 +39,17 @@ impl Verification {
         engine_base: u64,
         names: &BTreeMap<u64, Vec<(u64, String)>>,
     ) -> Self {
+        Self::run_with(graph, split, &|vma| vma >= engine_base, names)
+    }
+
+    /// [`Self::run`] with the engine region as a predicate on a node's
+    /// address (the S3's engine is two windows, one per bus view).
+    pub fn run_with(
+        graph: &SectionGraph,
+        split: &Split,
+        in_engine: &dyn Fn(u64) -> bool,
+        names: &BTreeMap<u64, Vec<(u64, String)>>,
+    ) -> Self {
         let named = name_nodes(graph, names);
         let mut v = Self {
             core_in_engine: Vec::new(),
@@ -65,13 +76,13 @@ impl Verification {
             if core {
                 v.core_flash_bytes += n.size;
                 *core_crates.entry(crate_name.clone()).or_default() += n.size;
-                if n.vma >= engine_base {
+                if in_engine(n.vma) {
                     v.core_in_engine.push(named[i].0.clone());
                 }
             } else {
                 v.engine_flash_bytes += n.size;
                 *engine_crates.entry(crate_name.clone()).or_default() += n.size;
-                if n.vma < engine_base {
+                if !in_engine(n.vma) {
                     v.engine_in_core_region += 1;
                     v.engine_in_core_region_bytes += n.size;
                 }
@@ -174,7 +185,7 @@ fn name_nodes(
                 .range(n.vma..n.vma + n.size)
                 .next()
                 .and_then(|(_, cands)| cands.iter().max_by_key(|(size, _)| *size))
-                .map_or_else(|| sec.to_string(), |(_, name)| name.clone());
+                .map_or_else(|| demangled_section(sec), |(_, name)| name.clone());
             let krate = if crate::engine_script::is_rust_object(obj) {
                 crate_of(&name).unwrap_or("(rust-anon)").to_string()
             } else {
@@ -185,6 +196,21 @@ fn name_nodes(
             (name, krate)
         })
         .collect()
+}
+
+/// A section named after its item (`.text._RNv…`, `.rodata._ZN…`), as the
+/// item's demangled path; any other name as it is. GNU ld's S3 images keep
+/// few function symbols, so their nodes are named this way.
+fn demangled_section(sec: &str) -> String {
+    let mangled = ["._R", "._ZN"]
+        .iter()
+        .filter_map(|m| sec.find(m))
+        .min()
+        .map(|at| &sec[at + 1..]);
+    match mangled.and_then(|m| rustc_demangle::try_demangle(m).ok()) {
+        Some(d) => format!("{d:#}"),
+        None => sec.to_string(),
+    }
 }
 
 /// The crate a demangled path starts in: `lpvm_native::…`,

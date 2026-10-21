@@ -42,7 +42,8 @@ use std::ops::Range;
 use anyhow::{Result, bail};
 use sha2::{Digest, Sha256};
 
-use crate::core_segments::{self, LOADER_RAM};
+use crate::core_segments;
+use crate::segment_rules::{ESP32C6_SEGMENTS, SegmentRules};
 
 /// Header byte 23: 1 when a SHA-256 of the image is appended.
 const APPEND_DIGEST_AT: usize = 23;
@@ -60,6 +61,15 @@ pub struct AimedPadding {
 /// Give every address-0 segment of `image` a run of `bss`; the runs it chose.
 /// An image with none is returned unchanged.
 pub fn aim_padding_at_bss(image: &mut [u8], bss: Range<u32>) -> Result<Vec<AimedPadding>> {
+    aim_padding_at_bss_in(image, bss, &ESP32C6_SEGMENTS)
+}
+
+/// [`aim_padding_at_bss`] for a chip whose loader's RAM `rules` names.
+pub fn aim_padding_at_bss_in(
+    image: &mut [u8],
+    bss: Range<u32>,
+    rules: &SegmentRules,
+) -> Result<Vec<AimedPadding>> {
     let segs = core_segments::segments(image)?;
     let mut aimed = Vec::new();
     let mut next = bss.start.next_multiple_of(4);
@@ -81,7 +91,11 @@ pub fn aim_padding_at_bss(image: &mut [u8], bss: Range<u32>) -> Result<Vec<Aimed
                 run.start
             );
         }
-        if run.start < LOADER_RAM.end && run.end > LOADER_RAM.start {
+        if rules
+            .loader_ram
+            .iter()
+            .any(|l| run.start < l.end && run.end > l.start)
+        {
             bail!(
                 "padding at {:#010x}..{:#010x} would reach the loader's RAM",
                 run.start,

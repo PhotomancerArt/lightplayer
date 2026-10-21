@@ -40,6 +40,22 @@ pub fn assemble(
     region_end: u32,
     build: u32,
 ) -> Result<AppImage> {
+    assemble_in(PAGE, REGION_START, loader, core, engine, region_end, build)
+}
+
+/// [`assemble`] for a layout whose MMU page is `page` and whose region
+/// starts at `region_start` (layout 2: 64 KiB, `factory + 0x1_0000`). The
+/// loader, the progress record and the boot records sit where layout 1 has
+/// them either way.
+pub fn assemble_in(
+    page: u32,
+    region_start: u32,
+    loader: &[u8],
+    core: &[u8],
+    engine: &[u8],
+    region_end: u32,
+    build: u32,
+) -> Result<AppImage> {
     if loader.len() as u32 > LOADER_MAX_LEN {
         bail!(
             "loader is {} B; the progress record starts {LOADER_MAX_LEN} B in",
@@ -48,16 +64,16 @@ pub fn assemble(
     }
     let core_len = core.len() as u32;
     let engine_len = engine.len() as u32;
-    let engine_off = (REGION_START + core_len).div_ceil(PAGE) * PAGE;
+    let engine_off = (region_start + core_len).div_ceil(page) * page;
     // The region ends on a page, and a page is a whole number of sectors,
     // so the engine's padded end fits wherever the engine does.
-    if !region_end.is_multiple_of(PAGE) {
+    if !region_end.is_multiple_of(page) {
         bail!("the region ends at {region_end:#x}, not on a page");
     }
     if engine_off + engine_len > region_end {
         bail!(
-            "core {core_len} B + engine {engine_len} B do not fit the region ({} B at page {PAGE:#x})",
-            region_end - REGION_START
+            "core {core_len} B + engine {engine_len} B do not fit the region ({} B at page {page:#x})",
+            region_end - region_start
         );
     }
     let mut bytes = vec![0xffu8; (engine_off + engine_len - LOADER_OFFSET) as usize];
@@ -68,7 +84,7 @@ pub fn assemble(
     put(LOADER_OFFSET, loader);
     let record = BootRecord {
         seq: 1,
-        core_off: REGION_START,
+        core_off: region_start,
         core_len,
         build,
         trial: false,
@@ -76,13 +92,13 @@ pub fn assemble(
     put(BOOT_RECORD_SECTORS[0], &record.encode());
     // Record sector 1 stays erased (0xFF): a flasher writing this image
     // erases whatever newer record a board held there.
-    put(REGION_START, core);
+    put(region_start, core);
     put(engine_off, engine);
     pad_image_end(&mut bytes, LOADER_OFFSET);
     Ok(AppImage {
         bytes,
         loader_len: loader.len() as u32,
-        core_off: REGION_START,
+        core_off: region_start,
         core_len,
         engine_off,
         engine_len,
