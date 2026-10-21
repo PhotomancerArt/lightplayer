@@ -121,20 +121,37 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     let stack = find("[stack] heartbeat: high-water ");
     let mem = find("[MEM] free=");
     let jit = find("[JIT] used=");
-    assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
+    // The probe logs a `[stack]` line only when the mark grows: once at the
+    // first ledger, and again at the second when the stop-all's own path
+    // went deeper than everything before it (since the S3's split door,
+    // boot is no longer the deepest path).
+    assert!(
+        matches!(stack.len(), 1 | 2),
+        "one [stack] line per ledger that raised the mark:\n{text}"
+    );
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
     // `[stack] heartbeat: high-water <used> B of <total> B (<headroom> B headroom)`
-    let words: Vec<&str> = stack[0].split_whitespace().collect();
-    let used: u32 = words[3].parse().expect("high-water bytes");
-    assert_eq!(&words[4..6], &["B", "of"], "{}", stack[0]);
-    let total: u32 = words[6].parse().expect("the stack's total");
-    let headroom: u32 = words[8]
-        .trim_start_matches('(')
-        .parse()
-        .expect("headroom bytes");
-    assert_eq!(used + headroom, total, "{}", stack[0]);
-    assert!(used > 0 && used < total, "{}", stack[0]);
+    let parse = |line: &str| -> (u32, u32) {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let used: u32 = words[3].parse().expect("high-water bytes");
+        assert_eq!(&words[4..6], &["B", "of"], "{line}");
+        let total: u32 = words[6].parse().expect("the stack's total");
+        let headroom: u32 = words[8]
+            .trim_start_matches('(')
+            .parse()
+            .expect("headroom bytes");
+        assert_eq!(used + headroom, total, "{line}");
+        assert!(used > 0 && used < total, "{line}");
+        (used, total)
+    };
+    let marks: Vec<(u32, u32)> = stack.iter().map(|l| parse(l)).collect();
+    let total = marks[0].1;
+    assert!(marks.iter().all(|(_, t)| *t == total), "{stack:?}");
+    assert!(
+        marks.windows(2).all(|w| w[1].0 > w[0].0),
+        "a later line only when the mark grew: {stack:?}"
+    );
     let mut figures = Figures::new(
         "esp32s3",
         "emu_s3_link_gates::the_ledger_triple_is_elicited_by_a_stop_all_over_the_link",
@@ -177,7 +194,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     println!(
         "LEDGER TRIPLE (lp-emu:esp32s3:t1), elicited by a stop-all over the link:\n  {}\n  {}\n  \
          {}\nhost link {} frames out / {} in, {} resent",
-        stack[0], mem[1], jit[1], counters.frames_tx, counters.frames_rx, counters.resends
+        stack[stack.len() - 1], mem[1], jit[1], counters.frames_tx, counters.frames_rx, counters.resends
     );
 }
 
