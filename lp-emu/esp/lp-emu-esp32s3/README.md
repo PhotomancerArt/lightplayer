@@ -33,6 +33,12 @@ It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — a
 >
 > **What does not exist:** the pad fabric and RMT (P07) — a ROM-up boot
 > reaches the application and does not light a strip.
+>
+> **And since S3 radio M1 (2026-10):** an image that starts the radio —
+> esp-radio's Wi‑Fi and the BTDM Bluetooth controller — boots both ways to
+> the server loop with nothing unmapped, and a software reset (the
+> firmware's requested reboot) is **performed**, not just reported ("The
+> radio windows, and the reset a reboot asks for" below).
 
 ## Running it
 
@@ -690,6 +696,133 @@ captures of *that* chip. No S3 silicon has been read (P09 owns that), so this
 chip's grade table is **empty** and every register answers `modeled` — the
 data path included. A run under `--strict-grade documented` stops at the first
 register the console touches, which is correct and is what the flag is for.
+
+## The radio windows, and the reset a reboot asks for
+
+*S3 radio roadmap M1 (`lp2025/2026-10-20-2335-s3-radio-and-ota`).*
+
+### The image
+
+There is no product radio on the S3 yet (M3 and M4 own `radio`, `ble`,
+`wifi`). So M1 boots **`fw-esp32s3 --features radio_boot_probe`**
+(`lp-fw/fw-esp32s3/src/radio_boot_probe.rs`): the shipped boot, untouched,
+with esp-radio started beside it — `wifi::new`, a station, one scan; and
+`BleConnector::new` (BTDM, with `coex`), one HCI Reset whose Command
+Complete is read back. Scaffolding, never shipped; its `.bss` heap arena is
+80 KB smaller because the blobs' IRAM text and statics do not otherwise fit
+`dram_seg` (where the product radio's RAM comes from is M4's plan).
+`just test-emu-esp32s3-boot` builds it beside the shipped image and names it
+`LP_EMU_ESP32S3_RADIO_ELF` / `LP_EMU_ESP32S3_RADIO_MERGED`.
+
+### One instruction the hart did not have
+
+The boot first stopped on an **unsupported instruction**, not a window:
+`saltu` (`62 a8 60`) in the blobs' `_vsnprintf`. `salt`/`saltu` ("set AR if
+less than", RST2 `op2` 7/6) are LX7 instructions the classic's LX6 lacks —
+`xtensa-esp32-elf-as` refuses them — and `lp-xt-inst` now decodes them,
+`lp-xt-emu` executes them and `lp-xt-jit` translates them. Encodings are
+read off `xtensa-esp32s3-elf-as`'s output
+(`lp-xt/lp-xt-inst/tests/machine_golden_vectors.rs`).
+
+### The windows
+
+Every MMIO window the blobs touch that the PAC does not name is an
+accept-and-remember [`RadioStub`](src/periph/radio_stub.rs) — the C6's
+method (`lp-emu-esp32c6/src/periph/wifi_stub.rs`), on this chip's addresses.
+They come from a census of the probe image's `l32r` literals that land in no
+modelled block, grouped by page and named after the blob routines that load
+them; the names are ours, by address range, because the layouts are
+Espressif's closed blobs.
+
+| window | range | whose | the probe reaches it |
+|---|---|---|---|
+| `PBUS` | `0x6000_6100..0x6000_7000` | the PHY's pbus, above the PAC's `FE` | yes |
+| `I2C_MST_HI` | `0x6000_E04C..0x6000_F000` | the PHY's frequency/PLL registers above the analog master's three PAC registers | yes |
+| `BT` | `0x6001_1000..0x6001_3000` | Bluetooth baseband (`bt_bb_*`) | yes |
+| `RF_CTRL` | `0x6001_C000..0x6001_CC00` | RX gain/AGC, below the PAC's `NRX` | yes |
+| `NRX_HI` | `0x6001_CD00..0x6001_D000` | `NRX`'s page above its `0x100` | yes |
+| `BLE_RW` | `0x6003_1000..0x6003_3000` | the BLE link layer (`r_lld_*`, `r_emi_*`) | yes |
+| `WIFI_MAC` | `0x6003_3000..0x6003_4F6C` | the Wi‑Fi MAC (`hal_init`, `mac_txrx_init`, `hal_crypto_*`) | yes |
+| `WIFI_PWR` | `0x6003_508C..0x6003_6000` | TSF and power timers (`tsf_hal_*`) | yes |
+| `BTDM_WAKE` | `0x6004_2000..0x6004_3000` | BTDM sleep/wake (`btdm_wakeup_request`) | **no — census only** |
+
+⚠️ The PAC's `RNG` block sits at the odd base `0x6003_4F6C` so that its one
+register lands at `+0x110`; its aperture swallows `0x6003_4F6C..0x6003_508C`,
+and the radio's accesses there (the census's `0x6003_5000..0x6003_5034`) are
+answered by `RNG`'s register file, which remembers every offset but `data`.
+
+### The overrides, each with what asked for it
+
+Seven, all in [`src/periph/radio_stub.rs`](src/periph/radio_stub.rs) with
+the disassembly that justifies them. Four are **done flags** a calibration
+polls (`rom_pkdet_vol_start`'s 3-bit field == 7, `txdc_cal_v70` bit 24,
+`ram_iq_est_enable` bit 16, `hal_init` bit 0) — the same shapes the C6's
+`WIFI_MAC` overrides answer; two are **self-clearing strobes** the BLE ROM
+waits on (`r_rwip_time_get`'s clock-sample bit 31, `r_rwip_driver_init`'s
+soft-reset bit 31); and one is an **identity word** an assertion checks
+(`r_lld_core_init` panics unless `0x6003_1004` reads `0x0900_1B00`).
+
+Two lessons the bring-up paid for, worth carrying:
+
+- **The spin detector keys on one register.** `ram_iq_est_enable` alternates
+  two reads, so no `SPIN` line fired; a 3 s deadline with the pc parked in
+  the loop found it. Run without a trace to a deadline and read the pc.
+- **An assertion is not a spin.** The BLE controller's `assert_wrapper`
+  panic came from a value read once; `--break-at r_rwip_assert_hack` plus a
+  `--trace-block BLE_RW` trace named the read.
+
+Nothing here raises an interrupt. The blobs map three sources — `WIFI_MAC`
+(0), `WIFI_PWR` (2) and `RWBLE` (8), all to CPU interrupt 1 — through
+[`src/intmatrix.rs`](src/intmatrix.rs), which accepts every one of its 99
+map registers (`tests/radio_boot.rs` pins the set), and enable and clear them
+in the windows above, which remember. Raising RX/TX completions is the
+emulated Wi‑Fi milestone's (M5).
+
+`tests/radio_boot.rs` is the gate: both boot paths reach the server loop
+strict with `unmapped=0`, the controller's Command Complete arrives, the
+scan ends, and every window is reached — or, for a census-only one, is
+**not**, so the flag stays true. `lp-cli/tests/emu_s3_link_gates.rs`'s
+`the_radio_image_renders_the_shipped_images_frame` pushes
+`projects/test/shader-oracle` to both images and holds the first lit frame
+on pad 9 byte-equal.
+
+### The reset a reboot asks for
+
+The firmware's requested reboot is `esp_hal::system::software_reset` → the
+ROM's `software_reset` (`0x4004_466c`) → `RTC_CNTL.options0 |=
+0x8000_0000`, **`sw_sys_rst`**. This machine's `rtc_cntl.rs` used to say the
+S3 had no such bit — the PAC (`options0.rs:316-319`) and the ROM both say it
+does — and dropped the write, so a reboot spun in the ROM for ever. Now the
+write asks the machine for a reset (`ResetSource::Software`), and under
+`--reboot-on-reset` (`Machine::reboot_for`) the machine performs it:
+
+- back to the power-on state, the ROM-up chain or the direct load replayed;
+- **RTC fast and slow memory kept** — the recovery ledger lives in RTC fast
+  memory on that promise;
+- `reset_state` reading **`CoreSw` (3)** in both halves, esp-hal's
+  "Software resets the digital core by RTC_CNTL_SW_SYS_RST", which the
+  firmware reports as `cause=software-reset`.
+
+`lp-cli`'s hosted S3 board (`S3Board`, `lp-cli emu run --chip esp32s3
+--host-link`) is built to reboot on reset, as the classic's is;
+`emu_s3_link_gates.rs`'s `a_requested_reboot_reboots_with_the_software_reset_cause`
+sends `Reboot` and reads the second boot's recovery line.
+
+### Still not modelled
+
+- **Radio behaviour.** No frame is received or sent; the scan finishes with
+  zero access points; BLE never advertises to anyone. M5 brings the network
+  seam to this chip; Bluetooth's air is not emulated on any chip.
+- **A TX completion.** Nothing in the probe transmits, so whether this
+  chip's MAC can be made to complete a send is unasked — the C6's open
+  question (`docs/debt/emu-c6-radio-tx-never-completes.md`) is M5's here.
+- **The other resets' causes.** A watchdog's or a host `chip_rst`'s reboot
+  still comes back reading power-on with RTC memory cleared; silicon reads
+  `SysRtcWdt`/`CoreUsbUart` and keeps RTC memory. The per-core
+  `sw_{app,pro}cpu_rst` bits are reported, not performed.
+- **Timing.** Every PHY calibration completes the instant it is asked; the
+  boot's time to the server loop with the radio on is `lp-emu:esp32s3:t1`'s
+  and says nothing about silicon's.
 
 ## Three things about this machine that its siblings do not have
 

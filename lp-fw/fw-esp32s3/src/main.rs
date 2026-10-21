@@ -521,6 +521,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // From here on `log::*` rides the link's log channel; the `esp_println!`
     // lines above are raw text outside frames.
     log_ring_logger::init();
+    #[cfg(feature = "radio_boot_probe")]
+    radio_boot_probe::replay_stages_to_log();
 
     let transport = UsbLinkTransport::new(usb_link);
 

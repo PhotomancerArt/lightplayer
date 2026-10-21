@@ -125,6 +125,61 @@ pub fn merged_chip_image() -> Result<PathBuf, String> {
     }
 }
 
+/// The environment variable naming the **radio probe** ELF — `fw-esp32s3`
+/// built with `radio_boot_probe` (S3 radio M1): the shipped boot with
+/// esp-radio's Wi‑Fi and BTDM started beside it. A separate image, so a
+/// separate variable: the two build to the same target path and must never
+/// be confused (the module docs' trap).
+pub const RADIO_IMAGE_ENV: &str = "LP_EMU_ESP32S3_RADIO_ELF";
+
+/// The radio probe's merged chip, as [`MERGED_ENV`] is the shipped image's.
+pub const RADIO_MERGED_ENV: &str = "LP_EMU_ESP32S3_RADIO_MERGED";
+
+/// The radio probe ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn radio_image() -> Result<PathBuf, String> {
+    env_file(
+        RADIO_IMAGE_ENV,
+        "`just test-emu-esp32s3-boot` builds `fw-esp32s3 --features radio_boot_probe` \
+         and sets it",
+    )
+}
+
+/// The radio probe's merged chip, if the caller has one. Same contract as
+/// [`merged_chip_image`].
+pub fn radio_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        RADIO_MERGED_ENV,
+        "`just test-emu-esp32s3-boot` merges the radio probe image with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
+/// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
+/// panic when it is set to a path that does not exist.
+fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {
+    match std::env::var_os(var) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{var}={} names a file that does not exist",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{var} is not set. {how}; a bare `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
 /// Print why a test did nothing, in the one shape a log reader greps for.
 pub fn skip_notice(test: &str, reason: &str) {
     println!("SKIP {test}: {reason}");

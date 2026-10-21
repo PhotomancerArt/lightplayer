@@ -21,6 +21,19 @@
 //! already up and the emulator need not produce them (raising the Wi‑Fi MAC's
 //! interrupts is the emulated Wi‑Fi milestone's, M5).
 //!
+//! # Every line twice: raw, and as a log record
+//!
+//! The stages run before the link exists, so they print **raw** (esp-println
+//! text a host attached from power-on reads, as the emulator's tests do) and
+//! are **kept** — the figures are taken where they happen, before anything
+//! the link does can move the heap — then re-emitted as `log::info!` records
+//! by [`replay_stages_to_log`] once the log ring is installed. That second
+//! copy is what a silicon capture sees: `lp-cli validate`'s link host opens
+//! the port only after espflash has reset the board and exited, so raw boot
+//! text is gone by then, while log records wait in the ring for the link
+//! (`radio-boot`'s payload in `lp-emu-validate`). The answers task prints
+//! both ways for the same reason.
+//!
 //! It is not the S3's product radio (M3/M4 own `radio`, `ble` and `wifi`), and
 //! it takes no product decision: no radio node, no ESP-NOW, no link over the
 //! air. M3 may delete it, or keep it as the emulator's radio image.
@@ -32,6 +45,45 @@ use esp_hal::peripherals::{BT, WIFI};
 static PERIPHERALS: critical_section::Mutex<
     core::cell::RefCell<Option<(WIFI<'static>, BT<'static>)>>,
 > = critical_section::Mutex::new(core::cell::RefCell::new(None));
+
+/// Up to this many stages are kept for [`replay_stages_to_log`]; the probe
+/// has six.
+const KEPT_STAGES: usize = 8;
+
+/// The stages so far: `(name, heap_free, heap_used)`, as printed.
+static STAGES: critical_section::Mutex<
+    core::cell::RefCell<([(&str, usize, usize); KEPT_STAGES], usize)>,
+> = critical_section::Mutex::new(core::cell::RefCell::new(([("", 0, 0); KEPT_STAGES], 0)));
+
+fn stage(name: &'static str) {
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    esp_println::println!("[RADIO] stage={name} heap_free={free} heap_used={used}");
+    critical_section::with(|cs| {
+        let mut kept = STAGES.borrow_ref_mut(cs);
+        let n = kept.1;
+        if n < KEPT_STAGES {
+            kept.0[n] = (name, free, used);
+            kept.1 = n + 1;
+        }
+    });
+}
+
+/// Re-emit every stage kept so far as a log record (module docs). Call once,
+/// right after the log ring is installed.
+pub fn replay_stages_to_log() {
+    let (kept, n) = critical_section::with(|cs| *STAGES.borrow_ref(cs));
+    for (name, free, used) in &kept[..n] {
+        log::info!("[RADIO] stage={name} heap_free={free} heap_used={used}");
+    }
+}
+
+/// One answer line, raw and as a log record (module docs).
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        esp_println::println!($($arg)*);
+        log::info!($($arg)*);
+    }};
+}
 
 /// Keep the radio's two peripherals for [`start`]. Called from `init_board`,
 /// the one place the peripheral singleton is split.
@@ -103,8 +155,8 @@ async fn radio_answers(
 ) {
     let mut event = [0u8; 64];
     match embedded_io_async::Read::read(&mut connector, &mut event).await {
-        Ok(n) => esp_println::println!("[RADIO] ble HCI event: {:02x?}", &event[..n.min(8)]),
-        Err(error) => esp_println::println!("[RADIO] ble HCI read FAILED: {error:?}"),
+        Ok(n) => say!("[RADIO] ble HCI event: {:02x?}", &event[..n.min(8)]),
+        Err(error) => say!("[RADIO] ble HCI read FAILED: {error:?}"),
     }
     // The controller stays up for the boot; dropping the connector would
     // deinit it.
@@ -112,16 +164,8 @@ async fn radio_answers(
 
     let config = esp_radio::wifi::scan::ScanConfig::default().with_max(8);
     match controller.scan_async(&config).await {
-        Ok(found) => esp_println::println!("[RADIO] wifi scan done: {} access points", found.len()),
-        Err(error) => esp_println::println!("[RADIO] wifi scan FAILED: {error:?}"),
+        Ok(found) => say!("[RADIO] wifi scan done: {} access points", found.len()),
+        Err(error) => say!("[RADIO] wifi scan FAILED: {error:?}"),
     }
     core::mem::forget(controller);
-}
-
-fn stage(name: &str) {
-    esp_println::println!(
-        "[RADIO] stage={name} heap_free={} heap_used={}",
-        esp_alloc::HEAP.free(),
-        esp_alloc::HEAP.used()
-    );
 }

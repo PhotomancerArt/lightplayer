@@ -90,6 +90,8 @@ XT_META = {
     "LP_EMU_ESP32V3_REF_MERGED": ("espflash save-image --merge of LP_EMU_ESP32V3_REF_ELF", ""),
     "LP_EMU_ESP32S3_ELF": ("esp32s3,server,float-f32 (defaults)", "release-esp32s3"),
     "LP_EMU_ESP32S3_MERGED": ("espflash save-image --merge of LP_EMU_ESP32S3_ELF", ""),
+    "LP_EMU_ESP32S3_RADIO_ELF": ("defaults + radio_boot_probe", "release-esp32s3"),
+    "LP_EMU_ESP32S3_RADIO_MERGED": ("espflash save-image --merge of LP_EMU_ESP32S3_RADIO_ELF", ""),
 }
 
 

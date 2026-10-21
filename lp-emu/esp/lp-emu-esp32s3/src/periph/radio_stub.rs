@@ -50,6 +50,12 @@ pub struct RadioWindow {
     /// a blob polling, and the value that lets the poll exit. **Never add
     /// one without the `SPIN` line that asked for it.**
     pub overrides: &'static [(u32, u32, u32, &'static str)],
+    /// Whether the radio probe's boot reaches this window. `false` marks a
+    /// window mapped on the **census alone** (its literals are in the image,
+    /// on a path the probe does not take); `tests/radio_boot.rs` holds the
+    /// flag true both ways, so the day the probe reaches one, the flag —
+    /// and its doc — must change.
+    pub reached_by_the_probe: bool,
 }
 
 /// The rest of the `FE` page above the PAC's `0x100`-byte block: the PHY's
@@ -74,6 +80,7 @@ pub const PBUS: RadioWindow = RadioWindow {
         // register the same way. Blob loops here; value chosen so it exits.
         (0x074, 1 << 16, 1 << 16, "ram_iq_est_enable done flag"),
     ],
+    reached_by_the_probe: true,
 };
 
 /// The analog I2C master's page above the three registers the PAC names
@@ -115,6 +122,7 @@ pub const I2C_MST_HI: RadioWindow = RadioWindow {
         // `txdc_cal_new` waits on its own done bit the same way.
         (0x000, 1 << 24, 1 << 24, "txdc_cal_v70 step done flag"),
     ],
+    reached_by_the_probe: true,
 };
 
 /// Bluetooth's baseband and controller registers (`bt_bb_gain_set`,
@@ -126,6 +134,7 @@ pub const BT: RadioWindow = RadioWindow {
     len: 0x2000,
     names: &[(0x0000, 0x0800, "bt_bb"), (0x0800, 0x2000, "bt_rw")],
     overrides: &[],
+    reached_by_the_probe: true,
 };
 
 /// The RF control page below the PAC's `NRX` (`rx_agc_reg_opt`,
@@ -136,6 +145,7 @@ pub const RF_CTRL: RadioWindow = RadioWindow {
     len: 0x0c00,
     names: &[(0x000, 0xc00, "rf_ctrl")],
     overrides: &[],
+    reached_by_the_probe: true,
 };
 
 /// `NRX`'s page above the PAC's `0x100`-byte block (`+0xd04..+0xd0c` of
@@ -146,18 +156,7 @@ pub const NRX_HI: RadioWindow = RadioWindow {
     len: 0x0300,
     names: &[(0x000, 0x300, "nrx_hi")],
     overrides: &[],
-};
-
-/// `BB`'s page above the PAC's `0x100`-byte block, up to the PAC's next
-/// block at `0x6001_E000`. No literal in the census lands here; it is mapped
-/// because the baseband is one window on the blob's side and a computed
-/// access into it would otherwise stop a strict run.
-pub const BB_HI: RadioWindow = RadioWindow {
-    name: "BB_HI",
-    base: 0x6001_D100,
-    len: 0x0f00,
-    names: &[(0x000, 0xf00, "bb_hi")],
-    overrides: &[],
+    reached_by_the_probe: true,
 };
 
 /// The BLE link layer's exchange memory and core registers
@@ -216,6 +215,7 @@ pub const BLE_RW: RadioWindow = RadioWindow {
             "r_lld_core_init IP version == 0x0900_1B00",
         ),
     ],
+    reached_by_the_probe: true,
 };
 
 /// The Wi‑Fi MAC (`hal_init`, `mac_txrx_init`, `mac_rxbuf_init`,
@@ -236,6 +236,7 @@ pub const WIFI_MAC: RadioWindow = RadioWindow {
         // `WIFI_MAC+0x4ddc`. Blob spins here; value chosen so the poll exits.
         (0x0d14, 1 << 0, 1 << 0, "hal_init ready flag"),
     ],
+    reached_by_the_probe: true,
 };
 
 /// Above the PAC's `RNG` aperture: the MAC's TSF and power timers
@@ -255,22 +256,31 @@ pub const WIFI_PWR: RadioWindow = RadioWindow {
     len: 0x6003_6000 - 0x6003_508C,
     names: &[(0x000, 0xf74, "pwr")],
     overrides: &[],
+    reached_by_the_probe: true,
 };
 
 /// The Bluetooth controller's wake/sleep registers (`btdm_wakeup_request`,
 /// `r_rwip_driver_init`, `rw_schedule`, `r_rf_sleep_hack`).
+///
+/// ⚠️ **Census only.** Its four literals (`0x6004_2000..0x6004_200C`) sit on
+/// the controller's sleep and wake paths, which the probe never takes — it
+/// sends one HCI command and never lets the controller sleep — so its boot
+/// touches nothing here. Mapped rather than left to stop a strict run
+/// because the next image to start BTDM (M3's, advertising for minutes)
+/// will take those paths; marked so that this is visible, not assumed.
 pub const BTDM_WAKE: RadioWindow = RadioWindow {
     name: "BTDM_WAKE",
     base: 0x6004_2000,
     len: 0x1000,
     names: &[(0x000, 0x1000, "btdm_wake")],
     overrides: &[],
+    reached_by_the_probe: false,
 };
 
 /// Every radio window, in registration order (appended to the boot set —
 /// see [`super`]'s "Registration order is a contract").
 pub const WINDOWS: &[RadioWindow] = &[
-    PBUS, I2C_MST_HI, BT, RF_CTRL, NRX_HI, BB_HI, BLE_RW, WIFI_MAC, WIFI_PWR, BTDM_WAKE,
+    PBUS, I2C_MST_HI, BT, RF_CTRL, NRX_HI, BLE_RW, WIFI_MAC, WIFI_PWR, BTDM_WAKE,
 ];
 
 /// One radio window on the bus.
@@ -421,7 +431,6 @@ mod tests {
             base::I2C_ANA_MST + crate::periph::i2c_ana_mst::I2C_ANA_MST_LEN
         );
         assert_eq!(NRX_HI.base, base::NRX + crate::periph::accept::RF_LEN);
-        assert_eq!(BB_HI.base, base::BB + crate::periph::accept::RF_LEN);
         assert_eq!(WIFI_MAC.base + WIFI_MAC.len, base::RNG);
         assert_eq!(WIFI_PWR.base, base::RNG + crate::periph::rng::LEN);
     }

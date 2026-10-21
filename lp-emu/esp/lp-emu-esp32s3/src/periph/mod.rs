@@ -316,11 +316,6 @@ pub fn boot_set(
             Box::new(radio_stub::RadioStub::new(radio_stub::NRX_HI)),
         ),
         (
-            radio_stub::BB_HI.base,
-            radio_stub::BB_HI.len,
-            Box::new(radio_stub::RadioStub::new(radio_stub::BB_HI)),
-        ),
-        (
             radio_stub::BLE_RW.base,
             radio_stub::BLE_RW.len,
             Box::new(radio_stub::RadioStub::new(radio_stub::BLE_RW)),

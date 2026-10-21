@@ -1522,7 +1522,9 @@ _s3-payload-features payload:
       # product build, which is why it has no `test_*` feature at all.
       boot-idle)             echo "esp32s3,server,float-f32" ;;
       shader-compile-stress) echo "esp32s3,test_shader_compile_incremental" ;;
-      *) echo "unknown S3 payload '{{ payload }}' (boot-idle, shader-compile-stress)" >&2; exit 2 ;;
+      # S3 radio M1: the shipped boot with esp-radio started beside it.
+      radio-boot)            echo "esp32s3,server,float-f32,radio_boot_probe" ;;
+      *) echo "unknown S3 payload '{{ payload }}' (boot-idle, shader-compile-stress, radio-boot)" >&2; exit 2 ;;
     esac
 
 # payload name -> the line a run stops on. Mirrors the `esp32s3` ARMS in
@@ -1537,6 +1539,7 @@ _s3-payload-sentinel payload:
     case "{{ payload }}" in
       boot-idle)             echo "[JIT] used=" ;;
       shader-compile-stress) echo "[inc-shader-compile] === DONE ===" ;;
+      radio-boot)            echo "[RADIO] wifi scan done" ;;
       *) echo "unknown S3 payload '{{ payload }}'" >&2; exit 2 ;;
     esac
 
@@ -4173,6 +4176,14 @@ test-emu-esp32s3:
 # which, since P06, is every test in `tests/boot_idle.rs` and most of
 # `tests/rom_up_boot.rs`.
 #
+# **The radio image** (S3 radio M1): `fw-esp32s3 --features radio_boot_probe`
+# — the shipped boot with esp-radio's Wi-Fi and BTDM started beside it — is
+# built and merged too (`LP_EMU_ESP32S3_RADIO_ELF` / `_RADIO_MERGED`), for
+# `tests/radio_boot.rs` (it boots both ways with nothing unmapped) and
+# `emu_s3_link_gates.rs` (it renders the shipped image's frame). One more
+# firmware build: the probe is built FIRST and copied out, so the shipped
+# image is what the target path holds when the recipe ends.
+#
 # With `LP_CI_IMAGES` set (`just fetch-ci-images`), the ELF and the merged chip
 # are CI's own and nothing is built; see `test-emu-esp32v3-boot`, which also
 # explains the `images.env` this writes.
@@ -4189,11 +4200,19 @@ test-emu-esp32s3-boot:
       cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
       exit "$status"
     fi
-    just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
     out={{ justfile_directory() }}/target/lp-emu-esp32s3
     merged="$out/merged.bin"
     mkdir -p "$out"
+    # The radio probe first (S3 radio M1: `radio_boot_probe`, the shipped
+    # boot with esp-radio's Wi-Fi and BTDM started beside it), the shipped
+    # image second, each copied out of the shared target path the moment it
+    # is built — the one-path trap above, now with two images.
+    just build-fw-esp32s3 radio_boot_probe
+    radio="$out/fw-esp32s3-radio.elf"
+    cp "$built" "$radio"
+    export LP_EMU_ESP32S3_RADIO_ELF="$radio"
+    just build-fw-esp32s3
     shipped="$out/fw-esp32s3-shipped.elf"
     cp "$built" "$shipped"
     export LP_EMU_ESP32S3_ELF="$shipped"
@@ -4202,7 +4221,12 @@ test-emu-esp32s3-boot:
           --partition-table lp-fw/fw-esp32s3/partitions.csv \
           --flash-size {{ s3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32S3_MERGED="$merged"
-      echo "images: shipped=$shipped merged=$merged"
+      radio_merged="$out/merged-radio.bin"
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$radio" "$radio_merged"
+      export LP_EMU_ESP32S3_RADIO_MERGED="$radio_merged"
+      echo "images: shipped=$shipped merged=$merged radio=$radio radio_merged=$radio_merged"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
       echo "image: shipped=$shipped"
