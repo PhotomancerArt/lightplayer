@@ -786,6 +786,22 @@ impl Device {
         }
     }
 
+    /// The note for `event` when it is the close or departure of a link
+    /// this device is not on, while it is on another (see
+    /// [`JournalNote::StaleLinkEvent`]); `None` for every other event.
+    fn stale_link_event(&self, event: &Event) -> Option<JournalNote> {
+        let current = self.link()?;
+        let (link, detached) = match event {
+            Event::LinkDetached { link } => (*link, true),
+            Event::Link {
+                link,
+                event: crate::link::LinkEvent::Closed { .. },
+            } => (*link, false),
+            _ => return None,
+        };
+        (link != current).then_some(JournalNote::StaleLinkEvent { link, detached })
+    }
+
     fn handle_event(&mut self, now: Millis, event: &Event, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
         // A coarse effect runs in a spawned future nothing can cancel. When
         // its activity is evicted mid-run — a cancel grace that expired, a
@@ -809,6 +825,15 @@ impl Device {
                     ended: matches!(marker, ActivityMarker::Ended { .. }),
                 },
             );
+            return Vec::new();
+        }
+        // A board heard over two links is on the one its last hello came in
+        // on. The other link's close or departure — the relay route a board
+        // closed when its LAN link took the network slot, then let go by the
+        // page — says nothing about the link the board is on now, and folded
+        // it would take the board offline under a live link.
+        if let Some(stale) = self.stale_link_event(event) {
+            ctx.journal.note(now, self.scope(), stale);
             return Vec::new();
         }
         if matches!(event, Event::LinkAttached { .. }) {

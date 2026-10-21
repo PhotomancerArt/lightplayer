@@ -182,6 +182,93 @@ boards included
 A listed board needs no meeting in this browser to be reached through the
 relay. The automatic move onto the LAN (P07) remains the roadmap's M3.
 
+## Amendment (2026-10-21): best link in one click, and the move onto the LAN
+
+Plan `lp2025/2026-10-20-0845-best-link` (the roadmap's M3). Item 8's held
+list is now built: "your boards" (amendment above), the roads Connect
+takes, and the automatic move. Nothing persisted, no wire, cloud API or
+firmware byte changed.
+
+**The road order** (`lpa-studio-core/src/app/devices/best_link.rs`, pure).
+For a board no link of this tab reaches, Connect tries, in order: Wi‑Fi,
+then lightplayer.app, then its cable (a click). Wi‑Fi is tried when there is
+an address, the page may reach the LAN, and the account's list does not say
+the board is online on another network. The address is the one the list
+gives while it says the board shares this computer's network
+(`sameNetwork` with `lan`), else the one this browser remembers. The list's
+address is used in memory only and never written to the address book. A
+Wi‑Fi try that fails goes on to lightplayer.app in the same press, with one
+log line; when both fail, the card shows lightplayer.app's words.
+"Connect over Wi‑Fi" and "Connect through lightplayer.app" pressed in a
+row's details are that road alone. A board this browser never met has no
+Connect of its own: its `connect-wifi` is its Connect and carries the same
+fall-through (`then_relay`, ruled by the director 2026-10-20).
+
+**What the page can reach** is a platform fact the web reports once
+(`LanReach`): an http page reaches the LAN directly in any browser; an
+https page does in Chromium after its Local Network prompt
+(`navigator.userAgentData` present), and never elsewhere (mixed content).
+Only the automatic choices obey `Blocked`; a press of "Connect over Wi‑Fi"
+still tries.
+
+**The move** (`devices/lan_move.rs`, `studio_controller/lan_move_flow.rs`).
+A board reached through lightplayer.app moves onto the LAN by itself, once
+per page load, when it is idle (no update, push, flash, erase or removal;
+no open, take-over or hold pending), its link holds a tier, and the list
+says it shares this network at an address. In order:
+
+- its LAN link presents the keys in the relay's order (the account's, then
+  this browser's) for as long as the board is on Wi‑Fi: the board hands its
+  one network slot only to the key that holds it, and a change of the
+  link's best key would rekey the link, which the board closes (the walk
+  found both);
+- the relay session is parked (`park`/`unpark` on the WebSocket provider):
+  when the board closes its route for the LAN connection, it is neither
+  redialled nor said as a drop;
+- once the board's own link is the LAN's (within 8 s), the editor, if it is
+  on the board, is rebound onto it in one step, never held, and the relay
+  session is let go. The relay link's departure no longer takes the board
+  with it: `lpa-devices` drops the close or departure of a link a device
+  is not on while it is on another (`StaleLinkEvent`;
+  [the defect](../defects/2026-10-21-a-board-moved-onto-wifi-went-offline-when-its-relay-link-left.md));
+- any failure stays on lightplayer.app with one log line and no second try
+  this page load.
+
+**The way back.** A moved board whose Wi‑Fi link goes is held by the editor
+as any dropped link is. If Wi‑Fi is not back within 5 s (core's clock), the
+LAN session is let go and the board is reached through lightplayer.app
+again, once. Not after a close with code 1000 (another connection with the
+same key took the slot: the card says someone else is connected, and the
+LAN session stops redialling), and not while the list no longer names the
+board online.
+
+**Findings** from planning (notes F1–F4): F1, the cross-browser slot
+ping-pong, stays open — its fix needs a firmware "taken" close reason and a
+relay-protocol version (the defect
+[2026-10-09](../defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md));
+the move is once per page load, never goes back after a 1000, and parks
+the relay while it moves, so it does not make the loop worse. F2 (the key
+order), F3 (the redial race) and F4 (never move during work) are the rules
+above.
+
+**A false `sameNetwork`** (two networks behind one public address) costs
+one quiet failed try, and on an https page in Chromium a pointless Local
+Network prompt. Accepted.
+
+**What is walked, and what is not.** `just walk-wifi-emu studio-relay`
+(T1–T5, the move refused) and `studio-relay-move` (T6 the move with the
+editor open, T7 the way back and the 1000, T8 the best link) run the shipped
+C6 image (`lp-emu:esp32c6:t1+net=lan`, lp-emu 9348e7191) through a local
+lp-cloud-server, with a page-side shim standing in for the LAN's
+reachability. A loopback http page never sees Chrome's Local Network
+prompt, so nothing there says how Mac or Android Chrome behave. For the desk
+sitting (Q1), still blank:
+
+- a WebSocket alone raises the prompt (Mac Chrome): ___
+- a WebSocket alone raises the prompt (Android Chrome, Pixel 8a): ___
+- `.local` resolves: ___
+- a refusal looks like: ___
+
 ## Follow-ups
 
 - P06–P08, after the domain-model and device-UX pass: your boards from

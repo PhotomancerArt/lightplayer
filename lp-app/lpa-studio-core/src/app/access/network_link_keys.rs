@@ -37,6 +37,14 @@
 //! board refused as wrong on the LAN is not presented through the relay
 //! either, and the other way round.
 //!
+//! **A move onto the LAN presents what the relay presents**
+//! ([`NetworkLinkKeys::present_as_relay`]): a board holds its one network
+//! slot for the key that opened it, and hands it to a newcomer only if the
+//! newcomer proves that same key; any other key is told busy. So while the
+//! page moves a board's relay session onto the LAN, the LAN link presents
+//! the held keys in the relay's order (the account's, then this browser's)
+//! before anything typed.
+//!
 //! A key a board refused as WRONG (it knows the salt; the PSK did not match)
 //! is charged to that board's login backoff, so the provider reports it
 //! ([`LinkKeys::refused_wrong`]) and it is never presented there again this
@@ -77,6 +85,9 @@ struct KeyStore {
     boards: BTreeMap<String, BoardKeys>,
     /// Socket URL → the board (its MAC) found answering there.
     aliases: BTreeMap<String, String>,
+    /// The boards (by MAC) whose LAN link presents the held keys in the
+    /// relay's order first, while the page moves them onto the LAN.
+    relay_order: std::collections::BTreeSet<String>,
 }
 
 impl KeyStore {
@@ -190,6 +201,28 @@ impl NetworkLinkKeys {
         board.generation += 1;
     }
 
+    /// While `on`, a LAN link to `board` (its MAC, spelled as for
+    /// [`Self::alias`]) presents the held keys in the relay's order — the
+    /// account's, then this browser's — ahead of anything typed: the keys
+    /// the board's relay session holds its slot with, so the board hands
+    /// the slot over rather than answering busy. Set for the length of a
+    /// move onto the LAN, and cleared after it. A change moves the board's
+    /// generation so a live link re-reads its list.
+    pub fn present_as_relay(&self, board: &str, on: bool) {
+        let mut store = self.inner.borrow_mut();
+        let changed = match on {
+            true => store.relay_order.insert(board.to_string()),
+            false => store.relay_order.remove(board),
+        };
+        if changed {
+            store
+                .boards
+                .entry(board.to_string())
+                .or_default()
+                .generation += 1;
+        }
+    }
+
     /// Whether anything was typed for the board at `address` this session.
     pub fn has_typed(&self, address: &str) -> bool {
         let store = self.inner.borrow();
@@ -225,14 +258,24 @@ impl LinkKeys for NetworkLinkKeys {
                 .cloned()
                 .collect();
         }
-        board
+        let typed = board
             .map(|board| board.typed.as_slice())
-            .unwrap_or_default()
-            .iter()
-            .chain(store.held.iter().map(|(_, key)| key))
-            .filter(|key| !wrong(key))
-            .cloned()
-            .collect()
+            .unwrap_or_default();
+        let mut keys: Vec<LinkKey> = Vec::new();
+        let mut add = |key: &LinkKey| {
+            if !wrong(key) && !keys.contains(key) {
+                keys.push(key.clone());
+            }
+        };
+        if store.relay_order.contains(store.board_of(address)) {
+            // A move onto the LAN: the relay session's keys first.
+            store.held_for_relay().for_each(&mut add);
+            typed.iter().for_each(&mut add);
+        } else {
+            typed.iter().for_each(&mut add);
+            store.held.iter().map(|(_, key)| key).for_each(&mut add);
+        }
+        keys
     }
 
     fn generation(&self, address: &str) -> u64 {
@@ -436,6 +479,47 @@ mod tests {
         keys.set_held(vec![account(2)]);
         assert!(keys.generation(RELAY) > generation);
         assert_eq!(keys.keys_for(RELAY), vec![key(2)]);
+    }
+
+    #[test]
+    fn a_move_onto_the_lan_presents_the_relays_order_first_and_only_for_its_board() {
+        let keys = NetworkLinkKeys::new();
+        keys.set_held(vec![browser(1), account(2)]);
+        keys.alias(BOARD, MAC);
+        keys.offer(BOARD, vec![key(7)]);
+        assert_eq!(keys.keys_for(BOARD), vec![key(7), key(1), key(2)]);
+
+        let before = keys.generation(BOARD);
+        keys.present_as_relay(MAC, true);
+        assert!(keys.generation(BOARD) > before, "a live link re-reads");
+        assert_eq!(
+            keys.keys_for(BOARD),
+            vec![key(2), key(1), key(7)],
+            "the relay's keys first: the account's, then this browser's"
+        );
+        // Another board on the LAN keeps the LAN's order.
+        assert_eq!(keys.keys_for("ws://10.0.0.6/link"), vec![key(1), key(2)]);
+        // The relay leg itself is unchanged.
+        assert_eq!(keys.keys_for(RELAY), vec![key(2), key(1)]);
+
+        let before = keys.generation(BOARD);
+        keys.present_as_relay(MAC, false);
+        assert!(keys.generation(BOARD) > before);
+        assert_eq!(keys.keys_for(BOARD), vec![key(7), key(1), key(2)]);
+        // Clearing what was never set moves nothing.
+        let settled = keys.generation(BOARD);
+        keys.present_as_relay(MAC, false);
+        assert_eq!(keys.generation(BOARD), settled);
+    }
+
+    #[test]
+    fn a_wrong_key_stays_out_of_the_relays_order_too() {
+        let keys = NetworkLinkKeys::new();
+        keys.set_held(vec![browser(1), account(2)]);
+        keys.alias(BOARD, MAC);
+        keys.present_as_relay(MAC, true);
+        keys.refused_wrong(BOARD, &key(2));
+        assert_eq!(keys.keys_for(BOARD), vec![key(1)]);
     }
 
     fn browser(id: u8) -> (KeyHolder, LinkKey) {

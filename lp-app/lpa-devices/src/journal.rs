@@ -170,6 +170,15 @@ pub enum JournalNote {
         /// would have retired the activity that replaced it).
         ended: bool,
     },
+    /// A link the device is no longer on closed or went away, while the
+    /// device is on another one (a board heard over two links, the last
+    /// hello's link the one it is on): dropped before the fold, so the old
+    /// link's end does not take the board with it.
+    StaleLinkEvent {
+        link: crate::link::LinkId,
+        /// Whether it was the link going away (a detach) rather than a close.
+        detached: bool,
+    },
 }
 
 /// Why an activity was removed rather than allowed to finish.

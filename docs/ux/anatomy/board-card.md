@@ -144,7 +144,7 @@ connect failed              Studio couldn't connect to this board over USB.
 not answering (it said      This board stopped responding over USB.
   hello, now says nothing)  Retry to reconnect.                                            ↻ Retry
 sim off                     This simulated board is off.                                   ▶ Power on
-online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect
+online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect (≋ Connect while it shares your network)
   (no link here)            (no picture yet, or relay protocol 1: the dark, no words)
 offline, another way        This board isn't plugged in.
   reaches it                Connect over Wi‑Fi to use it.                                  ↔ Connect
@@ -292,6 +292,60 @@ state word and its own button and loses its orange or red: the surface is
 the one loud place. The primary may repeat that row's button; it says verb
 and object ("Update firmware") where the row says the verb alone
 ("Update"), because the row already names its object (P12).
+
+**Connect takes the best road, in one press.** A board no link of this tab
+reaches has one Connect, and it tries the roads in order: Wi‑Fi on your
+own network, then lightplayer.app, then its cable (a click). The Wi‑Fi
+address is the one lightplayer.app says the board gave, while its list
+says the board shares this computer's network, else the one this browser
+remembers; while the list says the board is on another network, Wi‑Fi is
+skipped. A page whose browser never opens a socket to the LAN (an https
+page outside Chrome) skips it too. The primary's glyph is the first
+road's, not the board's last link: a board online at lightplayer.app that
+shares your network reads `≋ Connect`, not `☁ Connect`.
+
+```text
+┌──────────────────────────────────────────┐
+│     ● ● ● ● ● ● ● ● ● ● ● ● ● ●     ╭────┤
+│     ● ● ● ● ● ● ● ●                 │ ⋯  │   its picture, from lightplayer.app
+├────────────────────────────┬─────────┴────┤
+│ Fabric Test ✎              │ ≋ Connect    │   Wi‑Fi first: it shares your network
+├────────────────────────────┴──────────────┤
+│ ≋ Wi‑Fi            —                    › │   its details: Connect over Wi‑Fi
+│ ☁ lightplayer.app  river@example.com  online │   its details: Connect through lightplayer.app
+└──────────────────────────────────────────┘
+```
+
+While a road runs, the surface says the road in flight, as the connecting
+state already does: "Connecting to this board over Wi‑Fi.", and when Wi‑Fi
+doesn't answer, the same press goes on and the line becomes "Connecting to
+this board through lightplayer.app." There is no new state. The Wi‑Fi
+failure is not shown when lightplayer.app then answers: one line in the
+log says it (`Couldn't reach Fabric Test over Wi‑Fi; trying
+lightplayer.app.`). When both fail, the card shows lightplayer.app's words
+and its Retry. "Connect over Wi‑Fi" or "Connect through lightplayer.app"
+pressed in a row's details is that road alone. A board this tab already
+reaches (USB, Bluetooth, Wi‑Fi or lightplayer.app) has no road: Connect
+opens its session on that link.
+
+```text
+do:   │ Fabric Test                │ ≋ Connect │   # one press: Wi‑Fi, else lightplayer.app
+bad:  │ Fabric Test                │ ☁ Connect │   # on your own network, through the cloud:
+                                                   #   the slow road when the fast one is there
+bad:  Studio couldn't reach this board over Wi‑Fi.   # a second press for what Studio could try itself
+      Make sure this computer is on the same Wi‑Fi, then retry.      ↻ Retry
+```
+
+**A session through lightplayer.app moves onto Wi‑Fi by itself**, once per
+page load, when the list says the board shares your network: the card's
+lightplayer.app row stops saying `connected` and its Wi‑Fi row starts, and
+nothing else changes. The editor stays as it was, with no "Reconnecting…".
+If Wi‑Fi doesn't answer, the board stays on lightplayer.app and the log says
+why in one line; if Wi‑Fi drops later, the board goes back through
+lightplayer.app within about five seconds, the way any dropped link does.
+It never moves while the board is busy (an update, a project being sent).
+Watching a board on its card never opens a session: only Connect and Edit
+do.
 
 ## The row
 

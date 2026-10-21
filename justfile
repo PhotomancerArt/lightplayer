@@ -5318,6 +5318,15 @@ walk-two-tabs-emu *args:
 # lightplayer.app (T5, your boards follow you M1). Needs `cargo build -p
 # lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
 # studio-firmware-package-esp32c6`. Not CI.
+#
+# `studio-relay-move` (best link, M3; the same script and board): T1, then
+# the move — a session through lightplayer.app onto Wi‑Fi with the editor
+# open and no "Reconnecting…" (T6), back through lightplayer.app 5 s after
+# Wi‑Fi drops, and not after a 1000 (T7), and Connect over Wi‑Fi first on a
+# board never met, falling through to lightplayer.app when Wi‑Fi is refused
+# (T8). A page-side shim (`scripts/emu/walk-lan-shim.mjs`) stands in for
+# the LAN's reachability: a loopback http page never sees Chrome's Local
+# Network prompt. Same prerequisites. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 

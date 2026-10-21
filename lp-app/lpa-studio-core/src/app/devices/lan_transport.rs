@@ -84,6 +84,13 @@ impl LanDeviceTransport {
         Self { source }
     }
 
+    /// Let the session at `url` go by request: closed, no longer present or
+    /// redialled (a move onto the LAN that failed, or Wi‑Fi that dropped
+    /// for good).
+    pub fn forget_session(&self, url: &str) -> DeviceTransportFuture<Result<(), String>> {
+        self.source.forget(url)
+    }
+
     /// Reach the board at `url` now (a user's "Connect over Wi‑Fi", or an
     /// address typed into Connect a board's Network row), answering why not in plain words.
     pub fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), WifiConnectFailure>> {

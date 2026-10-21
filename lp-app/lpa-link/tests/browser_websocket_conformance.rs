@@ -28,6 +28,8 @@
 //! | a plain-link board is named, never downgraded to | [`a_board_that_runs_a_plain_link_is_named`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a close by request (the link's `Close`) is never redialled; the session stays listed, closed | [`a_close_by_request_is_never_redialled`] |
+//! | a parked session that closes is not redialled, not said as a drop, and stays listed; unparked, it redials at once | [`a_parked_session_that_closes_waits_and_unpark_redials_it`] |
+//! | unparking a session that never closed changes nothing; forgetting a parked one ends it | [`unpark_with_no_close_is_nothing_and_forget_ends_a_parked_session`] |
 //! | a connect someone asked for waits for the board's answer (a frame, a busy 1013, a socket that never opens) | [`a_connect_someone_asked_for_settles_on_the_boards_answer`] |
 //! | a busy board (1013) is said once, never announced again until it answers, and redialled slowly | [`a_busy_board_is_said_once_and_not_announced_until_it_answers`] |
 //! | the update channel flows both ways once a core-only board announces it with its `M` | [`the_update_channel_flows_both_ways_once_the_board_announces_it`] |
@@ -392,6 +394,103 @@ async fn a_close_by_request_is_never_redialled() {
             .any(|present| present.url == url && !present.connected),
         "still listed, closed: {:?}",
         lan::present_sessions()
+    );
+}
+
+/// The page's move of a board's relay session onto the LAN parks that
+/// session first: the LAN connection takes the board's one slot, the board
+/// closes the parked session's route, and nothing redials it (rule 2's drop
+/// loop would take the slot straight back). It is not said as a drop either
+/// — no `link lost`, no disconnect edge — and stays listed, so Studio's
+/// departure sweep leaves the board's card alone. When the move fails,
+/// `unpark` redials it at once.
+#[wasm_bindgen_test]
+async fn a_parked_session_that_closes_waits_and_unpark_redials_it() {
+    let url = "ws://10.0.0.21/link";
+    TestKeys::install(Vec::new());
+    let edges = edges();
+    let mut bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+    let session = bench.connect().await;
+    let mut link = open_link(&session).await;
+    let pump = bench.spawn_board_loop();
+    let hello = wait_for(&mut link, |event| matches!(event, LinkEvent::Frame(_))).await;
+    assert!(hello.is_some(), "the hello reached the model's link");
+    let disconnects = edges.1.get();
+
+    lan::park(session.session);
+    // The board hands its slot to the LAN connection: an ordinary close.
+    assert!(js_drop_socket(url, 1000, ""));
+    // Well past the drop loop's first redial (250 ms).
+    let mut lost = false;
+    for _ in 0..60 {
+        while let Some(event) = link.poll_event() {
+            if matches!(&event, LinkEvent::Error(error) if error.contains("link lost")) {
+                lost = true;
+            }
+        }
+        tick(20).await;
+    }
+    assert!(!lost, "a parked close is not said as a drop");
+    assert_eq!(edges.1.get(), disconnects, "no disconnect edge");
+    assert_eq!(js_sockets_opened(url), 1, "nothing redialled");
+    assert!(
+        lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && !present.connected),
+        "still listed, closed: {:?}",
+        lan::present_sessions()
+    );
+
+    // The move failed: unparked, the session is redialled at once.
+    lan::unpark(session.session);
+    for _ in 0..100 {
+        if js_sockets_opened(url) == 2 {
+            break;
+        }
+        tick(20).await;
+    }
+    pump.set(false);
+    assert_eq!(js_sockets_opened(url), 2, "unpark redials it");
+}
+
+/// `unpark` on a session that never closed while parked changes nothing,
+/// and `forget` still ends a parked session (the move succeeded, and the
+/// relay session is let go).
+#[wasm_bindgen_test]
+async fn unpark_with_no_close_is_nothing_and_forget_ends_a_parked_session() {
+    let url = "ws://10.0.0.22/link";
+    TestKeys::install(Vec::new());
+    let mut bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+    let session = bench.connect().await;
+    let mut link = open_link(&session).await;
+    let pump = bench.spawn_board_loop();
+    let hello = wait_for(&mut link, |event| matches!(event, LinkEvent::Frame(_))).await;
+    assert!(hello.is_some(), "the hello reached the model's link");
+
+    lan::park(session.session);
+    lan::unpark(session.session);
+    for _ in 0..20 {
+        tick(20).await;
+    }
+    assert_eq!(js_sockets_opened(url), 1, "nothing redialled");
+    assert!(
+        lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && present.connected),
+        "still connected"
+    );
+
+    lan::park(session.session);
+    assert!(
+        lan::forget(session.session).await,
+        "a parked session is forgotten"
+    );
+    pump.set(false);
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url),
+        "no longer listed"
     );
 }
 

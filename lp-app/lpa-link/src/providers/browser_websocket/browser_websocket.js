@@ -41,7 +41,10 @@
 // known loop, `docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-
 // network-slot-from-each-other.md`; Studio's tabs of one browser, which all
 // present the same keys, avoid it through their hold channel: the tab that was
-// left closes its session by request). Any other second client — anonymous,
+// left closes its session by request; and the page's own move from a relay
+// session onto the LAN avoids it by PARKING the relay session first, `park`
+// below. Neither covers another browser holding the same key: that loop is the
+// open defect). Any other second client — anonymous,
 // as every Studio is on an open board, or holding another key — gets its
 // socket upgraded and then closed at once with 1013, "try again later". That
 // is said once, in words — `wi-fi link lost: busy with another Wi‑Fi
@@ -70,6 +73,15 @@
 // relay's refusals: not signed in, board offline, too many tries, busy) ends
 // the session instead of redialling — a redial would only be refused again,
 // and each one spends the page's tries at the relay.
+//
+// A PARKED SESSION IS NOT REDIALLED. Before the page moves a board's relay
+// session onto the LAN it parks that session (`park`): the LAN connection
+// takes the board's one network slot, the board closes the relay route, and a
+// parked session that closes — for any code — is neither redialled nor said
+// as a drop. It stays listed, closed, as a session closed by request does, so
+// Studio's departure sweep does not tear the board's card down mid-move. If
+// the LAN connection fails, `unpark` redials it at once (when it closed
+// meanwhile); once the move is done the page forgets it.
 //
 // A HELD SESSION RIDES THROUGH A REBOOT. While an update runs through the
 // relay the board resets three times, and each time the relay says "board
@@ -186,6 +198,10 @@ class LanSession {
     this.fallbackUrl = null;
     this.dialUrl = url;
     this.lostAt = null;
+    // Parked (`park`): a close is not redialled and not said as a drop, and
+    // `parkedClosed` remembers it for `unpark`.
+    this.parked = false;
+    this.parkedClosed = false;
   }
 
   describe() {
@@ -435,6 +451,34 @@ export function hold(id, ms) {
   }
 }
 
+/// Park the session: from now until `unpark`, a close (for any code) is
+/// not redialled and not said as a drop, and the session stays listed. The
+/// page's move onto the LAN parks a board's relay session before the LAN
+/// connection takes the board's slot from it.
+export function park(id) {
+  const session = sessions.get(id);
+  if (session) {
+    session.parked = true;
+  }
+}
+
+/// Unpark the session: if it closed while parked it is redialled at once
+/// (the move onto the LAN failed, and the board is wanted back on this
+/// road); otherwise nothing changes.
+export function unpark(id) {
+  const session = sessions.get(id);
+  if (!session || !session.parked) {
+    return;
+  }
+  session.parked = false;
+  if (session.parkedClosed) {
+    session.parkedClosed = false;
+    if (session.wanted) {
+      startReconnect(session, 0);
+    }
+  }
+}
+
 /// End the session for good, saying why: the link above the socket has
 /// nothing left to try (a relay session out of keys). Heard as a drop —
 /// `<kind> link lost: <why>` — but never redialled, and no longer listed.
@@ -586,6 +630,10 @@ function openSocket(session, generation, target) {
         return;
       }
       if (session.socket === socket && session.generation === generation) {
+        if (session.parked) {
+          closeParked(session, `the board closed the link (${closeWords(event)})`);
+          return;
+        }
         // A refusal that would only be repeated ends the session here —
         // unless the session is held and the code is one it rides through.
         if (session.finalCodes.has(event?.code)) {
@@ -661,9 +709,27 @@ function handleBusy(session) {
   startReconnect(session, delay);
 }
 
+/// A parked session's connection ended: closed, still listed, not said as a
+/// drop and not redialled (`unpark` redials it).
+function closeParked(session, why) {
+  session.lastDrop = why;
+  session.parkedClosed = true;
+  session.generation += 1;
+  session.connecting = null;
+  session.state = "lost";
+  session.up = false;
+  closeSocket(session);
+  session.clearFrames();
+  session.activity();
+}
+
 /// The link died underneath us: say so ONCE (the Rust side reads this exact
 /// phrase as a departure), stop being present, and reconnect if wanted.
 function handleDrop(session, why, reconnectDelayMs) {
+  if (session.parked) {
+    closeParked(session, why);
+    return;
+  }
   session.lastDrop = why;
   if (session.state === "connected") {
     session.lostAt = Date.now();

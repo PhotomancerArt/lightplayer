@@ -385,7 +385,11 @@ the app through the same view model and presses the same actions. See
   later unless its handshake proves the holder's own key, which takes the
   slot over. A joined board with Cloud relay on and an account key also dials
   `lightplayer.app:80` by itself (below); it holds no relay memory while it
-  may not dial. See `docs/adr/2026-10-07-c6-wifi-link.md` and
+  may not dial. A relay session moves onto the LAN by itself when browser
+  and board share a network (once per page load, idle only); Connect picks
+  the link already open, then Wi‑Fi, then lightplayer.app, then the cable
+  (`docs/adr/2026-10-08-studio-network-links.md`, 2026-10-21 amendment).
+  See `docs/adr/2026-10-07-c6-wifi-link.md` and
   `docs/adr/2026-10-06-cloud-relay.md` ("Device side"); the emulated LAN
   (`net=lan`) is `docs/adr/2026-10-05-emulator-seams.md` §11.
 - **A push is one transaction** (wire 42). Every project write runs one

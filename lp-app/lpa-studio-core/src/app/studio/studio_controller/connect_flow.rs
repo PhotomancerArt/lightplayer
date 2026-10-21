@@ -540,11 +540,17 @@ impl StudioController {
     }
 
     /// Reach an offline `device` by `reach`: the code its own offer runs
-    /// (`connect-wifi`, `connect-relay`, `reconnect`).
+    /// (`connect-wifi`, `connect-relay`, `reconnect`). A Wi‑Fi try whose
+    /// board lightplayer.app also reaches goes on there if it fails
+    /// ([`Self::fall_through_to_relay`]).
     async fn reach_board(&mut self, device: DeviceId, reach: crate::ConnectReach) -> UiResult {
         match reach {
             crate::ConnectReach::Wifi => {
-                self.start_wifi_connect(crate::WifiConnectOp::Board { device })
+                let then_relay = self.board_key(device).is_some_and(|key| {
+                    self.roads_to(key, false)
+                        .contains(&crate::app::devices::best_link::Road::Relay)
+                });
+                self.start_wifi_connect(crate::WifiConnectOp::Board { device, then_relay })
             }
             crate::ConnectReach::Relay => {
                 self.start_relay_connect(crate::RelayConnectOp { device })
@@ -556,6 +562,142 @@ impl StudioController {
                 .await
             }
         }
+    }
+
+    /// The roads to the board with MAC `key` from this page, best first
+    /// ([`crate::app::devices::best_link::roads`]): Wi‑Fi while this page
+    /// has a LAN transport, lightplayer.app while it has the relay's and
+    /// someone is signed in, and the cable when `cable` says it can be
+    /// asked for. Neither network road while another tab of this browser
+    /// holds the board's network slot (its Connect is `take-over`).
+    pub(super) fn roads_to(
+        &self,
+        key: lpa_devices::BoardKey,
+        cable: bool,
+    ) -> Vec<crate::app::devices::best_link::Road> {
+        use crate::app::devices::best_link::{BestLinkFacts, Road, roads};
+        let held_elsewhere = self.network_slot_held_elsewhere(key);
+        let remembered = self
+            .wifi_addresses
+            .get(&key)
+            .map(|address| address.ip.clone());
+        let row = self.account_lan_hint(key);
+        let facts = BestLinkFacts {
+            linked_here: self.reaches_board(key),
+            remembered: remembered.as_deref(),
+            row: row.as_ref(),
+            lan_reach: self.lan_reach,
+            relay: self.relay_transport.is_some()
+                && self.access.account_keys().is_some()
+                && !held_elsewhere,
+            cable,
+        };
+        let wifi = self.lan_transport.is_some() && !held_elsewhere;
+        roads(&facts)
+            .into_iter()
+            .filter(|road| wifi || !matches!(road, Road::Wifi { .. }))
+            .collect()
+    }
+
+    /// Where Studio dials the board with MAC `key` on Wi‑Fi when someone
+    /// asks: the address lightplayer.app says it gave while it shares this
+    /// network, else the one this browser remembers
+    /// ([`crate::app::devices::best_link::wifi_address`]).
+    pub(super) fn wifi_address_for(&self, key: lpa_devices::BoardKey) -> Option<String> {
+        let remembered = self
+            .wifi_addresses
+            .get(&key)
+            .map(|address| address.ip.clone());
+        let row = self.account_lan_hint(key);
+        crate::app::devices::best_link::wifi_address(&crate::BestLinkFacts {
+            remembered: remembered.as_deref(),
+            row: row.as_ref(),
+            ..Default::default()
+        })
+    }
+
+    /// The Wi‑Fi try of a Connect that goes on through lightplayer.app
+    /// failed (`board` is in [`Self::fall_through`]): say so in one line and
+    /// start the relay's, for the same board. The card's held Connect, if
+    /// any, keeps holding; it ends on the relay's answer. `false` when the
+    /// board was not falling through, or the relay could not start (the
+    /// Wi‑Fi failure then stands on the card as usual).
+    pub(super) fn fall_through_to_relay(&mut self, board: lpa_devices::BoardKey) -> bool {
+        if !self.fall_through.contains(&board) {
+            return false;
+        }
+        let Some(device) = self.device_for_board(board) else {
+            self.fall_through.remove(&board);
+            return false;
+        };
+        if self
+            .start_relay_connect(crate::RelayConnectOp { device })
+            .is_err()
+        {
+            self.fall_through.remove(&board);
+            return false;
+        }
+        let name = self.board_title(board);
+        self.push_log(crate::UiLogDraft::new(
+            crate::UiLogLevel::Info,
+            crate::UiLogOrigin::Studio,
+            format!("Couldn't reach {name} over Wi\u{2011}Fi; trying lightplayer.app."),
+        ));
+        true
+    }
+
+    /// The relay's try of a Connect that fell through ended: the press is
+    /// over. When it failed too, the card's held Connect lets go at once, so
+    /// the card shows the relay's words rather than "Connecting…".
+    pub(super) fn fall_through_ended(&mut self, board: lpa_devices::BoardKey, failed: bool) {
+        if !self.fall_through.remove(&board) || !failed {
+            return;
+        }
+        let held_here = self.pending_device_lens.as_ref().is_some_and(|pending| {
+            pending.connect.is_some()
+                && self
+                    .device_at_address(&pending.uid)
+                    .is_some_and(|device| self.board_key(device.id) == Some(board))
+        });
+        if held_here {
+            self.drop_connect_hold();
+            self.mark_dirty();
+        }
+    }
+
+    /// The roster device (or the account's entry) the board with MAC `key`
+    /// is, if Studio knows it.
+    pub(super) fn device_for_board(&self, key: lpa_devices::BoardKey) -> Option<DeviceId> {
+        self.devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|device| {
+                device
+                    .identity
+                    .mac
+                    .as_ref()
+                    .and_then(lpa_devices::BoardKey::from_mac)
+                    == Some(key)
+            })
+            .map(|device| device.id)
+            .or_else(|| {
+                self.account_boards
+                    .row(key)
+                    .map(|_| crate::account_board_device(key))
+            })
+    }
+
+    /// The board with MAC `key` by its card's name.
+    pub(super) fn board_title(&self, key: lpa_devices::BoardKey) -> String {
+        if let Some(device) = self.device_for_board(key)
+            && let Some(device) = self.devices.roster().device(device)
+        {
+            return lpa_devices::view::device_view(device, self.device_now()).title;
+        }
+        self.account_boards
+            .row(key)
+            .map_or_else(|| key.to_string(), |row| row.label.clone())
     }
 
     /// The session's verbs on `view`'s card: `connect` on a board Studio is
@@ -604,11 +746,10 @@ impl StudioController {
         offers
     }
 
-    /// How Connect reaches `view`'s board while it is offline, in the
-    /// card's order — its Wi‑Fi address, lightplayer.app, its cable —
-    /// taking only a road whose own offer this card publishes. `None` for
-    /// a board that is here, one nothing reaches, and a stand-in (a sim or
-    /// an in-tab board, whose way back is Power on).
+    /// How Connect reaches `view`'s board while it is offline: the first of
+    /// its roads ([`Self::roads_to`]: Wi‑Fi, lightplayer.app, its cable).
+    /// `None` for a board that is here, one nothing reaches, and a stand-in
+    /// (a sim or an in-tab board, whose way back is Power on).
     fn connect_reach(
         &self,
         view: &crate::DeviceView,
@@ -617,22 +758,22 @@ impl StudioController {
         if view.status != crate::DeviceStatus::Offline || facts.face != crate::DeviceFace::Wire {
             return None;
         }
-        if self.connect_wifi_offer(view, facts).is_some() {
-            return Some(crate::ConnectReach::Wifi);
-        }
-        if self.connect_relay_offer(view, facts).is_some() {
-            return Some(crate::ConnectReach::Relay);
-        }
         // A board another tab holds over USB: its port is that tab's, and
         // the take-over is the way in (the "one tab" gate on the cable's
-        // reach, as on a closed port's). The network reaches above carry
-        // their own gate (the slot).
+        // reach, as on a closed port's). The network roads carry their own
+        // gate (the slot).
         let port_elsewhere = view
             .held_elsewhere
             .as_ref()
             .is_some_and(|held| held.via == lpa_devices::HoldVia::Usb);
-        (view.escapes.contains(&lpa_devices::view::Escape::Reconnect) && !port_elsewhere)
-            .then_some(crate::ConnectReach::Usb)
+        let cable = view.escapes.contains(&lpa_devices::view::Escape::Reconnect) && !port_elsewhere;
+        match self.board_key(view.id) {
+            Some(key) => self
+                .roads_to(key, cable)
+                .first()
+                .map(crate::app::devices::best_link::Road::reach),
+            None => cable.then_some(crate::ConnectReach::Usb),
+        }
     }
 
     /// Keep why `device`'s connect did not open, for its card; hand the
