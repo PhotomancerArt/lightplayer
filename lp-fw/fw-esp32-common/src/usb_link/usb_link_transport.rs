@@ -74,6 +74,13 @@ const SEND_ROOM_POLL: Duration = Duration::from_millis(2);
 /// renders between them.
 const UPDATE_STREAM_BUDGET: Duration = Duration::from_millis(40);
 
+/// The id of a message the server pushes on its own (the boot hello, the
+/// heartbeat and its status siblings). No client request carries it, so a
+/// drop notice for it ("response id=0 dropped") is one no client can match:
+/// it would only spend ring room while the host is already slow. The drop is
+/// still counted and logged; the next heartbeat carries the state anyway.
+const UNSOLICITED_ID: u64 = 0;
+
 /// Largest error notice for a dropped reply, serialized on the stack (it
 /// cannot use the frame buffer: the reply it is about may hold it).
 const NOTICE_BYTES: usize = 192;
@@ -409,9 +416,10 @@ impl ServerTransport for UsbLinkTransport {
                 log::error!("[usb_link] dropping message id={id}: {error}");
                 // Best effort: tell the peer its response was dropped, with
                 // the request id, so the client fails that call instead of
-                // timing out. Not for Error frames (no recursion), and without
+                // timing out. Not for Error frames (no recursion), nor for an
+                // unsolicited id-0 message (no request to fail), and without
                 // waiting for room.
-                if !is_error_frame && !self.send_drop_notice(id, &error) {
+                if !is_error_frame && id != UNSOLICITED_ID && !self.send_drop_notice(id, &error) {
                     log::error!(
                         "[usb_link] error notice for id={id} also dropped; peer left waiting"
                     );
@@ -698,6 +706,63 @@ mod tests {
             !shared.is_established(),
             "partly out: the session restarted"
         );
+    }
+
+    /// A reply dropped as "host link busy" tells the host which request it
+    /// was; an unsolicited id-0 message (a heartbeat) has no request, so it
+    /// is dropped without a notice no client could match.
+    #[test]
+    fn a_busy_drop_sends_a_notice_for_a_reply_and_none_for_a_heartbeat() {
+        let _turn = frame_buf_turn();
+        let shared = UsbLinkShared::leak(0x789a_bcde);
+        let mut board = UsbLinkTransport::new(shared);
+        let mut host = HostEnd::new(0xbbbb_cccc);
+        open_session(shared, &mut board, &mut host);
+        let big = WireServerMessage::new(
+            41,
+            ServerMsgBody::Error {
+                error: "x".repeat(9_000),
+            },
+        );
+        block(board.send(LinkId::PRIMARY, big)).unwrap();
+        assert!(shared.frame_buf_in_use(), "the link is still reading it");
+        // This pass has no send-wait left: a send that finds the buffer busy
+        // is dropped at once.
+        board.pass_wait_until = 0;
+
+        assert!(block(board.send(LinkId::PRIMARY, heartbeat())).is_err());
+        host.pump(shared);
+        let big_out: WireServerMessage =
+            lpc_wire::json::from_slice(&host.next_proto().unwrap()).unwrap();
+        assert_eq!(big_out.id, 41);
+        assert!(
+            host.next_proto().is_none(),
+            "a dropped id-0 message queues no notice"
+        );
+
+        // The buffer is free again; hold it once more and drop a reply.
+        let big = WireServerMessage::new(
+            42,
+            ServerMsgBody::Error {
+                error: "x".repeat(9_000),
+            },
+        );
+        block(board.send(LinkId::PRIMARY, big)).unwrap();
+        let reply = WireServerMessage::new(7, ServerMsgBody::StopAllProjects);
+        assert!(block(board.send(LinkId::PRIMARY, reply)).is_err());
+        host.pump(shared);
+        let big_out: WireServerMessage =
+            lpc_wire::json::from_slice(&host.next_proto().unwrap()).unwrap();
+        assert_eq!(big_out.id, 42);
+        let notice: WireServerMessage =
+            lpc_wire::json::from_slice(&host.next_proto().unwrap()).unwrap();
+        assert_eq!(notice.id, 7);
+        match notice.msg {
+            ServerMsgBody::Error { error } => {
+                assert!(error.contains("response id=7 dropped"), "{error}")
+            }
+            other => panic!("expected an error notice, got {other:?}"),
+        }
     }
 
     /// Bring a session up and deliver its hello.
