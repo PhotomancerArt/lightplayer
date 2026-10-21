@@ -251,6 +251,42 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
     );
 }
 
+/// The Wi‑Fi reconnect line is the board's time away, not the 1 s redial: a
+/// resetting board sends no FIN, so the socket's close comes late, about when
+/// the board is back. The line measures from the last word heard.
+#[test]
+fn a_wifi_reconnect_line_measures_the_time_the_board_was_away() {
+    for silent_secs in [3.0, 6.5] {
+        let mut board = Board::with_catalog(vec![x_late(), y_late()]);
+        board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+        board.reconnects_itself = true;
+        board.silent_socket_secs = Some(silent_secs);
+        board.redial_secs = 1.0;
+        let mut bench = Bench::new(board, Some(y_late()));
+        bench.cache_engine(&x_late());
+        let device = bench.connect_device();
+        bench.press_update(device);
+        bench.run_until_update_ends(device);
+        bench.assert_runs(&y_late());
+
+        let away = silent_secs + 1.0;
+        let times: Vec<f64> = bench
+            .lines
+            .iter()
+            .filter_map(|line| line.split("reconnected in ").nth(1))
+            .map(|tail| tail.trim_end_matches(" s").parse().expect("N.N s"))
+            .collect();
+        assert!(!times.is_empty(), "lines: {:#?}", bench.lines);
+        for took in &times {
+            assert!(
+                (took - away).abs() <= 0.2,
+                "silent {silent_secs} s, away {away} s, but the line said {took} s: {:#?}",
+                bench.lines
+            );
+        }
+    }
+}
+
 /// Through lightplayer.app's relay (OTA M8, PR C): the same update, held to
 /// the relayed key's tier. Every reset ends the relay route (the board's
 /// leg drops, `4410`); the page's session redials by itself, so the
@@ -1515,6 +1551,14 @@ struct Board {
     /// The board's LAN link ignores channel 3 (a release from before
     /// updates over Wi‑Fi, W6): its hello still announces the channel.
     ignores_updates: bool,
+    /// A reset leaves the socket looking open: the board sends no FIN, so
+    /// the page hears `onclose` only this many seconds after the board
+    /// stopped talking (`reconnects_itself` boards only).
+    silent_socket_secs: Option<f64>,
+    /// The socket's `onclose`, held back until the bench clock reaches it.
+    pending_close: Option<(f64, String)>,
+    /// How long the page's own redial takes after it hears the close.
+    redial_secs: f64,
 }
 
 impl Board {
@@ -1545,6 +1589,9 @@ impl Board {
             opens_while_dropped: 0,
             ignores_updates: false,
             announces: true,
+            silent_socket_secs: None,
+            pending_close: None,
+            redial_secs: 1.0,
         }
     }
 
@@ -1637,6 +1684,17 @@ impl Board {
             self.events.push_back(LinkEvent::Closed {
                 reason: reason.to_string(),
             });
+        }
+    }
+
+    /// The board stops talking and sends no FIN: its end of the link is
+    /// gone, but the page's socket stays open until `onclose` arrives
+    /// `secs` later (`poll_event` plays it).
+    fn go_silent(&mut self, reason: &str, secs: f64) {
+        if let Some(link) = self.open.take() {
+            let now = self.now_ms();
+            self.rig.link_down(now, link);
+            self.pending_close = Some((self.clock.get() + secs, reason.to_string()));
         }
     }
 
@@ -1741,7 +1799,7 @@ impl Board {
             }
             let lan = self.endpoint.starts_with("lan:");
             let relay = self.endpoint.starts_with("relay:");
-            self.close(match (self.reconnects_itself, lan, relay) {
+            let reason = match (self.reconnects_itself, lan, relay) {
                 (true, true, _) => "wi-fi link lost: the board closed the link (code 1006)",
                 (true, _, true) => {
                     "relay link lost: the board closed the link (code 4410: board-gone)"
@@ -1750,13 +1808,18 @@ impl Board {
                     "bluetooth link lost: the board or the radio ended the connection"
                 }
                 (false, _, _) => "board reset",
-            });
+            };
+            let silent = self.silent_socket_secs.filter(|_| self.reconnects_itself);
+            match silent {
+                Some(secs) => self.go_silent(reason, secs),
+                None => self.close(reason),
+            }
             match self.rig.reboot() {
                 Ok(()) => {}
                 Err(BootFault::PowerCut) => self.power_cut(),
                 Err(e) => panic!("boots after a reset: {e:?}"),
             }
-            if self.reconnects_itself {
+            if self.reconnects_itself && silent.is_none() {
                 self.dropped_at = Some(self.clock.get());
             }
         }
@@ -1817,6 +1880,8 @@ impl Link for RigLink {
     fn submit(&mut self, command: LinkCommand) {
         let mut board = self.board.borrow_mut();
         match command {
+            // The page's socket still looks open: nothing to open.
+            LinkCommand::Open { .. } if board.pending_close.is_some() => {}
             LinkCommand::Open { .. } => {
                 board.opens_asked += 1;
                 if board.dropped_at.is_some() {
@@ -1841,6 +1906,11 @@ impl Link for RigLink {
     fn poll_event(&mut self) -> Option<LinkEvent> {
         let mut board = self.board.borrow_mut();
         let now = board.clock.get();
+        if board.pending_close.as_ref().is_some_and(|(due, _)| now >= *due) {
+            let (_, reason) = board.pending_close.take().expect("checked");
+            board.events.push_back(LinkEvent::Closed { reason });
+            board.dropped_at = Some(now);
+        }
         if board.open.is_some() && board.engine_running() && now - board.last_heartbeat >= 1.0 {
             board.last_heartbeat = now;
             board
@@ -2495,7 +2565,7 @@ impl Bench {
             self.controller.note_device_hotplug(
                 crate::app::studio::studio_command::DeviceHotplug::Disconnected,
             );
-        } else if now >= at + 1.0 {
+        } else if now >= at + self.board().redial_secs {
             self.board_mut().dropped_at = None;
             self.granted.set(true);
             self.controller
