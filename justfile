@@ -2380,7 +2380,7 @@ fw-manifest-check-esp32c6:
     node scripts/extract-fw-manifest.mjs target/fw-split/shipped/p2.elf --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
 
 fw-manifest-check-esp32s3:
-    node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
+    node scripts/extract-fw-manifest.mjs target/fw-split/esp32s3-shipped/p2.elf --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
 
 fw-manifest-check-esp32v3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
@@ -2402,13 +2402,71 @@ fw-manifest-check-emu: build-fw-emu
 # removed the pressure the C6 still lives under — the check exists so Xtensa
 # code density stays a tracked number, not so anyone has to fight for space.
 # Do not tighten the margin to manufacture pressure.
-fw-esp32s3-size-check margin="65536": build-fw-esp32s3
+# The S3's split image (M7 P4, layout 2; `lp-fw-split build --chip esp32s3`):
+# two passes, the verifier, the loader (lp-fw/fw-esp32s3-loader), app.bin and
+# an 8 MiB merged.bin behind espflash's bundled IDF bootloader (the S3's only
+# door). The default is the shipped image as the build def packages it.
+fw-esp32s3-split features="":
     #!/usr/bin/env bash
     set -euo pipefail
-    # The partition is read from the `factory` row of
-    # lp-fw/fw-esp32s3/partitions.csv.
-    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} lp-fw/fw-esp32s3/partitions.csv {{ margin }} \
-        "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+    if [[ -z "{{ features }}" ]]; then
+        cargo run -q -p lp-fw-split --release -- build --chip esp32s3 \
+            --out target/fw-split/esp32s3-shipped \
+            --features esp32s3,server,float-f32 --target esp32s3-8mb
+    else
+        slug="$(echo "{{ features }}" | tr ',' '_')"
+        cargo run -q -p lp-fw-split --release -- build --chip esp32s3 \
+            --out "target/fw-split/esp32s3-${slug}" --features "{{ features }}"
+    fi
+
+# Fail when the S3's split image gets too close to the room it has: the
+# `factory` row of lp-fw/fw-esp32s3/partitions.csv (6 MB), layout 2. Like the
+# C6's (`fw-esp32c6-size-check`): it builds the split image, runs the
+# verifier (0 core nodes in the engine region, or the build fails), and
+# `lp-fw-split headroom` reports image, steady (core low and high) and update
+# headroom; the GATE is the smallest of the steady and update ones against
+# `margin`. `unsplit=1` also builds the plain image and prints the deltas.
+fw-esp32s3-size-check margin="65536" unsplit="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fw-esp32s3-split
+    out=target/fw-split/esp32s3-shipped
+    verdict="$(head -1 "${out}/verify.txt")"
+    echo "${verdict}"
+    # The shader compiler lands in the engine: the evidence, by crate.
+    compiler="$(grep -E ' (lps_glsl|lpvm_native|lpc_engine)$' "${out}/verify.txt" | head -3 | sed 's/^ *//' | paste -sd ',' - || true)"
+    echo "in the engine (bytes, crate): ${compiler}"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        { echo "#### esp32s3 split image"; echo "- \`${verdict}\`"; echo "- in the engine: \`${compiler}\`"; } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" \
+        --partitions lp-fw/fw-esp32s3/partitions.csv --margin {{ margin }}
+    if [ -n "{{ unsplit }}" ]; then
+        just build-fw-esp32s3
+        img="$(mktemp)"
+        trap 'rm -f "${img}"' EXIT
+        espflash save-image --chip esp32s3 --flash-size {{ s3_flash_size }} {{ fw_esp32s3_elf }} "${img}" >/dev/null
+        mono="$(wc -c < "${img}" | tr -d ' ')"
+        core="$(wc -c < "${out}/core.bin" | tr -d ' ')"
+        engine="$(wc -c < "${out}/engine.bin" | tr -d ' ')"
+        app="$(wc -c < "${out}/app.bin" | tr -d ' ')"
+        echo "monolithic image ${mono} B; split core ${core} B + engine ${engine} B; app.bin ${app} B"
+        echo "code delta (core + engine − monolithic): $(( core + engine - mono )) B"
+        echo "image delta (app.bin − monolithic): $(( app - mono )) B"
+    fi
+
+# The S3 split image's boot gate (`lp-cli/tests/emu_s3_split_boot.rs`): the
+# packaged image from the reset vector through the IDF door to the engine's
+# hello, the same with the core high and the engine low, and a pushed project
+# rendered. Builds the split image unless `LP_EMU_S3_SPLIT` names one.
+test-emu-esp32s3-split-boot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${LP_EMU_S3_SPLIT:-}" ]]; then
+        just fw-esp32s3-split
+        export LP_EMU_S3_SPLIT="{{ justfile_directory() }}/target/fw-split/esp32s3-shipped"
+    fi
+    cargo test -p lp-cli --release --test emu_s3_split_boot -- --include-ignored --nocapture --test-threads=1
 
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
 # partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
