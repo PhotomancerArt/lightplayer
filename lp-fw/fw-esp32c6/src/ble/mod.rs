@@ -1,52 +1,34 @@
 //! The BLE link: the wire, on lp-link, over a Nordic-UART GATT service.
 //!
-//! Plan `ble-remote-control` M4; the decision record is
-//! `docs/adr/2026-09-24-ble-transport.md`. In one paragraph: BLE is on
-//! unless the device store turns it off (`/.lp/access.json`, `bleEnabled`),
-//! read once at boot — an emulated C6 starts the controller and advertises,
-//! but no central ever connects to it. When on, each connection is one
-//! *untrusted* radio link into the
-//! link mux (`fw_esp32_common::radio_link`), which the server's access gate
-//! treats as it treats any untrusted link. On a split image a link's channel
-//! 3 carries the over-the-air update protocol to the core's update session
-//! (`crate::ota`), whose own access rule decides — with the tier the server
-//! granted the link while the engine runs, or the core's own login in
-//! core-only, where the links open in update mode (a wider receive window).
-//!
-//! - [`ble_task`]: bring-up, the host runner, advertising, connection tasks;
-//! - [`ble_connection`]: one connection's life as a link;
-//! - [`nus_service`]: the GATT server (the spike's UUIDs);
-//! - [`advertising`]: address, name, advertisement;
-//! - [`conn_params`]: the 15 ms / 4 s request and its read-back;
-//! - [`notify_queue`]: board → host frames, one per notification, and what
-//!   trouble-host queues.
-//!
-//! Each connection's wire is an lp-link session (plan `ble-on-lp-link`): one
-//! frame per ATT write or notification, sized to the connection's MTU. The
-//! pure halves — the link itself, its sizing, the mux that turns its
-//! messages into server requests and replies — live in
-//! `fw_esp32_common::radio_link`, where they are host-tested.
+//! The link itself is `fw_esp32_radio::ble` (bring-up, the host runner,
+//! advertising, each connection's link; the decision record is
+//! `docs/adr/2026-09-24-ble-transport.md`). What stays here is this chip's:
+//! the controller's configuration ([`ble_controller_config`], NPL setters
+//! only this controller family has), and the rule that the XIAO-C6's RF
+//! switch is set before the controller starts ([`start`] takes the proof).
 
-mod advertising;
-mod ble_connection;
 mod ble_controller_config;
-mod ble_task;
-mod conn_params;
-mod hci_transport;
-mod notify_queue;
-mod nus_service;
 
-pub use advertising::refresh_advertised_name;
-pub use ble_task::start;
-
-/// Run K's parameter file (`desk_ble_params`).
+use fw_esp32_common::radio_link::RadioLinkPort;
+pub use fw_esp32_radio::ble::refresh_advertised_name;
 #[cfg(feature = "desk_ble_params")]
-pub fn desk_params_path() -> &'static str {
-    conn_params::desk::PATH
-}
+pub use fw_esp32_radio::ble::{configure_desk_params, desk_params_path};
 
-/// Take Run K's parameters from the file's text (`desk_ble_params`).
-#[cfg(feature = "desk_ble_params")]
-pub fn configure_desk_params(text: &str) {
-    conn_params::desk::configure(text);
+use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
+
+/// Bring BLE up and start serving it on `port`, with this chip's controller
+/// configuration. Needs the RF-switch quirk to have run first (`_quirks` is
+/// the proof).
+pub fn start(
+    spawner: embassy_executor::Spawner,
+    bt: esp_hal::peripherals::BT<'static>,
+    port: &'static RadioLinkPort,
+    _quirks: BoardQuirksApplied,
+) {
+    fw_esp32_radio::ble::start(
+        spawner,
+        bt,
+        port,
+        ble_controller_config::ble_controller_config(),
+    );
 }

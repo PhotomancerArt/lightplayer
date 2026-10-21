@@ -10,7 +10,7 @@
 # a change to any of these crates runs that chip's pinned-figure jobs.
 # docs/debt/firmware-figures-skip-on-shared-crate-prs.md has the why.
 
-# fw-esp32c6 on riscv32imac-unknown-none-elf: 51 directories.
+# fw-esp32c6 on riscv32imac-unknown-none-elf: 52 directories.
 fw_closure_esp32c6:
   - 'lp-app/lpa-server/**'
   - 'lp-base/lp-bootctl/**'
@@ -39,6 +39,7 @@ fw_closure_esp32c6:
   - 'lp-core/lpc-wire/**'
   - 'lp-fw/fw-core/**'
   - 'lp-fw/fw-esp32-common/**'
+  - 'lp-fw/fw-esp32-radio/**'
   - 'lp-fw/fw-esp32c6/**'
   - 'lp-fw/lp-ws281x/**'
   - 'lp-gfx/lp-gfx/**'

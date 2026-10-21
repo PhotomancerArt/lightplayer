@@ -384,7 +384,7 @@ export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /// the firmware logs the lines this walk keys on from code above the frame
 /// device, so the seam and the radio print the same words:
 /// `[wifi] trying <ssid>` and `[wifi] address a.b.c.d`
-/// (`fw-esp32c6/src/net/station_task.rs`), `[lan] link <id> from <peer>:
+/// (`fw-esp32-radio/src/net/station_task.rs`), `[lan] link <id> from <peer>:
 /// secure session opening (…)` and `[lan] link <id>: closed (…)`
 /// (`lan_endpoint_task.rs`; the id is a `LinkId`'s Display, `link1`, not a
 /// bare number), and `Project loaded: <name>` (`lpa-server`'s

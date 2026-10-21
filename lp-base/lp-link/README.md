@@ -87,7 +87,7 @@ wire's messages over channel 1 lives at each edge:
   `fw-esp32c6`'s `ble` feature (which also brings up the BT stack itself).
 - **Board, Wi-Fi (C6 only):** the same `radio_link/` port, whose **network
   slot** (`NETWORK_LINK_SLOTS = 1`) holds one secure `ws()` link — a LAN
-  WebSocket from `fw-esp32c6/src/net/lan_endpoint_task.rs`, or a route on the
+  WebSocket from `fw-esp32-radio/src/net/lan_endpoint_task.rs`, or a route on the
   cloud relay's device leg from `net/relay/` (`relay_task.rs` on the chip, one
   relay `Frame` per lp-link frame). Behind `fw-esp32-common`'s `wifi`
   feature; a newcomer on the other path takes the slot only with the

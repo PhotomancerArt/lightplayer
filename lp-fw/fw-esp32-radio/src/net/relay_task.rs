@@ -4,7 +4,7 @@
 //!
 //! The work is `fw_esp32_common::net::relay`'s — the driver (the `lpc-relay`
 //! client joined to the network slot it shares with the LAN endpoint) and
-//! the device-leg loop — over this chip's platform ([`C6RelayIo`]): DNS and
+//! the device-leg loop — over this board's platform ([`BoardRelayIo`]): DNS and
 //! TCP from embassy-net, the hardware RNG, the station's address
 //! (`net_address`), and the settings the main thread hands over
 //! (`relay_probes::RELAY_BOARD`).
@@ -16,9 +16,10 @@
 //!   and the board holds an account key (the driver's rule, RD8).
 //! - **Where.** `lightplayer.app:80`, always, on the product image; a desk
 //!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
-//!   says so at boot (RD14).
-//! - **Relay protocol 2.** The hello carries the build's version
-//!   ([`relay_config`]: the manifest's version slot, what the wire hello
+//!   says so at boot (RD14). Both are the chip crate's build facts, so the
+//!   [`RelayClientConfig`] comes from it (the C6's `net::relay_config`).
+//! - **Relay protocol 2.** The hello carries the build's version (the
+//!   config's `firmware`: the manifest's version slot, what the wire hello
 //!   reports; on a split image the core and the engine come from one link,
 //!   so it is the core's too). The project's facts and the pictures the hub
 //!   asks for come from the main thread through `RELAY_BOARD` (its frame
@@ -39,7 +40,6 @@
 //!   the leg ends or the board may not dial.
 
 use alloc::collections::VecDeque;
-use alloc::string::String;
 use core::cell::RefCell;
 
 use embassy_futures::select::{Either, select};
@@ -74,25 +74,12 @@ const FRAME_TX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME;
 /// 25 s, and the driver closes a leg silent for 60 s itself first.
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(75);
 
-/// The relay's product address, or the desk image's (`LP_RELAY_HOST`).
-pub const RELAY_HOST: &str = env!("LP_RELAY_HOST_NAME");
-
-/// The relay's port (80: the device leg is plain HTTP).
-pub fn relay_port() -> u16 {
-    env!("LP_RELAY_HOST_PORT").parse().unwrap_or(80)
-}
-
-/// Whether this image was built to dial a desk relay (`LP_RELAY_HOST`).
-pub fn relay_host_overridden() -> bool {
-    env!("LP_RELAY_HOST_OVERRIDDEN") == "true"
-}
-
 /// The relay task: `config` is the board's fixed facts (MAC, name, wire
 /// version) and where the relay is.
 #[embassy_executor::task]
 pub async fn relay_task(stack: Stack<'static>, port: SharedPort, config: RelayClientConfig) {
     let index = RADIO_LINK_SLOTS;
-    let io = C6RelayIo {
+    let io = BoardRelayIo {
         stack,
         address: RefCell::new(net_address::watch()),
         queue: RefCell::new(VecDeque::new()),
@@ -108,8 +95,8 @@ pub async fn relay_task(stack: Stack<'static>, port: SharedPort, config: RelayCl
     run_relay_leg(&mut driver, &io, &port, index, sizes).await;
 }
 
-/// The relay's platform on the C6.
-struct C6RelayIo {
+/// The relay's platform on the board.
+struct BoardRelayIo {
     stack: Stack<'static>,
     address: RefCell<AddressWatch>,
     /// Inputs taken together (the address and its LAN address), handed out
@@ -117,7 +104,7 @@ struct C6RelayIo {
     queue: RefCell<VecDeque<RelayEvent<'static>>>,
 }
 
-impl C6RelayIo {
+impl BoardRelayIo {
     /// What the board already knows at start: the station's address, the
     /// switch and the account entries `core_boot` handed over.
     fn prime(&self, driver: &mut RelayDriver) {
@@ -150,7 +137,7 @@ impl C6RelayIo {
     }
 }
 
-impl RelayLegIo for C6RelayIo {
+impl RelayLegIo for BoardRelayIo {
     type Stream<'b>
         = TcpStream<'b>
     where
@@ -247,23 +234,6 @@ fn lan_address(address: Option<[u8; 4]>) -> Option<LanAddress> {
         ip,
         port: LINK_PORT,
     })
-}
-
-/// The relay's `config` for this board: its MAC, its name (the stamped
-/// `/.lp/device.json` name, else its `lp-xxxx` LAN label), this build's wire
-/// version and app version (the protocol 2 hello's firmware), and the
-/// relay's address (`lightplayer.app:80`, or the desk image's
-/// `LP_RELAY_HOST`). One session at a time: the C6 holds one.
-pub fn relay_config(board_mac: [u8; 6], name: Option<String>) -> RelayClientConfig {
-    RelayClientConfig {
-        host: String::from(RELAY_HOST),
-        port: relay_port(),
-        board_mac,
-        label: name.unwrap_or_else(|| fw_esp32_common::net::mdns::mdns_label(board_mac)),
-        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
-        max_routes: 1,
-        firmware: crate::manifest_version(),
-    }
 }
 
 fn fill_random(buf: &mut [u8]) {

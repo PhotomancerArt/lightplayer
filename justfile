@@ -2952,6 +2952,16 @@ clippy-fw-esp32c6: install-rv32-target
         --features esp32c6,heap_peak_diag -- --no-deps -D warnings
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,memory_fs -- --no-deps -D warnings
+    # The radio glue the C6 links (`lp-fw/fw-esp32-radio`): `--no-deps` above
+    # never lints it, so it gets its own passes, one per feature tier the C6
+    # builds it at (the ESP-NOW harnesses at `radio`, the BLE harnesses at
+    # `ble`, the app at `wifi`), plus the two desk-only BLE features. On the
+    # C6's target, from this directory (build-std and the toolchain are here).
+    for features in esp32c6,radio esp32c6,ble esp32c6,wifi esp32c6,wifi,desk_ble_params,desk_ble_fault; do
+        echo "clippy: fw-esp32-radio --features $features"
+        cargo clippy -p fw-esp32-radio --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --features "$features" -- --no-deps -D warnings
+    done
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader

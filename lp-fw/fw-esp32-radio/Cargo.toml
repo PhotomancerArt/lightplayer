@@ -1,0 +1,102 @@
+[package]
+name = "fw-esp32-radio"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The ESP32 radio glue shared by the chip firmware crates: ESP-NOW, BLE and the network on lp-net"
+
+[lints]
+workspace = true
+
+# What lives here (README.md): the radio glue that calls esp-radio's
+# chip-independent API — the ESP-NOW driver and the radio's one bring-up, the
+# BLE link, and the network thread (station, IP stack, LAN endpoint, mDNS,
+# relay). `fw-esp32-common` stays esp-radio-free by rule; this crate is the
+# esp-radio-aware layer above it. Chip facts (thread sizes and priorities, the
+# BLE controller config, board quirks, the first-light and diagnostic hooks,
+# the network seam's wake) arrive by injection from the chip crate.
+#
+# Like fw-esp32-common: no rust-toolchain.toml and no .cargo/config.toml here;
+# it builds inside a chip crate's build (its directory, target and toolchain).
+# Every dependency's features are a SUBSET of what `fw-esp32c6` already turns
+# on, so moving the code here leaves the C6's resolved feature set unchanged.
+
+[features]
+default = []
+# The chip, forwarded to the esp-* crates and nothing else.
+esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-radio?/esp32c6", "esp-println?/esp32c6"]
+esp32s3 = ["esp-hal/esp32s3", "esp-rtos/esp32s3", "esp-radio?/esp32s3", "esp-println?/esp32s3"]
+# The radio: its one bring-up (`hardware::radio_hub`) and the ESP-NOW driver.
+radio = [
+    "dep:esp-radio",
+    "esp-rtos/esp-alloc",
+    "esp-rtos/esp-radio",
+    "dep:lpc-hardware",
+    "dep:lp-collection",
+]
+# The BLE link on lp-link over a Nordic-UART GATT service (`ble`).
+ble = [
+    "radio",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "dep:esp-alloc",
+    "dep:trouble-host",
+    "dep:bt-hci",
+    "dep:heapless",
+    "dep:static_cell",
+    "dep:embassy-sync-07",
+    "dep:embedded-io-07",
+    "dep:lpc-shared",
+    "dep:lpa-server",
+    "fw-esp32-common/radio-link",
+]
+# The network on `lp-net` (`net`): the station, the IP stack, the LAN
+# endpoint, mDNS and the cloud relay's device leg.
+wifi = [
+    "ble",
+    "fw-esp32-common/wifi",
+    "dep:esp-radio-rtos-driver",
+    "dep:esp-println",
+    "dep:embassy-net",
+    "dep:smoltcp",
+    "dep:lpc-relay",
+    "dep:lpc-wire",
+    "dep:lpc-access",
+]
+# Desk-only BLE builds (never shipped): Run K's connection parameters from a
+# file, and a forced host-runner restart. The chip crate's features of the
+# same names turn these on.
+desk_ble_params = ["ble"]
+desk_ble_fault = ["ble"]
+
+[dependencies]
+fw-esp32-common = { path = "../fw-esp32-common" }
+critical-section = "1"
+embassy-executor = "0.10.0"
+embassy-futures = "0.1"
+embassy-sync = "0.8.0"
+embassy-time = "0.5.0"
+log = { workspace = true, default-features = false }
+esp-hal = { version = "1.1.0", features = ["unstable"] }
+esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy"] }
+esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "unstable", "wifi"] }
+esp-radio-rtos-driver = { version = "0.3.0", optional = true }
+esp-alloc = { version = "0.10.0", default-features = false, optional = true }
+esp-println = { version = "0.17.0", default-features = false, features = ["jtag-serial"], optional = true }
+lp-collection = { workspace = true, features = ["serde"], optional = true }
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
+trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }
+bt-hci = { version = "0.8.0", optional = true, default-features = false, features = ["log"] }
+heapless = { version = "0.9", optional = true }
+# trouble-host's `#[gatt_server]` expands to `static_cell` (`ble::nus_service`).
+static_cell = { version = "2.1", optional = true }
+embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
+embedded-io-07 = { package = "embedded-io", version = "0.7", optional = true }
+embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp", "tcp", "multicast", "dns"], optional = true }
+smoltcp = { version = "0.13.1", default-features = false, optional = true }
+lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true }
+lpc-access = { path = "../../lp-core/lpc-access", optional = true }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }

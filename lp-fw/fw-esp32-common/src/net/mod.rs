@@ -9,7 +9,7 @@
 //! It also holds **the boundary the network seam plugs into** (plan MD4):
 //! [`StationControl`] (scan, connect, disconnect, link loss) and
 //! [`NetFrameDevice`] (the frame device under embassy-net). The C6 puts
-//! esp-radio behind both (`fw-esp32c6/src/net/`); the network seam
+//! esp-radio behind both (`fw-esp32-radio/src/net/`); the network seam
 //! (`seam_station`, `seam_frame_device`) puts the emulator's virtual LAN
 //! behind them again, and nothing above the boundary can tell. Each item's
 //! doc is the contract an emulator answer is held to.

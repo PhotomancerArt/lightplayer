@@ -35,10 +35,8 @@ use trouble_host::prelude::*;
 
 use super::advertising;
 use super::ble_connection;
-use super::ble_controller_config::ble_controller_config;
 use super::hci_transport::LpHciTransport;
 use super::nus_service::NusServer;
-use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
 
 /// The HCI controller: esp-radio's BLE blob behind bt-hci's external
 /// controller, 20 command slots (the spike's figure).
@@ -67,17 +65,18 @@ static SLOT_FREED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static HOST_RESTARTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Bring BLE up and start serving it, each connection a radio link on
-/// `port` (the one the link mux serves). Needs the RF-switch quirk to have
-/// run first (`_quirks` is the proof). A controller that fails to start is
-/// logged and leaves the board USB-only.
+/// `port` (the one the link mux serves). `config` is the chip's controller
+/// configuration (its controller family's setters differ by chip), and the
+/// chip runs its board quirks first (the C6's RF switch). A controller that
+/// fails to start is logged and leaves the board USB-only.
 pub fn start(
     spawner: Spawner,
     bt: esp_hal::peripherals::BT<'static>,
     port: &'static RadioLinkPort,
-    _quirks: BoardQuirksApplied,
+    config: esp_radio::ble::Config,
 ) {
     let heap_before = esp_alloc::HEAP.used();
-    let connector = match BleConnector::new(bt, ble_controller_config()) {
+    let connector = match BleConnector::new(bt, config) {
         Ok(connector) => connector,
         Err(_) => {
             log::error!("[ble] controller init FAILED — BLE stays off this boot");
