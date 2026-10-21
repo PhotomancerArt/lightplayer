@@ -2074,6 +2074,9 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         // modelled flash chip or it falls back on its own.
         "esp32s3,server,float-f32" => "boot-idle".to_string(),
         "esp32s3,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
+        // S3 radio M1: the shipped boot with esp-radio's Wi-Fi and the BTDM
+        // controller started beside it (`radio_boot_probe`).
+        "esp32s3,server,float-f32,radio_boot_probe" => "radio-boot".to_string(),
         other => other.replace(',', "+"),
     }
 }

@@ -244,6 +244,8 @@ case "$features" in
     # `fw-esp32s3` declares no `memory_fs` feature.
     esp32s3,server,float-f32) slug=boot-idle ;;
     esp32s3,test_shader_compile_incremental) slug=shader-compile-stress ;;
+    # S3 radio M1: the shipped boot with esp-radio's Wi-Fi and BTDM started.
+    esp32s3,server,float-f32,radio_boot_probe) slug=radio-boot ;;
     *) slug="${features//,/+}" ;;
 esac
 

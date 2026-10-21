@@ -190,6 +190,11 @@ description = "The compile-parity harness on the S3: the incremental shader comp
 payloads = ["shader-compile-stress"]
 
 [[set]]
+name = "s3-radio"
+description = "S3 radio M1 (AC2): an image that starts the radio — `fw-esp32s3 --features radio_boot_probe`, the shipped boot with esp-radio's Wi-Fi (`wifi::new`, a station, one scan) and the BTDM controller (`BleConnector::new`, one HCI Reset) started beside it — recorded on the bench S3 (FS3 `fixture-s3`) and replayed against `lp-emu:esp32s3:t1`. What it compares: the probe's heap at every stage (`radio-stage`, memory class — what the blobs allocate is configuration, not air) and the controller's Command Complete (`radio-hci-event`, structural). No host conversation, so it runs on a current lp-link image. ⚠️ Resolve the port by MAC (`fwcheck port --mac D8:3B:DA:47:29:70`), and lease the board first (`board take fixture-s3`)."
+payloads = ["radio-boot"]
+
+[[set]]
 name = "s3-walk"
 description = "The S3's whole desk batch in one line: the shipped image's boot and heap, then the compile-parity harness. `lp-cli validate run s3-walk --config silicon:esp32s3 --port <resolved by MAC>` is what the sitting executes, one flash per payload, each with its `--dry-run` printed into the sitting log first. ⚠️ Resolve the port by MAC (`scripts/emu/board-port.py`), never by prefix: an S3 and a C6 both enumerate as 303a:1001 with a `/dev/cu.usbmodem…` node, so `candidates[0]` is how another session's board gets flashed. `gpio-calibrate` and `cycle-probe` join this list if and when the S3 grows their harnesses (D7's named future work)."
 payloads = ["boot-idle", "shader-compile-stress"]

@@ -906,6 +906,48 @@ pub static STACK_HEARTBEAT: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The radio probe's staged heap ledger (S3 radio M1,
+/// `lp-fw/fw-esp32s3/src/radio_boot_probe.rs`):
+///
+/// ```text
+/// [RADIO] stage=wifi_new heap_free=190924 heap_used=46656
+/// ```
+///
+/// Keyed on the stage. Both numbers are **memory**: what `wifi::new`,
+/// `BleConnector::new` and the HCI reset took off the heap is exactly what a
+/// silicon capture and an emulated one must agree on to the byte — the blobs
+/// allocate by what they are configured with, not by what the air says.
+pub static RADIO_STAGE: SeriesSpec = SeriesSpec {
+    name: "radio-stage",
+    description: "the radio probe's heap at each stage of bringing Wi-Fi and BTDM up",
+    pattern: r"\[RADIO\] stage=(?<stage>\S+) heap_free=(?<heap_free>\d+) heap_used=(?<heap_used>\d+)",
+    key: "stage",
+    fields: &[
+        ("heap_free", FieldClass::Memory),
+        ("heap_used", FieldClass::Memory),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The BTDM controller's answer to the probe's HCI Reset:
+///
+/// ```text
+/// [RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]
+/// ```
+///
+/// Structural: an H4 event packet, Command Complete for opcode `0x0c03` with
+/// status 0. On the emulator it is the controller's ROM routines answering
+/// over modelled registers; on silicon it is the same routines on the real
+/// ones, so a difference here is a register the model answers wrongly.
+pub static RADIO_HCI_EVENT: SeriesSpec = SeriesSpec {
+    name: "radio-hci-event",
+    description: "the BTDM controller's Command Complete for the probe's HCI Reset",
+    pattern: r"\[RADIO\] (?<what>ble HCI event): (?<event>\[[0-9a-f, ]*\])",
+    key: "what",
+    fields: &[("event", FieldClass::Structural)],
+    compiled: OnceLock::new(),
+};
+
 /// The littlefs mount's outcome on the flash partition.
 ///
 /// ```text
@@ -2460,6 +2502,77 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         boot: BootPath::Direct,
     },
     Payload {
+        name: "radio-boot",
+        // S3 radio M1 (AC2). The S3 has no product radio yet, so its arm is
+        // the shipped boot with `radio_boot_probe` beside it: esp-radio's
+        // Wi-Fi (`wifi::new`, a station, one scan) and the BTDM controller
+        // (`BleConnector::new`, one HCI Reset). What the transcript is FOR
+        // is the radio's own memory figures and the controller's answer,
+        // byte for byte against `lp-emu:esp32s3:t1` — the evidence behind
+        // the machine's radio windows (`lp-emu-esp32s3/src/periph/radio_stub.rs`).
+        chips: &[ChipArm {
+            chip: "esp32s3",
+            firmware_features: &["server", "float-f32", "radio_boot_probe"],
+            emulator_features: None,
+            // The product's link, and on this chip the only one.
+            link: Link::UsbSerialJtag,
+            // Every silicon capture is a ROM-up boot (`boot-idle`'s Q6).
+            boot: BootPath::RomUp {
+                reset_cause: "poweron",
+                strap: "app",
+            },
+            host_plan: Some(HostPlan {
+                host: "attached",
+                script: "",
+            }),
+            // **No conversation.** Every line this payload compares is
+            // printed by the boot unasked, before or beside the server loop —
+            // which is also why it can run on a current image at all: a raw
+            // `M!` script cannot reach a server behind lp-link (`boot-idle`'s
+            // S3 arm is refused for exactly that).
+            host_script: None,
+            // espflash hard-resets after writing, so silicon's capture is the
+            // boot after the one that formatted `lpfs` (`ChipArm::second_boot`).
+            // The radio's stages run before the mount, so nothing compared
+            // here hangs on it; it is set so the two sides are the same boot.
+            second_boot: true,
+            // The last line the probe prints: the scan's end, after the HCI
+            // event, so a capture that stops here carries every stage.
+            sentinel: Some(Sentinel::Done("[RADIO] wifi scan done")),
+        }],
+        display_name: "An image that starts the radio, to its first scan",
+        fw_check_slug: "radio-boot",
+        // The C6's arm is its SHIPPED image: on the C6 the product image
+        // already brings esp-radio up at boot (ESP-NOW; BLE once enabled),
+        // so it is `boot-idle-flash`'s image under this name. No C6
+        // transcript of it is recorded or needed — this payload exists for
+        // the S3 arm above.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: None,
+        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        pin_script: None,
+        wire: &[],
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&RADIO_STAGE, &RADIO_HCI_EVENT],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
         name: "usb-negative-control",
         chips: &[],
         display_name: "Shipped image with the port closed from boot",
@@ -3531,6 +3644,15 @@ mod tests {
                 BootPath::Direct,
                 false,
             ),
+            (
+                "radio-boot",
+                &["server", "float-f32", "radio_boot_probe"],
+                BootPath::RomUp {
+                    reset_cause: "poweron",
+                    strap: "app",
+                },
+                true,
+            ),
         ];
         for (name, features, boot, second_boot) in expected {
             let arm = find_payload(name)
@@ -3551,6 +3673,14 @@ mod tests {
             find_payload("boot-idle").unwrap().sentinel_for("esp32s3"),
             Sentinel::Done("[JIT] used="),
         );
+        // The radio's arm asks nothing of the server: its lines are printed
+        // unasked, and its capture ends at the scan.
+        let radio = find_payload("radio-boot").unwrap();
+        assert!(radio.arm("esp32s3").unwrap().host_script.is_none());
+        assert_eq!(
+            radio.sentinel_for("esp32s3"),
+            Sentinel::Done("[RADIO] wifi scan done"),
+        );
         // …and the two payloads the milestone does NOT give the S3 are absent
         // by name rather than silently answered with the C6's features
         // (D7: `gpio-calibrate` and `cycle-probe` are named future work).
@@ -3560,6 +3690,22 @@ mod tests {
                 "{name} has an `esp32s3` arm this milestone did not build"
             );
         }
+    }
+
+    #[test]
+    fn the_radio_series_parse_the_lines_the_probe_prints() {
+        let stage = RADIO_STAGE
+            .regex()
+            .captures("[RADIO] stage=wifi_new heap_free=190924 heap_used=46656")
+            .expect("a stage line");
+        assert_eq!(&stage["stage"], "wifi_new");
+        assert_eq!(&stage["heap_free"], "190924");
+        assert_eq!(&stage["heap_used"], "46656");
+        let event = RADIO_HCI_EVENT
+            .regex()
+            .captures("[RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]")
+            .expect("an event line");
+        assert_eq!(&event["event"], "[04, 0e, 04, 05, 03, 0c, 00]");
     }
 
     #[test]
