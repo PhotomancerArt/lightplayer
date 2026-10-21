@@ -5,7 +5,7 @@
 mod support;
 
 use lpc_update::board::{AccessFacts, LinkId, LinkTrust, SessionConfig, SessionMode};
-use lpc_update::code_table::CHUNK;
+use lpc_update::code_table::{CHIP_ESP32C6, CHIP_ESP32S3, CHUNK, LAYOUT_1, LAYOUT_2};
 use lpc_update::testing::{
     BootFault, FakeBoard, MODEL_BLOCK, MODEL_PROGRESS, MODEL_REGION_START, ModelBuild,
 };
@@ -484,6 +484,41 @@ fn every_offer_refusal_comes_before_any_erase() {
     let mut o = offer_of(&x);
     o.engine_len = REGION;
     assert!(matches!(refused(o, none)[0], Refusal::DoesNotFit { .. }));
+}
+
+/// A C6 offered an S3 build (chip 2, layout 2 — the codes the S3 was given
+/// on 2026-10-21) refuses it by name, the chip first: nothing is written,
+/// erased or reset, and both boot-record sectors (the trial's marks) stay
+/// byte for byte as they were (`refused` checks the whole flash). The same
+/// with only the layout an S3's names it the layout.
+#[test]
+fn a_c6_refuses_an_s3_offer_by_name_before_writing_anything() {
+    let (_, y) = x_and_y();
+    let mut s3 = offer_of(&y);
+    assert_eq!((s3.chip, s3.layout), (CHIP_ESP32C6, LAYOUT_1));
+    s3.chip = CHIP_ESP32S3;
+    s3.layout = LAYOUT_2;
+    let refusals = refused(s3, |_: &mut FakeBoard| {});
+    assert_eq!(
+        refusals[0],
+        Refusal::Incompatible {
+            what: Mismatch::Chip,
+            have: CHIP_ESP32C6,
+            need: CHIP_ESP32S3
+        }
+    );
+    assert!(refusals[0].to_string().contains("chip"), "{}", refusals[0]);
+
+    let mut layout_only = offer_of(&y);
+    layout_only.layout = LAYOUT_2;
+    assert_eq!(
+        refused(layout_only, |_: &mut FakeBoard| {})[0],
+        Refusal::Incompatible {
+            what: Mismatch::Layout,
+            have: LAYOUT_1,
+            need: LAYOUT_2
+        }
+    );
 }
 
 #[test]
