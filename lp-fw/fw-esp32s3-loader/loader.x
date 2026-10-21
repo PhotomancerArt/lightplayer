@@ -10,6 +10,15 @@
 MEMORY {
   LIRAM : ORIGIN = 0x403A0000, LENGTH = 0x8000
   LDRAM : ORIGIN = 0x3FCB8000, LENGTH = 0x8000
+  /* The IDF bootloader maps an app's DROM and IROM segments and asserts
+     the map is page-aligned; with none it asserts on zeroes it computed
+     (`abort()` at 0x403ceab9 on espflash 3.3's S3 build). So, as the C6
+     loader does, two 16-byte placeholders in ONE flash page: the data
+     view's at 0x3C000020 and the instruction view's at 0x42000120, both
+     MMU entry 0. The loader never reads them; it remaps entry 0 for the
+     core. */
+  DSTUB : ORIGIN = 0x3C000020, LENGTH = 0x100
+  ISTUB : ORIGIN = 0x42000120, LENGTH = 0x100
 }
 ENTRY(_start)
 
@@ -19,6 +28,8 @@ PROVIDE(Cache_Invalidate_ICache_All = 0x400016d4);
 PROVIDE(Cache_Invalidate_DCache_All = 0x400016e0);
 
 SECTIONS {
+  .drom_stub : { LONG(0x564c504c) LONG(1) LONG(0) LONG(0) } > DSTUB
+  .irom_stub : { LONG(0x52494c50) LONG(0) LONG(0) LONG(0) } > ISTUB
   .text : ALIGN(4) {
     KEEP(*(.literal._start .text._start))
     *(.literal .text .literal.* .text.*)
@@ -27,7 +38,6 @@ SECTIONS {
   /* The IDF bootloader loads file bytes only: .bss rides in .data as
      zeroes so nothing reads stale RAM. */
   .data : ALIGN(4) {
-    KEEP(*(.loader_identity))
     *(.rodata .rodata.*)
     *(.data .data.*)
     *(.bss .bss.* COMMON)
