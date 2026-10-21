@@ -50,6 +50,7 @@ impl SplitUpdateTarget {
                 layout
             }
             None => SplitLayout {
+                region_start: lp_bootctl::REGION_START,
                 region_end: lp_bootctl::REGION_START,
                 page: super::page_size(),
             },

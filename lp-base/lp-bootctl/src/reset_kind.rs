@@ -48,6 +48,43 @@
 //! 0x16 USB_JTAG_HPSYS  cold   the USB-Serial-JTAG's JTAG reset (host)
 //! 0x18 JTAG_CPU        cold   a JTAG debugger reset the CPU (host)
 //! ```
+//!
+//! # The ESP32-S3's codes
+//!
+//! The same classes, code by code, for the values the S3's mask ROM's
+//! `rtc_get_reset_reason(0)` returns (ROM entry `0x4000_057c`). Their names
+//! are the ROM's own 24-entry name table (`0x3FF1_8E10` in the vendored
+//! `lp-emu/esp/roms/esp32s3_rev0_rom.elf`'s `.rodata`, strings from
+//! `0x3FF1_A971`; read 2026-10-21 by following the pointers to `POWERON`),
+//! and they agree with esp-hal's `SocResetReason` for the S3
+//! (`third_party/esp-hal/src/rtc_cntl/rtc/esp32s3.rs`) code for code, except
+//! `0x0A`, which esp-hal does not name.
+//!
+//! ```text
+//! 0x01 POWERON              cold   power-on
+//! 0x03 RTC_SW_SYS_RST       warm   software reset of the digital core
+//! 0x05 DSLEEP               cold   wake from deep sleep
+//! 0x07 TG0WDT_SYS_RST       warm   timer group 0 watchdog
+//! 0x08 TG1WDT_SYS_RST       warm   timer group 1 watchdog
+//! 0x09 RTCWDT_SYS_RST       warm   RTC watchdog, digital core
+//! 0x0A INTRUSION_RST        warm*  not in esp-hal; no description
+//! 0x0B TG0WDT_CPU_RST       warm   timer group 0 watchdog, CPU
+//! 0x0C RTC_SW_CPU_RST       warm   software reset of the CPU
+//! 0x0D RTCWDT_CPU_RST       warm   RTC watchdog, CPU
+//! 0x0F BROWNOUT_RST         cold   brownout
+//! 0x10 RTCWDT_RTC_RST       warm   RTC watchdog, digital core and RTC
+//! 0x11 TG1WDT_CPU_RST       warm   timer group 1 watchdog, CPU
+//! 0x12 SUPER_WDT_RST        warm   super watchdog
+//! 0x13 GLITCH_RTC_RST       warm*  a glitch on the clock (esp-hal `SysClkGlitch`)
+//! 0x14 EFUSE_RST            warm   eFuse CRC error
+//! 0x15 USB_UART_CHIP_RESET  cold   the USB-Serial-JTAG bridge's chip reset (host)
+//! 0x16 USB_JTAG_CHIP_RESET  cold   the USB-Serial-JTAG's JTAG reset (host)
+//! 0x17 POWER_GLITCH_RESET   warm*  a glitch on the power (esp-hal `CorePwrGlitch`)
+//! ```
+//!
+//! `warm*`: the codes the C6's table has no counterpart for, which take the
+//! unknown rule (warm) until someone rules otherwise. The S3 has no SDIO
+//! host reset and no `JTAG_CPU` code.
 
 /// What a reset says about the boot before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +98,14 @@ impl ResetKind {
     pub const fn from_c6_reason(code: u32) -> Self {
         match code {
             0x01 | 0x05 | 0x06 | 0x0F | 0x15 | 0x16 | 0x18 => Self::Cold,
+            _ => Self::Warm,
+        }
+    }
+
+    /// Classify an ESP32-S3 reset-reason code (`rtc_get_reset_reason(0)`).
+    pub const fn from_s3_reason(code: u32) -> Self {
+        match code {
+            0x01 | 0x05 | 0x0F | 0x15 | 0x16 => Self::Cold,
             _ => Self::Warm,
         }
     }
@@ -99,6 +144,78 @@ mod tests {
             assert_eq!(
                 ResetKind::from_c6_reason(code),
                 ResetKind::Warm,
+                "{code:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn s3_power_brownout_and_deep_sleep_are_cold() {
+        for code in [0x01, 0x05, 0x0F] {
+            assert_eq!(
+                ResetKind::from_s3_reason(code),
+                ResetKind::Cold,
+                "{code:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn s3_a_host_reset_is_cold() {
+        for code in [0x15, 0x16] {
+            assert_eq!(
+                ResetKind::from_s3_reason(code),
+                ResetKind::Cold,
+                "{code:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn s3_the_chip_resetting_itself_is_warm() {
+        for code in [
+            0x03, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x10, 0x11, 0x12, 0x14,
+        ] {
+            assert_eq!(
+                ResetKind::from_s3_reason(code),
+                ResetKind::Warm,
+                "{code:#x}"
+            );
+        }
+    }
+
+    /// The three codes with no C6 counterpart take the unknown rule.
+    #[test]
+    fn s3_intrusion_and_glitches_are_warm() {
+        for code in [0x0A, 0x13, 0x17] {
+            assert_eq!(
+                ResetKind::from_s3_reason(code),
+                ResetKind::Warm,
+                "{code:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn s3_unknown_codes_are_warm() {
+        for code in [0x00, 0x02, 0x04, 0x06, 0x0E, 0x18, 0x19, 0x1F, 0xFF] {
+            assert_eq!(
+                ResetKind::from_s3_reason(code),
+                ResetKind::Warm,
+                "{code:#x}"
+            );
+        }
+    }
+
+    /// Every code `0x00..=0x1F`, pinned: a change to the table is a change
+    /// to this list.
+    #[test]
+    fn s3_every_code_is_pinned() {
+        let cold = [0x01, 0x05, 0x0F, 0x15, 0x16];
+        for code in 0x00..=0x1F {
+            assert_eq!(
+                ResetKind::from_s3_reason(code).is_cold(),
+                cold.contains(&code),
                 "{code:#x}"
             );
         }

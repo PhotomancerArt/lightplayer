@@ -161,6 +161,7 @@ impl BootState {
     /// length decides how much is mapped.
     pub fn engine_room(&self) -> Extent {
         let layout = self.layout.unwrap_or(SplitLayout {
+            region_start: REGION_START,
             region_end: FALLBACK_REGION_END,
             page: page_size(),
         });
