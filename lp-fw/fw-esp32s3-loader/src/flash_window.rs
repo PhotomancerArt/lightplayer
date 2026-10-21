@@ -41,7 +41,10 @@ impl FlashWindow {
 
     /// Whether `[at, at + len)` is inside the window.
     pub fn has(&self, at: u32, len: u32) -> bool {
-        at >= self.base && at.checked_add(len).is_some_and(|end| end <= self.base + self.len)
+        at >= self.base
+            && at
+                .checked_add(len)
+                .is_some_and(|end| end <= self.base + self.len)
     }
 
     /// Where flash offset `at` (inside the window) reads on the data bus.
@@ -59,7 +62,7 @@ impl FlashWindow {
             return false;
         }
         let src = self.addr(at);
-        let words = if (src as usize | dest as usize) % 4 == 0 {
+        let words = if (src as usize | dest as usize).is_multiple_of(4) {
             len as usize / 4
         } else {
             0
@@ -81,7 +84,7 @@ impl FlashWindow {
     /// # Safety
     /// As [`FlashWindow::copy`]; `dest` and `len` 4-aligned.
     pub unsafe fn copy_words(&self, at: u32, dest: *mut u32, len: u32) -> bool {
-        if !self.has(at, len) || at % 4 != 0 || len % 4 != 0 {
+        if !self.has(at, len) || !at.is_multiple_of(4) || !len.is_multiple_of(4) {
             return false;
         }
         // SAFETY: as above, word-aligned.

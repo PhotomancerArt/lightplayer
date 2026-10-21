@@ -124,7 +124,9 @@ fn copy(flash: &FlashWindow, addr: u32, end: u32, data: u32) -> Result<(), &'sta
         (addr, true)
     } else if within(&SRAM1_IRAM, addr, end) {
         (addr - SRAM1_I_FROM_D, false)
-    } else if within(&DRAM, addr, end) || within(&RTC_FAST, addr, end) || within(&RTC_SLOW, addr, end)
+    } else if within(&DRAM, addr, end)
+        || within(&RTC_FAST, addr, end)
+        || within(&RTC_SLOW, addr, end)
     {
         (addr, false)
     } else {
@@ -137,7 +139,7 @@ fn copy(flash: &FlashWindow, addr: u32, end: u32, data: u32) -> Result<(), &'sta
     if overlaps(&S3_IDF_BOOTLOADER_RAM, dest, dest + len) {
         return Err(c"segment overlaps the IDF bootloader");
     }
-    if words_only && (dest | len | data) % 4 != 0 {
+    if words_only && !(dest | len | data).is_multiple_of(4) {
         return Err(c"instruction RAM segment not word-aligned");
     }
     // SAFETY: the core's RAM, free until it starts; checked against both
