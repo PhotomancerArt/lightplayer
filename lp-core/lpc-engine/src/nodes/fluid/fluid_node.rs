@@ -168,8 +168,12 @@ impl NodeRuntime for FluidNode {
             viscosity: def.viscosity().get::<_, f32>(ctx)?.max(0.0),
         };
         // Absent reads as Pixels: removing the key is a real gesture back to
-        // the old frame.
-        let coords = def.coords().get_or(ctx, ShaderCoords::Pixels)?;
+        // the old frame. Read by its `some` path, the way the fixture reads
+        // its absent options: an absent option is the typed
+        // `is_absent_option` error, every frame, on every fluid authored
+        // before the key existed. (`get_or` on the view hung the emulated
+        // C6 on exactly that case: `projects/test/fluid` never lit.)
+        let coords = read_coords(ctx)?;
 
         let emitters = resolve_emitters(ctx)?;
         // `bus:time` carries a queryable product, not a number: resolve the
@@ -447,6 +451,25 @@ fn write_pattern_texture_pixels(
             }
         }
     }
+}
+
+/// The authored `coords`, Pixels when the key is absent.
+fn read_coords(ctx: &mut TickContext<'_>) -> Result<ShaderCoords, NodeError> {
+    let production = match ctx.resolve_static_consumed("coords.some") {
+        Ok(production) => production,
+        Err(error) if error.is_absent_option() => return Ok(ShaderCoords::Pixels),
+        Err(error) => {
+            return Err(NodeError::msg(alloc::format!(
+                "resolve fluid coords: {}",
+                error.message
+            )));
+        }
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("fluid coords is not a value"))?;
+    ShaderCoords::from_lp_value(value.value())
+        .map_err(|error| NodeError::msg(alloc::format!("fluid coords: {error}")))
 }
 
 pub fn fluid_emitters_path() -> SlotPath {
