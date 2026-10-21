@@ -622,10 +622,17 @@ run at all on a current image:
 - **Every line twice.** The probe takes its stage figures before the link
   exists and prints them raw, then re-emits them as log records once the log
   ring is up. A silicon capture is a link host's, which opens the port after
-  espflash has exited, so it sees the log records; the emulated twin runs
-  `--link-host raw` (the hosted S3 run is not built: `driver.rs`'s refusal)
-  and sees the raw lines. Both carry the same numbers, taken at the same
-  point of the boot.
+  espflash has exited, so the raw boot text is gone and the log records are
+  what it carries. Both copies are the same numbers, taken at the same point
+  of the boot.
+- **One boot, and hosted on both sides.** A current image's raw port is
+  lp-link frames, not text, so the emulated twin must be hosted too. This
+  payload is what taught the driver the S3's hosted door (`lp-cli emu run
+  --chip esp32s3 --host-link`, ROM-up from `--merged`); that door takes no
+  writable part, so the arm is a single boot — honest here, because every
+  compared figure is taken before `lpfs` is mounted. The S3's raw binary
+  also needs `--boot-mode rom-up` stated (`ChipSpec::rom_up_needs_boot_mode`),
+  which no S3 ROM-up plan had reached before.
 
 ### `Link::Uart0` is not `Link::Uart0Spike`
 

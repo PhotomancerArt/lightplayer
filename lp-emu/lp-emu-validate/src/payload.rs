@@ -2531,11 +2531,15 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             // `M!` script cannot reach a server behind lp-link (`boot-idle`'s
             // S3 arm is refused for exactly that).
             host_script: None,
-            // espflash hard-resets after writing, so silicon's capture is the
-            // boot after the one that formatted `lpfs` (`ChipArm::second_boot`).
-            // The radio's stages run before the mount, so nothing compared
-            // here hangs on it; it is set so the two sides are the same boot.
-            second_boot: true,
+            // **One boot, deliberately**, though silicon's capture is the boot
+            // after the one that formatted `lpfs` (espflash hard-resets after
+            // writing; `ChipArm::second_boot`). Every figure this payload
+            // compares is taken before the filesystem is mounted, so the
+            // format cannot reach it — and a single boot is what lets the
+            // emulated twin run under a link host at all (`lp-cli emu run
+            // --chip esp32s3 --host-link` takes no writable flash part), which
+            // a current lp-link image needs: its raw port is frames, not text.
+            second_boot: false,
             // The last line the probe prints: the scan's end, after the HCI
             // event, so a capture that stops here carries every stage.
             sentinel: Some(Sentinel::Done("[RADIO] wifi scan done")),
@@ -3651,7 +3655,7 @@ mod tests {
                     reset_cause: "poweron",
                     strap: "app",
                 },
-                true,
+                false,
             ),
         ];
         for (name, features, boot, second_boot) in expected {

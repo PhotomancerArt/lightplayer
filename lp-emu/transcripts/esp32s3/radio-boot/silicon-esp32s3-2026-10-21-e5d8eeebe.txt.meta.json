@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "payload": "radio-boot",
+  "chip": "esp32s3",
+  "configuration": "silicon:esp32s3",
+  "date": "2026-10-21",
+  "firmware_commit": "e5d8eeebe7f4",
+  "firmware_features": [
+    "esp32s3",
+    "server",
+    "float-f32",
+    "radio_boot_probe"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "2f811c872b1a82578ba21b7143c4d1b8e3db1d77bbb0977430c9ecaf3b6ab2d0",
+  "tools": {
+    "link-host": "cargo run -q -p lp-cli --release -- link capture --json-replies (e5d8eeebe)"
+  },
+  "source": "(cd lp-fw/fw-esp32s3 && cargo build --target xtensa-esp32s3-none-elf --profile release-esp32s3 --features esp32s3,server,float-f32,radio_boot_probe) && PORT_DEV=/dev/cu.usbmodem11313301 scripts/emu/desk-flash-no-monitor.sh -- flash --chip esp32s3 --port /dev/cu.usbmodem11313301 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size 8mb --after hard-reset target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3 && cargo run -q -p lp-cli --release -- link capture --json-replies /dev/cu.usbmodem11313301 --console target/validate/radio-boot.cap --seconds 120 --exit-on '[RADIO] wifi scan done'",
+  "capture": "lp-cli validate record s3-radio --config silicon:esp32s3",
+  "note": "captured through a LINK HOST: this image speaks lp-link on its USB link, so the capture is the host's decoded console (raw text as it arrived, log records as `[LEVEL] target: text`, each wire message as its `M!{json}` line, `[link] …` notes), not the port's bytes, and the host does not ask the board to pack its replies (`--json-replies`, the same as the emulated twin). espflash resets the board and exits before the host opens the port, so raw boot text printed before that open is NOT in this capture; log records are held in the board's log ring until the link is up, so the payload's own lines are.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not — and on this chip that link is the only one the application writes to (`esp-println`'s `jtag-serial`), so a silicon capture of it is a measurement of the product's own transport rather than of a bridge"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real USB-Serial-JTAG endpoint"
+    }
+  ]
+}
