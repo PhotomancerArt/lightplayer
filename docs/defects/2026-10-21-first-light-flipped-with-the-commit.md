@@ -40,10 +40,19 @@ land in flash and cache, so the same firmware read 5 ms apart.
 **Fix** — `lp_app_version::commit()` stamps a figure build with
 `FIGURE_COMMIT` (`000000000000`, the length of a real stamp, so nothing
 that depends on the length moves), and the C6, S3 and classic build scripts
-take their `LP_BUILD_COMMIT` from it. A figure build's bytes now depend on
-the firmware's sources and the host alone. A product or release build is
-never a figure build: its commit, build id, boot records and ota-manifest
-are unchanged.
+take their `LP_BUILD_COMMIT` from it. A product or release build is never a
+figure build: its commit, build id, boot records and ota-manifest are
+unchanged.
+
+Proven on CI after the merge: the PR's run (merge commit `fb23401a2`) and
+main's (`94d83eea6`), same sources, read `basic+net` at 386.950 and
+386.797 ms and `c40+net` at 402.406 and 402.364 ms, identical to the
+microsecond. Their images still differ in 37 bytes: the ESP app descriptor's
+build time (`esp-bootloader-esp-idf` stamps the wall clock unless
+`SOURCE_DATE_EPOCH` is set), a fixed-width field in `.flash.appdesc`, and the
+image checksum and digest that cover it. That moves nothing, so it is left;
+pin it too (`SOURCE_DATE_EPOCH` in a figure build) if a figure ever needs
+byte-identical images rather than an identical layout.
 
 **Lesson** — the version and the dirty flag were pinned because their
 *length* reached a heap figure; the commit was left real because its length

@@ -93,7 +93,11 @@ pub const FIGURE_COMMIT: &str = "000000000000";
 /// build is stamped [`FIGURE_VERSION`], [`FIGURE_COMMIT`] and clean (the
 /// firmware build scripts report `LP_BUILD_DIRTY=false` for it), so nothing
 /// the checkout can change — its commit or its tree's state — reaches the
-/// image: two commits with the same firmware sources build the same bytes.
+/// image: two commits with the same firmware sources build the same layout.
+/// Not quite the same bytes: the ESP app descriptor still carries the build's
+/// wall-clock time and date (`esp-bootloader-esp-idf`), fixed-width fields in
+/// their own section, so they move no code or data, and the image's digest
+/// covers them.
 pub fn figure_build() -> bool {
     std::env::var(FIGURE_BUILD_ENV).is_ok_and(|v| v.trim() == "1")
 }
