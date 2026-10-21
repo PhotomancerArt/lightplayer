@@ -728,6 +728,11 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     if cfg!(feature = "float-f32") {
         server.declare_embedder_features(&[lpc_model::LpFeature::ShaderF32]);
     }
+    // The filesystem this build serves, said in the hello as in the manifest
+    // core (the tree store), as the C6 says it.
+    if cfg!(feature = "fs-tree") {
+        server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+    }
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
