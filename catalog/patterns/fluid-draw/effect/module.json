@@ -6,6 +6,9 @@
     },
     "fluid": {
       "ref": "./fluid.json"
+    },
+    "friends": {
+      "ref": "./friends.json"
     }
   },
   "provenance": {

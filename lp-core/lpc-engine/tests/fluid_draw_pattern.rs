@@ -217,16 +217,23 @@ impl Drawing {
             .expect("draw reads a scope")
     }
 
-    /// The draw shader's produced emitters, in slot order, empty slots left out.
+    /// Every emitter the pattern's two shaders produce (`draw`'s strokes,
+    /// then `friends`), in slot order, empty slots left out.
     fn emitters(&self) -> Vec<FluidEmitter> {
+        let mut all = self.emitters_of("draw.compute_shader");
+        all.extend(self.emitters_of("friends.compute_shader"));
+        all
+    }
+
+    fn emitters_of(&self, suffix: &str) -> Vec<FluidEmitter> {
         let engine = self.rt.engine();
         let entry = engine
             .tree()
             .entries()
-            .find(|entry| entry.path.to_string().ends_with("draw.compute_shader"))
-            .expect("draw in tree");
+            .find(|entry| entry.path.to_string().ends_with(suffix))
+            .unwrap_or_else(|| panic!("{suffix} in tree"));
         let NodeEntryState::Alive(node) = entry.state.value() else {
-            panic!("draw alive");
+            panic!("{suffix} alive");
         };
         let Some(state) = node.runtime_state_slots() else {
             return Vec::new();

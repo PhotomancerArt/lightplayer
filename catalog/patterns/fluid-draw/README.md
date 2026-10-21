@@ -10,6 +10,13 @@ for two seconds and three slow emitters (the "friends") come back to stir it.
   fingers on the picture, by pointer id, in pattern space — and writes the
   Fluid node's emitters. Reading `touches` is what makes the picture
   drawable: Studio offers drawing only on a pattern that reads it.
+- `effect/friends` is a second compute shader: the three idle emitters.
+  It reads `touches` too, only to know when someone is drawing. The two are
+  separate because a board compiles each shader within a fixed memory
+  budget, and one shader doing both did not fit
+  (`lpc-engine/tests/example_shader_compile_peak_memory.rs`). Both write
+  `fluid.emitters`; the Fluid node merges them by id (friends 1–3, strokes
+  16 and up).
 - Each finger stamps four emitters along the chord from where it was last
   frame to where it is now, so a fast stroke stays a line. Velocity and
   direction come from that chord. A new finger dabs once.
@@ -20,8 +27,8 @@ for two seconds and three slow emitters (the "friends") come back to stir it.
   works on any lamp shape.
 - Knobs: **Fade** and **Viscosity**. They live on the draw shader, where an
   unwritten channel falls back to its default, and are handed to the Fluid
-  node. Brush size and the idle time are constants in `draw.glsl`
-  (`BRUSH`, `IDLE_AFTER`): every declared input costs the shader's
+  node. Brush size and the idle time are constants (`BRUSH` in
+  `draw.glsl`, `IDLE_AFTER` in `friends.glsl`): every declared input costs the shader's
   definition about a kilobyte, and a board sends a definition in one 16 KiB
   frame (`docs/defects/2026-10-20-a-node-def-over-a-read-frame-cannot-be-read.md`).
 
