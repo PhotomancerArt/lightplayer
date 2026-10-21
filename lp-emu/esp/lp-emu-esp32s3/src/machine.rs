@@ -110,6 +110,7 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
+use lp_emu_esp_common::engine::flash_cut_spec::{AfterCut, FLASH_CUT_MARKER, FlashCutSpec};
 use lp_emu_esp_common::host::ByteSink;
 use lp_emu_esp_common::pins::{PadId, RouteSource};
 use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
@@ -119,7 +120,7 @@ use lp_emu_esp_common::{
 
 use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, Which};
 use crate::control::{ControlCommand, ControlReply, HostReport};
-use crate::flash::{FlashBacking, FlashHandle, FlashImage};
+use crate::flash::{FlashBacking, FlashHandle, FlashImage, LPFS_LEN, LPFS_OFFSET};
 use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT};
 use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
 use crate::periph::{FlashSet, HostStreams};
@@ -767,6 +768,15 @@ pub enum Outcome {
         symbol: Option<String>,
         access: CacheOffAccess,
     },
+    /// A `--flash-cut` plan fired: the supply went in the middle of the
+    /// program or erase `report` names, the chip tore it, and the run stops
+    /// with the flash as the cut left it (`then=power-cycle` runs on instead
+    /// and never returns this). Exit code **8** — the C6's power cut exits 6,
+    /// which on this chip (and the classic) is the cache-off fetch.
+    PowerCut {
+        cycle: Cycles,
+        report: lp_emu_esp_common::engine::flash_cut::FlashCutReport,
+    },
 }
 
 impl Outcome {
@@ -793,6 +803,7 @@ impl Outcome {
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
             Outcome::CacheOffFetch { .. } => 6,
+            Outcome::PowerCut { .. } => 8,
         }
     }
 
@@ -804,6 +815,7 @@ impl Outcome {
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::ExitMatched { cycle }
             | Outcome::CacheOffFetch { cycle, .. }
+            | Outcome::PowerCut { cycle, .. }
             | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -1127,6 +1139,7 @@ pub struct Esp32S3Builder {
     control: Option<String>,
     usb_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
+    flash_cut: Option<FlashCutSpec>,
     // ---- the flash, the cache and the ROM's console (M6 P06) ----
     flash_backing: FlashBacking,
     flash_len: u32,
@@ -1169,6 +1182,7 @@ impl Default for Esp32S3Builder {
             control: None,
             usb_script: Vec::new(),
             reboot_on_reset: false,
+            flash_cut: None,
             flash_backing: FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
             cache_off: CacheOffPolicy::default(),
@@ -1450,6 +1464,23 @@ impl Esp32S3Builder {
     /// with the same boot frame. The run report says how many happened.
     pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
         self.reboot_on_reset = reboot;
+        self
+    }
+
+    /// Cut the power at the Nth program or erase command inside `lpfs`
+    /// (`--flash-cut <spec>`) — a test switch, off by default, the C6's
+    /// (`lp_emu_esp_common::engine::flash_cut_spec`). The range is the
+    /// spec's, or the chip's own `lpfs` row as the build finds it
+    /// ([`lpfs_range`]), and the count runs from power-on. When the cut fires
+    /// the run ends with [`Outcome::PowerCut`], or, with `then=power-cycle`,
+    /// the machine is power-cycled ([`Machine::power_cycle`]: back to the
+    /// power-on snapshot, the flash as the cut left it) and runs on, the plan
+    /// spent. The run's label gains `+flash-cut`
+    /// ([`Machine::configuration_label`]). A machine with a plan keeps a
+    /// power-on snapshot whatever [`reboot_on_reset`](Self::reboot_on_reset)
+    /// says.
+    pub fn flash_cut(mut self, spec: FlashCutSpec) -> Self {
+        self.flash_cut = Some(spec);
         self
     }
 
@@ -1783,6 +1814,9 @@ impl Esp32S3Builder {
             control_lines: 0,
             next_host_poll: 0,
             reboot_on_reset: self.reboot_on_reset,
+            flash_cut_then: AfterCut::Stop,
+            flash_cut_armed: false,
+            power_cycles: 0,
             reboots: 0,
             strap: Strap::App,
             power_on: None,
@@ -1825,18 +1859,44 @@ impl Esp32S3Builder {
             BootMode::Direct | BootMode::RomUp => {}
         }
 
+        // The power cut, armed now so its count runs from power-on, over the
+        // range the chip's own table names (a blank chip falls back to the
+        // shipped `lpfs` row).
+        if let Some(spec) = &self.flash_cut {
+            let mut flash = machine.flash.lock().expect("flash poisoned");
+            let plan = spec.plan_in(lpfs_range(flash.bytes()));
+            flash.arm_flash_cut(plan);
+            drop(flash);
+            machine.flash_cut_then = spec.then;
+            machine.flash_cut_armed = true;
+        }
+
         // Guest time is zero and everything is placed: the one moment a
         // peripheral may schedule something before the guest touches it.
         machine.bus.start_peripherals();
 
         // The state a reboot goes back to, taken only when one was asked
         // for: a snapshot costs a copy of every region.
-        if self.reboot_on_reset {
+        // A flash-cut plan is a power cut waiting to happen: keep the
+        // snapshot a power cycle restores, whether or not resets are
+        // performed.
+        if self.reboot_on_reset || machine.flash_cut_armed {
             machine.power_on = Some(machine.snapshot());
         }
 
         Ok(machine)
     }
+}
+
+/// The `lpfs` partition as `chip`'s own table says, or the shipped table's
+/// row ([`LPFS_OFFSET`]`+`[`LPFS_LEN`]) when no table parses or none is
+/// called `lpfs` — a `--flash-cut` plan's default range on this chip.
+pub fn lpfs_range(chip: &[u8]) -> core::ops::Range<u32> {
+    crate::image::partitions(chip)
+        .into_iter()
+        .find(|p| p.label == "lpfs")
+        .map(|p| p.offset..p.offset.saturating_add(p.len))
+        .unwrap_or(LPFS_OFFSET..LPFS_OFFSET + LPFS_LEN)
 }
 
 /// `_ResetVector`'s offset from the mask ROM's base. The vendored ROM ELF's
@@ -1956,6 +2016,14 @@ pub struct Machine {
     next_host_poll: Cycles,
     reboot_on_reset: bool,
     reboots: u64,
+    /// What the run loop does when a flash power cut fires
+    /// ([`Esp32S3Builder::flash_cut`]).
+    flash_cut_then: AfterCut,
+    /// Was a flash-cut plan armed on this machine? What puts `+flash-cut`
+    /// in the label, for the whole run.
+    flash_cut_armed: bool,
+    /// How many power cycles a `then=power-cycle` cut performed.
+    power_cycles: u64,
     /// The strapping the last reboot used.
     strap: Strap,
     /// The state a reboot goes back to. `None` unless
@@ -2415,6 +2483,98 @@ impl Machine {
     /// ([`Esp32S3Builder::reboot_on_reset`]).
     pub fn reboots(&self) -> u64 {
         self.reboots
+    }
+
+    /// Take the supply away and put it back: the whole power-on snapshot
+    /// restored — RTC memory and `reset_state`'s power-on code included —
+    /// with the flash chip as it stands, because the chip is not in the
+    /// snapshot. What a `then=power-cycle` cut performs. On this machine it
+    /// is [`reboot`](Self::reboot) into the run's own strap (a reboot here
+    /// already restores every block; there is no HP/LP split to choose
+    /// between, unlike the C6's), counted apart from the resets.
+    ///
+    /// `false` when the machine keeps no power-on snapshot.
+    pub fn power_cycle(&mut self) -> bool {
+        if !self.reboot(Strap::App) {
+            return false;
+        }
+        // `reboot` counted a reset; this was a power cycle.
+        self.reboots -= 1;
+        self.power_cycles += 1;
+        true
+    }
+
+    /// How many power cycles a `then=power-cycle` cut performed.
+    pub fn power_cycles(&self) -> u64 {
+        self.power_cycles
+    }
+
+    /// Was a flash-cut plan armed on this machine (what puts `+flash-cut`
+    /// in its label)?
+    pub fn flash_cut_armed(&self) -> bool {
+        self.flash_cut_armed
+    }
+
+    /// The last flash power cut that fired on this machine.
+    pub fn last_flash_cut(&self) -> Option<lp_emu_esp_common::engine::flash_cut::FlashCutReport> {
+        self.flash
+            .lock()
+            .expect("flash poisoned")
+            .last_flash_cut()
+            .copied()
+    }
+
+    /// The run's configuration name: the time grade's, then `+flash-cut`
+    /// when a flash power-cut plan was armed — the C6's spelling
+    /// ([`FLASH_CUT_MARKER`]), which `lp-emu-validate` refuses to record.
+    pub fn configuration_label(&self) -> String {
+        let base = self.time_grade.configuration();
+        if self.flash_cut_armed {
+            format!("{base}{FLASH_CUT_MARKER}")
+        } else {
+            base.to_string()
+        }
+    }
+
+    /// The flash-cut run's summary lines, for a host to print at exit: the
+    /// cut (or that the plan never fired, and how far it counted), the
+    /// power cycles it performed, and the in-range op census. Empty when no
+    /// plan was armed. The C6's lines, word for word.
+    pub fn flash_cut_summary(&self) -> Vec<String> {
+        if !self.flash_cut_armed {
+            return Vec::new();
+        }
+        let flash = self.flash.lock().expect("flash poisoned");
+        let mut lines = Vec::new();
+        let cutter = flash.flash_cutter();
+        match (cutter.armed(), flash.last_flash_cut()) {
+            (Some(plan), _) => lines.push(format!(
+                "flash-cut: armed at op {} ({}), not reached — {} in-range op(s) counted",
+                plan.at,
+                plan.tear.name(),
+                cutter.seen()
+            )),
+            (None, Some(report)) => lines.push(report.to_string()),
+            (None, None) => {}
+        }
+        if self.power_cycles > 0 {
+            lines.push(format!(
+                "flash-cut: {} power cycle(s) after the cut",
+                self.power_cycles
+            ));
+        }
+        if let Some(census) = flash.flash_op_census() {
+            lines.push(census.to_string());
+        }
+        let weak = flash.weak_bits();
+        if !weak.is_empty() {
+            lines.push(format!(
+                "flash-cut: {} weak bit(s) in {} sector(s), in this process only",
+                weak.count(),
+                weak.sectors().len()
+            ));
+        }
+        lines
     }
 
     /// The strapping the chip was started with, or the one the last reboot
@@ -3137,12 +3297,37 @@ impl Machine {
             // A peripheral asked for a reset — the RWDT's stage 0 expired, or
             // the link's control channel asked for one. Reported by default;
             // `--reboot-on-reset` performs it instead.
+            let request = self.bus.take_request();
+            // A flash power cut: the chip tore a command and has no supply.
+            // `then=stop` (the default) ends the run here; `power-cycle`
+            // restores the supply — the machine back to power-on, the flash
+            // as the cut left it, the plan spent — and runs on, with the
+            // budget rebased onto the new clock as a reset's is.
+            if let Some(MachineRequest::PowerCut { report }) = request {
+                if self.flash_cut_then == AfterCut::PowerCycle {
+                    let remaining = stop
+                        .stop_cycle
+                        .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                    if self.power_cycle() {
+                        log::info!("machine: {report} — power-cycled, running on");
+                        if let Some(remaining) = remaining {
+                            stop_cycle = self.cycles().saturating_add(remaining);
+                        }
+                        matched = 0;
+                        continue;
+                    }
+                }
+                return Outcome::PowerCut {
+                    cycle: report.cycle,
+                    report,
+                };
+            }
             if let Some(MachineRequest::Reset {
                 source,
                 at,
                 strap,
                 cause,
-            }) = self.bus.take_request()
+            }) = request
             {
                 // ⚠️ `stop_cycle` is an **absolute** guest cycle and a reboot
                 // moves what zero means. Read what is LEFT of the budget while

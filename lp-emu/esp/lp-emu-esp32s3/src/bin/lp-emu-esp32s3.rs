@@ -192,6 +192,14 @@ OPTIONS:
                             into GPIO.strap and the ROM reads it; under
                             direct the load is replayed and the strap is
                             recorded only
+    --flash-cut <spec>      cut the power at the Nth program/erase in lpfs:
+                            <n>:<model>:<seed>[,range=<off>+<len>]
+                            [,then=stop|power-cycle] (the C6's spec; the
+                            range defaults to the chip's own lpfs row). The
+                            run ends on the cut (exit 8), or power-cycles
+                            and runs on. A test switch; the label gains
+                            +flash-cut. Pair with --flash <file> to keep
+                            the torn chip
     --seed <n>              the machine's PRNG seed [0]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
@@ -207,6 +215,8 @@ EXIT CODES (a cross-machine contract — one table for all three machines):
       this machine: one core runs and ONE table serves both buses, so there
       is no second table to diverge from. Reserved across the family, never
       emitted here, and there is no --app-mmu-divergence flag to reserve
+    8 a --flash-cut power cut ended the run (the C6's is 6, which is this
+      chip's cache-off fetch)
 ";
 
 fn main() -> ExitCode {
@@ -251,6 +261,7 @@ struct Args {
     usb_script: Vec<PathBuf>,
     control: Option<String>,
     reboot_on_reset: bool,
+    flash_cut: Option<lp_emu_esp_common::engine::flash_cut_spec::FlashCutSpec>,
     seed: u64,
     efuse: EfuseIdentity,
     hooks: bool,
@@ -330,6 +341,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
+    }
+    if let Some(spec) = args.flash_cut.clone() {
+        builder = builder.flash_cut(spec);
     }
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
@@ -524,6 +538,9 @@ fn print_run_summary(machine: &Machine) {
             machine.reboots(),
             machine.strap()
         );
+    }
+    for line in machine.flash_cut_summary() {
+        println!("{line}");
     }
     {
         let chip = machine.flash().lock().expect("flash poisoned");
@@ -753,7 +770,7 @@ fn print_build_report(machine: &Machine) {
         machine.cpenable_reset(),
         machine.strict_unsupported(),
     );
-    println!("time grade: t1 ({})", machine.time_grade().configuration());
+    println!("time grade: t1 ({})", machine.configuration_label());
     for line in machine.core_report() {
         println!("{line}");
     }
@@ -819,6 +836,9 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
             pc, access, cycle, ..
         } => {
             println!("{}", machine.cache_off_message(*cycle, *pc, access));
+        }
+        Outcome::PowerCut { report, .. } => {
+            println!("POWER CUT cycle={cycle} ({micros} us emulated): {report}");
         }
         Outcome::Fault {
             core, pc, fault, ..
@@ -1017,6 +1037,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.control = Some(parse_control(&text)?);
             }
             "--reboot-on-reset" => args.reboot_on_reset = true,
+            "--flash-cut" => {
+                let text = value()?;
+                args.flash_cut = Some(
+                    lp_emu_esp_common::engine::flash_cut_spec::FlashCutSpec::parse(&text)
+                        .map_err(|e| format!("--flash-cut {e}"))?,
+                );
+            }
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;
