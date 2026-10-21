@@ -824,6 +824,47 @@ sends `Reboot` and reads the second boot's recovery line.
   boot's time to the server loop with the radio on is `lp-emu:esp32s3:t1`'s
   and says nothing about silicon's.
 
+## Power cuts, a writable chip, and an update host (S3 radio M7 P5)
+
+The update work needs three things of this machine that only the C6 had.
+
+| flag | where | what |
+|---|---|---|
+| `--flash-cut <spec>` | `lp-emu-esp32s3` and `lp-cli emu run --chip esp32s3 --host-link` | a power cut at the Nth program or erase in `lpfs`: `<n>:<model>:<seed>[,range=<off>+<len>][,then=stop\|power-cycle]`, the C6's spec (`lp_emu_esp_common::engine::flash_cut_spec`, moved there from the C6 crate, which re-exports it). The range defaults to the chip's own `lpfs` row (`machine::lpfs_range`) |
+| `--rom-up-flash <chip.bin>` | `lp-cli emu run --chip esp32s3 --host-link` | the reset vector out of a **writable** flash file, written back when the run ends — an early end is a power cut, and the next run boots what the flash held. (The raw binary's `--flash <file> --boot-mode rom-up` is the same thing.) |
+| `--ota-offer <dir>`, `--ota-cut-after N` | `lp-cli emu run --chip esp32s3 --host-link` | an update on lp-link channel 3 from the host this process is; `--ota-cut-after` ends the run as a power cut, the flash written back through `--rom-up-flash` — the C6's plumbing, shared; on the S3 it has no request to count until an update-capable core answers (P8), so it is not exercised here yet |
+
+**What a cut does here.** The NOR engine is the C6's (`engine::spi_flash` on
+`lp-nor-sim`); a cut tears the command and asks the machine for a
+`PowerCut`. `then=stop` ends the run (`Outcome::PowerCut`, exit code **8** —
+the C6's power cut exits 6, which is this chip's cache-off fetch).
+`then=power-cycle` restores the **power-on snapshot** over the flash as the
+cut left it (`Machine::power_cycle`) and runs on, the plan spent. That is a
+power cycle, not the performed *software* reset of M1: RTC memory and
+`reset_state` go back to power-on, and it is counted apart
+(`power_cycles()`, not `reboots()`). The run's label gains `+flash-cut`
+(`Machine::configuration_label`), which `lp-cli validate` refuses to record.
+`tests/flash_cut.rs` holds both endings over a writable copy of the shipped
+image's merged chip, and that the next boot after a stop comes up.
+
+**What an offer does today.** The shipped image is a single image with no
+channel-3 hook, so it answers an offer with **nothing** — no manifest, no
+request, no refusal — and writes nothing; Studio's "needs USB" comes from the
+hello's `ota_layout: 0`, never from this channel. The offer survives the
+board's software reset (`lp-cli`'s `run_s3` test). An update end to end needs
+the split, update-capable S3 core (M7 P8) and is P10's.
+
+⚠️ **Op indices are this layout's, not the C6's.** On a fresh merged S3
+chip the first boot's own `lpfs` format is the first handful of in-range ops
+(a cut at op 5 lands in it); by op 20 a cut is already inside an
+`--upload`'s writes.
+A cut inside an upload ends the upload too: the board restarts under it,
+and lp-cli's client waits on a transaction the board no longer holds until
+the wall-clock net. And a cut inside the first format is
+`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`: the
+next boot mounts a filesystem that refuses writes (open; the tree store,
+M7 P9, is the expected end of it).
+
 ## Three things about this machine that its siblings do not have
 
 1. **SRAM1 is one region with two doors.** `0x3FC8_8000` on the data bus and

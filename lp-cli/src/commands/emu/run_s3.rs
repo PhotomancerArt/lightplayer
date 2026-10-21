@@ -136,3 +136,121 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
     );
     super::run_hosted::run_hosted(board, boot, args, micros)
 }
+
+#[cfg(test)]
+mod tests {
+    use lp_emu_esp32s3::flash::{FACTORY_LEN, FACTORY_OFFSET, FlashBacking};
+    use lp_emu_esp32s3::machine::{AppSource, Esp32S3Builder, UsbHost};
+    use lp_emu_esp32s3::test_support;
+    use lpc_wire::{ClientMessage, ClientRequest};
+
+    use crate::commands::emu::link_host::{EmuLinkHost, S3Board};
+    use crate::commands::firmware::ota_fixture::Fixture;
+    use crate::commands::ota_host::{OtaArgs, OtaHost};
+
+    /// Emulated microseconds a wait may take.
+    const BUDGET_US: u64 = 2_000_000;
+
+    /// **The update host's plumbing on the S3** (M7 P5): an `--ota-offer`
+    /// rides the S3's hosted link, and the board — today's single image,
+    /// which installs no channel-3 hook (`fw_esp32_common::usb_link::
+    /// set_update_hook` is the C6's split core's) — answers it with
+    /// **nothing**: no manifest, no request, no refusal, not one byte of its
+    /// `factory` touched. Studio's "needs USB" for such a board is decided
+    /// from the hello's `ota_layout: 0` (`lpa-update`), never on this
+    /// channel. The offer then survives the board's performed software
+    /// reset (#1238): a `Reboot` brings the board back as
+    /// `cause=software-reset` on a new link session, with the host and its
+    /// offer still attached. An update that runs end to end needs an
+    /// update-capable S3 core (M7 P8) and is P10's.
+    #[test]
+    #[ignore = "needs LP_EMU_ESP32S3_ELF and LP_EMU_ESP32S3_MERGED; run through `just test-emu-esp32s3-boot`"]
+    fn an_offer_to_the_single_image_goes_unanswered_and_survives_a_reboot() {
+        let (elf, merged) = match (
+            test_support::fw_esp32s3_image(),
+            test_support::merged_chip_image(),
+        ) {
+            (Ok(elf), Ok(merged)) => (elf, merged),
+            (Err(reason), _) | (_, Err(reason)) => {
+                test_support::skip_notice(
+                    "an_offer_to_the_single_image_goes_unanswered_and_survives_a_reboot",
+                    &reason,
+                );
+                return;
+            }
+        };
+        let fx = Fixture::new("abc1234");
+        fx.write().unwrap().expect("OTA files written");
+        let builder = Esp32S3Builder::new()
+            .app(AppSource::Path(elf))
+            .flash(FlashBacking::Copy(merged))
+            .strict(true);
+        let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+            .expect("the shipped image direct-loads");
+        let mut host = EmuLinkHost::new(board, 0x5E55_0305, true);
+        host.ota = OtaHost::from_args(&OtaArgs {
+            ota_offer: Some(fx.ota_dir()),
+            ..OtaArgs::default()
+        })
+        .expect("the fixture's OTA directory is an offer");
+        let factory = |host: &EmuLinkHost<S3Board>| {
+            host.board
+                .machine
+                .flash()
+                .lock()
+                .expect("flash")
+                .peek(FACTORY_OFFSET, FACTORY_LEN)
+                .expect("factory is on the chip")
+                .to_vec()
+        };
+        let before = factory(&host);
+
+        let hello = host
+            .wait_for_line("\"hello\":{", BUDGET_US)
+            .expect("the run");
+        assert!(hello.is_some(), "no hello:\n{}", host.console().join("\n"));
+        // Long enough for a board with an update hook to have answered the
+        // host's first `?` many times over.
+        let settle = host.board.machine.micros() + 500_000;
+        host.run_until(settle, None).expect("the run");
+
+        host.send(&ClientMessage {
+            id: 9,
+            msg: ClientRequest::Reboot,
+        })
+        .expect("the link takes the request");
+        let second = host
+            .wait_for_line("[RECOVERY] boot: cause=software-reset", BUDGET_US)
+            .expect("the reboot");
+        let text = host.console().join("\n");
+        assert!(second.is_some(), "no second boot:\n{text}");
+        let hello = host
+            .wait_for_line("\"hello\":{", BUDGET_US)
+            .expect("the run");
+        assert!(hello.is_some(), "no hello after the reboot:\n{text}");
+        let settle = host.board.machine.micros() + 500_000;
+        host.run_until(settle, None).expect("the run");
+
+        let text = host.console().join("\n");
+        let ota = host.ota.as_ref().expect("the offer is still attached");
+        assert!(text.contains("offering "), "the host offered:\n{text}");
+        assert!(
+            ota.manifests.is_empty(),
+            "the board said nothing: {}",
+            ota.summary()
+        );
+        assert_eq!(ota.requests, 0, "{}", ota.summary());
+        assert!(ota.refusals.is_empty(), "{}", ota.summary());
+        assert!(!ota.done(), "{}", ota.summary());
+        assert_eq!(host.board.machine.reboots(), 1, "one software reboot");
+        assert!(host.board.machine.first_strict_violation().is_none());
+        // The reboot's own `PeerRestarted` is the one reset the host counts.
+        assert_eq!(host.link_errors, 1, "{text}");
+        assert!(factory(&host) == before, "factory untouched");
+        println!(
+            "S3 OFFER (lp-emu:esp32s3:t1): ota — {}; host link — {} reset(s)",
+            ota.summary(),
+            host.link_errors
+        );
+    }
+}

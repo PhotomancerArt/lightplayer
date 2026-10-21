@@ -4198,6 +4198,8 @@ test-emu-esp32s3-boot:
       # The S3's gates that need a link host since wire proto 30 (lp-cli's:
       # a link host is a product crate, which the lp-emu fence keeps out).
       cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
+      cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
       exit "$status"
     fi
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
@@ -4238,6 +4240,8 @@ test-emu-esp32s3-boot:
     # The S3's gates that need a link host since wire proto 30 (lp-cli's:
     # a link host is a product crate, which the lp-emu fence keeps out).
     cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
+    cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
     exit "$status"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
