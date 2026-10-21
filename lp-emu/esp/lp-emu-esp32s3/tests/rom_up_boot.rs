@@ -45,7 +45,7 @@
 //! and names both files.
 
 use lp_emu_esp32s3::flash::{
-    BOOTLOADER_OFFSET, FACTORY_OFFSET, FlashBacking, PARTITION_TABLE_OFFSET,
+    BOOTLOADER_OFFSET, FACTORY_OFFSET, FlashBacking, LPFS_LEN, LPFS_OFFSET, PARTITION_TABLE_OFFSET,
 };
 use lp_emu_esp32s3::image::{CHIP_ID_ESP32S3, EspImage, MergedImage};
 use lp_emu_esp32s3::loader::{
@@ -286,7 +286,16 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
 /// This is the C6's `user`-reset lesson in its own shape: a mount whose
 /// reads move no bytes fails the superblock check exactly as a blank chip
 /// does, and every other figure in the boot log still matches. The proof is
-/// the flash command census, which is what the two cases actually differ in.
+/// the flash command census, which is what the two cases actually differ in:
+/// a reformat erases, a mount does not.
+///
+/// A mount is not write-free, though. Since `lpfs` holds the tree store (the
+/// S3 updates plan's P9), mount **settles** the newest record of each head —
+/// programs it again with the bytes it just read, so a weak program reads the
+/// same on every later read (`lp-tree-store`'s `record_scan.rs`,
+/// `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+/// Those programs change no byte, which is what is asserted: the chip's
+/// `lpfs` is the first boot's, byte for byte.
 #[test]
 #[ignore = "needs a fw-esp32s3 build and espflash; `just test-emu-esp32s3-boot`"]
 fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
@@ -315,6 +324,7 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
         a.sector_erases > 0 && a.programs > 0,
         "the first boot formats an empty `lpfs`: {a}"
     );
+    let after_first = std::fs::read(&chip).expect("the chip");
     let text = String::from_utf8_lossy(&first.usb_sj()).into_owned();
     assert!(
         text.contains("[INIT] flash filesystem mounted"),
@@ -332,20 +342,25 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
     let b = second.flash().lock().expect("flash").command_census();
     assert!(b.reads > 0, "the second boot still reads the chip: {b}");
     assert_eq!(
-        (b.programs, b.sector_erases, b.block_erases, b.write_enables),
-        (0, 0, 0, 0),
+        (b.sector_erases, b.block_erases),
+        (0, 0),
         "the second boot must MOUNT what the first one wrote, not reformat it: {b}"
+    );
+    second.flush_flash().expect("the write back");
+    let lpfs = LPFS_OFFSET as usize..(LPFS_OFFSET + LPFS_LEN) as usize;
+    assert!(
+        std::fs::read(&chip).expect("the chip")[lpfs.clone()] == after_first[lpfs],
+        "the second boot's programs (its mount's settle) change no byte of `lpfs`: {b}"
     );
     let text = String::from_utf8_lossy(&second.usb_sj()).into_owned();
     assert!(text.contains("[INIT] flash filesystem mounted"), "{text}");
-    // ⚠️ Not asserted here: that the second boot's `flush_flash` writes
-    // nothing. A **direct** load *stages* the app into the chip
-    // (`loader::stage_image_in_flash` → `FlashImage::stage`), and a stage is
-    // a write to the chip's bytes — what a flasher did — so a direct load
-    // with `--flash` writes the staged layout back whether or not the guest
-    // wrote anything. The census above is the proof about the guest; the
-    // ROM-up twin below, which stages nothing, is where "wrote nothing,
-    // wrote nothing back" is a true claim.
+    assert!(text.contains("[FS] tree store mounted"), "{text}");
+    // Only `lpfs` is compared: a **direct** load *stages* the app into the
+    // chip (`loader::stage_image_in_flash` → `FlashImage::stage`), and a
+    // stage is a write to the chip's bytes — what a flasher did — so the
+    // rest of the file is the staged layout, written back whether or not the
+    // guest wrote anything. The ROM-up twin below, which stages nothing,
+    // compares the whole file.
     println!("first boot: {a}\nsecond boot: {b}");
 
     let _ = std::fs::remove_file(&chip);
@@ -354,8 +369,9 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
 /// **The second-boot rule on the ROM-up path** (M5 §3.2), which is the path
 /// P08's emulated twin boots: the first boot from a fresh `--flash` copy
 /// formats `lpfs`, the second mounts it — and, because a ROM-up boot stages
-/// nothing, a second boot that wrote nothing writes nothing back and the
-/// chip file's bytes are the first boot's, unchanged.
+/// nothing and a mount's only programs are its settle (the direct twin's
+/// docs), the chip file's bytes after the second boot are the first boot's,
+/// unchanged.
 #[test]
 #[ignore = "needs a fw-esp32s3 build and espflash; `just test-emu-esp32s3-boot`"]
 fn a_second_rom_up_boot_from_the_same_chip_mounts_rather_than_reformats() {
@@ -421,21 +437,21 @@ fn a_second_rom_up_boot_from_the_same_chip_mounts_rather_than_reformats() {
     let b = second.flash().lock().expect("flash").command_census();
     assert!(b.reads > 0, "the second boot still reads the chip: {b}");
     assert_eq!(
-        (b.programs, b.sector_erases, b.block_erases, b.write_enables),
-        (0, 0, 0, 0),
+        (b.sector_erases, b.block_erases),
+        (0, 0),
         "the second boot MOUNTS what the first one wrote: {b}"
     );
-    assert!(
-        !second.flush_flash().expect("nothing to write back"),
-        "a ROM-up boot that wrote nothing writes nothing back"
-    );
+    // Its programs are the mount's settle (the direct twin's docs): the same
+    // bytes again, so the chip file comes back as the first boot left it.
+    second.flush_flash().expect("the write back");
     assert_eq!(
         std::fs::read(&chip).expect("the chip"),
         after_first,
-        "and the chip file is byte for byte the first boot's"
+        "the chip file is byte for byte the first boot's: {b}"
     );
     let text = String::from_utf8_lossy(&second.usb_sj()).into_owned();
     assert!(text.contains("[INIT] flash filesystem mounted"), "{text}");
+    assert!(text.contains("[FS] tree store mounted"), "{text}");
     println!(
         "ROM-up first boot: {a} (server loop at {} us)\nROM-up second boot: {b} (server loop at {} us)",
         first.cycles() / memmap::CYCLES_PER_US,
