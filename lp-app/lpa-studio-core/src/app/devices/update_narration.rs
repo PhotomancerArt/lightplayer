@@ -11,6 +11,7 @@ use lpa_devices::UpdateStageFacts;
 use lpa_update::Decision;
 use lpc_update::code_table::CHUNK;
 
+use super::board_card::bar_work::whole_update_percent;
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 
@@ -62,7 +63,8 @@ impl PieceStat {
 pub(crate) struct UpdateNarration {
     opened: bool,
     last_stage: Option<UpdateStageFacts>,
-    /// The stage's latest progress, for a drop's "at 40%".
+    /// The stage's latest progress, for a drop's "at 20%" (the whole
+    /// update's number, as the card says it).
     last_progress: Option<(u32, u32)>,
     backup: PieceStat,
     core: PieceStat,
@@ -101,7 +103,7 @@ impl UpdateNarration {
             }
             Decision::Busy { done, total } => format!(
                 "another device is updating it{} · asking again every 3 s",
-                percent_clause(*done, *total)
+                percent_clause(UpdateStageFacts::Waiting, *done, *total)
             ),
             // The rest end the run; the outcome says why.
             _ => return None,
@@ -172,9 +174,12 @@ impl UpdateNarration {
         });
         self.down = Some((now_ms, interrupted.is_some()));
         let (done, total) = interrupted?;
+        // The stage the drop happened in; an unstaged progress reads as the
+        // core's, the first part.
+        let stage = self.last_stage.unwrap_or(UpdateStageFacts::Updating);
         Some(format!(
             "link dropped during update{}",
-            percent_clause_at(done, total)
+            percent_clause_at(stage, done, total)
         ))
     }
 
@@ -218,26 +223,30 @@ fn rate_part(name: &str, piece: &PieceStat) -> String {
     format!("{name} {size} in {took} ({rate} KB/s)")
 }
 
-/// ` · 40%` when a percent is known.
-fn percent_clause(done: u32, total: u32) -> String {
-    match percent(done, total) {
+/// ` · 20%` when a percent is known: the whole update's number
+/// ([`whole_update_percent`]), the one the card says.
+fn percent_clause(stage: UpdateStageFacts, done: u32, total: u32) -> String {
+    match whole_percent(stage, done, total) {
         Some(p) => format!(" · {p}%"),
         None => String::new(),
     }
 }
 
-/// ` at 40%` when a percent is known.
-fn percent_clause_at(done: u32, total: u32) -> String {
-    match percent(done, total) {
+/// ` at 20%` when a percent is known: the whole update's number.
+fn percent_clause_at(stage: UpdateStageFacts, done: u32, total: u32) -> String {
+    match whole_percent(stage, done, total) {
         Some(p) => format!(" at {p}%"),
         None => String::new(),
     }
 }
 
-fn percent(done: u32, total: u32) -> Option<u64> {
-    (total > 0).then(|| u64::from(done.min(total)) * 100 / u64::from(total))
+/// `done` of `total` in `stage`, as a percent of the whole update.
+fn whole_percent(stage: UpdateStageFacts, done: u32, total: u32) -> Option<u8> {
+    (total > 0).then(|| {
+        let part = u64::from(done.min(total)) * 100 / u64::from(total);
+        whole_update_percent(stage, part as u8)
+    })
 }
-
 /// Seconds: one decimal under ten (`1.2 s`), whole above (`52 s`).
 pub(crate) fn format_secs(ms: u64) -> String {
     if ms < 10_000 {
@@ -292,7 +301,7 @@ mod tests {
         n.progress(135_000, UpdateStageFacts::Updating, 400_000, 1_160_000);
         assert_eq!(
             n.link_down(135_100).as_deref(),
-            Some("link dropped during update at 34%")
+            Some("link dropped during update at 17%")
         );
         assert_eq!(n.link_up(136_000).as_deref(), Some("reconnected in 0.9 s"));
         assert_eq!(
