@@ -4,11 +4,12 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lp_cloud_domain::{
-    AccountAccess, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord,
-    StoredEvent,
+    AccountAccess, BoardRecord, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs,
+    SessionRecord, StoredEvent,
 };
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
+use lpc_relay::RelayBoardId;
 
 /// The whole service state in memory.
 ///
@@ -22,6 +23,7 @@ pub struct MemMetaStore {
     users_by_google_sub: BTreeMap<String, PrefixedUid>,
     users_by_email: BTreeMap<String, PrefixedUid>,
     account_access: BTreeMap<PrefixedUid, AccountAccess>,
+    board_records: BTreeMap<(PrefixedUid, RelayBoardId), BoardRecord>,
     sessions: BTreeMap<ContentHash, SessionRecord>,
     projects: BTreeMap<PrefixedUid, CloudProject>,
     members: BTreeMap<(PrefixedUid, String), MemberRecord>,
@@ -105,6 +107,45 @@ impl MetaStore for MemMetaStore {
             .values()
             .find(|access| access.key_salt == *key_salt)
             .cloned()
+    }
+
+    // ---- board list --------------------------------------------------
+
+    fn put_board_record(&mut self, record: BoardRecord) {
+        self.board_records
+            .insert((record.user, record.board), record);
+    }
+
+    fn board_record(&self, user: PrefixedUid, board: RelayBoardId) -> Option<BoardRecord> {
+        self.board_records.get(&(user, board)).cloned()
+    }
+
+    fn board_records_for_user(&self, user: PrefixedUid) -> Vec<BoardRecord> {
+        let mut records: Vec<BoardRecord> = self
+            .board_records
+            .values()
+            .filter(|record| record.user == user)
+            .cloned()
+            .collect();
+        records.sort_by(|a, b| {
+            a.joined_at
+                .total_cmp(&b.joined_at)
+                .then_with(|| a.board.cmp(&b.board))
+        });
+        records
+    }
+
+    fn board_records_for_board(&self, board: RelayBoardId) -> Vec<BoardRecord> {
+        // Keyed `(user, board)`, so account order falls out of the map.
+        self.board_records
+            .values()
+            .filter(|record| record.board == board)
+            .cloned()
+            .collect()
+    }
+
+    fn delete_board_record(&mut self, user: PrefixedUid, board: RelayBoardId) -> bool {
+        self.board_records.remove(&(user, board)).is_some()
     }
 
     // ---- sessions ----------------------------------------------------

@@ -153,11 +153,16 @@ pub struct DeviceRosterView {
     /// How each board's last activity ended, and when
     /// ([`super::ActivityEnds`]): a bar's Done and Failed.
     pub ends: std::collections::BTreeMap<lpa_devices::DeviceId, super::ActivityEnd>,
-    /// Each board the signed-in account's list says is online at
-    /// lightplayer.app (`ListBoards`), by its roster handle — a board this
-    /// browser knows, or the in-memory entry of one it never met
-    /// (`account_boards_flow.rs`). Absent = not listed, or nobody signed in.
+    /// Each board on the signed-in account's list (`ListAccountBoards`),
+    /// online at lightplayer.app or not ([`super::UiCloudBoard::online`]),
+    /// by its roster handle — a board this browser knows, or the in-memory
+    /// entry of one it never met (`account_boards_flow.rs`). Absent = not
+    /// listed, or nobody signed in.
     pub cloud_boards: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiCloudBoard>,
+    /// What lightplayer.app's last answer about the account's list left to
+    /// say on a board's card, by its roster handle (a full list, a Remove
+    /// from your account that did not go through).
+    pub account_notes: std::collections::BTreeMap<lpa_devices::DeviceId, super::AccountBoardNote>,
     /// The listed boards no link of this tab reaches, whose cards draw
     /// lightplayer.app's picture: what the web edge asks `BoardPictures`
     /// for.
@@ -201,6 +206,7 @@ impl Default for DeviceRosterView {
             last_seen: std::collections::BTreeMap::new(),
             ends: std::collections::BTreeMap::new(),
             cloud_boards: std::collections::BTreeMap::new(),
+            account_notes: std::collections::BTreeMap::new(),
             cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         }
@@ -267,7 +273,10 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
         // reaches.
         if device.status == lpa_devices::device::DeviceStatus::Offline
             && device.held_elsewhere.is_none()
-            && !roster.cloud_boards.contains_key(&device.id)
+            && !roster
+                .cloud_boards
+                .get(&device.id)
+                .is_some_and(|cloud| cloud.online)
         {
             remembered.push(RememberedView {
                 id: device.id,
@@ -594,6 +603,7 @@ impl DeviceRoster {
             take_overs: std::collections::BTreeMap::new(),
             // Joined by the controller, which holds the account's list.
             cloud_boards: std::collections::BTreeMap::new(),
+            account_notes: std::collections::BTreeMap::new(),
             cloud_picture_asks: Vec::new(),
             // Joined by the controller, which staged the pushes.
             sending: std::collections::BTreeMap::new(),
@@ -1165,6 +1175,7 @@ mod tests {
             last_seen: Default::default(),
             ends: Default::default(),
             cloud_boards: Default::default(),
+            account_notes: Default::default(),
             cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };
@@ -1229,6 +1240,7 @@ mod tests {
             last_seen: Default::default(),
             ends: Default::default(),
             cloud_boards: Default::default(),
+            account_notes: Default::default(),
             cloud_picture_asks: Vec::new(),
             cards: Vec::new(),
         };

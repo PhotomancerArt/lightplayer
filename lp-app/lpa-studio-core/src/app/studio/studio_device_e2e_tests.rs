@@ -167,8 +167,11 @@ fn bench_link(
     fake_device_link(info, device)
 }
 
-/// Your boards on every computer: the account's list (`ListBoards`) joined
-/// onto the roster by MAC, a board never met here connected through
+/// The account's board list (M2): offline account boards, the report on
+/// finding the account's key, Remove from your account.
+mod account_board_list_tests;
+/// Your boards on every computer: the account's list (`ListAccountBoards`)
+/// joined onto the roster by MAC, a board never met here connected through
 /// lightplayer.app, and the rule for live links.
 mod account_boards_tests;
 /// E4: the app agent's device journey over this bench.

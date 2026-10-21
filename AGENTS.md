@@ -1121,16 +1121,26 @@ lightplayer.app (`relay:<mac>`, the relay's browser leg
 someone is signed in and no USB, Bluetooth or LAN link of the tab reaches
 the board: on a remembered board (it said its MAC over any link; an offline
 one says "The board isn't online." on its tile), and on every board the
-account's list says is online. Signed in, the web edge
-(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListBoards` at load and
-every 30 s while the page is visible, and `BoardPictures` (watching) every
-half second for the cards that draw lightplayer.app's picture; core joins
-the rows onto the roster by MAC (`studio_controller/account_boards_flow.rs`):
-a listed board is in Online boards, and one this browser never met is an
-in-memory entry under `mac-<12 hex>`, never written to `/registry.json`,
-until its hello makes it a remembered board. Offline account boards (a
-stored list) and the automatic move onto the LAN are not built yet (M2 and
-M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
+account's list says is online. **The account keeps a board list** (cloud
+API v7, `docs/adr/2026-10-20-the-account-board-list.md`): one record per
+board in the cloud's store (`account_boards`, migration `0007`), joined when
+the board registers with the relay proving the account and when Studio reads
+a board's access list (USB, or Bluetooth/LAN at edit) and finds the
+account's current key (`ReportBoard`, once per link per connection), left
+only by **Remove from your account** (`devices/<board>/forget-from-account`,
+Lasting; it removes no key); at most 64. A record grants nothing: presence
+and pictures stay gated by the relay's proof. Signed in, the web edge
+(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListAccountBoards` at
+load and every 30 s while the page is visible, and `BoardPictures`
+(watching) every half second for the cards that draw lightplayer.app's
+picture; core joins the rows onto the roster by MAC
+(`studio_controller/account_boards_flow.rs`): an online board is in Online
+boards, an offline one in Offline boards on every computer (its last
+picture the one the relay wrote behind, dimmed; no Connect), and one this
+browser never met is an in-memory entry under `mac-<12 hex>`, never written
+to `/registry.json`, until its hello makes it a remembered board. The card's
+`forget` reads **Forget on this browser**. The automatic move onto the LAN
+is not built yet (M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
 the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
 stays as a dev shortcut that dials those boards at page load (like `?lan=`);
 there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks

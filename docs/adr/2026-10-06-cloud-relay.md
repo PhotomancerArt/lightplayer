@@ -637,6 +637,31 @@ The Follow-ups' "draw a board's cloud picture on its card" and M8's "the
 board list" (for online boards) are done by this; the stored list, the
 automatic LAN move and the share link remain.
 
+## Amendment (2026-10-20): the hub writes the account's board list; `ListBoards` is replaced
+
+Plan `lp2025/2026-10-19-2305-account-board-list`, M2. The decision is
+[2026-10-20-the-account-board-list](2026-10-20-the-account-board-list.md);
+what changes here:
+
+- **The hub returns record writes.** It still never touches the store: as a
+  board registers, reports a new project, leaves, or the relay goes away, it
+  returns `BoardRecordWrite`s (`take_writes`) that the edge applies through
+  the store on the board leg's own task. A board joins the board list of
+  every account it proved.
+- **The cache is written behind.** "The cache: memory only" above no longer
+  holds whole: a board's last picture is written to its accounts' records
+  when it leaves, when the relay goes away, and at most every ten minutes
+  while it is online, so it survives a deploy; `BoardPictures` answers from
+  the record when the process holds none. Its readers stay the accounts the
+  board proved when the picture was taken.
+- **The online cap is 64** (`MAX_BOARDS_PER_ACCOUNT` = `MAX_ACCOUNT_BOARDS`),
+  as is a `BoardPictures` read; it was 16.
+- **Cloud API v7.** `ListBoards` and `BoardList` are gone:
+  `ListAccountBoards` answers the account's records with this hub's presence
+  joined on (`AccountBoard.online` is the `BoardPresence` above).
+- **No relay-protocol change**: the hello, `RELAY_PROTO_VERSION` and the
+  goldens are as they were.
+
 ## Consequences
 
 - lightplayer.app serves one plain-HTTP path, and the redirect that keeps

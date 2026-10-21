@@ -42,15 +42,20 @@
 
 extern crate alloc;
 
+pub mod account_board_list;
 pub mod cloud_service;
 pub mod model;
 pub mod ports;
 pub mod push_validation;
 pub mod relay_accounts;
+pub mod relay_board_records;
 
 pub use cloud_service::CloudService;
 pub use lpc_cloud_api::MemberRole;
 pub use model::account_access::{AccountAccess, MAX_PREVIOUS_KEY_SALTS};
+pub use model::board_record::{
+    BoardFacts, BoardRecord, BoardSightings, MAX_ACCOUNT_BOARDS, StoredPicture,
+};
 pub use model::caller::Caller;
 pub use model::cloud_project::CloudProject;
 pub use model::cloud_user::CloudUser;
@@ -66,3 +71,4 @@ pub use ports::id_mint::IdMint;
 pub use ports::meta_store::MetaStore;
 pub use push_validation::{PushValidation, validate_push_events};
 pub use relay_accounts::{BoardAccounts, verify_board_accounts};
+pub use relay_board_records::{BoardRecordWrite, apply_board_record_write, stored_picture_for};

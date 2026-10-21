@@ -80,10 +80,20 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
         StudioCommand::AccountBoards(rows) => (
             "AccountBoards".to_string(),
             match rows {
-                Some(rows) => format!("{} online", rows.boards.len()),
+                Some(rows) => format!(
+                    "{} listed, {} online",
+                    rows.boards.len(),
+                    rows.boards
+                        .iter()
+                        .filter(|row| row.online.is_some())
+                        .count()
+                ),
                 None => "none".to_string(),
             },
         ),
+        StudioCommand::AccountBoardAnswered(answer) => {
+            ("AccountBoardAnswered".to_string(), bounded_debug(answer))
+        }
         StudioCommand::AccountBoardPictures(pictures) => (
             "AccountBoardPictures".to_string(),
             format!("{} pictures", pictures.len()),

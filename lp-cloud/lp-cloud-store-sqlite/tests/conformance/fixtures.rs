@@ -7,11 +7,12 @@
 //! check on the ground both adapters share.
 
 use lp_cloud_domain::{
-    AccountAccess, CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore,
-    ProjectRefs, SessionRecord,
+    AccountAccess, BoardRecord, BoardSightings, CloudProject, CloudUser, HeadRef, MemberRecord,
+    MemberRole, MetaStore, ProjectRefs, SessionRecord, StoredPicture,
 };
 use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
+use lpc_relay::RelayBoardId;
 
 /// A stable user uid: the same `n` is the same account in every check.
 pub fn user_uid(n: u8) -> PrefixedUid {
@@ -137,5 +138,54 @@ pub fn sample_account_access(user: PrefixedUid) -> AccountAccess {
         edit_password: Some("crew only".to_string()),
         previous_key_salts: vec![[0x55; 16], [0x66; 16]],
         updated_at: 12.5,
+    }
+}
+
+/// A stable board id: the same `n` is the same board in every check.
+pub fn board_id(n: u8) -> RelayBoardId {
+    RelayBoardId([0x10, 0xbd, 0xa3, 0, 0, n])
+}
+
+/// A record of board `n` on `user`'s list with every field set — a model,
+/// all four sightings and a picture readable by two accounts — every value
+/// distinct so a column swapped in an adapter's SQL cannot round-trip by
+/// accident.
+pub fn full_board_record(user: PrefixedUid, n: u8) -> BoardRecord {
+    BoardRecord {
+        user,
+        board: board_id(n),
+        label: format!("Lamp {n}"),
+        model: Some("XIAO ESP32-C6".to_string()),
+        firmware: Some("2026.10.20-1".to_string()),
+        project: Some("Rocaille".to_string()),
+        joined_at: 10.0 + f64::from(n),
+        seen: BoardSightings {
+            relay: Some(20.5),
+            usb: Some(21.5),
+            ble: Some(22.5),
+            lan: Some(23.5),
+        },
+        picture: Some(StoredPicture {
+            at: 24.5,
+            outputs: vec![73, 0x0102_0304, 1],
+            colors: vec![0xff, 0, 0x10, 0, 0xff, 0x20],
+            accounts: vec![user, user_uid(42)],
+        }),
+    }
+}
+
+/// A record of board `n` on `user`'s list holding the least it can: an
+/// empty label, nothing else known, never seen, no picture.
+pub fn minimal_board_record(user: PrefixedUid, n: u8, joined_at: f64) -> BoardRecord {
+    BoardRecord {
+        user,
+        board: board_id(n),
+        label: String::new(),
+        model: None,
+        firmware: None,
+        project: None,
+        joined_at,
+        seen: BoardSightings::default(),
+        picture: None,
     }
 }

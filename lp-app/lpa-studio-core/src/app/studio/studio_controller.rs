@@ -59,6 +59,7 @@ use crate::{
 
 /// The account's boards on every computer: lightplayer.app's rows joined
 /// onto the roster by MAC.
+mod account_board_requests_flow;
 mod account_boards_flow;
 /// One tab holds a board: the holder's flows (priming, claims, the gate's
 /// claims, the answer to an ask, the sentinels, the facts on the boards).
@@ -184,6 +185,20 @@ pub struct StudioController {
     /// The web edge's sink for the boards whose owner chose Start fresh
     /// (the roster's [`crate::BoardFilesMemory`]), kept in this browser.
     on_fresh_starts: Option<Box<dyn Fn(&str)>>,
+    /// Where the account board list's requests go (the web edge's cloud
+    /// calls): `account_board_requests_flow.rs`.
+    #[allow(
+        clippy::type_complexity,
+        reason = "one hook: the request, and the queue its answer comes back on"
+    )]
+    on_account_board_request: Option<
+        Box<
+            dyn Fn(
+                &crate::AccountBoardRequest,
+                Option<crate::app::studio::studio_view_channel::CommandSender>,
+            ),
+        >,
+    >,
     /// The connects over Wi‑Fi someone asked for, while they run and once
     /// they fail.
     wifi_connects: crate::WifiConnects,
@@ -214,8 +229,8 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
-    /// The signed-in account's boards online at lightplayer.app, and their
-    /// pictures, as the web edge last heard them (`ListBoards`,
+    /// The signed-in account's board list, online at lightplayer.app or not, and their
+    /// pictures, as the web edge last heard them (`ListAccountBoards`,
     /// `BoardPictures`). In memory only: a board this browser never met is
     /// a roster entry here until it says hello over a link.
     account_boards: crate::AccountBoards,
@@ -545,6 +560,7 @@ impl StudioController {
             wifi_addresses: crate::WifiAddressBook::new(),
             on_wifi_addresses: None,
             on_fresh_starts: None,
+            on_account_board_request: None,
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
@@ -1091,7 +1107,7 @@ impl StudioController {
         }
     }
 
-    /// The account's boards online at lightplayer.app, as `ListBoards` last
+    /// The account's board list, as `ListAccountBoards` last
     /// answered; `None` (signed out, or no answer) keeps nothing.
     pub fn set_account_boards(&mut self, rows: Option<crate::AccountBoardRows>) {
         self.account_boards.replace(rows);
@@ -1585,6 +1601,7 @@ impl StudioController {
                 lpa_devices::Action::ResetBoard { device },
             ));
         }
+        self.report_account_sightings();
         self.drive_device_access();
         self.mark_dirty();
     }
@@ -2444,9 +2461,11 @@ impl StudioController {
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
         self.hide_accounted_held_links(&mut view);
+        // When this browser last saw each board, before the account's list
+        // joins in: a record seen more recently stands over it.
+        view.last_seen = self.registry_last_seen(&view);
         self.join_account_boards(&mut view);
         view.board_projects = self.board_projects(&view);
-        view.last_seen = self.registry_last_seen(&view);
         view
     }
 
@@ -3774,10 +3793,19 @@ impl StudioController {
         }
         for view in &roster.roster.devices {
             // A board this browser never met has one way in: through
-            // lightplayer.app, whose row is all Studio knows of it.
+            // lightplayer.app, whose row is all Studio knows of it — while
+            // it is online there. Offline everywhere, nothing reaches it.
             if self.is_account_entry(view.id) {
                 let prefix = prefixes[&view.id].clone();
-                if let Some(offer) = self.relay_offer_at(view, &prefix, crate::DeviceFace::Wire) {
+                let online = self
+                    .account_board_key(view.id)
+                    .is_some_and(|key| self.account_boards.online(key));
+                if online
+                    && let Some(offer) = self.relay_offer_at(view, &prefix, crate::DeviceFace::Wire)
+                {
+                    offers.publish(offer);
+                }
+                if let Some(offer) = self.forget_from_account_offer_for(view, &prefix) {
                     offers.publish(offer);
                 }
                 offers.place_device(view.id, prefix);
@@ -3803,7 +3831,17 @@ impl StudioController {
                 examples: &sources.examples,
                 update: self.device_update_facts(view),
             };
+            // On a board the account's list holds, Forget reads as this
+            // browser's only, and Remove from your account stands after it.
+            let from_account = self.forget_from_account_offer_for(view, &facts.prefix);
             for offer in crate::device_offers(view, &facts) {
+                let forget = offer.path.last() == Some("forget");
+                match (forget, from_account.is_some()) {
+                    (true, true) => offers.publish(crate::forget_on_this_browser_copy(offer)),
+                    _ => offers.publish(offer),
+                }
+            }
+            if let Some(offer) = from_account {
                 offers.publish(offer);
             }
             if let Some(offer) = self.connect_wifi_offer(view, &facts) {
@@ -4718,6 +4756,11 @@ impl StudioController {
         if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
             let op = action.into_op::<crate::RelayConnectOp>()?;
             return self.start_relay_connect(op);
+        }
+        if node_id.as_str() == crate::ForgetFromAccountOp::NODE_ID {
+            let op = action.into_op::<crate::ForgetFromAccountOp>()?;
+            self.forget_from_account(op);
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::TakeOverOp::NODE_ID {
             let op = action.into_op::<crate::TakeOverOp>()?;

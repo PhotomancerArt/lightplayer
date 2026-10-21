@@ -30,7 +30,8 @@
 //!    is gone, and Bob through the relay is told busy;
 //! 5. a deploy (the server going away and back on its port): the board
 //!    comes back by itself (the time printed, never gated: it is wall time);
-//!    **P5**: the new hub holds no picture until the board is back with one;
+//!    **P5**: until the board is back, the new hub answers the picture the
+//!    old one wrote behind to the account's board list, offline;
 //! 6. Cloud relay off over USB: the board leaves the hub and says `off`; on
 //!    again, it comes back; **P6**: while it is off the hub keeps its
 //!    picture (`online: false`); back on, the picture is online and newer;
@@ -213,9 +214,9 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         "emu_relay_link: boot → registered in {:.1} s wall (lp-emu:esp32c6:t1+net=lan)",
         booted.elapsed().as_secs_f64()
     );
-    let list = cloud.list_boards(&alice.session);
-    assert_eq!(list.boards.len(), 1);
-    let presence = &list.boards[0];
+    let list = cloud.online_boards(&alice.session);
+    assert_eq!(list.len(), 1);
+    let presence = &list[0];
     assert!(
         presence
             .lan
@@ -305,8 +306,8 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     // the accounts the board proved read its picture.
     let named = Instant::now();
     loop {
-        let list = cloud.list_boards(&alice.session);
-        let project = list.boards.first().and_then(|b| b.project.clone());
+        let list = cloud.online_boards(&alice.session);
+        let project = list.first().and_then(|b| b.project.clone());
         if project.as_deref() == Some(BASIC_NAME) {
             break;
         }
@@ -493,22 +494,27 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     // `lpc-relay`'s rules and on the host in `relay_link.rs`.
     let restarted = Instant::now();
     cloud.restart();
-    // P5. A new hub has no cache: no picture until the board is back. A
-    // session does not survive the deploy (the store keeps the accounts,
-    // not their sessions), so Alice signs in again.
+    // P5, as the account's board list amends it: a new hub has no cache,
+    // but the old one wrote the board's last picture behind as it went away
+    // (docs/adr/2026-10-20-the-account-board-list.md), so until the board is
+    // back the new hub answers that one, offline. A session does not
+    // survive the deploy (the store keeps the accounts, not their
+    // sessions), so Alice signs in again.
     let alice_session = cloud.session_for(alice.uid);
     let away = cloud.board_count() == 0;
     let fresh = cloud.board_pictures(&alice_session, &known, false);
     if away && cloud.board_count() == 0 {
         assert!(
-            fresh.pictures.is_empty(),
-            "a new hub holds no picture: {fresh:?}"
+            fresh.pictures.len() == 1 && !fresh.pictures[0].online,
+            "a new hub answers the stored picture, offline: {fresh:?}"
         );
-        eprintln!("emu_relay_link: right after the deploy the new hub holds no picture");
+        eprintln!(
+            "emu_relay_link: right after the deploy the new hub answers the stored picture, offline"
+        );
     } else {
         eprintln!(
-            "emu_relay_link: the board was back before the new hub could be asked; its empty \
-             cache was not checked"
+            "emu_relay_link: the board was back before the new hub could be asked; its stored \
+             picture was not checked"
         );
     }
     assert!(
@@ -656,9 +662,9 @@ fn a_protocol_1_core_at_the_new_hub_is_answered_as_before() {
     eprintln!(
         "emu_relay_link (protocol 1): registered by itself (the board answers: relay connected)"
     );
-    let list = cloud.list_boards(&alice.session);
-    assert_eq!(list.boards.len(), 1);
-    let presence = &list.boards[0];
+    let list = cloud.online_boards(&alice.session);
+    assert_eq!(list.len(), 1);
+    let presence = &list[0];
     assert_eq!(presence.relay_proto, 1, "{presence:?}");
     assert_eq!(presence.firmware, None, "{presence:?}");
     assert_eq!(presence.project, None, "{presence:?}");
@@ -741,8 +747,8 @@ fn a_protocol_1_core_at_the_new_hub_is_answered_as_before() {
         board.output()
     );
     let session = cloud.session_for(alice.uid);
-    let list = cloud.list_boards(&session);
-    assert_eq!(list.boards[0].relay_proto, 1, "{:?}", list.boards[0]);
+    let list = cloud.online_boards(&session);
+    assert_eq!(list[0].relay_proto, 1, "{:?}", list[0]);
     // Two more status answers through the console, so a leg that would
     // drop on the new hub's first frames has had time to say so.
     console.wait_answers(2);

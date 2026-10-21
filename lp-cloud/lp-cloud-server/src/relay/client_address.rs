@@ -8,7 +8,7 @@
 //! neither — the router driven in-process by a test — has no address.
 //!
 //! Used for two things, neither of them a credential: `sameNetwork` in
-//! `ListBoards` (the board's and the browser's addresses match), and the
+//! `ListAccountBoards` (the board's and the browser's addresses match), and the
 //! per-address visitor limit.
 
 use std::convert::Infallible;
