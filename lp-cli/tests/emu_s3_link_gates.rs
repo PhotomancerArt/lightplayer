@@ -370,7 +370,7 @@ fn a_requested_reboot_reboots_with_the_software_reset_cause() {
 /// and to the radio probe image (`radio_boot_probe`: Wi‑Fi and BTDM started
 /// beside the same boot) lights pad 9 — `D10` on the XIAO ESP32-S3 Plus
 /// profile both images fall back to — with the **same frame**, byte for
-/// byte, and keeps rendering. The radio image boots strict with nothing
+/// byte, for ten whole frames. The radio image boots strict with nothing
 /// unmapped on the way.
 ///
 /// `shader-oracle` is clock-free, so its lit frame is one frame and the
@@ -417,13 +417,16 @@ fn the_radio_image_renders_the_shipped_images_frame() {
     );
     println!(
         "ORACLE FRAME (lp-emu:esp32s3:t1) on pad {ORACLE_PAD}, {} bytes, identical: {}\n  \
-         shipped: {} frames, {} whole lit\n  radio:   {} frames, {} whole lit",
+         shipped: {} frames, {} whole lit, by {} us\n  radio:   {} frames, {} whole lit, \
+         by {} us",
         shipped.first_lit.len(),
         hex(&shipped.first_lit),
         shipped.frames,
         shipped.whole_lit,
+        shipped.at_us,
         radio.frames,
-        radio.whole_lit
+        radio.whole_lit,
+        radio.at_us
     );
 }
 
@@ -431,12 +434,23 @@ fn the_radio_image_renders_the_shipped_images_frame() {
 /// arm, `LP_WALK_PAD` 9).
 const ORACLE_PAD: u8 = 9;
 
-/// Long enough for either image's boot, the deploy, the compile and a
-/// stretch of rendering.
+/// The most either image may take to boot, take the deploy, compile and
+/// light [`LIT_FRAMES`] whole frames. A ceiling, not a duration: the run
+/// stops as soon as it has its frames (checked every [`ORACLE_STEP_US`]),
+/// because rendering past them proves nothing more and costs the S3's CI
+/// job minutes it does not have (`docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md`).
 const ORACLE_US: u64 = 6_000_000;
+
+/// How often the run stops to count lit frames.
+const ORACLE_STEP_US: u64 = 100_000;
+
+/// Whole lit frames each side must reach.
+const LIT_FRAMES: usize = 10;
 
 struct OracleRender {
     console: String,
+    /// Emulated microseconds at which the run had its frames.
+    at_us: u64,
     first_lit: Vec<u8>,
     frames: usize,
     whole_lit: usize,
@@ -451,9 +465,19 @@ fn oracle_render(tag: &str, elf: &Path, merged: &Path) -> OracleRender {
         .unwrap_or_else(|e| panic!("{tag}: the image direct-loads: {e}"));
     let mut host = EmuLinkHost::new(board, 0x5E55_0304, true);
     deploy(&mut host, &repo_root().join("projects/test/shader-oracle"));
-    host.run_until(ORACLE_US, None)
-        .unwrap_or_else(|e| panic!("{tag}: the run reaches its deadline: {e}"));
+    let lit_so_far = |m: &lp_emu_esp32s3::machine::Machine| {
+        m.frames(ORACLE_PAD)
+            .iter()
+            .filter(|f| f.is_complete() && f.wire.iter().any(|b| *b != 0))
+            .count()
+    };
+    while host.board.machine.micros() < ORACLE_US && lit_so_far(&host.board.machine) < LIT_FRAMES {
+        let next = host.board.machine.micros() + ORACLE_STEP_US;
+        host.run_until(next, None)
+            .unwrap_or_else(|e| panic!("{tag}: the run stops only at its deadline: {e}"));
+    }
     let console = host.console().join("\n");
+    let at_us = host.board.machine.micros();
     let m = &mut host.board.machine;
     m.flush_frames();
     assert!(
@@ -476,8 +500,9 @@ fn oracle_render(tag: &str, elf: &Path, merged: &Path) -> OracleRender {
         .filter(|f| f.is_complete() && f.wire.iter().any(|b| *b != 0))
         .collect();
     assert!(
-        lit.len() >= 10,
-        "{tag}: at least ten whole lit frames on pad {ORACLE_PAD}, got {} of {}:\n{console}",
+        lit.len() >= LIT_FRAMES,
+        "{tag}: at least {LIT_FRAMES} whole lit frames on pad {ORACLE_PAD} by {ORACLE_US} us, \
+         got {} of {}:\n{console}",
         lit.len(),
         frames.len()
     );
@@ -485,6 +510,7 @@ fn oracle_render(tag: &str, elf: &Path, merged: &Path) -> OracleRender {
         first_lit: lit[0].wire.clone(),
         frames: frames.len(),
         whole_lit: lit.len(),
+        at_us,
         console,
     }
 }
