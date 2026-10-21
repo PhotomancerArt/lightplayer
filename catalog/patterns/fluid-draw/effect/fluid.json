@@ -20,7 +20,7 @@
     "height": 16
   },
   "solver_iterations": 3,
-  "step_hz": 25,
+  "step_hz": 20,
   "fade_speed": 0.08,
   "viscosity": 3e-05
 }

@@ -34,10 +34,11 @@ for two seconds and three slow emitters (the "friends") come back to stir it.
 
 ## Notes
 
-- **Step rate.** The solver steps at `step_hz` (25), but on an ESP32-C6 the
-  fluid renders at about 40 fps, so it steps about 20 times a second (half
-  the frames repeat). Raising `step_hz` above ~20 buys nothing there
-  (emulated, `lp-emu:esp32c6:t2`; see the drawing report in `docs/reports/`).
+- **Step rate.** The solver steps at `step_hz` 20. On an ESP32-C6 the
+  pattern renders at about 30 fps idle and 26 while drawing (emulated,
+  `lp-emu:esp32c6:t2`, `docs/reports/2026-10-20-fluid-draw-emulated-c6.md`).
+  At 25 a frame of 40 ms or more stepped the solver every frame, which held
+  every frame at 40 ms; 20 is about as fast as it can step there anyway.
 - **Thin and 1D lamp boxes.** Drawing is 2D in pattern space. On a long,
   thin box (an eave line) the 16 × 16 grid is stretched across it, so few
   rows land on the lamps; the friends wander within about ±0.3 of the
