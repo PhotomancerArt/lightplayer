@@ -602,6 +602,38 @@ The arm is written for the image after P06 and the sentinel is **not**
 weakened to make today's run pass; `shader-compile-stress` is the S3 payload
 that completes today, because a harness image never mounts a filesystem.
 
+### `radio-boot`: the S3's first transcript of a radio (S3 radio M1)
+
+`radio-boot` is the payload whose **S3 arm** exists for AC2 of the S3 radio
+roadmap: `fw-esp32s3 --features radio_boot_probe`, the shipped boot with
+esp-radio's Wi‑Fi and the BTDM controller started beside it, recorded on the
+bench S3 and replayed against `lp-emu:esp32s3:t1`. Its C6 top level is the
+C6's shipped image (which already starts its radio at boot) only because
+every payload has one; nothing records it.
+
+Two things about it differ from `boot-idle`'s S3 arm, and both are why it can
+run at all on a current image:
+
+- **No conversation.** Its series — `radio-stage` (the heap at each stage,
+  memory class) and `radio-hci-event` (the controller's Command Complete,
+  structural) — are printed by the boot unasked. `boot-idle`'s S3 arm needs a
+  raw `M!` stop-all that cannot reach a server behind lp-link, and is refused
+  for it.
+- **Every line twice.** The probe takes its stage figures before the link
+  exists and prints them raw, then re-emits them as log records once the log
+  ring is up. A silicon capture is a link host's, which opens the port after
+  espflash has exited, so the raw boot text is gone and the log records are
+  what it carries. Both copies are the same numbers, taken at the same point
+  of the boot.
+- **One boot, and hosted on both sides.** A current image's raw port is
+  lp-link frames, not text, so the emulated twin must be hosted too. This
+  payload is what taught the driver the S3's hosted door (`lp-cli emu run
+  --chip esp32s3 --host-link`, ROM-up from `--merged`); that door takes no
+  writable part, so the arm is a single boot — honest here, because every
+  compared figure is taken before `lpfs` is mounted. The S3's raw binary
+  also needs `--boot-mode rom-up` stated (`ChipSpec::rom_up_needs_boot_mode`),
+  which no S3 ROM-up plan had reached before.
+
 ### `Link::Uart0` is not `Link::Uart0Spike`
 
 `Uart0Spike` is a **C6 workaround**: the cargo feature `spike_uart0_link`

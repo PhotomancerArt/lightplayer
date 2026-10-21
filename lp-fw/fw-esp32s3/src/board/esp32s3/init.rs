@@ -57,6 +57,9 @@ pub fn init_board() -> (
     let usb_device = peripherals.USB_DEVICE;
     let flash = peripherals.FLASH;
     let rmt = peripherals.RMT;
+    // The radio probe's two peripherals, kept until the scheduler runs.
+    #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
+    crate::radio_boot_probe::stash(peripherals.WIFI, peripherals.BT);
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);

@@ -249,6 +249,21 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::RadioBoot,
+        display_name: "An image that starts the radio, to its first scan",
+        // S3 radio M1. This is the C6's half, which is the C6's shipped image
+        // (it brings esp-radio up at boot); the S3's arm adds
+        // `radio_boot_probe` in `lp-emu-validate`'s registry, and that arm is
+        // the one recorded. No `fw-checks` module: the payload is a firmware
+        // image, like `boot-idle`.
+        firmware_features: &["server", "radio"],
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "radio-boot",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::RenderLoop,
         display_name: "Render loop (a real project, N frames, RMT on)",
         // The shipped server image plus two things: an in-memory filesystem

@@ -51,6 +51,16 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   a 35-minute budget and the comment "growth here wants another split, not a
   bigger number". #993's 45-minute stopgap was dropped in its merge of main.
   The condition (device tests piling into one-job recipes) stays carried.
+- 2026-10-21 — PR #1238 (S3 radio M1, run 39620696788): `Emulator ESP32-S3`
+  and `Emulator C6` were both cancelled at their 35-minute budget with every
+  test step passed — the S3 job in its heap-ratchet step, the C6's in
+  "Upload CI images". Main runs them in 18–23 and 21–26 min. The S3's cause was
+  this PR's own: `test-emu-esp32s3-boot` gained a second firmware build (the
+  radio probe), the radio boots (~85 s) and a frame-parity gate that rendered
+  6 emulated seconds on each of two images (~9 min). The gate now stops at its
+  ten lit frames (45 s locally). The C6 job's test step took 32 min against
+  main's ~20, with no C6 test added — cold caches for the crates the PR
+  touched (`lp-cli`, `lp-emu-*`); a rerun is the evidence either way.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that

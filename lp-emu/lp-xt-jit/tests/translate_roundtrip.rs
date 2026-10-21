@@ -79,6 +79,8 @@ fn the_three_register_alu_agrees_with_the_interpreter() {
         AluRrr::Maxu,
         AluRrr::Mul16u,
         AluRrr::Mul16s,
+        AluRrr::Salt,
+        AluRrr::Saltu,
         AluRrr::Moveqz,
         AluRrr::Movnez,
         AluRrr::Movltz,

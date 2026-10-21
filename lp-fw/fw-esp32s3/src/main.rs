@@ -111,6 +111,8 @@ mod hardware;
 // inside is still app-only.
 #[cfg(any(not(fw_harness), feature = "test_loopback"))]
 mod output;
+#[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
+mod radio_boot_probe;
 #[cfg(not(fw_harness))]
 mod recovery;
 #[cfg(not(fw_harness))]
@@ -173,7 +175,15 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// More heap does not come from here: `dram2_seg` (`0x3FCDB700..0x3FCED710`,
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
+#[cfg(not(feature = "radio_boot_probe"))]
 const HEAP_SIZE: usize = 240 * 1024;
+/// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
+/// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
+/// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
+/// keep about today's share. Where the product radio's RAM comes from is M4's
+/// plan, not this probe's.
+#[cfg(feature = "radio_boot_probe")]
+const HEAP_SIZE: usize = 160 * 1024;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
@@ -480,6 +490,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
+    // Scaffolding for the emulator's radio windows (`radio_boot_probe`):
+    // esp-radio needs the scheduler, and its heap is taken before the server's.
+    #[cfg(feature = "radio_boot_probe")]
+    radio_boot_probe::start(spawner);
 
     // The host link runs lp-link over USB-Serial-JTAG (plan
     // `lp-link-usb-cutover`): a random session nonce per boot, so a host
@@ -507,6 +521,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // From here on `log::*` rides the link's log channel; the `esp_println!`
     // lines above are raw text outside frames.
     log_ring_logger::init();
+    #[cfg(feature = "radio_boot_probe")]
+    radio_boot_probe::replay_stages_to_log();
 
     let transport = UsbLinkTransport::new(usb_link);
 

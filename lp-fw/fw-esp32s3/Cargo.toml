@@ -71,6 +71,28 @@ io-thread = ["esp-rtos/esp-radio", "esp-rtos/esp-alloc", "dep:esp-radio-rtos-dri
 # stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
 io_thread_stack_diag = ["io-thread"]
 
+# The radio boot probe — OFF by default, never shipped; scaffolding for the S3
+# emulator's radio windows (S3 radio roadmap M1, `src/radio_boot_probe.rs`).
+# The shipped boot plus esp-radio started beside it: Wi‑Fi (`wifi::new`, a
+# station, one scan) and the BTDM Bluetooth controller (`BleConnector::new`,
+# one HCI reset), with `coex` between them. It is the image that drives the
+# esp-radio blobs through every window they own, so `lp-emu-esp32s3`'s stubs
+# have something to answer; it is deliberately NOT `radio`/`ble`/`wifi`, which
+# are the product's (M3/M4) and may delete or reuse this. Not `test_*`: it
+# decorates the app path (the server still boots and renders) rather than
+# replacing it.
+#
+#   just build-fw-esp32s3 radio_boot_probe
+radio_boot_probe = [
+    "server",
+    "dep:esp-radio",
+    "esp-radio/esp32s3",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+]
+
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
 # what `scripts/m4-hardware-walk.sh` diffs against the host oracle, and it is
@@ -224,6 +246,9 @@ log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is
 # the public face esp-radio itself creates its threads through.
 esp-radio-rtos-driver = { version = "0.3.0", optional = true }
+# `radio_boot_probe` only: the radio stack the probe starts. The product image
+# has no esp-radio until M3/M4.
+esp-radio = { version = "0.18.0", optional = true, features = ["esp-alloc", "log-04", "unstable", "wifi"] }
 
 # Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
 # arch-neutral ledger, plus the backtrace capture the panic path stages. Both

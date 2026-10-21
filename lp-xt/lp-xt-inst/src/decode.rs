@@ -597,6 +597,11 @@ fn decode_rst2(w: u32) -> Option<Inst> {
         0x2 => bool_logic(BoolOp::Orb),
         0x3 => bool_logic(BoolOp::Orbc),
         0x4 => bool_logic(BoolOp::Xorb),
+        // `saltu` / `salt` (LX7; see `AluRrr::Salt`). Encodings read off
+        // `xtensa-esp32s3-elf-as`'s output: `saltu a10, a8, a6` is
+        // `62 a8 60`, `salt` the same with `op2 = 7`.
+        0x6 => alu(AluRrr::Saltu),
+        0x7 => alu(AluRrr::Salt),
         0x8 => alu(AluRrr::Mull),
         0xa => alu(AluRrr::Muluh),
         0xb => alu(AluRrr::Mulsh),

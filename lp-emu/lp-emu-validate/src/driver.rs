@@ -151,6 +151,14 @@ pub struct ChipSpec {
     /// composite configuration is refused rather than run seam-free under a
     /// label that says otherwise.
     pub takes_seams: bool,
+    /// Does this machine's binary need `--boot-mode rom-up` stated for a
+    /// ROM-up boot? The C6's and the classic's take one from an image with
+    /// no `--elf`; the S3's defaults to a direct load and refuses a run with
+    /// no `--elf` (exit 64, "`--elf` is required under `--boot-mode
+    /// direct`"). Found by the first S3 ROM-up payload ever planned to run
+    /// (`radio-boot`, S3 radio M1): `boot-idle`'s S3 arm is refused before
+    /// it gets this far.
+    pub rom_up_needs_boot_mode: bool,
 }
 
 /// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32v3/src/machine.rs`
@@ -181,6 +189,7 @@ pub const ESP32C6: ChipSpec = ChipSpec {
     takes_reset_cause: true,
     core_quantum: None,
     takes_seams: true,
+    rom_up_needs_boot_mode: false,
 };
 
 /// The classic ESP32 (revision v3), the desk's `domraem/dom-z-102`.
@@ -204,6 +213,7 @@ pub const ESP32V3: ChipSpec = ChipSpec {
     takes_reset_cause: false,
     core_quantum: Some(ESP32V3_CORE_QUANTUM_DEFAULT),
     takes_seams: false,
+    rom_up_needs_boot_mode: false,
 };
 
 /// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32s3/src/machine.rs`
@@ -273,6 +283,7 @@ pub const ESP32S3: ChipSpec = ChipSpec {
     // run nobody can reproduce.
     core_quantum: Some(ESP32S3_CORE_QUANTUM_DEFAULT),
     takes_seams: false,
+    rom_up_needs_boot_mode: true,
 };
 
 /// Every chip this runner drives, in the order they were taught to it.
@@ -1486,12 +1497,16 @@ impl ConfigurationDriver for LpEmuDriver {
         let hosted = req.hosted()?.cloned();
         if hosted.is_some() {
             req.check_hostable()?;
-            if spec.chip != ESP32C6.chip || arm.second_boot {
+            // The C6's machine and, since S3 radio M1, the S3's — each from
+            // one boot: `lp-cli emu run --chip esp32s3 --host-link` takes
+            // `--merged` or `--elf` and no writable `--flash`, so an S3 arm
+            // that asks for a second boot is still refused.
+            if !(spec.chip == ESP32C6.chip || spec.chip == ESP32S3.chip) || arm.second_boot {
                 bail!(
                     "a hosted run of payload `{}` on `{}` is not built yet: the link host drives \
-                     the C6's machine, from one boot. The S3's hosted run takes no writable flash \
-                     part for a second boot (the plan's ruling R3); `--link-host raw` runs it \
-                     over the raw port, as before.",
+                     the C6's and the S3's machines, from one boot. The S3's hosted run takes no \
+                     writable flash part for a second boot (the plan's ruling R3); `--link-host \
+                     raw` runs it over the raw port, as before.",
                     req.payload.name,
                     spec.chip,
                 );
@@ -1619,6 +1634,13 @@ impl ConfigurationDriver for LpEmuDriver {
         let state_payload = matches!(req.sentinel(), Sentinel::State(_));
         let secs = req.run_secs();
         let mut emu: Vec<String> = match &hosted {
+            // The host's door defaults to the C6; another chip says so.
+            Some(host) if spec.chip == ESP32S3.chip => {
+                let mut argv = host.emulated.clone();
+                argv.push("--chip".into());
+                argv.push(ESP32S3.chip.into());
+                argv
+            }
             Some(host) => host.emulated.clone(),
             None => vec![
                 "cargo".into(),
@@ -1642,6 +1664,12 @@ impl ConfigurationDriver for LpEmuDriver {
                 emu.push(elf.clone());
             }
             BootPath::RomUp { reset_cause, strap } => {
+                // The raw binary only: lp-cli's hosted door takes a ROM-up
+                // boot from `--merged` and has no `--boot-mode` flag.
+                if spec.rom_up_needs_boot_mode && hosted.is_none() {
+                    emu.push("--boot-mode".into());
+                    emu.push("rom-up".into());
+                }
                 let merged = image.with_file_name("merged.bin");
                 steps.push(
                     PlanStep::new(
@@ -2074,6 +2102,9 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         // modelled flash chip or it falls back on its own.
         "esp32s3,server,float-f32" => "boot-idle".to_string(),
         "esp32s3,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
+        // S3 radio M1: the shipped boot with esp-radio's Wi-Fi and the BTDM
+        // controller started beside it (`radio_boot_probe`).
+        "esp32s3,server,float-f32,radio_boot_probe" => "radio-boot".to_string(),
         other => other.replace(',', "+"),
     }
 }
@@ -2964,6 +2995,55 @@ mod tests {
         // And the C6 DOES take the two ROM-banner flags, so they are stated.
         assert!(rendered.contains("--reset-cause poweron"), "{rendered}");
         assert!(rendered.contains("--strap app"), "{rendered}");
+    }
+
+    /// The S3's binary direct-loads unless told otherwise, so its raw ROM-up
+    /// run states the boot mode; hosted, it goes through lp-cli's S3 door,
+    /// which needs the chip named instead (S3 radio M1's `radio-boot`).
+    #[test]
+    fn an_s3_rom_up_payload_runs_raw_or_hosted() {
+        let req = request("lp-emu:esp32s3:t1", "radio-boot", None);
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        let runs: Vec<&PlanStep> = plan
+            .steps
+            .iter()
+            .filter(|s| s.command.iter().any(|a| a == "lp-emu-esp32s3"))
+            .collect();
+        assert_eq!(runs.len(), 1, "{rendered}");
+        assert!(rendered.contains("--merged"), "{rendered}");
+        for run in &runs {
+            assert!(
+                run.command
+                    .windows(2)
+                    .any(|w| w[0] == "--boot-mode" && w[1] == "rom-up"),
+                "{rendered}"
+            );
+            assert!(!run.command.iter().any(|a| a == "--elf"), "{rendered}");
+        }
+        assert!(
+            rendered.contains("--features esp32s3,server,float-f32,radio_boot_probe"),
+            "{rendered}"
+        );
+
+        // Hosted, the same arm runs through lp-cli's S3 door: the chip
+        // stated, ROM-up taken from `--merged`, no `--boot-mode`.
+        let mut req = request("lp-emu:esp32s3:t1", "radio-boot", None);
+        req.link_host = Some(test_host());
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        let run = &plan.steps.last().unwrap().command;
+        assert_eq!(
+            &run[..test_host().emulated.len()],
+            &test_host().emulated[..]
+        );
+        assert!(rendered.contains("--chip esp32s3"), "{rendered}");
+        assert!(rendered.contains("--merged"), "{rendered}");
+        assert!(
+            rendered.contains("--console target/validate/radio-boot.cap"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("--boot-mode"), "{rendered}");
     }
 
     #[test]

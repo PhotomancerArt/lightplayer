@@ -164,6 +164,11 @@ impl S3Board {
     /// the power-on USB host state — attached and draining
     /// (`UsbHost::Attached { draining: true }`) is every caller's default
     /// today; `run_s3`'s `--usb-host` is the one place that overrides it.
+    ///
+    /// Built to reboot on reset, as [`V3Board`] is: since S3 radio M1 a
+    /// Reboot request (the ROM's `software_reset`, `options0.sw_sys_rst`)
+    /// is a reset the machine performs, and a hosted board that ended its
+    /// run on one would leave the host talking to nothing.
     pub fn build(
         builder: lp_emu_esp32s3::machine::Esp32S3Builder,
         usb_host: lp_emu_esp32s3::machine::UsbHost,
@@ -172,6 +177,7 @@ impl S3Board {
         let machine = builder
             .usb_host(usb_host)
             .usb_sj_source(Box::new(source))
+            .reboot_on_reset(true)
             .build()
             .map_err(|e| anyhow::anyhow!("building the S3 machine: {e}"))?;
         Ok(Self { machine, queue })
@@ -212,11 +218,15 @@ impl EmuUsbBoard for S3Board {
         let m = &mut self.machine;
         m.flush_frames();
         let flash = m.flush_flash();
-        finish_lines(
+        let mut lines = finish_lines(
             m.instructions(),
             (m.bus().unmapped_reads(), m.bus().unmapped_writes()),
             flash,
-        )
+        );
+        if m.reboots() > 0 {
+            lines.push(format!("{} reboot(s)", m.reboots()));
+        }
+        lines
     }
 }
 
