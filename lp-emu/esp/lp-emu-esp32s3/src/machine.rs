@@ -276,6 +276,20 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "APB_SARADC",
     "SENS",
     "RNG",
+    // ---- S3 radio M1: the esp-radio blobs' windows (`periph::radio_stub`),
+    // appended for the index contract's reason. Met only by an image that
+    // starts the radio (`fw-esp32s3 --features radio_boot_probe`), from
+    // `esp_radio::wifi::new`'s PHY init on; the shipped image reaches none.
+    "PBUS",
+    "I2C_MST_HI",
+    "BT",
+    "RF_CTRL",
+    "NRX_HI",
+    "BB_HI",
+    "BLE_RW",
+    "WIFI_MAC",
+    "WIFI_PWR",
+    "BTDM_WAKE",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's

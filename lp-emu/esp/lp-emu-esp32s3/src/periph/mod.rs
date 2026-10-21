@@ -77,6 +77,7 @@ pub mod flash_mmu;
 pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod io_mux;
+pub mod radio_stub;
 pub mod rmt;
 pub mod rng;
 pub mod rtc_cntl;
@@ -288,5 +289,56 @@ pub fn boot_set(
         ),
         (base::SENS, accept::SENS_LEN, Box::new(accept::sens())),
         (base::RNG, rng::LEN, Box::new(rng::Rng::new(flash.seed))),
+        // ---- S3 radio M1: the esp-radio blobs' windows, appended ----
+        (
+            radio_stub::PBUS.base,
+            radio_stub::PBUS.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::PBUS)),
+        ),
+        (
+            radio_stub::I2C_MST_HI.base,
+            radio_stub::I2C_MST_HI.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::I2C_MST_HI)),
+        ),
+        (
+            radio_stub::BT.base,
+            radio_stub::BT.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::BT)),
+        ),
+        (
+            radio_stub::RF_CTRL.base,
+            radio_stub::RF_CTRL.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::RF_CTRL)),
+        ),
+        (
+            radio_stub::NRX_HI.base,
+            radio_stub::NRX_HI.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::NRX_HI)),
+        ),
+        (
+            radio_stub::BB_HI.base,
+            radio_stub::BB_HI.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::BB_HI)),
+        ),
+        (
+            radio_stub::BLE_RW.base,
+            radio_stub::BLE_RW.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::BLE_RW)),
+        ),
+        (
+            radio_stub::WIFI_MAC.base,
+            radio_stub::WIFI_MAC.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::WIFI_MAC)),
+        ),
+        (
+            radio_stub::WIFI_PWR.base,
+            radio_stub::WIFI_PWR.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::WIFI_PWR)),
+        ),
+        (
+            radio_stub::BTDM_WAKE.base,
+            radio_stub::BTDM_WAKE.len,
+            Box::new(radio_stub::RadioStub::new(radio_stub::BTDM_WAKE)),
+        ),
     ]
 }
