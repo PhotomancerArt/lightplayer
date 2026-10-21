@@ -123,14 +123,16 @@ fn a_pushed_project_is_compiled_by_the_engine_and_rendered() {
         .expect("running lp-cli emu run");
     assert!(status.success(), "lp-cli emu run: {status}");
     let text = std::fs::read_to_string(&frames).expect("frames were dumped");
-    let wires: Vec<serde_json::Value> = text
+    let mut wires: Vec<serde_json::Value> = text
         .lines()
         .map(|l| serde_json::from_str(l).expect("a frame record"))
         .collect();
+    // The run's deadline can fall mid-frame: the last one decodes short.
+    wires.pop();
     assert!(wires.len() >= 2, "frames rendered: {}", wires.len());
     assert!(
         wires.iter().all(|f| f["leds"] == 241),
-        "the basic project's strip"
+        "the basic project's strip, every whole frame"
     );
     let distinct: std::collections::HashSet<_> =
         wires.iter().map(|f| f["wire"].as_str().unwrap()).collect();

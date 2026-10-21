@@ -250,6 +250,60 @@ temporary — so an MSRV error here means `espup update`, not a code problem.
 The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
 the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
 
+### The split image (what ships)
+
+What Studio flashes, CI gates and a release ships is the **split image**
+(`lp-fw/builds/esp32s3-8mb.json`, `"split": true`; layout 2), the C6's
+shape on this chip — one link cut by reachability into a **core** and an
+**engine**, a RAM-only loader at `factory + 0`, two boot records:
+
+```bash
+just fw-esp32s3-split          # target/fw-split/esp32s3-shipped: core.bin, engine.bin, app.bin, merged.bin, split.json
+just fw-esp32s3-size-check     # the split headroom gate (64 KB), and the core's distance to its next 64 KiB page
+just test-emu-esp32s3-split-boot   # ROM-up through the IDF door to the engine's hello; core high; a project rendered
+```
+
+```text
+0x000000  IDF bootloader       espflash 3.3.0's bundled one (the S3's only door)
+0x008000  partition table      factory 0x10000+0x600000, lpfs 0x610000+0x180000
+0x010000  loader               lp-fw/fw-esp32s3-loader, RAM-only (≤ 0x5000 B)
+0x015000  progress record      ┐
+0x016000  boot record 0        │ layout 1's offsets (lp_bootctl)
+0x017000  boot record 1        ┘
+0x018000  reserved             erased, never written (the price of the 64 KiB page)
+0x020000  core                 an ESP image the loader starts
+ page↑    engine               its header first; MMU entries 0x100.., both views
+  …       free to factory's end (read from the flashed table)
+```
+
+- **The door.** `main.rs` cuts the boot into `core_boot` and
+  `lp_engine_entry`. A plain build (`just build-fw-esp32s3`, the dev image)
+  calls the door directly; a split build (`LP_SPLIT_LINK=1`, the `lp_split`
+  cfg) reaches it only through the engine header's `entry`
+  (`src/split.rs`), so everything only the door reaches — the server, the
+  node graph, the on-device GLSL compiler — links into the engine.
+- **Everything a board needs to stay reachable lives in `core_boot`**: the
+  link, the filesystem, and every radio's bring-up. A board whose engine is
+  missing runs core-only: its link up, its watchdog fed, nothing served (and,
+  once updates land, the update channel served — the S3 updates plan's P8).
+- **The engine's two views.** The S3's one MMU table serves both buses at one
+  index, so the core maps the engine's flash pages once at entry `0x100`: its
+  header and rodata read at `0x3D00_0000`, its code fetched at `0x4300_xxxx`
+  (`lp_bootctl::s3_mmu`). The core reads the boot records and the engine
+  header through the cache (its scratch entry `0x1E0`), never the ROM's SPI1
+  routines, and `factory`'s end from the flashed table.
+- **No updates yet**: the image announces `ota_layout: 0`. The S3's codes are
+  chip 2, layout 2 (`lpc-update`'s code table); its board side is P8's.
+- Measured (`just fw-esp32s3-size-check 65536 1`, 2026-10-21, default
+  features): core 281,584 B, engine 2,171,869 B, `app.bin` 2,568,192 B against
+  a plain image of 2,431,712 B (+21,741 B code, +136,480 B image: the 64 KiB
+  region start and page rounding); steady headroom 3,726,371 B; 46,096 B to the
+  core's next page.
+
+How the split is built (GNU ld's quirks on Xtensa, the literal pools, the two
+views) is `tools/lp-fw-split/README.md`; the loader is
+`lp-fw/fw-esp32s3-loader/README.md`.
+
 ### Release profile
 
 This crate builds under `[profile.release-esp32s3]` (`inherits = "release"`,
