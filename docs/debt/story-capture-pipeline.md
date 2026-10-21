@@ -755,3 +755,18 @@ hours), and neither is an exit path on its own.
   `CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670`), which is what
   two-hangs-fail looks like for real; Chrome for Testing from puppeteer's
   cache (path in the 2026-10-17 note above) passed `just studio-web-smoke`.
+  **Desk, story discovery (same day): the teardown-watchdog exit.** Google
+  Chrome 155 and Brave on the desk wrote the whole `--dump-dom` page and then
+  exited 2 with `Teardown watchdog expired; recording dump and terminating.`
+  on stderr, so `just studio-story-pngs <filter>` failed at discovery on
+  every attempt. `studio-story-pngs.mjs` now accepts exactly that case
+  (`isTeardownWatchdogExit`, passed by `runChrome` to `--dump-dom` runs only):
+  exit code 2 (not a signal), `Teardown watchdog expired` in stderr, and
+  stdout holding the page's HTML (`<html` or `<!DOCTYPE html`). It logs one
+  line (`story-discovery Chrome (--dump-dom): accepted non-zero exit (…)`).
+  Any other non-zero exit, an empty or HTML-less stdout, a different stderr or
+  a signal still fails and is retried as before; the screenshot path drives
+  Chrome over CDP, not `runProcess`, and is unchanged, as is CI's Chrome for
+  Testing, which never exits this way. If a desk run logs the accepted line,
+  that is one more teardown exit for this log; *why* Chrome's teardown
+  watchdog expires is still unidentified.
