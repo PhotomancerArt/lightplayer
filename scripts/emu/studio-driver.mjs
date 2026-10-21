@@ -51,6 +51,12 @@ import path from "node:path";
 import process from "node:process";
 
 const CDP_CALL_TIMEOUT_MS = 30_000;
+// A page `detach` can wait out the shim's hold settle (`HOLD_SETTLE_DEADLINE_MS`,
+// 15 s, virtual_serial.js) and then two stalled control commands
+// (`COMMAND_TIMEOUT_MS`, 20 s each, emulator_port.js: the settle's own read,
+// then the verb), so the default 30 s call could expire before the shim
+// gave up. 15 + 2 x 20 + 10 s of margin.
+const DETACH_CALL_TIMEOUT_MS = 15_000 + 2 * 20_000 + 10_000;
 /// A wedged-run deadline, never a measurement. See rule 2.
 export const DEFAULT_WAIT_MS = 120_000;
 
@@ -1027,7 +1033,7 @@ export class StudioDriver {
   async detach(boardId) {
     return this.evaluate(
       `window.__lpEmuSerial.bus.detach(${JSON.stringify(boardId)}).then(() => "detached")`,
-      { awaitPromise: true },
+      { awaitPromise: true, timeoutMs: DETACH_CALL_TIMEOUT_MS },
     );
   }
 
