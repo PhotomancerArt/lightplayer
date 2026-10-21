@@ -37,8 +37,10 @@ impl BoardStation {
     /// (`EspStation::restore_espnow_channel`). The seam's station never moves
     /// the radio's channel, so on that arm there is nothing to put back.
     pub fn restore_espnow_channel(&mut self) {
-        if let Self::Radio(station) = self {
-            station.restore_espnow_channel();
+        match self {
+            Self::Radio(station) => station.restore_espnow_channel(),
+            #[cfg(target_arch = "riscv32")]
+            Self::Seam { .. } => {}
         }
     }
 }

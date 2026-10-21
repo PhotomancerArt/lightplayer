@@ -744,7 +744,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32c6 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
