@@ -115,6 +115,11 @@ impl BuildDef {
         Ok(Some(path))
     }
 
+    /// The split tool's chip for this def's chip, if it has a split profile.
+    pub fn split_chip(&self) -> Option<lp_fw_split::chip_profile::SplitChip> {
+        self.chip.name.parse().ok()
+    }
+
     /// Where a split def's build lands (`lp-fw-split build --out`).
     pub fn split_dir(&self, repo_root: &Path) -> PathBuf {
         repo_root.join("target").join("fw-split").join(&self.id)
@@ -145,9 +150,10 @@ pub fn parse_build_def(json: &str) -> Result<BuildDef> {
     if def.cargo_features.is_empty() {
         bail!("build def `{}` lists no cargo features", def.id);
     }
-    if def.split && def.chip.name != "esp32c6" {
+    if def.split && def.split_chip().is_none() {
         bail!(
-            "build def `{}` sets `split`, which only the ESP32-C6 has (chip `{}`)",
+            "build def `{}` sets `split`, which only a chip with a split profile has \
+             (the ESP32-C6 and the ESP32-S3; chip `{}`)",
             def.id,
             def.chip.name
         );
@@ -272,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn split_is_an_optional_input_only_the_c6_may_set() {
+    fn split_is_an_optional_input_only_a_chip_with_a_profile_may_set() {
         let split = C6.replace(
             "\"flashSizeMb\": 4,",
             "\"flashSizeMb\": 4, \"split\": true,",
@@ -284,16 +290,23 @@ mod tests {
             Path::new("/repo/target/fw-split/esp32c6-4mb")
         );
         let s3 = split.replace("\"name\": \"esp32c6\"", "\"name\": \"esp32s3\"");
-        let error = parse_build_def(&s3).unwrap_err().to_string();
-        assert!(error.contains("only the ESP32-C6"), "{error}");
+        assert!(
+            parse_build_def(&s3).unwrap().split,
+            "the S3 has a split profile"
+        );
+        let classic = split.replace("\"name\": \"esp32c6\"", "\"name\": \"esp32\"");
+        let error = parse_build_def(&classic).unwrap_err().to_string();
+        assert!(error.contains("split profile"), "{error}");
     }
 
-    /// The shipped C6 def builds the split image.
+    /// The shipped C6 and S3 defs build the split image; the classic's does
+    /// not.
     #[test]
-    fn the_c6_def_is_split() {
+    fn the_c6_and_s3_defs_are_split() {
         let repo_root = find_repo_root().unwrap();
         assert!(load_build_def(&repo_root, "esp32c6-4mb").unwrap().split);
-        assert!(!load_build_def(&repo_root, "esp32s3-8mb").unwrap().split);
+        assert!(load_build_def(&repo_root, "esp32s3-8mb").unwrap().split);
+        assert!(!load_build_def(&repo_root, "esp32v3-4mb").unwrap().split);
     }
 
     /// Version + refuse: a future format is an error, never a partial decode.

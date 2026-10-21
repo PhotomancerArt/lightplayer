@@ -48,6 +48,16 @@ fn main() {
     // them. That tracking has to sit in the crate where the macro expands, not
     // in the crate that turns the feature on.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    // Split-link builds (`LP_SPLIT_LINK`, set by tools/lp-fw-split for both
+    // passes), as fw-esp32c6's build.rs has them: the core reaches the engine
+    // only through its header. An env var rather than a feature: both passes
+    // must see the same code, and a feature would change every crate's
+    // fingerprint.
+    println!("cargo::rustc-check-cfg=cfg(lp_split)");
+    println!("cargo:rerun-if-env-changed=LP_SPLIT_LINK");
+    if std::env::var_os("LP_SPLIT_LINK").is_some() {
+        println!("cargo::rustc-cfg=lp_split");
+    }
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {
         println!("cargo::rustc-cfg=fw_harness");

@@ -47,6 +47,10 @@ pub struct Headroom {
     pub update: i64,
     /// The C6's only: no S3 was ever fielded on littlefs at a fixed offset.
     pub legacy_overlap: Option<i64>,
+    /// Bytes the core may grow before it crosses into its next MMU page —
+    /// the cliff: a crossing costs a whole page of update headroom at once.
+    pub core_to_next_page: u32,
+    pub page: u32,
 }
 
 impl Headroom {
@@ -75,6 +79,8 @@ impl Headroom {
             steady_low: region_end - low_core_end - engine,
             steady_high: (high_core_at - region_start) - engine,
             update: high_core_at - low_core_end,
+            core_to_next_page: (report.page - report.core.size_bytes % report.page) % report.page,
+            page: report.page,
             legacy_overlap: c6.then(|| {
                 i64::from(LEGACY_LPFS_OFFSET) - (i64::from(LOADER_OFFSET) + i64::from(app_bin_len))
             }),
@@ -104,6 +110,11 @@ impl Headroom {
             format!(
                 "split headroom, update (a second core of the same size): {} B",
                 self.update
+            ),
+            format!(
+                "core: {} B to its next {} KiB page",
+                self.core_to_next_page,
+                self.page / 1024
             ),
         ];
         if let Some(overlap) = self.legacy_overlap {
@@ -183,6 +194,7 @@ mod tests {
         assert_eq!(h.steady_high, high - 0x2_0000 - 2_172_645);
         assert_eq!(h.update, high - 0x7_0000);
         assert_eq!(h.legacy_overlap, None);
+        assert_eq!(h.core_to_next_page, 0x5_0000 - 280_656);
         assert!(!h.lines().iter().any(|l| l.contains("legacy")));
     }
 
