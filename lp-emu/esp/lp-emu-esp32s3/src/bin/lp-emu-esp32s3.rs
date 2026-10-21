@@ -200,6 +200,17 @@ OPTIONS:
                             and runs on. A test switch; the label gains
                             +flash-cut. Pair with --flash <file> to keep
                             the torn chip
+    --seams <atoms|none>    engage emulator seams, STRICT: atoms
+                            `<seam>=<impl>` joined by `+` (`net=lan`), or
+                            `none`. A seam that cannot engage on this image is
+                            a hard error (exits 64). The run's label gains
+                            the atoms, and each chip start prints `SEAM <atom>
+                            engaged (…)`. With neither flag the capability
+                            defaults (`net=lan`) are asked for SOFTLY. ADR
+                            docs/adr/2026-10-05-emulator-seams.md
+    --seams-prefer <atoms>  the same, SOFT: engage what the image allows,
+                            else print `SEAM none engaged: <why>` and run on
+    --seams-info <image>    print a flash image's seam tables and exit
     --seed <n>              the machine's PRNG seed [0]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
@@ -217,6 +228,7 @@ EXIT CODES (a cross-machine contract — one table for all three machines):
       emitted here, and there is no --app-mmu-divergence flag to reserve
     8 a --flash-cut power cut ended the run (the C6's is 6, which is this
       chip's cache-off fetch)
+   64 a usage error, a build error, or a --seams seam that cannot engage
 ";
 
 fn main() -> ExitCode {
@@ -262,6 +274,10 @@ struct Args {
     control: Option<String>,
     reboot_on_reset: bool,
     flash_cut: Option<lp_emu_esp_common::engine::flash_cut_spec::FlashCutSpec>,
+    /// `--seams` / `--seams-prefer`, folded into one request at parse time.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// `--seams-info <image>`.
+    seams_info: Option<PathBuf>,
     seed: u64,
     efuse: EfuseIdentity,
     hooks: bool,
@@ -283,6 +299,11 @@ fn run() -> Result<ExitCode, String> {
     }
     if args.map {
         print_map();
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(path) = &args.seams_info {
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("{}", lp_emu_esp32s3::seams::seams_info(&bytes));
         return Ok(ExitCode::SUCCESS);
     }
     if args.elf.is_none() && !args.hooks && args.boot_mode == BootMode::Direct {
@@ -345,6 +366,7 @@ fn run() -> Result<ExitCode, String> {
     if let Some(spec) = args.flash_cut.clone() {
         builder = builder.flash_cut(spec);
     }
+    builder = builder.seams(args.seams.clone());
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
     }
@@ -398,6 +420,7 @@ fn run() -> Result<ExitCode, String> {
     }
 
     print_build_report(&machine);
+    print_seam_lines(&mut machine);
 
     let timeout = args.timeout.unwrap_or(Duration::from_millis(100));
     let stop = StopCondition {
@@ -415,6 +438,8 @@ fn run() -> Result<ExitCode, String> {
     // rather than inventing a reset gap.
     machine.flush_frames();
     print_outcome(&mut machine, &outcome);
+    print_seam_lines(&mut machine);
+    print_seam_report(&machine);
     print_run_summary(&machine);
     print_pin_report(&machine);
     print_refill_lag(&machine);
@@ -776,6 +801,33 @@ fn print_build_report(machine: &Machine) {
     }
 }
 
+/// A chip start's `SEAM …` lines, as they come.
+fn print_seam_lines(machine: &mut Machine) {
+    for line in machine.take_seam_lines() {
+        println!("{line}");
+    }
+}
+
+/// The seam counters, when anything engaged. Emulated figures.
+fn print_seam_report(machine: &Machine) {
+    if !machine.seams().engaged() {
+        return;
+    }
+    let s = machine.seams();
+    println!(
+        "seams {} ({}): seam_calls {}, seam_arms {} ({} re-arms), {} chip start(s)",
+        s.request,
+        machine.configuration_label(),
+        s.calls,
+        s.arms_planted,
+        s.rearms,
+        s.starts
+    );
+    for line in machine.seam_wake_lines() {
+        println!("{line}");
+    }
+}
+
 fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
     let cycle = outcome.cycle();
     let micros = cycle / memmap::CYCLES_PER_US;
@@ -839,6 +891,9 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         }
         Outcome::PowerCut { report, .. } => {
             println!("POWER CUT cycle={cycle} ({micros} us emulated): {report}");
+        }
+        Outcome::Seam { why, .. } => {
+            println!("SEAM ERROR at cycle {cycle} ({micros} us emulated): {why}");
         }
         Outcome::Fault {
             core, pc, fault, ..
@@ -1044,6 +1099,21 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                         .map_err(|e| format!("--flash-cut {e}"))?,
                 );
             }
+            "--seams" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(&value()?, lp_emu_esp_common::seam::Strength::Strict)
+                    .map_err(|e| format!("--seams: {e}"))?;
+            }
+            "--seams-prefer" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(&value()?, lp_emu_esp_common::seam::Strength::Soft)
+                    .map_err(|e| format!("--seams-prefer: {e}"))?;
+            }
+            "--seams-info" => args.seams_info = Some(PathBuf::from(value()?)),
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;

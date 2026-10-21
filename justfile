@@ -4184,6 +4184,13 @@ test-emu-esp32s3:
 # firmware build: the probe is built FIRST and copied out, so the shipped
 # image is what the target path holds when the recipe ends.
 #
+# **The seam ABI harness** (S3 radio M5): `fw-esp32s3 --features
+# test_seam_abi`, built and copied out the same way
+# (`LP_EMU_ESP32S3_SEAM_ABI_ELF`), for `tests/seam_abi_harness.rs` — the
+# Xtensa seam ABI and the wake under the real release build. Those tests need
+# the dev-only `test-seams` implementations, which no shipped binary has, so
+# they run in a second `cargo test` with the feature on.
+#
 # With `LP_CI_IMAGES` set (`just fetch-ci-images`), the ELF and the merged chip
 # are CI's own and nothing is built; see `test-emu-esp32v3-boot`, which also
 # explains the `images.env` this writes.
@@ -4195,6 +4202,7 @@ test-emu-esp32s3-boot:
       eval "$ci_env"
       status=0
       cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+      cargo test -p lp-emu-esp32s3 --features test-seams --test 'seam_*' -- --include-ignored --nocapture || status=$?
       # The S3's gates that need a link host since wire proto 30 (lp-cli's:
       # a link host is a product crate, which the lp-emu fence keeps out).
       cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
@@ -4214,6 +4222,10 @@ test-emu-esp32s3-boot:
     radio="$out/fw-esp32s3-radio.elf"
     cp "$built" "$radio"
     export LP_EMU_ESP32S3_RADIO_ELF="$radio"
+    just build-fw-esp32s3 test_seam_abi
+    seam_abi="$out/fw-esp32s3-seam-abi.elf"
+    cp "$built" "$seam_abi"
+    export LP_EMU_ESP32S3_SEAM_ABI_ELF="$seam_abi"
     just build-fw-esp32s3
     shipped="$out/fw-esp32s3-shipped.elf"
     cp "$built" "$shipped"
@@ -4237,6 +4249,9 @@ test-emu-esp32s3-boot:
     export -p | grep ' LP_EMU_ESP32S3_' > "$out/images.env"
     status=0
     cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+    # The emulator seam gates (docs/adr/2026-10-05-emulator-seams.md): the
+    # `test_seam_abi` harness needs the dev-only `test-seams` implementations.
+    cargo test -p lp-emu-esp32s3 --features test-seams --test 'seam_*' -- --include-ignored --nocapture || status=$?
     # The S3's gates that need a link host since wire proto 30 (lp-cli's:
     # a link host is a product crate, which the lp-emu fence keeps out).
     cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?

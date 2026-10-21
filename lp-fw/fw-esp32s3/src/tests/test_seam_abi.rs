@@ -19,12 +19,23 @@
 //!
 //! Each call is followed by a check that a local kept across it still holds
 //! its value: the window the call never rotated must be the caller's own.
+//!
+//! Then, when the take is engaged, **the wake**: the harness binds the wake
+//! handler ([`crate::seams::seam_wake_handler`]) and sleeps in `waiti`; each
+//! time the emulator raises `FROM_CPU_INTR3` for bytes it queued, the handler
+//! swaps the pending word and wakes a waker the harness registered, and the
+//! harness drains the take and prints `woke N: take …`.
+//!
 //! On silicon it prints `echo=7`, `engaged=false`, `net engaged=false`, and
 //! idles.
 
-use fw_esp32_common::seams::net::{net_link, net_mac};
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{RawWaker, RawWakerVTable, Waker};
 
-use crate::seams::{test_echo, test_take};
+use fw_esp32_common::seams::net::{net_link, net_mac};
+use fw_esp32_common::seams::seam_wake;
+
+use crate::seams::{seam_wake_handler, test_echo, test_take};
 
 pub fn run() -> ! {
     esp_println::println!("[SEAM-ABI] start");
@@ -37,15 +48,7 @@ pub fn run() -> ! {
     let engaged = test_take::engaged();
     esp_println::println!("[SEAM-ABI] take engaged={engaged}");
     if engaged {
-        let mut buf = [0u8; 16];
-        loop {
-            let n = test_take::call(0, buf.as_mut_ptr(), buf.len() as u32) as usize;
-            if n == 0 {
-                break;
-            }
-            let got = &buf[..n.min(buf.len())];
-            esp_println::println!("[SEAM-ABI] take {n} B: {}", Hex(got));
-        }
+        drain(None);
     }
 
     let net = net_mac::engaged();
@@ -61,10 +64,68 @@ pub fn run() -> ! {
     esp_println::println!("[SEAM-ABI] canary={canary:#010x}");
     esp_println::println!("[SEAM-ABI] done");
 
+    if engaged {
+        wait_for_wakes();
+    }
     let delay = esp_hal::delay::Delay::new();
     loop {
         delay.delay_millis(1000);
     }
+}
+
+/// Drain `test_take` until it returns 0, printing each take — after which
+/// wake, when a wake asked for it.
+fn drain(wake: Option<u32>) {
+    let mut buf = [0u8; 16];
+    loop {
+        let n = test_take::call(0, buf.as_mut_ptr(), buf.len() as u32) as usize;
+        if n == 0 {
+            break;
+        }
+        let got = &buf[..n.min(buf.len())];
+        match wake {
+            None => esp_println::println!("[SEAM-ABI] take {n} B: {}", Hex(got)),
+            Some(w) => esp_println::println!("[SEAM-ABI] woke {w}: take {n} B: {}", Hex(got)),
+        }
+    }
+}
+
+/// Sleep in `waiti` until the wake handler wakes [`WOKEN`]'s waker, then
+/// drain the take; forever. The waker is registered before each drain, so a
+/// raise that lands after the drain is the next loop's wake, never lost.
+fn wait_for_wakes() -> ! {
+    // esp-hal's interrupt entry saves the FP registers (`float-save-restore`),
+    // so a core that takes an interrupt needs coprocessor 0 armed — the app
+    // path's `init` does the same before its first interrupt.
+    crate::board::esp32s3::fpu::arm();
+    seam_wake_handler::bind();
+    esp_println::println!("[SEAM-ABI] waiting for wakes");
+    let mut wakes = 0u32;
+    loop {
+        WOKEN.store(false, Ordering::SeqCst);
+        seam_wake::NET_EVENTS.register(&flag_waker());
+        while !WOKEN.load(Ordering::SeqCst) {
+            // SAFETY: `waiti 0` lowers the interrupt level to 0 and idles
+            // until an interrupt; the handler bound above is that interrupt.
+            unsafe { core::arch::asm!("waiti 0") };
+        }
+        wakes += 1;
+        drain(Some(wakes));
+    }
+}
+
+/// Set by the waker the wake handler wakes.
+static WOKEN: AtomicBool = AtomicBool::new(false);
+
+fn flag_waker() -> Waker {
+    const VTABLE: RawWakerVTable = RawWakerVTable::new(
+        |_| RawWaker::new(core::ptr::null(), &VTABLE),
+        |_| WOKEN.store(true, Ordering::SeqCst),
+        |_| WOKEN.store(true, Ordering::SeqCst),
+        |_| {},
+    );
+    // SAFETY: every vtable entry ignores its (null) data pointer.
+    unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
 }
 
 /// Bytes as lowercase hex pairs, space-separated.

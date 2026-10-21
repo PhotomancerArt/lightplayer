@@ -155,6 +155,21 @@ pub fn radio_merged_image() -> Result<PathBuf, String> {
     )
 }
 
+/// The environment variable naming the **seam ABI harness** ELF —
+/// `fw-esp32s3` built with `test_seam_abi` (S3 radio M5): a release build
+/// that calls the Xtensa seam shims and prints what came back. A test image
+/// that never ships, on its own variable for the one-path trap's reason.
+pub const SEAM_ABI_IMAGE_ENV: &str = "LP_EMU_ESP32S3_SEAM_ABI_ELF";
+
+/// The seam ABI harness ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn seam_abi_image() -> Result<PathBuf, String> {
+    env_file(
+        SEAM_ABI_IMAGE_ENV,
+        "`just test-emu-esp32s3-boot` builds `fw-esp32s3 --features test_seam_abi` and sets it",
+    )
+}
+
 /// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
 /// panic when it is set to a path that does not exist.
 fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {
