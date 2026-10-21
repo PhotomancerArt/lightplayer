@@ -113,7 +113,9 @@ use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::host::ByteSink;
 use lp_emu_esp_common::pins::{PadId, RouteSource};
 use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
-use lp_emu_esp_common::{ByteLog, ByteSource, ElfImage, MachineRequest, SocBus, Strap};
+use lp_emu_esp_common::{
+    ByteLog, ByteSource, ElfImage, MachineRequest, ResetSource, SocBus, Strap,
+};
 
 use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, Which};
 use crate::control::{ControlCommand, ControlReply, HostReport};
@@ -285,7 +287,6 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "BT",
     "RF_CTRL",
     "NRX_HI",
-    "BB_HI",
     "BLE_RW",
     "WIFI_MAC",
     "WIFI_PWR",
@@ -3137,7 +3138,10 @@ impl Machine {
             // the link's control channel asked for one. Reported by default;
             // `--reboot-on-reset` performs it instead.
             if let Some(MachineRequest::Reset {
-                source, at, strap, ..
+                source,
+                at,
+                strap,
+                cause,
             }) = self.bus.take_request()
             {
                 // ⚠️ `stop_cycle` is an **absolute** guest cycle and a reboot
@@ -3150,7 +3154,7 @@ impl Machine {
                 let remaining = stop
                     .stop_cycle
                     .map(|_| stop_cycle.saturating_sub(self.cycles()));
-                if self.reboot_on_reset && self.reboot(strap) {
+                if self.reboot_on_reset && self.reboot_for(strap, cause) {
                     log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
                     if let Some(remaining) = remaining {
                         stop_cycle = self.cycles().saturating_add(remaining);
@@ -3653,6 +3657,57 @@ impl Machine {
             .is_some_and(|tcp| tcp.client_connected());
         self.usb_client_connected = client && usb_host.draining();
         self.reboots += 1;
+        true
+    }
+
+    /// Reboot for a reset of kind `cause`: [`reboot`](Self::reboot), with
+    /// what that kind of reset leaves alone on silicon put back.
+    ///
+    /// **A software system reset** (`RTC_CNTL.options0.sw_sys_rst`, the
+    /// ROM's `software_reset`, the firmware's requested reboot) resets the
+    /// digital core and leaves the RTC domain's memory powered, so **RTC
+    /// fast and slow memory keep their bytes** — the firmware's recovery
+    /// ledger lives in RTC fast memory on that promise (`fw-esp32s3`'s
+    /// `esp32s3_recovery_backend`, `#[ram(rtc_fast, persistent)]`), and
+    /// ESP-IDF's `RTC_NOINIT` data survives `esp_restart` the same way — and
+    /// `reset_state` reads `CoreSw` (3) in both halves
+    /// ([`crate::periph::rtc_cntl::SW_SYS_RESET_CODE`]), not the snapshot's
+    /// power-on code. Everything else goes back to power-on, the RNG's state
+    /// included (the classic's `software_reboot` rule, and its reason).
+    ///
+    /// Every other cause is [`reboot`](Self::reboot) unchanged: a watchdog
+    /// or a host's `chip_rst` still comes back reading power-on with RTC
+    /// memory cleared, which is **not** what silicon does and is not this
+    /// milestone's to change (the README's "What is still not modelled").
+    pub fn reboot_for(&mut self, strap: Strap, cause: ResetSource) -> bool {
+        if cause != ResetSource::Software {
+            return self.reboot(strap);
+        }
+        let base = self.bus.guest_arena_base();
+        let span = |addr: u32, len: u32| {
+            let at = (addr - base) as usize;
+            at..at + len as usize
+        };
+        let fast = span(memmap::RTC_FAST_BASE, memmap::RTC_FAST_LEN);
+        let slow = span(memmap::RTC_SLOW_BASE, memmap::RTC_SLOW_LEN);
+        let kept_fast = self.bus.guest_arena()[fast.clone()].to_vec();
+        let kept_slow = self.bus.guest_arena()[slow.clone()].to_vec();
+        if !self.reboot(strap) {
+            return false;
+        }
+        self.bus.guest_arena_mut()[fast].copy_from_slice(&kept_fast);
+        self.bus.guest_arena_mut()[slow].copy_from_slice(&kept_slow);
+        if let Some(index) = self.bus.peripheral_index("RTC_CNTL") {
+            self.bus
+                .with_peripheral::<crate::periph::rtc_cntl::RtcCntl, _>(index, |r, _| {
+                    r.set_reset_cause_code(crate::periph::rtc_cntl::SW_SYS_RESET_CODE)
+                });
+        }
+        log::info!(
+            "machine: software system reset — reboot {} with RTC memory kept and reset_state \
+             CoreSw",
+            self.reboots
+        );
         true
     }
 
