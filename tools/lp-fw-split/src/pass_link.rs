@@ -14,6 +14,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
+use crate::chip_profile::{ChipProfile, Linker};
+
 /// The firmware's target and profile.
 pub const TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const PROFILE: &str = "release-esp32";
@@ -33,7 +35,7 @@ pub struct Pass {
     pub took: Duration,
 }
 
-/// One link of the firmware: `<out>/<name>.elf` and `<out>/<name>.map`.
+/// One link of the C6's firmware: `<out>/<name>.elf` and `<out>/<name>.map`.
 pub fn link_firmware(
     repo: &Path,
     out: &Path,
@@ -41,7 +43,28 @@ pub fn link_firmware(
     script: &Path,
     identity: &Identity<'_>,
 ) -> Result<Pass> {
-    let crate_dir = repo.join("lp-fw/fw-esp32c6");
+    link_firmware_for(
+        &crate::chip_profile::ESP32C6,
+        repo,
+        out,
+        name,
+        script,
+        identity,
+    )
+}
+
+/// One link of `profile`'s firmware. Its three link arguments are spelled
+/// for its linker: directly for lld, behind `-Wl,` for GNU ld through gcc
+/// (whose binutils come from the espup toolchain when not on `PATH`).
+pub fn link_firmware_for(
+    profile: &ChipProfile,
+    repo: &Path,
+    out: &Path,
+    name: &str,
+    script: &Path,
+    identity: &Identity<'_>,
+) -> Result<Pass> {
+    let crate_dir = repo.join(profile.crate_dir);
     let main_rs = crate_dir.join("src/main.rs");
     fs::File::options()
         .write(true)
@@ -60,22 +83,40 @@ pub fn link_firmware(
         Some(target) => command.env("LP_FW_TARGET", target),
         None => command.env_remove("LP_FW_TARGET"),
     };
+    let wl = match profile.linker {
+        Linker::Lld => "",
+        Linker::GnuLd => {
+            if let Some(gcc) = xtensa_gcc_dir() {
+                let path = std::env::var("PATH").unwrap_or_default();
+                command.env("PATH", format!("{}:{path}", gcc.display()));
+            }
+            "-Wl,"
+        }
+    };
     let output = command
-        .args(["rustc", "--quiet", "--target", TARGET, "--profile", PROFILE])
+        .args([
+            "rustc",
+            "--quiet",
+            "--target",
+            profile.target,
+            "--profile",
+            profile.profile,
+        ])
         .args(["--features", identity.features])
         .args(["--message-format", "json-render-diagnostics"])
-        .args(["--", "-C", "link-arg=--emit-relocs"])
+        .args(["--", "-C"])
+        .arg(format!("link-arg={wl}--emit-relocs"))
         .arg("-C")
-        .arg(format!("link-arg=-Map={}", map.display()))
+        .arg(format!("link-arg={wl}-Map={}", map.display()))
         .arg("-C")
-        .arg(format!("link-arg=-T{}", script.display()))
+        .arg(format!("link-arg={wl}-T{}", script.display()))
         .stderr(Stdio::inherit())
         .output()
-        .context("running cargo rustc for fw-esp32c6")?;
+        .with_context(|| format!("running cargo rustc for {}", profile.package))?;
     if !output.status.success() {
-        bail!("the {name} link of fw-esp32c6 failed");
+        bail!("the {name} link of {} failed", profile.package);
     }
-    let built = executable(&output.stdout, "fw-esp32c6")?;
+    let built = executable(&output.stdout, profile.package)?;
     let elf = out.join(format!("{name}.elf"));
     fs::copy(&built, &elf).with_context(|| format!("copying {}", built.display()))?;
     Ok(Pass {
@@ -98,9 +139,24 @@ pub fn build_bootloader(repo: &Path) -> Result<PathBuf> {
 }
 
 fn build_loader_flavour(repo: &Path, bootloader: bool) -> Result<PathBuf> {
-    let dir = repo.join("lp-fw/fw-esp32c6-loader");
+    build_loader_for(&crate::chip_profile::ESP32C6, repo, bootloader)
+}
+
+/// Build `profile`'s loader from its own directory (`bootloader`: our own
+/// second stage, which only a profile with `our_bootloader` has); its ELF.
+pub fn build_loader_for(profile: &ChipProfile, repo: &Path, bootloader: bool) -> Result<PathBuf> {
+    if bootloader && !profile.our_bootloader {
+        bail!("{} has no second stage of our own", profile.name);
+    }
+    let dir = repo.join(profile.loader_dir);
     let mut command = Command::new("cargo");
     scrub_outer_build_env(&mut command);
+    if profile.linker == Linker::GnuLd
+        && let Some(gcc) = xtensa_gcc_dir()
+    {
+        let path = std::env::var("PATH").unwrap_or_default();
+        command.env("PATH", format!("{}:{path}", gcc.display()));
+    }
     if bootloader {
         command.args(["build", "--features", "bootloader"]);
     } else {
@@ -112,11 +168,27 @@ fn build_loader_flavour(repo: &Path, bootloader: bool) -> Result<PathBuf> {
         .args(["--message-format", "json-render-diagnostics"])
         .stderr(Stdio::inherit())
         .output()
-        .context("building fw-esp32c6-loader")?;
+        .with_context(|| format!("building {}", profile.loader_package))?;
     if !output.status.success() {
-        bail!("building fw-esp32c6-loader failed");
+        bail!("building {} failed", profile.loader_package);
     }
-    executable(&output.stdout, "fw-esp32c6-loader")
+    executable(&output.stdout, profile.loader_package)
+}
+
+/// The espup toolchain's GNU binutils for Xtensa, the newest that has
+/// `xtensa-esp32s3-elf-gcc` (the justfile's `_xt-gcc-dir`), or `None` when
+/// none is installed (it must then be on `PATH`).
+pub fn xtensa_gcc_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let root = Path::new(&home).join(".rustup/toolchains/esp/xtensa-esp-elf");
+    let mut dirs: Vec<PathBuf> = fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join("xtensa-esp-elf/bin"))
+        .filter(|p| p.join("xtensa-esp32s3-elf-gcc").exists())
+        .collect();
+    dirs.sort();
+    dirs.pop()
 }
 
 /// Drop an outer build's toolchain environment from a child cargo: when

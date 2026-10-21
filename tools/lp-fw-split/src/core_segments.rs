@@ -24,7 +24,7 @@
 //!   (`fw-esp32c6-loader/src/flash_window.rs`, `SCRATCH`), which a core
 //!   segment there would remap under it. The segment's bytes must also sit at
 //!   its address's offset within a page, or the loader refuses it ("segment
-//!   not page-congruent"); [`PAGE`] is the page the image is laid out for.
+//!   not page-congruent"); [`crate::app_image::PAGE`] is the page the image is laid out for.
 //! - **[`CORE_RAM`] minus [`LOADER_RAM`]**, copied. `CORE_RAM` is the HP SRAM
 //!   the core's own link may use (esp-hal's `ld/esp32c6/memory.x`, `RAM :
 //!   ORIGIN = 0x40800000, LENGTH = 0x6E610`); above it is the IDF
@@ -47,8 +47,8 @@ use std::ops::Range;
 
 use anyhow::{Result, bail};
 
-use crate::app_image::PAGE;
 use crate::engine_script::ENGINE_BASE;
+use crate::segment_rules::{ESP32C6_SEGMENTS, SegmentRules};
 
 /// The flash the core's own segments may be mapped at: the start of the
 /// loader's MMU window up to the engine region.
@@ -85,51 +85,68 @@ impl CoreSegment {
         u64::from(self.addr) + u64::from(self.len)
     }
 
-    /// How the loader treats it, or why it cannot place it.
+    /// How the C6's loader treats it, or why it cannot place it.
     pub fn placement(&self) -> Result<Placement, String> {
+        self.placement_in(&ESP32C6_SEGMENTS)
+    }
+
+    /// How a chip's loader treats it, or why it cannot place it.
+    pub fn placement_in(&self, rules: &SegmentRules) -> Result<Placement, String> {
         let within =
             |r: &Range<u32>| self.addr >= r.start && self.end() <= u64::from(r.end) && self.len > 0;
         let overlaps = |r: &Range<u32>| {
             u64::from(self.addr) < u64::from(r.end) && self.end() > u64::from(r.start)
         };
-        if LOADER_MMU_WINDOW.contains(&self.addr) {
-            if !within(&CORE_FLASH) {
+        if let Some(w) = rules.flash.iter().find(|w| w.window.contains(&self.addr)) {
+            if !within(&w.core) {
                 return Err(format!(
                     "mapped by the loader, but not inside the core's flash {:#010x}..{:#010x}",
-                    CORE_FLASH.start, CORE_FLASH.end
+                    w.core.start, w.core.end
                 ));
             }
-            if self.data_offset % PAGE != self.addr % PAGE {
+            let page = rules.page;
+            if self.data_offset % page != self.addr % page {
                 return Err(format!(
-                    "its bytes at image offset {:#x} are not at its address's offset in a {PAGE:#x} page",
+                    "its bytes at image offset {:#x} are not at its address's offset in a {page:#x} page",
                     self.data_offset
                 ));
             }
             return Ok(Placement::Mapped);
         }
-        if !within(&CORE_RAM) {
+        if !rules.ram.iter().any(within) {
             let what = if self.addr == 0 {
                 "an address-0 segment (espflash's padding)"
             } else {
                 "a segment outside the core's RAM"
             };
+            let ranges: Vec<String> = rules
+                .ram
+                .iter()
+                .map(|r| format!("{:#010x}..{:#010x}", r.start, r.end))
+                .collect();
             return Err(format!(
-                "{what}: the loader would copy it to {:#010x}, which is not inside {:#010x}..{:#010x}",
-                self.addr, CORE_RAM.start, CORE_RAM.end
+                "{what}: the loader would copy it to {:#010x}, which is not inside {}",
+                self.addr,
+                ranges.join(" or ")
             ));
         }
-        if overlaps(&LOADER_RAM) {
+        if let Some(l) = rules.loader_ram.iter().find(|l| overlaps(l)) {
             return Err(format!(
                 "copied over the loader's own RAM {:#010x}..{:#010x}, which the loader refuses",
-                LOADER_RAM.start, LOADER_RAM.end
+                l.start, l.end
             ));
         }
         Ok(Placement::Copied)
     }
 
-    /// One line of the segment table.
+    /// One line of the C6's segment table.
     pub fn line(&self) -> String {
-        let how = match self.placement() {
+        self.line_in(&ESP32C6_SEGMENTS)
+    }
+
+    /// One line of a chip's segment table.
+    pub fn line_in(&self, rules: &SegmentRules) -> String {
+        let how = match self.placement_in(rules) {
             Ok(Placement::Mapped) => "mapped".to_string(),
             Ok(Placement::Copied) => "copied".to_string(),
             Err(why) => format!("REFUSED: {why}"),
@@ -186,10 +203,18 @@ pub fn segments(image: &[u8]) -> Result<Vec<CoreSegment>> {
 /// The core image's segment table, or an error naming every segment the
 /// loader cannot place.
 pub fn check(image: &[u8]) -> Result<Vec<CoreSegment>> {
+    check_in(image, &ESP32C6_SEGMENTS)
+}
+
+/// [`check`] against a chip's loader.
+pub fn check_in(image: &[u8], rules: &SegmentRules) -> Result<Vec<CoreSegment>> {
     let segs = segments(image)?;
-    let refused: Vec<_> = segs.iter().filter(|s| s.placement().is_err()).collect();
+    let refused: Vec<_> = segs
+        .iter()
+        .filter(|s| s.placement_in(rules).is_err())
+        .collect();
     if !refused.is_empty() {
-        let table: Vec<_> = segs.iter().map(CoreSegment::line).collect();
+        let table: Vec<_> = segs.iter().map(|s| s.line_in(rules)).collect();
         bail!(
             "the core image has {} segment(s) the loader cannot place; a board would not boot it \
              (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md):\n{}",
@@ -203,6 +228,7 @@ pub fn check(image: &[u8]) -> Result<Vec<CoreSegment>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_image::PAGE;
 
     #[test]
     fn release_2026_10_14_10s_core_passes() {

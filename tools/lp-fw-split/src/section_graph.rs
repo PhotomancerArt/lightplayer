@@ -15,6 +15,8 @@ use anyhow::{Context, Result, bail};
 use object::Endianness;
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
 
+use crate::chip_profile::{ChipProfile, Isa, Linker};
+
 /// Flash-mapped output sections (the core's and the engine's).
 pub const FLASH_OUTS: &[&str] = &[
     ".text",
@@ -99,6 +101,33 @@ impl SectionGraph {
         let nodes = parse_map(&String::from_utf8_lossy(&map));
         let relocs = read_relocations(&elf)?;
         Ok(Self::build(nodes, &relocs.list, relocs.entry))
+    }
+
+    /// Read the map and the ELF of one link of `profile`'s chip: lld's map
+    /// and `S + A` for the C6 ([`Self::load`]); GNU ld's map, targets from
+    /// the linked bytes and code tied to its literal pool for the S3.
+    pub fn load_for(profile: &ChipProfile, elf_path: &Path, map_path: &Path) -> Result<Self> {
+        if profile.linker == Linker::Lld && profile.isa == Isa::Rv32 {
+            return Self::load(elf_path, map_path);
+        }
+        let map =
+            std::fs::read(map_path).with_context(|| format!("reading {}", map_path.display()))?;
+        let elf =
+            std::fs::read(elf_path).with_context(|| format!("reading {}", elf_path.display()))?;
+        let text = String::from_utf8_lossy(&map);
+        let nodes = match profile.linker {
+            Linker::Lld => parse_map(&text),
+            Linker::GnuLd => crate::gnu_map::parse_gnu_map(&text),
+        };
+        let relocs = match profile.isa {
+            Isa::Rv32 => read_relocations(&elf)?,
+            Isa::Xtensa => crate::xtensa_targets::read_xtensa_targets(&elf)?,
+        };
+        let mut graph = Self::build(nodes, &relocs.list, relocs.entry);
+        if profile.isa == Isa::Xtensa {
+            crate::literal_pools::tie_pools(&mut graph);
+        }
+        Ok(graph)
     }
 
     /// The graph over `nodes` (any order) with relocations `(r_offset, S + A)`.
