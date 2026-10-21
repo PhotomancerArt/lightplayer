@@ -99,6 +99,7 @@ pub fn ModuleFace(
                         frame: preview.frame,
                         focus_action: preview.show_live.clone(),
                         on_action,
+                        drawable: face.drawable.clone(),
                     }
                     if let Some(current) = hero_choice {
                         HeroProductToggle { node: hero_node, current, on_action }

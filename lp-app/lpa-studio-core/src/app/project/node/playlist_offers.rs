@@ -340,7 +340,7 @@ fn panel_write_action(
         PanelWriteOp {
             scope: target.scope,
             channel: target.channel.clone(),
-            value,
+            value: value.into(),
             ttl_ms: None,
         },
     )
@@ -616,6 +616,9 @@ mod tests {
             lpc_model::PLAYLIST_SKIP_CHANNEL => lpc_model::PLAYLIST_SKIP_CHANNEL,
             other => panic!("unexpected channel {other}"),
         };
-        (channel, op.value.clone())
+        (
+            channel,
+            op.value.as_value().expect("a whole-value write").clone(),
+        )
     }
 }

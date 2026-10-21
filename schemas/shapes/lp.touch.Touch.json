@@ -1,0 +1,24 @@
+{
+  "value": {
+    "shape": {
+      "editor": "plain",
+      "id": 2175778215,
+      "meta": {},
+      "ty": {
+        "struct": {
+          "fields": [
+            {
+              "name": "id",
+              "ty": "u32"
+            },
+            {
+              "name": "pos",
+              "ty": "vec2"
+            }
+          ],
+          "name": "Touch"
+        }
+      }
+    }
+  }
+}

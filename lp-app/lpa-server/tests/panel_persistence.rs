@@ -21,12 +21,14 @@ use core::cell::RefCell;
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::panel_state::{PANEL_STATE_PATH, PANEL_STATE_WRITE_INTERVAL_MS, PanelStateFile};
 use lpa_server::{LpGraphics, LpServer, Project};
-use lpc_model::{AsLpPath, LpPath, LpPathBuf, LpValue};
+use lpc_model::{
+    AsLpPath, LpPath, LpPathBuf, LpValue, PanelWriteValue, TOUCHES_CHANNEL, ToLpValue, Touch,
+};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, RevisionGateRead, RevisionGateResult,
     WireBindingGraph, WireBindingGraphRead, WireBusChannelValue, WirePanelClearRequest,
-    WirePanelWriteRequest, WireProjectHandle, WireScopeRef,
+    WirePanelCommandResponse, WirePanelWriteRequest, WireProjectHandle, WireScopeRef,
 };
 use lpfs::{LpFs, LpFsMemory, LpFsView};
 
@@ -201,7 +203,7 @@ fn momentary_writers_are_never_persisted() {
     harness.project().panel_write(&WirePanelWriteRequest {
         scope,
         channel: "time".to_string(),
-        value: LpValue::F32(1.0),
+        value: LpValue::F32(1.0).into(),
         ttl_ms: Some(PANEL_STATE_WRITE_INTERVAL_MS * 10),
     });
     harness.advance(PANEL_STATE_WRITE_INTERVAL_MS);
@@ -210,6 +212,52 @@ fn momentary_writers_are_never_persisted() {
     assert!(
         saved.entries.is_empty(),
         "the momentary writer is engaged but not persisted: {saved:?}"
+    );
+}
+
+#[test]
+fn a_touch_set_rides_a_momentary_write_and_is_never_persisted() {
+    // A set (a touch set) is gesture state: a latched one is refused, so it
+    // can never reach the leaf-only state file; a momentary one engages
+    // and is skipped by the snapshot like any momentary writer.
+    let mut harness = Harness::new("panel-persist-touch-set");
+    harness.load();
+    let scope = harness.scope();
+    let set = PanelWriteValue::Map(alloc::vec![(1, Touch::new(1, [0.0, 0.5]).to_lp_value())]);
+
+    let latched = harness.project().panel_write(&WirePanelWriteRequest {
+        scope,
+        channel: TOUCHES_CHANNEL.to_string(),
+        value: set.clone(),
+        ttl_ms: None,
+    });
+    assert!(
+        matches!(latched, WirePanelCommandResponse::Rejected { .. }),
+        "a latched set is refused: {latched:?}"
+    );
+
+    let momentary = harness.project().panel_write(&WirePanelWriteRequest {
+        scope,
+        channel: TOUCHES_CHANNEL.to_string(),
+        value: set,
+        ttl_ms: Some(PANEL_STATE_WRITE_INTERVAL_MS * 10),
+    });
+    assert!(
+        matches!(momentary, WirePanelCommandResponse::Accepted { engaged: 1 }),
+        "a momentary set engages: {momentary:?}"
+    );
+    harness.write_panel("time", 2.0);
+    harness.advance(PANEL_STATE_WRITE_INTERVAL_MS);
+
+    let saved = harness.state_file().expect("a write happened");
+    assert_eq!(
+        saved
+            .entries
+            .iter()
+            .map(|entry| entry.channel.as_str())
+            .collect::<alloc::vec::Vec<_>>(),
+        ["time"],
+        "only the latched leaf is persisted: {saved:?}"
     );
 }
 
@@ -318,7 +366,9 @@ fn a_playlist_cycle_and_skip_list_survive_a_reboot() {
     let mut restored: Vec<(String, LpValue)> = engine
         .panel_writers()
         .iter()
-        .map(|((_, channel), writer)| (channel.0.clone(), writer.value.clone()))
+        .filter_map(|((_, channel), writer)| {
+            Some((channel.0.clone(), writer.value.as_value()?.clone()))
+        })
         .collect();
     restored.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(
@@ -431,7 +481,7 @@ impl Harness {
         self.project().panel_write(&WirePanelWriteRequest {
             scope,
             channel: channel.to_string(),
-            value,
+            value: value.into(),
             ttl_ms: None,
         });
     }

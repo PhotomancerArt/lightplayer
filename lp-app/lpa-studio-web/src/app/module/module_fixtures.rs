@@ -422,6 +422,7 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
         wiring_open: false,
         provenance: Some("PhotomancerArt · v1.2 · CC0-1.0".to_string()),
         auto_save: None,
+        drawable: None,
         export: None,
     }
 }
@@ -561,6 +562,7 @@ pub(crate) fn root_face() -> UiModuleFace {
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
         // The project root owns panel persistence (P11).
         auto_save: Some(true),
+        drawable: None,
         export: None,
     }
 }
@@ -589,6 +591,7 @@ pub(crate) fn control_root_face() -> UiModuleFace {
         wiring_open: false,
         provenance: None,
         auto_save: Some(true),
+        drawable: None,
         export: None,
     }
 }
@@ -659,6 +662,7 @@ pub(crate) fn both_products_root_face(hero: ModuleHeroProduct) -> UiModuleFace {
         wiring_open: false,
         provenance: None,
         auto_save: Some(true),
+        drawable: None,
         // A root face: designation rows ride every card BUT the root.
         export: None,
     }

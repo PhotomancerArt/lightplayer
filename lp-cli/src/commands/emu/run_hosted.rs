@@ -161,6 +161,29 @@ async fn converse<B: EmuUsbBoard>(
         );
     }
 
+    if let Some(spec) = &args.strokes {
+        let after = super::handler::parse_duration_us(&args.strokes_after)?;
+        let length = super::handler::parse_duration_us(&args.strokes_for)? / 1000;
+        let script = super::strokes::StrokeScript::from_spec(spec, length)?;
+        let start = host.board.micros() + after;
+        host.run_until(start.min(micros), None)?;
+        eprintln!(
+            "emu: strokes `{spec}` from {:.3} s emulated, {} samples over {:.3} s",
+            host.board_seconds(),
+            script.samples.len(),
+            script.span_ms() as f64 / 1000.0
+        );
+        let counts = super::strokes::draw(host, &script, micros).await?;
+        eprintln!(
+            "emu: strokes done at {:.3} s emulated — {} sent, {} accepted, {} refused, {} collapsed",
+            host.board_seconds(),
+            counts.sent,
+            counts.accepted,
+            counts.rejected,
+            counts.collapsed
+        );
+    }
+
     for (i, text) in args.request.iter().enumerate() {
         let request: ClientRequest = serde_json::from_str(text)
             .with_context(|| format!("--request `{text}` is not a ClientRequest"))?;

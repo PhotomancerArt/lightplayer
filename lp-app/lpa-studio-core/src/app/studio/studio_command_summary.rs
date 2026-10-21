@@ -99,6 +99,12 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
             format!("{} pictures", pictures.len()),
         ),
         StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
+        // A finger sends one per move, like a Graph drag: the writes it
+        // makes are actions of their own, and the timeline keeps those.
+        StudioCommand::Stroke(stroke) => (
+            "Stroke".to_string(),
+            format!("{:?}: {} fingers", stroke.surface, stroke.pointers.len()),
+        ),
         // A selection box or a drag sends one per move: the timeline keeps
         // what they changed, not every one.
         StudioCommand::Graph(note) => ("Graph".to_string(), format!("{note:?}")),

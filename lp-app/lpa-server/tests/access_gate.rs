@@ -1020,7 +1020,7 @@ fn project_commands() -> Vec<(WireProjectCommand, Required)> {
                 request: WirePanelWriteRequest {
                     scope: WireScopeRef::Module { owner },
                     channel: "time".to_string(),
-                    value: LpValue::F32(0.5),
+                    value: LpValue::F32(0.5).into(),
                     ttl_ms: None,
                 },
             },

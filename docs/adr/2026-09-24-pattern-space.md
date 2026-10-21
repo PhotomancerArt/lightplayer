@@ -125,3 +125,20 @@ texel centres map to ±1, and the pitch is one texel.
   would be a second `ScopeGeometry` source, and nothing here prevents it.
 - Deriving `render_size` from pitch was deferred by DD3.
 - Sample geometry (per-letter, along-stroke, wire-order patterns).
+
+## Amendment (2026-10-20): the Fluid node opts in
+
+The Fluid node is the first non-shader node to opt in. Its def takes the
+same optional key and values, `"coords": "pattern"` (Yona's ruling, drawing
+on the picture plan); absent or `"pixels"` is the old frame, byte-identical,
+with no format bump. In pattern mode the solver grid spans the lamp box edge
+to edge, every sample is placed through that box's fit (off the box, it
+clamps to the edge), and emitters are read in pattern space: `pos` and `dir`
+y up, `radius` and the push in pattern units, so a stamp is round on the
+lamps. A 1D request is answered the way a 2D pattern shader answers one: the
+strip lies along the centre line, x −1…1 at y 0. Emitters are stamped in
+`produce`, before any sample, so they go through the scope seen at the last
+sample (a lent lamp box outranks a texel-centre stand-in); before the first
+sample, the grid's own texel centres. Pattern mode also reads the grid at
+cell centres; pixels mode keeps its half-cell up-left read-back offset.
+See `lp-core/lpc-engine/src/nodes/fluid/mod.rs`.

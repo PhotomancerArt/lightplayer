@@ -37,6 +37,15 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 45: a panel write carries a `PanelWriteValue` (plan
+///   `lp2025/2026-10-20-0019-drawing-on-the-picture`, D7) —
+///   `WirePanelWriteRequest.value` is `{"value": <LpValue>}` or
+///   `{"map": [[key, <LpValue>], …]}` instead of a bare `LpValue`. A map is
+///   accepted on a momentary write only (a touch set on `touches`); a
+///   latched one is refused. `.lp/panel.json` and `LpValue` are unchanged.
+///   The same train adds the Fluid def's optional `coords` key (an old peer
+///   refuses a def with a field it does not know, as with the shader's in
+///   25). `PACK_FORMAT_VERSION` is unchanged.
 /// - 44: file bodies on the fs wire go as one unambiguous encoding — text as
 ///   a JSON string, any other bytes as `{"base64":"…"}`
 ///   (`lpc_model::body_bytes`, wire 41's rule) — in `FsRequest::Write`,
@@ -455,7 +464,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 44;
+pub const WIRE_PROTO_VERSION: u32 = 45;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -886,7 +895,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 44,
+            WIRE_PROTO_VERSION, 45,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

@@ -108,7 +108,7 @@ fn a_dormant_entrys_knobs_survive_a_reboot_and_come_back_with_the_entry() {
         engine
             .panel_writers()
             .get(sink_scope, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.75)),
         "the sink writer of a dormant entry is restored"
     );
@@ -136,7 +136,7 @@ fn a_dormant_entrys_knobs_survive_a_reboot_and_come_back_with_the_entry() {
         engine
             .panel_writers()
             .get(ScopeRef::Module { owner: pulse }, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.25)),
         "the module knob is back on the reloaded pattern"
     );

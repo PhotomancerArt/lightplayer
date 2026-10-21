@@ -179,15 +179,18 @@ pub(crate) fn apply_picker_action(facts: &mut PatternPickerFacts, action: &UiAct
     let Some(op) = action.op_as::<lpa_studio_core::PanelWriteOp>() else {
         return;
     };
+    let Some(value) = op.value.as_value() else {
+        return;
+    };
     match op.channel.as_str() {
         lpc_model::PLAYLIST_CYCLE_CHANNEL => {
-            if let Ok(cycle) = PlaylistCycle::from_lp_value(&op.value) {
+            if let Ok(cycle) = PlaylistCycle::from_lp_value(value) {
                 facts.cycle = cycle;
                 *facts = cycle_held(facts.clone());
             }
         }
         lpc_model::PLAYLIST_SKIP_CHANNEL => {
-            if let Ok(skip) = Vec::<u32>::from_lp_value(&op.value) {
+            if let Ok(skip) = Vec::<u32>::from_lp_value(value) {
                 facts.skip = skip;
                 *facts = skip_held(facts.clone());
             }

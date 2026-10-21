@@ -28,6 +28,11 @@ use crate::dataflow::resolver::query_intern::QueryId;
 pub enum RouteTarget {
     /// A literal written into the binding; materialize it directly.
     Literal(LpValue),
+    /// An engaged panel writer: read its held value from the host each time.
+    PanelWriter {
+        scope: crate::node::ScopeRef,
+        channel: lpc_model::ChannelName,
+    },
     /// Resolve this query and adopt its value.
     Query(QueryId),
 }

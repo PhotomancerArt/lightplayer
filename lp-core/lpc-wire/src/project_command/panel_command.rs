@@ -10,7 +10,7 @@
 //! project-level arms.
 
 use alloc::string::String;
-use lpc_model::LpValue;
+use lpc_model::PanelWriteValue;
 
 use crate::WireScopeRef;
 
@@ -22,8 +22,10 @@ pub struct WirePanelWriteRequest {
     pub scope: WireScopeRef,
     /// The channel the control drives.
     pub channel: String,
-    /// The value to hold.
-    pub value: LpValue,
+    /// The value to hold: one leaf, or a `u32`-keyed set (a touch set). A
+    /// map is accepted on a momentary write only (`ttl_ms` set): it is
+    /// gesture state and never persists.
+    pub value: PanelWriteValue,
     /// Momentary liveness (panel.md P14): when present, the writer
     /// DESPAWNS unless renewed within this many milliseconds — renewal is
     /// simply another write. Absent = latching writer (holds until an
@@ -80,7 +82,8 @@ pub enum WirePanelCommandResponse {
 mod tests {
     use super::*;
     use alloc::string::ToString;
-    use lpc_model::NodeId;
+    use alloc::vec;
+    use lpc_model::{LpValue, NodeId, ToLpValue, Touch};
 
     #[test]
     fn panel_write_round_trips() {
@@ -89,10 +92,26 @@ mod tests {
                 owner: NodeId::new(4),
             },
             channel: "speed".to_string(),
-            value: LpValue::F32(0.5),
+            value: PanelWriteValue::Value(LpValue::F32(0.5)),
             ttl_ms: Some(1000),
         };
         let json = serde_json::to_string(&request).unwrap();
+        let back: WirePanelWriteRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, request);
+    }
+
+    #[test]
+    fn panel_write_of_a_touch_set_round_trips() {
+        let request = WirePanelWriteRequest {
+            scope: WireScopeRef::Module {
+                owner: NodeId::new(4),
+            },
+            channel: "touches".to_string(),
+            value: PanelWriteValue::Map(vec![(1, Touch::new(1, [0.0, -0.5]).to_lp_value())]),
+            ttl_ms: Some(400),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"map\""), "{json}");
         let back: WirePanelWriteRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back, request);
     }

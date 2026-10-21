@@ -56,6 +56,13 @@ pub struct UiModuleFace {
     /// project's root module that owns it, and an embedded module carries
     /// `None` rather than repeating its host's switch.
     pub auto_save: Option<bool>,
+    /// The hero is drawable (plan `drawing-on-the-picture`, D12): set by the
+    /// studio controller on the ROOT module's face only, while the open
+    /// session is live, its hero is the board's own composed output and a
+    /// `touches` reader is loaded. Play's banner and the editor's hero both
+    /// draw this face's preview. A fact, not a verb: a stroke is reported as
+    /// `StudioCommand::Stroke` on [`crate::UiDrawable::surface`].
+    pub drawable: Option<crate::UiDrawable>,
     /// This module's own **export designation** row, for its detail popup
     /// (spike 2·i). `None` when designation is not a question for this card
     /// — the root module (an export must never point at the root), a
@@ -137,6 +144,7 @@ impl UiModuleFace {
             wiring_open: false,
             provenance: None,
             auto_save: None,
+            drawable: None,
             export: None,
         }
     }

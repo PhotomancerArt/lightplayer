@@ -249,7 +249,7 @@ fn knob_values_survive_unload_and_reload() {
         rt.engine()
             .panel_writers()
             .get(sink, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.75)),
         "the sink writer stays: its owner is the playlist"
     );
@@ -268,7 +268,7 @@ fn knob_values_survive_unload_and_reload() {
         rt.engine()
             .panel_writers()
             .get(new_scope, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.25)),
         "the module knob came back under the new module id"
     );
@@ -277,7 +277,7 @@ fn knob_values_survive_unload_and_reload() {
         rt.engine()
             .panel_writers()
             .get(sink, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.75))
     );
 }

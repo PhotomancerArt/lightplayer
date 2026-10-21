@@ -78,6 +78,14 @@ pub enum StudioCommand {
     /// the ⌘K ranking — never a request: core does not navigate. Latest
     /// wins.
     Place(crate::UiPlace),
+    /// Where every finger on a drawable picture is now (plan
+    /// `drawing-on-the-picture`, D11): a fact the web reports as the pointer
+    /// moves, like `Place`, never an action. Core turns it into paced
+    /// momentary `touches` writes (`app/draw`): it owns the target, the
+    /// conversion, the pace, the renewal and the release. Applied in queue
+    /// order and never coalesced here — the stroke controller keeps the
+    /// newest positions and decides when to write.
+    Stroke(crate::UiStroke),
     /// The signed-in account's board list, as lightplayer.app last
     /// answered `ListAccountBoards` (the web edge asks at load and every
     /// 30 s while the page is visible). `None` is signed out, or

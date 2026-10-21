@@ -362,7 +362,7 @@ fn panel_time(host: &mut EmuLinkHost<C6Board>, value: f32, ids: u64) -> Result<(
     let request = lpc_wire::WirePanelWriteRequest {
         scope: serde_json::from_value(scope).map_err(|e| e.to_string())?,
         channel: "time".to_string(),
-        value: LpValue::F32(value),
+        value: LpValue::F32(value).into(),
         ttl_ms: None,
     };
     block_on(client.project_panel_write(handle, request))

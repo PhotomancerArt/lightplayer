@@ -303,7 +303,7 @@ where
     /// Process one coalesced batch. Returns `false` when a `Shutdown` was seen
     /// (the loop should stop after this batch is fully processed).
     async fn process_batch(&mut self, batch: Vec<StudioCommand>) -> bool {
-        let plan = CommandPlan::from_batch(batch);
+        let mut plan = CommandPlan::from_batch(batch);
 
         // Console commands are synchronous state mutations with no async work;
         // apply them first (in queue order, never coalesced) so the batch's
@@ -374,6 +374,19 @@ where
         }
         // The one asynchronous half: registry writes the folds asked for.
         self.controller.settle_device_records().await;
+        // Strokes after the folds (a picture that just stopped being
+        // drawable is read as such), then whatever write the stroke owes
+        // with no new sample (the newest positions once the send interval
+        // passed, a resting finger's renewal). Each is a panel write in
+        // this batch's actions, coalesced like a knob's.
+        for stroke in core::mem::take(&mut plan.strokes) {
+            if let Some(action) = self.controller.apply_stroke(stroke) {
+                push_action_coalesced(&mut plan.actions, action);
+            }
+        }
+        if let Some(action) = self.controller.due_stroke_write() {
+            push_action_coalesced(&mut plan.actions, action);
+        }
         for action in plan.actions {
             self.run_action(action).await;
         }
@@ -782,6 +795,10 @@ struct CommandPlan {
     /// Kept as latest-wins, the pair read as "no move" and the editor stayed
     /// up over the home page.
     places: Vec<crate::UiPlace>,
+    /// The fingers on drawable pictures, in queue order: each one is a
+    /// sample the stroke controller folds (it keeps the newest positions
+    /// and decides when to write).
+    strokes: Vec<crate::UiStroke>,
 }
 
 /// One planned device step: fold an input, or make the effects layer look.
@@ -812,6 +829,7 @@ impl CommandPlan {
         let mut account_pictures = Vec::new();
         let mut account_answers = Vec::new();
         let mut places = Vec::new();
+        let mut strokes = Vec::new();
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
@@ -826,6 +844,7 @@ impl CommandPlan {
                 StudioCommand::AccountBoardPictures(pictures) => account_pictures.extend(pictures),
                 StudioCommand::AccountBoardAnswered(answer) => account_answers.push(answer),
                 StudioCommand::Place(reported) => places.push(reported),
+                StudioCommand::Stroke(stroke) => strokes.push(stroke),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
                 // a server round-trip, so convert it into the equivalent
@@ -879,6 +898,7 @@ impl CommandPlan {
             account_pictures,
             account_answers,
             places,
+            strokes,
         }
     }
 }
@@ -921,12 +941,18 @@ fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
         // Panel writes coalesce per (scope, channel) with the same
         // tail-scan rule: a knob-drag flood collapses to the newest value,
         // and any non-PanelWrite action is a barrier (a queued clear must
-        // reach the server between two writes, in order).
+        // reach the server between two writes, in order). A stroke's
+        // release is a barrier too, on either side: a tap's dab and its
+        // release must both reach the board.
         let key = (op.scope, op.channel.clone());
+        let release = op.is_release();
         for queued in actions.iter_mut().rev() {
             match queued.op_as::<crate::PanelWriteOp>() {
                 Some(queued_op) => {
                     if (queued_op.scope, queued_op.channel.clone()) == key {
+                        if release || queued_op.is_release() {
+                            break;
+                        }
                         *queued = action;
                         return;
                     }

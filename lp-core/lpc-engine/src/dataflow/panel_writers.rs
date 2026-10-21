@@ -17,15 +17,16 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, LpValue, Revision};
+use lpc_model::{ChannelName, LpValue, PanelWriteValue, Revision};
 
 use crate::node::ScopeRef;
 
 /// One engaged panel writer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelWriter {
-    /// The held value (latched until cleared, panel.md P2).
-    pub value: LpValue,
+    /// The held value (latched until cleared, panel.md P2). A map is only
+    /// ever held by a momentary writer (the server refuses a latched one).
+    pub value: PanelWriteValue,
     /// Engine revision of the most recent write (display/coalescing aid).
     pub written_at: Revision,
     /// Momentary liveness deadline (panel.md P14), in engine total-ms:
@@ -69,7 +70,7 @@ impl PanelWriterStore {
         &mut self,
         scope: ScopeRef,
         channel: ChannelName,
-        value: LpValue,
+        value: PanelWriteValue,
         at: Revision,
         expires_at_ms: Option<u64>,
     ) {
@@ -212,9 +213,9 @@ impl PanelWriterStore {
             let Some(writer) = self.writers.remove(&key) else {
                 continue;
             };
-            if writer.expires_at_ms.is_none() {
+            if let (None, PanelWriteValue::Value(value)) = (writer.expires_at_ms, writer.value) {
                 self.parked
-                    .insert((String::from(persist_path), key.1), writer.value);
+                    .insert((String::from(persist_path), key.1), value);
                 parked += 1;
             }
         }
@@ -257,7 +258,7 @@ impl PanelWriterStore {
             self.writers.insert(
                 (scope, key.1),
                 PanelWriter {
-                    value,
+                    value: PanelWriteValue::Value(value),
                     written_at: at,
                     expires_at_ms: None,
                 },
@@ -288,14 +289,14 @@ mod tests {
         store.set(
             old,
             speed.clone(),
-            LpValue::F32(0.25),
+            LpValue::F32(0.25).into(),
             Revision::new(1),
             None,
         );
         store.set(
             old,
             ChannelName(String::from("nudge")),
-            LpValue::F32(1.0),
+            LpValue::F32(1.0).into(),
             Revision::new(1),
             Some(500),
         );
@@ -317,7 +318,7 @@ mod tests {
         );
         assert_eq!(
             store.get(new, &speed).map(|writer| &writer.value),
-            Some(&LpValue::F32(0.25))
+            Some(&PanelWriteValue::Value(LpValue::F32(0.25)))
         );
         assert_eq!(store.parked().count(), 0);
         assert_eq!(

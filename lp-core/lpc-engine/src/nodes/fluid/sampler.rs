@@ -16,12 +16,69 @@ pub fn sample_rgb_nearest_q16(solver: &MsaFluidSolver, x_q16: i32, y_q16: i32) -
 }
 
 /// Sample the current fluid color with bilinear filtering.
+///
+/// Cell `i` (1-based) is read at its **left/top corner**, `(i − 1) / n`,
+/// while [`super::stamp_emitter`] puts an emitter's dye in the cell whose
+/// span holds it — centred at `(i − 0.5) / n`. So pixels mode reads its dye
+/// back half a cell up-and-left of where it stamped it. It is kept exactly
+/// as it is: pixels mode is byte-identical to every fluid rendered before
+/// pattern space existed. Pattern mode samples with
+/// [`sample_rgb_bilinear_centred_q16`], which has no offset.
 pub fn sample_rgb_bilinear_q16(solver: &MsaFluidSolver, x_q16: i32, y_q16: i32) -> (Q32, Q32, Q32) {
     let nx = solver.nx();
     let ny = solver.ny();
     let stride = solver.stride();
     let (x0, x1, tx) = q16_to_cell_pair(x_q16, nx);
     let (y0, y1, ty) = q16_to_cell_pair(y_q16, ny);
+
+    let c00 = x0 + y0 * stride;
+    let c10 = x1 + y0 * stride;
+    let c01 = x0 + y1 * stride;
+    let c11 = x1 + y1 * stride;
+
+    (
+        bilinear_channel(
+            solver.r()[c00],
+            solver.r()[c10],
+            solver.r()[c01],
+            solver.r()[c11],
+            tx,
+            ty,
+        ),
+        bilinear_channel(
+            solver.g()[c00],
+            solver.g()[c10],
+            solver.g()[c01],
+            solver.g()[c11],
+            tx,
+            ty,
+        ),
+        bilinear_channel(
+            solver.b()[c00],
+            solver.b()[c10],
+            solver.b()[c01],
+            solver.b()[c11],
+            tx,
+            ty,
+        ),
+    )
+}
+
+/// Sample the current fluid color with bilinear filtering over **cell
+/// centres**: cell `i` (1-based) is read exactly at `(i − 0.5) / n`, the
+/// centre of the span its dye is stamped into. Between centres it blends the
+/// two neighbours; outside the outermost centres it holds the edge cell
+/// (clamp). `x_q16` / `y_q16` are grid uv, 0 → 1 edge to edge.
+pub fn sample_rgb_bilinear_centred_q16(
+    solver: &MsaFluidSolver,
+    x_q16: i32,
+    y_q16: i32,
+) -> (Q32, Q32, Q32) {
+    let nx = solver.nx();
+    let ny = solver.ny();
+    let stride = solver.stride();
+    let (x0, x1, tx) = q16_to_centred_cell_pair(x_q16, nx);
+    let (y0, y1, ty) = q16_to_centred_cell_pair(y_q16, ny);
 
     let c00 = x0 + y0 * stride;
     let c10 = x1 + y0 * stride;
@@ -68,6 +125,16 @@ pub fn sample_rgba16_bilinear_q16(solver: &MsaFluidSolver, x_q16: i32, y_q16: i3
     rgba16_from_rgb(r, g, b)
 }
 
+/// [`sample_rgb_bilinear_centred_q16`] as RGBA16 unorm.
+pub fn sample_rgba16_bilinear_centred_q16(
+    solver: &MsaFluidSolver,
+    x_q16: i32,
+    y_q16: i32,
+) -> [u16; 4] {
+    let (r, g, b) = sample_rgb_bilinear_centred_q16(solver, x_q16, y_q16);
+    rgba16_from_rgb(r, g, b)
+}
+
 fn rgba16_from_rgb(r: Q32, g: Q32, b: Q32) -> [u16; 4] {
     [
         r.to_u16_saturating(),
@@ -94,6 +161,21 @@ fn q16_to_cell_pair(coord: i32, len: usize) -> (usize, usize, Q32) {
     };
     let cell0 = index + 1;
     let cell1 = (cell0 + 1).min(len);
+    (cell0, cell1, frac)
+}
+
+/// The two cells around `coord` (grid uv, Q16.16) on a centre lattice —
+/// cell `k` (0-based) centred at `(k + 0.5) / len` — and the blend between
+/// them.
+fn q16_to_centred_cell_pair(coord: i32, len: usize) -> (usize, usize, Q32) {
+    let len = len.max(1) as i64;
+    // Position in cell units, measured from the first cell's centre.
+    let scaled = i64::from(coord.clamp(0, 65536)) * len - 32768;
+    let scaled = scaled.clamp(0, (len - 1) << 16);
+    let index = (scaled >> 16) as usize;
+    let frac = Q32::from_fixed((scaled & 0xFFFF) as i32);
+    let cell0 = index + 1;
+    let cell1 = (cell0 + 1).min(len as usize);
     (cell0, cell1, frac)
 }
 

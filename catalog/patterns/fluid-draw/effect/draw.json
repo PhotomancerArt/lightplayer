@@ -1,0 +1,89 @@
+{
+  "kind": "ComputeShader",
+  "source": "draw.glsl",
+  "bindings": {
+    "touches": {
+      "source": "bus:touches"
+    },
+    "emitters": {
+      "target": "bus:fluid.emitters"
+    },
+    "fade": {
+      "source": "bus:fade"
+    },
+    "viscosity": {
+      "source": "bus:viscosity"
+    }
+  },
+  "consumed": {
+    "fade": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.08,
+      "min": 0,
+      "max": 0.5,
+      "label": "Fade",
+      "description": "How fast the dye fades, per solver step"
+    },
+    "viscosity": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3e-05,
+      "min": 0,
+      "max": 0.0005,
+      "label": "Viscosity",
+      "description": "How thick the fluid is: higher spreads less and swirls slower"
+    },
+    "touches": {
+      "kind": "map",
+      "value": "lp::touch::Touch",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "Touches",
+      "description": "Fingers on the board's picture, in pattern space"
+    },
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Seconds from the scope's time product"
+    }
+  },
+  "produced": {
+    "fluid_fade": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.08,
+      "label": "",
+      "description": "Fade, handed to the Fluid node"
+    },
+    "fluid_viscosity": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3e-05,
+      "label": "",
+      "description": "Viscosity, handed to the Fluid node"
+    },
+    "emitters": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 16,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

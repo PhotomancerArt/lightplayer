@@ -50,6 +50,7 @@ mod run_hosted;
 mod run_s3;
 mod run_v3;
 mod serve;
+mod strokes;
 
 pub use args::EmuCli;
 pub use handler::handle_emu;

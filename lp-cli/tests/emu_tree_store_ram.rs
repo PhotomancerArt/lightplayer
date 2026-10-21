@@ -267,7 +267,7 @@ fn panel_time(host: &mut EmuLinkHost<C6Board>, value: f32) {
         lpc_wire::WirePanelWriteRequest {
             scope: serde_json::from_value(scope).unwrap(),
             channel: "time".to_string(),
-            value: LpValue::F32(value),
+            value: LpValue::F32(value).into(),
             ttl_ms: None,
         },
     ))

@@ -457,6 +457,18 @@ F (module, "fluid-draw"):
   friend-count, and the sim's public params — *is* the installation
   controller.
 
+> **As built, 2026-10-20** (`catalog/patterns/fluid-draw`, ADR
+> `2026-10-20-touch-sets-are-momentary-map-panel-writes`): the public
+> channel is just `touches`, and the gate, the friends and the emitters are
+> one compute shader (its globals persist across ticks), touches →
+> `fluid.emitters`, with `idle_after` its own setting. The input is not a
+> panel pad: Studio makes the board's live picture drawable when a pattern
+> reads `touches`, and a finger on it is a momentary touch-set write
+> (`lp::touch::Touch { id, pos }` by pointer id, pattern space). The sim
+> runs in pattern space (the Fluid node's `"coords": "pattern"`). A host
+> camera writing `touches` from an outer scope (the R5 walk) is still the
+> shape for other sources.
+
 ## 5. UI corollaries
 
 One face, three zoom levels: the **effect author** works inside the module
@@ -568,8 +580,8 @@ vocabulary to standardize anymore
 (ADR 2026-08-04-time-is-a-product).
 
 Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
-multi-point, per-touch identity; shape question tracked as panel.md
-P-Q5). The old `phase` channel convention (panel.md P3) is superseded
+multi-point, per-touch identity; panel.md P-Q5, closed 2026-10-20: a
+`u32 → lp::touch::Touch` map riding a momentary panel write). The old `phase` channel convention (panel.md P3) is superseded
 by the phasor uniform kind above.
 
 ## 8. Provenance (field set settled — Q7)

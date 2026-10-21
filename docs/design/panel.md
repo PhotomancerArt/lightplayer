@@ -335,6 +335,13 @@ mode switch.
 > direction was design reference only. Widget-side gesture classes (which
 > channel kinds ARE momentary) arrive with the touch-set vocabulary,
 > P-Q5.
+>
+> 2026-10-20 (wire 45): a panel write's value is a leaf or a `u32`-keyed
+> map (`PanelWriteValue`), and a map rides a **momentary** write only — a
+> latched one is refused, so `.lp/panel.json` stays leaf-only. The first
+> map is the touch set on the well-known `touches` channel
+> (`lp::touch::Touch { id, pos }` by pointer id, in pattern space), which
+> Studio writes while someone draws on a board's picture.
 
 ## 3. Worked walkthroughs
 
@@ -403,8 +410,13 @@ this document never specifies resolution.
   clears with everything else. "Reset means reset"; a reset that leaves
   values latched in scopes the user cannot currently see is a haunting,
   not a safety feature. Implemented and pinned by test.
-- **P-Q5:** the touch-set value shape (per-touch id, position,
+- **P-Q5:** ~~the touch-set value shape (per-touch id, position,
   pressure/z, velocity — carried or derived?) and the multi-XY pad
-  widget spec. Prior art: old lightPlayer's `MultiTouchInput.Touch`
+  widget spec.~~ **Closed 2026-10-20** (ADR
+  `2026-10-20-touch-sets-are-momentary-map-panel-writes`): a `u32`-keyed
+  map of `lp::touch::Touch { id, pos }` by pointer id, `pos` in pattern
+  space; velocity and direction derived by the consumer; pressure later,
+  as an added field. The first "widget" is the board's live picture
+  itself (drawable when a pattern reads `touches`), not a pad. Prior art: old lightPlayer's `MultiTouchInput.Touch`
   (id, initial/current x·y, z, velocity, interpolation). Vocabulary
   item — modules.md §7.

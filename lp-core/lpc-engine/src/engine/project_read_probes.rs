@@ -1101,7 +1101,9 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
             },
         ),
         (
-            BindingSource::Literal(_) | BindingSource::BusChannel(_),
+            BindingSource::Literal(_)
+            | BindingSource::PanelWriter { .. }
+            | BindingSource::BusChannel(_),
             BindingTarget::BusChannel(channel),
         ) => (
             entry.owner,
@@ -1143,6 +1145,7 @@ fn wire_endpoint_from_source(source: &BindingSource) -> WireBindingEndpoint {
         BindingSource::Literal(value) => WireBindingEndpoint::Literal {
             value: value.clone(),
         },
+        BindingSource::PanelWriter { .. } => WireBindingEndpoint::PanelWriter,
         BindingSource::ProducedSlot { node, slot } => WireBindingEndpoint::NodeSlot {
             node: *node,
             slot: slot.clone(),

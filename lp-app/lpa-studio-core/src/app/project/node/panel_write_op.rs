@@ -19,16 +19,42 @@ use crate::{
 /// per `(scope, channel)` — a newer write replaces a queued unsent one
 /// (see `push_action_coalesced` in `studio_actor`), so a drag never
 /// floods the wire.
+///
+/// A stroke on a drawable picture is one too, built by core alone
+/// (`app/draw`): a momentary `touches` write whose value is a
+/// [`lpc_model::PanelWriteValue::Map`] of touches. It is never echoed as a
+/// held value (see [`Self::echoes_locally`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelWriteOp {
     /// The scope the write lands in (the control's home scope).
     pub scope: lpc_wire::WireScopeRef,
     /// The channel the control drives.
     pub channel: String,
-    /// The value to hold.
-    pub value: lpc_model::LpValue,
+    /// The value to hold: a control's one leaf, or a stroke's touch set (a
+    /// map, momentary writes only).
+    pub value: lpc_model::PanelWriteValue,
     /// Momentary renewal deadline (panel.md P14); `None` = latching.
     pub ttl_ms: Option<u32>,
+}
+
+impl PanelWriteOp {
+    /// Whether the control shows this write at once, ahead of the board's
+    /// answer (the local echo, GV fix 5): a latching leaf only. A momentary
+    /// write is gesture state that lets go by itself — a touch set is never
+    /// shown as a held value.
+    #[must_use]
+    pub fn echoes_locally(&self) -> bool {
+        self.ttl_ms.is_none() && self.value.as_value().is_some()
+    }
+
+    /// Whether this is a momentary set that empties its channel: the
+    /// release of a stroke. A release never coalesces with the write before
+    /// it — a tap's dab and its release must both reach the board.
+    #[must_use]
+    pub fn is_release(&self) -> bool {
+        self.ttl_ms.is_some()
+            && matches!(&self.value, lpc_model::PanelWriteValue::Map(entries) if entries.is_empty())
+    }
 }
 
 impl ControllerOp for PanelWriteOp {
@@ -168,7 +194,7 @@ mod tests {
                 owner: lpc_model::NodeId::new(0),
             },
             channel: "speed".to_string(),
-            value: lpc_model::LpValue::F32(0.5),
+            value: lpc_model::LpValue::F32(0.5).into(),
             ttl_ms: None,
         };
         assert_eq!(

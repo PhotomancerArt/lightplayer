@@ -50,7 +50,7 @@ pub(crate) fn panel_write_or_slot_action(
             PanelWriteOp {
                 scope: target.scope,
                 channel: target.channel.clone(),
-                value,
+                value: value.into(),
                 ttl_ms: None,
             },
         )),
