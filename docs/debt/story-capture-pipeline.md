@@ -770,3 +770,13 @@ hours), and neither is an exit path on its own.
   Testing, which never exits this way. If a desk run logs the accepted line,
   that is one more teardown exit for this log; *why* Chrome's teardown
   watchdog expires is still unidentified.
+
+- 2026-10-21 — **the deploy smoke's retry was not enough: two hangs in a
+  row.** "Deploy Cloud Service" run 39638916954 on 967088c53 (#1242, a
+  comments-only change) failed at "Smoke-check web artifact": `Browser DOM
+  smoke: Chrome hung (error.code=ETIMEDOUT … elapsedMs=20007); retrying
+  once …`, then the retry hung too (`stdout: 0 chars … error.code=ETIMEDOUT
+  elapsedMs=20078; the first attempt also hung`), stderr only dbus noise. A
+  re-run of the failed job (attempt 2) passed with no hang and deployed. This
+  is the "two hangs in a row" the 2026-10-20 note says earns the deploy smoke
+  an entry of its own; not filed here.
