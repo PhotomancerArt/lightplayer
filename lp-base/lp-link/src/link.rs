@@ -704,10 +704,14 @@ impl<A: Arq> Link<A> {
             return true;
         };
         if acked.frames > 0 {
-            self.backoff = 0;
             self.probe_armed = true;
         }
         if let Some(r) = acked.rtt_sample {
+            // Karn's rule: only an ack of a frame sent once measures the path,
+            // so only it clears the backoff. An ack of resent frames may be
+            // the answer to the first send, arriving late; clearing here
+            // would start every next request at the un-backed-off timeout.
+            self.backoff = 0;
             self.rtt.sample(r);
         }
         self.peer_win = hdr.win;

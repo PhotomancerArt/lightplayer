@@ -1,4 +1,5 @@
-//! Atomic instruction execution (A extension: LR.W, SC.W, AMOSWAP.W, AMOADD.W, AMOXOR.W, AMOAND.W, AMOOR.W)
+//! Atomic instruction execution (A extension: LR.W, SC.W, AMOSWAP.W, AMOADD.W, AMOXOR.W, AMOAND.W, AMOOR.W,
+//! AMOMIN.W, AMOMAX.W, AMOMINU.W, AMOMAXU.W)
 //!
 //! The AMOs are a read and a write with nothing in between, which is atomic on a
 //! single hart. `lr.w` / `sc.w` are not that simple: `sc.w` writes only while
@@ -46,6 +47,12 @@ pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
         0x04 => execute_amoxor_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
         0x0c => execute_amoand_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
         0x08 => execute_amoor_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        // AMOMIN/AMOMAX/AMOMINU/AMOMAXU: RISC-V Unprivileged ISA, "A" extension
+        // chapter ("Atomic Memory Operations"): memory becomes the min / max of
+        // itself and rs2, rd gets the old word; MIN/MAX compare signed, MINU/MAXU unsigned.
+        0x10 | 0x14 | 0x18 | 0x1c => {
+            execute_amo_min_max_w::<M, B>(funct5, rd, rs1, rs2, inst_word, pc, regs, memory)
+        }
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -443,6 +450,71 @@ fn execute_amoor_w<M: LoggingMode, B: Bus>(
     })
 }
 
+/// AMOMIN.W (funct5 0x10) / AMOMAX.W (0x14) / AMOMINU.W (0x18) / AMOMAXU.W
+/// (0x1c): the min or max of the old word and `rs2` is written back; `rd` gets
+/// the old word. Like the other AMOs it is a read and
+/// a write with nothing between them, and it neither takes nor ends an LR/SC
+/// reservation (aq/rl, bits 26:25, do nothing on a single in-order hart).
+#[inline(always)]
+fn execute_amo_min_max_w<M: LoggingMode, B: Bus>(
+    funct5: u8,
+    rd: Gpr,
+    rs1: Gpr,
+    rs2: Gpr,
+    inst_word: u32,
+    pc: u32,
+    regs: &mut [i32; 32],
+    memory: &mut B,
+) -> Result<ExecutionResult, EmulatorError> {
+    let base = read_reg(regs, rs1);
+    let operand = read_reg(regs, rs2);
+    let address = base as u32;
+
+    let error_regs = *regs;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
+
+    let new_value = match funct5 {
+        0x10 => old_value.min(operand),
+        0x14 => old_value.max(operand),
+        0x18 => (old_value as u32).min(operand as u32) as i32,
+        _ => (old_value as u32).max(operand as u32) as i32,
+    };
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
+
+    // Return old value in rd
+    if rd.num() != 0 {
+        regs[rd.num() as usize] = old_value;
+    }
+
+    let log = if M::ENABLED {
+        Some(InstLog::Store {
+            cycle: 0,
+            pc,
+            instruction: inst_word,
+            rs1_val: base,
+            rs2_val: operand,
+            addr: address,
+            mem_old: old_value,
+            mem_new: new_value,
+        })
+    } else {
+        None
+    };
+
+    Ok(ExecutionResult {
+        new_pc: None,
+        should_halt: false,
+        syscall: false,
+        class: InstClass::Atomic,
+        inst_size: 4,
+        log,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{LoggingDisabled, LoggingEnabled};
@@ -722,6 +794,115 @@ mod tests {
             memory.read_word(DEFAULT_RAM_START).unwrap(),
             0x12340000 | 0x0000ffff
         );
+    }
+
+    const AMOMIN_W: u8 = 0x10;
+    const AMOMAX_W: u8 = 0x14;
+    const AMOMINU_W: u8 = 0x18;
+    const AMOMAXU_W: u8 = 0x1c;
+
+    /// Runs `<op> rd, x11, (x10)` over a word holding `mem` with rs2 = `operand`;
+    /// returns (rd's value, the word after).
+    fn run_min_max(funct5: u8, rd: Gpr, mem: i32, operand: i32) -> (i32, i32) {
+        let mut regs = [0i32; 32];
+        regs[10] = DEFAULT_RAM_START as i32;
+        regs[11] = operand;
+        regs[14] = 0x5a5a_5a5a;
+        let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
+        memory.write_word(DEFAULT_RAM_START, mem).unwrap();
+        let word = encode_atomic(rd, Gpr::A0, Gpr::A1, funct5);
+        let mut res = LrReservation::new();
+        decode_execute_atomic::<LoggingEnabled, _>(word, 0x1000, &mut regs, &mut memory, &mut res)
+            .unwrap();
+        (
+            regs[rd.num() as usize],
+            memory.read_word(DEFAULT_RAM_START).unwrap(),
+        )
+    }
+
+    /// Every pair of edge values (i32::MIN/MAX, -1 = u32::MAX, 0, 1) against `want`.
+    fn check_min_max(funct5: u8, want: fn(i32, i32) -> i32) {
+        let edges = [i32::MIN, -1, 0, 1, i32::MAX];
+        for mem in edges {
+            for v in edges {
+                let (rd, after) = run_min_max(funct5, Gpr::A4, mem, v);
+                assert_eq!(rd, mem, "rd gets the old word (0x{funct5:x}: {mem}, {v})");
+                assert_eq!(after, want(mem, v), "0x{funct5:x}: {mem}, {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_amomin_w_signed() {
+        check_min_max(AMOMIN_W, |a, b| a.min(b));
+        assert_eq!(run_min_max(AMOMIN_W, Gpr::A4, 0, -1).1, -1);
+    }
+
+    #[test]
+    fn test_amomax_w_signed() {
+        check_min_max(AMOMAX_W, |a, b| a.max(b));
+        assert_eq!(run_min_max(AMOMAX_W, Gpr::A4, -1, 0).1, 0);
+    }
+
+    #[test]
+    fn test_amominu_w_unsigned() {
+        check_min_max(AMOMINU_W, |a, b| (a as u32).min(b as u32) as i32);
+        // 0xffff_ffff and i32::MIN are above 1 / i32::MAX unsigned.
+        assert_eq!(run_min_max(AMOMINU_W, Gpr::A4, -1, 1).1, 1);
+        assert_eq!(
+            run_min_max(AMOMINU_W, Gpr::A4, i32::MIN, i32::MAX).1,
+            i32::MAX
+        );
+    }
+
+    #[test]
+    fn test_amomaxu_w_unsigned() {
+        check_min_max(AMOMAXU_W, |a, b| (a as u32).max(b as u32) as i32);
+        assert_eq!(run_min_max(AMOMAXU_W, Gpr::A4, 1, -1).1, -1);
+        assert_eq!(
+            run_min_max(AMOMAXU_W, Gpr::A4, i32::MAX, i32::MIN).1,
+            i32::MIN
+        );
+    }
+
+    #[test]
+    fn amo_min_max_with_rd_x0_updates_memory_and_discards_the_old_word() {
+        // The `fetch_max` whose result nobody reads: `amomaxu.w zero, a1, (a0)`.
+        for (funct5, want) in [
+            (AMOMIN_W, -3),
+            (AMOMAX_W, 7),
+            (AMOMINU_W, 7),
+            (AMOMAXU_W, -3),
+        ] {
+            let (rd, after) = run_min_max(funct5, Gpr::Zero, 7, -3);
+            assert_eq!((rd, after), (0, want), "funct5 0x{funct5:x}");
+        }
+    }
+
+    #[test]
+    fn amo_min_max_ignore_aq_rl_and_leave_a_reservation_alone() {
+        let mut regs = [0i32; 32];
+        regs[10] = DEFAULT_RAM_START as i32;
+        regs[11] = 3;
+        let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
+        memory.write_word(DEFAULT_RAM_START, 10).unwrap();
+        let mut reservation = LrReservation::new();
+        reservation.reserve(DEFAULT_RAM_START);
+        // aq = bit 26, rl = bit 25
+        let word = encode_atomic(Gpr::A4, Gpr::A0, Gpr::A1, AMOMIN_W) | (0b11 << 25);
+        decode_execute_atomic::<LoggingEnabled, _>(
+            word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut reservation,
+        )
+        .unwrap();
+        assert_eq!(
+            (regs[14], memory.read_word(DEFAULT_RAM_START).unwrap()),
+            (10, 3)
+        );
+        assert_eq!(reservation.held(), Some(DEFAULT_RAM_START));
     }
 
     #[test]

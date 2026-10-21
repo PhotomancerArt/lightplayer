@@ -16,13 +16,14 @@ use lp_cloud_server::app_state::AppState;
 use lp_cloud_server::config::ServerConfig;
 use lp_cloud_server::page::static_site::StaticSite;
 use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
+use lp_cloud_server::relay::relay_registry::apply_relay_writes;
 use lp_cloud_server::router::build_router;
 use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpa_client::transport_relay::RelayTarget;
 use lpc_access::{SecretEntry, SecretKind, Tier};
 use lpc_cloud_api::{
-    AccountAccessInfo, Actor, BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION,
-    CloudCall, CloudReply, CloudRequest, CloudResponse, KnownPicture,
+    AccountAccessInfo, AccountBoard, Actor, BoardPictureList, BoardPictures, BoardPresence,
+    CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest, CloudResponse, KnownPicture,
 };
 use lpc_history::PrefixedUid;
 use lpc_relay::RelayBoardId;
@@ -194,7 +195,9 @@ impl Cloud {
         }
     }
 
-    pub fn list_boards(&self, session: &str) -> BoardList {
+    /// `ListAccountBoards` as `session`: every board on the account's
+    /// list, online or not. Panics on an error reply.
+    pub fn account_boards(&self, session: &str) -> Vec<AccountBoard> {
         let url = format!("{}/api", self.origin());
         let cookie = format!("lp_session={session}");
         let reply: CloudReply = self.runtime.block_on(async move {
@@ -203,7 +206,7 @@ impl Cloud {
                 .header("cookie", cookie)
                 .json(&CloudCall {
                     version: CLOUD_API_VERSION,
-                    request: CloudRequest::ListBoards,
+                    request: CloudRequest::ListAccountBoards,
                 })
                 .send()
                 .await
@@ -213,9 +216,18 @@ impl Cloud {
                 .unwrap()
         });
         match reply.result.unwrap() {
-            CloudResponse::BoardList(list) => list,
+            CloudResponse::AccountBoardList(list) => list.boards,
             other => panic!("{other:?}"),
         }
+    }
+
+    /// The account's boards online at the relay now, as `session` sees
+    /// them: the rows of [`Self::account_boards`] that carry presence.
+    pub fn online_boards(&self, session: &str) -> Vec<BoardPresence> {
+        self.account_boards(session)
+            .into_iter()
+            .filter_map(|board| board.online)
+            .collect()
     }
 
     /// `BoardPictures` as `session`: the cached pictures of `boards` (each
@@ -254,11 +266,14 @@ impl Cloud {
         }
     }
 
-    /// A deploy: every leg told "going away", the process gone, a new one
-    /// on the same port with the same accounts (the store survives a
-    /// deploy; presence does not).
+    /// A deploy: every leg told "going away" (its last board-list writes
+    /// applied), the process gone, a new one on the same port with the same
+    /// accounts and board lists (the store survives a deploy; presence does
+    /// not).
     pub fn restart(&mut self) {
-        self.state.relay().going_away();
+        let writes = self.state.relay().going_away();
+        self.runtime
+            .block_on(apply_relay_writes(&self.state, writes));
         self.serve.abort();
         let _ = self.runtime.block_on(&mut self.serve);
         let old = self.state.clone();
@@ -270,15 +285,19 @@ impl Cloud {
                 .into_iter()
                 .map(|user| {
                     let access = store.account_access(user.uid);
-                    (user, access)
+                    let boards = store.board_records_for_user(user.uid);
+                    (user, access, boards)
                 })
                 .collect::<Vec<_>>()
         }));
         self.runtime.block_on(new.with_service(move |core| {
-            for (user, access) in rows {
+            for (user, access, boards) in rows {
                 core.service.store_mut().put_user(user);
                 if let Some(access) = access {
                     core.service.store_mut().put_account_access(access);
+                }
+                for board in boards {
+                    core.service.store_mut().put_board_record(board);
                 }
             }
         }));

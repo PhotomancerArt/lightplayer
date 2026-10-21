@@ -13,7 +13,6 @@
 //! deletes arrive as tombstones (`kind: Delete`, `offset: 0`, `total: 0`,
 //! empty data). These are new canonical wire forms — no compatibility shims.
 
-use crate::serde_base64;
 use alloc::vec::Vec;
 use lpc_model::LpPathBuf;
 use serde::{Deserialize, Serialize};
@@ -51,10 +50,9 @@ pub struct FileChunk {
     pub offset: u32,
     /// Total file size in bytes (repeated on every chunk of the file).
     pub total: u32,
-    #[serde(
-        serialize_with = "serde_base64::serialize_smart",
-        deserialize_with = "serde_base64::deserialize_smart"
-    )]
+    /// The chunk's bytes: text as a JSON string, other bytes as
+    /// `{"base64":"…"}` ([`lpc_model::body_bytes`]).
+    #[serde(with = "lpc_model::body_bytes")]
     pub data: Vec<u8>,
 }
 

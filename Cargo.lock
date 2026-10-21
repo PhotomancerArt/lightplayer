@@ -6006,6 +6006,7 @@ dependencies = [
  "lp-cloud-domain",
  "lpc-cloud-api",
  "lpc-history",
+ "lpc-relay",
 ]
 
 [[package]]
@@ -6016,6 +6017,7 @@ dependencies = [
  "lp-cloud-store-mem",
  "lpc-cloud-api",
  "lpc-history",
+ "lpc-relay",
  "object_store",
  "rusqlite",
  "serde",

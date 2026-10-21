@@ -5,7 +5,8 @@
 //! ([`super::board_surface`]). Where it comes from is its source: the board's link (live, stale,
 //! or waiting for its first frame), the editor's lens (the last frame it
 //! left, dimmed), lightplayer.app (a board of the account that no link here
-//! reaches: its last picture there, current), the last saved picture
+//! reaches: its last picture there, current while the board is online
+//! there, else the last one it kept, dimmed), the last saved picture
 //! (dimmed), or nothing. While an
 //! update holds the board's lights, the picture is their one colour. A
 //! board that runs nothing has no picture: a fresh install never shows the
@@ -43,6 +44,20 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
         };
     }
     let feed = picture_feed(input).filter(|_| !runs_nothing(input));
+    // An account board offline everywhere, with no picture of its own
+    // here: the last one lightplayer.app kept, dimmed (last known).
+    if feed.and_then(|feed| feed.frame.as_ref()).is_none()
+        && let Some(frame) = kept_cloud_picture(input)
+    {
+        return UiBoardPicture {
+            source: PictureSource::Cloud,
+            frame: Some(frame.clone()),
+            dim: true,
+            light: None,
+            // A board offline everywhere is never drawable.
+            drawable: None,
+        };
+    }
     let lens_live = feed.is_some_and(lens_is_live);
     let source = match feed.map(|feed| feed.liveness) {
         // A board another tab holds has no link here: whatever the feed
@@ -89,6 +104,20 @@ fn cloud_picture<'a>(input: &BoardCardInput<'a>) -> Option<&'a crate::UiControlP
         .and_then(|cloud| cloud.picture.as_ref())
 }
 
+/// The last picture lightplayer.app kept of an account board that is
+/// offline there as well as here (a deploy keeps it: it is written to the
+/// account's board list). Last known, so the card dims it.
+fn kept_cloud_picture<'a>(
+    input: &BoardCardInput<'a>,
+) -> Option<&'a crate::UiControlProductPreview> {
+    input
+        .links
+        .cloud
+        .filter(|cloud| !cloud.online && input.offline() && !input.locked())
+        .filter(|_| input.view.held_elsewhere.is_none() && !input.stand_in())
+        .and_then(|cloud| cloud.picture.as_ref())
+}
+
 /// The picture is the lens session's own and current: live, or stale on a
 /// board that stopped publishing, read by the open session (CD8).
 pub(crate) fn lens_is_live(feed: &DeviceCardFeedView) -> bool {
@@ -118,6 +147,9 @@ pub(crate) fn picture_line(input: &BoardCardInput<'_>) -> Option<String> {
         return Some(CLOUD_PICTURE_WORDS.to_string());
     }
     let feed = picture_feed(input);
+    if feed.and_then(|feed| feed.frame.as_ref()).is_none() && kept_cloud_picture(input).is_some() {
+        return Some(KEPT_CLOUD_PICTURE_WORDS.to_string());
+    }
     // The picture of a board another tab holds is the one that tab saved.
     if input.held().is_some() {
         return Some(match feed.and_then(|feed| feed.frame.as_ref()) {
@@ -152,7 +184,10 @@ pub(crate) fn frame_rate(input: &BoardCardInput<'_>) -> Option<String> {
 /// The status corner's "Last frame" fact: how old the picture is when it
 /// is not live (stale, saved, the lens's last), in Studio's one age.
 pub(crate) fn last_frame(input: &BoardCardInput<'_>) -> Option<String> {
-    if cloud_picture(input).is_some() {
+    let own_frame = picture_feed(input).and_then(|feed| feed.frame.as_ref());
+    if cloud_picture(input).is_some()
+        || (own_frame.is_none() && kept_cloud_picture(input).is_some())
+    {
         let at = input.links.cloud.and_then(|cloud| cloud.picture_at)?;
         return Some(age_words((input.now - at).max(0.0)));
     }
@@ -189,9 +224,9 @@ fn picture_feed<'a>(input: &BoardCardInput<'a>) -> Option<&'a DeviceCardFeedView
 /// how old it is are the "Frame rate" and "Last frame" facts.
 ///
 /// Over Bluetooth the card pulls at a gentler pace
-/// (`DEVICE_CARD_FEED_BLE_INTERVAL`, one to two pictures a second), so the
-/// details say so: the board's "43 fps" beside a picture that steps once a
-/// second would read as a stall.
+/// (`DEVICE_CARD_FEED_BLE_INTERVAL`, two or three pictures a second), so the
+/// details say so: the board's "43 fps" beside a picture that steps a few
+/// times a second would read as a stall.
 pub(crate) fn source_words(
     feed: &DeviceCardFeedView,
     activity: Option<&ActivityView>,
@@ -217,10 +252,13 @@ pub(crate) fn source_words(
 }
 
 /// How often a Bluetooth card's picture moves (see [`source_words`]).
-const BLUETOOTH_PICTURE_PACE: &str = "Shown once or twice a second over Bluetooth.";
+const BLUETOOTH_PICTURE_PACE: &str = "Shown two or three times a second over Bluetooth.";
 
 /// lightplayer.app's picture of a board no link here reaches.
 const CLOUD_PICTURE_WORDS: &str = "From lightplayer.app.";
+
+/// An offline account board's last picture, kept by lightplayer.app.
+const KEPT_CLOUD_PICTURE_WORDS: &str = "Its last picture at lightplayer.app.";
 
 /// A picture saved before the board went away.
 const SAVED_PICTURE_WORDS: &str = "Saved before the board went away.";

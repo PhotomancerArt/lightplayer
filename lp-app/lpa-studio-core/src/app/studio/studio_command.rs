@@ -86,11 +86,15 @@ pub enum StudioCommand {
     /// order and never coalesced here — the stroke controller keeps the
     /// newest positions and decides when to write.
     Stroke(crate::UiStroke),
-    /// The signed-in account's boards online at lightplayer.app, as its
-    /// relay last answered `ListBoards` (the web edge asks at load and every
+    /// The signed-in account's board list, as lightplayer.app last
+    /// answered `ListAccountBoards` (the web edge asks at load and every
     /// 30 s while the page is visible). `None` is signed out, or
     /// lightplayer.app did not answer: keep nothing. Latest wins.
     AccountBoards(Option<crate::AccountBoardRows>),
+    /// lightplayer.app's answer to an [`crate::AccountBoardRequest`] core
+    /// asked for (a report, or Remove from your account). Applied in queue
+    /// order.
+    AccountBoardAnswered(crate::AccountBoardAnswer),
     /// Their last pictures, as lightplayer.app answered `BoardPictures`.
     /// Applied in queue order; a picture of a board no longer listed is
     /// dropped.

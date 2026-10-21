@@ -45,14 +45,17 @@ async fn main() -> ExitCode {
     // Connect info: the relay's client address when there is no fly proxy
     // in front (local runs). Behind fly it reads `Fly-Client-IP` instead.
     let relay = std::sync::Arc::clone(state.relay());
+    let draining_state = state.clone();
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-    let going_away = std::sync::Arc::clone(&relay);
     let draining = async move {
         shutdown_signal().await;
         // The relay's sockets are upgraded connections, which the graceful
         // drain does not wait for: close them "going away" first, so every
         // board takes its short (2–12 s) backoff onto the next machine.
-        going_away.going_away();
+        // Every online board's last sighting and newest picture go to its
+        // accounts' board lists before the process ends.
+        let writes = draining_state.relay().going_away();
+        lp_cloud_server::relay::relay_registry::apply_relay_writes(&draining_state, writes).await;
     };
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(draining)

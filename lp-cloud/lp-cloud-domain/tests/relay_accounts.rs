@@ -1,11 +1,12 @@
 //! The relay's view of the domain: which accounts a board's registration
-//! proves, and whose boards `ListBoards` shows.
+//! proves, and whose boards `ListAccountBoards` and `BoardPictures`
+//! answer for.
 
 use lp_cloud_domain::{CloudService, verify_board_accounts};
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::{
-    AccountAccessInfo, Actor, BoardList, BoardPictureList, BoardPictures, CloudError, CloudRequest,
-    CloudResponse,
+    AccountAccessInfo, AccountBoardList, Actor, BoardPictureList, BoardPictures, CloudError,
+    CloudRequest, CloudResponse,
 };
 use lpc_history::PrefixedUid;
 use lpc_relay::{relay_auth_key, relay_proof};
@@ -73,7 +74,7 @@ fn the_same_account_twice_is_one_user_and_a_missing_proof_does_not_verify() {
 }
 
 #[test]
-fn list_boards_shows_an_account_its_own_a_guest_none_and_refuses_anonymous() {
+fn the_board_list_shows_an_account_its_own_a_guest_none_and_refuses_anonymous() {
     let mut svc = service();
     let alice = signed_in(&mut svc, "g-alice");
     let guest = Actor::User(svc.begin_guest_user().uid);
@@ -85,12 +86,16 @@ fn list_boards_shows_an_account_its_own_a_guest_none_and_refuses_anonymous() {
         Err(CloudError::NotAuthenticated)
     );
     assert_eq!(
-        svc.handle(alice, CloudRequest::ListBoards),
-        Ok(CloudResponse::BoardList(BoardList::default())),
-        "the domain alone knows no presence"
+        svc.handle(alice, CloudRequest::ListAccountBoards),
+        Ok(CloudResponse::AccountBoardList(AccountBoardList::default())),
+        "no board has joined the list"
     );
     assert_eq!(
-        svc.handle(Actor::Anonymous, CloudRequest::ListBoards),
+        svc.handle(guest, CloudRequest::ListAccountBoards),
+        Ok(CloudResponse::AccountBoardList(AccountBoardList::default()))
+    );
+    assert_eq!(
+        svc.handle(Actor::Anonymous, CloudRequest::ListAccountBoards),
         Err(CloudError::NotAuthenticated)
     );
 }

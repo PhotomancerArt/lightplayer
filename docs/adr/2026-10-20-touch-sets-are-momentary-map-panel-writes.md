@@ -38,12 +38,12 @@ included. And Studio's live pictures took no pointer at all.
    `.lp/panel.json` and `LpValue`, both persisted, are unchanged. The engine
    materializes a map writer as `SlotData::Map` (`BindingSource::LiteralMap`).
    A finger renews by writing again, and a dropped link releases within the
-   ttl with no help from anyone. Wire 43 → 44.
+   ttl with no help from anyone. Wire 44 → 45.
 4. **The Fluid node in pattern space.** `"coords": "pattern"` on
    `fluid.json`, the shader def's key and values. The grid spans the lamp
    box, and emitters are read in pattern units, y up, so a stamp is round on
    the lamps. When the key is absent (or `"pixels"`), the node publishes
-   byte-identical to before. The key rides wire 44.
+   byte-identical to before. The key rides wire 45.
 5. **Drawable.** A connected board's live picture (the card, Play, the
    editor's root hero) is drawable when a loaded module scope has a
    `touches` reader. Studio writes into the innermost such scope, so a
@@ -90,7 +90,7 @@ included. And Studio's live pictures took no pointer at all.
 - One new persisted name per thing a user can copy: `touches` in a
   pattern's bindings, `coords` in a fluid.json, and the `fluid-draw`
   entry. Each is additive.
-- Wire 44 marks older boards Incompatible until they are flashed, as every
+- Wire 45 marks older boards Incompatible until they are flashed, as every
   bump does.
 - The fit between a picture and the lamps lives in one place. Note that
   LampView's picture is the lamp-centre box grown by 0.9 × the cell radius

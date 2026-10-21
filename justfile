@@ -4921,11 +4921,13 @@ ci-durations *args:
 desk-images *args:
     cargo run -q -p lp-cli --features desk-images -- hardware desk-images {{ args }}
 
-# List attached serial hardware (passive; never hangs). Identify chips with
+# List attached serial hardware (passive; never opens a port, but may first wait
+# on cargo's build lock or a rebuild; once built, `./target/debug/lp-cli
+# hardware list` skips that). Identify chips with
 # `just hardware-list --probe` (resets idle boards; per-port timeout), filter
 # with `--chip esp32s3`, script with `--json`.
 hardware-list *args:
-    cargo run -q -p lp-cli -- hardware list {{ args }}
+    cargo run -p lp-cli -- hardware list {{ args }}
 
 # Remove the WebSerial chooser dialog for local dev servers by granting Brave
 # standing serial access via the Chromium enterprise policy
@@ -5288,7 +5290,7 @@ walk-two-tabs-emu *args:
 # brings the same board back as a "Wi‑Fi via lightplayer.app" card; off the
 # relay, the tile says "The board isn't online."; a fresh browser profile
 # that never met the board sees it under Online boards from the account's
-# list (`ListBoards`), with lightplayer.app's picture, and connects through
+# list (`ListAccountBoards`), with lightplayer.app's picture, and connects through
 # lightplayer.app (T5, your boards follow you M1). Needs `cargo build -p
 # lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
 # studio-firmware-package-esp32c6`. Not CI.

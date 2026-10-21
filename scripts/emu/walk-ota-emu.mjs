@@ -1323,8 +1323,8 @@ async function main() {
   /// Through the relay, once Y is confirmed: Y sends its picture (relay
   /// protocol 2, whatever X spoke). The board's heartbeat says `pictures N`
   /// (N ≥ 1), the page's own `BoardPictures` read — its session cookie is
-  /// the walk's account — holds a picture for it, online, and `ListBoards`
-  /// lists it at relay protocol 2 with Y's version.
+  /// the walk's account — holds a picture for it, online, and
+  /// `ListAccountBoards` lists it online at relay protocol 2 with Y's version.
   const picturesOnY = async (board) => {
     const from = boardWords(board).length;
     const words = await waitBoard(board, /\[relay\] state=connected [^\n]*pictures [1-9]\d* (idle|watched)/, "a picture on Y", STEP_MS, from);
@@ -1336,8 +1336,8 @@ async function main() {
     const read = await call({ boardPictures: { boards: [{ id: door.relayId, seq: null }], watch: false } });
     const picture = read?.result?.Ok?.boardPictureList?.pictures?.[0];
     if (!picture?.online) throw new Error(`the relay holds no online picture of ${door.relayId} after the update: ${JSON.stringify(read).slice(0, 300)}`);
-    const listed = await call("listBoards");
-    const presence = listed?.result?.Ok?.boardList?.boards?.find((entry) => entry.id === door.relayId);
+    const listed = await call("listAccountBoards");
+    const presence = listed?.result?.Ok?.accountBoardList?.boards?.find((entry) => entry.id === door.relayId)?.online;
     if (presence?.relayProto !== 2) throw new Error(`the relay lists ${door.relayId} at protocol ${presence?.relayProto}, not 2: ${JSON.stringify(listed).slice(0, 300)}`);
     const samples = picture.colors ? Buffer.from(picture.colors, "base64").length / 3 : 0;
     return {

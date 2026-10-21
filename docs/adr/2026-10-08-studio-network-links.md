@@ -170,6 +170,18 @@ belong to the automatic LAN move, which this ADR holds back.
 - **Evict account keys, or move the 16-entry cap, so the key always fits.**
   Not decided here (6): it changes the persisted access file's behaviour.
 
+## Amendment (2026-10-20): your boards, from the account's list
+
+"Your boards" (P06, held above) is built by the roadmap
+`lp2025/2026-10-19-2300-your-boards-follow-you`: M1 had Studio read the
+account's online boards (`ListBoards`) and join them onto the roster by MAC,
+a board never met here included; M2 replaced `ListBoards` with
+`ListAccountBoards` (cloud API v7), the account's stored board list, offline
+boards included
+([2026-10-20-the-account-board-list](2026-10-20-the-account-board-list.md)).
+A listed board needs no meeting in this browser to be reached through the
+relay. The automatic move onto the LAN (P07) remains the roadmap's M3.
+
 ## Follow-ups
 
 - P06–P08, after the domain-model and device-UX pass: your boards from

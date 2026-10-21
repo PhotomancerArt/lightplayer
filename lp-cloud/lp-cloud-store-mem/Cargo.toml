@@ -11,6 +11,8 @@ description = "In-memory adapters for every lp-cloud-domain port: the local-dev 
 lp-cloud-domain = { path = "../lp-cloud-domain" }
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
 lpc-history = { path = "../../lp-core/lpc-history" }
+# A board on an account's list is keyed by its relay id (its MAC).
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 
 [lints]
 workspace = true

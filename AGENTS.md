@@ -1121,16 +1121,26 @@ lightplayer.app (`relay:<mac>`, the relay's browser leg
 someone is signed in and no USB, Bluetooth or LAN link of the tab reaches
 the board: on a remembered board (it said its MAC over any link; an offline
 one says "The board isn't online." on its tile), and on every board the
-account's list says is online. Signed in, the web edge
-(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListBoards` at load and
-every 30 s while the page is visible, and `BoardPictures` (watching) every
-half second for the cards that draw lightplayer.app's picture; core joins
-the rows onto the roster by MAC (`studio_controller/account_boards_flow.rs`):
-a listed board is in Online boards, and one this browser never met is an
-in-memory entry under `mac-<12 hex>`, never written to `/registry.json`,
-until its hello makes it a remembered board. Offline account boards (a
-stored list) and the automatic move onto the LAN are not built yet (M2 and
-M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
+account's list says is online. **The account keeps a board list** (cloud
+API v7, `docs/adr/2026-10-20-the-account-board-list.md`): one record per
+board in the cloud's store (`account_boards`, migration `0007`), joined when
+the board registers with the relay proving the account and when Studio reads
+a board's access list (USB, or Bluetooth/LAN at edit) and finds the
+account's current key (`ReportBoard`, once per link per connection), left
+only by **Remove from your account** (`devices/<board>/forget-from-account`,
+Lasting; it removes no key); at most 64. A record grants nothing: presence
+and pictures stay gated by the relay's proof. Signed in, the web edge
+(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListAccountBoards` at
+load and every 30 s while the page is visible, and `BoardPictures`
+(watching) every half second for the cards that draw lightplayer.app's
+picture; core joins the rows onto the roster by MAC
+(`studio_controller/account_boards_flow.rs`): an online board is in Online
+boards, an offline one in Offline boards on every computer (its last
+picture the one the relay wrote behind, dimmed; no Connect), and one this
+browser never met is an in-memory entry under `mac-<12 hex>`, never written
+to `/registry.json`, until its hello makes it a remembered board. The card's
+`forget` reads **Forget on this browser**. The automatic move onto the LAN
+is not built yet (M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
 the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
 stays as a dev shortcut that dials those boards at page load (like `?lan=`);
 there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks
@@ -1142,11 +1152,13 @@ same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
 `/relay` (WebSocket upgrades included) to the `lp-cloud-server` on 2812 — but
 `lp-cli serve` binds 2812 for its own socket, so the two do not share a desk.
 
-Two more dev-only flags tune the device wire for a measurement (read once at
+Three more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
-and `?wire=json` stops the page asking boards to pack their replies, so JSON
+`?card-ble-gap-ms=N` sets the device card picture's gap between reads over a
+Bluetooth link (`DEVICE_CARD_FEED_BLE_INTERVAL`; clamped to 0–2000 ms; USB,
+the LAN and the relay keep theirs), and `?wire=json` stops the page asking boards to pack their replies, so JSON
 and JSON Pack can be compared on one build (`?wire=packed` is the default,
 spelled out). Studio otherwise asks every board
 whose hello offers this build's pack format; what the board answered is one
@@ -1396,7 +1408,8 @@ board-info` loops (both idioms have flashed the wrong board or hung on a
 wedged port before; the resolver probes with per-port timeouts instead):
 
 ```bash
-just hardware-list                  # passive: never opens a port, cannot hang
+just hardware-list                  # passive: never opens a port; may first wait on cargo's build lock or a rebuild
+./target/debug/lp-cli hardware list # the same list, once built: no cargo, no wait
 just hardware-list --probe          # identify chips (resets idle boards)
 just hardware-list --chip esp32s3   # only boards probing as that chip; --json to script
 cargo run -q -p lp-cli -- fwcheck port --chip esp32c6   # resolve exactly one port

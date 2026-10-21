@@ -107,8 +107,9 @@ pub use app::devices::{
 };
 /// The account's boards online at lightplayer.app, and their pictures.
 pub use app::devices::{
-    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, CloudPictureAsk,
-    UiCloudBoard, account_board_device,
+    AccountBoardAnswer, AccountBoardLink, AccountBoardNote, AccountBoardPicture,
+    AccountBoardPresence, AccountBoardReport, AccountBoardRequest, AccountBoardRow,
+    AccountBoardRows, AccountBoards, CloudPictureAsk, UiCloudBoard, account_board_device,
 };
 pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
@@ -145,6 +146,11 @@ pub use app::devices::{
     UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
     UpdateVersion, UpdateVersionDisplay, firmware_file_action, update_offers, update_route,
     update_session_words, update_standing, update_words, wants_auto_start,
+};
+/// Remove from your account: the account's list, not this browser's.
+pub use app::devices::{
+    FORGET_FROM_ACCOUNT_VERB, ForgetFromAccountOp, REMOVE_FROM_YOUR_ACCOUNT,
+    forget_from_account_offer, forget_on_this_browser_copy,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::devices::{
@@ -318,7 +324,7 @@ pub use app::studio::{
     UiLensCard, UiLensReconnecting, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
     UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
     VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
-    set_device_lens_pause_override, studio_view_channel,
+    set_card_feed_ble_gap_override, set_device_lens_pause_override, studio_view_channel,
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;

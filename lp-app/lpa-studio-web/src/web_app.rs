@@ -361,6 +361,10 @@ pub fn App() -> Element {
             controller.load_fresh_starts(&json);
         }
         controller.set_on_fresh_starts(crate::settings_io::store_fresh_starts);
+        // The account's board list: core asks, this edge makes the cloud
+        // call and hands the answer back on core's own queue.
+        controller
+            .set_on_account_board_request(crate::cloud::account_boards::send_account_board_request);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);

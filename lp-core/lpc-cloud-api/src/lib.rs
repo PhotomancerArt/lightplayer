@@ -22,6 +22,7 @@ extern crate std;
 
 pub mod access;
 pub mod account_access_info;
+pub mod account_board;
 pub mod account_password_tier;
 pub mod ack;
 pub mod actor;
@@ -46,12 +47,15 @@ pub mod version;
 
 pub use access::Access;
 pub use account_access_info::AccountAccessInfo;
+pub use account_board::{
+    AccountBoard, AccountBoardList, BoardSeen, ForgetBoard, MAX_ACCOUNT_BOARDS, ReportBoard, SeenOn,
+};
 pub use account_password_tier::AccountPasswordTier;
 pub use ack::Ack;
 pub use actor::Actor;
 pub use base64_bytes::Base64Bytes;
 pub use board_picture::{BoardPicture, BoardPictureList, BoardPictures, KnownPicture};
-pub use board_presence::{BoardList, BoardPresence, MAX_LISTED_BOARDS};
+pub use board_presence::BoardPresence;
 pub use call_spec::CloudCallSpec;
 pub use envelope::{CloudCall, CloudReply};
 pub use error::CloudError;
