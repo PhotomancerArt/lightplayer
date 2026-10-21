@@ -1,0 +1,21 @@
+[package]
+name = "fw-esp32s3-loader"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "SPIKE: the ESP32-S3 split-image loader — maps the core a boot record names, loads its RAM segments, jumps"
+publish = false
+
+# Standalone, as fw-esp32c6-loader: a bare-metal Xtensa binary on the `esp`
+# toolchain, built from this directory. Excluded from the root workspace.
+[workspace]
+
+[dependencies]
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = 1

@@ -44,7 +44,7 @@ use crate::elf_symbol;
 use crate::engine_script::{is_rust_object, object_pattern};
 use crate::image_end::pad_image_end;
 use crate::reachability::Split;
-use crate::section_graph::{Node, SectionGraph, demangled_symbols, read_relocations_skipping};
+use crate::section_graph::{Node, Relocations, SectionGraph, demangled_symbols};
 use crate::split_artifacts::section_spans;
 use crate::verify_report::Verification;
 
@@ -125,7 +125,16 @@ pub fn build_s3(opts: &S3Options) -> Result<()> {
     build_id.copy_from_slice(build_id_sym.get(&p2_elf));
     lp_bootctl::engine_header::patch(&mut engine, &build_id)
         .map_err(|e| anyhow::anyhow!("engine header: {e:?}"))?;
-    let core = core_image(&crate::split_artifacts::core_elf(&p2_elf)?)?;
+    let mut core = core_image(&crate::split_artifacts::core_elf(&p2_elf)?)?;
+    // espflash's address-0 padding, re-aimed at the core's .bss (the C6's
+    // 2026-10-14 defect: a loader copies it to address 0).
+    let bss = elf_symbol::value(&p2_elf, "_bss_start")?..elf_symbol::value(&p2_elf, "_bss_end")?;
+    for p in crate::core_padding::aim_padding_at_bss(&mut core, bss)? {
+        eprintln!(
+            "    core.bin: padding segment {} ({} B) aimed at .bss {:#010x}",
+            p.index, p.len, p.addr
+        );
+    }
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
     let segs = crate::core_segments::segments(&core)?;
@@ -283,10 +292,193 @@ pub fn load_graph(elf: &Path, map: &Path) -> Result<(SectionGraph, usize)> {
         })
         .collect();
     let bytes = fs::read(elf)?;
-    let relocs = read_relocations_skipping(&bytes, XTENSA_SKIP_RELOCS)?;
+    let relocs = read_xtensa_targets(&bytes)?;
     let mut graph = SectionGraph::build(nodes, &relocs.list, relocs.entry);
     let ties = tie_literal_pairs(&mut graph);
     Ok((graph, ties))
+}
+
+/// Every relocation's target, read from the **linked bytes**, never from
+/// `S + A`: GNU ld's `--emit-relocs` on Xtensa keeps a stale zero addend on
+/// relocations against a merged section's symbol (18,355 of 30,236
+/// `R_XTENSA_32` in the spike's pass 2 read `<section> + 0` while the word
+/// they patch points well inside it), which aimed half the graph's data
+/// edges at the first section of `.rodata`.
+///
+/// - `R_XTENSA_32`: the 32-bit word at `r_offset` is the target.
+/// - `R_XTENSA_SLOT0_OP` on an `l32r` (op0 = 1): the literal it loads,
+///   `((pc + 3) & ~3) + (imm16 | 0xFFFF0000) << 2` (Xtensa ISA RM, L32R).
+/// - on a `callN` (op0 = 5): `(pc & ~3) + (offset18 << 2) + 4` (CALL0..12).
+/// - anything else (branches, `j`): `S + A`, which is within the function.
+///
+/// A named (non-section) symbol is also a target, as in the C6 reader (a
+/// `sym - k` table base).
+pub fn read_xtensa_targets(data: &[u8]) -> Result<Relocations> {
+    use object::Endianness;
+    use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
+    let header = object::elf::FileHeader32::<Endianness>::parse(data)?;
+    let endian = header.endian()?;
+    let sections = header.sections(endian, data)?;
+    let (symtab_index, _) = sections
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s.sh_type(endian) == object::elf::SHT_SYMTAB)
+        .context("no symbol table")?;
+    let symbols =
+        sections.symbol_table_by_index(endian, data, object::SectionIndex(symtab_index))?;
+    let mut list = Vec::new();
+    let mut words = std::collections::HashMap::new();
+    let mut pending = Vec::new();
+    for section in sections.iter() {
+        if section.sh_type(endian) != object::elf::SHT_RELA {
+            continue;
+        }
+        let target = sections.section(object::SectionIndex(section.sh_info(endian) as usize))?;
+        if target.sh_flags(endian) & object::elf::SHF_ALLOC == 0
+            || target.sh_type(endian) == object::elf::SHT_NOBITS
+        {
+            continue;
+        }
+        let base = target.sh_addr(endian);
+        let bytes = target.data(endian, data)?;
+        let word = |at: u32| -> Option<u32> {
+            let o = at.checked_sub(base)? as usize;
+            Some(u32::from_le_bytes(bytes.get(o..o + 4)?.try_into().ok()?))
+        };
+        let Some((relas, _)) = section.rela(endian, data)? else {
+            continue;
+        };
+        // First, every absolute word's target, by its address: what an
+        // `l32r` that loads that word means.
+        for rela in relas {
+            if rela.r_type(endian) == 1
+                && let Some(w) = word(rela.r_offset(endian))
+            {
+                words.insert(rela.r_offset(endian), w);
+            }
+        }
+        pending.push((section.sh_info(endian) as usize, relas, base, bytes));
+    }
+    for (_, relas, base, bytes) in pending {
+        let insn = |at: u32| -> Option<u32> {
+            let o = at.checked_sub(base)? as usize;
+            let b = bytes.get(o..o + 3)?;
+            Some(u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+        };
+        let word = |at: u32| -> Option<u32> {
+            let o = at.checked_sub(base)? as usize;
+            Some(u32::from_le_bytes(bytes.get(o..o + 4)?.try_into().ok()?))
+        };
+        for rela in relas {
+            let r_type = rela.r_type(endian);
+            if XTENSA_SKIP_RELOCS.contains(&r_type) {
+                continue;
+            }
+            let at = rela.r_offset(endian);
+            let sym = symbols.symbol(object::SymbolIndex(rela.r_sym(endian) as usize))?;
+            let s_plus_a = i64::from(sym.st_value(endian)) + i64::from(rela.r_addend(endian));
+            let resolved = match r_type {
+                1 => word(at).map(i64::from),
+                20 => match insn(at).map(|i| (i, i & 0xF)) {
+                    // An `l32r`: what it loads, when that word is an address
+                    // (it carries an `R_XTENSA_32`); a plain constant is no
+                    // edge. Never the pool itself: coalescing shares one
+                    // function's pool slot with another's `l32r`.
+                    Some((i, 1)) => {
+                        let imm16 = (i >> 8) & 0xFFFF;
+                        let off = ((imm16 | 0xFFFF_0000) << 2) as i32;
+                        let lit = ((at + 3) & !3).wrapping_add_signed(off);
+                        match words.get(&lit) {
+                            Some(w) => Some(i64::from(*w)),
+                            None => continue,
+                        }
+                    }
+                    Some((i, 5)) => {
+                        let off18 = ((i >> 6) as i32) << 14 >> 14;
+                        Some(i64::from((at & !3).wrapping_add_signed(off18 << 2) + 4))
+                    }
+                    _ => None,
+                },
+
+                _ => None,
+            };
+            if let Ok(dbg) = std::env::var("LP_SPLIT_DEBUG_FROM")
+                && let Some((lo, hi)) = dbg.split_once(',')
+                && let (Ok(lo), Ok(hi)) = (u32::from_str_radix(lo, 16), u32::from_str_radix(hi, 16))
+                && (lo..hi).contains(&at)
+            {
+                eprintln!(
+                    "edge {at:#x} type {r_type} resolved {:?} s+a {s_plus_a:#x} sym_type {}",
+                    resolved.map(|r| format!("{r:#x}")),
+                    sym.st_type()
+                );
+            }
+            list.push((u64::from(at), resolved.unwrap_or(s_plus_a)));
+            if sym.st_type() != object::elf::STT_SECTION && sym.st_type() != object::elf::STT_NOTYPE
+            {
+                list.push((u64::from(at), i64::from(sym.st_value(endian))));
+            }
+        }
+    }
+    Ok(Relocations {
+        list,
+        entry: u64::from(header.e_entry(endian)),
+    })
+}
+
+/// SPIKE debugging: the chain of input sections by which the core's roots
+/// reach the first node whose description contains `needle`.
+pub fn why_s3(elf: &Path, map: &Path, needle: &str) -> Result<Vec<String>> {
+    let (graph, _) = load_graph(elf, map)?;
+    let bytes = fs::read(elf)?;
+    let names = demangled_symbols(&bytes)?;
+    let mut roots: Vec<usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.is_ram_code() || n.out == ".flash.appdesc")
+        .map(|(i, _)| i)
+        .collect();
+    if let Some(e) = graph.node_at(graph.entry as i64) {
+        roots.push(e);
+    }
+    roots.extend(core_roots(&graph, &bytes)?);
+    let mut parent = std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<usize> = roots.iter().copied().collect();
+    for r in &roots {
+        parent.insert(*r, usize::MAX);
+    }
+    let label = |i: usize| {
+        let n = &graph.nodes[i];
+        let sym = names
+            .range(n.vma..n.vma + n.size.max(1))
+            .next()
+            .and_then(|(_, v)| v.first())
+            .map(|(_, s)| s.chars().take(140).collect::<String>())
+            .unwrap_or_default();
+        format!("{:#010x} {} {} [{}]", n.vma, n.out, n.object_and_section().1.chars().take(80).collect::<String>(), sym)
+    };
+    while let Some(i) = queue.pop_front() {
+        if graph.nodes[i].desc.contains(needle) && parent[&i] != usize::MAX {
+            let mut chain = vec![label(i)];
+            let mut at = parent[&i];
+            while at != usize::MAX {
+                chain.push(label(at));
+                at = parent[&at];
+            }
+            chain.reverse();
+            return Ok(chain);
+        }
+        if let Some(ts) = graph.edges.get(&i) {
+            for t in ts {
+                if !parent.contains_key(t) {
+                    parent.insert(*t, i);
+                    queue.push_back(*t);
+                }
+            }
+        }
+    }
+    Ok(vec!["(not reached)".into()])
 }
 
 /// The S3's output sections, by the name the shared graph gives their kind:
@@ -300,9 +492,10 @@ fn normalise_out(out: &str) -> &str {
     }
 }
 
-/// Edges both ways between `.literal.X` and `.text.X` of one object (and
-/// `.literal`/`.text`): `l32r` reaches its pool only backwards and only
-/// 256 KiB, so the two must land in one region.
+/// An edge from `.text.X` to its own `.literal.X` (and `.text` to
+/// `.literal`) of one object, so a core function's pool counts as core.
+/// Placement does the rest: the engine script writes every engine
+/// function's pool right before it (`l32r` reaches only 256 KiB back).
 pub fn tie_literal_pairs(graph: &mut SectionGraph) -> usize {
     let mut by_key = std::collections::HashMap::new();
     for (i, n) in graph.nodes.iter().enumerate() {
@@ -318,7 +511,8 @@ pub fn tie_literal_pairs(graph: &mut SectionGraph) -> usize {
             continue;
         };
         if let Some(&t) = by_key.get(&(obj.to_string(), rest.to_string())) {
-            graph.edges.entry(i).or_default().insert(t);
+            // One way: a core function's pool is core. Never back: a pool
+            // coalescing gave other functions' `l32r`s is not their code.
             graph.edges.entry(t).or_default().insert(i);
             ties += 1;
         }
@@ -687,6 +881,6 @@ Linker script and memory map
             0,
         );
         assert_eq!(tie_literal_pairs(&mut g), 1);
-        assert!(g.edges[&0].contains(&1) && g.edges[&1].contains(&0));
+        assert!(g.edges[&1].contains(&0) && !g.edges.contains_key(&0));
     }
 }

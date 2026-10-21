@@ -95,6 +95,8 @@ enum Command {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
     },
+    /// SPIKE: how the core reaches a section (substring of its name).
+    WhyS3 { elf: PathBuf, map: PathBuf, needle: String },
     /// SPIKE: verify one fw-esp32s3 pass-2 link.
     VerifyS3 { elf: PathBuf, map: PathBuf },
     /// Check one (pass-2) link: no core section in the engine region.
@@ -154,6 +156,12 @@ fn run(command: Command) -> Result<bool> {
                 features,
                 loader_elf,
             })?;
+            Ok(true)
+        }
+        Command::WhyS3 { elf, map, needle } => {
+            for line in lp_fw_split::s3::why_s3(&elf, &map, &needle)? {
+                println!("{line}");
+            }
             Ok(true)
         }
         Command::VerifyS3 { elf, map } => {
