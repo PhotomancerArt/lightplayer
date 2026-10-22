@@ -110,6 +110,16 @@ pub(crate) fn init_psram(config: &mut PsramConfig) -> bool {
     success
 }
 
+/// LP fork (seventh diff): the octal path alone, for `Psram::new_octal`.
+#[procmacros::ram]
+pub(crate) fn init_psram_octal(config: &mut PsramConfig) -> bool {
+    let success = octal_spi_impl::psram_init(config);
+    if !success {
+        warn!("Failed to configure octal PSRAM.");
+    }
+    success
+}
+
 #[procmacros::ram]
 pub(crate) fn map_psram(config: PsramConfig) -> Range<usize> {
     const MMU_ACCESS_SPIRAM: u32 = 1 << 15;
@@ -1503,6 +1513,10 @@ pub(crate) mod octal_spi_impl {
         // CONFIG_SPIRAM_ECC_ENABLE not yet supported
     }
 
+    // LP fork (seventh diff): kept out of line, so its formatting stays in
+    // flash instead of being inlined into the `#[ram]` init (~1 KB of IRAM);
+    // the init already calls `log` in flash from IRAM.
+    #[inline(never)]
     fn print_psram_info(reg_val: &OpiPsramModeReg) {
         info!(
             "vendor id    : {:02x} ({})",

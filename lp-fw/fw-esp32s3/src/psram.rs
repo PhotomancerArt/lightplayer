@@ -168,13 +168,15 @@ fn try_bring_up(peri: esp_hal::peripherals::PSRAM<'static>) -> State {
     if cap != FUSED_8MB {
         return State::NotFused(cap);
     }
+    // `new_octal`: the quad path is never referenced, so none of its `#[ram]`
+    // code is linked (the fork's seventh diff).
     let config = PsramConfig {
         mode: PsramMode::OctalSpi,
         size: PsramSize::Size(PSRAM_WINDOW_LEN as usize),
         mmu_start_entry: Some(PSRAM_MMU_ENTRY),
         ..PsramConfig::default()
     };
-    let psram = Psram::new(peri, config);
+    let psram = Psram::new_octal(peri, config);
     let (ptr, len) = psram.raw_parts();
     // The mapping outlives the handle (esp-hal's `Psram` has no `Drop`), and
     // nothing else may claim the peripheral again.

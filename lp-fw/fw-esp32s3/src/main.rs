@@ -210,7 +210,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
 #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
-const HEAP_SIZE: usize = 240 * 1024;
+const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM;
 /// The radio image's arena (`radio`, S3 radio M3): 72 KB smaller, so the main
 /// stack keeps its share of `dram_seg`. BLE costs 72,528 B of `dram_seg` at
 /// link time: the radio blobs' own region (`c_heap::HEAP_RADIO_BYTES`, 32 KB)
@@ -218,14 +218,27 @@ const HEAP_SIZE: usize = 240 * 1024;
 /// (the 240 KB arena with BLE fails to link by 20,552 B with no stack at all).
 /// The heap the radio's C blocks do not use is still Rust's, last.
 #[cfg(s3_radio)]
-const HEAP_SIZE: usize = 168 * 1024;
+const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
 /// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
 /// keep about today's share. Where the product radio's RAM comes from is M4's
 /// plan, not this probe's.
 #[cfg(feature = "radio_boot_probe")]
-const HEAP_SIZE: usize = 160 * 1024;
+const HEAP_SIZE: usize = 160 * 1024 - PSRAM_INIT_IRAM;
+
+/// What a `psram` image's PSRAM init takes of `dram_seg`, given back by the
+/// arena so the main stack keeps its share (M10 P2). esp-hal's octal init is
+/// `#[ram]`: 2,572 B of `.rwtext` after the fork's seventh diff (from 5,364 B
+/// with the quad path linked and the decode inlined), and `.rwtext` comes out
+/// of the same span as `.stack`. 3 KiB keeps the stack at or above the
+/// default image's (2026-10-22: 54,880 B against 54,392 B); the arena's loss
+/// is nothing beside the 8 MiB PSRAM brings, and an image whose PSRAM does
+/// not come up runs with an arena 3 KiB smaller than a default image's.
+#[cfg(feature = "psram")]
+const PSRAM_INIT_IRAM: usize = 3 * 1024;
+#[cfg(not(feature = "psram"))]
+const PSRAM_INIT_IRAM: usize = 0;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
