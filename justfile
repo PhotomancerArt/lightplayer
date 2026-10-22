@@ -1176,6 +1176,20 @@ clippy-fw-esp32s3:
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
+    # The radio (S3 radio M3): the BLE link over the shared crate, and the
+    # M1 radio probe (scaffolding, the emulator's radio image). The two start
+    # the same controller, so they are separate passes. Then the shared radio
+    # crate itself on this chip's target, at each tier this chip builds it
+    # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
+    # reaches a dependency.
+    echo "clippy: --features ble"
+    cargo clippy --release --features ble -- --no-deps -D warnings
+    echo "clippy: --features radio_boot_probe"
+    cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
+    for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
+      echo "clippy: fw-esp32-radio --features $features"
+      cargo clippy -p fw-esp32-radio --release --features "$features" -- --no-deps -D warnings
+    done
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this

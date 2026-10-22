@@ -34,12 +34,16 @@
 //! Bluetooth controller keeps running through an HP-system reset and its DMA
 //! wrote into the bootloader's code
 //! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
-//! This chip runs no radio and no peripheral DMA at all — USB-Serial-JTAG
-//! moves bytes through its FIFO, and the WS281x driver refills RMT RAM from
-//! an interrupt — so nothing can write the span across a reset. The region
-//! still carries **no capability tag**, the C6's rule: a request that asks
-//! for `Internal` (esp-rtos's thread stacks today, a radio's buffers if this
-//! chip ever gets one) cannot land in memory the bootloader takes back.
+//! This chip runs a radio too since S3 radio M3 (`ble`), so the rule is the
+//! C6's, and it is enforced by capability, not by this chip having nothing
+//! that DMAs: the region carries **no capability tag**, so only a request
+//! that asks for nothing (Rust's global allocator) can land here. The radio
+//! blobs' C heap asks for its own region's tag and then `Internal`
+//! (`crate::c_heap`), esp-radio's own buffers ask for `Internal`, and so do
+//! esp-rtos's thread stacks: none of them can reach these bytes. Of the
+//! rest, USB-Serial-JTAG moves bytes through its FIFO and the WS281x driver
+//! refills RMT RAM from an interrupt, so no other DMA writes the span across
+//! a reset either.
 //!
 //! # Why the JIT may use it
 //!
