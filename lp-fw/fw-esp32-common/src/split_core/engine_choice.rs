@@ -22,6 +22,14 @@ use super::split_chip::SplitChip;
 
 /// The engine this boot enters — its entry's address and its length — or
 /// why the core stays core-only.
+///
+/// Its own frame (`inline(never)`), as is [`log_boot_state`]: the chip calls
+/// both from `split_boot`, in the main task's poll frame, and the engine
+/// then runs nested in that frame for the board's life. Inlined, their
+/// locals (the header bytes, the guard's hasher, the line's `String`) sat in
+/// that frame: the C6's was 3,248 B; outlined, 2,864 B (M7 P7, for 224 B of
+/// core).
+#[inline(never)]
 pub fn choose_engine<C: SplitChip>(
     state: &mut BootState,
     identity: &CoreIdentity,
@@ -85,6 +93,7 @@ fn find_engine<C: SplitChip>(
 /// The one boot-state line: where this core is and how it came to run, the
 /// loader, the region, the page, the engine (or why not) and the digest the
 /// core carries for it. `engine` is [`choose_engine`]'s answer, by length.
+#[inline(never)]
 pub fn log_boot_state<C: SplitChip>(
     state: &BootState,
     engine: Result<u32, CoreOnlyReason>,
