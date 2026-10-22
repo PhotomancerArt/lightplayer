@@ -2482,6 +2482,42 @@ test-emu-esp32s3-split-boot:
     fi
     cargo test -p lp-cli --release --test emu_s3_split_boot -- --include-ignored --nocapture --test-threads=1
 
+# The S3 split image's boot bookkeeping, scenario by scenario
+# (`lp-cli/tests/emu_s3_split_scenarios.rs`, the C6's
+# `test-emu-c6-split-boot` twin; S3 updates plan M7 P10): four split builds
+# (x, y, y-dies, y-hangs) unless `scenarios` names a directory of them. One
+# door: the S3 boots through the ESP-IDF bootloader only. Not in CI (as the C6's).
+test-emu-esp32s3-split-scenarios scenarios="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/s3-split-scenarios
+        split() { APP_VERSION="$1" cargo run -q -p lp-fw-split --release -- build --chip esp32s3 --target esp32s3-8mb --out "$out/$2" --features "$3"; }
+        split x-test x esp32s3,server,float-f32
+        split y-test y esp32s3,server,float-f32
+        split y-test y-dies esp32s3,server,float-f32,fixture-trial-dies
+        split y-test y-hangs esp32s3,server,float-f32,fixture-trial-hangs
+    fi
+    LP_S3_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_s3_split_scenarios -- --include-ignored --nocapture --test-threads=1
+
+# The S3's over-the-air updates, scenario by scenario (`lp-cli/tests/emu_s3_ota.rs`,
+# the C6's `test-emu-c6-ota` twin; S3 updates plan M7 P10): four
+# `scripts/ota/build-image.sh --chip esp32s3` images unless `scenarios` names a
+# directory of them. One door, as above. Not in CI (as the C6's).
+test-emu-esp32s3-ota scenarios="" filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/s3-ota-scenarios
+        scripts/ota/build-image.sh --chip esp32s3 "$out/x" a0a0a0a0
+        scripts/ota/build-image.sh --chip esp32s3 "$out/y" b1b1b1b1
+        scripts/ota/build-image.sh --chip esp32s3 "$out/y-dies" c1c1c1c1 esp32s3,server,float-f32,fixture-trial-dies
+        scripts/ota/build-image.sh --chip esp32s3 "$out/x-untrusted" a0a0a0a0 esp32s3,server,float-f32,fixture-usb-untrusted
+    fi
+    LP_S3_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_s3_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
 # partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
 # the classic-ESP32 bring-up plan) — unlike the S3, this chip has no 8 MB
