@@ -337,11 +337,17 @@ just test-emu-esp32s3-split-boot   # ROM-up through the IDF door to the engine's
   record), and the engine run as a plain image.
 - Test images only, never in a build def: `fixture-trial-dies`,
   `fixture-trial-hangs`, `fixture-usb-untrusted` (the C6's).
-- Measured (`just fw-esp32s3-size-check 65536 1`, 2026-10-21, default
-  features): core 281,584 B, engine 2,171,869 B, `app.bin` 2,568,192 B against
-  a plain image of 2,431,712 B (+21,741 B code, +136,480 B image: the 64 KiB
-  region start and page rounding); steady headroom 3,726,371 B; 46,096 B to the
-  core's next page.
+- Measured (`just fw-esp32s3-size-check`, 2026-10-22, default features,
+  Bluetooth on, the update board side in): core 791,440 B, engine
+  2,055,057 B, `app.bin` 2,973,696 B; steady headroom 3,318,895 B, update
+  headroom 4,521,984 B; 60,528 B to the core's next page. **The split is
+  layout-sensitive on Xtensa:** the reachability walk follows shared literal
+  pools (GNU ld coalesces them across functions), so a link where an engine
+  function's pool lands next to a core one drags engine code into the core —
+  main at `ccfa116b0` carried ~400 KB of `lpc_engine`/`lpc_model`/`lpc_wire`
+  in a 1,325,216 B core that way (`lp-fw-split why` shows
+  `core_boot` → `btdm_controller_init` → a `.literal` section of
+  `lpc_engine`'s). Compare cores across builds with that in mind.
 
 How the split is built (GNU ld's quirks on Xtensa, the literal pools, the two
 views) is `tools/lp-fw-split/README.md`; the loader is
