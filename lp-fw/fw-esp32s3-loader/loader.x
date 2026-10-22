@@ -3,11 +3,13 @@
    from flash.
 
    Code runs from the instruction-bus view, data from the data-bus view of
-   the same SRAM (I 0x403A_0000 = D 0x3FCB_0000, the +0x6F_0000 alias):
-   lp_bootctl::S3_LOADER_RAM, 0x3FCB_0000..0x3FCC_0000, written into
-   loader_memory.x by build.rs. That range lies inside every core's .bss
-   (never inside a segment the loader copies; esp_image refuses one that
-   reaches it) and below the IDF bootloader's own RAM
+   the same SRAM (I 0x403B_5000 = D 0x3FCC_5000, the +0x6F_0000 alias):
+   lp_bootctl::S3_LOADER_RAM, 0x3FCC_5000..0x3FCC_9000 (16 KiB), written
+   into loader_memory.x by build.rs. That range lies at the top of every
+   core's heap arena, inside its .bss (never inside a segment the loader
+   copies; esp_image refuses one that reaches it), so the core's arena is
+   cut once, at its top edge (L4, amended 2026-10-22), and below the IDF
+   bootloader's own RAM
    (lp_bootctl::S3_IDF_BOOTLOADER_RAM, 0x3FCD_9700 and up, D view), which is
    still live while this image runs: the loader runs on the stack the IDF
    bootloader called it on. The core zeroes .bss over the loader after the
