@@ -54,6 +54,11 @@ pub struct NetChip {
     pub stack_bytes: usize,
     /// The thread's priority (the C6's: the link thread's).
     pub priority: u32,
+    /// The core the thread is pinned to: `None` on a single-core chip (the
+    /// C6); `Some(0)` on the S3, whose esp-rtos is a `multi_core` build where
+    /// an unpinned thread can try to schedule the core this firmware never
+    /// starts (`fw-esp32s3/src/io_thread.rs`).
+    pub pin_to_core: Option<u32>,
     /// Run first thing on the new thread (the C6's stack paint, under its
     /// `net_thread_stack_diag`; nothing otherwise).
     pub on_thread_start: fn(),
@@ -150,7 +155,7 @@ pub fn start(
             entry,
             args.cast::<c_void>(),
             chip.priority,
-            None,
+            chip.pin_to_core,
             chip.stack_bytes,
         );
     }

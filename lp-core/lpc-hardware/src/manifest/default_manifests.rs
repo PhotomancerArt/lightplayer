@@ -42,8 +42,10 @@ pub fn default_esp32c6_hardware_manifest() -> HwManifest {
 ///   No source publishes their GPIO numbers.
 /// - **In-package flash and PSRAM (GPIO26-GPIO37).** Not header pins and never
 ///   claimable; this part carries octal PSRAM, which uses the widest set.
-/// - **A radio resource.** `fw-esp32s3` registers no radio driver, so
-///   advertising `/radio/0` would offer a resource nothing can open.
+/// - **A radio resource.** The default `fw-esp32s3` image registers no radio
+///   driver, so advertising `/radio/0` here would offer a resource nothing can
+///   open; an image built with `radio` adds it itself
+///   (`HwManifest::with_resource`) beside the ESP-NOW driver it registers.
 pub fn default_esp32s3_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_S3_PLUS_JSON)
         .and_then(|manifest| manifest.to_manifest())

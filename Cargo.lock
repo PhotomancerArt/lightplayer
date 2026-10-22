@@ -4362,6 +4362,7 @@ dependencies = [
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
+ "lpc-relay",
  "lpc-shared",
  "lpc-wire",
  "lpfs",
