@@ -50,7 +50,6 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -70,6 +69,10 @@ use lpc_hardware::{
 use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::s3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
+use crate::output::ws281x_endpoints::{
+    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number,
+    has_board_assigned_label, validate_byte_count, ws281x_local_spec,
+};
 
 const DRIVER_ID: &str = "esp32s3-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32-S3 RMT WS281x";
@@ -622,19 +625,6 @@ fn adopt_channel(
     }
 }
 
-fn validate_byte_count(byte_count: u32) -> Result<(), HardwareEndpointError> {
-    if byte_count < 3 {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: "WS281x byte_count must be at least 3".into(),
-        });
-    }
-    Ok(())
-}
-
-fn byte_len_for_byte_count(byte_count: u32) -> usize {
-    ((byte_count / 3) as usize) * 3
-}
-
 fn start_error_to_output_error(channel: u8, error: StartError) -> OutputError {
     match error {
         StartError::Busy => OutputError::Other {
@@ -644,58 +634,4 @@ fn start_error_to_output_error(channel: u8, error: StartError) -> OutputError {
             reason: format!("RMT channel {channel} cannot start a frame: {other:?}"),
         },
     }
-}
-
-fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
-    match error {
-        HardwareEndpointError::Hardware { error } => OutputError::Hardware { error },
-        other => OutputError::InvalidConfig {
-            reason: other.to_string(),
-        },
-    }
-}
-
-fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
-    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: format!("WS281x endpoint address is not a GPIO: {address}"),
-        });
-    };
-    let gpio = raw
-        .parse::<u8>()
-        .map_err(|_| HardwareEndpointError::UnsupportedConfig {
-            reason: format!("invalid ESP32-S3 GPIO address: {address}"),
-        })?;
-    if !gpio_exists(gpio) {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: format!("ESP32-S3 has no GPIO {gpio}"),
-        });
-    }
-    Ok(gpio)
-}
-
-/// Does this chip have GPIO `pin` at all?
-///
-/// The ESP32-S3 numbers **GPIO0-21 and GPIO26-48** — there is no GPIO22-25 and
-/// no GPIO49+. This is not a policy filter (reserving pins is the manifest's
-/// job); it is the physical pin list, and it is checked because
-/// [`AnyPin::steal`] *panics* on a number the chip does not have. A
-/// hand-written `/hardware.json` naming `/gpio/22` must fail the open, not the
-/// boot.
-fn gpio_exists(pin: u8) -> bool {
-    pin <= 21 || (26..=48).contains(&pin)
-}
-
-/// A resource whose display label is still `GPIO<n>` has no board label, and a
-/// pin the board does not name is not one a project should be offered.
-fn has_board_assigned_label(address: &HwAddress, display_label: &str) -> bool {
-    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
-        return false;
-    };
-    !display_label.eq_ignore_ascii_case(&format!("GPIO{raw}"))
-}
-
-fn ws281x_local_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(format!("ws281x:local:{config}"))
-        .expect("manifest display label should form a valid endpoint spec")
 }

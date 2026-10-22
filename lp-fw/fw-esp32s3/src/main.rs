@@ -133,6 +133,11 @@ mod hardware;
 mod output;
 #[cfg(all(feature = "lcd_ws281x_probe", not(fw_harness)))]
 mod lcd_probe;
+#[cfg(all(feature = "lcd_ws281x_probe", feature = "lcd-ws281x"))]
+compile_error!(
+    "`lcd_ws281x_probe` brings its own LCD_CAM rig; it cannot share the peripheral with the \
+     `lcd-ws281x` output driver"
+);
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(not(fw_harness))]
@@ -176,7 +181,7 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
-    output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
+    output::Esp32OutputProvider,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -529,7 +534,7 @@ struct FirmwareApp {
 pub(crate) struct CoreBoot {
     spawner: embassy_executor::Spawner,
     usb_link: &'static UsbLinkShared,
-    rmt_peripheral: esp_hal::peripherals::RMT<'static>,
+    output_peripherals: output::OutputPeripherals,
     base_fs: Box<dyn lpfs::LpFs>,
     fs_boot_state: lpc_wire::FsBootState,
     watchdog: recovery::watchdog::WatchdogFeeder,
@@ -566,7 +571,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // boot skeleton that used to call it directly here is gone, and the harness
     // entrypoint above (which never runs `init_board`) is cfg-exclusive with
     // this function. Do not add a second `esp_hal::init` anywhere on this path.
-    let (sw_int, timg0, usb_device, flash, rwdt, rmt_peripheral) = init_board();
+    let (sw_int, timg0, usb_device, flash, rwdt, output_peripherals) = init_board();
     // The heap is main.rs's, not the board's — `init_board` deliberately does
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
@@ -723,7 +728,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     CoreBoot {
         spawner,
         usb_link,
-        rmt_peripheral,
+        output_peripherals,
         base_fs,
         fs_boot_state,
         watchdog,
@@ -750,7 +755,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     let CoreBoot {
         spawner,
         usb_link,
-        rmt_peripheral,
+        output_peripherals,
         base_fs,
         fs_boot_state,
         watchdog,
@@ -781,21 +786,9 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
 
-    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
-    // with divider 1 gives the 12.5 ns tick `lp_ws281x::PulseCodes` assumes; a
-    // failure here is a clock-tree problem, and it costs the board its output
-    // rather than its boot, so it is logged and not fatal.
-    match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
-        Ok(rmt) => {
-            hardware_system.add_ws281x_driver(Box::new(Esp32S3RmtWs281xDriver::new(
-                Rc::clone(&hardware_registry),
-                rmt,
-            )));
-        }
-        Err(error) => {
-            esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
-        }
-    }
+    // The WS281x driver: the RMT's, or LCD_CAM's under `lcd-ws281x`
+    // (`output::register_ws281x_driver`).
+    output::register_ws281x_driver(&mut hardware_system, &hardware_registry, output_peripherals);
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));

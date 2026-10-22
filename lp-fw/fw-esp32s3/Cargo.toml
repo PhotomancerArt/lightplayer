@@ -146,6 +146,15 @@ ble = [
     "fw-esp32-radio/ble",
 ]
 
+# WS281x output over LCD_CAM (i8080) + GDMA instead of the RMT: up to eight
+# lanes in lockstep from one internal-RAM frame buffer, with no refill
+# deadline, so radio interrupts and flash writes cannot tear a frame (S3 radio
+# roadmap M9; the LED-channels spike's evidence). NOT the default: the RMT
+# driver stays the S3's until Yona rules on the switch with the costs and a
+# real 5-strip test in front of him. The board profile declares both
+# `/rmt/ws281xK` and `/lcd/ws281xK`; each driver reads only its own.
+lcd-ws281x = []
+
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
 # what `scripts/m4-hardware-walk.sh` diffs against the host oracle, and it is
