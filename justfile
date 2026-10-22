@@ -2856,9 +2856,10 @@ fmt-check:
 # is already absent from `default-members` — which is why every fw-* crate is
 # named below, and why `lp-xt-fp-harness` (esp-println, bare-metal target) joins
 # them. It is covered by `clippy-fw-esp32s3` and `clippy-fw-esp32v3`, which
-# compile it for its real target.
+# compile it for its real target. `fw-esp32-radio` (esp-hal, esp-radio) is
+# linted on the C6's target by `clippy-fw-esp32c6`.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
     # fw-esp32-common's usb_link/uart_link modules are behind non-default
     # features (`clippy-host`'s `--workspace` only lints its defaults), the
     # same gap `test-rust-features` closes below for the tests.
@@ -2952,6 +2953,16 @@ clippy-fw-esp32c6: install-rv32-target
         --features esp32c6,heap_peak_diag -- --no-deps -D warnings
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,memory_fs -- --no-deps -D warnings
+    # The radio glue the C6 links (`lp-fw/fw-esp32-radio`): `--no-deps` above
+    # never lints it, so it gets its own passes, one per feature tier the C6
+    # builds it at (the ESP-NOW harnesses at `radio`, the BLE harnesses at
+    # `ble`, the app at `wifi`), plus the two desk-only BLE features. On the
+    # C6's target, from this directory (build-std and the toolchain are here).
+    for features in esp32c6,radio esp32c6,ble esp32c6,wifi esp32c6,wifi,desk_ble_params,desk_ble_fault; do
+        echo "clippy: fw-esp32-radio --features $features"
+        cargo clippy -p fw-esp32-radio --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --features "$features" -- --no-deps -D warnings
+    done
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader

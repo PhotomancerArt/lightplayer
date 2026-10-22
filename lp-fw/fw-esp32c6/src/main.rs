@@ -353,7 +353,7 @@ fn log_heartbeat_stack_lines() {
         #[cfg(feature = "net_thread_stack_diag")]
         net::net_thread_stack_diag::log_if_grown();
         #[cfg(lp_net)]
-        net::net_heartbeat::log_line();
+        net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
         #[cfg(feature = "heap_peak_diag")]
         heap_peak_diag::log_line();
     }
@@ -967,11 +967,11 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             if file.wifi { "on" } else { "off" },
             if file.cloud_relay { "on" } else { "off" }
         );
-        if net::relay_task::relay_host_overridden() {
+        if net::relay_config::relay_host_overridden() {
             esp_println::println!(
                 "[INIT] desk image: the relay is {}:{} (LP_RELAY_HOST), not lightplayer.app",
-                net::relay_task::RELAY_HOST,
-                net::relay_task::relay_port()
+                net::relay_config::RELAY_HOST,
+                net::relay_config::relay_port()
             );
         }
         if let Some((controller, station)) = net_radio {
@@ -981,11 +981,20 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                 | u64::from(esp_hal::rng::Rng::new().random());
             // A board that will join allocates its socket buffers now.
             let will_join = file.wifi && !file.networks.is_empty();
-            let relay = net::relay_task::relay_config(
+            let relay = net::relay_config::relay_config(
                 mac,
                 lpa_server::device_identity::read_device_name(base_fs.as_ref()),
             );
-            net::net_thread::start(controller, station, host, seed, lan_port, will_join, relay);
+            net::net_thread::start(
+                controller,
+                station,
+                host,
+                seed,
+                lan_port,
+                will_join,
+                relay,
+                &net::net_chip::NET_CHIP,
+            );
         }
     }
     #[cfg(all(

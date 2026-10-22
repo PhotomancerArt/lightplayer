@@ -438,6 +438,10 @@ jobs:
               # through the generated firmware closure (`figures_esp32c6`
               # above), not through this filter.
               - 'lp-fw/fw-esp32-common/**'
+              # The radio glue the C6 links (ESP-NOW, BLE, the network on
+              # `lp-net`), moved out of fw-esp32c6 (S3 radio plan M2): every
+              # emulator gate that ran on it there must still run on it here.
+              - 'lp-fw/fw-esp32-radio/**'
               # The vendored forks (esp-hal, esp-radio, esp-alloc, naga, …)
               # are in the C6 image's link closure, so a change there moves
               # the bytes every gate below boots. Missing until 2026-09-27:

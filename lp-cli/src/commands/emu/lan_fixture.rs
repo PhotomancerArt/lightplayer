@@ -48,7 +48,7 @@ use lp_emu_esp_common::seam::net::{
 use serde::Deserialize;
 
 /// The board's LAN endpoint port: the firmware's LAN link listens here
-/// (`fw-esp32c6/src/net/lan_endpoint_task.rs`), and a forward reaches it.
+/// (`fw-esp32-radio/src/net/lan_endpoint_task.rs`), and a forward reaches it.
 pub const BOARD_LAN_PORT: u16 = 80;
 
 /// One fixture file, read.

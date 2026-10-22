@@ -46,7 +46,7 @@ const FRAME_FROM_THE_OTHER_BOARD: &str = "d0000000ffffffffffffa0f26285a87cffffff
 e2b3830ddd1618fe340402504c01016285a87c000000000100000000";
 
 /// The RX DMA ring the `test_espnow` image's blob posts: the firmware's
-/// `static_rx_buf_num` (`lp-fw/fw-esp32c6/src/hardware/espnow_controller_config.rs`;
+/// `static_rx_buf_num` (`lp-fw/fw-esp32-radio/src/hardware/espnow_controller_config.rs`;
 /// esp-radio's default is ten, the product has asked for four since
 /// 2026-10-01). A figure of the image, not of the machine.
 const RX_RING_DESCRIPTORS: u64 = 4;
