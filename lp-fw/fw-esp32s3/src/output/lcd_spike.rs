@@ -398,7 +398,13 @@ impl Rig {
 
         let mut tx = self.tx.take().unwrap();
         let t0 = Instant::now();
-        let len = parallel::encode_frame(SlotPlan::THREE, &refs, LATCH_BYTES, tx.as_mut_slice());
+        let len = parallel::encode_frame(
+            SlotPlan::THREE,
+            &refs,
+            lp_ws281x::ColorOrder::Rgb,
+            LATCH_BYTES,
+            tx.as_mut_slice(),
+        );
         let encode_us = t0.elapsed().as_micros();
         tx.set_length(len);
 

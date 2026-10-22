@@ -31,6 +31,8 @@
 //! delta-swap construction (three masked swaps on a 64-bit word), written
 //! here from first principles. No LED-driver library's source was consulted.
 
+use crate::timing::ColorOrder;
+
 /// Lanes on an 8-bit bus.
 pub const LANES: usize = 8;
 
@@ -66,12 +68,22 @@ pub const fn encoded_len(plan: SlotPlan, max_lane_bytes: usize, tail: usize) -> 
     max_lane_bytes * plan.bus_bytes_per_byte() + tail
 }
 
-/// Encode up to eight lanes (wire-order bytes, colour order already applied)
-/// into `out`, followed by `tail` zero bytes. Returns the bytes written.
+/// Encode up to eight lanes of RGB triplets into `out`, each pixel's bytes
+/// sent in `order` (WS2812 parts want [`ColorOrder::Grb`]; [`ColorOrder::Rgb`]
+/// sends the bytes as given), followed by `tail` zero bytes. Returns the
+/// bytes written.
 ///
-/// Lane `i` drives bus bit `i`. Panics if `out` is too small or more than
-/// eight lanes are given; the caller sizes `out` with [`encoded_len`].
-pub fn encode_frame(plan: SlotPlan, lanes: &[&[u8]], tail: usize, out: &mut [u8]) -> usize {
+/// Lane `i` drives bus bit `i`. A lane's length is a whole number of pixels
+/// (a trailing partial pixel is sent as given). Panics if `out` is too small
+/// or more than eight lanes are given; the caller sizes `out` with
+/// [`encoded_len`].
+pub fn encode_frame(
+    plan: SlotPlan,
+    lanes: &[&[u8]],
+    order: ColorOrder,
+    tail: usize,
+    out: &mut [u8],
+) -> usize {
     assert!(lanes.len() <= LANES, "at most eight lanes");
     let max = lanes.iter().map(|lane| lane.len()).max().unwrap_or(0);
     let len = encoded_len(plan, max, tail);
@@ -82,7 +94,7 @@ pub fn encode_frame(plan: SlotPlan, lanes: &[&[u8]], tail: usize, out: &mut [u8]
         // The fast path: a fixed 24-byte chunk per wire byte, so the stores
         // need no bounds checks and the bit loop unrolls.
         for index in 0..max {
-            let (packed, active) = gather(lanes, index);
+            let (packed, active) = gather(lanes, order, index);
             let columns = transpose8(packed).to_le_bytes();
             let chunk: &mut [u8; 24] = (&mut out[index * 24..index * 24 + 24])
                 .try_into()
@@ -96,7 +108,7 @@ pub fn encode_frame(plan: SlotPlan, lanes: &[&[u8]], tail: usize, out: &mut [u8]
     } else {
         let spb = plan.slots_per_bit as usize;
         for index in 0..max {
-            let (packed, active) = gather(lanes, index);
+            let (packed, active) = gather(lanes, order, index);
             // After the transpose, byte `b` holds bit `b` of every lane.
             let columns = transpose8(packed).to_le_bytes();
             let chunk = &mut out[index * per_byte..(index + 1) * per_byte];
@@ -120,14 +132,18 @@ pub fn encode_frame(plan: SlotPlan, lanes: &[&[u8]], tail: usize, out: &mut [u8]
     len
 }
 
-/// Byte `index` of every lane packed into one word (lane `i` in byte `i`),
-/// and the mask of lanes that still have a byte there.
+/// Wire byte `index` of every lane packed into one word (lane `i` in byte
+/// `i`), and the mask of lanes that still have a byte there.
 #[inline(always)]
-fn gather(lanes: &[&[u8]], index: usize) -> (u64, u8) {
+fn gather(lanes: &[&[u8]], order: ColorOrder, index: usize) -> (u64, u8) {
+    let slot = index % 3;
+    let source = index - slot + order.source_index(slot);
     let mut packed = 0u64;
     let mut active = 0u8;
     for (lane, bytes) in lanes.iter().enumerate() {
-        if let Some(&byte) = bytes.get(index) {
+        if index < bytes.len() {
+            // A trailing partial pixel has no permutation: send it as given.
+            let byte = bytes.get(source).copied().unwrap_or(bytes[index]);
             packed |= (byte as u64) << (8 * lane);
             active |= 1 << lane;
         }
@@ -285,7 +301,7 @@ mod tests {
         // One lane, one byte 0b1000_0001.
         let lanes: [&[u8]; 1] = [&[0x81]];
         let mut out = [0xEEu8; 24 + 2];
-        let n = encode_frame(SlotPlan::THREE, &lanes, 2, &mut out);
+        let n = encode_frame(SlotPlan::THREE, &lanes, ColorOrder::Rgb, 2, &mut out);
         assert_eq!(n, 26);
         assert_eq!(&out[0..3], &[1, 1, 0]); // MSB = 1
         assert_eq!(&out[3..6], &[1, 0, 0]); // 0
@@ -302,17 +318,31 @@ mod tests {
         };
         let lanes: [&[u8]; 2] = [&[0x80], &[0x00]];
         let mut out = [0xEEu8; 32];
-        encode_frame(plan, &lanes, 0, &mut out);
+        encode_frame(plan, &lanes, ColorOrder::Rgb, 0, &mut out);
         // Bit 7: lane 0 is 1 (three slots high), lane 1 is 0 (one slot).
         assert_eq!(&out[0..4], &[0b11, 0b01, 0b01, 0]);
         assert_eq!(&out[4..8], &[0b11, 0, 0, 0]);
     }
 
     #[test]
+    fn grb_order_sends_green_first() {
+        // One pixel R=0x01 G=0x80 B=0x00: GRB puts 0x80 first on the wire.
+        let lanes: [&[u8]; 1] = [&[0x01, 0x80, 0x00]];
+        let mut out = vec![0u8; encoded_len(SlotPlan::THREE, 3, 0)];
+        encode_frame(SlotPlan::THREE, &lanes, ColorOrder::Grb, 0, &mut out);
+        // First wire byte (G = 0x80): MSB is a 1, the rest 0.
+        assert_eq!(&out[0..3], &[1, 1, 0]);
+        assert_eq!(&out[3..6], &[1, 0, 0]);
+        // Second wire byte (R = 0x01): only the LSB is a 1.
+        assert_eq!(&out[24..27], &[1, 0, 0]);
+        assert_eq!(&out[45..48], &[1, 1, 0]);
+    }
+
+    #[test]
     fn short_lanes_drop_out() {
         let lanes: [&[u8]; 3] = [&[0xFF, 0xFF], &[0xFF], &[]];
         let mut out = vec![0u8; encoded_len(SlotPlan::THREE, 2, 0)];
-        encode_frame(SlotPlan::THREE, &lanes, 0, &mut out);
+        encode_frame(SlotPlan::THREE, &lanes, ColorOrder::Rgb, 0, &mut out);
         assert_eq!(&out[0..3], &[0b011, 0b011, 0]);
         assert_eq!(&out[24..27], &[0b001, 0b001, 0]);
     }
@@ -341,7 +371,7 @@ mod tests {
         let lanes: Vec<&[u8]> = lane_bytes.iter().map(|lane| lane.as_slice()).collect();
         let max = lanes.iter().map(|lane| lane.len()).max().unwrap();
         let mut bus = vec![0u8; encoded_len(SlotPlan::THREE, max, 8)];
-        encode_frame(SlotPlan::THREE, &lanes, 8, &mut bus);
+        encode_frame(SlotPlan::THREE, &lanes, ColorOrder::Rgb, 8, &mut bus);
 
         // 8 MHz sampling of 2.5 MHz slots: 3.2 samples a slot.
         let samples = resample(&bus, 3.2, 17, 400);
