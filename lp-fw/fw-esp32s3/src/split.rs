@@ -23,8 +23,8 @@
 //! a trial confirmed when any host link comes up.
 
 use fw_esp32_common::split_core as split;
-use lpfs::lp_path::AsLpPath as _;
 use lp_bootctl::engine_header::{ENGINE_BUILD_ID_LEN, ENGINE_HEADER_LEN};
+use lpfs::lp_path::AsLpPath as _;
 
 use crate::split_core::S3Split;
 use crate::{CoreBoot, lp_engine_entry};
