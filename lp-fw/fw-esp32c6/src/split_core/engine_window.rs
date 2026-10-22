@@ -1,4 +1,7 @@
-//! The engine's window: where it is linked, and the MMU entries behind it.
+//! The C6's flash MMU for the split image: where the engine is linked, the
+//! MMU entries behind it, the core's scratch window, and where the running
+//! core is. One view: on the C6 the engine's code and data share
+//! [`ENGINE_VADDR`].
 
 /// Where the engine is linked (`tools/lp-fw-split`'s `ENGINE_BASE`).
 pub const ENGINE_VADDR: usize = 0x4240_0000;
@@ -40,8 +43,9 @@ pub fn map_engine(start: u32, len: u32) {
 /// nothing else uses, unmapped again when dropped.
 ///
 /// The core's own hash reads its 1.2 MB through here rather than through
-/// the ROM's SPI1 reads ([`super::split_flash`]), whose 64-byte calls cost
-/// 392 of the 515 ms the hash took on silicon. The entries are the ones just
+/// the ROM's SPI1 reads (`fw_esp32_common::split_core::SplitFlash`), whose
+/// 64-byte calls cost 392 of the 515 ms the hash took on silicon. The
+/// entries are the ones just
 /// below [`ENGINE_VADDR`] — the top of the core's own window, which the core
 /// (linked from `0x4200_0000` up) does not reach — and each one is checked
 /// invalid before it is used, so a core grown into them makes this refuse
@@ -87,6 +91,16 @@ impl ScratchWindow {
         // SAFETY: `map` pointed these entries at `len` bytes of flash from
         // `skip` on; they stay mapped until `self` drops.
         unsafe { core::slice::from_raw_parts((vaddr + self.skip) as *const u8, self.len) }
+    }
+}
+
+impl fw_esp32_common::split_core::ScratchWindow for ScratchWindow {
+    fn map(start: u32, len: u32) -> Option<Self> {
+        ScratchWindow::map(start, len)
+    }
+
+    fn bytes(&self) -> &[u8] {
+        ScratchWindow::bytes(self)
     }
 }
 

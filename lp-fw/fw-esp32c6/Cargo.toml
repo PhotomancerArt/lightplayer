@@ -19,6 +19,10 @@ esp32c6 = [
 server = [
     "fs-tree",
     "fw-esp32-common/server",
+    # The split image's update board side (`src/split_core/` is the C6's
+    # chip for it). Only `LP_SPLIT_LINK` builds call it; a plain build links
+    # none of it.
+    "fw-esp32-common/split-core",
     "lpc-hardware",
     "lpc-model",
     "lpc-wire",

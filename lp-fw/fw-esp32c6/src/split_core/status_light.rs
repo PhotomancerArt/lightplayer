@@ -126,11 +126,17 @@ impl StatusLight {
                 rgb[0],
                 rgb[1],
                 rgb[2],
-                super::update_edge::state_word(state)
+                fw_esp32_common::split_core::state_word(state)
             );
         } else {
             log::warn!("[OTA] light: the frame did not go out");
         }
+    }
+}
+
+impl fw_esp32_common::split_core::UpdateLight for StatusLight {
+    fn show(&mut self, state: BoardState) {
+        StatusLight::show(self, state);
     }
 }
 

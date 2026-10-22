@@ -4200,6 +4200,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "littlefs-rust",
  "log",
+ "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-crc32",
  "lp-gfx",

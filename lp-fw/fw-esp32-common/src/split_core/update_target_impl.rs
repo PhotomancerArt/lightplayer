@@ -1,5 +1,5 @@
 //! `lpc_update`'s [`UpdateTarget`] over the split image: the fenced raw
-//! flash ([`SplitFlash`]), layout 1's placement rules
+//! flash ([`SplitFlash`]), the chip's layout's placement rules
 //! ([`lp_bootctl::SplitLayout`]) and the split image's format hooks
 //! (`lp-bootctl`'s boot record and engine header). The session never
 //! re-types a format; this is where they meet.
@@ -16,13 +16,13 @@ use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
+use super::split_chip::{Sha256Stream, SplitChip};
 use super::split_flash::{BLOCK, SECTOR, SplitFlash};
 use super::update_timing::{FlashTiming, now_us};
-use crate::hw_sha::BootSha256;
 
 /// The split image's side of an update.
-pub struct SplitUpdateTarget {
-    flash: SplitFlash,
+pub struct SplitUpdateTarget<C: SplitChip> {
+    flash: SplitFlash<C>,
     layout: SplitLayout,
     core_off: u32,
     core_len: u32,
@@ -36,7 +36,7 @@ pub struct SplitUpdateTarget {
     pub timing: FlashTiming,
 }
 
-impl SplitUpdateTarget {
+impl<C: SplitChip> SplitUpdateTarget<C> {
     /// The target for this boot. When the boot state is not trusted the
     /// fence is never set, so nothing is ever written (and the session
     /// refuses every install `N`/`T` anyway).
@@ -50,9 +50,9 @@ impl SplitUpdateTarget {
                 layout
             }
             None => SplitLayout {
-                region_start: lp_bootctl::REGION_START,
-                region_end: lp_bootctl::REGION_START,
-                page: super::page_size(),
+                region_start: C::REGION_START,
+                region_end: C::REGION_START,
+                page: C::page_size(),
             },
         };
         let (record_sector, record_seq) = state
@@ -65,13 +65,13 @@ impl SplitUpdateTarget {
             core_len: state.core_len,
             record_sector,
             record_seq,
-            engine_start: state.engine_room().start,
+            engine_start: state.engine_room::<C>().start,
             timing: FlashTiming::default(),
         }
     }
 
     /// The raw flash, for the core's own reads (the light's, the hashes').
-    pub fn flash(&mut self) -> &mut SplitFlash {
+    pub fn flash(&mut self) -> &mut SplitFlash<C> {
         &mut self.flash
     }
 }
@@ -80,7 +80,7 @@ fn ok(done: bool) -> Result<(), FlashFault> {
     if done { Ok(()) } else { Err(FlashFault) }
 }
 
-impl UpdateTarget for SplitUpdateTarget {
+impl<C: SplitChip> UpdateTarget for SplitUpdateTarget<C> {
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault> {
         let t0 = now_us();
         let done = self.flash.erase(addr);
@@ -101,9 +101,10 @@ impl UpdateTarget for SplitUpdateTarget {
         ok(done)
     }
 
-    /// On the SHA accelerator ([`BootSha256`]), from flash a sector at a
-    /// time: the software hash over the ROM's reads cost ~1.3 s for the core
-    /// and ~1.9 s for the engine on the bench C6.
+    /// With the chip's SHA ([`SplitChip::Sha`]), from flash a sector at a
+    /// time: on the bench C6 the software hash over the ROM's reads cost
+    /// ~1.3 s for the core and ~1.9 s for the engine; its accelerator, a
+    /// fraction of that.
     fn sha256_flash(
         &mut self,
         head: Option<&[u8]>,
@@ -111,7 +112,7 @@ impl UpdateTarget for SplitUpdateTarget {
         to: u32,
     ) -> Option<Result<[u8; 32], FlashFault>> {
         let t0 = now_us();
-        let mut sha = BootSha256::new();
+        let mut sha = C::Sha::new();
         if let Some(head) = head {
             sha.update(head);
         }
@@ -179,12 +180,11 @@ impl UpdateTarget for SplitUpdateTarget {
         // refuse it here, before the record that boots it, and say why. The
         // core's own bytes decide (its tree-store mark): its engine, which
         // carries the manifest, is not on flash yet.
-        if super::cores_must_read_tree_store() {
+        if C::CORES_MUST_READ_TREE_STORE {
             let flash = &mut self.flash;
-            let verdict =
-                fw_esp32_common::fs_tree_core_guard::core_store_verdict(len, |at, buf| {
-                    flash.read(dest + at, buf)
-                });
+            let verdict = crate::fs_tree_core_guard::core_store_verdict(len, |at, buf| {
+                flash.read(dest + at, buf)
+            });
             if let Some(why) = verdict.refusal() {
                 log::warn!("[OTA] core install refused: {why}");
                 return Err(FlashFault);

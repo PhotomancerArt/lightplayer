@@ -15,16 +15,12 @@ use alloc::vec;
 
 use lp_bootctl::{
     ATTEMPTED_MARK_OFFSET, BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootChoice, BootSlot,
-    COLD_TALLY_OFFSET, CONFIRMED_MARK_OFFSET, Extent, LOADER_OFFSET, REGION_START, ResetKind,
+    COLD_TALLY_OFFSET, CONFIRMED_MARK_OFFSET, Extent, LOADER_OFFSET, ResetKind,
     STARTED_MARK_OFFSET, SplitLayout,
 };
 
-use super::engine_window::{page_size, running_core_offset};
+use super::split_chip::SplitChip;
 use super::split_flash::SplitFlash;
-
-/// Bounds an engine header's length when the flashed table could not be
-/// read: the end of a 4 MB chip. Nothing is written in that state.
-const FALLBACK_REGION_END: u32 = 0x40_0000;
 
 pub struct BootState {
     /// The layout from the flashed table, when it gave one.
@@ -66,9 +62,12 @@ impl BootState {
 
     /// Read this boot's state. `factory` is `(offset, len)` from the flashed
     /// table, if it could be read.
-    pub fn read(flash: &mut SplitFlash, factory: Option<(u32, u32)>, reset: ResetKind) -> Self {
-        let page = page_size();
-        let layout = factory.and_then(|(offset, len)| SplitLayout::from_factory(offset, len, page));
+    pub fn read<C: SplitChip>(
+        flash: &mut SplitFlash<C>,
+        factory: Option<(u32, u32)>,
+        reset: ResetKind,
+    ) -> Self {
+        let layout = factory.and_then(|(offset, len)| C::layout(offset, len));
         let mut sectors = [None; 2];
         let mut reads_ok = true;
         for (slot, at) in sectors.iter_mut().zip(BOOT_RECORD_SECTORS) {
@@ -79,7 +78,7 @@ impl BootState {
                 reads_ok = false;
             }
         }
-        let running = running_core_offset();
+        let running = C::running_core_offset();
         // The loader's choice — or, when it fell back from an unconfirmed
         // trial whose core would not load to the proven core running here,
         // that rollback (`booted_by`; defect 2026-10-17, a power cycle after
@@ -157,15 +156,16 @@ impl BootState {
     }
 
     /// The most the engine may occupy. Without a layout from the table, a
-    /// low core's engine is bounded only by the chip: the header's own
-    /// length decides how much is mapped.
-    pub fn engine_room(&self) -> Extent {
+    /// low core's engine is bounded only by the chip
+    /// ([`SplitChip::FALLBACK_REGION_END`]): the header's own length decides
+    /// how much is mapped.
+    pub fn engine_room<C: SplitChip>(&self) -> Extent {
         let layout = self.layout.unwrap_or(SplitLayout {
-            region_start: REGION_START,
-            region_end: FALLBACK_REGION_END,
-            page: page_size(),
+            region_start: C::REGION_START,
+            region_end: C::FALLBACK_REGION_END,
+            page: C::page_size(),
         });
-        if self.layout.is_none() && self.core_off != REGION_START {
+        if self.layout.is_none() && self.core_off != C::REGION_START {
             return Extent { start: 0, end: 0 };
         }
         layout.engine_room(self.core_off, self.core_len)
@@ -174,7 +174,7 @@ impl BootState {
     /// The first write of a trial core's boot, before anything that could
     /// fail: count a cold retry when this boot is one, then mark attempted.
     /// A core that dies before confirming is then accountable.
-    pub fn begin_trial(&mut self, flash: &mut SplitFlash) {
+    pub fn begin_trial<C: SplitChip>(&mut self, flash: &mut SplitFlash<C>) {
         let Some(c) = self.choice.as_mut() else {
             return;
         };
@@ -197,7 +197,7 @@ impl BootState {
 
     /// A trial core finished its bring-up (radios and links up): from here a
     /// power cycle is never counted against it.
-    pub fn mark_started(&mut self, flash: &mut SplitFlash) {
+    pub fn mark_started<C: SplitChip>(&mut self, flash: &mut SplitFlash<C>) {
         if !self.on_trial() {
             return;
         }
@@ -210,7 +210,7 @@ impl BootState {
     }
 
     /// A trial core proves itself: from here the loader keeps booting it.
-    pub fn confirm(&mut self, flash: &mut SplitFlash) {
+    pub fn confirm<C: SplitChip>(&mut self, flash: &mut SplitFlash<C>) {
         if !self.on_trial() {
             return;
         }
@@ -232,7 +232,7 @@ impl BootState {
     /// boot after a USB flash): mark it confirmed, so later boots skip the
     /// guard. The loader reads `confirmed` only on trials, so this changes
     /// no boot choice.
-    pub fn confirm_checked(&mut self, flash: &mut SplitFlash) {
+    pub fn confirm_checked<C: SplitChip>(&mut self, flash: &mut SplitFlash<C>) {
         if !self.trusted() {
             return;
         }
@@ -258,7 +258,7 @@ impl BootState {
 
 /// Length of the ESP image at `at`: header, then each segment's header and
 /// bytes, then the checksum padding to 16 and the appended SHA-256.
-fn image_len(flash: &mut SplitFlash, at: u32) -> Option<u32> {
+fn image_len<C: SplitChip>(flash: &mut SplitFlash<C>, at: u32) -> Option<u32> {
     let mut header = [0u8; 24];
     if !flash.read(at, &mut header) || header[0] != 0xE9 {
         return None;
