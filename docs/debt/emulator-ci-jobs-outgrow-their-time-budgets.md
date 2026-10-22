@@ -66,9 +66,13 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   passed (the gate 22 min, P4's split boot 5 min). Main already ran this job
   in 28–30.5 min after P4 (#1248) added the split-image boot; this PR's
   seam harness (one more firmware build and four tests) tipped it over.
-  Split, not bumped: `just test-emu-esp32s3-seams` and its own job,
-  `Emulator ESP32-S3 seams (x64)`. The S3 job itself still sits near its
-  budget on main — the next S3 device test wants a split of the gate.
+  Split, not bumped: `just test-emu-esp32s3-seams` and its own job. The
+  re-run without the harness was cancelled the same way (gate 22 min, split
+  boot 5, the ratchet at 6 when the budget hit; cold caches for the crates
+  the PR touched, as #1238 saw), so the S3's heap ratchet moved into that
+  job too: `Emulator ESP32-S3 seams and heap (x64)`, 30 minutes. The S3
+  gate job is now the gate and the split boot, ~27 min cold — the next S3
+  device test wants a split of the gate itself.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that

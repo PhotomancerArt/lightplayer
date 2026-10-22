@@ -909,7 +909,8 @@ LTO; `net=lan` engaged by default with `net_mac` writing the eFuse MAC
 through its out-pointer; and the wake reaching a core asleep in `waiti`,
 each queue delivered exactly once. `just test-emu-esp32s3-seams` builds the
 image and runs them with `--features test-seams` (CI: `Emulator ESP32-S3
-seams (x64)`, a job of its own).
+seams and heap (x64)`, a job of its own, which also runs the S3's heap
+ratchet).
 
 ⚠️ **The shipped S3 image declares no seam yet** (no network stack before
 the roadmap's M4), so on it every default run says `SEAM none engaged: no

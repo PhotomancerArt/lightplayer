@@ -4312,8 +4312,8 @@ test-emu-esp32s3-boot:
 # implementations (no shipped binary has them): the Xtensa seam ABI through
 # the release build's LTO, `net=lan` engaged by default, and the wake. One
 # firmware build and a few seconds of emulation; the `Emulator ESP32-S3
-# seams (x64)` job runs exactly this, apart from the S3 gate's job, which
-# runs near its time budget.
+# seams and heap (x64)` job runs this and the S3's heap ratchet, apart from
+# the S3 gate's job, which runs near its time budget.
 test-emu-esp32s3-seams:
     #!/usr/bin/env bash
     set -euo pipefail

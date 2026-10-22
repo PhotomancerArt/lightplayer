@@ -75,7 +75,8 @@ set -euo pipefail
 # (`Heap budget (esp32c6 chip)`, filter `emu_c6`), the classic in
 # `emu-esp32v3` (`Emulator ESP32v3 (x64)`, filter `emu_esp32v3`, the job that
 # installs the Xtensa toolchain and builds this firmware anyway), and the S3
-# in `emu-esp32s3` (`Emulator ESP32-S3 (x64)`, filter `emu_esp32s3`) for that
+# in `emu-esp32s3-seams` (`Emulator ESP32-S3 seams and heap (x64)`, filter
+# `figures_esp32s3`; moved out of `emu-esp32s3` for its time budget) for that
 # same reason: the C6's heap job has no Xtensa toolchain (DD71). All three
 # set
 # `LP_EMU_BUILD_FW=1`, where a skip is a failure. Without an image the chip
@@ -649,7 +650,7 @@ chip_check() {
     if ! elf="$(chip_elf "$CHIP_ID")"; then
         echo "heap-budget: ${CHIP_ID}: SKIPPED — no firmware image (see stderr). The chip half \
 runs in CI's path-gated jobs, which set LP_EMU_BUILD_FW=1: 'Heap budget (esp32c6 chip)' for the \
-C6, 'Emulator ESP32v3 (x64)' for the classic and 'Emulator ESP32-S3 (x64)' for the S3 (the jobs \
+C6, 'Emulator ESP32v3 (x64)' for the classic and 'Emulator ESP32-S3 seams and heap (x64)' for the S3 (the jobs \
 that already have the Xtensa toolchain)."
         return 0
     fi
@@ -881,7 +882,7 @@ chip_baseline() {
 # Which chips a run covers: all of them, or the one named.
 # CI's three jobs have one toolchain each and so name one each — the C6 in
 # `Heap budget (esp32c6 chip)`, the classic in `Emulator ESP32v3 (x64)` and
-# the S3 in `Emulator ESP32-S3 (x64)`, the two jobs that already install an
+# the S3 in `Emulator ESP32-S3 seams and heap (x64)`, the two jobs that install an
 # Xtensa toolchain and build that firmware. A bare `chips` locally is still
 # all three.
 chips_for() {
