@@ -39,6 +39,10 @@ pub fn policy() -> &'static str {
 /// Bring PSRAM up and install the policy. Logged with `esp_println` (the
 /// link is not up yet), like the other `[INIT]` lines.
 pub fn install() {
+    if policy() == "off" {
+        esp_println::println!("[INIT] psram: off (control image)");
+        return;
+    }
     let t0 = esp_hal::time::Instant::now();
     // SAFETY: nothing else in this image takes the PSRAM singleton.
     let peri = unsafe { esp_hal::peripherals::PSRAM::steal() };

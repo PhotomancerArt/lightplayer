@@ -150,7 +150,7 @@ pub fn run(
     code_fetch(base + 4 * 1024 * 1024);
 
     // ── Flash writes with PSRAM dirty in the cache ───────────────────────
-    let mut fs = esp_storage::FlashStorage::new(flash_peri);
+    let mut fs = unsafe { esp_storage::FlashStorage::new(flash_peri).multicore_ignore() };
     flash_write_hazard(&mut fs, base + 5 * 1024 * 1024);
 
     // The frame copy an output path would add (PSRAM render → internal).
@@ -769,7 +769,7 @@ pub fn led_stress(
 
     let (base, size) = init(psram_peri);
     println!("{TAG} led stress: psram {base:#010x} {size} B, {LEDS} LEDs × 4 channels, {FRAMES} frames per row");
-    let mut fs = esp_storage::FlashStorage::new(flash_peri);
+    let mut fs = unsafe { esp_storage::FlashStorage::new(flash_peri).multicore_ignore() };
     core1_start(cpu_peri, base);
 
     let mut internal = alloc::boxed::Box::new([[0u8; N]; 4]);
@@ -819,7 +819,10 @@ pub fn led_stress(
                             // Once a frame, ~1 ms in (well past the prefill).
                             if !erased && started.elapsed() > esp_hal::time::Duration::from_micros(1000) {
                                 erased = true;
-                                let _ = fs.erase(SPARE_SECTOR, SPARE_SECTOR + 4096);
+                                let r = fs.erase(SPARE_SECTOR, SPARE_SECTOR + 4096);
+                                if r.is_err() {
+                                    println!("{TAG} led stress: erase failed {r:?}");
+                                }
                             }
                         }
                     }
@@ -1052,7 +1055,7 @@ fn core1_contention(cpu_peri: esp_hal::peripherals::CPU_CTRL<'static>, base: usi
     }
     // Last, because it may not survive: core 1 on flash code, then on PSRAM,
     // while core 0 erases a sector with only its own interrupts masked.
-    for (c1, c1_name) in [(4u32, "psram-rmw"), (3, "psram-seq"), (2, "flash-code")] {
+    for (c1, c1_name) in [(3u32, "psram-seq"), (4, "psram-rmw"), (2, "flash-code")] {
         println!("{TAG} core1 {c1_name} during a core-0 erase: starting");
         CORE1_COUNT.store(0, Ordering::Relaxed);
         CORE1_CMD.store(c1, Ordering::Release);

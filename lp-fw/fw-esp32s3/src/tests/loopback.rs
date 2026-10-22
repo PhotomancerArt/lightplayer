@@ -155,6 +155,11 @@ pub fn run(peripherals: Peripherals) -> ! {
     // PSRAM spike: the LED stress runs after the self-test.
     #[cfg(feature = "test_psram_bench")]
     let spike = (peripherals.PSRAM, peripherals.FLASH, peripherals.CPU_CTRL);
+    #[cfg(feature = "test_psram_bench")]
+    {
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(4000) {}
+    }
     esp_println::println!(
         "fw-esp32s3: RMT loopback self-test, GPIO4-7 TX ch0-3 -> RX ch4-7, no wires"
     );
