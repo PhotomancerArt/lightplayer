@@ -186,7 +186,13 @@ fn cut_sweep(id: &str, raw: bool) {
     let core_chunks = y.manifest.core.length.div_ceil(4096) as u32;
     let engine_chunks = y.manifest.engine.length.div_ceil(4096) as u32;
     let total = core_chunks + engine_chunks;
-    let cuts = cut_points(core_chunks, total);
+    // `LP_S3_OTA_SWEEP=all`: a cut after EVERY request of the update, not
+    // the ≥ 30 below (hours; quoted in the PR, never CI).
+    let cuts: Vec<u32> = if std::env::var("LP_S3_OTA_SWEEP").as_deref() == Ok("all") {
+        (1..=total).collect()
+    } else {
+        cut_points(core_chunks, total)
+    };
     // One update, the flash snapshotted after each chosen request.
     let mut host = hosted(x.merged(), Some(offer(&y, |a| a.ota_no_z = raw)));
     let mut snaps: Vec<(u32, &'static str, Vec<u8>)> = Vec::new();
