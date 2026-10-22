@@ -315,7 +315,12 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 
 /// Waits. Every one is the page's or the board's, never a sleep: these are
 /// only how long the walk lets one stage take before it calls it failed.
-const STEP_MS = 180_000;
+/// `WALK_STEP_MS` raises it for a slow board: an emulated S3 runs ~40×
+/// slower than real time with Bluetooth and a project on, so its first
+/// heartbeat — what the card learns a project from after an update's last
+/// reboot — is minutes of wall time away
+/// (docs/debt/emulated-s3-runs-forty-times-slower-than-real-time.md).
+const STEP_MS = Number(process.env.WALK_STEP_MS ?? 180_000);
 /// A board booting ROM-up and joining the virtual LAN (a deadline, not a
 /// measurement).
 const JOIN_MS = 300_000;
