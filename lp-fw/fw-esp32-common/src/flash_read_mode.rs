@@ -98,17 +98,26 @@ impl Mspi {
         Self::rd(self.spi0 + CTRL)
     }
 
-    /// Whether both controllers read back as the ROM's QIO read mode leaves
-    /// them: QIO, command `0xEB`, a 32-bit address phase, and two more dummy
-    /// cycles than `saved` (the DIO set) had.
+    /// The QIO switch's verdict: [`NOT_SET_AFTER`] unless both controllers
+    /// read back as the ROM's QIO read mode leaves them (QIO, command `0xEB`,
+    /// a 32-bit address phase, and two more dummy cycles than `saved`, the
+    /// DIO set, had); then [`READ_BACK_DIFFERED`] when `differ` (a
+    /// [`fold_differ`]) is not zero; else [`SWITCH_ON`].
     #[inline(always)]
-    pub fn reads_as_qio(self, saved: &SavedReadMode) -> bool {
+    pub fn qio_verdict(self, saved: &SavedReadMode, differ: u32) -> u8 {
         let user1 = Self::rd(self.spi0 + USER1);
-        Self::rd(self.spi0 + CTRL) & (FREAD_DIO | FREAD_QIO) == FREAD_QIO
-            && Self::rd(self.spi1 + CTRL) & (FREAD_DIO | FREAD_QIO) == FREAD_QIO
-            && Self::rd(self.spi0 + USER2) & 0xffff == CMD_QIO_READ
-            && user1 >> 26 == 31
-            && user1 & 0x3f == (saved.spi0_user1 & 0x3f) + 2
+        if Self::rd(self.spi0 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
+            || Self::rd(self.spi1 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
+            || Self::rd(self.spi0 + USER2) & 0xffff != CMD_QIO_READ
+            || user1 >> 26 != 31
+            || user1 & 0x3f != (saved.spi0_user1 & 0x3f) + 2
+        {
+            NOT_SET_AFTER
+        } else if differ != 0 {
+            READ_BACK_DIFFERED
+        } else {
+            SWITCH_ON
+        }
     }
 }
 
@@ -151,30 +160,18 @@ impl SavedReadMode {
     }
 }
 
-/// Whether the two read-back runs differ in any bit. A failed ROM read
-/// counts as a difference: pass its nonzero status in `failed`.
+/// `acc` with every bit in which the two read-back runs differ: zero when
+/// they agree. Start `acc` from the ROM reads' statuses, so a failed read
+/// counts as a difference.
 #[inline(always)]
-pub fn differs(before: &[u32; CHECK_WORDS], after: &[u32; CHECK_WORDS], failed: u32) -> bool {
-    let mut d = failed;
+pub fn fold_differ(before: &[u32; CHECK_WORDS], after: &[u32; CHECK_WORDS], acc: u32) -> u32 {
+    let mut d = acc;
     let mut i = 0;
     while i < CHECK_WORDS {
         d |= before[i] ^ after[i];
         i += 1;
     }
-    d != 0
-}
-
-/// The switch's verdict: [`NOT_SET_AFTER`] before [`READ_BACK_DIFFERED`],
-/// [`SWITCH_ON`] when both hold.
-#[inline(always)]
-pub fn verdict(set_after: bool, differed: bool) -> u8 {
-    if !set_after {
-        NOT_SET_AFTER
-    } else if differed {
-        READ_BACK_DIFFERED
-    } else {
-        SWITCH_ON
-    }
+    d
 }
 
 /// The words a boot line uses for a verdict that is not [`SWITCH_ON`].
@@ -191,21 +188,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_verdict_names_the_register_check_before_the_read_back() {
-        assert_eq!(verdict(true, false), SWITCH_ON);
-        assert_eq!(verdict(false, true), NOT_SET_AFTER);
-        assert_eq!(verdict(false, false), NOT_SET_AFTER);
-        assert_eq!(verdict(true, true), READ_BACK_DIFFERED);
-    }
-
-    #[test]
     fn any_differing_bit_or_a_failed_read_differs() {
         let a = [0x1234_5678; CHECK_WORDS];
         let mut b = a;
-        assert!(!differs(&a, &b, 0));
-        assert!(differs(&a, &b, 1));
+        assert_eq!(fold_differ(&a, &b, 0), 0);
+        assert_ne!(fold_differ(&a, &b, 1), 0);
         b[CHECK_WORDS - 1] ^= 0x8000_0000;
-        assert!(differs(&a, &b, 0));
+        assert_eq!(fold_differ(&a, &b, 0), 0x8000_0000);
+    }
+
+    #[test]
+    fn the_verdicts_are_distinct_bytes() {
+        assert_ne!(SWITCH_ON, NOT_SET_AFTER);
+        assert_ne!(SWITCH_ON, READ_BACK_DIFFERED);
+        assert_ne!(NOT_SET_AFTER, READ_BACK_DIFFERED);
+        assert_eq!(
+            verdict_words(NOT_SET_AFTER),
+            "the controller did not read back as set"
+        );
     }
 
     #[test]

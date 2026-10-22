@@ -56,8 +56,8 @@ use core::mem::MaybeUninit;
 
 use fw_esp32_common::flash_qio::{ESP32S3_QIO_PARTS, qio_ready_on};
 use fw_esp32_common::flash_read_mode::{
-    CHECK_AT, CHECK_WORDS, FREAD_DIO, FREAD_QIO, Mspi, ROM_MODE_QIO, SWITCH_ON, SavedReadMode,
-    differs, verdict, verdict_words,
+    CHECK_AT, CHECK_WORDS, FREAD_DIO, FREAD_QIO, Mspi, NOT_SET_AFTER, READ_BACK_DIFFERED,
+    ROM_MODE_QIO, SWITCH_ON, SavedReadMode, fold_differ, verdict_words,
 };
 
 /// The S3's flash controllers: SPI0 (the cache's) at `0x6000_3000` and SPI1
@@ -169,19 +169,25 @@ fn switch_to_80mhz() -> u8 {
         let mut before = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let mut after = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let bytes = 4 * CHECK_WORDS as u32;
-        let mut failed = esp_rom_spiflash_read(CHECK_AT, before.as_mut_ptr().cast(), bytes) as u32;
+        let mut differ = esp_rom_spiflash_read(CHECK_AT, before.as_mut_ptr().cast(), bytes) as u32;
         Mspi::wr(
             MSPI.spi0 + CORE_CLK_SEL,
             (core_clk & !CORE_CLK_MASK) | CORE_CLK_80M,
         );
         Mspi::wr(MSPI.spi0 + CLOCK, spi0_clock | CLK_EQU_SYSCLK);
         Mspi::wr(MSPI.spi1 + CLOCK, spi1_clock | CLK_EQU_SYSCLK);
-        failed |= esp_rom_spiflash_read(CHECK_AT, after.as_mut_ptr().cast(), bytes) as u32;
-        let differed = differs(before.assume_init_ref(), after.assume_init_ref(), failed);
-        let set_after = Mspi::rd(MSPI.spi0 + CORE_CLK_SEL) & CORE_CLK_MASK == CORE_CLK_80M
-            && Mspi::rd(MSPI.spi0 + CLOCK) & CLK_EQU_SYSCLK != 0
-            && Mspi::rd(MSPI.spi1 + CLOCK) & CLK_EQU_SYSCLK != 0;
-        let v = verdict(set_after, differed);
+        differ |= esp_rom_spiflash_read(CHECK_AT, after.as_mut_ptr().cast(), bytes) as u32;
+        let differ = fold_differ(before.assume_init_ref(), after.assume_init_ref(), differ);
+        let v = if Mspi::rd(MSPI.spi0 + CORE_CLK_SEL) & CORE_CLK_MASK != CORE_CLK_80M
+            || Mspi::rd(MSPI.spi0 + CLOCK) & CLK_EQU_SYSCLK == 0
+            || Mspi::rd(MSPI.spi1 + CLOCK) & CLK_EQU_SYSCLK == 0
+        {
+            NOT_SET_AFTER
+        } else if differ != 0 {
+            READ_BACK_DIFFERED
+        } else {
+            SWITCH_ON
+        };
         if v != SWITCH_ON {
             Mspi::wr(MSPI.spi1 + CLOCK, spi1_clock);
             Mspi::wr(MSPI.spi0 + CLOCK, spi0_clock);
@@ -205,12 +211,12 @@ fn switch_to_qio() -> u8 {
         let mut dio = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let mut qio = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let bytes = 4 * CHECK_WORDS as u32;
-        let mut failed = esp_rom_spiflash_read(CHECK_AT, dio.as_mut_ptr().cast(), bytes) as u32;
+        let mut differ = esp_rom_spiflash_read(CHECK_AT, dio.as_mut_ptr().cast(), bytes) as u32;
         SPIMasterReadModeCnfig(ROM_MODE_QIO);
         esp_rom_spiflash_select_qio_pins(0, 0);
-        failed |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
-        let differed = differs(dio.assume_init_ref(), qio.assume_init_ref(), failed);
-        let v = verdict(MSPI.reads_as_qio(&saved), differed);
+        differ |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
+        let differ = fold_differ(dio.assume_init_ref(), qio.assume_init_ref(), differ);
+        let v = MSPI.qio_verdict(&saved, differ);
         if v != SWITCH_ON {
             saved.put_back(MSPI);
         }

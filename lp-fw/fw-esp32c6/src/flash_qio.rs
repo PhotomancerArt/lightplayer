@@ -55,7 +55,7 @@ use core::mem::MaybeUninit;
 use fw_esp32_common::flash_qio::qio_ready;
 use fw_esp32_common::flash_read_mode::{
     CHECK_AT, CHECK_WORDS, FREAD_DIO, FREAD_QIO, Mspi, NOT_SET_AFTER, ROM_MODE_QIO, SWITCH_ON,
-    SavedReadMode, differs, verdict,
+    SavedReadMode, fold_differ,
 };
 
 /// The C6's flash controllers: `SPI_MEM` 0 (the cache's) at `0x6000_2000`,
@@ -125,12 +125,12 @@ fn switch_to_qio() -> u8 {
         let mut dio = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let mut qio = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
         let bytes = 4 * CHECK_WORDS as u32;
-        let mut failed = esp_rom_spiflash_read(CHECK_AT, dio.as_mut_ptr().cast(), bytes) as u32;
+        let mut differ = esp_rom_spiflash_read(CHECK_AT, dio.as_mut_ptr().cast(), bytes) as u32;
         SPIMasterReadModeCnfig(ROM_MODE_QIO);
         esp_rom_spiflash_select_qio_pins(0, 0);
-        failed |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
-        let differed = differs(dio.assume_init_ref(), qio.assume_init_ref(), failed);
-        let v = verdict(MSPI.reads_as_qio(&saved), differed);
+        differ |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
+        let differ = fold_differ(dio.assume_init_ref(), qio.assume_init_ref(), differ);
+        let v = MSPI.qio_verdict(&saved, differ);
         if v != SWITCH_ON {
             saved.put_back(MSPI);
         }
