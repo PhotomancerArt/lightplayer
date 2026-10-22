@@ -166,7 +166,7 @@ pub const SEAM_ABI_IMAGE_ENV: &str = "LP_EMU_ESP32S3_SEAM_ABI_ELF";
 pub fn seam_abi_image() -> Result<PathBuf, String> {
     env_file(
         SEAM_ABI_IMAGE_ENV,
-        "`just test-emu-esp32s3-boot` builds `fw-esp32s3 --features test_seam_abi` and sets it",
+        "`just test-emu-esp32s3-seams` builds `fw-esp32s3 --features test_seam_abi` and sets it",
     )
 }
 

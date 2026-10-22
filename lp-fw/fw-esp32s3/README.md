@@ -197,7 +197,7 @@ the driver cannot rot uncompiled — see
 ### `test_seam_abi` (emulator only)
 
 ```bash
-just build-fw-esp32s3 test_seam_abi   # then `just test-emu-esp32s3-boot` runs it
+just build-fw-esp32s3 test_seam_abi   # `just test-emu-esp32s3-seams` builds and runs it
 ```
 
 The Xtensa emulator-seam ABI under the real `release-esp32s3` build (S3

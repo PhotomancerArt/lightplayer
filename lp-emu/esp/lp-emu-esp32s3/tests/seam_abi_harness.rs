@@ -26,7 +26,7 @@
 //! somewhere later.
 //!
 //! `#[ignore]`d: needs the harness image (`LP_EMU_ESP32S3_SEAM_ABI_ELF`);
-//! `just test-emu-esp32s3-boot` builds it and runs this with
+//! `just test-emu-esp32s3-seams` builds it and runs this with
 //! `--features test-seams`. A missing image skips loudly.
 
 #![cfg(feature = "test-seams")]
@@ -45,7 +45,7 @@ const CANARY: &str = "[SEAM-ABI] canary=0x5eedc0de";
 const MAC: [u8; 6] = [0x02, 0x5e, 0xa3, 0x53, 0x33, 0x01];
 
 #[test]
-#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-boot`"]
+#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-seams`"]
 fn the_harness_prints_silicons_answers_with_the_seams_off() {
     let Some(mut m) = harness("seams off", SeamRequest::none()) else {
         return;
@@ -60,7 +60,7 @@ fn the_harness_prints_silicons_answers_with_the_seams_off() {
 }
 
 #[test]
-#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-boot`"]
+#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-seams`"]
 fn the_harness_prints_the_emulators_answers_with_the_seams_on() {
     // `net=real`: this test is about the value and take ABI alone. With the
     // default `net=lan` beside them the network's endpoint would take index 0
@@ -114,7 +114,7 @@ fn the_harness_prints_the_emulators_answers_with_the_seams_on() {
 }
 
 #[test]
-#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-boot`"]
+#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-seams`"]
 fn the_network_seam_engages_by_default_and_answers_its_calls() {
     let Some(mut m) = harness("net=lan", SeamRequest::default()) else {
         return;
@@ -140,7 +140,7 @@ fn the_network_seam_engages_by_default_and_answers_its_calls() {
 }
 
 #[test]
-#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-boot`"]
+#[ignore = "needs the test_seam_abi harness image; `just test-emu-esp32s3-seams`"]
 fn the_wake_reaches_a_sleeping_core_and_delivers_each_queue_once() {
     let Some(mut m) = harness(
         "wake",
