@@ -303,21 +303,51 @@ just test-emu-esp32s3-split-boot   # ROM-up through the IDF door to the engine's
   node graph, the on-device GLSL compiler — links into the engine.
 - **Everything a board needs to stay reachable lives in `core_boot`**: the
   link, the filesystem, and every radio's bring-up. A board whose engine is
-  missing runs core-only: its link up, its watchdog fed, nothing served (and,
-  once updates land, the update channel served — the S3 updates plan's P8).
+  missing runs core-only: its link up, its watchdog fed, and the update
+  channel served on USB and on every Bluetooth link (below).
 - **The engine's two views.** The S3's one MMU table serves both buses at one
   index, so the core maps the engine's flash pages once at entry `0x100`: its
   header and rodata read at `0x3D00_0000`, its code fetched at `0x4300_xxxx`
-  (`lp_bootctl::s3_mmu`). The core reads the boot records and the engine
-  header through the cache (its scratch entry `0x1E0`), never the ROM's SPI1
-  routines, and `factory`'s end from the flashed table.
-- **No updates yet**: the image announces `ota_layout: 0`. The S3's codes are
-  chip 2, layout 2 (`lpc-update`'s code table); its board side is P8's.
-- Measured (`just fw-esp32s3-size-check 65536 1`, 2026-10-21, default
-  features): core 281,584 B, engine 2,171,869 B, `app.bin` 2,568,192 B against
-  a plain image of 2,431,712 B (+21,741 B code, +136,480 B image: the 64 KiB
-  region start and page rounding); steady headroom 3,726,371 B; 46,096 B to the
-  core's next page.
+  (`lp_bootctl::s3_mmu`). The core reads the engine header through the
+  cache, the boot records through esp-storage's low-level ROM calls (after
+  `FlashStorage::new`, never before), and `factory`'s end from the flashed
+  table.
+- **Updates over the air** (the S3 updates plan's M7 P8): the image announces
+  `ota: {layout: 2}` (chip 2, layout 2 in `lpc-update`'s code table), and the
+  board side is the C6's, shared — `fw_esp32_common::split_core`, over this
+  chip's `S3Split` (`src/split_core/`): its MMU (the engine at entries
+  `0x100..`, the core's own hash through its scratch entries `0x1E0..0x200`,
+  never the `lpfs` window), the ROM flash calls behind the shared write fence,
+  the SHA accelerator (software while a boot hash holds it), the S3 reset
+  table (`ResetKind::from_s3_reason`) and the RMT update light (never USB
+  19/20, the flash and PSRAM pads 26–37). The boot is the C6's:
+  `split_core::begin` marks a trial **attempted** as `mount_filesystem` reads
+  the partition table, before the mount and before Bluetooth; `split::split_boot`
+  marks it **started**; the first boot after a USB flash hashes the engine once
+  (the engine guard); a host link coming up **confirms** a trial; a board with
+  no engine it may enter, an engine that keeps crashing, or a core on trial
+  runs **core-only**, serving the update session on USB and on each Bluetooth
+  link (the radio links decide `Update` mode there). The running engine's
+  USB transport and its link mux hand channel 3 to the same session.
+  Bluetooth carries channel 3 through the C6's shared code; its walk on
+  silicon is P12's.
+- **Octal flash takes no update** (Q7): an eFuse that says octal flash makes
+  `S3Split::updates_off` say so — `[OTA] updates off: octal flash: …` at
+  boot, layout 0 in the hello's manifest, nothing written (not a mark, not a
+  record), and the engine run as a plain image.
+- Test images only, never in a build def: `fixture-trial-dies`,
+  `fixture-trial-hangs`, `fixture-usb-untrusted` (the C6's).
+- Measured (`just fw-esp32s3-size-check`, 2026-10-22, default features,
+  Bluetooth on, the update board side in): core 791,440 B, engine
+  2,055,057 B, `app.bin` 2,973,696 B; steady headroom 3,318,895 B, update
+  headroom 4,521,984 B; 60,528 B to the core's next page. **The split is
+  layout-sensitive on Xtensa:** the reachability walk follows shared literal
+  pools (GNU ld coalesces them across functions), so a link where an engine
+  function's pool lands next to a core one drags engine code into the core —
+  main at `ccfa116b0` carried ~400 KB of `lpc_engine`/`lpc_model`/`lpc_wire`
+  in a 1,325,216 B core that way (`lp-fw-split why` shows
+  `core_boot` → `btdm_controller_init` → a `.literal` section of
+  `lpc_engine`'s). Compare cores across builds with that in mind.
 
 How the split is built (GNU ld's quirks on Xtensa, the literal pools, the two
 views) is `tools/lp-fw-split/README.md`; the loader is
@@ -489,7 +519,7 @@ Where a `radio` image's heap is (`[INIT] heap region:` lines at boot):
 | region | tag | who lands there |
 |---|---|---|
 | arena pieces outside the boot stages' RAM | `Internal` | Rust first; the C heap's overflow; thread stacks |
-| arena piece inside the split loader's RAM (`0x3FCB_0000..0x3FCC_0000`) | none | Rust only |
+| arena piece inside the split loader's RAM (`0x3FCC_5000..0x3FCC_9000`, the arena's top) | none | Rust only |
 | `dram2_seg` | none | Rust only |
 | radio (32 KB) | `Internal` + `External` | the blobs' C heap first; Rust last |
 

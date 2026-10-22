@@ -443,6 +443,10 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
         );
         #[cfg(feature = "frame-dump")]
         frame_dump::log_open(endpoint_id, config.byte_count());
+        // A split image's core lights this strip while an update runs
+        // (`fw_esp32_common::split_core::status_light_note`).
+        #[cfg(lp_split)]
+        fw_esp32_common::split_core::status_light_note::note_open(gpio, config.byte_count() / 3);
 
         Ok(Box::new(Esp32S3RmtWs281xOutput {
             registry: Rc::clone(&self.registry),

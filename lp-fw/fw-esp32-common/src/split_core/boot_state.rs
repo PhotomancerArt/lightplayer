@@ -99,7 +99,9 @@ impl BootState {
             _ => (running, image_len(flash, running).unwrap_or(0)),
         };
         let records_disagree = choice.is_some_and(|c| c.slot.record.core_off != running);
-        let untrusted = if factory.is_none() {
+        let untrusted = if let Some(why) = C::updates_off() {
+            Some(why)
+        } else if factory.is_none() {
             Some("no `factory` in the flashed partition table")
         } else if layout.is_none() {
             Some("`factory` cannot hold this layout under this MMU page")
@@ -350,6 +352,27 @@ mod tests {
             BOOT_RECORD_READ_LEN,
         ));
         assert!(!slot.unwrap().marks.attempted);
+    }
+
+    #[test]
+    fn a_part_that_takes_no_update_writes_nothing_and_says_why() {
+        TestChip::reset(REGION_START, ResetKind::Warm);
+        TestChip::updates_off("octal flash");
+        record(0, REGION_START, 0x1_0000, true);
+        let state = super::super::begin::<TestChip>(FACTORY);
+        assert_eq!(state.untrusted, Some("octal flash"));
+        assert!(
+            state.layout.is_some(),
+            "the engine's room still follows the layout"
+        );
+        let slot = BootSlot::decode(&TestChip::bytes(
+            BOOT_RECORD_SECTORS[0],
+            BOOT_RECORD_READ_LEN,
+        ));
+        assert!(
+            !slot.unwrap().marks.attempted,
+            "no mark on a part that forbids them"
+        );
     }
 
     #[test]

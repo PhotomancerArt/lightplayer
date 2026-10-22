@@ -59,8 +59,10 @@ binds every core it will ever boot (ruling L4):
 - **entries `0x1C0..0x200` are the loader's scratch**, through which it reads
   the records and the core's image, and every one of them is unmapped before
   the jump;
-- **its RAM, `0x3FCB_0000..0x3FCC_0000`** (data view, `lp_bootctl::S3_LOADER_RAM`),
-  is inside every core's `.bss`.
+- **its RAM, `0x3FCC_5000..0x3FCC_9000`** (16 KiB, data view,
+  `lp_bootctl::S3_LOADER_RAM`), is inside every core's `.bss`, at the top of
+  its heap arena (amended 2026-10-22: it was `0x3FCB_0000..0x3FCC_0000`, in
+  the arena's middle, which split the Bluetooth image's heap in three).
 
 ## Where a segment may go
 
@@ -91,10 +93,13 @@ remaps entry 0 for the core.
 ## The RAM it lives in
 
 Code runs from the instruction-bus view and data from the data-bus view of
-the same SRAM1: code at I `0x403A_0000` (= D `0x3FCB_0000`), data at D
-`0x3FCB_8000`, written into the linker script by `build.rs` from
+the same SRAM1: code at I `0x403B_5000` (= D `0x3FCC_5000`), data at D
+`0x3FCC_7000`, written into the linker script by `build.rs` from
 `lp_bootctl::S3_LOADER_RAM` so the number has one home. That is inside every
-core's `.bss` (the core zeroes it after the jump) and below the IDF
+core's `.bss` (the core zeroes it after the jump), at the top of its heap
+arena, so the core cuts its arena once, at that edge; it ends at
+`0x3FCC_9000` (I `0x403B_9000`), where esp-hal's `memory.x` says a
+bootloader's startup IRAM may begin; and it is below the IDF
 bootloader's own RAM (`lp_bootctl::S3_IDF_BOOTLOADER_RAM`, D `0x3FCD_9700`
 and up), which is still live while the loader runs: the loader runs on the
 stack the IDF bootloader called it on. `.bss` rides in `.data` as zeroes,

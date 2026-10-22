@@ -65,8 +65,14 @@ classification, the layout code and region start, the watchdog, the update
 light, and `statics()` — the chip's one `SplitStatics` (Rust has no generic
 statics). Associated functions and types only, never `self`: an image has one
 chip, so each generic is instantiated once and every call stays direct under
-LTO. The C6's is `fw-esp32c6/src/split_core/` (`C6Split`); `test_chip.rs` is a
-host one for the fence and boot-state tests.
+LTO. The C6's is `fw-esp32c6/src/split_core/` (`C6Split`), the S3's
+`fw-esp32s3/src/split_core/` (`S3Split`, layout 2, M7 P8); `test_chip.rs` is
+a host one for the fence and boot-state tests. `SplitChip::updates_off` (a
+default `None`) is how a part that cannot take an update says so: the S3 on
+octal flash announces layout 0 and its boot state is never trusted, so
+nothing is written. `status_light_note` is the engine's half of the update
+light, shared: the chip's RMT driver notes the first strip it opens, the
+frame hook records it.
 
 The silicon rules (the split image ADR §7) are kept as code here: no second
 `FlashStorage`, the write fence, trust the records only when they agree with

@@ -51,11 +51,21 @@ fn the_packaged_image_boots_through_the_idf_door_to_the_engines_hello() {
         console.contains(&format!("[LOADER] core @{core_off:#x} (proven)")),
         "the loader booted record 0's core:\n{console}"
     );
-    let digest = &report["engine"]["sha256"].as_str().unwrap()[..8];
-    let line =
-        format!("[CORE] engine @{engine_off:#x} ({engine_len} B, digest {digest}), entering");
+    // The shared split core's boot line (the C6's): where the core runs, how
+    // it came to, the engine it entered and the digest it carries for it.
+    // The line's tail (the digest) is not asserted: the link's log channel
+    // cuts a long line, and a dev build's id is long enough to reach it.
+    let core_len = report["core"]["sizeBytes"].as_u64().unwrap();
+    let line = format!("[CORE] core @{core_off:#x} +{core_len} (proven)");
     assert!(console.contains(&line), "no {line:?} in:\n{console}");
-    println!("split boot (lp-emu:esp32s3:t1): {line}");
+    let entered = format!("· engine {engine_len} B ·");
+    assert!(console.contains(&entered), "no {entered:?} in:\n{console}");
+    // The first boot after a USB flash hashes the engine once (the guard)
+    // against the core's digest slot: the engine the header named, at
+    // `engine_off`, is the one packaged.
+    let guard = format!("[OTA] engine guard: the engine ({engine_len} B) matches its digest");
+    assert!(console.contains(&guard), "no {guard:?} in:\n{console}");
+    println!("split boot (lp-emu:esp32s3:t1): engine @{engine_off:#x}, {line} {entered}");
 }
 
 #[test]
@@ -96,12 +106,20 @@ fn a_core_at_the_regions_high_end_maps_the_engine_below_it() {
         console.contains(&format!("[LOADER] core @{high:#x} (proven)")),
         "the loader booted the high core:\n{console}"
     );
-    let line = format!(
-        "[CORE] engine @{LAYOUT_2_REGION_START:#x} ({} B,",
+    let line = format!("[CORE] core @{high:#x} +{} (proven)", core.len());
+    assert!(console.contains(&line), "no {line:?} in:\n{console}");
+    // The engine the core entered is the one at the region's start: the
+    // first boot's guard hashed it there against the core's digest slot.
+    let entered = format!("· engine {} B ·", engine.len());
+    assert!(console.contains(&entered), "no {entered:?} in:\n{console}");
+    let guard = format!(
+        "[OTA] engine guard: the engine ({} B) matches its digest",
         engine.len()
     );
-    assert!(console.contains(&line), "no {line:?} in:\n{console}");
-    println!("split boot, core high (lp-emu:esp32s3:t1): core @{high:#x}, {line}");
+    assert!(console.contains(&guard), "no {guard:?} in:\n{console}");
+    println!(
+        "split boot, core high (lp-emu:esp32s3:t1): core @{high:#x}, engine @{LAYOUT_2_REGION_START:#x}, {line}"
+    );
 }
 
 #[test]
