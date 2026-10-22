@@ -288,6 +288,18 @@ impl LcdBus {
                 // with it in `wait_idle`.
                 self.in_flight_sizes = Some((bytes, descriptors));
                 self.stats.frames = self.stats.frames.wrapping_add(1);
+                // One line per 1,000 frames (~30 s at 30 fps): what a walk
+                // reads off the product image with no analyzer attached.
+                if self.stats.frames % 1_000 == 1 {
+                    log::info!(
+                        "[lcd-ws281x] frames={} timeouts={} lanes={mask:#04x} bus_bytes={len} \
+                         encode_us={} encode_us_max={}",
+                        self.stats.frames,
+                        self.stats.timeouts,
+                        self.stats.encode_us_last,
+                        self.stats.encode_us_max,
+                    );
+                }
                 Ok(())
             }
             Err((error, lcd, buf)) => {
