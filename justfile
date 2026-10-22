@@ -5489,6 +5489,9 @@ walk-drop-emu *args:
 # for lightplayer.app's relay: the board's leg through the virtual LAN's
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
+# `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes:
+# `just walk-ota-ble-emu --s3`.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5499,6 +5502,19 @@ walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
+    # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
+    # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* ]]; then
+        images=target/walk-ota-emu/images-s3
+        if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+        fi
+        # Y last: build-image.sh writes the parts directory the bundle copies.
+        just studio-firmware-package-esp32s3
+        just studio-web-story-build
+        node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     images=target/walk-ota-emu/images
     if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
