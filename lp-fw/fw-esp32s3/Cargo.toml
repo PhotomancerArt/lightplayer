@@ -29,6 +29,7 @@ esp32s3 = [
 # now (ADR 2026-08-02-rv32-firmwares-are-abort-tier). See the dependency
 # section for why each entry is load-bearing.
 server = [
+    "fs-tree",
     "fw-esp32-common/server",
     "dep:lpa-server",
     "dep:lp-gfx-lpvm",
@@ -37,6 +38,18 @@ server = [
     "dep:lpc-wire",
     "dep:lpc-model",
 ]
+
+# The tree store on `lpfs` (`src/tree_flash.rs`), as the C6's `fs-tree`, which
+# `server` implies: every flash-backed build mounts it (littlefs left this
+# crate with it). A partition with no store is formatted (lazily) unless a
+# littlefs superblock is found there — then the board HOLDS (`fs:
+# legacy_held`, files untouched); a newer or damaged store is REFUSED. Records
+# are hashed in software (`lp-tree-store`'s `soft-sha`; the C6 uses its SHA
+# accelerator). The core carries the store's mark
+# (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`), and the manifest lists
+# `fs.tree`. See docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md
+# and docs/adr/2026-10-16-c6-tree-store-cutover-migration.md.
+fs-tree = ["fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 
 # `dram2_seg` — the 73,744 B the second-stage bootloader runs in — as a second
 # heap region after the `.bss` arena, with no capability tag (the C6's rule:
@@ -293,7 +306,8 @@ embedded-storage = "0.3"
 # a disabled cache mid-write. `default-features = false` without it compiles
 # fine and corrupts silently — exactly the trap M2 hit twice.
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
-littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+# The tree store (`fs-tree`), with its software SHA-256.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs", "soft-sha"], optional = true }
 
 # The boot-time `ServerHello` plus the wire types `io_task` hands to
 # `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved

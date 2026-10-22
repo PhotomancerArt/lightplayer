@@ -140,6 +140,15 @@ fn a_power_cycle_cut_runs_on_over_the_torn_flash() {
         text.contains(SERVER_LOOP),
         "the second boot came up:\n{text}"
     );
+    // ...and its flash takes writes again: the cut was inside the first
+    // boot's format, so the second one formats `lpfs` anew, and that format
+    // must land (a chip still latched off drops every command, every verify
+    // fails, and the store gives up with `NoSpace`).
+    assert!(
+        text.contains("[FS] tree store formatted"),
+        "the second boot formats the store over the torn flash:\n{text}"
+    );
+    assert!(!text.contains("format failed"), "{text}");
     let summary = m.flash_cut_summary();
     assert!(
         summary

@@ -5,7 +5,7 @@
   "package": "fw-esp32s3",
   "cargoTarget": "xtensa-esp32s3-none-elf",
   "profile": "release-esp32s3",
-  "cargoFeatures": ["esp32s3", "server", "float-f32"],
+  "cargoFeatures": ["esp32s3", "server", "float-f32", "fs-tree"],
   "flashSizeMb": 8,
   "partitionsCsv": "lp-fw/fw-esp32s3/partitions.csv",
   "split": true,
