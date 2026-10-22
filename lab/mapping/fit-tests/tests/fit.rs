@@ -151,6 +151,7 @@ fit!(test_quad_wire_oracle, test_project("quad-wire-oracle"));
 fit!(test_quad60_v3, test_project("quad60-v3"));
 fit!(test_shader_oracle, test_project("shader-oracle"));
 fit!(test_shader_oracle_f32, test_project("shader-oracle-f32"));
+fit!(test_skirt_620, test_project("skirt-620"));
 fit!(test_zook_dome_1500, test_project("zook-dome-1500"));
 
 /// The radiance dome loads in the product as specified: 275 panels × 80

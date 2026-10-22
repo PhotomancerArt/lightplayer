@@ -44,6 +44,13 @@ slips through.
   in four jobs (C6 first light, Heap budget, Emulator C6 lp-cli, the
   release). Both are GitHub release lookups; the token-carrying steps of the
   workaround did not help, so the lookup itself failed. Reran the failed jobs.
+- 2026-10-22 — PR #1261, `Lint (x64)`: `extractions/setup-just@v3` failed
+  with `no release for just matching version specifier` (exit 127) — the
+  release lookup came back empty. setup-just asks GitHub's releases for the
+  version too, and the step passes it no `github-token` here (whether the
+  action falls back to the job's token was not checked). The same class
+  either way: a red install on a healthy commit, green on the next run —
+  the same morning's lookup failure as the entry above.
 
 **Exit criteria** — no 403/429 install failure on main for a month after the
 binstall steps carry a token; then retire.
