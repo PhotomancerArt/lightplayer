@@ -7,7 +7,7 @@
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-use fw_esp32_common::update_send::UpdateSend;
+use crate::update_send::UpdateSend;
 use lpc_update::board::LinkId;
 
 use super::update_links::UpdateLinks;

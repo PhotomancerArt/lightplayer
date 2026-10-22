@@ -1,5 +1,5 @@
 //! The board's update session (`lpc_update::board::BoardSession`) on the
-//! host links — USB, and each radio link when the image has Bluetooth: the
+//! host links — USB, and each radio link when the image has them: the
 //! edge both core-only and the running engine's hooks drive. It owns the
 //! session, the split image's [`SplitUpdateTarget`] and one channel-3 outbox
 //! per link it answers ([`UpdateOutbox`], sent through [`UpdateLinks`]),
@@ -20,6 +20,7 @@ use lpc_update::board::{
 };
 use lpc_update::{BoardMessage, BoardState, HostMessage, PieceKind};
 
+use super::split_chip::SplitChip;
 use super::update_links::UpdateLinks;
 use super::update_outbox::UpdateOutbox;
 use super::update_target_impl::SplitUpdateTarget;
@@ -36,9 +37,9 @@ pub enum EdgeEffect {
 }
 
 /// The session, its flash and its outboxes.
-pub struct UpdateEdge {
+pub struct UpdateEdge<C: SplitChip> {
     pub session: BoardSession,
-    pub target: SplitUpdateTarget,
+    pub target: SplitUpdateTarget<C>,
     /// One per link the session has answered, while its link is open or it
     /// still holds something.
     outboxes: Vec<UpdateOutbox>,
@@ -79,9 +80,9 @@ pub fn state_word(state: BoardState) -> &'static str {
     }
 }
 
-impl UpdateEdge {
+impl<C: SplitChip> UpdateEdge<C> {
     pub fn new(
-        mut target: SplitUpdateTarget,
+        mut target: SplitUpdateTarget<C>,
         facts: BoardFacts,
         access: AccessFacts,
         config: SessionConfig,
@@ -141,7 +142,7 @@ impl UpdateEdge {
     /// the tier a login or key granted it on the engine's server (never one
     /// the device's `open` setting alone gave: the session adds that itself,
     /// except through the relay, where it never applies).
-    #[cfg(feature = "ble")]
+    #[cfg(feature = "radio-link")]
     pub fn on_message_with_tier(
         &mut self,
         link: LinkId,
@@ -274,10 +275,10 @@ impl UpdateEdge {
 }
 
 /// Core-only's radio and LAN links drive the session through the edge
-/// (`fw_esp32_common::radio_link::CoreOnlyLinks`): a LAN link's key lookup
-/// is answered by the session itself, on the session's clock.
-#[cfg(feature = "ble")]
-impl fw_esp32_common::radio_link::CoreOnlySession for UpdateEdge {
+/// (`crate::radio_link::CoreOnlyLinks`): a LAN link's key lookup is
+/// answered by the session itself, on the session's clock.
+#[cfg(feature = "radio-link")]
+impl<C: SplitChip> crate::radio_link::CoreOnlySession for UpdateEdge<C> {
     fn link_up(&mut self, link: LinkId, trust: LinkTrust) {
         UpdateEdge::link_up(self, link, trust);
     }

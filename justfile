@@ -2883,6 +2883,9 @@ clippy-host:
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features fs-tree --all-targets -- --no-deps -D warnings
+    # The split image's update board side (`split-core`, which the C6 turns
+    # on), with `wifi` so its radio and LAN arms are linted too.
+    cargo clippy -p fw-esp32-common --features split-core,wifi --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
@@ -3188,6 +3191,9 @@ test-rust-features:
     # The tree store as the board's filesystem (`fs-tree`, the C6's since the
     # cutover): the mount verdict, the alignment shim and the update guard.
     cargo test -p fw-esp32-common --features fs-tree
+    # The split image's update board side (`split-core`): the write fence
+    # and the boot state, over a host chip (`split_core::test_chip`).
+    cargo test -p fw-esp32-common --features split-core --lib split_core
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.
@@ -3709,8 +3715,8 @@ test-emu-layout-migration:
 # with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
 # Max) and a few minutes of
 # scenarios. Run it when you touch `lp-bootctl`'s records or `choose`, the
-# loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32c6/src/ota/` or the boot
-# mount. `scenarios=<dir>` reuses images already built there.
+# loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32-common/src/split_core/`
+# (or the C6's `src/split_core/`) or the boot mount. `scenarios=<dir>` reuses images already built there.
 test-emu-c6-split-boot scenarios="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail

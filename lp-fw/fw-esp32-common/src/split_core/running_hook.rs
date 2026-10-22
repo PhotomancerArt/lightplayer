@@ -1,7 +1,7 @@
 //! The running engine's channel-3 hooks (DM13, DM17): core code the engine's
 //! transports call for every update-channel message — the USB transport
-//! (`fw_esp32_common::usb_link::set_update_hook`) and, when the image has
-//! Bluetooth, the link mux for each radio link's
+//! (`crate::usb_link::set_update_hook`) and, when the image has radio
+//! links, the link mux for each radio link's
 //! (`LinkMuxTransport::with_update_hook`, [`radio_update_hook`]) — and once
 //! per pass over the links to flush.
 //!
@@ -48,6 +48,7 @@ use super::board_identity::{
     CoreIdentity, board_facts, core_sha256, core_sha256_known, core_sha256_step,
 };
 use super::boot_state::BootState;
+use super::split_chip::SplitChip;
 use super::update_edge::{EdgeEffect, UpdateEdge};
 use super::update_links::{USB_LINK, UpdateLinks};
 use super::update_target_impl::SplitUpdateTarget;
@@ -62,9 +63,9 @@ struct Setup {
     usb_trust: LinkTrust,
 }
 
-struct Running {
+pub(super) struct Running<C: SplitChip> {
     setup: Setup,
-    edge: Option<UpdateEdge>,
+    edge: Option<UpdateEdge<C>>,
     /// The manifest at install, as a view that owns no heap: its text is
     /// the image's own `'static` strings, so what stays resident does not
     /// grow with the app version's length (#964). With no session nothing
@@ -74,20 +75,24 @@ struct Running {
     at_install: lpc_update::BoardManifestView<'static>,
 }
 
-/// The hook's state. One task only: the server loop's (the transports call
-/// the hooks from their own pump and upkeep), so a `RefCell` is the whole
-/// lock.
-struct OneTask(RefCell<Option<Running>>);
+/// The hook's state (the chip's [`super::SplitStatics`] holds it). One task
+/// only: the server loop's (the transports call the hooks from their own
+/// pump and upkeep), so a `RefCell` is the whole lock.
+pub struct RunningCell<C: SplitChip>(RefCell<Option<Running<C>>>);
+
+impl<C: SplitChip> RunningCell<C> {
+    pub(super) const fn new() -> Self {
+        Self(RefCell::new(None))
+    }
+}
 
 // SAFETY: touched only from the server loop's task (see above); the
 // `RefCell` turns any overlap into a panic rather than an aliased `&mut`.
-unsafe impl Sync for OneTask {}
-
-static RUNNING: OneTask = OneTask(RefCell::new(None));
+unsafe impl<C: SplitChip> Sync for RunningCell<C> {}
 
 /// Install the USB hook before entering the engine (the radio hook is the
 /// link mux's, [`radio_update_hook`]: the engine installs it with the mux).
-pub fn install(
+pub fn install<C: SplitChip>(
     links: UpdateLinks,
     state: BootState,
     identity: CoreIdentity,
@@ -95,7 +100,7 @@ pub fn install(
     access: AccessFacts,
     usb_trust: LinkTrust,
 ) {
-    clear_stale_progress(&state);
+    clear_stale_progress::<C>(&state);
     let setup = Setup {
         links,
         state,
@@ -109,21 +114,21 @@ pub fn install(
     // heap nothing until a host arrives — the view kept owns no heap. The
     // core's hash is left out (all-zero facts): hashing it here held every
     // boot's first light ~185 ms. `manifest` fills it in.
-    let at_install = resident_manifest(&setup);
-    *RUNNING.0.borrow_mut() = Some(Running {
+    let at_install = resident_manifest::<C>(&setup);
+    *C::statics().running.0.borrow_mut() = Some(Running {
         setup,
         edge: None,
         at_install,
     });
-    fw_esp32_common::usb_link::set_update_hook(usb_hook);
+    crate::usb_link::set_update_hook(usb_hook::<C>);
 }
 
 /// The manifest at install, borrowing the image's own strings. Its own
 /// frame (`inline(never)`), so the edge it reads from does not stay on the
 /// stack beside the view it returns.
 #[inline(never)]
-fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
-    let edge = new_edge_with(setup, [0; 32]);
+fn resident_manifest<C: SplitChip>(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
+    let edge = new_edge_with::<C>(setup, [0; 32]);
     edge.session
         .manifest_view(super::update_edge::now_ms())
         .with_text(
@@ -141,8 +146,8 @@ fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
 ///
 /// The core's hash is in it: if [`hash_step`] has not finished it yet, it is
 /// finished here.
-pub fn manifest() -> Option<lpc_update::BoardManifest> {
-    let running = RUNNING.0.try_borrow().ok()?;
+pub fn manifest<C: SplitChip>() -> Option<lpc_update::BoardManifest> {
+    let running = C::statics().running.0.try_borrow().ok()?;
     let running = running.as_ref()?;
     Some(match &running.edge {
         Some(edge) => edge.session.manifest(super::update_edge::now_ms()),
@@ -151,7 +156,7 @@ pub fn manifest() -> Option<lpc_update::BoardManifest> {
             // resident view leaves out is filled in (finished here if
             // `hash_step` has not).
             let mut view = running.at_install;
-            view.core_sha256 = core_sha256(&running.setup.state);
+            view.core_sha256 = core_sha256::<C>(&running.setup.state);
             view.to_manifest()
         }
     })
@@ -159,15 +164,15 @@ pub fn manifest() -> Option<lpc_update::BoardManifest> {
 
 /// The engine's frame hook, once the boot has lit (or given up lighting):
 /// one slice more of the core's hash, until it is known.
-pub fn hash_step() {
+pub fn hash_step<C: SplitChip>() {
     if core_sha256_known().is_some() {
         return;
     }
-    let Ok(running) = RUNNING.0.try_borrow() else {
+    let Ok(running) = C::statics().running.0.try_borrow() else {
         return;
     };
     if let Some(running) = running.as_ref() {
-        core_sha256_step(&running.setup.state);
+        core_sha256_step::<C>(&running.setup.state);
     }
 }
 
@@ -176,16 +181,16 @@ pub fn hash_step() {
 /// is waiting on its `Hello` (`wanted`) and the boot has lit, so the rest of
 /// the hash is taken at once, for it, rather than a slice a frame. Set only
 /// once [`install`] has run (the engine's door, after it).
-pub fn hello_ready(wanted: bool) -> bool {
-    core_sha256_known().is_some() || (wanted && crate::first_light::decided())
+pub fn hello_ready<C: SplitChip>(wanted: bool) -> bool {
+    core_sha256_known().is_some() || (wanted && C::first_light_decided())
 }
 
 /// DM13: a progress record beside a valid engine is stale (a cut between
 /// the running engine's pending record and its header erase): the valid
 /// engine wins, and the record goes before the engine starts.
-fn clear_stale_progress(state: &BootState) {
+fn clear_stale_progress<C: SplitChip>(state: &BootState) {
     let at = lp_bootctl::PROGRESS_RECORD_SECTOR;
-    let mut flash = super::split_flash::SplitFlash::take();
+    let mut flash = super::split_flash::SplitFlash::<C>::take();
     let mut magic = [0u8; 4];
     if !flash.read(at, &mut magic) || magic == [0xff; 4] {
         return;
@@ -198,17 +203,17 @@ fn clear_stale_progress(state: &BootState) {
     }
 }
 
-fn edge_of(running: &mut Running) -> &mut UpdateEdge {
+fn edge_of<C: SplitChip>(running: &mut Running<C>) -> &mut UpdateEdge<C> {
     let setup = &running.setup;
-    running.edge.get_or_insert_with(|| new_edge(setup))
+    running.edge.get_or_insert_with(|| new_edge::<C>(setup))
 }
 
-fn new_edge(s: &Setup) -> UpdateEdge {
-    new_edge_with(s, core_sha256(&s.state))
+fn new_edge<C: SplitChip>(s: &Setup) -> UpdateEdge<C> {
+    new_edge_with::<C>(s, core_sha256::<C>(&s.state))
 }
 
-fn new_edge_with(s: &Setup, core_sha256: [u8; 32]) -> UpdateEdge {
-    let facts = board_facts(
+fn new_edge_with<C: SplitChip>(s: &Setup, core_sha256: [u8; 32]) -> UpdateEdge<C> {
+    let facts = board_facts::<C>(
         &s.state,
         &s.identity,
         SessionMode::EngineRunning,
@@ -233,12 +238,12 @@ fn new_edge_with(s: &Setup, core_sha256: [u8; 32]) -> UpdateEdge {
 /// session, then everything queued is sent and its effects taken. `open`:
 /// who the device is open to now, as the engine's server holds it (a radio
 /// message carries it; USB, trusted, does not need it).
-fn with_session(
-    message: impl FnOnce(&mut UpdateEdge),
+fn with_session<C: SplitChip>(
+    message: impl FnOnce(&mut UpdateEdge<C>),
     flush_only: bool,
     open: Option<lpc_access::OpenTo>,
 ) {
-    let Ok(mut running) = RUNNING.0.try_borrow_mut() else {
+    let Ok(mut running) = C::statics().running.0.try_borrow_mut() else {
         return;
     };
     let Some(running) = running.as_mut() else {
@@ -271,26 +276,26 @@ fn with_session(
             // The engine's own header sector is erased: no engine code may
             // run from it again. Reset now; the host sees its link drop and
             // finds core-only waiting.
-            super::reset_now();
+            C::reset_now();
         }
     }
 }
 
 /// The USB transport's hook: `Some(message)`, one channel-3 message; `None`,
 /// a pass, to flush.
-fn usb_hook(message: Option<&[u8]>) {
+fn usb_hook<C: SplitChip>(message: Option<&[u8]>) {
     match message {
-        Some(bytes) => with_session(|edge| edge.on_message(USB_LINK, bytes), false, None),
-        None => with_session(|_| {}, true, None),
+        Some(bytes) => with_session::<C>(|edge| edge.on_message(USB_LINK, bytes), false, None),
+        None => with_session::<C>(|_| {}, true, None),
     }
 }
 
 /// The link mux's hook (`LinkMuxTransport::with_update_hook`): a radio
 /// link's channel-3 message with the tier its login or key granted, a link
 /// that closed, or a pass to flush.
-#[cfg(feature = "ble")]
-pub fn radio_update_hook(call: fw_esp32_common::radio_link::RadioUpdate<'_>) {
-    use fw_esp32_common::radio_link::RadioUpdate;
+#[cfg(feature = "radio-link")]
+pub fn radio_update_hook<C: SplitChip>(call: crate::radio_link::RadioUpdate<'_>) {
+    use crate::radio_link::RadioUpdate;
 
     use super::update_links::session_link;
 
@@ -301,7 +306,7 @@ pub fn radio_update_hook(call: fw_esp32_common::radio_link::RadioUpdate<'_>) {
             open,
             relayed,
             bytes,
-        } => with_session(
+        } => with_session::<C>(
             |edge| edge.on_message_with_tier(session_link(link), relayed, granted, bytes),
             false,
             Some(open),
@@ -309,8 +314,8 @@ pub fn radio_update_hook(call: fw_esp32_common::radio_link::RadioUpdate<'_>) {
         // A link the session never heard needs no goodbye; one it did is
         // forgotten (and its queued answers dropped).
         RadioUpdate::Closed { link } => {
-            with_session(|edge| edge.link_down(session_link(link)), true, None)
+            with_session::<C>(|edge| edge.link_down(session_link(link)), true, None)
         }
-        RadioUpdate::Pass => with_session(|_| {}, true, None),
+        RadioUpdate::Pass => with_session::<C>(|_| {}, true, None),
     }
 }

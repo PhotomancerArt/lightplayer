@@ -5,7 +5,7 @@
 //! trial core does until it has proven itself. It keeps the board reachable
 //! and serves the over-the-air update protocol (`lpc-update`'s board
 //! session) on channel 3 of **every host link it has**: the USB link, each
-//! Bluetooth radio link when the image has them, and the LAN link when it
+//! radio link when the image has them (Bluetooth), and the LAN link when it
 //! has Wi-Fi:
 //!
 //! - a host coming up — on any link — gets the board manifest (`M`)
@@ -18,7 +18,7 @@
 //! - an engine-less core accepts its own engine, by hash, from anyone (Y8).
 //!
 //! **Radio and LAN links.** Core-only is the radio port's one reader while
-//! it runs (no engine, no link mux): `fw_esp32_common`'s
+//! it runs (no engine, no link mux): `crate::radio_link`'s
 //! [`CoreOnlyLinks`] takes the port's notices and each open link's events
 //! into the session. A Bluetooth link is untrusted, and the session's own
 //! login (`L` over channel 3) is how one earns a tier. A LAN link is a
@@ -47,18 +47,18 @@
 //! it, a house board whose new core cannot reach its network would wait for
 //! a cable.
 
-#[cfg(feature = "ble")]
-use fw_esp32_common::radio_link::CoreOnlyLinks;
-use fw_esp32_common::usb_link::UsbLinkShared;
+#[cfg(feature = "radio-link")]
+use crate::radio_link::CoreOnlyLinks;
+use crate::usb_link::UsbLinkShared;
+use lp_link::{CH_UPDATE, LinkEvent};
 use lpc_update::board::{
     AccessFacts, EngineStatus, LinkTrust, OWNER_QUIET_MS, SessionConfig, SessionMode,
     TRIAL_HOST_DEADLINE_MS, TrialDeadline,
 };
-use lpc_wire::lp_link::{CH_UPDATE, LinkEvent};
 
 use super::board_identity::{CoreIdentity, board_facts, core_sha256};
 use super::boot_state::BootState;
-use super::status_light::StatusLight;
+use super::split_chip::{FeedWatchdog, SplitChip, UpdateLight};
 use super::update_edge::{EdgeEffect, UpdateEdge, state_word};
 use super::update_links::{USB_LINK, UpdateLinks};
 use super::update_target_impl::SplitUpdateTarget;
@@ -79,12 +79,12 @@ pub enum CoreOnlyReason {
 }
 
 /// Everything core-only needs from the boot.
-pub struct CoreOnly {
+pub struct CoreOnly<C: SplitChip> {
     pub usb_link: &'static UsbLinkShared,
     /// The radio links' port, already in update mode.
-    #[cfg(feature = "ble")]
-    pub radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
-    pub watchdog: crate::recovery::watchdog::WatchdogFeeder,
+    #[cfg(feature = "radio-link")]
+    pub radio_port: &'static crate::radio_link::RadioLinkPort,
+    pub watchdog: C::Watchdog,
     pub state: BootState,
     pub why: CoreOnlyReason,
     pub identity: CoreIdentity,
@@ -95,16 +95,16 @@ pub struct CoreOnly {
     /// The chip's RNG, for login nonces.
     pub entropy: fn(&mut [u8]),
     /// The update light, when the engine left a record this core can light.
-    pub light: Option<StatusLight>,
+    pub light: Option<C::Light>,
     /// The boot read a saved network with Wi-Fi on.
     pub network_saved: bool,
 }
 
 /// The core-only loop. Never returns: every committed piece ends in a reset.
-pub async fn core_only(ctx: CoreOnly) -> ! {
+pub async fn core_only<C: SplitChip>(ctx: CoreOnly<C>) -> ! {
     let CoreOnly {
         usb_link,
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         radio_port,
         mut watchdog,
         mut state,
@@ -118,7 +118,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
     } = ctx;
     let links = UpdateLinks {
         usb: usb_link,
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         radio: radio_port,
     };
     let (engine, engine_len) = match why {
@@ -144,13 +144,13 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         lp_recovery::mark_boot_complete();
     }
 
-    let facts = board_facts(
+    let facts = board_facts::<C>(
         &state,
         &identity,
         SessionMode::CoreOnly,
         engine,
         engine_len,
-        core_sha256(&state),
+        core_sha256::<C>(&state),
     );
     let config = SessionConfig {
         // Encoding 1: a `Z` chunk decodes with lp-deflate on this task, in a
@@ -160,19 +160,19 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         entropy: Some(entropy),
         owner_quiet_ms: OWNER_QUIET_MS,
     };
-    let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&state), facts, access, config);
+    let mut edge = UpdateEdge::new(SplitUpdateTarget::<C>::new(&state), facts, access, config);
     let mut shown = edge.state();
     log::info!("[OTA] core-only: {}", state_word(shown));
     if let Some(light) = light.as_mut() {
         light.show(shown);
     }
-    log::info!("[OTA] core-only heap free {} B", esp_alloc::HEAP.free());
+    log::info!("[OTA] core-only heap free {} B", C::heap_free());
     // A host whose link came up before this loop started: its `Up` may
     // already be gone, so the link's state says it.
     if usb_link.is_established() {
         edge.link_up(USB_LINK, usb_trust);
     }
-    #[cfg(feature = "ble")]
+    #[cfg(feature = "radio-link")]
     let mut radio = CoreOnlyLinks::new(radio_port);
 
     let mut deadline = TrialDeadline::new(
@@ -202,7 +202,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
                 _ => {}
             }
         }
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         {
             touched |= radio.pump(&mut edge);
         }
@@ -217,10 +217,10 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
                     // What the piece cost: the main stack's high-water mark
                     // (inflate's frames included, DM18) and the heap left
                     // with the `Z` window still held.
-                    crate::stack_probe::log_if_grown("core-only");
+                    C::log_stack_if_grown("core-only");
                     log::info!(
                         "[OTA] core-only heap free {} B at commit ({} chunks arrived as Z)",
-                        esp_alloc::HEAP.free(),
+                        C::heap_free(),
                         edge.encoded_chunks()
                     );
                     reset_at = Some(embassy_time::Instant::now() + LOG_GRACE);
@@ -241,7 +241,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         // host has everything (or after its drain limit).
         if reset_at.is_some_and(|at| embassy_time::Instant::now() >= at) {
             reset_at = None;
-            fw_esp32_common::usb_link::when_drained(super::reset_now);
+            crate::usb_link::when_drained(C::reset_now);
         }
         if touched {
             let now = edge.state();

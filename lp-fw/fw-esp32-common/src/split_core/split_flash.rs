@@ -6,8 +6,9 @@
 //! - **No second `FlashStorage`.** Its constructor sizes the part with an
 //!   `RDID` on SPI1; made while the radios run, that came back as garbage,
 //!   every bounds check then refused, and the core read its boot records as
-//!   "missing". This uses esp-storage's low-level ROM calls instead, with the
-//!   bounds below.
+//!   "missing". This uses the chip's raw flash calls instead
+//!   ([`SplitChip::flash_read`] and the rest: on the C6, esp-storage's
+//!   low-level ROM calls), with the bounds below.
 //! - **Writes are fenced.** Nothing is written unless it lies in the region
 //!   and outside the running core's own extent, or is one of the two
 //!   boot-record sectors or the update's progress-record sector — and
@@ -19,13 +20,18 @@
 //!
 //! [`protect`]: SplitFlash::protect
 
-use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, PROGRESS_RECORD_SECTOR, REGION_START};
+use core::marker::PhantomData;
+
+use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, PROGRESS_RECORD_SECTOR};
+
+use super::split_chip::SplitChip;
 
 pub const SECTOR: u32 = 4096;
-/// The part's block erase (`0xD8`, the ROM's `esp_rom_spiflash_erase_block`).
+/// The part's block erase (`0xD8`; on the C6, the ROM's
+/// `esp_rom_spiflash_erase_block`).
 pub const BLOCK: u32 = 64 * 1024;
 
-/// The bytes the ROM moves per call: a word-aligned local buffer, small
+/// The bytes the chip moves per call: a word-aligned local buffer, small
 /// enough for the stack and never across a 256-byte program page.
 const PIECE: usize = 64;
 
@@ -33,18 +39,20 @@ const PIECE: usize = 64;
 struct Piece([u8; PIECE]);
 
 /// The SPI flash, for the boot bookkeeping only.
-pub struct SplitFlash {
+pub struct SplitFlash<C: SplitChip> {
     /// The running core's extent and the region's end; `None` = no writes
     /// at all.
     fence: Option<(Extent, u32)>,
     unlocked: bool,
+    chip: PhantomData<C>,
 }
 
-impl SplitFlash {
+impl<C: SplitChip> SplitFlash<C> {
     pub fn take() -> Self {
         Self {
             fence: None,
             unlocked: false,
+            chip: PhantomData,
         }
     }
 
@@ -64,12 +72,9 @@ impl SplitFlash {
             let skip = (addr - base) as usize;
             let n = (out.len() - done).min(PIECE - skip);
             let len = (skip + n + 3) & !3;
-            // SAFETY: the ROM read, word-aligned, into a local word-aligned
-            // buffer.
-            let ok = unsafe {
-                esp_storage::ll::spiflash_read(base, chunk.0.as_mut_ptr().cast(), len as u32)
-            }
-            .is_ok();
+            // SAFETY: the chip's read, word-aligned, into a local
+            // word-aligned buffer.
+            let ok = unsafe { C::flash_read(base, chunk.0.as_mut_ptr().cast(), len as u32) };
             if !ok {
                 return false;
             }
@@ -86,7 +91,7 @@ impl SplitFlash {
             return false;
         }
         // SAFETY: one sector the fence allows.
-        self.unlock() && unsafe { esp_storage::ll::spiflash_erase_sector(at / SECTOR) }.is_ok()
+        self.unlock() && unsafe { C::flash_erase_sector(at / SECTOR) }
     }
 
     /// Erase the 64 KiB block at `at` (block-aligned), if the fence allows
@@ -98,7 +103,7 @@ impl SplitFlash {
             return false;
         }
         // SAFETY: one block the fence allows.
-        self.unlock() && unsafe { esp_storage::ll::spiflash_erase_block(at / BLOCK) }.is_ok()
+        self.unlock() && unsafe { C::flash_erase_block(at / BLOCK) }
     }
 
     /// Program `bytes` at `at`, any alignment: NOR only clears bits, so the
@@ -124,10 +129,7 @@ impl SplitFlash {
             chunk.0[skip..skip + n].copy_from_slice(&bytes[done..done + n]);
             // SAFETY: a span the fence allows (its padding is 0xFF, which
             // programs nothing), from a local word-aligned buffer.
-            let ok = unsafe {
-                esp_storage::ll::spiflash_write(base, chunk.0.as_ptr().cast(), len as u32)
-            }
-            .is_ok();
+            let ok = unsafe { C::flash_program(base, chunk.0.as_ptr().cast(), len as u32) };
             if !ok {
                 return false;
             }
@@ -147,15 +149,15 @@ impl SplitFlash {
         {
             return true;
         }
-        let in_region = at >= REGION_START && at + len <= region_end;
+        let in_region = at >= C::REGION_START && at + len <= region_end;
         let clear_of_core = at + len <= core.start || at >= core.end;
         in_region && clear_of_core
     }
 
     fn unlock(&mut self) -> bool {
         if !self.unlocked {
-            // SAFETY: the ROM's write-protect clear.
-            self.unlocked = unsafe { esp_storage::ll::spiflash_unlock() }.is_ok();
+            // SAFETY: the part's write-protect clear, before a fenced write.
+            self.unlocked = unsafe { C::flash_unlock() };
         }
         self.unlocked
     }
@@ -168,6 +170,76 @@ impl SplitFlash {
         }
         let w = word;
         // SAFETY: one word the fence allows.
-        self.unlock() && unsafe { esp_storage::ll::spiflash_write(at, &w, 4) }.is_ok()
+        self.unlock() && unsafe { C::flash_program(at, &w, 4) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lp_bootctl::{Extent, ResetKind};
+
+    use super::super::test_chip::TestChip;
+    use super::*;
+
+    /// The running core at the low end, one 64 KiB block long; the region
+    /// ends at `0x380000` (the C6's `factory` end).
+    fn fenced() -> SplitFlash<TestChip> {
+        TestChip::reset(0x1_8000, ResetKind::Warm);
+        let mut flash = SplitFlash::<TestChip>::take();
+        flash.protect(
+            Extent {
+                start: 0x1_8000,
+                end: 0x2_8000,
+            },
+            0x38_0000,
+        );
+        flash
+    }
+
+    #[test]
+    fn nothing_is_written_before_the_fence_knows_the_core_and_the_region() {
+        TestChip::reset(0x1_8000, ResetKind::Warm);
+        let mut flash = SplitFlash::<TestChip>::take();
+        assert!(!flash.erase(0x30_0000));
+        assert!(!flash.erase(BOOT_RECORD_SECTORS[0]));
+        assert!(!flash.program(0x30_0000, &[0]));
+        assert!(!flash.program_word(0x30_0000, 0));
+        assert_eq!(TestChip::bytes(0x30_0000, 4), [0xff; 4]);
+    }
+
+    #[test]
+    fn the_fence_allows_the_region_and_the_records_but_never_the_running_core() {
+        let mut flash = fenced();
+        assert!(flash.erase(0x30_0000), "the region, clear of the core");
+        assert!(flash.erase_block(0x30_0000), "a block clear of the core");
+        assert!(flash.erase(BOOT_RECORD_SECTORS[0]));
+        assert!(flash.erase(BOOT_RECORD_SECTORS[1]));
+        assert!(flash.erase(PROGRESS_RECORD_SECTOR));
+        assert!(!flash.erase(0x1_8000), "the running core's first sector");
+        assert!(!flash.erase(0x2_7000), "the running core's last sector");
+        assert!(
+            !flash.erase_block(0x2_0000),
+            "a block over the running core"
+        );
+        assert!(!flash.erase(0x1_0000), "the loader");
+        assert!(!flash.erase(0x38_0000), "past the region's end (lpfs)");
+        assert!(
+            !flash.program(0x2_7ffe, &[0, 0, 0, 0]),
+            "a program into the core"
+        );
+        assert!(!flash.erase(0x30_0800), "an erase off a sector boundary");
+    }
+
+    #[test]
+    fn a_program_at_any_alignment_clears_only_its_own_bytes() {
+        let mut flash = fenced();
+        assert!(flash.program(0x30_0001, &[0x12, 0x34, 0x56, 0x78, 0x9a]));
+        assert_eq!(
+            TestChip::bytes(0x30_0000, 8),
+            [0xff, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xff, 0xff]
+        );
+        let mut back = [0u8; 5];
+        assert!(flash.read(0x30_0001, &mut back));
+        assert_eq!(back, [0x12, 0x34, 0x56, 0x78, 0x9a]);
     }
 }
