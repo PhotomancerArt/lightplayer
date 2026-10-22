@@ -5,6 +5,8 @@
 pub mod backtrace_oracle;
 #[cfg(feature = "test_loopback")]
 pub mod loopback;
+#[cfg(feature = "test_lcd_ws281x")]
+pub mod lcd_ws281x;
 #[cfg(feature = "test_button")]
 pub mod test_button;
 #[cfg(feature = "test_seam_abi")]
