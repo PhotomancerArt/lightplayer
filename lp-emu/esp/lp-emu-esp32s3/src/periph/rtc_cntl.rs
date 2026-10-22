@@ -255,6 +255,11 @@ const SW_SYS_RST: u32 = 1 << 31;
 /// "Software resets the digital core by RTC_CNTL_SW_SYS_RST".
 pub const SW_SYS_RESET_CODE: u32 = 0x03;
 
+/// `reset_state`'s code after a host's chip reset through the
+/// USB-Serial-JTAG bridge (`USB_UART_CHIP_RESET`, esp-hal's `CoreUsbUart`):
+/// RTC memory kept, as after [`SW_SYS_RESET_CODE`].
+pub const USB_UART_CHIP_RESET_CODE: u32 = 0x15;
+
 const WDT_EN: u32 = 1 << 31;
 const STG0_SHIFT: u32 = 28;
 const STG_MASK: u32 = 0b111;

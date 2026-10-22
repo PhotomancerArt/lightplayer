@@ -4126,14 +4126,26 @@ impl Machine {
     /// power-on code. Everything else goes back to power-on, the RNG's state
     /// included (the classic's `software_reboot` rule, and its reason).
     ///
+    /// **A host's chip reset** (the USB-Serial-JTAG bridge's, a DTR/RTS
+    /// dance or the `reset` control verb) is the same with `reset_state`
+    /// reading `CoreUsbUart` (0x15,
+    /// [`crate::periph::rtc_cntl::USB_UART_CHIP_RESET_CODE`]), which the
+    /// split core's boot bookkeeping counts as cold (`lp-bootctl`'s
+    /// `ResetKind::from_s3_reason`; the S3 updates plan's P10, scenario S4b).
+    ///
     /// Every other cause is [`reboot`](Self::reboot) unchanged: a watchdog
-    /// or a host's `chip_rst` still comes back reading power-on with RTC
-    /// memory cleared, which is **not** what silicon does and is not this
-    /// milestone's to change (the README's "What is still not modelled").
+    /// still comes back reading power-on with RTC memory cleared, which is
+    /// **not** what silicon does (the README's "What is still not
+    /// modelled").
     pub fn reboot_for(&mut self, strap: Strap, cause: ResetSource) -> bool {
-        if cause != ResetSource::Software {
-            return self.reboot(strap);
-        }
+        let (code, word) = match cause {
+            ResetSource::Software => (crate::periph::rtc_cntl::SW_SYS_RESET_CODE, "CoreSw"),
+            ResetSource::ChipReset => (
+                crate::periph::rtc_cntl::USB_UART_CHIP_RESET_CODE,
+                "CoreUsbUart",
+            ),
+            _ => return self.reboot(strap),
+        };
         let base = self.bus.guest_arena_base();
         let span = |addr: u32, len: u32| {
             let at = (addr - base) as usize;
@@ -4151,12 +4163,11 @@ impl Machine {
         if let Some(index) = self.bus.peripheral_index("RTC_CNTL") {
             self.bus
                 .with_peripheral::<crate::periph::rtc_cntl::RtcCntl, _>(index, |r, _| {
-                    r.set_reset_cause_code(crate::periph::rtc_cntl::SW_SYS_RESET_CODE)
+                    r.set_reset_cause_code(code)
                 });
         }
         log::info!(
-            "machine: software system reset — reboot {} with RTC memory kept and reset_state \
-             CoreSw",
+            "machine: {cause:?} — reboot {} with RTC memory kept and reset_state {word}",
             self.reboots
         );
         true
