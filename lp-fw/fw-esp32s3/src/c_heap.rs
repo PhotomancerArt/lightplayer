@@ -87,7 +87,7 @@ static RADIO_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 /// C bytes the radio region could not hold, which went to the main arena.
 static OVERFLOWED: AtomicUsize = AtomicUsize::new(0);
 /// The high-water [`log_if_grown`] last reported.
-#[cfg(feature = "radio")]
+#[cfg(s3_radio)]
 static LOGGED_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 
 /// Bytes of header in front of every C block: its total size.
@@ -299,7 +299,7 @@ unsafe extern "C" fn get_free_internal_heap_size() -> usize {
 /// last line — the number [`HEAP_RADIO_BYTES`] is checked against, the way
 /// `stack_probe`'s `[stack]` line checks the main stack. The product radio's
 /// heartbeat only (`radio`): the M1 probe's output stays as it was recorded.
-#[cfg(feature = "radio")]
+#[cfg(s3_radio)]
 pub fn log_if_grown(tag: &str) {
     let high = RADIO_HIGH_WATER.load(Ordering::Relaxed);
     if high > LOGGED_HIGH_WATER.swap(high, Ordering::Relaxed) {

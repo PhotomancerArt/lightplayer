@@ -62,7 +62,7 @@ pub fn init_board() -> (
     crate::radio_boot_probe::stash(peripherals.WIFI, peripherals.BT);
     // The BLE link's peripheral, kept until the device store says whether
     // BLE runs (`crate::ble::start`, after the filesystem mounts).
-    #[cfg(all(feature = "ble", not(fw_harness)))]
+    #[cfg(all(s3_ble, not(fw_harness)))]
     crate::ble::stash(peripherals.BT);
 
     // Set up software interrupt and timer for the Embassy runtime.
