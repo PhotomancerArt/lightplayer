@@ -195,7 +195,10 @@ fn s4b_a_host_reset_counts_as_cold() {
         .build()
         .expect("the machine builds");
     m.run_until(&StopCondition::after_micros(3_500_000));
-    let text = text_of(&m);
+    // UART0 alone: the ROM's `rst:` line is there only, and the ROM's banner
+    // and the loader's line go to UART0 *and* the USB console, so the two
+    // together would count every boot twice.
+    let text = m.uart0().text();
     let trials = text
         .matches(&format!("[LOADER] core @{high:#x} (trial)"))
         .count();

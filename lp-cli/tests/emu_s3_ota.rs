@@ -77,11 +77,15 @@ fn u01_x_to_y_raw_with_a_read_back_and_the_identity() {
     );
     let finish = run_to_done(&mut host, None);
     assert_eq!(finish, Finish::UpToDate, "{}", tail(&host));
-    let ota = host.ota.as_ref().unwrap();
-    assert_eq!(ota.served().chunks_encoded, 0, "raw only");
+    assert_eq!(
+        host.ota.as_ref().unwrap().served().chunks_encoded,
+        0,
+        "raw only"
+    );
     assert!(console_has(&host, "[OTA] core verified, committing"));
     assert!(console_has(&host, "[OTA] engine verified, committing"));
-    expect_last_core(&host, &y, true);
+    expect_last_core(&mut host, &y, true);
+    let ota = host.ota.as_ref().unwrap();
 
     // U13: the backup read back before the update is X's engine.bin.
     let kept = std::fs::read(
@@ -147,7 +151,7 @@ fn u02_x_to_y_with_z_and_the_light() {
     assert_eq!(finish, Finish::UpToDate, "{}", tail(&host));
     let served = host.ota.as_ref().unwrap().served();
     assert!(served.chunks_encoded > 0, "chunks went as Z");
-    expect_last_core(&host, &y, true);
+    expect_last_core(&mut host, &y, true);
     // U16: dark yellow while updating, dark red while it needs its engine,
     // on the pad the project's strip is on (GRB on the wire).
     assert!(lit.contains(&[0x10, 0x18, 0x00]), "dark yellow: {lit:02x?}");
@@ -258,20 +262,31 @@ fn recover(
     let mut host = hosted(flash, Some(offer(&y, |a| a.ota_no_z = raw)));
     let finish = run_to_done(&mut host, None);
     let console = host.console().join("\n");
+    // The first boot after the cut, by the loader's line (raw console, before
+    // any link) and, when its log line arrived, the core's build.
+    let loader = console
+        .lines()
+        .find(|l| l.contains("[LOADER] core @"))
+        .map(|l| l[l.find('@').unwrap_or(0)..].to_string())
+        .unwrap_or_else(|| "none".into());
     let first = console
         .lines()
         .find(|l| l.contains("[CORE] core @"))
-        .map(|l| {
+        .map_or("", |l| {
             if l.contains(x_build) {
-                "X"
+                " X"
             } else if l.contains(y_build) {
-                "Y"
+                " Y"
             } else {
-                "?"
+                " ?"
             }
-        })
-        .unwrap_or("none");
-    let reachable = console.contains("[OTA] core-only:") || console.contains("\"hello\":{");
+        });
+    let first = format!("{loader}{first}");
+    // Reachable: the board answered on its link, an engine's hello or a
+    // core's manifest on channel 3 (log lines are best-effort, the defect in
+    // `expect_last_core`'s docs).
+    let reachable = console.contains("\"hello\":{")
+        || !host.ota.as_ref().is_some_and(|o| o.manifests.is_empty());
     let resumed = console
         .lines()
         .find(|l| l.contains("[OTA] resuming"))
@@ -280,7 +295,9 @@ fn recover(
     let ota = host.ota.as_ref().unwrap();
     let served = ota.served();
     let served_bytes = served.bytes_raw + served.bytes_encoded;
-    let last_y = last_core_build(&console) == Some(y_build.to_string()) && engine_entered(&console);
+    let last_y = last_core_agrees(&console, y_build, true)
+        && engine_hello_after_last_boot(&console)
+            .is_some_and(|(b, state)| b == y_build && state == BoardState::Running);
     let ok = finish == Finish::UpToDate && last_y && reachable;
     format!(
         "{}\tcut-after={n}\tpiece={piece}\tfirst-boot={first}{}\t{resumed}\tserved-after={} req / {served_bytes} B",
@@ -527,7 +544,7 @@ fn u08_a_core_install_needs_edit_and_a_core_side_login_grants_it() {
     );
     let finish = run_to_done(&mut host, None);
     assert_eq!(finish, Finish::UpToDate, "{}", tail(&host));
-    expect_last_core(&host, &y, true);
+    expect_last_core(&mut host, &y, true);
     report(
         "U8",
         "untrusted USB, open nobody: engine N/A (flash untouched); core-only N/A without a \
@@ -762,7 +779,7 @@ fn u19_power_cycles_after_a_failed_trial_and_its_heal_run_the_engine() {
         "{}",
         tail(&host)
     );
-    expect_last_core(&host, &y, true);
+    expect_last_core(&mut host, &y, true);
 
     let failed = lp_bootctl::build_hash(yd.build_id.as_bytes());
     let refused = Finish::Stopped(StopReason::Decision(lpa_update::Decision::RefusedBuild {
@@ -805,7 +822,7 @@ fn u19_power_cycles_after_a_failed_trial_and_its_heal_run_the_engine() {
             "cycle {cycle}: the core did not trust its boot state\n{}",
             tail(&host)
         );
-        expect_last_core(&host, &y, true);
+        expect_last_core(&mut host, &y, true);
         let hello =
             hello_firmware_of(&mut host, &y.build_id).expect("a hello after the power cycle");
         assert_eq!(
@@ -884,7 +901,7 @@ fn u15_a_corrupted_raw_chunk_fails_its_piece_which_is_sent_again() {
         "N/H at the piece's end"
     );
     assert!(console_has(&host, "corrupted the raw chunk"));
-    expect_last_core(&host, &y, true);
+    expect_last_core(&mut host, &y, true);
     report(
         "U15",
         "a flipped byte in engine chunk 0x40000: N/H at the piece end, the engine sent again, Y runs",
@@ -1144,18 +1161,69 @@ fn engine_entered(console: &str) -> bool {
         .is_some_and(|l| l.contains("· engine ") && l.contains(" B ·"))
 }
 
-/// The last core line names `img`'s build (and, with `engine`, its engine).
-fn expect_last_core(host: &EmuLinkHost<S3Board>, img: &Image, engine: bool) {
+/// The last core is `img`'s, running its engine (`engine`), by the board's
+/// own words that a link reset cannot drop: the newest hello after the
+/// loader's last line (only an engine sends one) carries `img`'s build,
+/// `Running`. The core's `[CORE]` line, when it arrived, must agree — but it
+/// rides the log channel, best-effort datagrams a link reset clears, and on
+/// the S3 the first link session after an update's reset is reset by a
+/// `ProtocolError` while the host is mid-conversation, which loses it
+/// (`docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md`).
+fn expect_last_core(host: &mut EmuLinkHost<S3Board>, img: &Image, engine: bool) {
     let console = host.console().join("\n");
-    assert_eq!(
-        last_core_build(&console),
-        Some(img.build_id.clone()),
-        "{}",
+    assert!(
+        last_core_agrees(&console, &img.build_id, engine),
+        "a [CORE] line after the last boot names another build or no engine:\n{}",
         tail(host)
     );
-    if engine {
-        assert!(engine_entered(&console), "{}", tail(host));
+    if !engine {
+        return;
     }
+    let until = host.board.machine.micros() + 5_000_000;
+    loop {
+        let console = host.console().join("\n");
+        if let Some((build, state)) = engine_hello_after_last_boot(&console)
+            && build == img.build_id
+        {
+            assert_eq!(state, BoardState::Running, "{}", tail(host));
+            return;
+        }
+        assert!(
+            host.board.machine.micros() < until,
+            "no hello of {} after the last boot:\n{}",
+            img.build_id,
+            tail(host)
+        );
+        host.step().expect("the run");
+    }
+}
+
+/// When the last boot's `[CORE]` line arrived, it names `build` (and, with
+/// `engine`, an engine entered); `true` when it did not arrive.
+fn last_core_agrees(console: &str, build: &str, engine: bool) -> bool {
+    let after = last_boot(console);
+    if !after.contains("[CORE] core @") {
+        return true;
+    }
+    last_core_build(after).as_deref() == Some(build) && (!engine || engine_entered(after))
+}
+
+/// The console since the loader's last line: the last boot.
+fn last_boot(console: &str) -> &str {
+    console
+        .rfind("[LOADER] core @")
+        .map_or(console, |at| &console[at..])
+}
+
+/// The newest hello since the last boot: its firmware's build and state.
+fn engine_hello_after_last_boot(console: &str) -> Option<(String, BoardState)> {
+    let line = last_boot(console)
+        .lines()
+        .rev()
+        .find(|l| l.starts_with("M!") && l.contains("\"hello\":{"))?;
+    let v: serde_json::Value = serde_json::from_str(&line[2..]).ok()?;
+    let m: BoardManifest = serde_json::from_value(v["msg"]["hello"]["firmware"].clone()).ok()?;
+    Some((m.build_id, m.state))
 }
 
 /// The last hello's `firmware` block, read off the console.
