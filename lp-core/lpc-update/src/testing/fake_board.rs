@@ -349,6 +349,20 @@ impl FakeBoard {
         }
     }
 
+    /// The record sector the running core did not boot from: where a trial
+    /// record goes. Never the running core's own — after a rollback the
+    /// newest record is the failed trial's, not ours.
+    fn spare_sector(&self) -> Result<usize, FlashFault> {
+        let running = self.running.ok_or(FlashFault)?;
+        let ours = self
+            .records()
+            .iter()
+            .filter(|r| r.core_off == running.core_off && r.core_len == running.core_len)
+            .max_by_key(|r| r.seq)
+            .map_or(1, |r| r.sector);
+        Ok(1 - ours)
+    }
+
     fn running_extent(&self) -> Option<Range<u32>> {
         self.running
             .map(|r| r.core_off..Self::up(r.core_off + r.core_len))
@@ -424,24 +438,25 @@ impl UpdateTarget for FakeBoard {
         self.program(dest + MODEL_COMMIT_AT as u32, &MODEL_COMMIT_WORD)
     }
 
+    fn retire_spare_record(&mut self) -> Result<(), FlashFault> {
+        let addr = MODEL_RECORDS[self.spare_sector()?];
+        if self.flash.bytes()[addr as usize..(addr + CHUNK) as usize]
+            .iter()
+            .all(|&b| b == 0xFF)
+        {
+            return Ok(());
+        }
+        self.flash.erase(addr)
+    }
+
     fn write_trial_record(
         &mut self,
         dest: u32,
         len: u32,
         build_hash: u32,
     ) -> Result<(), FlashFault> {
-        // Never over the record the running core booted from: after a
-        // rollback the newest record is the failed trial's, not ours.
-        let records = self.records();
-        let seq = records.iter().map(|r| r.seq).max().unwrap_or(0) + 1;
-        let running = self.running.ok_or(FlashFault)?;
-        let ours = records
-            .iter()
-            .filter(|r| r.core_off == running.core_off && r.core_len == running.core_len)
-            .max_by_key(|r| r.seq)
-            .map_or(1, |r| r.sector);
-        let sector = 1 - ours;
-        let addr = MODEL_RECORDS[sector];
+        let seq = self.records().iter().map(|r| r.seq).max().unwrap_or(0) + 1;
+        let addr = MODEL_RECORDS[self.spare_sector()?];
         self.flash.erase(addr)?;
         self.flash
             .program(addr, &encode_record(seq, dest, len, build_hash, true))

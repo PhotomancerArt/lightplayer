@@ -2,6 +2,8 @@
 //! by chunk, then the hash and the commit.
 //!
 //! - **Core stage** (a core install): the progress record (kind `C`); the
+//!   spare boot record erased ([`UpdateTarget::retire_spare_record`]), so a
+//!   cut can never boot the new core under the record it replaces; the
 //!   engine header erased if it was still valid (an engine-crashing board),
 //!   so a cut can never leave a valid-looking engine over bytes the new core
 //!   overwrote; then each chunk in order. When the last is in, the whole
@@ -108,12 +110,18 @@ impl BoardSession {
         t.sector0 = None;
         t.erased = None;
         let (kind, dest, at) = (t.kind(), t.record.dest, t.record.resume_at(&t.marks));
-        // Before any chunk: nothing may look like a valid engine while bytes
-        // under it change (both are no-ops on a resume that already did it).
+        // Before any chunk: nothing may look like a valid engine, and no
+        // boot record may name a core, while bytes under it change (each is
+        // a no-op on a resume that already did it).
         let cleared = match kind {
-            PieceKind::Core if self.engine_valid => target.erase_engine_header(),
+            PieceKind::Core => target.retire_spare_record().and_then(|()| {
+                if self.engine_valid {
+                    target.erase_engine_header()
+                } else {
+                    Ok(())
+                }
+            }),
             PieceKind::Engine => target.erase_sector(dest),
-            PieceKind::Core => Ok(()),
         };
         if cleared.is_err() {
             return self.fault();

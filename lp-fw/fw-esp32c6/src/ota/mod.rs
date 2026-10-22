@@ -141,13 +141,41 @@ pub fn reset_kind() -> lp_bootctl::ResetKind {
 /// Read this boot's state and, for a trial core, count a cold retry and
 /// mark it attempted — the first writes of a new core's boot, before
 /// anything that could fail. `factory` is `(offset, len)` from the flashed
-/// partition table, if it could be read.
-pub fn begin(factory: Option<(u32, u32)>) -> BootState {
+/// partition table, if it could be read; `build_id` is this core's.
+///
+/// A **stray** — this core under another build's unconfirmed trial record,
+/// a proven record behind it — resets here, warm, once that trial is marked
+/// attempted: the loader then rolls back to the proven core, which names the
+/// dead build refused, as before the cut that made the stray. The update
+/// writes a core's record last, and a cut between the two after a rollback
+/// boots the new core under the dead trial's record (defect 2026-10-19). A
+/// core that wrote its record last is any core released before that fix,
+/// so this is what keeps a cut safe while one of those installs this one.
+pub fn begin(factory: Option<(u32, u32)>, build_id: &[u8]) -> BootState {
     let mut flash = SplitFlash::take();
-    let mut state = BootState::read(&mut flash, factory, reset_kind());
+    let id_len = build_id
+        .iter()
+        .position(|b| *b == 0)
+        .unwrap_or(build_id.len());
+    let own_build = lp_bootctl::build_hash(&build_id[..id_len]);
+    let mut state = BootState::read(&mut flash, factory, reset_kind(), own_build);
     if let (true, Some(layout)) = (state.trusted(), state.layout) {
         flash.protect(state.core_extent(), layout.region_end);
         state.begin_trial(&mut flash);
+        if state.stray
+            && let Some(c) = state.choice
+            && c.slot.marks.attempted
+        {
+            // Straight to the port: the log's link is not up yet, and the
+            // reset would swallow anything queued for it.
+            esp_println::println!(
+                "[CORE] core @{:#x} runs under build {:#010x}'s trial record, not its own \
+                 ({own_build:#010x}): its record was never written — resetting to roll back",
+                state.core_off,
+                c.slot.record.build,
+            );
+            reset_now();
+        }
     }
     state
 }

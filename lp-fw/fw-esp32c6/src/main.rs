@@ -663,7 +663,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         // 2026-10-02).
         #[cfg(lp_split)]
         {
-            ota_state = ota::begin(flash_layout.factory.map(|f| (f.offset, f.len)));
+            ota_state = ota::begin(flash_layout.factory.map(|f| (f.offset, f.len)), &BUILD_ID);
         }
         let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
         (outcome, flash_storage, flash_layout)
@@ -673,7 +673,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // No flash driver, no table: the boot state is untrusted (no writes).
     #[cfg(all(lp_split, feature = "memory_fs"))]
     {
-        ota_state = ota::begin(None);
+        ota_state = ota::begin(None, &BUILD_ID);
     }
 
     // `heap_peak_diag` (never shipped) also times the mount, either

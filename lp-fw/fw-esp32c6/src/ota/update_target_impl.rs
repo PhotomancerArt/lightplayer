@@ -12,7 +12,7 @@
 use core::ops::Range;
 
 use lp_bootctl::engine_header::{ENGINE_COMMIT_OFFSET, ENGINE_COMMITTED};
-use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
+use lp_bootctl::{BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
@@ -166,6 +166,27 @@ impl UpdateTarget for SplitUpdateTarget {
         ok(self
             .flash
             .program_word(dest + ENGINE_COMMIT_OFFSET as u32, ENGINE_COMMITTED))
+    }
+
+    fn retire_spare_record(&mut self) -> Result<(), FlashFault> {
+        // The sector `write_trial_record` writes. After a rollback it holds
+        // the dead trial's record, which names the end of the region the new
+        // core is about to fill, and a cold boot still chooses it (a power
+        // cut is not a failure): left in place, a cut after the new core's
+        // hash and before its own record boots the new core under the dead
+        // build's record — its build, its length and its marks (defect
+        // 2026-10-19). With the sector blank, the running core's record is
+        // the only one until the trial record is written.
+        let at = BOOT_RECORD_SECTORS[1 - self.record_sector];
+        let mut buf = [0u8; BOOT_RECORD_READ_LEN];
+        if !self.flash.read(at, &mut buf) {
+            return Err(FlashFault);
+        }
+        if buf.iter().all(|&b| b == 0xff) {
+            return Ok(());
+        }
+        log::info!("[OTA] spare boot record retired before the core");
+        ok(self.flash.erase(at))
     }
 
     fn write_trial_record(

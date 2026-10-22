@@ -44,6 +44,10 @@ pub struct BootState {
     pub fell_back: bool,
     /// The loader's version word (0: none).
     pub loader_version: u16,
+    /// This core runs under an unconfirmed trial record of another build,
+    /// with a proven record behind it: a new core whose own record a cut
+    /// kept from being written (`lp_bootctl::stray_trial`).
+    pub stray: bool,
 }
 
 impl BootState {
@@ -61,12 +65,18 @@ impl BootState {
             counted_cold_retry: false,
             fell_back: false,
             loader_version: 0,
+            stray: false,
         }
     }
 
     /// Read this boot's state. `factory` is `(offset, len)` from the flashed
-    /// table, if it could be read.
-    pub fn read(flash: &mut SplitFlash, factory: Option<(u32, u32)>, reset: ResetKind) -> Self {
+    /// table, if it could be read; `own_build` is this core's build hash.
+    pub fn read(
+        flash: &mut SplitFlash,
+        factory: Option<(u32, u32)>,
+        reset: ResetKind,
+        own_build: u32,
+    ) -> Self {
         let page = page_size();
         let layout = factory.and_then(|(offset, len)| SplitLayout::from_factory(offset, len, page));
         let mut sectors = [None; 2];
@@ -85,6 +95,7 @@ impl BootState {
         // that rollback (`booted_by`; defect 2026-10-17, a power cycle after
         // a heal).
         let choice = lp_bootctl::booted_by(sectors, reset, running);
+        let stray = choice.is_some_and(|c| lp_bootctl::stray_trial(sectors, &c, own_build));
         let failed_build = choice
             .filter(|c| c.rolled_back)
             .and_then(|c| sectors[1 - c.sector])
@@ -130,6 +141,7 @@ impl BootState {
             counted_cold_retry: false,
             fell_back: records_disagree,
             loader_version,
+            stray,
         }
     }
 

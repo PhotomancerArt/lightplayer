@@ -810,6 +810,212 @@ fn u19_power_cycles_after_a_failed_trial_and_its_heal_run_the_engine() {
     );
 }
 
+// --- U20: power cuts in the next core install after a rollback ------------------------------
+
+/// `docs/defects/2026-10-19-a-cut-before-the-next-cores-record-boots-it-under-the-dead-trials.md`:
+/// U19's state (Y rolled back from Y-dies and healed; the newer record still
+/// Y-dies', naming the low end), then X offered. X's core goes to the low
+/// end — the bytes the dead trial's record names, which a cold boot still
+/// chooses. A power cut anywhere in that core's stage, and at every write to
+/// the dead trial's record sector, must leave a board whose cold boot runs a
+/// core under its own record (trusted, its build the record's), and a host
+/// offering X must still finish.
+#[test]
+#[ignore = "needs the OTA images; `just test-emu-c6-ota`"]
+fn u20_power_cuts_in_the_next_core_after_a_rollback_never_boot_it_under_the_dead_record() {
+    let (Some(x), Some(y), Some(yd)) = (image("x"), image("y"), image("y-dies")) else {
+        return;
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let with_cache = |img: &Image| {
+        offer(img, |a| {
+            a.ota_no_z = true;
+            a.ota_cache = Some(cache.path().to_path_buf());
+        })
+    };
+    // U19's state, then one power cycle: Y runs its engine, rolled back.
+    let mut host = hosted(x.merged(), Some(with_cache(&y)));
+    assert_eq!(
+        run_to_done(&mut host, None),
+        Finish::UpToDate,
+        "{}",
+        tail(&host)
+    );
+    for img in [&yd, &y] {
+        host.ota = OtaHost::from_args(&with_cache(img)).unwrap();
+        let now_ms = host.now_us() / 1_000;
+        host.ota.as_mut().unwrap().link_up(now_ms);
+        run_to_done(&mut host, None);
+    }
+    expect_last_core(&host, &y, true);
+    let base = flash_of(&host);
+    let records = records_of(&base);
+    let dead = (0..2)
+        .find(|&i| {
+            records[i]
+                .is_some_and(|s| s.record.build == lp_bootctl::build_hash(yd.build_id.as_bytes()))
+        })
+        .expect("the dead trial's record is still there");
+    let dead_rec = records[dead].unwrap().record;
+    let dead_sector = lp_bootctl::BOOT_RECORD_SECTORS[dead];
+    println!(
+        "U20 the dead trial's record: sector {dead}, core @{:#x} +{:#x}",
+        dead_rec.core_off, dead_rec.core_len
+    );
+
+    // How many program/erase commands X's core stage sends into the bytes
+    // the dead record names, up to the core's hash.
+    let core_range = dead_rec.core_off..dead_rec.core_off + x.manifest.core.length as u32;
+    let core_ops = {
+        let mut host = hosted(base.clone(), Some(with_cache(&x)));
+        arm(&mut host, core_range.clone(), u64::MAX);
+        while !console_has(&host, "[OTA] core verified") {
+            host.step().expect("the run");
+        }
+        let counted = host.board.machine.flash_cut_summary().join(" ");
+        let n = counted
+            .split(" — ")
+            .nth(1)
+            .and_then(|t| t.split_whitespace().next())
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or_else(|| panic!("no count in {counted:?}"));
+        assert!(n > 4, "{n} ops in the core stage");
+        n
+    };
+    let mut cuts: Vec<(&str, std::ops::Range<u32>, u64)> = [0, 1, core_ops / 2, core_ops - 1]
+        .into_iter()
+        .map(|at| ("core", core_range.clone(), at))
+        .collect();
+    // Every write to the dead record's sector, up to the new core's trial
+    // marks: whatever the session erases and programs there.
+    cuts.extend((0..4).map(|at| ("record", dead_sector..dead_sector + 0x1000, at)));
+
+    let mut rows = Vec::new();
+    for (what, range, at) in cuts {
+        let mut host = hosted(base.clone(), Some(with_cache(&x)));
+        arm(&mut host, range.clone(), at);
+        let mut cut = false;
+        for _ in 0..UPDATE_STEPS {
+            if host.step().is_err() {
+                cut = host.board.machine.last_flash_cut().is_some();
+                break;
+            }
+            if host.ota.as_ref().is_some_and(|o| o.done()) {
+                break;
+            }
+        }
+        if !cut {
+            rows.push(format!(
+                "{what} op {at}: never reached (the update finished)"
+            ));
+            continue;
+        }
+        let report = host.board.machine.last_flash_cut().unwrap();
+        let retired = console_has(&host, "spare boot record retired");
+        // The cold boot after the cut, with no host.
+        let mut host = hosted(flash_of(&host), None);
+        // The boot-state line (a stray's own `[CORE] core @…` line, before
+        // its reset, is not one).
+        let line = wait_line(&mut host, " · loader v")
+            .unwrap_or_else(|| panic!("{what} op {at}: no core line\n{}", tail(&host)));
+        host.run_until(host.board.machine.micros() + 2_000_000, None)
+            .expect("the run");
+        assert!(
+            !console_has(&host, "boot state not trusted"),
+            "{what} op {at} ({report}): the core did not trust its boot state\n{}",
+            tail(&host)
+        );
+        let (off, build) = core_line(&line);
+        let console = host.console().join("\n");
+        let how = [
+            ("its record was never written", "stray reset"),
+            ("(rolled back)", "rolled back"),
+            ("(trial)", "trial"),
+            ("(proven)", "proven"),
+        ]
+        .iter()
+        .filter(|(needle, _)| console.contains(needle))
+        .map(|(_, word)| *word)
+        .collect::<Vec<_>>()
+        .join(", ");
+        let booted = lp_bootctl::booted_by(
+            records_of(&flash_of(&host)),
+            lp_bootctl::ResetKind::Cold,
+            off,
+        )
+        .unwrap_or_else(|| panic!("{what} op {at}: no record\n{line}"));
+        assert_eq!(
+            booted.slot.record.build,
+            lp_bootctl::build_hash(build.as_bytes()),
+            "{what} op {at} ({report}): core {build} @{off:#x} runs under another build's \
+             record {:#x?}\n{}",
+            booted.slot.record,
+            tail(&host)
+        );
+        // And a host offering X finishes from there.
+        host.ota = OtaHost::from_args(&with_cache(&x)).unwrap();
+        let now_ms = host.now_us() / 1_000;
+        host.ota.as_mut().unwrap().link_up(now_ms);
+        assert_eq!(
+            run_to_done(&mut host, None),
+            Finish::UpToDate,
+            "{what} op {at}: {}",
+            tail(&host)
+        );
+        expect_last_core(&host, &x, true);
+        rows.push(format!(
+            "{what} op {at} ({:?} @{:#x}){}: cold boot ran {build} under its own record ({how}); \
+             X finished",
+            report.kind,
+            report.addr,
+            if retired {
+                ", spare record retired first"
+            } else {
+                ""
+            },
+        ));
+    }
+    for row in &rows {
+        println!("U20 {row}");
+    }
+    report(
+        "U20",
+        &format!(
+            "Y rolled back from Y-dies and healed; X's core cut at {} points (its {core_ops} ops \
+             and the dead record's sector): every cold boot ran a core under its own record, and \
+             X finished",
+            rows.len()
+        ),
+    );
+}
+
+/// Arm a clean power cut at in-range command `at` (counted from now).
+fn arm(host: &mut EmuLinkHost<C6Board>, range: std::ops::Range<u32>, at: u64) {
+    let mut spec = lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::new(
+        at,
+        lp_emu_esp_common::engine::flash_cut::TearModel::Clean,
+        1,
+    );
+    spec.range = Some(range);
+    host.board.machine.arm_flash_cut(&spec).expect("armed");
+}
+
+/// The two boot records as the loader reads them.
+fn records_of(chip: &[u8]) -> [Option<lp_bootctl::BootSlot>; 2] {
+    lp_bootctl::BOOT_RECORD_SECTORS.map(|at| {
+        let at = at as usize;
+        lp_bootctl::BootSlot::decode(&chip[at..at + lp_bootctl::BOOT_RECORD_READ_LEN])
+    })
+}
+
+/// `[CORE] core @0x… +… (…) build <id> · …`: the offset and the build id.
+fn core_line(line: &str) -> (u32, String) {
+    let at = &line[line.find("core @0x").unwrap() + 8..];
+    let off = u32::from_str_radix(at.split_whitespace().next().unwrap(), 16).unwrap();
+    let build = &line[line.find(" build ").unwrap() + 7..];
+    (off, build.split_whitespace().next().unwrap().to_string())
+}
+
 // --- U14: a host that goes away mid-core, and a new one that resumes ------------------------
 
 #[test]

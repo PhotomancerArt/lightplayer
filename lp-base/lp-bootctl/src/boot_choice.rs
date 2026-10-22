@@ -94,6 +94,39 @@ pub fn booted_by(
     }
 }
 
+/// Whether the core running under `chosen` is a **stray**: a new core whose
+/// own trial record was never written, booted under the record it was meant
+/// to replace.
+///
+/// The update writes a new core into the end of the region the running core
+/// is not in, hashes it, and only then writes its trial record into the
+/// other sector. After a rollback that sector holds the dead trial's record,
+/// naming that same end — and a cold boot still chooses it (a power cut is
+/// not a failure). A cut between the new core's hash and its record (or
+/// anywhere in its write, by a core that wrote its record last) boots the
+/// new core under the dead build's record: its build, its length, its marks.
+///
+/// The test: `chosen` is an unconfirmed trial whose build is not
+/// `running_build`, and the other record is proven. The answer is a warm
+/// reset: the trial is attempted by then, so the loader rolls back to the
+/// proven record, whose core the update never touched, and the rollback
+/// names the dead build as refused, as it did before the cut. A trial whose
+/// build is the running core's is its own; with nothing proven behind it a
+/// stray is still booted (a reset would only come back here). Reads only;
+/// the records mean what they meant.
+pub fn stray_trial(
+    sectors: [Option<BootSlot>; 2],
+    chosen: &BootChoice,
+    running_build: u32,
+) -> bool {
+    let rec = chosen.slot.record;
+    !chosen.rolled_back
+        && rec.trial
+        && !chosen.slot.marks.confirmed
+        && rec.build != running_build
+        && sectors[1 - chosen.sector].is_some_and(|s| s.proven())
+}
+
 /// Whether `slot` is a trial that failed, given the reset before this boot.
 pub fn failed(slot: &BootSlot, reset: ResetKind) -> bool {
     let m = slot.marks;
@@ -370,6 +403,62 @@ mod tests {
         // A warm boot already rolls back in `choose`.
         let c = booted_by([trial(3, attempted()), good], Warm, good_off).unwrap();
         assert_eq!((c.sector, c.rolled_back), (1, true));
+    }
+
+    // Defect 2026-10-19: a new core written over a dead trial's core, cut
+    // before its own record: it runs under the dead build's record.
+    #[test]
+    fn a_core_under_another_builds_trial_record_is_a_stray() {
+        let good = proven(2);
+        let dead = trial(3, attempted());
+        let dead_build = dead.unwrap().record.build;
+        for sectors in [[dead, good], [good, dead]] {
+            for reset in [Cold, Warm] {
+                let Some(c) = choose(sectors, reset) else {
+                    unreachable!()
+                };
+                // Warm: `choose` already rolled back, and the proven core runs.
+                let expect = reset == Cold;
+                assert_eq!(stray_trial(sectors, &c, 0x5eed), expect, "{reset:?}");
+                // The trial's own build is never a stray.
+                assert!(!stray_trial(sectors, &c, dead_build));
+            }
+        }
+        // Started, unconfirmed: still a stray (a cold boot never fails it).
+        let started = trial(
+            3,
+            Marks {
+                started: true,
+                ..attempted()
+            },
+        );
+        let c = choose([good, started], Cold).unwrap();
+        assert!(stray_trial([good, started], &c, 0x5eed));
+    }
+
+    #[test]
+    fn a_stray_is_left_alone_when_nothing_proven_is_behind_it_or_it_confirmed() {
+        // Nothing proven behind it: a reset would only come back here.
+        for other in [None, trial(2, NONE)] {
+            let s = [other, trial(3, attempted())];
+            let c = choose(s, Cold).unwrap();
+            assert!(!stray_trial(s, &c, 0x5eed));
+        }
+        // A confirmed trial is proven, whatever it names.
+        let s = [
+            proven(2),
+            trial(
+                3,
+                Marks {
+                    confirmed: true,
+                    ..attempted()
+                },
+            ),
+        ];
+        assert!(!stray_trial(s, &choose(s, Cold).unwrap(), 0x5eed));
+        // A proven record is never a trial.
+        let s = [proven(2), proven(3)];
+        assert!(!stray_trial(s, &choose(s, Cold).unwrap(), 0x5eed));
     }
 
     #[test]

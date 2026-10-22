@@ -8,7 +8,8 @@
 //!
 //! **This crate never re-types the split image's formats.** The boot record,
 //! the engine header and its commit word are reached only through the hooks
-//! here ([`UpdateTarget::write_trial_record`],
+//! here ([`UpdateTarget::retire_spare_record`],
+//! [`UpdateTarget::write_trial_record`],
 //! [`UpdateTarget::prepare_uncommitted_header`],
 //! [`UpdateTarget::commit_engine_header`],
 //! [`UpdateTarget::erase_engine_header`]).
@@ -74,6 +75,14 @@ pub trait UpdateTarget {
     fn prepare_uncommitted_header(&self, sector0: &mut [u8]);
     /// Program the commit word of the engine header at `dest`.
     fn commit_engine_header(&mut self, dest: u32) -> Result<(), FlashFault>;
+    /// Erase the boot record a new core's trial record will replace, before
+    /// the first byte of that core is written. The record there may name
+    /// the very bytes the core is about to overwrite — after a rollback it
+    /// is the dead trial's, which a cold boot still chooses — and a cut
+    /// between the core and its record must not boot the new core under
+    /// it. Asked on every start and resume of a core transfer; a no-op
+    /// when the sector holds nothing.
+    fn retire_spare_record(&mut self) -> Result<(), FlashFault>;
     /// Write the boot record that boots the new core at `dest` on trial.
     fn write_trial_record(
         &mut self,
