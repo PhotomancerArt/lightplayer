@@ -1176,14 +1176,17 @@ clippy-fw-esp32s3:
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
-    # The radio (S3 radio M3): the BLE link over the shared crate, and the
-    # M1 radio probe (scaffolding, the emulator's radio image). The two start
+    # The radio (S3 radio M3, M4): each tier over the shared crate (ESP-NOW,
+    # then BLE, then the network), and the M1 radio probe (scaffolding, the
+    # emulator's radio image). The two start
     # the same controller, so they are separate passes. Then the shared radio
     # crate itself on this chip's target, at each tier this chip builds it
     # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
     # reaches a dependency.
-    echo "clippy: --features ble"
-    cargo clippy --release --features ble -- --no-deps -D warnings
+    for feat in radio ble wifi; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
     echo "clippy: --features radio_boot_probe"
     cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do

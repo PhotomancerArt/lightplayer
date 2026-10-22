@@ -211,7 +211,7 @@ const HEAP_SIZE: usize = 240 * 1024;
 /// so the main stack keeps its share of `dram_seg` (about 52 KB) with both
 /// radios in the image. Where the bytes went — the radio blobs' own region
 /// (`c_heap::HEAP_RADIO_BYTES`), the controllers' IRAM, the BLE stack's and the
-/// network's statics — is docs/adr/2026-10-22-s3-radio-memory.md. The radio
+/// network's statics — is docs/adr/2026-10-21-s3-radio-memory.md. The radio
 /// region's spare bytes are still Rust's, last, so the heap's total is the
 /// arena, the radio region and `dram2_seg` together.
 #[cfg(feature = "radio")]
