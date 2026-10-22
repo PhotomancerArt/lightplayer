@@ -81,6 +81,7 @@ pub mod loader;
 pub mod machine;
 pub mod memmap;
 pub mod periph;
+pub mod psram;
 pub mod regs;
 pub mod rom;
 pub mod seams;

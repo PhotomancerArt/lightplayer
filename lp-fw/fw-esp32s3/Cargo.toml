@@ -231,6 +231,18 @@ test_button = ["server"]
 # result and the caller's window survive an answer. Never shipped.
 test_seam_abi = []
 
+# The octal PSRAM probe — OFF by default, never shipped (lane P of the S3 radio
+# roadmap; `src/tests/test_psram.rs`). Brings the XIAO ESP32-S3's 8 MB octal
+# PSRAM up through esp-hal's own driver, writes and reads back two address-
+# derived patterns across every byte it mapped, and runs a ten-byte function
+# copied into PSRAM through the instruction bus. It is the image
+# `lp-emu-esp32s3`'s PSRAM model is proven against (`tests/psram_boot.rs`);
+# on silicon it prints the same lines. Where the product's heap goes is
+# decided after the silicon spike, not here.
+#
+#   just build-fw-esp32s3 test_psram
+test_psram = []
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
