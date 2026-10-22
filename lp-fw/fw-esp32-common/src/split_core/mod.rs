@@ -100,6 +100,7 @@ mod running_hook;
 mod split_chip;
 mod split_flash;
 mod split_statics;
+pub mod status_light_note;
 #[cfg(test)]
 mod test_chip;
 mod update_edge;
@@ -135,6 +136,9 @@ pub const INCOMPLETE_BOOTS_TO_CORE_ONLY: u32 = 4;
 /// anything that could fail. `factory` is `(offset, len)` from the flashed
 /// partition table, if it could be read.
 pub fn begin<C: SplitChip>(factory: Option<(u32, u32)>) -> BootState {
+    if let Some(why) = C::updates_off() {
+        log::warn!("[OTA] updates off: {why}");
+    }
     let mut flash = SplitFlash::<C>::take();
     let mut state = BootState::read(&mut flash, factory, C::reset_kind());
     if let (true, Some(layout)) = (state.trusted(), state.layout) {

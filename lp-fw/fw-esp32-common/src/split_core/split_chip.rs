@@ -32,6 +32,15 @@ pub trait SplitChip: Sized + 'static {
     /// (`crate::fs_tree_core_guard`): this board's files are in a tree store.
     const CORES_MUST_READ_TREE_STORE: bool;
 
+    /// Why this part can take no update, if it cannot: the board then
+    /// announces layout 0 (no host offers it one) and its boot state is
+    /// never trusted, so nothing is written — not a mark, not a record. The
+    /// S3 on an octal-flash part, which forbids re-programming a word in
+    /// place (every mark does).
+    fn updates_off() -> Option<&'static str> {
+        None
+    }
+
     /// The flash MMU's page, as this boot runs it.
     fn page_size() -> u32;
     /// This chip's layout over a `factory` partition at `offset`, `len`

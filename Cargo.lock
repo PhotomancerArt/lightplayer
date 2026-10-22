@@ -4364,6 +4364,7 @@ dependencies = [
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
+ "lpc-update",
  "lpc-wire",
  "lpfs",
  "lpir",
@@ -4371,6 +4372,7 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-native",
+ "sha2",
 ]
 
 [[package]]
