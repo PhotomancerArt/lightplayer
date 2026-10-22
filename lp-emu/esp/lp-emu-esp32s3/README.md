@@ -34,6 +34,9 @@ It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — a
 > **What does not exist:** the pad fabric and RMT (P07) — a ROM-up boot
 > reaches the application and does not light a strip.
 >
+> **And since 2026-10-22:** the octal PSRAM — an image that brings it
+> up through esp-hal boots both ways and uses all 8 MiB ("PSRAM" below).
+>
 > **And since S3 radio M1 (2026-10):** an image that starts the radio —
 > esp-radio's Wi‑Fi and the BTDM Bluetooth controller — boots both ways to
 > the server loop with nothing unmapped, and a software reset (the
@@ -325,6 +328,53 @@ from the `entry` instruction at each pc, out of the ROM and the merged
 image, and `PS.OWB = 11` and the four save-area words are measured and
 seeded. Fourteen things a direct load does not reproduce are listed in
 `loader.rs`'s module docs; every one is a place the two paths can disagree.
+
+## PSRAM: the octal chip on `CS1` (2026-10)
+
+The canonical board (the XIAO ESP32-S3, an ESP32-S3R8) and the desk's FS3
+carry **8 MiB of octal PSRAM** beside the flash: flash on `CS0`, PSRAM on
+`CS1`. The firmware does not use it yet; this machine models it so an image
+that brings it up runs here, and **an image that never touches it runs
+exactly as before** — `tests/psram_boot.rs` runs the shipped image with the
+default 8 MiB chip and with none and holds the link bytes, cycles,
+instructions and cache fills equal. So the chip is present at 8 MiB by
+default; `--psram-len 0` is a board without (`lp-cli emu run --chip esp32s3
+--psram <size>` is the same knob). `emu serve` holds C6 boards only, so it
+has no S3 PSRAM option.
+
+| what | where | evidence |
+|---|---|---|
+| the chip: bytes and mode registers | [`src/psram.rs`](src/psram.rs) | the registers' reset values are **FS3's own decode** (esp-hal's `print_psram_info`, 2026-10-22): vendor `0x0D` (AP), generation 3, 64 Mbit, good die, 3 V, fast refresh, hybrid wrap, 32-byte bursts. MR0 and MR4 are unobserved and say so |
+| the mode-register reads and writes | [`src/periph/spi1.rs`](src/periph/spi1.rs), "`CS1`" | the ROM's `esp_rom_spi_cmd_start` puts `misc[1:0] = ~cs_mask`; a `usr` transaction with only `CS1` selected goes to the PSRAM. Commands `0x4040`/`0xC0C0` are esp-hal's `OPI_PSRAM_REG_READ`/`WRITE`; only MR0 takes a write |
+| the pages | [`src/cache.rs`](src/cache.rs), "PSRAM pages" | MMU bit 15 is esp-hal's `MMU_ACCESS_SPIRAM`, ORed in by `Cache_Dbus_MMU_Set` (`4004f771`). The fill copies the page into both windows, opens the DROM page to stores and mirrors them into IROM, and writes it back when the entry moves |
+| the SPI0 cache-side set-up, the clocks, the pads | accept-and-remember | the bytes that move do not depend on them here |
+
+What the probe proves (`fw-esp32s3 --features test_psram`, `just
+test-emu-esp32s3-psram`): esp-hal's own driver finds the chip in octal mode
+and maps all of it at `0x3C02_0000`, two index-derived patterns written and
+read back across all 8 MiB with no wrong word, and ten bytes of Xtensa copied
+in through the data bus run through the instruction bus at the same index
+(`0x4281_0000`). FS3 printed every one of those lines first; the emulated run,
+direct and ROM-up, prints them all with `unmapped = 0`.
+
+⚠️ **Three things that differ from silicon, on purpose.**
+
+- **Timing.** A PSRAM access costs what a flash-window access costs on `t1`:
+  nothing beyond the instruction. FS3's probe took ~52 cycles a word for the
+  write pass and ~34 for the read pass, this machine 8 and 9 — loop overhead
+  only. PSRAM timing is **modeled, ungraded** (`validate.toml`) until the
+  silicon spike's measurements grade it. Never quote an emulated PSRAM speed.
+- **Staleness.** As with flash, the window never serves a stale byte: a store
+  is seen by the instruction bus at once, where silicon needs the probe's
+  `Cache_WriteBack_All` + `Cache_Invalidate_ICache_All`. An image that forgot
+  them would run here and not on a board.
+- **Aliases.** One PSRAM page mapped at two MMU indices is two window copies
+  here (the fill warns); silicon has one page. esp-hal maps each page once.
+
+A software reset keeps the chip's bytes and registers (it does not take the
+chip's supply away — IDF's `EXT_RAM_NOINIT_ATTR` exists because of that); a
+power cycle zeroes them. A snapshot carries the chip with every live window
+page written back, and `None` when nothing ever wrote it.
 
 ## The peripherals, in the order the boot met them
 

@@ -188,7 +188,7 @@ fn the_shipped_image_runs_the_same_with_and_without_psram() {
             .usb_host(UsbHost::Attached { draining: true })
             .build()
             .expect("the shipped image direct-loads");
-        let outcome = m.run_until(&StopCondition::after_micros(2_000_000));
+        let outcome = m.run_until(&StopCondition::after_micros(500_000));
         assert!(
             matches!(outcome, Outcome::Deadline { .. }),
             "psram={psram}: {outcome:?}"

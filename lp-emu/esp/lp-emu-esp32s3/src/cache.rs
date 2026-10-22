@@ -1150,6 +1150,72 @@ mod tests {
     }
 
     #[test]
+    fn bit_15_names_a_psram_page_and_bit_14_wins() {
+        // `Cache_Dbus_MMU_Set(MMU_ACCESS_SPIRAM, …)` stores `page | 0x8000`.
+        assert_eq!(Target::of(0x8000 | 5), Target::Psram(5));
+        assert_eq!(Target::of(5), Target::Flash(5));
+        assert_eq!(Target::of(MMU_INVALID), Target::Unmapped);
+        assert_eq!(Target::of(MMU_INVALID | 0x8000 | 5), Target::Unmapped);
+        // And the flash path's answers are unchanged: a PSRAM page is not a
+        // flash page.
+        let mut mmu = FlashMmu::new();
+        mmu.set_entry(2, 0x8000 | 5);
+        assert_eq!(mmu.translate(0x3C02_0000), None);
+        assert!(mmu.invalidate_page_at(5 << PAGE_SHIFT).is_empty());
+    }
+
+    /// The fill's PSRAM half, on the machine's own bus: a page copied into
+    /// both windows, a store through the data window seen through the
+    /// instruction window, the page written back when the entry moves, and a
+    /// flash page beside it still refusing stores.
+    #[test]
+    fn a_psram_page_is_filled_writable_mirrored_and_written_back() {
+        use lp_emu_core::Bus as _;
+        let mut bus = crate::bus_setup::build();
+        let flash: crate::flash::FlashHandle = Arc::new(Mutex::new(
+            crate::flash::FlashImage::blank(crate::flash::DEFAULT_FLASH_LEN),
+        ));
+        let psram = crate::psram::Psram::new(crate::psram::DEFAULT_PSRAM_LEN)
+            .unwrap()
+            .handle();
+        let cache = S3Cache::handle();
+        let page = vec![0x5au8; PAGE_LEN as usize];
+        psram.lock().unwrap().write_back(7, &page);
+        {
+            let mut c = cache.lock().unwrap();
+            c.mmu.set_entry(2, MMU_ACCESS_SPIRAM | 7);
+            c.mmu.set_entry(3, 0); // flash page 0
+        }
+        assert_eq!(fill(&mut bus, &flash, &psram, &cache), 2);
+        assert_eq!(bus.read_word(0x3C02_0040).unwrap() as u32, 0x5a5a_5a5a);
+        assert_eq!(bus.read_word(0x4202_0040).unwrap() as u32, 0x5a5a_5a5a);
+        bus.write_word(0x3C02_0040, 0x1122_3344).unwrap();
+        assert_eq!(
+            bus.read_word(0x4202_0040).unwrap() as u32,
+            0x1122_3344,
+            "mirrored"
+        );
+        assert!(
+            bus.write_word(0x3C03_0040, 1).is_err(),
+            "a flash page takes no store"
+        );
+        assert_eq!(cache.lock().unwrap().psram_pages(), vec![(2, 7)]);
+
+        // The live copy is the window's until a write-back.
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x40], 0x5a);
+        assert_eq!(write_back_psram(&bus, &psram, &cache), 1);
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x40], 0x44);
+
+        // Moving the entry writes the page back and closes the data page.
+        bus.write_word(0x3C02_0044, 0x99).unwrap();
+        cache.lock().unwrap().mmu.set_entry(2, MMU_INVALID);
+        fill(&mut bus, &flash, &psram, &cache);
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x44], 0x99);
+        assert!(bus.write_word(0x3C02_0040, 1).is_err(), "unmapped: closed");
+        assert!(cache.lock().unwrap().psram_pages().is_empty());
+    }
+
+    #[test]
     fn the_cache_state_round_trips_through_a_snapshot() {
         let mut c = S3Cache::new();
         c.note_ctrl(Which::ICache, 1, 5, 0x4004_f31b);
