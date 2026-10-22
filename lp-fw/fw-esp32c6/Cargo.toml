@@ -14,6 +14,7 @@ esp32c6 = [
     "esp-bootloader-esp-idf/esp32c6",
     "esp-rtos/esp32c6",
     "esp-hal/esp32c6",
+    "fw-esp32-radio?/esp32c6",
 ]
 server = [
     "fs-tree",
@@ -33,7 +34,9 @@ radio = [
     "esp-radio/esp32c6",
     "esp-rtos/esp-alloc",
     "esp-rtos/esp-radio",
-]  # Root-owned ESP-NOW radio capability
+    "dep:fw-esp32-radio",
+    "fw-esp32-radio/radio",
+]  # Root-owned ESP-NOW radio capability (its driver: `fw-esp32-radio`)
 # The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.md):
 # the wire over a Nordic-UART GATT service, one untrusted link per connection.
 # In the default image, but INERT until the device store (`/.lp/access.json`)
@@ -54,6 +57,7 @@ ble = [
     "dep:embassy-sync-07",
     "dep:embedded-io-07",
     "fw-esp32-common/radio-link",
+    "fw-esp32-radio/ble",
 ]
 naga = ["lpa-server/naga"]
 # The USB link task on a preemptive esp-rtos thread of its own (priority 1,
@@ -83,6 +87,7 @@ wifi = [
     "dep:embassy-net",
     "dep:smoltcp",
     "dep:lpc-relay",
+    "fw-esp32-radio/wifi",
 ]
 # `lp-net`'s stack high-water, painted at thread start and logged as
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
@@ -195,13 +200,13 @@ desk_espnow_meter = ["radio"]
 # BLE M4 round 3's connection-parameter experiment (Run K) — OFF by default,
 # never shipped: the requested interval / latency / timeout (and an
 # active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
-# `src/ble/conn_params.rs`, `desk`.
-desk_ble_params = ["ble"]
+# `fw-esp32-radio/src/ble/conn_params.rs`, `desk`.
+desk_ble_params = ["ble", "fw-esp32-radio/desk_ble_params"]
 # The BLE host-runner recovery drill — OFF by default, never shipped: an ATT
 # write carrying `LP-DESK-FORCE-BLE-HOST-RESTART` fails the host's read the way
 # an unparseable packet does, so a desk board can prove that a runner restart
-# closes its links and advertises again. See `src/ble/hci_transport.rs`.
-desk_ble_fault = ["ble"]
+# closes its links and advertises again. See `fw-esp32-radio/src/ble/hci_transport.rs`.
+desk_ble_fault = ["ble", "fw-esp32-radio/desk_ble_fault"]
 # LP SRAM above the recovery region (15,360 B in this image) as the heap's
 # last region, untagged so only Rust's global allocator reaches it, after
 # main, dram2_seg and the radio region (`src/board/esp32c6/lp_sram_heap.rs`).
@@ -486,6 +491,10 @@ fw-core = { path = "../fw-core", default-features = false }
 # `usb-link`: the host link on lp-link (plan `lp-link-usb-cutover`). Always
 # on: a harness that never spawns the link task links none of it.
 fw-esp32-common = { path = "../fw-esp32-common", features = ["usb-link"] }
+# The radio glue (ESP-NOW driver, BLE link, the network on `lp-net`), shared
+# with the other chips; this crate injects its chip facts (`src/net/net_chip.rs`,
+# `src/ble/mod.rs`). Its features follow `radio`, `ble` and `wifi` here.
+fw-esp32-radio = { path = "../fw-esp32-radio", optional = true }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab

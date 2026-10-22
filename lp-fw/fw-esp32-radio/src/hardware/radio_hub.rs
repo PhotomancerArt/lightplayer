@@ -33,10 +33,6 @@ pub struct RadioParts {
     /// The ESP-NOW interface.
     pub esp_now: EspNow<'static>,
     /// The station interface: the frame device under the IP stack.
-    #[cfg_attr(
-        not(lp_net),
-        allow(dead_code, reason = "only the station (feature `wifi`) takes it")
-    )]
     pub station: Interface<'static>,
 }
 

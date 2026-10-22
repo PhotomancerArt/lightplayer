@@ -1,7 +1,7 @@
 //! The station task: the join policy driven over the radio, on `lp-net`.
 //!
 //! [`StationPolicy`] (sans-IO, `fw-esp32-common`) decides; this task does
-//! what it asks with [`C6Station`] (the radio's station, or the network
+//! what it asks with [`BoardStation`] (the radio's station, or the network
 //! seam's) and the IP stack, and feeds back what happened. It takes the network file from the board
 //! ([`super::station_probes::STATION_BOARD`]) and publishes the policy there
 //! after every step, for the server's probes.
@@ -55,7 +55,8 @@ use fw_esp32_common::net::{
 use lpc_access::NetworkFile;
 use lpc_wire::{ConnectStep, StationState};
 
-use super::c6_station::C6Station;
+use super::board_station::BoardStation;
+use super::net_thread::NetChip;
 use super::station_probes::STATION_BOARD;
 
 /// How often a joined station reads its signal.
@@ -73,14 +74,20 @@ const DHCP_RESTART_AFTER: Duration = Duration::from_secs(3);
 /// boot that never lights (an engine-less core) joins then.
 const FIRST_JOIN_CAP: Duration = Duration::from_millis(2_000);
 
-/// The task. `host` is the board's LAN name (`lp-xxxx.local`).
+/// The task. `host` is the board's LAN name (`lp-xxxx.local`); `chip` says
+/// when first light is decided and what to call before a join.
 #[embassy_executor::task]
-pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: String) {
+pub async fn station_task(
+    mut control: BoardStation,
+    stack: Stack<'static>,
+    host: String,
+    chip: &'static NetChip,
+) {
     let mut policy = StationPolicy::new(host);
     // The boot's settings are on the board before this thread starts
     // (`station_probes::boot_settings`): only a board that will join waits.
     if STATION_BOARD.uses_wifi() {
-        wait_for_first_light().await;
+        wait_for_first_light(chip.first_light_decided).await;
     }
     let mut file = NetworkFile::none();
     let mut queue: VecDeque<StationAction> = VecDeque::new();
@@ -99,7 +106,7 @@ pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: S
             }
         }
         while let Some(action) = queue.pop_front() {
-            for event in run(&mut control, stack, &file, &policy, action).await {
+            for event in run(&mut control, stack, &file, &policy, action, chip).await {
                 queue.extend(policy.handle(now_ms(), event));
             }
             STATION_BOARD.publish(&policy);
@@ -207,11 +214,12 @@ pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: S
 
 /// Run one action; what happened, for the policy.
 async fn run(
-    control: &mut C6Station,
+    control: &mut BoardStation,
     stack: Stack<'static>,
     file: &NetworkFile,
     policy: &StationPolicy,
     action: StationAction,
+    chip: &NetChip,
 ) -> Vec<StationEvent> {
     match action {
         StationAction::Scan => alloc::vec![StationEvent::ScanDone(scan(control).await)],
@@ -222,8 +230,7 @@ async fn run(
             stack.set_config_v4(ConfigV4::None);
             super::net_address::publish(None);
             log::info!("[wifi] trying {ssid}");
-            #[cfg(feature = "heap_map_diag")]
-            crate::heap_map::arm_tracking("station join");
+            (chip.on_join_attempt)();
             let started = Instant::now();
             match control.connect(&ssid, &network.password).await {
                 ConnectOutcome::Associated => {
@@ -254,7 +261,7 @@ async fn run(
 /// Scan, and record what was heard for the scan probe. No answer is
 /// recorded as nothing (the probe keeps saying `scanning`); the policy hears
 /// an empty list and carries on.
-async fn scan(control: &mut C6Station) -> Vec<lpc_wire::HeardNetwork> {
+async fn scan(control: &mut BoardStation) -> Vec<lpc_wire::HeardNetwork> {
     match control.scan().await {
         Some(heard) => {
             STATION_BOARD.record_scan(now_ms(), heard.clone());
@@ -275,10 +282,11 @@ fn dhcp_config() -> DhcpConfig {
 }
 
 /// Until this boot's first light is decided (a frame lit, or none in its
-/// first frames: `first_light::decided`), or [`FIRST_JOIN_CAP`] from reset.
-async fn wait_for_first_light() {
+/// first frames: the chip's `first_light::decided`), or [`FIRST_JOIN_CAP`]
+/// from reset.
+async fn wait_for_first_light(decided: fn() -> bool) {
     let cap = Instant::from_ticks(0) + FIRST_JOIN_CAP;
-    while !crate::first_light::decided() && Instant::now() < cap {
+    while !decided() && Instant::now() < cap {
         Timer::after(Duration::from_millis(10)).await;
     }
     log::info!("[wifi] station starts at {} ms", now_ms());

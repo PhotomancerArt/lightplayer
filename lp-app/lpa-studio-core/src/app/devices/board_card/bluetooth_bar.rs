@@ -10,7 +10,7 @@
 //! | off | "disabled" | Neutral |
 //!
 //! The advertised name is the firmware's rule
-//! (`fw-esp32c6/src/ble/advertising.rs`): `LP-` and the loaded project's
+//! (`fw-esp32-radio/src/ble/advertising.rs`): `LP-` and the loaded project's
 //! folder name, cut to fit the advertising packet, else `LP-` and the last
 //! two bytes of the MAC in lower-case hex. Studio knows the folder while the
 //! board says what it runs, and the MAC form once it has said it runs

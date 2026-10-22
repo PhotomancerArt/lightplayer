@@ -20,7 +20,6 @@ use core::cell::RefCell;
 use lp_collection::{VecMap, VecSet};
 
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
-#[cfg(fw_harness)]
 use esp_hal::peripherals::WIFI;
 use esp_radio::esp_now::{
     BROADCAST_ADDRESS, EspNow, EspNowError, EspNowManager, EspNowReceiver, EspNowSender,
@@ -59,7 +58,6 @@ pub struct Esp32EspNowRadioDriver {
 impl Esp32EspNowRadioDriver {
     /// The driver with a radio of its own (the ESP-NOW harnesses): it
     /// brings the radio up and keeps the controller.
-    #[cfg(fw_harness)]
     pub fn new(
         registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
@@ -67,7 +65,6 @@ impl Esp32EspNowRadioDriver {
         Self::with_channel(registry, wifi, DEFAULT_ESPNOW_CHANNEL)
     }
 
-    #[cfg(fw_harness)]
     pub fn with_channel(
         registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
@@ -116,7 +113,7 @@ impl Esp32EspNowRadioDriver {
 
     fn endpoint_status(&self) -> HwEndpointStatus {
         let status = self.registry.endpoint_status_for(&self.address);
-        #[cfg(lp_net)]
+        #[cfg(feature = "wifi")]
         let status = fw_esp32_common::net::radio_rule::radio_endpoint_status(
             crate::net::uses_wifi(),
             status,
@@ -471,7 +468,7 @@ impl SeenRing {
 /// open device keeps its interface (it opens once per boot), so the Radio
 /// comes back the moment Wi-Fi is turned off.
 fn radio_rule_holds() -> Result<(), HardwareEndpointError> {
-    #[cfg(lp_net)]
+    #[cfg(feature = "wifi")]
     if crate::net::uses_wifi() {
         return Err(fw_esp32_common::net::radio_rule::radio_off_error(
             HwEndpointId::for_driver_spec(DRIVER_ID, &endpoint_spec()),

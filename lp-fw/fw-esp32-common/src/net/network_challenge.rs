@@ -2,7 +2,7 @@
 //! and wait for the mux to say whether it takes the slot over (Wi-Fi relay
 //! plan D2; the rule is `radio_link::parked_handshake`'s).
 //!
-//! Shared by the C6's LAN endpoint (`fw-esp32c6/src/net/lan_endpoint_task.rs`)
+//! Shared by the C6's LAN endpoint (`fw-esp32-radio/src/net/lan_endpoint_task.rs`)
 //! and its std twin in the host harness, so the two cannot drift. The
 //! relay's newcomers take the same verdict through the relay driver
 //! (`net::relay`), event by event.

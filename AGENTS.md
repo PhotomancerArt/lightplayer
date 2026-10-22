@@ -330,7 +330,7 @@ the app through the same view model and presses the same actions. See
   still governs it. lp-cli reaches a board through the relay with
   `relay:<board-id>[@<origin>]` (session from `LP_CLOUD_SESSION`, env only)
   and puts its host board there with `lp-cli serve --relay <origin>`. The C6
-  is a relay client **in the core** (`fw-esp32c6/src/net/relay_task.rs` on
+  is a relay client **in the core** (`fw-esp32-radio/src/net/relay_task.rs` on
   `lp-net`, the loop in `fw-esp32-common/src/net/relay/`): it dials only when
   joined, Cloud relay is on and it holds an account key, and
   `NetworkStatus.relay` says how far it got. The product image always dials
@@ -617,6 +617,7 @@ runtime.
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumer: `fw-esp32c6` | yes (bare metal) |
 | `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace). Two flavours: the factory loader the IDF bootloader starts, and (`--features bootloader`) LightPlayer's own second stage at flash `0x0`, the C6's boot path since 2026-10-17 — every split image must boot through **both** (`lp-emu-esp32c6/tests/split_boot.rs`, `second_stage.rs`; `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`) | yes (bare metal) |
 | `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -743,7 +744,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32c6 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```

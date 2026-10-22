@@ -13,8 +13,9 @@ use super::station_probes::{STATION_BOARD, uses_wifi};
 /// across the station interface since boot. RX drops are not counted:
 /// esp-radio keeps no count of the frames it drops on a full RX queue (its
 /// debug line `RX QUEUE FULL` marks each), so the desk walk reads that line
-/// for N11. Display only, and never a password.
-pub fn log_line() {
+/// for N11. Display only, and never a password. `on_joined` runs right after
+/// the joined line (the C6's `radio_dma_diag` log; nothing otherwise).
+pub fn log_line(on_joined: fn()) {
     if !uses_wifi() {
         return;
     }
@@ -30,8 +31,7 @@ pub fn log_line() {
                 "[wifi] connected to {ssid} · {rssi} dBm · {ip} ({host}) · frames in {frames_in} \
                  out {frames_out} · rx drops not counted"
             );
-            #[cfg(feature = "radio_dma_diag")]
-            crate::radio_dma_diag::log("joined");
+            on_joined();
         }
         state => log::info!(
             "[wifi] {} {} · frames in {frames_in} out {frames_out}",
