@@ -94,8 +94,14 @@ lpc_model::lp_embed_manifest_core! {
         ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
-    // A single image: no update over a link.
-    ota_layout: 0,
+    // The split image takes over-the-air updates in layout 2 (the S3 plan's
+    // M7 P8); a plain (single-image) build says nothing — only USB updates
+    // it. An octal-flash part says 0 at run time instead (`split_core`).
+    ota_layout: if cfg!(lp_split) {
+        lpc_update::code_table::LAYOUT_2
+    } else {
+        0
+    },
 }
 
 // The BLE link (feature `ble`, S3 radio M3), over the shared crate.
@@ -137,6 +143,10 @@ mod seams;
 mod serial;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod split;
+// The S3's side of the split image's update board side, which is shared
+// (`fw_esp32_common::split_core`): `S3Split`, the update light.
+#[cfg(all(lp_split, not(fw_harness)))]
+mod split_core;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(fw_harness)]
@@ -522,10 +532,10 @@ pub(crate) struct CoreBoot {
     /// BLE started this boot (the device store left it on).
     #[cfg(s3_ble)]
     ble_started: bool,
-    /// `factory`'s `(offset, len)` from the flashed table: where a split
-    /// image's region ends.
+    /// This boot's split-image state (`split_core::begin`, run as the
+    /// filesystem mounts): which core, which record, on trial or not.
     #[cfg(lp_split)]
-    factory: Option<(u32, u32)>,
+    ota_state: fw_esp32_common::split_core::BootState,
 }
 
 /// The core's half of the boot: the board, the heap, recovery and the
@@ -650,7 +660,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(feature = "radio_boot_probe")]
     radio_boot_probe::replay_stages_to_log();
 
-    let (base_fs, fs_boot_state, _factory) = mount_filesystem(flash);
+    let (base_fs, fs_boot_state, _ota_state) = mount_filesystem(flash);
 
     // The radio links' shared slots: the BLE task opens a connection's link
     // there and the engine's link mux serves it. On the heap, not `.bss`: its
@@ -711,7 +721,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         #[cfg(s3_ble)]
         ble_started,
         #[cfg(lp_split)]
-        factory: _factory,
+        ota_state: _ota_state,
     }
 }
 
@@ -738,7 +748,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         #[cfg(s3_ble)]
         ble_started,
         #[cfg(lp_split)]
-            factory: _,
+            ota_state: _,
     } = core;
     let transport = UsbLinkTransport::new(usb_link);
 
@@ -862,6 +872,22 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
     server.set_entropy_source(Some(fill_random));
+    // A split image's hello carries its board manifest: the core's update
+    // session says it, as it answers `Q` on channel 3 (the C6's, wire 38).
+    #[cfg(lp_split)]
+    server.set_firmware_manifest(Some(
+        fw_esp32_common::split_core::running_manifest::<split_core::S3Split>,
+    ));
+    // ...whose core hash the frame hook takes a slice a frame: the
+    // unsolicited hello waits for it; a host's own `Hello` has the rest
+    // taken at once.
+    #[cfg(lp_split)]
+    fw_esp32_common::server_loop::set_hello_gate(
+        fw_esp32_common::split_core::hello_ready::<split_core::S3Split>,
+    );
+    // ...and records the strip its update light may drive.
+    #[cfg(lp_split)]
+    fw_esp32_common::server_loop::set_frame_hook(split_frame_hook);
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).
@@ -889,6 +915,12 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
             transport,
             radio_port,
             embassy_time::Delay,
+        );
+        // Each radio link's channel 3 goes to the core's update session,
+        // with the tier its login granted (the C6's).
+        #[cfg(lp_split)]
+        let mux = mux.with_update_hook(
+            fw_esp32_common::split_core::radio_update_hook::<split_core::S3Split>,
         );
         if ble_started {
             mux.with_upkeep_hook(ble::refresh_advertised_name)
@@ -940,6 +972,15 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     );
 }
 
+/// A split image's frame hook (`server_loop::set_frame_hook`): one slice
+/// more of the core's own hash until it is known (the hello waits on it),
+/// and the strip the update light may drive, recorded once it is known.
+#[cfg(all(lp_split, not(fw_harness)))]
+fn split_frame_hook(server: &LpServer) {
+    fw_esp32_common::split_core::core_hash_step::<split_core::S3Split>();
+    fw_esp32_common::split_core::status_light_note::persist(server);
+}
+
 /// The server loop, as its own task (spawned by the engine door): the door
 /// returns to the core, which has nothing left to do.
 #[cfg(not(fw_harness))]
@@ -956,29 +997,40 @@ async fn engine_task(app: FirmwareApp) {
     .await;
 }
 
+/// A split image's boot state, from [`mount_filesystem`] (nothing in a
+/// plain build).
+#[cfg(all(lp_split, not(fw_harness)))]
+type OtaState = fw_esp32_common::split_core::BootState;
+#[cfg(all(not(lp_split), not(fw_harness)))]
+type OtaState = ();
+
 /// Mount the tree store on `lpfs`, falling back to RAM so an unformattable,
 /// held or mis-flashed board still comes up reachable and can say so over
 /// the wire. The C6's mount (`fw-esp32c6/src/main.rs`), on this chip.
 #[cfg(not(fw_harness))]
 fn mount_filesystem(
     flash: esp_hal::peripherals::FLASH<'static>,
-) -> (
-    Box<dyn lpfs::LpFs>,
-    lpc_wire::FsBootState,
-    Option<(u32, u32)>,
-) {
+) -> (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState, OtaState) {
     use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
     use lpc_wire::FsBootState;
 
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     // A split image's region ends where `factory` does, in the table the
     // chip carries (read once, here, after `FlashStorage::new`).
+    //
+    // Split builds: read the boot records — and a trial core marks itself
+    // attempted — right here, before the mount and before any radio comes
+    // up (a new core that dies in that bring-up must still read as a failed
+    // trial). NOT before `FlashStorage::new` (the C6's silicon rule: no ROM
+    // flash access before its RDID size probe).
     #[cfg(lp_split)]
-    let factory = LpfsPartition::locate_factory(&mut flash_storage);
+    let ota_state = fw_esp32_common::split_core::begin::<split_core::S3Split>(
+        LpfsPartition::locate_factory(&mut flash_storage),
+    );
     #[cfg(not(lp_split))]
-    let factory = None;
-    let memory = |state| -> (Box<dyn lpfs::LpFs>, FsBootState, Option<(u32, u32)>) {
-        (Box::new(LpFsMemory::new()), state, factory)
+    let ota_state = ();
+    let memory = |state, ota_state| -> (Box<dyn lpfs::LpFs>, FsBootState, OtaState) {
+        (Box::new(LpFsMemory::new()), state, ota_state)
     };
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
         // Not a runtime condition: it means the image was flashed without
@@ -989,7 +1041,7 @@ fn mount_filesystem(
             "[ERROR] no `lpfs` partition in the flashed table — reflash with \
              --partition-table lp-fw/fw-esp32s3/partitions.csv; using memory FS"
         );
-        return memory(FsBootState::Memory);
+        return memory(FsBootState::Memory, ota_state);
     };
     // An octal-flash part (eFuse `FLASH_TYPE` = 8 data lines) cannot take
     // the store: it re-programs words in place (a record's marks), which
@@ -1000,7 +1052,7 @@ fn mount_filesystem(
             "[FS] octal flash: the tree store re-programs words, which this part \
              forbids — not mounted; using memory FS"
         );
-        return memory(FsBootState::Memory);
+        return memory(FsBootState::Memory, ota_state);
     }
     // The tree store: mount; a partition with no store on it is formatted
     // (lazily) only when no littlefs superblock says a board's files are
@@ -1030,30 +1082,30 @@ fn mount_filesystem(
         TreeFsInit::Mounted(fs, s) => {
             esp_println::println!("[INIT] flash filesystem mounted");
             summary("mounted", s);
-            (Box::new(fs), FsBootState::Mounted, factory)
+            (Box::new(fs), FsBootState::Mounted, ota_state)
         }
         TreeFsInit::Formatted(fs, s) => {
             esp_println::println!("[INIT] flash filesystem mounted");
             summary("formatted", s);
-            (Box::new(fs), FsBootState::Formatted, factory)
+            (Box::new(fs), FsBootState::Formatted, ota_state)
         }
         TreeFsInit::Held(_) => {
             esp_println::println!(
                 "[FS] legacy-layout filesystem found — not formatting; files are held \
                  (littlefs, not yet in the tree store); using memory FS"
             );
-            memory(FsBootState::LegacyHeld)
+            memory(FsBootState::LegacyHeld, ota_state)
         }
         TreeFsInit::Refused { why, .. } => {
             esp_println::println!(
                 "[FS] tree store refused: a newer or damaged store header — files kept \
                  ({why}); using memory FS, access locked"
             );
-            memory(FsBootState::Refused)
+            memory(FsBootState::Refused, ota_state)
         }
         TreeFsInit::FormatFailed => {
             esp_println::println!("[WARN] tree store format failed, falling back to memory");
-            memory(FsBootState::Memory)
+            memory(FsBootState::Memory, ota_state)
         }
     }
 }
