@@ -8,20 +8,20 @@
 //! It is what would have caught the split image's dropped-tail defect
 //! (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`):
 //! a committed header over an engine whose last bytes never reached flash.
-//! It hashes on the SHA accelerator ([`crate::hw_sha`]).
+//! It hashes with the chip's SHA ([`SplitChip::Sha`]: the C6's accelerator).
 //!
 //! An engine an update installs is hashed before it is committed (DM11), and
 //! its trial confirms on its link, so the guard does not run again after an
 //! over-the-air update.
 
-use super::ENGINE_VADDR;
 use super::boot_state::BootState;
+use super::split_chip::{Sha256Stream, SplitChip};
 use super::split_flash::SplitFlash;
-use crate::hw_sha;
 
-/// Hash the mapped engine (`len` bytes behind [`ENGINE_VADDR`]) against
-/// `digest`. `Err` names why the core must not enter it.
-pub fn engine_guard(
+/// Hash the mapped engine (`len` bytes behind
+/// [`SplitChip::ENGINE_DATA_VADDR`]) against `digest`. `Err` names why the
+/// core must not enter it.
+pub fn engine_guard<C: SplitChip>(
     state: &mut BootState,
     len: u32,
     digest: &[u8; 32],
@@ -29,8 +29,11 @@ pub fn engine_guard(
     let started = embassy_time::Instant::now();
     // SAFETY: `find_engine` mapped exactly `len` bytes of committed engine
     // behind the window; flash reads through the cache.
-    let engine = unsafe { core::slice::from_raw_parts(ENGINE_VADDR as *const u8, len as usize) };
-    let sha = hw_sha::sha256(engine);
+    let engine =
+        unsafe { core::slice::from_raw_parts(C::ENGINE_DATA_VADDR as *const u8, len as usize) };
+    let mut sha = C::Sha::new();
+    sha.update(engine);
+    let sha = sha.finalize();
     let ms = started.elapsed().as_millis();
     if &sha != digest {
         log::error!(
@@ -40,7 +43,7 @@ pub fn engine_guard(
     }
     log::info!("[OTA] engine guard: the engine ({len} B) matches its digest ({ms} ms)");
     if let Some(layout) = state.layout {
-        let mut flash = SplitFlash::take();
+        let mut flash = SplitFlash::<C>::take();
         flash.protect(state.core_extent(), layout.region_end);
         state.confirm_checked(&mut flash);
     }

@@ -1,5 +1,5 @@
 //! The host links the update session answers on: the USB link and, when the
-//! image has Bluetooth, each radio link (and with Wi-Fi the LAN link) — by
+//! image has radio links, each one (and with Wi-Fi the LAN link) — by
 //! the [`LinkId`] the session names it with.
 //!
 //! The session's link ids are the transport's: [`USB_LINK`] is the USB
@@ -14,9 +14,9 @@
 //! answer is handed to either: a link still reading makes it wait
 //! (`UpdateSend::Later`), and the outbox keeps it.
 
-use fw_esp32_common::update_send::UpdateSend;
-use fw_esp32_common::usb_link::UsbLinkShared;
-use fw_esp32_common::usb_link::usb_update_channel::RING_MAX;
+use crate::update_send::UpdateSend;
+use crate::usb_link::UsbLinkShared;
+use crate::usb_link::usb_update_channel::RING_MAX;
 use lpc_update::board::LinkId;
 
 /// The one USB link, as the session names it.
@@ -26,10 +26,10 @@ pub const USB_LINK: LinkId = LinkId(0);
 #[derive(Clone, Copy)]
 pub struct UpdateLinks {
     pub usb: &'static UsbLinkShared,
-    /// The radio links' port, when the image has Bluetooth (whether or not
+    /// The radio links' port, when the image has radio links (whether or not
     /// the device store started it: a port with no links answers nothing).
-    #[cfg(feature = "ble")]
-    pub radio: &'static fw_esp32_common::radio_link::RadioLinkPort,
+    #[cfg(feature = "radio-link")]
+    pub radio: &'static crate::radio_link::RadioLinkPort,
 }
 
 impl UpdateLinks {
@@ -41,11 +41,11 @@ impl UpdateLinks {
         if link == USB_LINK {
             return self.usb.send_update(bytes);
         }
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         {
             self.radio.send_update(transport_link(link), bytes)
         }
-        #[cfg(not(feature = "ble"))]
+        #[cfg(not(feature = "radio-link"))]
         UpdateSend::NoSession
     }
 
@@ -54,17 +54,17 @@ impl UpdateLinks {
         if link == USB_LINK {
             return Some(self.usb.with_link(|l| l.generation()));
         }
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         {
             self.radio.link_generation(transport_link(link))
         }
-        #[cfg(not(feature = "ble"))]
+        #[cfg(not(feature = "radio-link"))]
         None
     }
 
     /// Some link still reads a long message out of the frame buffer.
     fn frame_buf_in_use(&self) -> bool {
-        #[cfg(feature = "ble")]
+        #[cfg(feature = "radio-link")]
         if self.radio.frame_buf_in_use() {
             return true;
         }
@@ -73,11 +73,11 @@ impl UpdateLinks {
 }
 
 /// A transport link as the session names it.
-#[cfg(feature = "ble")]
-pub use fw_esp32_common::radio_link::core_only_links::session_link;
+#[cfg(feature = "radio-link")]
+pub use crate::radio_link::core_only_links::session_link;
 
 /// A session link as the transport names it.
-#[cfg(feature = "ble")]
+#[cfg(feature = "radio-link")]
 fn transport_link(link: LinkId) -> lpc_shared::transport::LinkId {
     lpc_shared::transport::LinkId::new(link.0)
 }

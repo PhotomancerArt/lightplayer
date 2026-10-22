@@ -61,6 +61,8 @@ pub mod lp_fs;
 pub mod radio_link;
 #[cfg(feature = "server")]
 pub mod server_loop;
+#[cfg(feature = "split-core")]
+pub mod split_core;
 #[cfg(feature = "fs-tree")]
 pub mod tree_fs;
 #[cfg(feature = "uart-link")]

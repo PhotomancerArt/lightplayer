@@ -19,6 +19,10 @@ esp32c6 = [
 server = [
     "fs-tree",
     "fw-esp32-common/server",
+    # The split image's update board side (`src/split_core/` is the C6's
+    # chip for it). Only `LP_SPLIT_LINK` builds call it; a plain build links
+    # none of it.
+    "fw-esp32-common/split-core",
     "lpc-hardware",
     "lpc-model",
     "lpc-wire",
@@ -567,7 +571,8 @@ lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 # The over-the-air update session (protocol v1) the split image's core runs,
-# in core-only and as the running engine's channel-3 hook (`src/ota/`).
+# in core-only and as the running engine's channel-3 hook
+# (`fw_esp32_common::split_core`, over this crate's `src/split_core/`).
 lpc-update = { path = "../../lp-core/lpc-update" }
 lpc-access = { path = "../../lp-core/lpc-access" }
 # The cloud relay's protocol and client (`wifi`; Wi-Fi relay plan P8): the

@@ -507,7 +507,7 @@ fn s10_an_engine_that_keeps_crashing() {
     println!(
         "SKIP S10: an engine that crashes at entry needs a fixture or a seeded recovery ledger \
          (RTC RAM, cleared on every power-on boot this harness makes); neither exists. The \
-         threshold is `ota::INCOMPLETE_BOOTS_TO_CORE_ONLY` and the core-only line is \
+         threshold is `split_core::INCOMPLETE_BOOTS_TO_CORE_ONLY` and the core-only line is \
          `[OTA] core-only: engine keeps crashing`."
     );
 }

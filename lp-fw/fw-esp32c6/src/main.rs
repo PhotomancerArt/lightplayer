@@ -63,7 +63,7 @@ lpc_model::lp_embed_manifest_core! {
 }
 
 /// The manifest core's `target` and `platform.chip`, named once: the
-/// embedded blob and the board manifest an update reports (`ota/`) read the
+/// embedded blob and the board manifest an update reports (`split_core/`) read the
 /// same constants, so the two can never say different things.
 #[cfg(feature = "server")]
 const MANIFEST_TARGET: &str = env!("LP_FW_TARGET");
@@ -139,16 +139,22 @@ mod io_thread_stack_diag;
 // their load generators instead.
 #[cfg(lp_net)]
 mod net;
-// The SHA accelerator: a split image's boot-path hashes (`ota/`), and the
-// tree store's record ids — split or not, so it lives outside `ota/`
-// (split-only).
+// The SHA accelerator: a split image's boot-path hashes (`split_core/`),
+// and the tree store's record ids — split or not, so it lives outside
+// `split_core/` (split-only).
 #[cfg(all(
     not(fw_harness),
     any(lp_split, all(feature = "server", not(feature = "memory_fs")))
 ))]
 mod hw_sha;
+// The C6's side of the split image's update board side, which is shared
+// (`fw_esp32_common::split_core`, called `split` here).
 #[cfg(all(lp_split, not(fw_harness)))]
-mod ota;
+mod split_core;
+#[cfg(all(lp_split, not(fw_harness)))]
+use fw_esp32_common::split_core as split;
+#[cfg(all(lp_split, not(fw_harness)))]
+use split_core::C6Split;
 // The heap's peak between heartbeats (`[heap] peak=…`), never shipped.
 #[cfg(all(feature = "heap_peak_diag", not(fw_harness)))]
 mod heap_peak_diag;
@@ -467,10 +473,10 @@ fn frame_hook(server: &LpServer) {
     #[cfg(not(any(lp_split, lp_net)))]
     let _ = server;
     // The core's own hash, held back until the boot has lit: a slice a
-    // frame (`ota::core_hash_step`), and the unsolicited hello waits for it.
+    // frame (`split::core_hash_step`), and the unsolicited hello waits for it.
     #[cfg(lp_split)]
     if first_light::decided() {
-        ota::core_hash_step();
+        split::core_hash_step::<C6Split>();
     }
     #[cfg(lp_split)]
     output::status_light_note::persist(server);
@@ -542,9 +548,9 @@ struct CoreBoot {
     boot_guard: Option<lp_recovery::FrameGuard>,
     boot_assessment: lp_recovery::BootAssessment,
     #[cfg(lp_split)]
-    ota_state: ota::BootState,
+    ota_state: split::BootState,
     /// The boot read a saved network with Wi-Fi on (`lp-net` joins one): a
-    /// trial core then waits only so long for a host (`ota::core_only`).
+    /// trial core then waits only so long for a host (`split::core_only`).
     #[cfg(lp_split)]
     network_saved: bool,
 }
@@ -663,7 +669,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         // 2026-10-02).
         #[cfg(lp_split)]
         {
-            ota_state = ota::begin(flash_layout.factory.map(|f| (f.offset, f.len)));
+            ota_state = split::begin::<C6Split>(flash_layout.factory.map(|f| (f.offset, f.len)));
         }
         let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
         (outcome, flash_storage, flash_layout)
@@ -673,7 +679,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // No flash driver, no table: the boot state is untrusted (no writes).
     #[cfg(all(lp_split, feature = "memory_fs"))]
     {
-        ota_state = ota::begin(None);
+        ota_state = split::begin::<C6Split>(None);
     }
 
     // `heap_peak_diag` (never shipped) also times the mount, either
@@ -1225,12 +1231,12 @@ fn lp_engine_entry(core: CoreBoot) {
     // A split image's hello carries its board manifest (wire proto 38): the
     // core's update session says it, as it answers `Q` on channel 3.
     #[cfg(lp_split)]
-    server.set_firmware_manifest(Some(ota::running_manifest));
+    server.set_firmware_manifest(Some(split::running_manifest::<C6Split>));
     // ...whose core hash is taken after first light (the frame hook): the
     // unsolicited hello waits for it, so saying it never holds a frame. A
     // host's own `Hello` before then is answered at once.
     #[cfg(lp_split)]
-    server_loop::set_hello_gate(ota::hello_ready);
+    server_loop::set_hello_gate(split::hello_ready::<C6Split>);
     // ...and records the strip its update light may drive; the relay's
     // answers (relay protocol 2); and the first-light count. One frame hook
     // holds them all.
@@ -1268,7 +1274,7 @@ fn lp_engine_entry(core: CoreBoot) {
             embassy_time::Delay,
         );
         #[cfg(lp_split)]
-        let mux = mux.with_update_hook(ota::radio_update_hook);
+        let mux = mux.with_update_hook(split::radio_update_hook::<C6Split>);
         if ble_started {
             mux.with_upkeep_hook(ble::refresh_advertised_name)
         } else {
@@ -1588,7 +1594,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 /// engine the header and the boot records agree on, or stay core-only.
 #[cfg(all(lp_split, not(fw_harness)))]
 async fn split_boot(mut core: CoreBoot) {
-    let mut state = core::mem::replace(&mut core.ota_state, ota::BootState::placeholder());
+    let mut state = core::mem::replace(&mut core.ota_state, split::BootState::placeholder());
     // Test images only (never in a build def): a trial core that dies, or
     // hangs, after marking itself attempted and before it starts — what the
     // loader's rollback and cold cap exist for.
@@ -1605,41 +1611,27 @@ async fn split_boot(mut core: CoreBoot) {
     }
     // Radios and links are up: from here a power cycle never counts
     // against a trial.
-    ota::mark_started(&mut state);
+    split::mark_started::<C6Split>(&mut state);
 
-    let engine = if state.on_trial() {
-        Err(ota::CoreOnlyReason::OnTrial)
-    } else {
-        find_engine(&state).map_err(|e| ota::CoreOnlyReason::NoEngine(e.describe()))
-    };
-    // The engine guard (DD34): the first boot after a USB flash hashes the
-    // engine once against the digest slot before entering it.
-    let engine = match engine {
-        Ok((entry, len)) if !state.confirmed() => {
-            match ota::engine_guard(&mut state, len, &engine_digest()) {
-                Ok(()) => Ok((entry, len)),
-                Err(why) => Err(ota::CoreOnlyReason::NoEngine(why)),
-            }
-        }
-        other => other,
-    };
-    let incomplete = lp_recovery::snapshot()
-        .map(|s| s.consecutive_incomplete_boots)
-        .unwrap_or(0);
-    let engine = match engine {
-        Ok((_, engine_len)) if incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY => {
-            Err(ota::CoreOnlyReason::EngineKeepsCrashing {
-                boots: incomplete,
-                engine_len,
-            })
-        }
-        other => other,
-    };
-    log_boot_state(&state, &engine);
-    // What the update session needs, in both modes: the image's identity,
-    // the device store's `secrets` and `open` (the core reads only those,
-    // and never writes the file), and how far the USB link is trusted.
+    // The image's identity (the build id static, the patched digest slot,
+    // the manifest core's words): the engine choice checks the header and
+    // guards the engine against it, and the update session reports it.
     let identity = core_identity();
+    // The engine the header and the boot records agree on — a trial, no
+    // engine, a guard mismatch or one that keeps crashing stays core-only.
+    let engine = split::choose_engine::<C6Split>(&mut state, &identity);
+    split::log_boot_state::<C6Split>(&state, engine.map(|(_, len)| len), &identity);
+    // SAFETY: a committed header of this build, from this link: its entry
+    // is `lp_engine_entry`'s address in the engine now mapped behind it.
+    let engine = engine.map(|(entry, len)| {
+        (
+            unsafe { core::mem::transmute::<usize, fn(CoreBoot)>(entry as usize) },
+            len,
+        )
+    });
+    // What the update session needs, in both modes: the device store's
+    // `secrets` and `open` (the core reads only those, and never writes the
+    // file), and how far the USB link is trusted.
     let access = lpc_update::board::AccessFacts::from_file(
         &lpa_server::access_store::device_store_at_boot(core.base_fs.as_ref(), core.fs_boot_state),
     );
@@ -1650,7 +1642,7 @@ async fn split_boot(mut core: CoreBoot) {
         lpc_update::board::LinkTrust::Trusted
     };
     // Where the update session answers: USB, and the radio links.
-    let links = ota::UpdateLinks {
+    let links = split::UpdateLinks {
         usb: core.usb_link,
         #[cfg(feature = "ble")]
         radio: core.radio_port,
@@ -1666,7 +1658,7 @@ async fn split_boot(mut core: CoreBoot) {
     });
     match engine {
         Ok((entry, len)) => {
-            ota::install_running_hook(links, state, identity, len, access, usb_trust);
+            split::install_running_hook::<C6Split>(links, state, identity, len, access, usb_trust);
             entry(core)
         }
         Err(why) => {
@@ -1709,13 +1701,13 @@ async fn split_boot(mut core: CoreBoot) {
             let record = base_fs
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
                 .ok();
-            let light = ota::StatusLight::new(record.as_deref(), rmt_peripheral);
+            let light = split_core::StatusLight::new(record.as_deref(), rmt_peripheral);
             // Its own task, like the engine's server loop: awaited here, the
             // core-only future (its session and window) would be built in
             // the main task's poll frame, and the engine path — which runs
             // nested in that frame — would start that much deeper.
             spawner.spawn(
-                core_only_task(ota::CoreOnly {
+                core_only_task(split::CoreOnly {
                     usb_link,
                     #[cfg(feature = "ble")]
                     radio_port,
@@ -1738,70 +1730,22 @@ async fn split_boot(mut core: CoreBoot) {
 /// Core-only, as a task of its own (see `split_boot`).
 #[cfg(all(lp_split, not(fw_harness)))]
 #[embassy_executor::task]
-async fn core_only_task(ctx: ota::CoreOnly) {
-    ota::core_only(ctx).await
+async fn core_only_task(ctx: split::CoreOnly<C6Split>) {
+    split::core_only(ctx).await
 }
 
 /// The image's identity, as the update session reports it: every field from
 /// the build itself (the build id static, the patched digest slot, the
 /// manifest core's words).
 #[cfg(all(lp_split, not(fw_harness)))]
-fn core_identity() -> ota::CoreIdentity {
-    ota::CoreIdentity {
+fn core_identity() -> split::CoreIdentity {
+    split::CoreIdentity {
         build_id: BUILD_ID,
         digest: engine_digest(),
         target: crate::MANIFEST_TARGET,
         chip: crate::MANIFEST_CHIP,
         version: env!("LP_APP_VERSION"),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
-    }
-}
-
-/// The one boot-state line: where this core is and how it came to run, the
-/// loader, the region, the page, the engine (or why not) and the digest the
-/// core carries for it.
-#[cfg(all(lp_split, not(fw_harness)))]
-fn log_boot_state(
-    state: &ota::BootState,
-    engine: &Result<(fn(CoreBoot), u32), ota::CoreOnlyReason>,
-) {
-    let digest = engine_digest();
-    let region_end = state.layout.map_or(0, |l| l.region_end);
-    let id = &BUILD_ID;
-    let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
-    let build = core::str::from_utf8(&id[..id_len]).unwrap_or("?");
-    let engine_words: alloc::string::String = match engine {
-        Ok((_, len)) => alloc::format!("engine {len} B"),
-        Err(ota::CoreOnlyReason::OnTrial) => "engine not started (trial)".into(),
-        Err(ota::CoreOnlyReason::NoEngine(why)) => alloc::format!("no engine: {why}"),
-        Err(ota::CoreOnlyReason::EngineKeepsCrashing { boots, .. }) => {
-            alloc::format!("engine keeps crashing ({boots} incomplete boots)")
-        }
-    };
-    log::info!(
-        "[CORE] core @{:#x} +{} ({}) build {build} · loader v{} · region end {region_end:#x} · \
-         page {:#x} · {engine_words} · digest {:02x}{:02x}{:02x}{:02x}",
-        state.core_off,
-        state.core_len,
-        state.standing(),
-        state.loader_version,
-        ota::page_size(),
-        digest[0],
-        digest[1],
-        digest[2],
-        digest[3],
-    );
-    if let Some(why) = state.untrusted {
-        log::error!("[CORE] boot state not trusted ({why}) — nothing is written this boot");
-    }
-    if state.rolled_back() {
-        log::warn!(
-            "[CORE] rolled back: the newer core (build {:#010x}) failed its trial",
-            state.failed_build.unwrap_or(0)
-        );
-    }
-    if state.counted_cold_retry {
-        log::warn!("[CORE] trial cold retry counted: the last boot died before it started");
     }
 }
 
@@ -1882,36 +1826,6 @@ static ENGINE_HEADER: EngineHeader = EngineHeader {
     crc: 0,
     commit: lp_bootctl::engine_header::ENGINE_COMMITTED,
 };
-
-/// The engine's entry and length, if a committed engine of this build is in
-/// the room the layout leaves it. Maps the header's page, validates the
-/// header, then maps exactly its length.
-#[cfg(all(lp_split, not(fw_harness)))]
-fn find_engine(
-    state: &ota::BootState,
-) -> Result<(fn(CoreBoot), u32), lp_bootctl::EngineHeaderError> {
-    use lp_bootctl::EngineHeaderError;
-    use lp_bootctl::engine_header::ENGINE_HEADER_LEN;
-    let room = state.engine_room();
-    if room.is_empty() || room.start % ota::page_size() != 0 {
-        return Err(EngineHeaderError::DoesNotFit);
-    }
-    ota::map_engine(room.start, ENGINE_HEADER_LEN as u32);
-    let mut bytes = [0u8; ENGINE_HEADER_LEN];
-    for (i, b) in bytes.iter_mut().enumerate() {
-        // SAFETY: the header's page is mapped (erased flash reads as 0xff);
-        // volatile so the compiler cannot assume anything about bytes it
-        // did not write.
-        *b = unsafe { core::ptr::read_volatile((ota::ENGINE_VADDR as *const u8).add(i)) };
-    }
-    let header = lp_bootctl::EngineHeader::decode(&bytes)?;
-    header.validate(&BUILD_ID, room.len())?;
-    ota::map_engine(room.start, header.len);
-    // SAFETY: a committed header of this build, from this link: its entry
-    // is `lp_engine_entry`'s address in the engine now mapped behind it.
-    let entry: fn(CoreBoot) = unsafe { core::mem::transmute(header.entry as usize) };
-    Ok((entry, header.len))
-}
 
 // Same gate as its only caller, `lp_engine_entry`: the hardware harnesses
 // replace `main` with their own entrypoint and never send a hello.
