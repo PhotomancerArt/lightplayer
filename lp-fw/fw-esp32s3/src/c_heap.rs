@@ -28,16 +28,21 @@
 //!
 //! | region | tag | who lands there |
 //! |---|---|---|
-//! | main arena, below the boot stages | `Internal` | Rust first; C when the radio region is full |
-//! | main arena, from the loader's RAM up | none ([`FENCED`]) | Rust only |
+//! | main arena, outside the boot stages' RAM | `Internal` | Rust first; C when the radio region is full; thread stacks |
+//! | main arena, inside a boot stage's RAM (the loader's) | none ([`FENCED`]) | Rust only |
 //! | `dram2_seg` (`crate::dram2_heap`) | none | Rust only (capability-free requests) |
 //! | radio ([`HEAP_RADIO`]) | `Internal` and `External` ([`RADIO`]) | C first; Rust last of all |
 //!
-//! A request carrying `Internal` (the C fallback, esp-radio's own
-//! `InternalMemory`, esp-rtos's thread stacks) therefore never reaches
-//! `dram2_seg` nor the loader's RAM. Rust's global allocator asks for nothing
-//! and tries the regions in registration order: main below the boot stages,
-//! main from them up, `dram2_seg`, radio.
+//! The arena is cut only around the boot stages' own ranges, not from the
+//! first one up: the loader's 64 KB sits in the middle of the arena, and the
+//! arena above it is ordinary RAM that `Internal` requests need (cutting
+//! from the loader up left the M1 probe 54,816 B of `Internal`, which Wi-Fi's
+//! blobs filled, and esp-rtos could not allocate the link thread's stack:
+//! FS3, 2026-10-21). A request carrying `Internal` (the C fallback,
+//! esp-radio's own `InternalMemory`, esp-rtos's thread stacks) therefore
+//! never reaches `dram2_seg` nor the loader's RAM. Rust's global allocator
+//! asks for nothing and tries the regions in registration order: the arena's
+//! pieces bottom-up, `dram2_seg`, radio.
 //!
 //! Semantics are esp-alloc 0.10's `compat` ones (`malloc.rs`), which this
 //! replaces (`compat` is off: its `malloc` asks for no capability): a 4-byte
@@ -52,8 +57,8 @@ use esp_alloc::MemoryCapability;
 pub const RADIO: EnumSet<MemoryCapability> =
     enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::External);
 
-/// The capability set of the main arena's part from the loader's RAM up: none,
-/// so only a request that asks for nothing can land there.
+/// The capability set of the main arena's piece inside a boot stage's RAM:
+/// none, so only a request that asks for nothing can land there.
 pub const FENCED: EnumSet<MemoryCapability> = EnumSet::empty();
 
 /// The radio region's size. BTDM's controller took 35,724 B at init on FS3
@@ -88,29 +93,83 @@ static LOGGED_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 /// Bytes of header in front of every C block: its total size.
 const HEADER: usize = 4;
 
-/// Register the main arena, cut where it reaches a boot stage's RAM; the
-/// `Internal` part first. Replaces `esp_alloc::heap_allocator!` on a radio
-/// image. Then `dram2_seg` (its own module), then [`install_radio`], so Rust
-/// reaches the radio region only once the main arena and `dram2_seg` are
-/// both full. Returns `(start, internal part, fenced part)`.
-pub fn install_main() -> (usize, usize, usize) {
+/// One piece of the main arena: where it is, how long, and whether it lies in
+/// a boot stage's RAM (registered untagged) or not (`Internal`).
+#[derive(Clone, Copy)]
+pub struct ArenaPiece {
+    pub start: usize,
+    pub len: usize,
+    pub fenced: bool,
+}
+
+/// The most pieces the arena may be cut into: the regions esp-alloc holds,
+/// less `dram2_seg` and the radio region. Three today: below the loader's RAM,
+/// the loader's RAM, above it (the arena ends below the IDF bootloader's RAM,
+/// which starts inside the main stack).
+pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 2;
+
+/// Register the main arena, cut around every boot stage's RAM: pieces
+/// outside are `Internal`, pieces inside carry no tag. Bottom-up, so Rust's
+/// first fit fills the arena as before. Replaces `esp_alloc::heap_allocator!`
+/// on a radio image. Then `dram2_seg` (its own module), then
+/// [`install_radio`], so Rust reaches the radio region only once the arena
+/// and `dram2_seg` are both full.
+pub fn install_main() -> [Option<ArenaPiece>; MAX_ARENA_PIECES] {
     let main = core::ptr::addr_of_mut!(HEAP_MAIN).cast::<u8>();
-    let (below, fenced) =
-        lp_bootctl::split_at_s3_boot_stage_ram(main as u32, crate::HEAP_SIZE as u32);
-    let (below, fenced) = (below as usize, fenced as usize);
-    // SAFETY: the array is handed to the allocator exactly once, here; its
-    // two parts are disjoint and together the array.
-    unsafe {
-        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-            main,
-            below,
-            MemoryCapability::Internal.into(),
-        ));
-        if fenced != 0 {
-            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(main.add(below), fenced, FENCED));
+    let pieces = arena_pieces(main as usize, crate::HEAP_SIZE);
+    for piece in pieces.iter().flatten() {
+        let caps = if piece.fenced {
+            FENCED
+        } else {
+            MemoryCapability::Internal.into()
+        };
+        // SAFETY: the pieces are disjoint and together the array, which is
+        // handed to the allocator exactly once, here.
+        unsafe {
+            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+                piece.start as *mut u8,
+                piece.len,
+                caps,
+            ));
         }
     }
-    (main as usize, below, fenced)
+    pieces
+}
+
+/// Cut `start..start + len` around [`lp_bootctl::S3_BOOT_STAGE_RAM`] (lowest
+/// range first), bottom-up. Panics past [`MAX_ARENA_PIECES`]: a link that
+/// put the arena across more boot-stage RAM than esp-alloc has regions for,
+/// which the boot gates see at once.
+fn arena_pieces(start: usize, len: usize) -> [Option<ArenaPiece>; MAX_ARENA_PIECES] {
+    let mut pieces = [None; MAX_ARENA_PIECES];
+    let mut count = 0;
+    let mut push = |from: usize, to: usize, fenced: bool| {
+        if to > from {
+            assert!(
+                count < MAX_ARENA_PIECES,
+                "the heap arena crosses more boot-stage RAM than esp-alloc has regions for"
+            );
+            pieces[count] = Some(ArenaPiece {
+                start: from,
+                len: to - from,
+                fenced,
+            });
+            count += 1;
+        }
+    };
+    let end = start + len;
+    let mut at = start;
+    for range in lp_bootctl::S3_BOOT_STAGE_RAM {
+        let (lo, hi) = (range.start as usize, range.end as usize);
+        if hi <= at || lo >= end {
+            continue;
+        }
+        push(at, lo.max(at), false);
+        push(lo.max(at), hi.min(end), true);
+        at = hi.min(end);
+    }
+    push(at, end, false);
+    pieces
 }
 
 /// Register the radio region, last of all (see [`install_main`]). It must lie

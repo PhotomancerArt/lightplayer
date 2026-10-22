@@ -539,7 +539,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // A radio image cuts the arena where it reaches the boot stages' RAM, and
     // gives the radio blobs a region of their own, last (`c_heap`).
     #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
-    let (main_base, main_internal, main_fenced) = c_heap::install_main();
+    let arena_pieces = c_heap::install_main();
     // The bootloader's segment, second: first-fit in registration order keeps
     // the boot residents in the arena above. See `dram2_heap`.
     #[cfg(feature = "heap-dram2")]
@@ -566,11 +566,24 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         );
     }
     #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
-    esp_println::println!(
-        "[INIT] heap regions: {main_base:#010x}+{main_internal} (dram_seg arena, Internal), \
-         +{main_fenced} (from the loader's RAM, untagged), {dram2_base:#010x}+{dram2_heap} \
-         (dram2_seg, untagged), {radio_base:#010x}+{radio_heap} (radio)"
-    );
+    {
+        for piece in arena_pieces.iter().flatten() {
+            esp_println::println!(
+                "[INIT] heap region: {:#010x}+{} (dram_seg arena, {})",
+                piece.start,
+                piece.len,
+                if piece.fenced {
+                    "a boot stage's RAM, untagged"
+                } else {
+                    "Internal"
+                }
+            );
+        }
+        esp_println::println!(
+            "[INIT] heap region: {dram2_base:#010x}+{dram2_heap} (dram2_seg, untagged)"
+        );
+        esp_println::println!("[INIT] heap region: {radio_base:#010x}+{radio_heap} (radio)");
+    }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
