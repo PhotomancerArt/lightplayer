@@ -18,7 +18,8 @@
     "node.texture",
     "gfx.lpvm",
     "svc.button",
-    "shader.f32"
+    "shader.f32",
+    "fs.tree"
   ],
   "limits": {
     "flashAppBytes": 6291456

@@ -860,10 +860,11 @@ chip the first boot's own `lpfs` format is the first handful of in-range ops
 `--upload`'s writes.
 A cut inside an upload ends the upload too: the board restarts under it,
 and lp-cli's client waits on a transaction the board no longer holds until
-the wall-clock net. And a cut inside the first format is
-`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`: the
-next boot mounts a filesystem that refuses writes (open; the tree store,
-M7 P9, is the expected end of it).
+the wall-clock net. And `then=power-cycle` gives the flash its supply back
+(`FlashImage::restore_power`, as the C6's restart does): until M7 P9 it did
+not, every write after the cycle was dropped, and the next boot looked like
+a filesystem that refuses writes
+(`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
 
 ## Emulator seams, the wake and `net=lan` (S3 radio M5)
 

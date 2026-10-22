@@ -85,6 +85,13 @@ lpc_model::lp_embed_manifest_core! {
             cfg!(feature = "float-f32"),
             lpc_model::LpFeature::ShaderF32,
         ),
+        // The tree store on `lpfs` (`fs-tree`, which `server` implies): what
+        // hosts read before they route a core here (`requires.fsTree`), as
+        // on the C6.
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "fs-tree"),
+            lpc_model::LpFeature::FsTree,
+        ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
     // A single image: no update over a link.
@@ -127,6 +134,8 @@ mod split;
 mod stack_probe;
 #[cfg(fw_harness)]
 mod tests;
+#[cfg(not(fw_harness))]
+mod tree_flash;
 
 #[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
 use serial::usb_link_task;
@@ -135,12 +144,12 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32s3::init::{init_board, start_runtime},
     core::cell::RefCell,
-    flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
+    flash_storage::LpfsPartition,
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::usb_link::{UsbLinkShared, UsbLinkTransport},
-    fw_esp32_common::{boot, log_ring_logger, lp_fs},
+    fw_esp32_common::{boot, log_ring_logger},
     hardware::button::Esp32GpioButtonDriver,
     lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{ButtonService, LpGraphics, LpServer},
@@ -729,6 +738,11 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     if cfg!(feature = "float-f32") {
         server.declare_embedder_features(&[lpc_model::LpFeature::ShaderF32]);
     }
+    // The filesystem this build serves, said in the hello as in the manifest
+    // core (the tree store), as the C6 says it.
+    if cfg!(feature = "fs-tree") {
+        server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+    }
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
@@ -789,8 +803,9 @@ async fn engine_task(app: FirmwareApp) {
     .await;
 }
 
-/// Mount the `lpfs` partition, falling back to RAM so an unformattable or
-/// mis-flashed board still comes up reachable and can say so over the wire.
+/// Mount the tree store on `lpfs`, falling back to RAM so an unformattable,
+/// held or mis-flashed board still comes up reachable and can say so over
+/// the wire. The C6's mount (`fw-esp32c6/src/main.rs`), on this chip.
 #[cfg(not(fw_harness))]
 fn mount_filesystem(
     flash: esp_hal::peripherals::FLASH<'static>,
@@ -799,6 +814,9 @@ fn mount_filesystem(
     lpc_wire::FsBootState,
     Option<(u32, u32)>,
 ) {
+    use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
+    use lpc_wire::FsBootState;
+
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     // A split image's region ends where `factory` does, in the table the
     // chip carries (read once, here, after `FlashStorage::new`).
@@ -806,6 +824,9 @@ fn mount_filesystem(
     let factory = LpfsPartition::locate_factory(&mut flash_storage);
     #[cfg(not(lp_split))]
     let factory = None;
+    let memory = |state| -> (Box<dyn lpfs::LpFs>, FsBootState, Option<(u32, u32)>) {
+        (Box::new(LpFsMemory::new()), state, factory)
+    };
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
         // Not a runtime condition: it means the image was flashed without
         // `--partition-table lp-fw/fw-esp32s3/partitions.csv` and espflash
@@ -815,29 +836,71 @@ fn mount_filesystem(
             "[ERROR] no `lpfs` partition in the flashed table — reflash with \
              --partition-table lp-fw/fw-esp32s3/partitions.csv; using memory FS"
         );
-        return (
-            Box::new(LpFsMemory::new()),
-            lpc_wire::FsBootState::Memory,
-            factory,
+        return memory(FsBootState::Memory);
+    };
+    // An octal-flash part (eFuse `FLASH_TYPE` = 8 data lines) cannot take
+    // the store: it re-programs words in place (a record's marks), which
+    // octal/ECC flash forbids (ruling Q7). Never mounted there, never
+    // formatted: the board serves from RAM and says why.
+    if esp_hal::efuse::read_bit(esp_hal::efuse::FLASH_TYPE) {
+        esp_println::println!(
+            "[FS] octal flash: the tree store re-programs words, which this part \
+             forbids — not mounted; using memory FS"
+        );
+        return memory(FsBootState::Memory);
+    }
+    // The tree store: mount; a partition with no store on it is formatted
+    // (lazily) only when no littlefs superblock says a board's files are
+    // still in littlefs — HELD then, never formatted (the C6's AD3). A store
+    // the mount will not adopt (a newer or damaged header) is REFUSED —
+    // nothing written, files kept, access locked (`fs: refused`).
+    let summary = |how: &str, s: lp_tree_store::MountSummary| {
+        esp_println::println!(
+            "[FS] tree store {how} ({} sectors, {} free, root {})",
+            s.sectors,
+            s.free_sectors,
+            s.root_seq
         );
     };
-    match lp_fs::LpFsFlash::init(LpFlashStorage::new(flash_storage, partition), lpfs_config) {
-        Ok((fs, formatted)) => {
-            esp_println::println!("[INIT] flash filesystem mounted");
-            let state = if formatted {
-                lpc_wire::FsBootState::Formatted
+    match init_tree_guarded(
+        crate::tree_flash::tree_flash(flash_storage, partition),
+        lp_tree_store::SoftSha256,
+        lp_tree_store::StoreConfig::default(),
+        |flash| {
+            if crate::tree_flash::littlefs_found(flash) {
+                FormatVerdict::Hold
             } else {
-                lpc_wire::FsBootState::Mounted
-            };
-            (Box::new(fs), state, factory)
+                FormatVerdict::Format
+            }
+        },
+    ) {
+        TreeFsInit::Mounted(fs, s) => {
+            esp_println::println!("[INIT] flash filesystem mounted");
+            summary("mounted", s);
+            (Box::new(fs), FsBootState::Mounted, factory)
         }
-        Err(e) => {
-            esp_println::println!("[WARN] flash FS failed: {e}, falling back to memory");
-            (
-                Box::new(LpFsMemory::new()),
-                lpc_wire::FsBootState::Memory,
-                factory,
-            )
+        TreeFsInit::Formatted(fs, s) => {
+            esp_println::println!("[INIT] flash filesystem mounted");
+            summary("formatted", s);
+            (Box::new(fs), FsBootState::Formatted, factory)
+        }
+        TreeFsInit::Held(_) => {
+            esp_println::println!(
+                "[FS] legacy-layout filesystem found — not formatting; files are held \
+                 (littlefs, not yet in the tree store); using memory FS"
+            );
+            memory(FsBootState::LegacyHeld)
+        }
+        TreeFsInit::Refused { why, .. } => {
+            esp_println::println!(
+                "[FS] tree store refused: a newer or damaged store header — files kept \
+                 ({why}); using memory FS, access locked"
+            );
+            memory(FsBootState::Refused)
+        }
+        TreeFsInit::FormatFailed => {
+            esp_println::println!("[WARN] tree store format failed, falling back to memory");
+            memory(FsBootState::Memory)
         }
     }
 }

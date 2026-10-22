@@ -2652,6 +2652,12 @@ impl Machine {
         if !self.reboot(Strap::App) {
             return false;
         }
+        // The supply is back: a flash a power cut latched off takes commands
+        // again, its cells (weak bits included) as the cut left them — as
+        // the C6's restart does. Without it every program and erase after
+        // the cycle was dropped, and the second boot read a chip it could not
+        // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
+        self.flash.lock().expect("flash poisoned").restore_power();
         // `reboot` counted a reset; this was a power cycle.
         self.reboots -= 1;
         self.power_cycles += 1;
