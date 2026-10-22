@@ -154,6 +154,9 @@ pub struct FlashSet {
     /// The flash chip — SPI1 executes commands against it and the cache
     /// fill reads through it.
     pub flash: FlashHandle,
+    /// The PSRAM on `CS1` — SPI1 answers its mode registers and the cache
+    /// fill reads and writes its pages.
+    pub psram: crate::psram::PsramHandle,
     /// The cache-enable bits, the MMU table and D4's watch slot, shared
     /// between `EXTMEM`, `FLASH_MMU` and the machine.
     pub cache: CacheHandle,
@@ -216,7 +219,10 @@ pub fn boot_set(
         (
             base::EFUSE,
             efuse::EFUSE_LEN,
-            Box::new(efuse::efuse(identity)),
+            Box::new(efuse::efuse(
+                identity,
+                flash.psram.lock().expect("psram poisoned").len(),
+            )),
         ),
         (
             base::I2C_ANA_MST,
@@ -233,7 +239,7 @@ pub fn boot_set(
         (
             base::SPI1,
             accept::SPI_LEN,
-            Box::new(spi1::Spi1::new(flash.flash.clone())),
+            Box::new(spi1::Spi1::new(flash.flash.clone(), flash.psram.clone())),
         ),
         (base::BB, accept::RF_LEN, Box::new(accept::bb())),
         (base::NRX, accept::RF_LEN, Box::new(accept::nrx())),

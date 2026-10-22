@@ -326,6 +326,11 @@ fn boot() -> ! {
         drop(peripherals);
         tests::test_seam_abi::run();
     }
+
+    // The PSRAM probe takes the PSRAM singleton esp-hal's driver asks for;
+    // nothing else of the peripherals is used.
+    #[cfg(feature = "test_psram")]
+    tests::test_psram::run(peripherals.PSRAM);
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact
