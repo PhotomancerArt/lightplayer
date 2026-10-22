@@ -10,7 +10,9 @@
 
 use std::ops::Range;
 
-use crate::chip_profile::layout_2;
+use lp_bootctl::s3_mmu;
+use lp_bootctl::{LAYOUT_2_PAGE, S3_LOADER_IRAM, S3_LOADER_RAM, SRAM1_I_FROM_D};
+
 use crate::core_segments::{CORE_FLASH, CORE_RAM, LOADER_MMU_WINDOW, LOADER_RAM};
 
 /// One flash window the loader maps segments through.
@@ -58,28 +60,23 @@ pub static ESP32C6_SEGMENTS: SegmentRules = SegmentRules {
 pub static ESP32S3_SEGMENTS: SegmentRules = SegmentRules {
     flash: &[
         FlashWindow {
-            window: 0x3C00_0000..0x3E00_0000,
-            core: 0x3C00_0000..layout_2::ENGINE_DROM,
+            window: s3_mmu::DROM_BASE..s3_mmu::DROM_BASE + s3_mmu::MMU_ENTRIES * s3_mmu::MMU_PAGE,
+            core: s3_mmu::DROM_BASE..s3_mmu::ENGINE_DROM,
         },
         FlashWindow {
-            window: 0x4200_0000..0x4400_0000,
-            core: 0x4200_0000..layout_2::ENGINE_IROM,
+            window: s3_mmu::IROM_BASE..s3_mmu::IROM_BASE + s3_mmu::MMU_ENTRIES * s3_mmu::MMU_PAGE,
+            core: s3_mmu::IROM_BASE..s3_mmu::ENGINE_IROM,
         },
     ],
     ram: &[S3_DRAM, S3_IRAM],
-    loader_ram: &[
-        layout_2::LOADER_DRAM,
-        (layout_2::LOADER_DRAM.start + S3_IRAM_ALIAS)..(layout_2::LOADER_DRAM.end + S3_IRAM_ALIAS),
-    ],
-    page: layout_2::LAYOUT_2_PAGE,
+    loader_ram: &[S3_LOADER_RAM, S3_LOADER_IRAM],
+    page: LAYOUT_2_PAGE,
 };
 
 /// esp-hal's S3 `dram_seg`.
 const S3_DRAM: Range<u32> = 0x3FC8_8000..0x3FCD_B700;
-/// Internal SRAM1's instruction-bus view is its data-bus view plus this.
-const S3_IRAM_ALIAS: u32 = 0x6F_0000;
 /// `dram_seg` seen from the instruction bus.
-const S3_IRAM: Range<u32> = (S3_DRAM.start + S3_IRAM_ALIAS)..(S3_DRAM.end + S3_IRAM_ALIAS);
+const S3_IRAM: Range<u32> = (S3_DRAM.start + SRAM1_I_FROM_D)..(S3_DRAM.end + SRAM1_I_FROM_D);
 
 #[cfg(test)]
 mod tests {

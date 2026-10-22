@@ -600,6 +600,12 @@ jobs:
               # lp-cli's.
               - 'lp-cli/src/commands/emu/**'
               - 'lp-cli/tests/emu_s3_*.rs'
+              # The S3's split image (M7 P4): the pipeline that links it, the
+              # loader that boots it and the formats both read. The job's
+              # split-boot step boots what they make.
+              - 'tools/lp-fw-split/**'
+              - 'lp-fw/fw-esp32s3-loader/**'
+              - 'lp-base/lp-bootctl/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -2643,6 +2649,12 @@ jobs:
         id: figures_tests
         shell: bash
         run: cd lp2025 && just test-emu-esp32s3-gate 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
+
+      # The S3's split image (layout 2, the IDF door): the packaged image
+      # from the reset vector to the engine's hello, the core high and the
+      # engine low, and a pushed project rendered by the engine's JIT.
+      - name: Emulator ESP32-S3 split image boot
+        run: cd lp2025 && just test-emu-esp32s3-split-boot
 
       # CI's images for `just fetch-ci-images` — see the same step in emu-c6.
       - name: Pack CI images (ci-images-esp32s3)

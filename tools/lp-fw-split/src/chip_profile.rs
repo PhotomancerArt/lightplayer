@@ -29,6 +29,7 @@ use std::ops::Range;
 
 use espflash::flasher::FlashSize;
 use espflash::targets::Chip;
+use lp_bootctl::s3_mmu;
 
 use crate::segment_rules::SegmentRules;
 
@@ -232,27 +233,6 @@ pub static ESP32C6: ChipProfile = ChipProfile {
     segments: &crate::segment_rules::ESP32C6_SEGMENTS,
 };
 
-/// Layout 2, the S3's (`docs`: the M7 plan's ruling L3).
-///
-/// ⚠️ Re-typed here until `lp-bootctl` carries layout 2 (the S3 roadmap's
-/// M7 P2: `LAYOUT_2_PAGE`, `LAYOUT_2_REGION_START`, the `s3_mmu` plan's
-/// `ENGINE_DROM`/`ENGINE_IROM`). When it lands, these become references.
-pub mod layout_2 {
-    /// The S3's only MMU page (the ROM's `Cache_Ibus_MMU_Set` refuses
-    /// others).
-    pub const LAYOUT_2_PAGE: u32 = 0x1_0000;
-    /// `factory + 0x1_0000`: the first 64 KiB page after the boot records.
-    pub const LAYOUT_2_REGION_START: u32 = 0x2_0000;
-    /// The engine's data view: MMU entry `0x100`.
-    pub const ENGINE_DROM: u32 = 0x3D00_0000;
-    /// The engine's instruction view: the same entry.
-    pub const ENGINE_IROM: u32 = 0x4300_0000;
-    /// The engine window: entries `0x100..0x1C0`.
-    pub const ENGINE_WINDOW: u32 = 0xC0 * LAYOUT_2_PAGE;
-    /// The loader's own RAM, data view (code at the instruction alias).
-    pub const LOADER_DRAM: core::ops::Range<u32> = 0x3FCB_0000..0x3FCC_0000;
-}
-
 /// The ESP32-S3: layout 2, the IDF door.
 pub static ESP32S3: ChipProfile = ChipProfile {
     chip: SplitChip::Esp32s3,
@@ -265,14 +245,14 @@ pub static ESP32S3: ChipProfile = ChipProfile {
     linker: Linker::GnuLd,
     isa: Isa::Xtensa,
     partitions: "lp-fw/fw-esp32s3/partitions.csv",
-    page: layout_2::LAYOUT_2_PAGE,
-    region_start: layout_2::LAYOUT_2_REGION_START,
+    page: lp_bootctl::LAYOUT_2_PAGE,
+    region_start: lp_bootctl::LAYOUT_2_REGION_START,
     layout: 2,
     engine: EngineRegion::TwoViews {
-        data: layout_2::ENGINE_DROM,
-        code: layout_2::ENGINE_IROM,
-        window: layout_2::ENGINE_WINDOW,
-        bus_distance: 0x4200_0000 - 0x3C00_0000,
+        data: s3_mmu::ENGINE_DROM,
+        code: s3_mmu::ENGINE_IROM,
+        window: s3_mmu::ENGINE_WINDOW,
+        bus_distance: s3_mmu::IROM_BASE - s3_mmu::DROM_BASE,
     },
     text_follows_rodata: false,
     loader_dir: "lp-fw/fw-esp32s3-loader",

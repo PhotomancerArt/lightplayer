@@ -266,6 +266,9 @@ esp-radio = { version = "0.18.0", optional = true, features = ["esp-alloc", "log
 # rest of the crate is stripped at link time.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+# The split image's formats (`lp_split` builds): the boot records, the engine
+# header, the digest slot, layout 2 and the S3's MMU plan.
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 
 # Direct dep for `stack_probe::paint`, which masks interrupts while it writes
 # the paint pattern into the unused main stack. The implementation comes from

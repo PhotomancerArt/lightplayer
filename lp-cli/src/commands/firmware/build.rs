@@ -70,29 +70,38 @@ pub fn build_firmware(repo_root: &Path, def: &BuildDef) -> Result<()> {
     Ok(())
 }
 
-/// The split image, through the split tool's library: two passes, the
-/// verifier, the loader, `app.bin` and `merged.bin`.
+/// The split image, through the split tool's library and the def's chip
+/// profile: two passes, the verifier, the loader, `app.bin` and
+/// `merged.bin`.
 fn build_split(repo_root: &Path, def: &BuildDef) -> Result<()> {
-    if def.cargo_target != lp_fw_split::pass_link::TARGET
-        || def.profile != lp_fw_split::pass_link::PROFILE
-    {
+    let chip = def
+        .split_chip()
+        .with_context(|| format!("build def `{}`: no split profile for its chip", def.id))?;
+    let profile = chip.profile();
+    if def.cargo_target != profile.target || def.profile != profile.profile {
         bail!(
-            "build def `{}` asks for {} / {}, but the split image is built for {} / {}",
+            "build def `{}` asks for {} / {}, but the {} split image is built for {} / {}",
             def.id,
             def.cargo_target,
             def.profile,
-            lp_fw_split::pass_link::TARGET,
-            lp_fw_split::pass_link::PROFILE
+            profile.name,
+            profile.target,
+            profile.profile
         );
     }
     println!(
         "building {} as a split image ({} / {})",
         def.id, def.cargo_target, def.profile
     );
-    let mut opts =
-        lp_fw_split::BuildOptions::new(repo_root.to_path_buf(), def.split_dir(repo_root));
+    let mut opts = lp_fw_split::BuildOptions::for_chip(
+        chip,
+        repo_root.to_path_buf(),
+        def.split_dir(repo_root),
+    );
     opts.features = def.cargo_features.join(",");
-    opts.bootloader = def.bootloader_path(repo_root)?;
+    if let Some(bootloader) = def.bootloader_path(repo_root)? {
+        opts.bootloader = Some(bootloader);
+    }
     opts.partitions = repo_root.join(&def.partitions_csv);
     opts.target = Some(def.id.clone());
     lp_fw_split::build(&opts)
