@@ -14,7 +14,12 @@
 //! the transcript can, which is how the M4 hardware walk states its result as
 //! "192 of 192 bytes" instead of "it lit up".
 
+#[cfg(any(not(fw_harness), feature = "test_loopback"))]
 pub mod rmt;
+
+/// The LED-channels spike's LCD_CAM rig (never shipped).
+#[cfg(any(feature = "test_lcd_ws281x", feature = "lcd_ws281x_probe"))]
+pub mod lcd_spike;
 
 #[cfg(not(fw_harness))]
 pub use fw_esp32_common::output::provider::Esp32OutputProvider;

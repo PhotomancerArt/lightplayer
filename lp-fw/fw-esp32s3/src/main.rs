@@ -129,8 +129,10 @@ mod hardware;
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
 // inside is still app-only.
-#[cfg(any(not(fw_harness), feature = "test_loopback"))]
+#[cfg(any(not(fw_harness), feature = "test_loopback", feature = "test_lcd_ws281x"))]
 mod output;
+#[cfg(all(feature = "lcd_ws281x_probe", not(fw_harness)))]
+mod lcd_probe;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(not(fw_harness))]
@@ -284,6 +286,9 @@ fn boot() -> ! {
     // presence of one).
     #[cfg(feature = "test_loopback")]
     tests::loopback::run(peripherals);
+
+    #[cfg(feature = "test_lcd_ws281x")]
+    tests::lcd_ws281x::run(peripherals);
 
     #[cfg(feature = "test_xt_jit_corpus")]
     {
@@ -690,7 +695,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         match store.ble_enabled {
             true => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
-                ble::start(spawner, radio_port)
+                let started = ble::start(spawner, radio_port);
+                #[cfg(feature = "lcd_ws281x_probe")]
+                lcd_probe::start(spawner);
+                started
             }
             false if fs_boot_state == lpc_wire::FsBootState::Refused => {
                 log::info!(
