@@ -227,9 +227,19 @@ pub fn split_boot(core: CoreBoot) {
                 digest[2],
                 digest[3]
             );
+            // The radio links serve the engine's server (the link mux). In
+            // the same synchronous run as `core_boot`, so before the BLE task
+            // has run at all; a connection that subscribes waits for it.
+            #[cfg(feature = "ble")]
+            core.radio_port
+                .decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
             entry(core)
         }
         Err(why) => {
+            // Core-only serves nothing over the air yet (the update session
+            // on the radio links is the S3 updates plan's): the radio links'
+            // mode stays undecided, so a Bluetooth central can connect and
+            // its link never opens. USB is the way in, as before.
             log::error!("[CORE] no engine: {} — core-only", why.describe());
             let CoreBoot {
                 spawner, watchdog, ..
