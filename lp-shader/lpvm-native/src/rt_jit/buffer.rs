@@ -101,6 +101,21 @@ impl JitBuffer {
         unsafe {
             core::arch::asm!("fence.i", options(nostack, preserves_flags));
         }
+        // ESP32-S3: code in the cache's data window (a PSRAM heap) is fetched
+        // through two caches, so it is published through the firmware's
+        // routine (`crate::code_publish`) before anything can call it. SRAM1
+        // code is fetched uncached and needs none.
+        #[cfg(target_arch = "xtensa")]
+        if let Inner::Heap { code } = &buffer.inner {
+            let write = code.as_ptr() as usize;
+            if crate::exec_addr::s3_in_cache_window(write) {
+                crate::code_publish::publish(
+                    write,
+                    crate::exec_addr::exec_addr(write),
+                    code.len(),
+                );
+            }
+        }
         buffer
     }
 

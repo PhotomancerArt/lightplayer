@@ -399,8 +399,12 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // `HEAP_SIZE`, so its high-water mark is what sizes the heap — see
     // `stack_probe`.
     stack_probe::log_if_grown("heartbeat");
-    let free = esp_alloc::HEAP.free();
-    let used = esp_alloc::HEAP.used();
+    // On a `psram` image `[MEM]` is internal RAM's (comparable with every
+    // other image's), and PSRAM has a line of its own after the triple.
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
     let largest = recovery::panic_path::largest_free_block();
     // Structural — see this function's doc comment. No OOM retry allocator on
     // this chip, so the honest count of retries that saved an allocation is 0.
@@ -419,6 +423,8 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     log::info!(
         "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
     );
+    #[cfg(feature = "psram")]
+    psram::log_ledger_line();
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,
@@ -481,8 +487,14 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // figure `c_heap::HEAP_RADIO_BYTES` is checked against.
     #[cfg(s3_radio)]
     c_heap::log_if_grown("heartbeat");
-    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    // Internal RAM on a `psram` image: the figures the board's gates and a
+    // host's judgement are about (`crate::psram`, "The heap").
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
+    let free = free.min(u32::MAX as usize) as u32;
+    let used = used.min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
         free_bytes: free,
         used_bytes: used,
@@ -635,7 +647,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // `lpfs` or a split image maps its engine, so the core has it either way
     // (`crate::psram`'s module docs).
     #[cfg(feature = "psram")]
-    psram::bring_up();
+    {
+        psram::bring_up();
+        psram::add_heap_region();
+    }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
@@ -760,6 +775,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
 #[cfg(not(fw_harness))]
 #[inline(never)]
 pub(crate) fn lp_engine_entry(core: CoreBoot) {
+    // JIT code in PSRAM runs only once published (M10 P5): the engine's JIT
+    // calls this firmware's routine for every buffer it links there.
+    #[cfg(feature = "psram")]
+    if psram::usable() {
+        lpvm_native::code_publish::set_code_publish(psram::publish_code);
+    }
     let CoreBoot {
         spawner,
         usb_link,

@@ -175,7 +175,22 @@ use crate::heap::Heap;
 /// cores are up — and `add_region` panics past the cap. Naming it also removes
 /// the index hazard: `stats()` writes `region_stats[id]` for every occupied
 /// slot, so the two arrays must be the same length. See `README-LP.md`.
+#[cfg(not(feature = "external-first"))]
 pub const MAX_REGIONS: usize = 5;
+/// One more with `external-first` (LP fork, third diff): the S3's PSRAM is a
+/// region beside the arena's pieces, `dram2_seg` and the radio's.
+#[cfg(feature = "external-first")]
+pub const MAX_REGIONS: usize = 6;
+
+/// LP fork (third diff, feature `external-first`): Rust's default allocations
+/// (the [`GlobalAlloc`] path, which asks for no capability) of at least this
+/// many bytes try the `External`-only regions first, then fall back to every
+/// region in registration order as before. `0` sends every allocation to
+/// PSRAM first; the default, `usize::MAX`, is upstream's placement exactly.
+/// Set once at boot, before the allocations it should steer.
+#[cfg(feature = "external-first")]
+pub static EXTERNAL_FIRST_MIN: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(usize::MAX);
 
 /// The global allocator instance
 #[cfg_attr(feature = "global-allocator", global_allocator)]
@@ -210,6 +225,12 @@ pub enum MemoryCapability {
     Internal,
     /// Memory must be in SPI RAM
     External,
+    /// LP fork (third diff, feature `external-first`): a region only a
+    /// caller naming this capability lands in. The S3 tags its radio's
+    /// region with it, which used to borrow `External` for the same purpose
+    /// and cannot once a real `External` region exists.
+    #[cfg(feature = "external-first")]
+    Reserved,
 }
 
 /// Stats for a heap region
@@ -534,6 +555,18 @@ impl EspHeapInner {
         free
     }
 
+    /// LP fork (third diff): the free heap in every region carrying none of
+    /// `excluded`.
+    #[cfg(feature = "external-first")]
+    pub fn free_excluding(&self, excluded: EnumSet<MemoryCapability>) -> usize {
+        self.heap
+            .iter()
+            .flatten()
+            .filter(|region| region.capabilities.is_disjoint(excluded))
+            .map(|region| region.heap.free())
+            .sum()
+    }
+
     /// Allocate memory in a region satisfying the given requirements.
     ///
     /// # Safety
@@ -547,13 +580,22 @@ impl EspHeapInner {
         capabilities: EnumSet<MemoryCapability>,
         layout: Layout,
     ) -> *mut u8 {
+        unsafe { self.alloc_where(|caps| caps.is_superset(capabilities), layout) }
+    }
+
+    /// [`alloc_caps`](Self::alloc_caps) over the regions `admit` accepts.
+    unsafe fn alloc_where(
+        &mut self,
+        admit: impl Fn(EnumSet<MemoryCapability>) -> bool,
+        layout: Layout,
+    ) -> *mut u8 {
         #[cfg(feature = "internal-heap-stats")]
         let before = self.used();
         let mut iter = self
             .heap
             .iter_mut()
             .filter_map(|region| region.as_mut())
-            .filter(|region| region.capabilities.is_superset(capabilities));
+            .filter(|region| admit(region.capabilities));
 
         let allocation = loop {
             let Some(region) = iter.next() else {
@@ -677,6 +719,59 @@ impl EspHeap {
         ptr
     }
 
+    /// LP fork (third diff): the free heap in every region carrying none of
+    /// `excluded` — the S3's internal RAM is every region not `External`,
+    /// tagged or not.
+    #[cfg(feature = "external-first")]
+    pub fn free_excluding(&self, excluded: EnumSet<MemoryCapability>) -> usize {
+        self.inner.with(|heap| heap.free_excluding(excluded))
+    }
+
+    /// LP fork (third diff): allocate in a region carrying none of
+    /// `excluded`, in registration order. Freed with the ordinary path.
+    ///
+    /// # Safety
+    ///
+    /// As [`alloc_caps`](Self::alloc_caps).
+    #[cfg(feature = "external-first")]
+    pub unsafe fn alloc_excluding(
+        &self,
+        excluded: EnumSet<MemoryCapability>,
+        layout: Layout,
+    ) -> *mut u8 {
+        let ptr = self.inner.with(|heap| unsafe {
+            heap.alloc_where(|caps| caps.is_disjoint(excluded), layout)
+        });
+
+        #[cfg(feature = "alloc-hooks")]
+        unsafe {
+            _esp_alloc_alloc(self, EnumSet::empty(), ptr.addr(), layout.size());
+        }
+
+        ptr
+    }
+
+    /// LP fork (third diff): [`GlobalAlloc::alloc`]'s placement. At or above
+    /// [`EXTERNAL_FIRST_MIN`], the regions whose capabilities are exactly
+    /// `External` first; then every region, as upstream.
+    #[cfg(feature = "external-first")]
+    unsafe fn alloc_default(&self, layout: Layout) -> *mut u8 {
+        if layout.size() >= EXTERNAL_FIRST_MIN.load(core::sync::atomic::Ordering::Relaxed) {
+            let external: EnumSet<MemoryCapability> = MemoryCapability::External.into();
+            let ptr = self
+                .inner
+                .with(|heap| unsafe { heap.alloc_where(|caps| caps == external, layout) });
+            if !ptr.is_null() {
+                #[cfg(feature = "alloc-hooks")]
+                unsafe {
+                    _esp_alloc_alloc(self, EnumSet::empty(), ptr.addr(), layout.size());
+                }
+                return ptr;
+            }
+        }
+        unsafe { self.alloc_caps(EnumSet::empty(), layout) }
+    }
+
     /// Deallocate memory.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         #[cfg(feature = "alloc-hooks")]
@@ -714,8 +809,14 @@ impl EspHeap {
 }
 
 unsafe impl GlobalAlloc for EspHeap {
+    #[cfg(not(feature = "external-first"))]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe { self.alloc_caps(EnumSet::empty(), layout) }
+    }
+
+    #[cfg(feature = "external-first")]
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe { self.alloc_default(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {

@@ -237,8 +237,10 @@ test_seam_abi = []
 # `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries 0x80..0x100), only on a part
 # whose eFuse says 8 MB, and self-tests it; anything else boots as without
 # the feature. What may and may not live there is the ADR's
-# (docs/adr/2026-10-XX-s3-psram.md, M10 P6).
-psram = []
+# (docs/adr/2026-10-XX-s3-psram.md, M10 P6). Where the Rust heap goes is the
+# build-time knob `LP_PSRAM_HEAP` (`src/psram.rs`): `all` (the default),
+# `split:<bytes>`, `last` or `off`.
+psram = ["server", "esp-alloc/external-first", "dep:enumset", "dep:lpvm-native"]
 
 # The octal PSRAM probe — OFF by default, never shipped (lane P of the S3 radio
 # roadmap; `src/tests/test_psram.rs`). Brings the XIAO ESP32-S3's 8 MB octal

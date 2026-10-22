@@ -32,11 +32,24 @@
 //! mapped twice or at the wrong place reads back another sample's value —
 //! written, read back and restored to zero.
 //!
-//! # Nothing uses it yet
+//! # The heap
 //!
-//! This module brings the chip up and says whether it is usable
-//! ([`usable`]); the allocator regions, the LED frames and the JIT come in
-//! later phases of the same milestone.
+//! Once up, the window is one esp-alloc region tagged `External` only
+//! ([`add_heap_region`]), registered after every internal one, and where
+//! Rust's default allocations go is the build-time knob `LP_PSRAM_HEAP`
+//! ([`HeapPolicy`]), until the walk's numbers settle it (M10's Q-M10a):
+//!
+//! | `LP_PSRAM_HEAP` | the region | Rust's default allocations |
+//! |---|---|---|
+//! | `all` (default) | yes | PSRAM first, every size |
+//! | `split:<bytes>` | yes | PSRAM first at or above `<bytes>`, internal first below |
+//! | `last` | yes | internal first; PSRAM only once internal is full |
+//! | `off` | no | internal only, as an image without the feature |
+//!
+//! Whatever asks for `Internal` — the radio's C heap, esp-rtos's thread
+//! stacks, esp-radio's DMA buffers — never lands here under any policy, and
+//! the load gates' figures ([`internal_free`], [`internal_largest_block`])
+//! stay internal RAM's: that is the scarce one.
 
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
@@ -225,4 +238,267 @@ fn self_test(base: usize, len: usize) -> State {
         unsafe { core::ptr::write_volatile(word(i), 0) };
     }
     if ok { State::Up } else { State::PatternFailed }
+}
+
+/// Where Rust's default allocations go (module docs, "The heap").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeapPolicy {
+    /// No PSRAM region at all.
+    Off,
+    /// The region, used only once the internal ones are full.
+    Last,
+    /// PSRAM first at or above this many bytes (`0` = every allocation).
+    FirstFrom(usize),
+}
+
+impl HeapPolicy {
+    /// `LP_PSRAM_HEAP` as built: `all` when unset or unreadable.
+    pub fn built() -> Self {
+        Self::parse(option_env!("LP_PSRAM_HEAP").unwrap_or("all"))
+            .unwrap_or(HeapPolicy::FirstFrom(0))
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "all" => Some(HeapPolicy::FirstFrom(0)),
+            "last" => Some(HeapPolicy::Last),
+            "off" => Some(HeapPolicy::Off),
+            other => other
+                .strip_prefix("split:")
+                .and_then(|n| n.parse().ok())
+                .map(HeapPolicy::FirstFrom),
+        }
+    }
+}
+
+/// Register the window as the heap's `External` region and set the
+/// placement threshold, when PSRAM is [`usable`] and the policy is not
+/// [`HeapPolicy::Off`]. After every internal region, so first-fit in
+/// registration order reaches PSRAM last on the default path. Prints the
+/// `[INIT] heap region:` line it adds, or why it adds none.
+pub fn add_heap_region() {
+    let Some((base, len)) = window() else {
+        return;
+    };
+    let policy = HeapPolicy::built();
+    if policy == HeapPolicy::Off {
+        esp_println::println!("[INIT] heap region: none in PSRAM (LP_PSRAM_HEAP=off)");
+        return;
+    }
+    let used = esp_alloc::HEAP
+        .stats()
+        .region_stats
+        .iter()
+        .filter(|r| r.is_some())
+        .count();
+    if used >= esp_alloc::MAX_REGIONS {
+        esp_println::println!(
+            "[INIT] heap region: none in PSRAM — esp-alloc's {} regions are all taken",
+            esp_alloc::MAX_REGIONS
+        );
+        return;
+    }
+    // SAFETY: the window is mapped, tested, zeroed where the test wrote, and
+    // handed to the allocator exactly once, here; nothing else holds it.
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            len,
+            esp_alloc::MemoryCapability::External.into(),
+        ));
+    }
+    let threshold = match policy {
+        HeapPolicy::FirstFrom(n) => n,
+        _ => usize::MAX,
+    };
+    esp_alloc::EXTERNAL_FIRST_MIN.store(threshold, Ordering::Relaxed);
+    match policy {
+        HeapPolicy::FirstFrom(0) => esp_println::println!(
+            "[INIT] heap region: {base:#010x}+{len} (PSRAM, External; Rust's allocations go here first)"
+        ),
+        HeapPolicy::FirstFrom(n) => esp_println::println!(
+            "[INIT] heap region: {base:#010x}+{len} (PSRAM, External; Rust's allocations of {n} B or more go here first)"
+        ),
+        _ => esp_println::println!(
+            "[INIT] heap region: {base:#010x}+{len} (PSRAM, External; used once internal RAM is full)"
+        ),
+    }
+}
+
+fn external() -> enumset::EnumSet<esp_alloc::MemoryCapability> {
+    esp_alloc::MemoryCapability::External.into()
+}
+
+/// Free bytes in internal RAM: every heap region that is not PSRAM.
+pub fn internal_free() -> usize {
+    esp_alloc::HEAP.free_excluding(external())
+}
+
+/// Used bytes in internal RAM.
+pub fn internal_used() -> usize {
+    region_totals(false).1
+}
+
+/// `(free, used)` in PSRAM's region (zeros when there is none).
+pub fn psram_totals() -> (usize, usize) {
+    let (free, used) = region_totals(true);
+    (free, used)
+}
+
+fn region_totals(psram: bool) -> (usize, usize) {
+    esp_alloc::HEAP
+        .stats()
+        .region_stats
+        .iter()
+        .flatten()
+        .filter(|r| {
+            r.capabilities
+                .contains(esp_alloc::MemoryCapability::External)
+                == psram
+        })
+        .fold((0, 0), |(f, u), r| (f + r.free, u + r.used))
+}
+
+/// The largest block internal RAM can give, exact to the byte: what the load
+/// gates read.
+pub fn internal_largest_block() -> usize {
+    largest_block(internal_free(), |layout| unsafe {
+        // SAFETY: a non-zero layout, freed at once by the caller.
+        esp_alloc::HEAP.alloc_excluding(external(), layout)
+    })
+}
+
+/// The largest block PSRAM's region can give.
+pub fn psram_largest_block() -> usize {
+    largest_block(psram_totals().0, |layout| unsafe {
+        // SAFETY: as above.
+        esp_alloc::HEAP.alloc_caps(external(), layout)
+    })
+}
+
+fn largest_block(bound: usize, alloc: impl Fn(core::alloc::Layout) -> *mut u8) -> usize {
+    fw_esp32_common::largest_block::largest_fitting(bound, |size| {
+        if size == 0 {
+            return true;
+        }
+        let Ok(layout) = core::alloc::Layout::from_size_align(size, 4) else {
+            return false;
+        };
+        // `black_box`: an allocation only freed may otherwise be deleted
+        // (docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.md).
+        let ptr = core::hint::black_box(alloc(layout));
+        if ptr.is_null() {
+            false
+        } else {
+            // SAFETY: freed with the layout it was allocated with.
+            unsafe { alloc::alloc::dealloc(ptr, layout) };
+            true
+        }
+    })
+}
+
+/// The ledger's PSRAM line, after `[MEM]` (which is internal RAM's on a
+/// `psram` image).
+pub fn log_ledger_line() {
+    if !usable() {
+        log::info!("[PSRAM] {}", state().describe());
+        return;
+    }
+    let (free, used) = psram_totals();
+    if free + used == 0 {
+        log::info!("[PSRAM] on, not in the heap");
+        return;
+    }
+    let largest = psram_largest_block();
+    log::info!("[PSRAM] free={free} used={used} largest_free={largest}");
+}
+
+unsafe extern "C" {
+    fn Cache_WriteBack_All() -> i32;
+    /// The S3 mask ROM's range invalidate (`esp32s3.rom.ld`); 0 = done.
+    fn Cache_Invalidate_Addr(vaddr: u32, size: u32) -> i32;
+}
+
+/// The cache's line.
+const CACHE_LINE: usize = 32;
+
+/// `lpvm_native::code_publish`'s routine on this chip: write the data cache
+/// back, so the code reaches PSRAM, then drop the instruction cache's lines
+/// over the code's fetch range, so the next fetch reads it. The whole data
+/// cache (32 KB) is cheaper to name than to walk, once per shader.
+pub fn publish_code(_write: usize, exec: usize, len: usize) {
+    let start = exec & !(CACHE_LINE - 1);
+    let end = (exec + len).next_multiple_of(CACHE_LINE);
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    // SAFETY: ROM routines; the range is the buffer's own fetch addresses.
+    unsafe {
+        Cache_WriteBack_All();
+        Cache_Invalidate_Addr(start as u32, (end - start) as u32);
+    }
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+}
+
+/// Whether `addr` is in the PSRAM window (data bus).
+pub fn in_window(addr: usize) -> bool {
+    let base = PSRAM_DROM as usize;
+    addr >= base && addr < base + PSRAM_WINDOW_LEN as usize
+}
+
+/// A byte buffer in internal RAM — any heap region but PSRAM's — that grows
+/// to the largest frame it was asked to hold. What the RMT output copies a
+/// PSRAM frame into (`output::rmt`), so its refill ISR reads internal RAM.
+pub struct InternalBuffer {
+    ptr: *mut u8,
+    cap: usize,
+}
+
+impl InternalBuffer {
+    pub const fn empty() -> Self {
+        Self {
+            ptr: core::ptr::null_mut(),
+            cap: 0,
+        }
+    }
+
+    /// `src` copied into the buffer, or `None` when internal RAM cannot hold
+    /// it.
+    pub fn copy_of(&mut self, src: &[u8]) -> Option<&[u8]> {
+        if src.len() > self.cap {
+            self.release();
+            let layout = core::alloc::Layout::from_size_align(src.len(), 4).ok()?;
+            // SAFETY: a non-zero layout (an empty frame never needs a copy
+            // larger than `cap = 0`, so `src.len() > 0` here).
+            let ptr = unsafe { esp_alloc::HEAP.alloc_excluding(external(), layout) };
+            if ptr.is_null() {
+                return None;
+            }
+            self.ptr = ptr;
+            self.cap = src.len();
+        }
+        // SAFETY: `cap >= src.len()` bytes at `ptr` are this buffer's alone.
+        unsafe {
+            core::ptr::copy_nonoverlapping(src.as_ptr(), self.ptr, src.len());
+            Some(core::slice::from_raw_parts(self.ptr, src.len()))
+        }
+    }
+
+    fn release(&mut self) {
+        if !self.ptr.is_null() {
+            // SAFETY: allocated in `copy_of` with exactly this layout.
+            unsafe {
+                alloc::alloc::dealloc(
+                    self.ptr,
+                    core::alloc::Layout::from_size_align_unchecked(self.cap, 4),
+                )
+            };
+            self.ptr = core::ptr::null_mut();
+            self.cap = 0;
+        }
+    }
+}
+
+impl Drop for InternalBuffer {
+    fn drop(&mut self) {
+        self.release();
+    }
 }

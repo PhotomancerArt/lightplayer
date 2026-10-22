@@ -12,6 +12,15 @@
 //!   fetches the same bytes through the I-bus alias above it. Hardware-proven
 //!   (spike E2), and visible in any S3 boot log — the linker places `.text` at
 //!   I-bus `0x4037_8000`, which is D-bus `0x3FC8_8000` plus this offset.
+//! - Xtensa (ESP32-S3), **PSRAM**: **`exec = write + 0x0600_0000`** for
+//!   writes inside the cache's data window (`0x3C00_0000..0x3E00_0000`),
+//!   where a firmware that maps PSRAM puts its heap. The S3's one MMU table
+//!   serves both buses at one index, so the same page is fetched at the
+//!   instruction window's `0x4200_0000 + (write - 0x3C00_0000)`. Unlike
+//!   SRAM1 this goes through two caches, so the code must also be
+//!   **published** (data cache written back, instruction cache invalidated)
+//!   before it runs: [`crate::code_publish`]. Proven on silicon by the PSRAM
+//!   spike (the JIT corpus 13/13 from PSRAM, stale without the publish).
 //!
 //! # Two callers, and why both must use it
 //!
@@ -40,6 +49,14 @@ const S3_DUAL_MAPPED_DBUS: core::ops::Range<usize> = 0x3FC8_8000..0x3FCF_0000;
 /// ESP32-S3: distance from the D-bus view of SRAM1 to its I-bus alias.
 const S3_IBUS_ALIAS_OFFSET: usize = 0x6F_0000;
 
+/// ESP32-S3: the cache's data window (512 MMU entries × 64 KiB), where a
+/// PSRAM heap lives (`lp_bootctl::s3_mmu`'s `DROM_BASE`).
+pub(crate) const S3_CACHE_DBUS: core::ops::Range<usize> = 0x3C00_0000..0x3E00_0000;
+
+/// ESP32-S3: from the cache's data window to its instruction window, the
+/// same MMU entries (`IROM_BASE - DROM_BASE`).
+const S3_CACHE_IBUS_OFFSET: usize = 0x4200_0000 - 0x3C00_0000;
+
 /// The ESP32-S3 rule as a pure function, so it is testable on any host.
 ///
 /// Returns `None` when `write` is outside the dual-mapped window, which means
@@ -61,9 +78,18 @@ const S3_IBUS_ALIAS_OFFSET: usize = 0x6F_0000;
 pub(crate) const fn s3_exec_addr(write: usize) -> Option<usize> {
     if write >= S3_DUAL_MAPPED_DBUS.start && write < S3_DUAL_MAPPED_DBUS.end {
         Some(write + S3_IBUS_ALIAS_OFFSET)
+    } else if s3_in_cache_window(write) {
+        Some(write + S3_CACHE_IBUS_OFFSET)
     } else {
         None
     }
+}
+
+/// Whether `write` is in the S3 cache's data window — code stored there runs
+/// only once it is published ([`crate::code_publish`]).
+#[must_use]
+pub(crate) const fn s3_in_cache_window(write: usize) -> bool {
+    write >= S3_CACHE_DBUS.start && write < S3_CACHE_DBUS.end
 }
 
 /// Execute address for code stored at write address `write`.
@@ -136,6 +162,23 @@ mod tests {
         let a = s3_exec_addr(base).unwrap();
         let b = s3_exec_addr(base + 0x40).unwrap();
         assert_eq!(b - a, 0x40);
+    }
+
+    #[test]
+    fn s3_psram_maps_to_the_instruction_window_at_the_same_index() {
+        // The PSRAM window's first byte (`s3_mmu::PSRAM_DROM`/`PSRAM_IROM`).
+        assert_eq!(s3_exec_addr(0x3C80_0000), Some(0x4280_0000));
+        // The spike's code page, and the window's last byte.
+        assert_eq!(s3_exec_addr(0x3C81_0000), Some(0x4281_0000));
+        assert_eq!(s3_exec_addr(0x3DFF_FFFF), Some(0x43FF_FFFF));
+        assert!(s3_in_cache_window(0x3C80_0040));
+        // Outside the cache's window: not translated, and SRAM1 is not PSRAM.
+        assert_eq!(s3_exec_addr(0x3BFF_FFFF), None);
+        assert_eq!(s3_exec_addr(0x3E00_0000), None);
+        assert!(!s3_in_cache_window(0x3FC9_0000));
+        // Offset-preserving, as the SRAM1 rule.
+        let a = s3_exec_addr(0x3C90_0000).unwrap();
+        assert_eq!(s3_exec_addr(0x3C90_0100).unwrap() - a, 0x100);
     }
 
     #[test]
