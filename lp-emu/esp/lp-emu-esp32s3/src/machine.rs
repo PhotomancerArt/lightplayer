@@ -4359,6 +4359,24 @@ impl Machine {
         // watch is re-armed from the restored enable bits at the next window.
         self.cache_watch = false;
         self.bus.set_memory_cost(None);
+        // A restored table that maps PSRAM is filled NOW, before the guest
+        // runs another instruction: the restored window bytes are already
+        // right (the regions carry them), but a PSRAM page takes no store
+        // until the fill opens it, and the next slice would otherwise fault
+        // on the first one. A table with no PSRAM entry — every power-on
+        // table a reboot restores, every image that never maps PSRAM — keeps
+        // the fill at the next boundary, exactly as before.
+        let maps_psram = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entries()
+            .iter()
+            .any(|e| matches!(cache::Target::of(*e), cache::Target::Psram(_)));
+        if maps_psram {
+            self.refill_cache();
+        }
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.
