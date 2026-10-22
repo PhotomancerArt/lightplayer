@@ -18,8 +18,8 @@
 //!   and could reach the split loader's RAM
 //!   (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
 //!   On this chip the boot stages are `lp_bootctl::S3_BOOT_STAGE_RAM`: the
-//!   split loader's RAM, inside the core's `.bss` (where the main arena is),
-//!   and the IDF bootloader's, which is `dram2_seg` and the top of
+//!   split loader's RAM, inside the core's `.bss` at the top of the main
+//!   arena, and the IDF bootloader's, which is `dram2_seg` and the top of
 //!   `dram_seg`. So nothing the radio can DMA into may live in either.
 //!
 //! The regions are picked by capability. The S3 has PSRAM on some boards, but
@@ -34,11 +34,14 @@
 //! | radio ([`HEAP_RADIO`]) | `Internal` and `External` ([`RADIO`]) | C first; Rust last of all |
 //!
 //! The arena is cut only around the boot stages' own ranges, not from the
-//! first one up: the loader's 64 KB sits in the middle of the arena, and the
-//! arena above it is ordinary RAM that `Internal` requests need (cutting
-//! from the loader up left the M1 probe 54,816 B of `Internal`, which Wi-Fi's
-//! blobs filled, and esp-rtos could not allocate the link thread's stack:
-//! FS3, 2026-10-21). A request carrying `Internal` (the C fallback,
+//! first one up: anything of the arena above a range is ordinary RAM that
+//! `Internal` requests need (cutting from the loader up left the M1 probe
+//! 54,816 B of `Internal`, which Wi-Fi's blobs filled, and esp-rtos could
+//! not allocate the link thread's stack: FS3, 2026-10-21). The loader's
+//! 16 KiB sits at the arena's top (L4, amended 2026-10-22: at
+//! `0x3FCB_0000..0x3FCC_0000`, mid-arena, it cut the Bluetooth image's
+//! arena in three and its largest free block fell to 73,744 B), so the
+//! arena is one `Internal` piece below it and a few KB untagged inside it. A request carrying `Internal` (the C fallback,
 //! esp-radio's own `InternalMemory`, esp-rtos's thread stacks) therefore
 //! never reaches `dram2_seg` nor the loader's RAM. Rust's global allocator
 //! asks for nothing and tries the regions in registration order: the arena's
@@ -116,9 +119,10 @@ pub struct ArenaPiece {
 }
 
 /// The most pieces the arena may be cut into: the regions esp-alloc holds,
-/// less `dram2_seg` and the radio region. Three today: below the loader's RAM,
-/// the loader's RAM, above it (the arena ends below the IDF bootloader's RAM,
-/// which starts inside the main stack).
+/// less `dram2_seg` and the radio region. Two today: below the loader's RAM,
+/// and the arena's top inside it (three if a link puts the arena across it;
+/// the arena ends below the IDF bootloader's RAM, which starts inside the
+/// main stack).
 pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 2;
 
 /// Register the main arena, cut around every boot stage's RAM: pieces

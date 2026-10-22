@@ -34,8 +34,10 @@ through C `malloc`. It also brings two hazards the C6 found on silicon:
   system, and its DMA keeps writing into buffers the previous app gave it.
   On the C6 those writes crashed the second-stage bootloader (`dram2_seg`)
   and could reach the split loader's RAM. On the S3 the boot stages'
-  RAM is `lp_bootctl::S3_BOOT_STAGE_RAM`: the split loader's 64 KB
-  (`0x3FCB_0000..0x3FCC_0000`), which sits **inside** the main arena, and the
+  RAM is `lp_bootctl::S3_BOOT_STAGE_RAM`: the split loader's 16 KiB
+  (`0x3FCC_5000..0x3FCC_9000` since the loader's L4 amendment, #1255; it was
+  `0x3FCB_0000..0x3FCC_0000`, mid-arena, when this was written), which sits
+  inside the core's `.bss`, and the
   IDF bootloader's (`0x3FCD_9700..0x3FCE_D710`), which is `dram2_seg` and the
   top 8 KB of `dram_seg`, where the main stack is.
 

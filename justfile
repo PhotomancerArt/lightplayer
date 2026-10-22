@@ -4360,6 +4360,36 @@ test-emu-esp32s3-seams:
     export LP_EMU_ESP32S3_SEAM_ABI_ELF="$seam_abi"
     cargo test -p lp-emu-esp32s3 --features test-seams --test 'seam_*' -- --include-ignored --nocapture
 
+# The S3's octal PSRAM in the emulator (lane P of the S3 radio roadmap):
+# `fw-esp32s3 --features test_psram` — a probe that never ships — built,
+# copied out of the shared target path, merged for its ROM-up boot, and run
+# by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
+# probe writes and reads all 8 MiB and runs code out of it, both ways, and
+# every line matches FS3's capture. The test that the shipped image runs the
+# same with and without PSRAM needs the shipped image, so it runs in
+# `test-emu-esp32s3-boot` instead (here it SKIPs). One firmware build and
+# about a minute of emulation (release).
+test-emu-esp32s3-psram:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_psram
+    probe="$out/fw-esp32s3-psram.elf"
+    cp "$built" "$probe"
+    export LP_EMU_ESP32S3_PSRAM_ELF="$probe"
+    if command -v espflash >/dev/null 2>&1; then
+      merged="$out/merged-psram.bin"
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$probe" "$merged"
+      export LP_EMU_ESP32S3_PSRAM_MERGED="$merged"
+    else
+      echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
+    fi
+    cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is

@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(entry_of(0x43FF_FFFF), Some(0x1FF));
         assert_eq!(entry_of(0x3E00_0000), None);
         assert_eq!(entry_of(0x4400_0000), None);
-        assert_eq!(entry_of(0x3FCB_0000), None);
+        assert_eq!(entry_of(0x3FCC_5000), None);
         assert_eq!(entry_of(0x3BFF_FFFF), None);
     }
 }

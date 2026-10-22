@@ -24,5 +24,8 @@
   "limits": {
     "flashAppBytes": 6291456
   },
-  "wireProto": 44
+  "wireProto": 44,
+  "ota": {
+    "layout": 2
+  }
 }

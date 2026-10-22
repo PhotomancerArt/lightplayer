@@ -7,6 +7,8 @@ pub mod backtrace_oracle;
 pub mod loopback;
 #[cfg(feature = "test_button")]
 pub mod test_button;
+#[cfg(feature = "test_psram")]
+pub mod test_psram;
 #[cfg(feature = "test_seam_abi")]
 pub mod test_seam_abi;
 /// The FP conformance rig lives in `lp-xt-fp-harness` — the classic ESP32 runs

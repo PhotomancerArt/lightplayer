@@ -2819,6 +2819,14 @@ jobs:
         id: seams
         run: cd lp2025 && just test-emu-esp32s3-seams
 
+      # The S3's octal PSRAM (lane P of the S3 radio roadmap): the
+      # `test_psram` probe image — one more Xtensa firmware build — booted
+      # both ways by `lp-emu-esp32s3/tests/psram_boot.rs`. Here rather than
+      # in `emu-esp32s3`, which runs near its budget; locally ~1 minute of
+      # emulation after the build.
+      - name: Emulator ESP32-S3 PSRAM (the probe image, direct and ROM-up)
+        run: cd lp2025 && just test-emu-esp32s3-psram
+
       # The S3's half of the heap-budget record's chip section (M6 P10). It
       # lives here rather than in `Heap budget (esp32c6 chip)` because it
       # needs the Xtensa toolchain this job already installs — a cold espup

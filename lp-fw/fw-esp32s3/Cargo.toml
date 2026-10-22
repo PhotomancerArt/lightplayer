@@ -32,6 +32,12 @@ esp32s3 = [
 server = [
     "fs-tree",
     "fw-esp32-common/server",
+    # The split image's update board side (`src/split_core/` is the S3's
+    # chip for it, the S3 plan's M7 P8). Only `LP_SPLIT_LINK` builds call
+    # it; a plain build links none of it.
+    "fw-esp32-common/split-core",
+    "dep:lpc-update",
+    "dep:sha2",
     "dep:lpa-server",
     "dep:lp-gfx-lpvm",
     "dep:lpc-hardware",
@@ -170,6 +176,21 @@ wifi = [
 # build is the real firmware plus a transcript.
 frame-dump = []
 
+# Emulator FIXTURES, never shipped and never in a build def: a split-image
+# core that, booted on TRIAL, marks itself attempted and then panics
+# (`fixture-trial-dies`) or spins without feeding the watchdog
+# (`fixture-trial-hangs`) before it marks itself started — the two ways a new
+# core fails its first boot, for the loader's rollback and cold-cap scenarios
+# (the S3 plan's P10 builds them). Inert in a plain (unsplit) build. The
+# C6's features of the same names. Not `test_*`: that prefix selects a
+# harness entrypoint instead of the app.
+fixture-trial-dies = []
+fixture-trial-hangs = []
+# Emulator FIXTURE, never shipped: the USB link is NOT trusted by the split
+# image's update session, so the emulator (which has only USB) can prove a
+# core install is refused without a login. The C6's feature of the same name.
+fixture-usb-untrusted = []
+
 # Hardware float. This is the board that has an FPU, so this is the board that
 # gets `FloatMode::F32` compiled in — the whole point of M7.
 #
@@ -230,6 +251,18 @@ test_button = ["server"]
 # (`lp-emu-esp32s3/tests/seam_abi_harness.rs`) proves the arguments, the
 # result and the caller's window survive an answer. Never shipped.
 test_seam_abi = []
+
+# The octal PSRAM probe — OFF by default, never shipped (lane P of the S3 radio
+# roadmap; `src/tests/test_psram.rs`). Brings the XIAO ESP32-S3's 8 MB octal
+# PSRAM up through esp-hal's own driver, writes and reads back two address-
+# derived patterns across every byte it mapped, and runs a ten-byte function
+# copied into PSRAM through the instruction bus. It is the image
+# `lp-emu-esp32s3`'s PSRAM model is proven against (`tests/psram_boot.rs`);
+# on silicon it prints the same lines. Where the product's heap goes is
+# decided after the silicon spike, not here.
+#
+#   just build-fw-esp32s3 test_psram
+test_psram = []
 
 test_xt_jit_corpus = [
     "dep:lpvm-native",
@@ -347,6 +380,14 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 # The split image's formats (`lp_split` builds): the boot records, the engine
 # header, the digest slot, layout 2 and the S3's MMU plan.
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
+# The over-the-air update session (protocol v1) the split image's core runs,
+# in core-only and as the running engine's channel-3 hook
+# (`fw_esp32_common::split_core`): its codes, its board types, the update
+# light's record. The C6's line.
+lpc-update = { path = "../../lp-core/lpc-update", optional = true }
+# The SHA accelerator's software fallback while a boot hash holds it
+# (`src/split_core/split_sha.rs`), as on the C6.
+sha2 = { workspace = true, optional = true }
 
 # Direct dep for `stack_probe::paint`, which masks interrupts while it writes
 # the paint pattern into the unused main stack. The implementation comes from

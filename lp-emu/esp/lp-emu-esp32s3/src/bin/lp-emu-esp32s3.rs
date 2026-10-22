@@ -15,7 +15,8 @@
 //! meant. P04 added the peripheral flags (`--efuse-mac`, `--efuse-rev`);
 //! P05 the link's; P06 the flash, cache and ROM-console ones (`--boot-mode`,
 //! `--flash`, `--flash-copy`, `--merged`, `--flash-len`, `--cache-off-fetch`,
-//! `--uart0`, `--strap`); P07 the pads'.
+//! `--uart0`, `--strap`); P07 the pads'; lane P (S3 radio roadmap) the
+//! PSRAM's (`--psram-len`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -70,6 +71,11 @@ OPTIONS:
                             --chip esp32s3 --merge` writes. Sets --flash-len
                             to the file's length unless told otherwise
     --flash-len <bytes>     the chip's size [8388608, the S3 board's 8 MB]
+    --psram-len <size>      the octal PSRAM on CS1: 2mb, 4mb, 8mb, 16mb,
+                            32mb, a byte count, or 0/none for a board
+                            without. An image that never brings PSRAM up
+                            runs exactly as it does with none [8mb, the
+                            XIAO ESP32-S3's]
     --cache-off-fetch stop|permit
                             D4. `stop` (the default, and every gate run's)
                             refuses a fetch or read through a flash window
@@ -251,6 +257,7 @@ struct Args {
     boot_mode: BootMode,
     flash: Option<FlashBacking>,
     flash_len: Option<u32>,
+    psram_len: Option<u32>,
     cache_off: CacheOffPolicy,
     uart0: UsbSjSink,
     strap: Option<u32>,
@@ -359,6 +366,9 @@ fn run() -> Result<ExitCode, String> {
             builder = builder.flash_len(meta.len() as u32);
         }
         builder = builder.flash(backing);
+    }
+    if let Some(len) = args.psram_len {
+        builder = builder.psram_len(len);
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
@@ -578,6 +588,9 @@ fn print_run_summary(machine: &Machine) {
             chip.command_census(),
             machine.cache_fills(),
         );
+    }
+    if let Some(line) = machine.psram_summary() {
+        println!("{line}");
     }
     if !machine.uart0().is_empty() {
         println!("uart0: {} bytes on the wire", machine.uart0().len());
@@ -1005,6 +1018,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .map_err(|_| format!("--flash-len {v}: not a byte count"))?;
                 args.flash_len = Some(n);
             }
+            "--psram-len" => {
+                let v = value()?;
+                args.psram_len = Some(
+                    lp_emu_esp32s3::psram::parse_size(&v)
+                        .map_err(|e| format!("--psram-len: {e}"))?,
+                );
+            }
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--uart0" => args.uart0 = parse_usb_sj(&value()?, "--uart0", true)?,
             "--rmt-logs" => args.rmt_logs = true,
@@ -1323,8 +1343,12 @@ mod tests {
             "0x8".into(),
             "--flash-len".into(),
             "0x800000".into(),
+            "--psram-len".into(),
+            "2mb".into(),
         ])
         .unwrap();
+        assert_eq!(a.psram_len, Some(2 << 20));
+        assert!(parse(vec!["--psram-len".into(), "3mb".into()]).is_err());
         assert_eq!(a.boot_mode, BootMode::RomUp);
         assert_eq!(a.flash, Some(FlashBacking::Copy(PathBuf::from("chip.bin"))));
         assert_eq!(a.cache_off, CacheOffPolicy::Permit);

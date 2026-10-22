@@ -110,6 +110,12 @@ it wrong is a red CI run on a correct change.
   four now: the 64 B appear on the run that *builds* the reference image
   and are gone on the run that reuses it — a lead for whoever takes the open
   question, not investigated here.
+- 2026-10-22 (#1258, S3 updates M7 P8) — the fifth, byte for byte and the
+  same shape: `just test-emu-c6`'s first `emu_serve_walk` (the run that built
+  the reference image, load average ~155) read `220468 B free / 105068 B
+  used` and ended `test-emu-c6-boot` there; `just test-emu-serve` re-run
+  passed whole, and `test-emu-c6-cli`, which the failure had skipped, was
+  run on its own. Five of five on the building run.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

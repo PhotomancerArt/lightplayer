@@ -1167,6 +1167,8 @@ pub struct Esp32S3Builder {
     // ---- the flash, the cache and the ROM's console (M6 P06) ----
     flash_backing: FlashBacking,
     flash_len: u32,
+    /// The PSRAM's size ([`Esp32S3Builder::psram_len`]).
+    psram_len: u32,
     cache_off: CacheOffPolicy,
     uart0: UsbSjSink,
     uart0_source: Option<Box<dyn ByteSource>>,
@@ -1213,6 +1215,7 @@ impl Default for Esp32S3Builder {
             pace: None,
             flash_backing: FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            psram_len: crate::psram::DEFAULT_PSRAM_LEN,
             cache_off: CacheOffPolicy::default(),
             uart0: UsbSjSink::default(),
             uart0_source: None,
@@ -1248,6 +1251,7 @@ impl fmt::Debug for Esp32S3Builder {
             .field("reboot_on_reset", &self.reboot_on_reset)
             .field("flash_backing", &self.flash_backing)
             .field("flash_len", &self.flash_len)
+            .field("psram_len", &self.psram_len)
             .field("cache_off", &self.cache_off)
             .field("uart0", &self.uart0)
             .field("strap_word", &format_args!("{:#x}", self.strap_word))
@@ -1304,6 +1308,16 @@ impl Esp32S3Builder {
     /// [`crate::flash::DEFAULT_FLASH_LEN`], the board's 8 MiB.
     pub fn flash_len(mut self, bytes: u32) -> Self {
         self.flash_len = bytes;
+        self
+    }
+
+    /// The octal PSRAM on `CS1` ([`crate::psram`]): one of
+    /// [`crate::psram::DENSITIES`]' sizes, or `0` for a board without. The
+    /// default is [`crate::psram::DEFAULT_PSRAM_LEN`], the canonical XIAO
+    /// ESP32-S3's 8 MiB; an image that never brings PSRAM up runs exactly as
+    /// it does with none (`tests/psram_boot.rs` holds that).
+    pub fn psram_len(mut self, bytes: u32) -> Self {
+        self.psram_len = bytes;
         self
     }
 
@@ -1745,6 +1759,9 @@ impl Esp32S3Builder {
             FlashImage::open(self.flash_backing, self.flash_len)
                 .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
         ));
+        let psram = crate::psram::Psram::new(self.psram_len)
+            .map_err(BuildError::Io)?
+            .handle();
         let cache = S3Cache::handle();
         cache
             .lock()
@@ -1752,6 +1769,7 @@ impl Esp32S3Builder {
             .set_policy(self.cache_off);
         let flash_set = FlashSet {
             flash: flash.clone(),
+            psram: psram.clone(),
             cache: cache.clone(),
             strap: self.strap_word,
             seed: self.seed,
@@ -1907,6 +1925,7 @@ impl Esp32S3Builder {
             boot_mode: self.boot_mode,
             cache,
             flash,
+            psram,
             cache_fills: 0,
             staging: FlashStaging::default(),
             cache_watch: false,
@@ -2167,6 +2186,9 @@ pub struct Machine {
     cache: CacheHandle,
     /// The flash chip, shared with SPI1 and read by the cache fill.
     flash: FlashHandle,
+    /// The PSRAM on `CS1`, shared with SPI1 (its mode registers) and read
+    /// and written by the cache fill (its pages).
+    psram: crate::psram::PsramHandle,
     /// How many entries the fill has copied out of the chip.
     cache_fills: u64,
     /// What a direct load staged in the chip; empty on a ROM-up machine.
@@ -2261,7 +2283,7 @@ impl Machine {
     /// the emulator's so D4's watch does not arm on them ([`crate::cache`]).
     fn refill_now(&mut self) -> u64 {
         self.set_host_access(true);
-        let filled = cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        let filled = cache::fill(&mut self.bus, &self.flash, &self.psram, &self.cache) as u64;
         self.set_host_access(false);
         filled
     }
@@ -2322,6 +2344,50 @@ impl Machine {
     /// The flash chip, for a test and for the run report.
     pub fn flash(&self) -> &FlashHandle {
         &self.flash
+    }
+
+    /// The PSRAM, for a test and for the run report.
+    pub fn psram(&self) -> &crate::psram::PsramHandle {
+        &self.psram
+    }
+
+    /// The run report's `psram:` line, or `None` when the image never reached
+    /// the chip — a run that does not touch PSRAM reports what it always did.
+    pub fn psram_summary(&self) -> Option<String> {
+        let chip = self.psram.lock().expect("psram poisoned");
+        let c = chip.census();
+        if !c.touched() {
+            return None;
+        }
+        let mapped = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .psram_pages()
+            .len();
+        Some(format!(
+            "psram: {} ({} MiB, octal); {} register reads, {} writes, {} refused; {} pages \
+             filled, {} written back, {} mapped now",
+            chip.len(),
+            chip.len() >> 20,
+            c.register_reads,
+            c.register_writes,
+            c.refused,
+            c.pages_filled,
+            c.pages_written_back,
+            mapped
+        ))
+    }
+
+    /// The PSRAM's bytes as the guest sees them now: the chip, with every
+    /// page the cache holds live written back into it first.
+    pub fn psram_contents(&self) -> Option<Vec<u8>> {
+        cache::write_back_psram(&self.bus, &self.psram, &self.cache);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .contents()
+            .map(<[u8]>::to_vec)
     }
 
     /// Write the flash image back if its backing says to.
@@ -2658,6 +2724,10 @@ impl Machine {
         // the cycle was dropped, and the second boot read a chip it could not
         // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
         self.flash.lock().expect("flash poisoned").restore_power();
+        // The PSRAM is volatile: what `reboot` kept across the reset (a
+        // reset does not take the chip's supply away) is gone, and its mode
+        // registers are back at their reset.
+        self.psram.lock().expect("psram poisoned").power_off();
         // `reboot` counted a reset; this was a power cycle.
         self.reboots -= 1;
         self.power_cycles += 1;
@@ -4063,7 +4133,16 @@ impl Machine {
             self.usb_sj_tried_log.bytes(),
             self.uart0_log.bytes(),
         );
+        // A reset does not take the PSRAM's supply away, so its bytes (and
+        // its mode registers, which are not in the snapshot) survive it —
+        // IDF's `EXT_RAM_NOINIT_ATTR` exists because they do. The power-on
+        // snapshot carries the chip as it was at power on; keep today's.
+        let psram = self.psram_contents();
         self.restore_state(&power_on);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(psram.as_deref());
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
         self.uart0_log.replace(&uart0);
@@ -4229,6 +4308,7 @@ impl Machine {
             console: self.usb_sj_log.bytes(),
             uart0: self.uart0_log.bytes(),
             pins: self.pins.state.clone(),
+            psram: self.psram_contents(),
         }
     }
 
@@ -4265,11 +4345,38 @@ impl Machine {
         // epoch came back with `restore_scalars`, and leaving the observer's
         // stale forces one re-read of the routing at the next boundary.
         self.pins.state = snap.pins.clone();
+        // The PSRAM's bytes, and every window page closed to stores: the fill
+        // that the restored (all-dirty) table asks for re-opens the ones it
+        // maps to PSRAM, from these bytes — which the snapshot took with the
+        // live pages written back, so they agree with the restored windows.
+        self.bus.clear_store_through();
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(snap.psram.as_deref());
         // The restore put the peripherals' blobs back, the MMU table with
         // them (it rides in `EXTMEM`'s), and marked every entry dirty; the
         // watch is re-armed from the restored enable bits at the next window.
         self.cache_watch = false;
         self.bus.set_memory_cost(None);
+        // A restored table that maps PSRAM is filled NOW, before the guest
+        // runs another instruction: the restored window bytes are already
+        // right (the regions carry them), but a PSRAM page takes no store
+        // until the fill opens it, and the next slice would otherwise fault
+        // on the first one. A table with no PSRAM entry — every power-on
+        // table a reboot restores, every image that never maps PSRAM — keeps
+        // the fill at the next boundary, exactly as before.
+        let maps_psram = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entries()
+            .iter()
+            .any(|e| matches!(cache::Target::of(*e), cache::Target::Psram(_)));
+        if maps_psram {
+            self.refill_cache();
+        }
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.
