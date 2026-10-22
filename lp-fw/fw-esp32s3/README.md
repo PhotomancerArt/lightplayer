@@ -13,8 +13,8 @@ LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
 > chip-agnostic `Esp32OutputProvider` this crate's RMT driver plugs into
 > (below) all come from `fw-esp32-common`.
 
-Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, littlefs
-storage, GLSL compiled to Xtensa machine code by the on-device JIT, and real
+Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, the tree
+store on `lpfs`, GLSL compiled to Xtensa machine code by the on-device JIT, and real
 WS281x output on 4 concurrent RMT channels (below) — plus the hardware
 harnesses (clocks, heap, and serial logging far enough to print the `[INIT]`
 marker family, a JIT corpus runner, and the RMT loopback self-test). The
@@ -461,7 +461,48 @@ does not yet exist would boot-loop the board every 8 s.
 ## The app layer
 
 The default build is the LightPlayer app: `LpServer` over USB-Serial-JTAG,
-littlefs on the `lpfs` partition, and abort-tier recovery.
+the tree store on the `lpfs` partition, and abort-tier recovery.
+
+### The filesystem: the tree store on `lpfs`
+
+`lpfs` (1.5 MB at `0x610000`, 384 sectors of 4 KiB) holds the tree store
+(`lp-tree-store`, the `fs-tree` feature, which `server` implies), as on the
+C6 since its 2026-10 cutover; littlefs is gone from the image. The C6 is the
+model, and the differences are only the chip's:
+
+- **Reads go through the flash cache.** `src/tree_flash.rs` maps the
+  partition at layout 2's `lpfs` window (`lp_bootctl::s3_mmu::LPFS_WINDOW`,
+  MMU entries `0x1C0..0x1E0`, `0x3DC0_0000`, up to 2 MiB — the loader's
+  scratch, unmapped before it jumps) and the store reads it as memory. After
+  every program and erase the written range is dropped from the cache with
+  the mask ROM's `Cache_Invalidate_Addr`; if the ROM ever refuses, reads fall
+  back to ROM calls for the rest of the boot. Writes go through
+  `fw_esp32_common::aligned_nor_flash` over esp-storage, as on the C6.
+- **Records are hashed in software** (`lp_tree_store::SoftSha256`), not with
+  the S3's SHA accelerator.
+- **Octal flash is refused.** A part whose eFuse says octal flash serves the
+  memory filesystem and says so (`[FS] octal flash: …`); the store has only
+  been read on quad parts.
+
+What it cost (`just fw-esp32s3-size-check`, against `main` at `05f3ab150`
+with littlefs): the monolithic image grew 21,840 B (2,431,712 →
+2,453,552 B). In the split image the core grew 28,848 B (the store mounts in
+`core_boot`) and the engine shrank 5,000 B; the core now sits 17,248 B below
+its next 64 KiB page (46,096 B before).
+
+**A littlefs `lpfs` is held, never formatted.** A board that still has
+littlefs files (the S3s flashed before M7 P9) boots with `fs: legacy_held`
+and an in-memory filesystem: its files are untouched. There is no migration
+(the S3 updates plan's ruling L7: the only S3 is the bench one). To adopt the
+tree store, erase `lpfs` over USB (lease the board first; `board take`
+prints its port) and re-push the projects:
+
+```bash
+espflash erase-region --port <port> 0x610000 0x180000
+```
+
+The next boot finds blank flash, formats the store (`[FS] tree store
+formatted (384 sectors, …)`) and serves it.
 
 ### The link IO thread
 
