@@ -519,7 +519,7 @@ Where a `radio` image's heap is (`[INIT] heap region:` lines at boot):
 | region | tag | who lands there |
 |---|---|---|
 | arena pieces outside the boot stages' RAM | `Internal` | Rust first; the C heap's overflow; thread stacks |
-| arena piece inside the split loader's RAM (`0x3FCB_0000..0x3FCC_0000`) | none | Rust only |
+| arena piece inside the split loader's RAM (`0x3FCC_5000..0x3FCC_9000`, the arena's top) | none | Rust only |
 | `dram2_seg` | none | Rust only |
 | radio (32 KB) | `Internal` + `External` | the blobs' C heap first; Rust last |
 

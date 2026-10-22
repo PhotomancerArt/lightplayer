@@ -55,8 +55,8 @@ pub static ESP32C6_SEGMENTS: SegmentRules = SegmentRules {
 /// `dram2_seg`'s `0x3FCD_B700`, where the IDF bootloader's own RAM begins)
 /// and its instruction-bus alias (`+0x6F_0000`; the core's vectors and
 /// `.rwtext` start at `0x4037_8000`). The loader lives at data view
-/// `0x3FCB_0000..0x3FCC_0000` (code at the alias), inside every core's
-/// `.bss`.
+/// `0x3FCC_5000..0x3FCC_9000` (code at the alias), inside every core's
+/// `.bss`, at the top of its heap arena (`lp_bootctl::S3_LOADER_RAM`).
 pub static ESP32S3_SEGMENTS: SegmentRules = SegmentRules {
     flash: &[
         FlashWindow {
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn the_s3_loaders_ram_is_inside_the_cores_and_its_alias_too() {
         let r = &ESP32S3_SEGMENTS;
-        assert_eq!(r.loader_ram[1], 0x403A_0000..0x403B_0000);
+        assert_eq!(r.loader_ram[1], 0x403B_5000..0x403B_9000);
         assert!(r.ram[0].start <= r.loader_ram[0].start && r.loader_ram[0].end <= r.ram[0].end);
         assert!(r.ram[1].start <= r.loader_ram[1].start && r.loader_ram[1].end <= r.ram[1].end);
         assert_eq!(r.ram[1].start, 0x4037_8000, "the core's vectors");

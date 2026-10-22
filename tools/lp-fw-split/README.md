@@ -68,6 +68,18 @@ off its source (AGENTS.md, license rule):
 4. **Every call is `l32r` + `callx8`** (relaxation narrows the in-range ones
    to `call8`, whose target is decoded): a call has no range, so engine →
    core calls across 16 MiB link.
+5. **The blobs' branches carry stale addends too** (found when the radio
+   linked in, 2026-10-22). GNU-assembled C keeps a relocation on every
+   branch and jump, against the output section's symbol with the input
+   section's addend (`.text + 0x5f8` for a `bgeui` in
+   `btdm_controller_init`). `S + A` is `.text`'s first bytes, the literal
+   pools there, and their slots made the engine core: the S3 core was
+   1.3 MB with Bluetooth and 2.5 MB with Wi-Fi, 646 KB and 964 KB once a
+   branch's target is decoded from the instruction (`branch_target`,
+   checked against objdump's printed target for all 4,591 of the
+   Bluetooth image's). `ASM_EXPAND`/`ASM_SIMPLIFY` mark an `l32r` +
+   `callx` whose `l32r` carries the edge, and are no edge of their own.
+   LLVM's objects carry neither.
 
 ## The pipeline
 
