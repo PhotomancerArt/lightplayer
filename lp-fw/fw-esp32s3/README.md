@@ -428,6 +428,64 @@ rather than out of a reserved code region — so that residency is already
 inside `[MEM]`'s `used`. See `esp32_memory_stats` in `src/main.rs` and
 `src/stack_probe.rs`.
 
+## Bluetooth (feature `ble`)
+
+The C6's BLE link, on this chip (S3 radio plan M3,
+`lp2025/2026-10-20-2335-s3-radio-and-ota`): the wire on lp-link over a
+Nordic-UART GATT service, one untrusted link per connection into the link
+mux, from the shared crate `lp-fw/fw-esp32-radio` (`fw_esp32_radio::ble`).
+What is this chip's:
+
+- **The controller is BTDM**, not the C6's NPL, so its configuration is its
+  own (`src/ble/ble_controller_config.rs`): two connections (the link slots),
+  the controller task on core 0. Its three interrupts are bound to CPU0 at
+  priority 1, under the link thread's lock (`src/io_thread.rs`).
+- **The radio blobs' C heap is its own** (`src/c_heap.rs`, the C6's): a 32 KB
+  region the blobs' `malloc` tries first, then the arena's `Internal`
+  pieces, never `dram2_seg` and never a boot stage's RAM — the radio keeps
+  writing across a warm reset, and both boot stages run in RAM the app
+  borrows. The boot checks the radio region is clear of them. esp-alloc's
+  `compat` is off (its `malloc` asks for no capability).
+- **It starts in `core_boot`**, after the filesystem, by the C6's rule: **on
+  unless the device store (`/.lp/access.json`) turns it off** — a fresh board
+  with no store starts it; a board whose files are held or refused does not.
+  On a split image the radio links serve the engine's server once
+  `split_boot` enters it; a core-only S3 serves nothing over the air yet
+  (updates over Bluetooth are the S3 updates plan's).
+
+**Off by default** until the desk walk (AC4) has passed on FS3: because a fresh
+board starts it, adding `ble` to `default` starts the controller on every
+fresh S3, emulated ones included. Build it with `just build-fw-esp32s3 ble` or
+`just fw-esp32s3-split esp32s3,server,float-f32,ble`.
+
+Where a `radio` image's heap is (`[INIT] heap region:` lines at boot):
+
+| region | tag | who lands there |
+|---|---|---|
+| arena pieces outside the boot stages' RAM | `Internal` | Rust first; the C heap's overflow; thread stacks |
+| arena piece inside the split loader's RAM (`0x3FCB_0000..0x3FCC_0000`) | none | Rust only |
+| `dram2_seg` | none | Rust only |
+| radio (32 KB) | `Internal` + `External` | the blobs' C heap first; Rust last |
+
+What it costs (plain image against plain image, 2026-10-21):
+
+| | Δ | what |
+|---|---:|---|
+| `dram_seg`, IRAM | +24,732 B | controller code that must run from RAM (`.rwtext.wifi` 22,584 B) |
+| `dram_seg`, `.data` | +7,968 B | |
+| `dram_seg`, `.bss` | +5,848 B | the BLE stack's statics, besides the radio region |
+| radio region | +32,768 B | |
+| main arena | 240 → 168 KB | so the main stack keeps its share (54,400 B) |
+| flash | +298,792 B | `.text` + `.rodata`, inside the 64 KB headroom floor by megabytes |
+
+At boot: `[ble] up: controller +32568 B, host + GATT +3520 B` and a radio-region
+high water of 23,658 of 32,768 B while advertising — on FS3 (2026-10-21,
+**with no antenna attached**, so advertising was never heard) and on
+`lp-emu:esp32s3:t1` (controller +32,632 B, the same 23,658 B). The esp-hal
+fork's switch that moves the controller's IRAM to flash (C6 only,
+`third_party/esp-hal/esp_config.yml`) is not extended to this chip: `dram_seg`
+closes without it.
+
 ## How this differs from fw-esp32c6
 
 Per the per-chip-toolchains ADR, the recovery strategy is **per chip** and does
