@@ -82,7 +82,7 @@ lpc_model::lp_embed_manifest_core! {
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
         lpc_model::manifest::feature_fragment(
-            cfg!(s3_radio),
+            cfg!(s3_espnow),
             lpc_model::LpFeature::SvcRadioEspnow,
         ),
         lpc_model::manifest::feature_fragment(
@@ -208,14 +208,20 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// `dram2_heap`), so the stack keeps its share.
 #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
 const HEAP_SIZE: usize = 240 * 1024;
-/// The radio image's arena (`radio`, S3 radio M3 and M4): 104 KB smaller,
-/// so the main stack keeps its share of `dram_seg` (about 52 KB) with both
-/// radios in the image. Where the bytes went — the radio blobs' own region
-/// (`c_heap::HEAP_RADIO_BYTES`), the controllers' IRAM, the BLE stack's and the
-/// network's statics — is docs/adr/2026-10-21-s3-radio-memory.md. The radio
-/// region's spare bytes are still Rust's, last, so the heap's total is the
-/// arena, the radio region and `dram2_seg` together.
-#[cfg(s3_radio)]
+/// A Bluetooth image's arena (`radio` without `espnow`, S3 radio M3): 72 KB
+/// smaller, so the main stack keeps its share of `dram_seg`. BLE costs 72,528 B
+/// of `dram_seg` at link time: the radio blobs' own region
+/// (`c_heap::HEAP_RADIO_BYTES`, 32 KB) and 39,760 B of the controller's IRAM
+/// text and the BLE stack's statics. The heap the radio's C blocks do not use
+/// is still Rust's, last.
+#[cfg(all(s3_radio, not(s3_espnow)))]
+const HEAP_SIZE: usize = 168 * 1024;
+/// The arena with the Wi-Fi blob up too (`espnow`, and `wifi`, S3 radio M4):
+/// 104 KB smaller than a radio-free image's, so the main stack keeps its share
+/// of `dram_seg` (about 52 KB) with both radios in the image. Where the bytes
+/// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
+/// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
+#[cfg(s3_espnow)]
 const HEAP_SIZE: usize = 136 * 1024;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
@@ -531,7 +537,7 @@ pub(crate) struct CoreBoot {
     /// The radio's ESP-NOW interface and, when no station owns it, the Wi-Fi
     /// controller kept alive (dropping it stops Wi-Fi and ESP-NOW): the
     /// engine builds the ESP-NOW driver over them with its hardware registry.
-    #[cfg(s3_radio)]
+    #[cfg(s3_espnow)]
     espnow: (
         esp_radio::esp_now::EspNow<'static>,
         Option<esp_radio::wifi::WifiController<'static>>,
@@ -678,7 +684,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // order, its M2 Run G): ESP-NOW's interface to the engine's driver; the
     // controller and the station interface to the station (`wifi`), or back
     // to the driver to keep alive.
-    #[cfg(s3_radio)]
+    #[cfg(s3_espnow)]
     let (espnow, net_radio) = {
         let wifi = radio_peripherals::take_wifi().expect("init_board stashes WIFI");
         let parts = fw_esp32_radio::hardware::radio_hub::bring_up(wifi)
@@ -790,7 +796,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             );
         }
     }
-    #[cfg(all(s3_radio, not(s3_wifi)))]
+    #[cfg(all(s3_espnow, not(s3_wifi)))]
     let _ = net_radio;
 
     CoreBoot {
@@ -802,7 +808,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         watchdog,
         boot_guard,
         boot_assessment,
-        #[cfg(s3_radio)]
+        #[cfg(s3_espnow)]
         espnow,
         #[cfg(s3_ble)]
         radio_port,
@@ -831,7 +837,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         watchdog,
         boot_guard,
         boot_assessment,
-        #[cfg(s3_radio)]
+        #[cfg(s3_espnow)]
         espnow,
         #[cfg(s3_ble)]
         radio_port,
@@ -856,9 +862,9 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         hardware_manifest.board_name()
     );
     // The ESP-NOW radio's resource, on an image that registers its driver
-    // (`radio`): the board profile leaves `/radio/0` out because the default
+    // (`espnow`): the board profile leaves `/radio/0` out because the default
     // image registers none (`default_esp32s3_hardware_manifest`'s doc).
-    #[cfg(s3_radio)]
+    #[cfg(s3_espnow)]
     let hardware_manifest = hardware_manifest.with_resource(lpc_hardware::HwResource::new(
         lpc_hardware::HwAddress::radio(0),
         [lpc_hardware::HwCapability::Radio],
@@ -885,11 +891,11 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
-    // The ESP-NOW driver over the interface `core_boot` brought up (`radio`):
+    // The ESP-NOW driver over the interface `core_boot` brought up (`espnow`):
     // the Radio node's. With the station in the image (`wifi`) the Radio node
     // rule holds in the driver: while the board is set to use Wi-Fi, an open
     // device answers with the rule's words and the rest of the project runs.
-    #[cfg(s3_radio)]
+    #[cfg(s3_espnow)]
     {
         let (esp_now, kept) = espnow;
         match fw_esp32_radio::hardware::espnow_radio_driver::Esp32EspNowRadioDriver::from_parts(

@@ -447,14 +447,16 @@ rather than out of a reserved code region — so that residency is already
 inside `[MEM]`'s `used`. See `esp32_memory_stats` in `src/main.rs` and
 `src/stack_probe.rs`.
 
-## The radio: ESP-NOW, Bluetooth and Wi-Fi (features `radio`, `ble`, `wifi`)
+## The radio: Bluetooth, ESP-NOW and Wi-Fi (features `ble`, `espnow`, `wifi`)
 
 The C6's radio, on this chip (S3 radio plan, M3 and M4,
 `lp2025/2026-10-20-2335-s3-radio-and-ota`), from the shared crate
 `lp-fw/fw-esp32-radio`, the C6's feature tiers:
 
-- **`radio`**: the radio's one bring-up (`esp_radio::wifi::new`) and the
-  ESP-NOW driver (the Radio node), with the C6's Wi-Fi rule (while the board
+- **`radio`**: esp-radio and the radio blobs' C heap; it starts nothing on
+  its own.
+- **`espnow`**: the radio's one bring-up (`esp_radio::wifi::new`, the Wi-Fi
+  blob) and the ESP-NOW driver (the Radio node), with the C6's Wi-Fi rule (while the board
   is set to use Wi-Fi, a Radio node says why it is off and the rest runs).
   The image adds `/radio/0` to the hardware manifest itself
   (`HwManifest::with_resource`; the board profile leaves it out for the
@@ -483,21 +485,27 @@ split image the radio links serve the engine once `split_boot` enters it; a
 core-only S3 serves nothing over the air yet (updates are the updates plan's).
 
 **`ble` is on by default** since its desk walk passed on FS3
-(`docs/reports/2026-10-21-s3-bluetooth-walk.md`), and with it `radio` (the C6's
-tiers): every S3 image starts the radio and the controller unless the device
-store turns Bluetooth off, emulated ones included (they advertise to nobody, as
-an emulated C6 does). **`wifi` is off by default** until its desk walk passes:
+(`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
+BTDM controller unless the device store turns Bluetooth off, emulated ones
+included (they advertise to nobody, as an emulated C6 does). **`espnow` is off
+by default**, unlike the C6: the Wi-Fi blob up costs about 37 KB of heap the
+S3 does not have to spare beside a 620-pixel project, and when it starts is
+Yona's call (the ADR's 2026-10-22 amendment). **`wifi` is off by default**
+until its desk walk passes:
 build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
 esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
 --features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
 probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
-`s3_wifi` are the features minus the probe, and the source gates on those).
+`s3_espnow`, `s3_wifi` are the features minus the probe, and the source gates
+on those).
 
 **Memory** is `docs/adr/2026-10-21-s3-radio-memory.md`: the radio blobs' own
-48 KB C heap (`src/c_heap.rs`), the arena cut around the boot stages' RAM and
+C heap (`src/c_heap.rs`; 32 KB on a Bluetooth image, 48 KB with the Wi-Fi
+blob up), the arena cut around the boot stages' RAM and
 `dram2_seg` untagged — no radio block may land where a boot stage runs after a
 warm reset, and every block is checked as it is handed out — the Wi-Fi IRAM
-classes in flash, a 136 KB arena, a ~52 KB main stack. With both radios up
+classes in flash, a 168 KB arena on a Bluetooth image and 136 KB with the
+Wi-Fi blob up, a ~52–54 KB main stack. With both radios up
 and no project the heap is 262,160 B in total and ~131 KB free (emulated),
 against 319,504 / 287,940 without a radio. A radio image prints its regions at
 boot (`[INIT] heap region: …`) and the radio region's high water at the

@@ -1183,7 +1183,7 @@ clippy-fw-esp32s3:
     # crate itself on this chip's target, at each tier this chip builds it
     # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
     # reaches a dependency.
-    for feat in radio ble wifi; do
+    for feat in espnow wifi; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done

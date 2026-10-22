@@ -45,7 +45,8 @@ before any radio. RAM is.
 ## Decision
 
 1. **The radio's C heap is a region of its own** (`fw-esp32s3/src/c_heap.rs`,
-   the C6's design): a 48 KB `.bss` arena, tagged `Internal | External`
+   the C6's design): a 48 KB `.bss` arena on an image with the Wi-Fi blob
+   up (`espnow`, `wifi`; a Bluetooth image, `ble` alone, keeps M3's 32 KB), tagged `Internal | External`
    (`External` borrowed as a tag nothing else asks for; this firmware maps
    no PSRAM). The blobs' `malloc` tries it first, then the arena's `Internal`
    pieces; never an untagged region. esp-alloc's `compat` is off (its
@@ -79,10 +80,12 @@ before any radio. RAM is.
    switch names the C6's NPL archive (`libble_app.a`) and pairs with an NPL
    blob call (`esp_ble_controller_flash_only_param_config`); BTDM is a
    different blob. Moving it is research, not this decision.
-5. **The main arena is 136 KB on every radio image** (`radio`, `ble`,
-   `wifi`), so the main stack keeps its share: 51,684 B with both radios,
-   55,756 B with BLE alone, against 51,976 B before. A radio-less image is
-   unchanged (240 KB).
+5. **The main arena is 136 KB on an image with the Wi-Fi blob up**
+   (`espnow`, `wifi`), so the main stack keeps its share: 51,684 B with both
+   radios, 55,756 B with BLE and ESP-NOW, against 51,976 B before. A
+   Bluetooth image (`ble`, the default since the S3 Bluetooth walk) keeps
+   M3's 168 KB arena and 32 KB radio region; a radio-less image is unchanged
+   (240 KB).
 6. **The threads**: `lp-net` 12 KB (the C6's 8 KB plus half again, for
    Xtensa's windowed frames — unmeasured here), priority 1, pinned to core 0
    (`NetChip::pin_to_core`, which this chip needs and the C6 does not);
@@ -120,7 +123,7 @@ condition (its flash writes disable the cache and mask non-IRAM interrupts).
 
 Plain images, `xtensa-esp32s3-elf-size`, against the image before the radio:
 
-| | before | `ble` | `wifi` (both radios) |
+| | before | `espnow` (BLE + ESP-NOW) | `wifi` (both radios) |
 |---|---:|---:|---:|
 | IRAM (`.rwtext` + `.rwtext.wifi`) | 12,052 | 37,644 | 37,648 |
 | `.data` + `.data.wifi` | 3,596 | 15,296 | 15,600 |
@@ -129,9 +132,10 @@ Plain images, `xtensa-esp32s3-elf-size`, against the image before the radio:
 | radio region | — | 49,152 | 49,152 |
 | main stack | 51,984 | 55,756 | 51,684 |
 
-The `ble` column is the image this change builds (ESP-NOW is part of
-`radio`, so the Wi-Fi blob is up there too); M3's PR measured BLE alone
-before ESP-NOW joined it: IRAM +24,732 B, `.data` +7,968 B, `.bss` statics
+The `espnow` column is BLE with the Wi-Fi blob up for ESP-NOW. The default
+image, `ble` alone, is M3's (arena 168 KB, radio region 32 KB, main stack
+54,392 B; heap used 69,620 B idle, emulated), and its PR measured it against
+the image before the radio: IRAM +24,732 B, `.data` +7,968 B, `.bss` statics
 +5,848 B. Wi-Fi's own statics, against M3's BLE-only image, are +18,240 B (`.data` +4,036, `.bss`
 +14,204, the network on `lp-net` included); its IRAM was +27,084 B before the
 switches moved 26,220 of it.
@@ -180,6 +184,19 @@ free 287,940. For comparison, the C6's total is 372,344 B.
 - **The BTDM controller's IRAM to flash** (22,584 B): needs ESP-IDF's
   `BT_CTRL_RUN_IN_FLASH_ONLY` equivalent for BTDM and a silicon run; the
   lever to try next if the heap is the problem.
+
+## Amendment (2026-10-22): ESP-NOW is its own tier, off by default
+
+`ble` became a default feature with the S3 Bluetooth walk (#1254). This
+ADR's first cut made `radio` the C6's tier — the Wi-Fi blob up and the
+ESP-NOW driver — so `ble` on by default would have started the Wi-Fi blob on
+every S3: about 37 KB more heap in use at idle (69,620 → 106,544 B,
+emulated). Lane E's 620-pixel project with BLE on leaves 63 KB free and a
+49.5 KB largest block (#1261), so that 37 KB is the difference between a
+project that fits and one that does not. **ESP-NOW is its own feature,
+`espnow`** (`radio` is the bare radio, `wifi` implies `espnow`), and it is not
+in `default`. Whether it starts by default — or only when a project has a
+Radio node or a network is saved — is Yona's call. The C6 runs it by default.
 
 ## Follow-ups
 

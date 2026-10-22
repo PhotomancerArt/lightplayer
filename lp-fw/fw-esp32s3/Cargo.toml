@@ -111,9 +111,8 @@ radio_boot_probe = [
 # The radio (S3 radio roadmap M3, M4): esp-radio on this chip, the shared
 # radio glue (`fw-esp32-radio`), and the radio blobs' own C heap
 # (`src/c_heap.rs`: a region of its own, never `dram2_seg`, never the boot
-# stages' RAM). As on the C6, `radio` is the radio's one bring-up
-# (`esp_radio::wifi::new`) and the ESP-NOW driver (the Radio node); `ble`
-# adds Bluetooth, `wifi` the station.
+# stages' RAM). On its own it starts nothing: `ble` brings the BTDM controller
+# up, `espnow` the Wi-Fi blob and the ESP-NOW driver, `wifi` the station.
 radio = [
     "server",
     "dep:enumset",
@@ -139,6 +138,13 @@ ble = [
     "fw-esp32-common/radio-link",
     "fw-esp32-radio/ble",
 ]
+# ESP-NOW (the Radio node): the radio's one bring-up (`esp_radio::wifi::new`,
+# the Wi-Fi blob) and the ESP-NOW driver, with the C6's Wi-Fi rule. Not on by
+# default: the Wi-Fi blob up costs ~37 KB of heap the S3 does not have to spare
+# beside a 620-pixel project (lane E, #1261); whether it starts by default, or
+# only when a project has a Radio node or a network is saved, is Yona's call.
+# The C6 runs it by default.
+espnow = ["radio"]
 # The Wi-Fi station and the network on `lp-net` (S3 radio roadmap M4; the
 # C6's since its Wi-Fi roadmap M6, docs/adr/2026-10-07-c6-wifi-link.md): a
 # board with a saved network joins it by itself and serves the secure lp-link
@@ -148,6 +154,7 @@ ble = [
 # this chip's facts are `src/net/`.
 wifi = [
     "ble",
+    "espnow",
     "fw-esp32-common/wifi",
     "fw-esp32-radio/wifi",
     "dep:esp-radio-rtos-driver",

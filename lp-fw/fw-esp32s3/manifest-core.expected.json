@@ -18,7 +18,6 @@
     "node.texture",
     "gfx.lpvm",
     "svc.button",
-    "svc.radio-espnow",
     "shader.f32",
     "fs.tree"
   ],

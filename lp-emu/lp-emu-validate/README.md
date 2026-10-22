@@ -218,7 +218,7 @@ would be comparing nothing:
   code region, the JIT allocates out of the `esp_alloc` heap, and its
   residency is already inside `[MEM] used`.
 - the boot heap line is **a two-region sum**, `[INIT] chip=esp32s3
-  arch=xtensa heap=139264+73744=213008` (the arena and `dram2_seg`), where the
+  arch=xtensa heap=172032+73744=245776` (the arena and `dram2_seg`), where the
   classic prints the four-region sum. The *fields* are
   comparable across the three chips; the *line* is not.
 

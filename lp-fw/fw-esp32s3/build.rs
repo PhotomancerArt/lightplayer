@@ -59,7 +59,7 @@ fn main() {
     if std::env::var_os("LP_SPLIT_LINK").is_some() {
         println!("cargo::rustc-cfg=lp_split");
     }
-    // The product's radio (`radio`, `ble`, `wifi`) unless the radio boot probe is
+    // The product's radio (`radio`, `ble`, `espnow`, `wifi`) unless the radio boot probe is
     // built: the probe starts esp-radio's Wi-Fi and the BTDM controller
     // itself, and since `ble` is a default feature an image that adds the
     // probe would otherwise start the controller twice. So a probe image is
@@ -67,6 +67,7 @@ fn main() {
     // the source gates on these two cfgs, never on the features.
     println!("cargo::rustc-check-cfg=cfg(s3_radio)");
     println!("cargo::rustc-check-cfg=cfg(s3_ble)");
+    println!("cargo::rustc-check-cfg=cfg(s3_espnow)");
     println!("cargo::rustc-check-cfg=cfg(s3_wifi)");
     let probe = std::env::var_os("CARGO_FEATURE_RADIO_BOOT_PROBE").is_some();
     if std::env::var_os("CARGO_FEATURE_RADIO").is_some() && !probe {
@@ -74,6 +75,9 @@ fn main() {
     }
     if std::env::var_os("CARGO_FEATURE_BLE").is_some() && !probe {
         println!("cargo::rustc-cfg=s3_ble");
+    }
+    if std::env::var_os("CARGO_FEATURE_ESPNOW").is_some() && !probe {
+        println!("cargo::rustc-cfg=s3_espnow");
     }
     if std::env::var_os("CARGO_FEATURE_WIFI").is_some() && !probe {
         println!("cargo::rustc-cfg=s3_wifi");

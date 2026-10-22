@@ -19,7 +19,8 @@ pub fn stash(wifi: WIFI<'static>, bt: BT<'static>) {
     });
 }
 
-/// The WIFI peripheral, once.
+/// The WIFI peripheral, once (`espnow`: the radio's one bring-up).
+#[cfg(s3_espnow)]
 pub fn take_wifi() -> Option<WIFI<'static>> {
     critical_section::with(|cs| WIFI_PERIPHERAL.borrow_ref_mut(cs).take())
 }
