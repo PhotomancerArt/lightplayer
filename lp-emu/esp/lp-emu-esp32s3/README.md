@@ -139,8 +139,8 @@ the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
 A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
-⚠️ **The heap line is a two-region sum**, `heap=172032+73744=245776` on the
-shipped image (`HEAP_SIZE = 168 * 1024` since `ble` became a default feature,
+⚠️ **The heap line is a two-region sum**, `heap=139264+73744=213008` on the
+shipped image (`HEAP_SIZE = 136 * 1024` since `ble` became a default feature,
 plus `dram2_seg`), where the classic prints a four-region sum. Anything comparing the two
 chips' boot captures must not expect the same line. There is no
 `[INIT] main stack <N> B` line either; the S3's 37,280 B total appears in
