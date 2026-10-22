@@ -38,6 +38,12 @@ slips through.
   `espflash@3.3.0` hit `(429) Too Many Requests: rate limit exceeded`, exit 70.
   The 30 main failures before it (back to 2026-09-08) showed no other 403/429
   install failure. Fixed by authenticating every binstall step.
+- 2026-10-22 — main's "Release firmware" (run 39799391273) and PR #1256 (run
+  39809685174) in the same morning: espup `version_not_found` three times
+  (the Xtensa action), and "no release for just matching version specifier"
+  in four jobs (C6 first light, Heap budget, Emulator C6 lp-cli, the
+  release). Both are GitHub release lookups; the token-carrying steps of the
+  workaround did not help, so the lookup itself failed. Reran the failed jobs.
 - 2026-10-22 — PR #1257, run 39809305979: `extractions/setup-just@v3`'s
   "Install just" failed with `no release for just matching version specifier`
   in 12 jobs on the first attempt and in "Firmware size (esp32c6)" again on
