@@ -99,6 +99,13 @@ pub fn build() -> SocBus {
         if READ_ONLY.contains(&span.name) {
             region = region.read_only();
         }
+        if span.name == "drom-window" {
+            // A PSRAM page the MMU maps is writable through the data window,
+            // and the instruction window at the same table index serves the
+            // same bytes (`crate::cache`'s module docs, "PSRAM pages"). Read
+            // only on the store-through path; a flash page still faults.
+            region = region.store_mirror(memmap::IROM_BASE - memmap::DROM_BASE);
+        }
         bus.add_region(region);
     }
 

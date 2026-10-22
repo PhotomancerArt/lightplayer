@@ -115,6 +115,11 @@ pub struct RamRegion {
     /// [`AccessRule`]; the default is [`AccessRule::Any`], which is what
     /// every region did before the rule existed.
     pub access: AccessRule,
+    /// Where a store through one of this region's **store-through pages** is
+    /// made a second time: `address + store_mirror`. See
+    /// [`SocBus::set_store_through`]. `None` on every region but one, and
+    /// read only on that cold path.
+    pub store_mirror: Option<u32>,
     len: u32,
     /// Initial contents, moved into the bus's arena by
     /// [`SocBus::add_region`]. Empty for every region that is on a bus — it
@@ -132,6 +137,7 @@ impl RamRegion {
             exec: false,
             writable: true,
             access: AccessRule::Any,
+            store_mirror: None,
             len,
             init: Vec::new(),
         }
@@ -145,6 +151,7 @@ impl RamRegion {
             exec: false,
             writable: true,
             access: AccessRule::Any,
+            store_mirror: None,
             len: data.len() as u32,
             init: data,
         }
@@ -157,6 +164,14 @@ impl RamRegion {
 
     pub fn read_only(mut self) -> Self {
         self.writable = false;
+        self
+    }
+
+    /// A store through one of this region's store-through pages is also
+    /// made at `address + offset`, which must land in another region. See
+    /// [`SocBus::set_store_through`].
+    pub fn store_mirror(mut self, offset: u32) -> Self {
+        self.store_mirror = Some(offset);
         self
     }
 
@@ -341,6 +356,12 @@ const MAX_CODE_DIRTY_SPANS: usize = 64;
 /// with: small enough that a region boundary costs at most one page, large
 /// enough that the whole table is 16 KiB for a 256 MiB span.
 pub const PERMISSION_PAGE_LEN: u32 = 16 * 1024;
+
+/// The page [`SocBus::set_store_through`] opens and closes: 64 KiB, the S3
+/// flash MMU's page — the one chip that opens any.
+pub const STORE_THROUGH_PAGE_LEN: u32 = 1 << STORE_THROUGH_PAGE_SHIFT;
+/// `log2(STORE_THROUGH_PAGE_LEN)`.
+pub const STORE_THROUGH_PAGE_SHIFT: u32 = 16;
 
 /// [`SocBus::permission_table`]: not plain RAM. Every access on this page
 /// must go through the bus.
@@ -607,6 +628,13 @@ pub struct SocBus {
     /// grade that does not; [`SocBus::set_matrix`] pays the same price for
     /// the same reason.
     memory_cost: Option<Box<dyn MemoryCost + Send>>,
+    /// The pages of read-only regions the guest may store into anyway, one
+    /// bit per [`STORE_THROUGH_PAGE_LEN`] page of the 32-bit address space.
+    /// See [`SocBus::set_store_through`]. **`None` until a chip opens the
+    /// first one** — a pointer on every bus that never does (the `+1.2 %`
+    /// note on [`code_dirty`](Self::code_dirty) is why), and read only on
+    /// the store path's already-cold "this region is read-only" arm.
+    store_through: Option<Box<[u64]>>,
     /// Cycles [`memory_cost`](Self::memory_cost) has charged since the
     /// privileged stepper last drained it.
     memory_cycles: u32,
@@ -704,6 +732,7 @@ impl SocBus {
             matrix: Box::new(NoCpuInterrupts),
             request: None,
             memory_cost: None,
+            store_through: None,
             memory_cycles: 0,
             now: 0,
             pc: 0,
@@ -1686,6 +1715,128 @@ impl SocBus {
             };
         }
         table
+    }
+
+    /// Open (or close) one page of a **read-only** region to guest stores.
+    ///
+    /// A page is [`STORE_THROUGH_PAGE_LEN`] bytes; `base` is any address in
+    /// it. A store into an open page is made into the region's bytes as if
+    /// the region were writable, and — when the region declares a
+    /// [`store_mirror`](RamRegion::store_mirror) — made again at
+    /// `address + mirror`, with the mirror's executable-store bookkeeping
+    /// (the block cache's code-write record, `--strict-bus`'s missing-fence
+    /// check) done there as a guest store into it would. A store into a
+    /// closed page of a read-only region faults, as it always has.
+    ///
+    /// What it is for: a memory a chip maps **into a cache window at run
+    /// time**, which on the S3 is its PSRAM behind the flash MMU. The data
+    /// bus's window is read-only because flash is; a page the MMU points at
+    /// PSRAM is RAM, and the instruction bus's window at the same table index
+    /// serves the same bytes (`lp-emu-esp32s3`'s `cache.rs`). The window stays
+    /// one region, so instruction fetch and every load stay the plain arena
+    /// read they were.
+    ///
+    /// Opening a page costs a bus that never opens one nothing: the store
+    /// path tests this table only after it has already decided the region is
+    /// read-only, which a correct guest never reaches.
+    pub fn set_store_through(&mut self, base: u32, open: bool) {
+        let page = (base >> STORE_THROUGH_PAGE_SHIFT) as usize;
+        if !open && self.store_through.is_none() {
+            return;
+        }
+        let table = self.store_through.get_or_insert_with(|| {
+            alloc::vec![0u64; (1usize << (32 - STORE_THROUGH_PAGE_SHIFT)) / 64].into_boxed_slice()
+        });
+        let (word, bit) = (page / 64, page % 64);
+        if open {
+            table[word] |= 1 << bit;
+        } else {
+            table[word] &= !(1 << bit);
+        }
+    }
+
+    /// Is the page holding `address` open to stores? See
+    /// [`set_store_through`](Self::set_store_through).
+    pub fn is_store_through(&self, address: u32) -> bool {
+        let page = (address >> STORE_THROUGH_PAGE_SHIFT) as usize;
+        self.store_through
+            .as_ref()
+            .is_some_and(|t| t[page / 64] & (1 << (page % 64)) != 0)
+    }
+
+    /// Close every store-through page — a snapshot restore, before the chip
+    /// re-opens the ones its restored state names.
+    pub fn clear_store_through(&mut self) {
+        if let Some(t) = self.store_through.as_mut() {
+            t.fill(0);
+        }
+    }
+
+    /// The bytes at `[address, address + len)`, if they lie in one region.
+    /// The host's read of guest RAM — no watchpoint, no cost model, no
+    /// alias translation.
+    pub fn peek_span(&self, address: u32, len: u32) -> Option<&[u8]> {
+        self.regions.iter().find(|r| r.span_fits(address, len))?;
+        let off = (address - self.arena_base) as usize;
+        self.arena.get(off..off + len as usize)
+    }
+
+    /// The store path's cold arm for a read-only region with store-through
+    /// pages open somewhere on the bus. Out of line: see
+    /// [`set_store_through`](Self::set_store_through).
+    #[inline(never)]
+    fn write_store_through(
+        &mut self,
+        i: usize,
+        address: u32,
+        width: Width,
+        value: u32,
+        fault: MemoryError,
+    ) -> Result<(), MemoryError> {
+        let len = width.bytes();
+        let last = address.wrapping_add(len - 1);
+        if !self.is_store_through(address) || !self.is_store_through(last) {
+            return Err(fault);
+        }
+        if self.regions[i].end().wrapping_sub(address) < len
+            || !self.regions[i].accepts_data(address, len)
+        {
+            return Err(fault);
+        }
+        self.store_bytes(address, len, value);
+        if let Some(mirror) = self.regions[i].store_mirror {
+            let at = address.wrapping_add(mirror);
+            let Some(m) = self.region_index_slow(at) else {
+                return Err(fault);
+            };
+            if self.regions[m].end().wrapping_sub(at) < len {
+                return Err(fault);
+            }
+            let off = (at - self.arena_base) as usize;
+            if self.strict_fences {
+                self.note_guest_code_write(off, at, len, value);
+            }
+            if self.watch_code_any
+                && self.regions[m].exec
+                && self.arena[off..off + len as usize] != value.to_le_bytes()[..len as usize]
+            {
+                if self.watch_guest_code {
+                    self.note_guest_code_span(at, len);
+                }
+                if self.watch_code_stores {
+                    self.note_code_dirty(at, len);
+                }
+            }
+            self.store_bytes(at, len, value);
+        }
+        Ok(())
+    }
+
+    /// `len` little-endian bytes of `value` into the arena at `address`,
+    /// which the caller has bounds-checked.
+    fn store_bytes(&mut self, address: u32, len: u32, value: u32) {
+        let off = (address - self.arena_base) as usize;
+        self.arena[off..off + len as usize].copy_from_slice(&value.to_le_bytes()[..len as usize]);
     }
 
     /// Place bytes into RAM from the host side — ELF segments, a ROM image,
@@ -2684,6 +2835,9 @@ impl SocBus {
                 kind: MemoryAccessKind::Write,
             };
             if !self.regions[i].writable {
+                if self.store_through.is_some() {
+                    return self.write_store_through(i, address, width, value, fault);
+                }
                 return Err(fault);
             }
             // See `read`: the arena is flat, so the region's own end is what
