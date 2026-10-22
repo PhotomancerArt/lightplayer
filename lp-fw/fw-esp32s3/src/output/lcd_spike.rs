@@ -37,7 +37,10 @@
 //! `LCD:` lines, one per case, `LCD: RESULT pass|fail` last (raw text in the
 //! harness, log records in the app image).
 
-#![cfg_attr(not(fw_harness), allow(dead_code, reason = "the app probe runs only `frame`"))]
+#![cfg_attr(
+    not(fw_harness),
+    allow(dead_code, reason = "the app probe runs only `frame`")
+)]
 
 extern crate alloc;
 
@@ -556,7 +559,11 @@ fn pad_diag() -> (u32, u32, u32) {
         last = now;
     }
     let cam = esp_hal::peripherals::LCD_CAM::regs();
-    (toggles, cam.cam_ctrl().read().bits(), cam.cam_ctrl1().read().bits())
+    (
+        toggles,
+        cam.cam_ctrl().read().bits(),
+        cam.cam_ctrl1().read().bits(),
+    )
 }
 
 fn spin_us(us: u64) {

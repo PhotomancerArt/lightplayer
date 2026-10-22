@@ -59,7 +59,10 @@ async fn wifi_scans() {
         log::error!("[LCDPROBE] station config FAILED: {error:?}");
         return;
     }
-    log::info!("[LCDPROBE] wifi up, scanning (heap_free={})", esp_alloc::HEAP.free());
+    log::info!(
+        "[LCDPROBE] wifi up, scanning (heap_free={})",
+        esp_alloc::HEAP.free()
+    );
     let config = esp_radio::wifi::scan::ScanConfig::default().with_max(16);
     loop {
         match controller.scan_async(&config).await {
@@ -99,9 +102,19 @@ async fn lcd_frames() {
             clk: GPIO11::steal().into(),
             vsync: GPIO12::steal().into(),
         };
-        Rig::new(LCD_CAM::steal(), DMA_CH3::steal(), DMA_CH4::steal(), pads, None, 124 * 3)
+        Rig::new(
+            LCD_CAM::steal(),
+            DMA_CH3::steal(),
+            DMA_CH4::steal(),
+            pads,
+            None,
+            124 * 3,
+        )
     };
-    log::info!("[LCDPROBE] lcd rig up (heap_free={})", esp_alloc::HEAP.free());
+    log::info!(
+        "[LCDPROBE] lcd rig up (heap_free={})",
+        esp_alloc::HEAP.free()
+    );
     let (mut frames, mut failed, mut worst_frame_us, mut worst_encode_us) = (0u32, 0u32, 0, 0);
     loop {
         let report = rig.frame(&SKIRT, frames, Stress::None);
