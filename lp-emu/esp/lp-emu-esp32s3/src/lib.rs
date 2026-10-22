@@ -83,5 +83,6 @@ pub mod memmap;
 pub mod periph;
 pub mod regs;
 pub mod rom;
+pub mod seams;
 pub mod snapshot;
 pub mod test_support;

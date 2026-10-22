@@ -6172,6 +6172,7 @@ dependencies = [
  "lp-emu-core",
  "lp-emu-esp-common",
  "lp-emu-esp-figures",
+ "lp-seam",
  "lp-ws281x",
  "lp-xt-emu",
  "lp-xt-inst",

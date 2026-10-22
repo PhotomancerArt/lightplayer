@@ -129,6 +129,10 @@ mod output;
 mod radio_boot_probe;
 #[cfg(not(fw_harness))]
 mod recovery;
+// The `test_seam_abi` harness's seam table (S3 radio M5): the shipped image
+// declares no seam until it has a network stack (M4).
+#[cfg(feature = "test_seam_abi")]
+mod seams;
 #[cfg(not(fw_harness))]
 mod serial;
 #[cfg(all(lp_split, not(fw_harness)))]
@@ -310,6 +314,12 @@ fn boot() -> ! {
     {
         drop(peripherals);
         tests::incremental_shader_compile::run();
+    }
+
+    #[cfg(feature = "test_seam_abi")]
+    {
+        drop(peripherals);
+        tests::test_seam_abi::run();
     }
 }
 

@@ -777,6 +777,10 @@ pub enum Outcome {
         cycle: Cycles,
         report: lp_emu_esp_common::engine::flash_cut::FlashCutReport,
     },
+    /// A strict emulator seam request (`--seams`) cannot engage on the image
+    /// this chip start runs: no live table, or an entry missing. Judged once
+    /// the app runs, so after the build. Exit code 64, the C6's.
+    Seam { cycle: Cycles, why: String },
 }
 
 impl Outcome {
@@ -804,6 +808,7 @@ impl Outcome {
             Outcome::Breakpoint { .. } => 5,
             Outcome::CacheOffFetch { .. } => 6,
             Outcome::PowerCut { .. } => 8,
+            Outcome::Seam { .. } => 64,
         }
     }
 
@@ -816,6 +821,7 @@ impl Outcome {
             | Outcome::ExitMatched { cycle }
             | Outcome::CacheOffFetch { cycle, .. }
             | Outcome::PowerCut { cycle, .. }
+            | Outcome::Seam { cycle, .. }
             | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -868,6 +874,8 @@ pub enum BuildError {
     UndeclaredPeripheral {
         name: String,
     },
+    /// A strict emulator seam request that cannot engage (`--seams`).
+    Seam(String),
 }
 
 impl fmt::Display for BuildError {
@@ -889,6 +897,7 @@ impl fmt::Display for BuildError {
                 "peripheral `{name}` is not in PERIPHERAL_REGISTRATION_ORDER — add it in the \
                  place the boot meets it, not at the end"
             ),
+            BuildError::Seam(why) => write!(f, "{why}"),
         }
     }
 }
@@ -1140,6 +1149,21 @@ pub struct Esp32S3Builder {
     usb_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
     flash_cut: Option<FlashCutSpec>,
+    // ---- emulator seams (S3 radio M5) ----
+    /// Emulator seams to engage (`--seams`, `--seams-prefer`). The capability
+    /// defaults (`net=lan`, softly) unless asked otherwise.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// The wake's pacing knobs.
+    seam_pacing: lp_emu_esp_common::seam::PacerConfig,
+    /// The virtual LAN the network seam answers from, and this board's name
+    /// on it ([`Esp32S3Builder::lan`]); `None` gives an engaged board an empty
+    /// LAN of its own.
+    lan: Option<(
+        lp_emu_esp_common::seam::net::SharedLan,
+        lp_emu_esp_common::ParticipantId,
+    )>,
+    /// The run's pace ([`Esp32S3Builder::pace`]); `None` is the unset pace.
+    pace: Option<lp_emu_esp_common::seam::net::Pace>,
     // ---- the flash, the cache and the ROM's console (M6 P06) ----
     flash_backing: FlashBacking,
     flash_len: u32,
@@ -1183,6 +1207,10 @@ impl Default for Esp32S3Builder {
             usb_script: Vec::new(),
             reboot_on_reset: false,
             flash_cut: None,
+            seams: lp_emu_esp_common::seam::SeamRequest::default(),
+            seam_pacing: lp_emu_esp_common::seam::PacerConfig::default(),
+            lan: None,
+            pace: None,
             flash_backing: FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
             cache_off: CacheOffPolicy::default(),
@@ -1509,6 +1537,62 @@ impl Esp32S3Builder {
     /// 24-frame run holds hundreds of thousands of pulses.
     pub fn rmt_logs(mut self, keep: bool) -> Self {
         self.rmt_logs = keep;
+        self
+    }
+
+    /// Engage these emulator seams (`--seams net=lan`, `--seams-prefer …`;
+    /// `lp_emu_esp_common::seam::SeamRequest`). A strict seam that no table
+    /// in flash could satisfy fails the build; one that cannot engage once
+    /// the app runs ends the run with [`Outcome::Seam`]. A soft one prints
+    /// `SEAM none engaged: …` and the run goes on. The default request is the
+    /// capability defaults (`net=lan`, softly); only an empty one (`none`)
+    /// scans nothing.
+    pub fn seams(mut self, request: lp_emu_esp_common::seam::SeamRequest) -> Self {
+        self.seams = request;
+        self
+    }
+
+    /// Put this board on `lan` as `board` (`<board>/net`,
+    /// `lp_emu_esp_common::seam::net::net_endpoint`), its station MAC the
+    /// eFuse MAC ([`Self::efuse`]). When the request wants `net=lan`, the
+    /// board is **attached at build** — before the guest boots — so a host can
+    /// call [`SharedLan::forward`] and print the board's `lan:` address at
+    /// once; a MAC another board on the LAN already has fails the build. The
+    /// attachment survives every reboot and power cycle.
+    ///
+    /// Who drives the LAN is the LAN's ([`LanDriver`]): a self-driven or
+    /// wall-clock one is pumped by the machine itself (the S3 has no lockstep
+    /// runner, so a runner's LAN carries nothing for it). Without this an
+    /// engaged board gets an empty LAN of its own: nothing in range.
+    ///
+    /// [`SharedLan::forward`]: lp_emu_esp_common::seam::net::SharedLan::forward
+    /// [`LanDriver`]: lp_emu_esp_common::seam::net::LanDriver
+    pub fn lan(
+        mut self,
+        lan: lp_emu_esp_common::seam::net::SharedLan,
+        board: lp_emu_esp_common::ParticipantId,
+    ) -> Self {
+        self.lan = Some((lan, board));
+        self
+    }
+
+    /// The run's pace (`lp_emu_esp_common::seam::net::lan_pace`): `realtime`
+    /// holds the board's guest clock to wall time for the whole run, `max`
+    /// never does; unset (the default) holds it only while a host is
+    /// connected through one of its LAN's forwards. Applied at the board's
+    /// LAN pump, so `realtime` needs the network seam engaged on a LAN its
+    /// boards drive themselves: a run that does not ask for `net=lan`, or
+    /// whose LAN is a runner's, fails to build, and a chip start where the
+    /// seam does not engage ends the run ([`Outcome::Seam`]). A set pace is
+    /// in the configuration label (`…@pace=realtime`).
+    pub fn pace(mut self, pace: lp_emu_esp_common::seam::net::Pace) -> Self {
+        self.pace = Some(pace);
+        self
+    }
+
+    /// The wake's pacing knobs (`lp_emu_esp_common::seam::PacerConfig`).
+    pub fn seam_pacing(mut self, pacing: lp_emu_esp_common::seam::PacerConfig) -> Self {
+        self.seam_pacing = pacing;
         self
     }
 
@@ -1843,6 +1927,13 @@ impl Esp32S3Builder {
                 pin_log_lines: 0,
                 pin_log_capped: false,
             },
+            seams: crate::seams::SeamState {
+                pacer_config: self.seam_pacing,
+                board: self.lan.as_ref().map(|(_, b)| *b).unwrap_or_default(),
+                lan: self.lan.as_ref().map(|(l, _)| l.clone()),
+                pace: self.pace,
+                ..crate::seams::SeamState::new(self.seams.clone())
+            },
         };
 
         match self.boot_mode {
@@ -1883,6 +1974,46 @@ impl Esp32S3Builder {
         if self.reboot_on_reset || machine.flash_cut_armed {
             machine.power_on = Some(machine.snapshot());
         }
+
+        // Emulator seams: the build is the first chip start. After the
+        // power-on snapshot, so a reboot restores an unpatched window and
+        // resolves again. A direct load is already running the app, so it
+        // resolves and arms now; a ROM-up boot waits for the app. With none
+        // asked for: nothing at all.
+        //
+        // A board a host put on a LAN is attached now, before the guest
+        // boots, when it wants the network seam: its lease is reserved and a
+        // host can forward to it at once.
+        let wants_net = machine
+            .seams
+            .request
+            .wanted()
+            .iter()
+            .any(|(i, _)| i.answer == lp_emu_esp_common::seam::SeamAnswer::Net);
+        if let Some((lan, board)) = &self.lan
+            && wants_net
+        {
+            let id = lp_emu_esp_common::seam::net::net_endpoint(*board);
+            lan.attach(id, machine.efuse().mac)
+                .map_err(|why| BuildError::Seam(format!("net=lan: {why}")))?;
+            lan.set_pace(id, self.pace).map_err(BuildError::Seam)?;
+        }
+        // A `realtime` pace is held at the LAN pump: with no network seam
+        // asked for there is no LAN to hold it, and the run would go unpaced
+        // under a label that says otherwise.
+        if self.pace == Some(lp_emu_esp_common::seam::net::Pace::Realtime) && !wants_net {
+            return Err(BuildError::Seam(
+                crate::seams::net_seam::realtime_needs_a_lan(
+                    "this run does not ask for the network seam (`net=lan`)",
+                ),
+            ));
+        }
+        machine.seams_on_chip_start().map_err(BuildError::Seam)?;
+        machine.seams_start_if_app_running();
+        if let Some(why) = machine.seams.strict_error.take() {
+            return Err(BuildError::Seam(why));
+        }
+        machine.drain_code_writes();
 
         Ok(machine)
     }
@@ -1951,7 +2082,7 @@ fn fresh_hart(
 
 /// The ESP32-S3 machine.
 pub struct Machine {
-    bus: SocBus,
+    pub(crate) bus: SocBus,
     /// **Two** slots: the S3 is dual-core. Slot 1 is held — see the module
     /// docs.
     pub harts: Vec<XtHart<SocBus>>,
@@ -2059,6 +2190,10 @@ pub struct Machine {
     pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
     strap_word: u32,
+    /// Emulator seams: what was asked for, this chip start's resolution, the
+    /// arm sites and their counters. Empty on a run that asked for none
+    /// (`--seams none`). See [`crate::seams`].
+    pub(crate) seams: crate::seams::SeamState,
 }
 
 impl Machine {
@@ -2155,7 +2290,26 @@ impl Machine {
         if !self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
             return;
         }
-        self.cache_fills += self.refill_now();
+        let filled = self.refill_now();
+        self.cache_fills += filled;
+        // A fill can erase a seam's patch (or map the page a site waits
+        // for). Only after a fill, and only with a seam engaged: seam-off
+        // runs pay nothing, seam-on runs pay per fill, not per slice.
+        if filled > 0 && self.seams.engaged() {
+            self.arm_seams();
+        }
+    }
+
+    /// Hand every code write the bus recorded to both harts, so neither runs
+    /// a block decoded from bytes that have since changed.
+    fn drain_code_writes(&mut self) {
+        if self.bus.code_writes_pending() {
+            for (lo, hi) in self.bus.take_code_writes() {
+                for hart in &mut self.harts {
+                    hart.invalidate_block_range(lo, hi);
+                }
+            }
+        }
     }
 
     fn set_host_access(&mut self, on: bool) {
@@ -2530,16 +2684,18 @@ impl Machine {
             .copied()
     }
 
-    /// The run's configuration name: the time grade's, then `+flash-cut`
-    /// when a flash power-cut plan was armed — the C6's spelling
-    /// ([`FLASH_CUT_MARKER`]), which `lp-emu-validate` refuses to record.
+    /// The run's configuration name: the time grade's, then one
+    /// `+<seam>=<impl>` atom per engaged seam, then `+flash-cut` when a flash
+    /// power-cut plan was armed (the C6's spelling, [`FLASH_CUT_MARKER`],
+    /// which `lp-emu-validate` refuses to record), then `@pace=<mode>` when
+    /// the run's pace was set. Exactly the grade's name when none applies.
     pub fn configuration_label(&self) -> String {
-        let base = self.time_grade.configuration();
-        if self.flash_cut_armed {
-            format!("{base}{FLASH_CUT_MARKER}")
+        let suffix = if self.flash_cut_armed {
+            FLASH_CUT_MARKER
         } else {
-            base.to_string()
-        }
+            ""
+        };
+        self.seams.label(self.time_grade.configuration(), suffix)
     }
 
     /// The flash-cut run's summary lines, for a host to print at exit: the
@@ -3029,6 +3185,22 @@ impl Machine {
         hit
     }
 
+    /// Does the flash chip hold an image header at offset 0 (the second
+    /// stage the mask ROM loads)? `false` on a blank chip.
+    pub fn has_image_at_reset_vector(&self) -> bool {
+        self.flash()
+            .lock()
+            .ok()
+            .and_then(|flash| flash.peek(0, 1).map(|head| head[0]))
+            .is_some_and(|head| head == crate::image::IMAGE_MAGIC)
+    }
+
+    /// Whether a byte client holds the USB link's socket now (the edge the
+    /// coupling last saw), for the network seam's unset pace.
+    pub(crate) fn usb_client_is_connected(&self) -> bool {
+        self.usb_client_connected
+    }
+
     /// Read a word of guest memory from the host side. Marked as the
     /// emulator's own access, so D4's watch never arms on it.
     pub fn peek_word(&mut self, address: u32) -> Option<u32> {
@@ -3051,6 +3223,52 @@ impl Machine {
         self.set_host_access(false);
         self.bus.set_pc(saved);
         ok
+    }
+
+    /// `len` bytes of guest memory at `address`, read word by word through
+    /// [`peek_word`](Self::peek_word)'s decode; `None` if any word refused.
+    pub(crate) fn peek_bytes(&mut self, address: u32, len: usize) -> Option<Vec<u8>> {
+        let mut out = Vec::with_capacity(len);
+        let mut at = address;
+        while out.len() < len {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let word = self.peek_word(word_at)?.to_le_bytes();
+            let take = (4 - lane).min(len - out.len());
+            out.extend_from_slice(&word[lane..lane + take]);
+            at = at.checked_add(take as u32)?;
+        }
+        Some(out)
+    }
+
+    /// Write `bytes` at `address` through [`poke_word`](Self::poke_word)'s
+    /// decode, merging partial words with what is there. `false` if any word
+    /// refused (what came before it is written). A seam answer's only way
+    /// into guest memory.
+    pub(crate) fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
+        let mut at = address;
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let take = rest.len().min(4 - lane);
+            let mut word = if lane == 0 && take == 4 {
+                0
+            } else {
+                match self.peek_word(word_at) {
+                    Some(w) => w,
+                    None => return false,
+                }
+            }
+            .to_le_bytes();
+            word[lane..lane + take].copy_from_slice(&rest[..take]);
+            if !self.poke_word(word_at, u32::from_le_bytes(word)) {
+                return false;
+            }
+            at += take as u32;
+            rest = &rest[take..];
+        }
+        true
     }
 
     /// The word at a symbol, for `--probe <cycle>:<symbol>`.
@@ -3118,6 +3336,21 @@ impl Machine {
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
             }
+            // The network seam's LAN, when this machine drives it itself:
+            // what the guest gave goes out, what arrived comes in, before the
+            // wake looks. One `bool` on every other run.
+            if self.seams.net_pumps {
+                self.net_pump(now);
+            }
+            // An engaged capability seam's wake, before the window: a raise
+            // reaches the cores now, not after a window (or an idle skip)
+            // that could not see it. Never on a seam-off run.
+            if self.seam_wake_armed() && self.seam_wake_tick(now) {
+                self.feed_cores(now);
+            }
+            if let Some(at) = self.seam_wake_deadline() {
+                deadline = deadline.min(at.max(now + 1));
+            }
             // The window. The quantum is the *upper* bound on one core's
             // window; every bound above still applies.
             let window = deadline.saturating_sub(now).max(1).min(self.core_quantum);
@@ -3182,7 +3415,7 @@ impl Machine {
                         self.harts[core].poll_interrupts();
                     }
                     SliceEnd::Ebreak { pc } => {
-                        if !self.serve_breakpoint(core, pc) {
+                        if !self.serve_breakpoint(core, pc) && !self.serve_seam(core, pc) {
                             self.harts[core].deliver_breakpoint(pc);
                         }
                     }
@@ -3216,6 +3449,18 @@ impl Machine {
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
             self.service_host(at);
+            // Seams: a chip start waits for the app to run from the flash
+            // window, then resolves and arms. One `bool` on a seam-off run.
+            if self.seams.waiting_for_app {
+                self.seams_start_if_app_running();
+                self.drain_code_writes();
+            }
+            if let Some(why) = self.seams.strict_error.take() {
+                return Outcome::Seam {
+                    cycle: self.cycles(),
+                    why,
+                };
+            }
             self.feed_cores(at);
 
             // The deterministic idle skip: only when **every** running core is
@@ -3236,10 +3481,14 @@ impl Machine {
                 // …and anything the host's side is due to do, for the same
                 // reason the slice is bounded by it.
                 let host = self.next_host_service(at);
+                // …and the seams' next look: a wake the pacer would allow,
+                // or the LAN's next due cycle, so a guest in `waiti` never
+                // sleeps through a join landing or a frame arriving.
+                let seam = self.seam_wake_deadline();
                 let timers = (0..CORES)
                     .filter(|c| !self.core_stalled(*c))
                     .filter_map(|c| self.harts[c].next_timer_cycle());
-                let wake = [event, bytes, host]
+                let wake = [event, bytes, host, seam]
                     .into_iter()
                     .flatten()
                     .chain(timers)
@@ -3608,6 +3857,8 @@ impl Machine {
             && connected != self.usb_client_connected
         {
             self.usb_client_connected = connected;
+            // A byte-socket client reads on wall time: it holds an unset pace.
+            self.net_host_attached(connected);
             if self.usb_sj_drain == UsbSjDrain::Auto {
                 let command = if connected {
                     ControlCommand::Open
@@ -3812,7 +4063,7 @@ impl Machine {
             self.usb_sj_tried_log.bytes(),
             self.uart0_log.bytes(),
         );
-        self.restore(&power_on);
+        self.restore_state(&power_on);
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
         self.uart0_log.replace(&uart0);
@@ -3848,6 +4099,15 @@ impl Machine {
             .is_some_and(|tcp| tcp.client_connected());
         self.usb_client_connected = client && usb_host.draining();
         self.reboots += 1;
+        // Emulator seams resolve on every chip start: re-scan the flash as it
+        // is NOW (an update may have rewritten it), forget the old sites, and
+        // wait for the app again. A strict request that can no longer engage
+        // ends the run at the next boundary.
+        if let Err(why) = self.seams_on_chip_start() {
+            self.seams.strict_error = Some(why);
+        }
+        self.seams_start_if_app_running();
+        self.drain_code_writes();
         true
     }
 
@@ -3973,8 +4233,17 @@ impl Machine {
     }
 
     /// Put the machine back exactly where [`snapshot`](Self::snapshot) took
-    /// it.
+    /// it, and re-arm the seams over the restored window (which may hold a
+    /// patch, or not).
     pub fn restore(&mut self, snap: &Snapshot) {
+        self.restore_state(snap);
+        self.arm_seams();
+        self.drain_code_writes();
+    }
+
+    /// [`restore`](Self::restore) without the re-arm: a reboot resolves the
+    /// seams afresh instead.
+    fn restore_state(&mut self, snap: &Snapshot) {
         self.harts = snap.harts.clone();
         self.stalled = snap.stalled;
         *self.core_1_control.lock().expect("core_1_control poisoned") = snap.core_1_control;

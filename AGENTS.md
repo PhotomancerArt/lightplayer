@@ -1613,6 +1613,12 @@ The shipped firmware declares a few functions (`lp-base/lp-seam`, MIT,
 asks**. The ROM hook table stays empty; seams are their own exception, with
 their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
 
+The C6 and, since S3 radio M5, the **S3** answer seams (Xtensa: a `movi`
+hint, a windowed call through a volatile pointer, answered at a `break` over
+the `entry` before the window rotates — the ADR's §13; the wake is
+`SYSTEM.cpu_intr_from_cpu_3`). The shipped S3 image declares no seam until it
+has Wi‑Fi; only its `test_seam_abi` harness does.
+
 - **Two kinds.** A *capability* seam stands in for hardware the emulator
   cannot model: `net=lan` (the network seam, below) ships and is on by
   default; Bluetooth is next. A *performance* seam skips work the emulator

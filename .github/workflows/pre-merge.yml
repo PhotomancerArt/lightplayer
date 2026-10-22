@@ -2679,37 +2679,18 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-      # The S3's half of the heap-budget record's chip section (M6 P10). It
-      # lives here rather than in `Heap budget (esp32c6 chip)` because it
-      # needs the Xtensa toolchain this job already installs — a cold espup
-      # install is ~8 minutes — and because that job is path-gated on
-      # `emu_c6`, which does not fire for `lp-fw/fw-esp32s3/**` at all, so
-      # this firmware's own changes would have run its heap gate never
-      # (DD71).
-      #
-      # Cost, measured on an M2 Max with a warm cargo cache: ~25 s all in — a
-      # `fw-esp32s3` rebuild (the walk's `frame-dump` build shares this target
-      # path, so naming the features is what makes the shipped image come
-      # back) plus a sub-second boot that ends on its own `[JIT] used=` line.
-      #
-      # It runs even when the gate failed, for the classic's reason: a statics
-      # change moves both, and one red run should patch both.
-      - name: Heap budget ratchet — the S3's own ledger
-        id: figures_heap
-        if: success() || steps.figures_tests.outcome == 'failure'
-        shell: bash
-        run: cd lp2025 && just heap-budget-check-chips-s3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+      # The S3's heap ratchet runs in `emu-esp32s3-seams` since S3 radio M5:
+      # this job reached its 35-minute budget on cold-cache PRs with it here.
 
       # A moved FIGURE hands back its patch — see `emu-c6`'s step of the same
       # name, and `emu-esp32v3`'s for the image copies it re-runs against.
       - name: Figure moves — bless what failed, diff the records
         id: figures_patch
-        if: failure() && (steps.figures_tests.outcome == 'failure' || steps.figures_heap.outcome == 'failure')
+        if: failure() && steps.figures_tests.outcome == 'failure'
         timeout-minutes: 15
         shell: bash
         env:
           TESTS: ${{ steps.figures_tests.outcome }}
-          HEAP: ${{ steps.figures_heap.outcome }}
           FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -2723,12 +2704,6 @@ jobs:
             scripts/ci/figures-patch.py bless --name "S3 link gates (lp-cli)" \
               --log "$RUNNER_TEMP/figures-tests.log" \
               --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-cli --release --test emu_s3_link_gates"
-          fi
-          if [ "$HEAP" = failure ]; then
-            scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32s3)" \
-              --log "$RUNNER_TEMP/figures-heap.log" \
-              --heap-bless "just heap-budget-baseline-chips-s3" \
-              --heap-check "just heap-budget-check-chips-s3"
           fi
           scripts/ci/figures-patch.py collect --job emu-esp32s3 --job-name "Emulator ESP32-S3 (x64)"
 
@@ -2756,6 +2731,148 @@ jobs:
               echo '```'; } >> "$GITHUB_STEP_SUMMARY"
             grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
+
+  # The S3's emulator seams (S3 radio M5, `just test-emu-esp32s3-seams`) and
+  # the S3's heap ratchet (`just heap-budget-check-chips-s3`, moved here from
+  # `emu-esp32s3` at the same time, for the same budget):
+  # the `test_seam_abi` harness image — one Xtensa firmware build — and
+  # `lp-emu-esp32s3`'s `tests/seam_*` with the dev-only `test-seams`
+  # implementations. A job of its own rather than a step of `emu-esp32s3`,
+  # which already ran 28–30.5 minutes of its 35 on main when this landed
+  # (the gate, P4's split boot and the heap ratchet) and was cancelled at its
+  # budget with every step passing when this was a step of it
+  # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md: split, don't
+  # bump). Locally ~2 minutes warm. **The first green run's wall clock goes
+  # in this comment.**
+  emu-esp32s3-seams:
+    name: Emulator ESP32-S3 seams and heap (x64)
+    runs-on: ubuntu-24.04
+    # The harness build and its tests (~4 min) plus the heap ratchet (a
+    # shipped-image build and a release lp-cli, ~6 min on the gate job).
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.figures_esp32s3 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport/espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Host nightly for the emulator, the Xtensa fork for the harness image,
+      # not made default — `emu-esp32s3`'s reasoning, and its versions; keep
+      # them in sync.
+      - name: Install Rust toolchain (host)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install Xtensa Rust toolchain
+        uses: ./lp2025/.github/actions/xtensa-toolchain
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: false
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      # The gate job's espflash, pinned the same: the ratchet's ci-images
+      # wrapper may build a merged image.
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      - name: Emulator ESP32-S3 seams (the harness image, the ABI, net=lan, the wake)
+        id: seams
+        run: cd lp2025 && just test-emu-esp32s3-seams
+
+      # The S3's half of the heap-budget record's chip section (M6 P10). It
+      # lives here rather than in `Heap budget (esp32c6 chip)` because it
+      # needs the Xtensa toolchain this job already installs — a cold espup
+      # install is ~8 minutes — and because that job is path-gated on
+      # `emu_c6`, which does not fire for `lp-fw/fw-esp32s3/**` at all, so
+      # this firmware's own changes would have run its heap gate never
+      # (DD71).
+      #
+      # Cost, measured on an M2 Max with a warm cargo cache: ~25 s all in — a
+      # `fw-esp32s3` rebuild (the walk's `frame-dump` build shares this target
+      # path, so naming the features is what makes the shipped image come
+      # back) plus a sub-second boot that ends on its own `[JIT] used=` line.
+      #
+      # It runs even when the seam tests failed: a statics change is this
+      # step's to report, whatever the harness said. (Moved here from
+      # `emu-esp32s3` in S3 radio M5, whose budget it pushed over.)
+      - name: Heap budget ratchet — the S3's own ledger
+        id: figures_heap
+        if: success() || steps.seams.outcome == 'failure'
+        shell: bash
+        run: cd lp2025 && just heap-budget-check-chips-s3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # A moved heap FIGURE hands back its patch — `emu-esp32s3`'s step of the
+      # same name, for this job's one figure source.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && steps.figures_heap.outcome == 'failure'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32s3)" \
+            --log "$RUNNER_TEMP/figures-heap.log" \
+            --heap-bless "just heap-budget-baseline-chips-s3" \
+            --heap-check "just heap-budget-check-chips-s3"
+          scripts/ci/figures-patch.py collect --job emu-esp32s3-seams --job-name "Emulator ESP32-S3 seams and heap (x64)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-emu-esp32s3-seams
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
@@ -4263,6 +4380,7 @@ jobs:
       - emu-esp32v3
       - emu-esp32v3-ref
       - emu-esp32s3
+      - emu-esp32s3-seams
       - heap-budget-chips
       - emu-c6-cli
       - c6-first-light
