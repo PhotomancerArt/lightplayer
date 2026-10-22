@@ -17,17 +17,33 @@
 //! process is). The board is built to reboot on reset (`S3Board::build`),
 //! so a requested reboot — the S3's performed software reset — keeps the
 //! host attached across it.
+//!
+//! Since S3 radio M5 it takes the C6's seam flags as well: `--seams`,
+//! `--seams-prefer` (with neither, the capability defaults — `net=lan` —
+//! softly, as on the C6), `--seam-trace`, `--pace`, and `--lan <fixture>`,
+//! which puts the board on a virtual LAN of its own and prints its forward
+//! (`lan:127.0.0.1:<port>`). A board on a LAN gets the locally administered
+//! MAC `emu serve` gives its first board unless `--efuse-mac` names one: the
+//! S3 machine's own default eFuse MAC is all zeros.
 
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32s3::control::parse_usb_script;
 use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::machine::{AppSource, BootMode, Esp32S3Builder, FrameSink, TimeGrade, UsbHost};
 
-use super::args::{Grade, RunArgs, UsbHostArg};
-use super::handler::{check_file, whole_part_len};
-use super::link_host::S3Board;
+use lp_emu_esp_common::seam::SeamRequest;
+use lp_emu_esp_common::seam::net::LanDriver;
+use lp_emu_esp32s3::loader::EfuseIdentity;
 
-pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
+use super::args::{Grade, RunArgs, UsbHostArg};
+use super::handler::{
+    RUN_BOARD, SEAM_TRACE_ONLY, SeamLines, announce_lan_for, check_file, whole_part_len,
+};
+use super::lan_fixture::LanFixture;
+use super::link_host::S3Board;
+use super::serve::default_mac;
+
+pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<()> {
     if !args.host_link {
         bail!(
             "`emu run --chip esp32s3` is the hosted run only: pass --host-link (the S3's own \
@@ -45,8 +61,6 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
         (args.tx_log.is_some(), "--tx-log"),
         (!args.pin_script.is_empty(), "--pin-script"),
         (!args.wire.is_empty(), "--wire"),
-        (args.efuse_mac.is_some(), "--efuse-mac"),
-        (args.efuse_rev.is_some(), "--efuse-rev"),
         (args.flash_part.is_some(), "--flash-part"),
         (args.reset_cause.is_some(), "--reset-cause"),
         (args.strap.is_some(), "--strap"),
@@ -103,6 +117,48 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
     }
+
+    // The seams (S3 radio M5): the request, the board's LAN and its pace.
+    builder = builder.seams(seams);
+    if let Some(pace) = args.pace {
+        builder = builder.pace(pace.pace());
+    }
+    // `--lan`: one board on a LAN of its own, driven on its own guest clock.
+    let lan = match args.lan.as_deref() {
+        Some(path) => {
+            let fixture = LanFixture::read(path)?;
+            Some((fixture.lan(LanDriver::SelfDriven), fixture))
+        }
+        None => None,
+    };
+    if let Some((shared, _)) = &lan {
+        builder = builder.lan(shared.clone(), RUN_BOARD);
+    }
+    if let Some(path) = &args.seam_trace {
+        let file = std::fs::File::create(path)
+            .with_context(|| format!("--seam-trace: creating {}", path.display()))?;
+        builder = builder.trace(
+            Box::new(SeamLines::new(file)),
+            vec![SEAM_TRACE_ONLY.to_string()],
+        );
+    }
+    // The eFuse identity: what `--efuse-*` names; on a LAN with none named,
+    // `emu serve`'s first board's MAC rather than the machine's all-zero one.
+    let mut efuse = EfuseIdentity::default();
+    if lan.is_some() {
+        efuse.mac = default_mac(0);
+    }
+    if let Some(text) = &args.efuse_mac {
+        efuse.mac = EfuseIdentity::parse_mac(text)
+            .map_err(|e| anyhow::anyhow!("--efuse-mac `{text}`: {e}"))?;
+    }
+    if let Some(text) = &args.efuse_rev {
+        (efuse.wafer_major, efuse.wafer_minor) = EfuseIdentity::parse_rev(text)
+            .map_err(|e| anyhow::anyhow!("--efuse-rev `{text}`: {e}"))?;
+    }
+    if efuse != EfuseIdentity::default() {
+        builder = builder.efuse(efuse);
+    }
     // The cable's schedule beside a hosted link: control words only, exactly
     // as the C6 door restricts it (`handler.rs`) — the host IS the link, so
     // a scripted byte would be injected under it.
@@ -128,7 +184,9 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
         .usb_host
         .map(UsbHostArg::usb_host)
         .unwrap_or(UsbHost::Attached { draining: true });
-    let board = S3Board::build(builder, usb_host)?;
+    let mut board = S3Board::build(builder, usb_host)?;
+    board.print_seam_lines();
+    announce_lan_for(board.machine.net_endpoint_id(), lan.as_ref())?;
     let boot = format!(
         "esp32s3 {} boot, grade {}",
         board.machine.boot_mode().as_str(),

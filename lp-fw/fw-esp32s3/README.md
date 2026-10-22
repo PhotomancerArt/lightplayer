@@ -194,6 +194,25 @@ the milestone gate that first has a use for the button; this harness exists so
 the driver cannot rot uncompiled — see
 `docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
 
+### `test_seam_abi` (emulator only)
+
+```bash
+just build-fw-esp32s3 test_seam_abi   # `just test-emu-esp32s3-seams` builds and runs it
+```
+
+The Xtensa emulator-seam ABI under the real `release-esp32s3` build (S3
+radio M5; `docs/adr/2026-10-05-emulator-seams.md` §13). It calls
+`test_echo(1, 2, 4)`, drains `test_take`, and — when the network seam's
+engaged byte reads 1 — `net_mac` and `net_link`, each through the shim
+`lp_seam::seam_fn!` generates for Xtensa, with a value kept live across every
+call; then, with the take engaged, it binds the S3's wake handler
+(`seams::seam_wake_handler`, `SYSTEM.cpu_intr_from_cpu_3`) and sleeps in
+`waiti`, draining the take on every wake. It is the only image with a seam
+table (`src/seams/`); the shipped image declares none until it has a network
+stack. On silicon it prints `echo=7`, `take engaged=false`,
+`net engaged=false` and idles. The emulator's side is
+`lp-emu/esp/lp-emu-esp32s3/tests/seam_abi_harness.rs`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
@@ -443,8 +462,13 @@ The C6's radio, on this chip (S3 radio plan, M3 and M4,
 - **`ble`**: the BLE link — lp-link over a Nordic-UART GATT service, one
   untrusted link per connection into the link mux. The controller is BTDM,
   not the C6's NPL, so its configuration is this chip's
-  (`src/ble/ble_controller_config.rs`: two connections, the controller task on
-  core 0).
+  (`src/ble/ble_controller_config.rs`): three activities — the two link slots
+  plus the advertiser that offers the second one (BTDM counts every
+  advertising set and connection against `max_connections`; the C6's NPL
+  counts connections only:
+  docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md)
+  — and the controller task on core 0. Logins draw their nonce from the
+  hardware RNG (`fill_random`), as on the C6.
 - **`wifi`**: the station, the IP stack, the secure LAN link at
   `ws://<board>/link`, mDNS `lp-xxxx.local` and the relay's device leg, on
   `lp-net` (12 KB, priority 1, pinned to core 0: `src/net/net_chip.rs`). The
@@ -458,10 +482,16 @@ CPU0) sit under the link thread's priority-1 lock (`src/io_thread.rs`). On a
 split image the radio links serve the engine once `split_boot` enters it; a
 core-only S3 serves nothing over the air yet (updates are the updates plan's).
 
-**Off by default** until the desk walks have passed on FS3 (they wait for an
-antenna): because a fresh board starts BLE, a default `ble` would start it on
-every fresh S3, emulated ones included. Build them with `just build-fw-esp32s3
-wifi` or `just fw-esp32s3-split esp32s3,server,float-f32,wifi`.
+**`ble` is on by default** since its desk walk passed on FS3
+(`docs/reports/2026-10-21-s3-bluetooth-walk.md`), and with it `radio` (the C6's
+tiers): every S3 image starts the radio and the controller unless the device
+store turns Bluetooth off, emulated ones included (they advertise to nobody, as
+an emulated C6 does). **`wifi` is off by default** until its desk walk passes:
+build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
+esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
+--features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
+probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
+`s3_wifi` are the features minus the probe, and the source gates on those).
 
 **Memory** is `docs/adr/2026-10-21-s3-radio-memory.md`: the radio blobs' own
 48 KB C heap (`src/c_heap.rs`), the arena cut around the boot stages' RAM and
@@ -473,9 +503,12 @@ against 319,504 / 287,940 without a radio. A radio image prints its regions at
 boot (`[INIT] heap region: …`) and the radio region's high water at the
 heartbeat (`[radio-heap] …`).
 
-On FS3 (2026-10-21, **no antenna attached**, so its advertising was never
-heard): `[ble] up: controller +32568 B, host + GATT +3520 B`, the BLE-only
-radio region at 23,658 B.
+On FS3 with an antenna, Mac Chrome as the central (2026-10-21, the Bluetooth
+walk record, a `ble` image without M4's ESP-NOW): `[ble] up: controller +33400
+B, host + GATT +3520 B`; connected, the radio region's high water is 26,084 of
+32,768 B (0 B overflowed to main) and the main stack's 29,312 of 54,296 B.
+Frame rate on `/projects/studio` (Peach (1D)): 37 fps radio off, 35–36
+advertising, 32 connected and editing, inside the radio frame-rate budget.
 
 ## How this differs from fw-esp32c6
 

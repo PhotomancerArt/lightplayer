@@ -62,7 +62,7 @@ pub fn init_board() -> (
     crate::radio_boot_probe::stash(peripherals.WIFI, peripherals.BT);
     // The radio's peripherals, kept until `core_boot` brings the radio up
     // after the filesystem mounts (`crate::radio_peripherals`).
-    #[cfg(all(feature = "radio", not(fw_harness)))]
+    #[cfg(all(s3_radio, not(fw_harness)))]
     crate::radio_peripherals::stash(peripherals.WIFI, peripherals.BT);
 
     // Set up software interrupt and timer for the Embassy runtime.

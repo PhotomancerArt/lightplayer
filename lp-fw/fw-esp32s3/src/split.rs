@@ -230,7 +230,7 @@ pub fn split_boot(core: CoreBoot) {
             // The radio links serve the engine's server (the link mux). In
             // the same synchronous run as `core_boot`, so before the BLE task
             // has run at all; a connection that subscribes waits for it.
-            #[cfg(feature = "ble")]
+            #[cfg(s3_ble)]
             core.radio_port
                 .decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
             entry(core)

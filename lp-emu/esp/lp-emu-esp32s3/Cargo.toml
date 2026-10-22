@@ -27,8 +27,18 @@ lp-xt-emu = { path = "../../lp-xt-emu" }
 # `--strip-order`) without re-declaring either enum. Both other machines have
 # the same one.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+# Emulator seams (`src/seams/`): the declarations, identity and hint a seam
+# function carries. MIT, outside the fence, admitted with no allowlist entry.
+lp-seam = { path = "../../../lp-base/lp-seam" }
 log = { workspace = true }
 env_logger = { workspace = true }
+
+[features]
+# The TEST ONLY seam implementations (`test=echo`, `test=take`; ADR
+# docs/adr/2026-10-05-emulator-seams.md). Dev-only and off by default: the
+# seam tests turn it on (`cargo test --features test-seams`), no shipped
+# command line ever does. The C6's feature, the same way.
+test-seams = ["lp-emu-esp-common/test-seams"]
 
 [dev-dependencies]
 # The assembler, for `tests/isa_gaps.rs`. A **test** dependency: the machine

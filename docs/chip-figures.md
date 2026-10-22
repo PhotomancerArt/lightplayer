@@ -149,7 +149,8 @@ in the change that stopped observing it.
 ## When CI hands back the patch
 
 Every job that checks figures — `Emulator C6 (x64)`, `Emulator ESP32v3 (x64)`,
-`Emulator ESP32-S3 (x64)`, `Heap budget (esp32c6 chip)`, and the engine ratchet
+`Emulator ESP32-S3 (x64)`, `Emulator ESP32-S3 seams and heap (x64)` (the S3's
+heap ratchet), `Heap budget (esp32c6 chip)`, and the engine ratchet
 in `Validate (x64)` — tees its figure checks' output, and when one of them
 fails it runs one more step, `Figure moves — bless what failed, diff the
 records` (`scripts/ci/figures-patch.py`):

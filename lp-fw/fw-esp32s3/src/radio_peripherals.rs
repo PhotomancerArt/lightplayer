@@ -25,7 +25,7 @@ pub fn take_wifi() -> Option<WIFI<'static>> {
 }
 
 /// The BT peripheral, once.
-#[cfg(feature = "ble")]
+#[cfg(s3_ble)]
 pub fn take_bt() -> Option<BT<'static>> {
     critical_section::with(|cs| BT_PERIPHERAL.borrow_ref_mut(cs).take())
 }

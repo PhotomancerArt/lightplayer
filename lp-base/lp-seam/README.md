@@ -95,18 +95,33 @@ lp_seam::seam_fn! {
 ```
 
 - **The seam function** is `#[inline(never)] extern "C"`, exported as
-  `lp_seam_<name>`, and holds a non-`pure` `addi zero, zero, <hint>` with an
-  immediate unique per seam: LLVM cannot delete the body or fold two into
-  one.
-- **The call shim** (`call`) reaches it only from an `asm!` block — `call`
-  with the arguments bound to `a0..a7`, the result read from `a0`, and
-  `clobber_abi("C")` — so LTO cannot internalise the ABI, drop the argument
-  set-up, or constant-fold the result. The M0 spike watched an ordinary
-  `#[no_mangle]` body lose all three under `lto = true` + `opt-level = "z"`.
+  `lp_seam_<name>`, and holds a non-`pure` hint with an immediate unique per
+  seam: LLVM cannot delete the body or fold two into one. On RISC-V the hint
+  is `addi zero, zero, <hint>`; on Xtensa, `movi <scratch>, <hint>` into a
+  register the compiler picks (it may emit `movi.n` and may schedule it a few
+  instructions past the `entry`).
+- **The call shim** (`call`) reaches it so LTO cannot internalise the ABI,
+  drop the argument set-up, or constant-fold the result. The M0 spike
+  watched an ordinary `#[no_mangle]` body lose all three under `lto = true`
+  + `opt-level = "z"`.
+  - **RISC-V:** an `asm!` `call` with the arguments bound to `a0..a7`, the
+    result read from `a0`, and `clobber_abi("C")`.
+  - **Xtensa** (S3 radio M5): an ordinary windowed `callx8` through a
+    `static` function pointer read with `read_volatile`, so the compiler
+    cannot see the target and must keep the call, its arguments (the
+    callee's `a2..`, the caller's `a10..`) and its result. No hand-written
+    windowed `asm!`: the compiler owns the window; the emulator answers at a
+    `break` planted over the function's `entry`, before the window rotates
+    (n = `PS.CALLINC`, arguments at `a(4n+2)..`, the result to `a(4n+2)`, the
+    return to the windowed return address's low 30 bits).
 
-Off `riscv32` (host tests, the Xtensa firmwares' builds of shared code) the
-shim calls the silicon body directly and no seam function exists. Xtensa
-seams are the roadmap's M7.
+Off `riscv32` and `xtensa` (host tests) the shim calls the silicon body
+directly and no seam function exists.
+
+Adding Xtensa did **not** move `SEAM_ABI_ID`: the identity hashes the
+`declare!` invocation (below), and the declarations did not change — only the
+macro that emits each arch's function and shim. An arch is a way to call a
+seam, not a seam.
 
 ## The engaged byte
 
@@ -130,7 +145,11 @@ clears the line, then swaps the word to zero. Whatever a seam wakes runs on
 the firmware's IO thread, and the emulator paces what it raises. The C6
 image carries the handler since the network seam (`pending` names a RAM
 word; bit 0 = frames, bit 1 = station events, any bit wakes both of
-`lp-net`'s waiters), bound only when that seam is engaged.
+`lp-net`'s waiters), bound only when that seam is engaged. On the S3 the
+line is the same software interrupt, raised through
+`SYSTEM.cpu_intr_from_cpu_3` (source 82) rather than an `INTPRI`; its
+handler (`fw-esp32s3`'s `seams::seam_wake_handler`) is bound today only by
+the `test_seam_abi` harness, until the S3 has a network bring-up to bind it.
 
 ## The network seam (`net=lan`)
 

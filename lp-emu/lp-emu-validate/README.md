@@ -217,8 +217,9 @@ would be comparing nothing:
 - the whole `[JIT]` line is zeros, `cap=0` included — the S3 has no reserved
   code region, the JIT allocates out of the `esp_alloc` heap, and its
   residency is already inside `[MEM] used`.
-- the boot heap line is **one number**, `[INIT] chip=esp32s3 arch=xtensa
-  heap=245760`, where the classic prints the four-region sum. The *fields* are
+- the boot heap line is **a two-region sum**, `[INIT] chip=esp32s3
+  arch=xtensa heap=172032+73744=245776` (the arena and `dram2_seg`), where the
+  classic prints the four-region sum. The *fields* are
   comparable across the three chips; the *line* is not.
 
 Its `usb-serial-jtag` row is the one most likely to be misread as a

@@ -82,7 +82,7 @@ lpc_model::lp_embed_manifest_core! {
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
         lpc_model::manifest::feature_fragment(
-            cfg!(feature = "radio"),
+            cfg!(s3_radio),
             lpc_model::LpFeature::SvcRadioEspnow,
         ),
         lpc_model::manifest::feature_fragment(
@@ -103,12 +103,12 @@ lpc_model::lp_embed_manifest_core! {
 }
 
 // The BLE link (feature `ble`, S3 radio M3), over the shared crate.
-#[cfg(all(feature = "ble", not(fw_harness)))]
+#[cfg(all(s3_ble, not(fw_harness)))]
 mod ble;
 mod board;
 // The radio blobs' C heap and the regions a radio image allocates from: the
 // product radio (`radio`) and the M1 probe both link the blobs.
-#[cfg(all(any(feature = "radio", feature = "radio_boot_probe"), not(fw_harness)))]
+#[cfg(all(any(s3_radio, feature = "radio_boot_probe"), not(fw_harness)))]
 mod c_heap;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
@@ -119,7 +119,7 @@ mod flash_storage;
 mod io_thread;
 #[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
 mod io_thread_stack_diag;
-#[cfg(all(feature = "wifi", not(fw_harness)))]
+#[cfg(all(s3_wifi, not(fw_harness)))]
 mod net;
 // Not simply `not(fw_harness)`: the `test_button` harness drives the same
 // registry-facing driver the app path registers, and a self-test against a
@@ -134,10 +134,14 @@ mod hardware;
 mod output;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
-#[cfg(all(feature = "radio", not(fw_harness)))]
+#[cfg(all(s3_radio, not(fw_harness)))]
 mod radio_peripherals;
 #[cfg(not(fw_harness))]
 mod recovery;
+// The `test_seam_abi` harness's seam table (S3 radio M5): the shipped image
+// declares no seam until it has a network stack (M4).
+#[cfg(feature = "test_seam_abi")]
+mod seams;
 #[cfg(not(fw_harness))]
 mod serial;
 #[cfg(all(lp_split, not(fw_harness)))]
@@ -148,9 +152,6 @@ mod stack_probe;
 mod tests;
 #[cfg(not(fw_harness))]
 mod tree_flash;
-
-#[cfg(all(feature = "radio", feature = "radio_boot_probe"))]
-compile_error!("`radio` and `radio_boot_probe` both bring the radio up; build one or the other");
 
 #[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
 use serial::usb_link_task;
@@ -205,7 +206,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// More heap does not come from here: `dram2_seg` (`0x3FCDB700..0x3FCED710`,
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
-#[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
+#[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
 const HEAP_SIZE: usize = 240 * 1024;
 /// The radio image's arena (`radio`, S3 radio M3 and M4): 104 KB smaller,
 /// so the main stack keeps its share of `dram_seg` (about 52 KB) with both
@@ -214,7 +215,7 @@ const HEAP_SIZE: usize = 240 * 1024;
 /// network's statics — is docs/adr/2026-10-21-s3-radio-memory.md. The radio
 /// region's spare bytes are still Rust's, last, so the heap's total is the
 /// arena, the radio region and `dram2_seg` together.
-#[cfg(feature = "radio")]
+#[cfg(s3_radio)]
 const HEAP_SIZE: usize = 136 * 1024;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
@@ -319,6 +320,12 @@ fn boot() -> ! {
         drop(peripherals);
         tests::incremental_shader_compile::run();
     }
+
+    #[cfg(feature = "test_seam_abi")]
+    {
+        drop(peripherals);
+        tests::test_seam_abi::run();
+    }
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact
@@ -398,6 +405,17 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// The login challenge's randomness: the S3's hardware RNG, as the C6's
+/// `fill_random`. True-random while the radio runs, and unpredictable enough
+/// for a single-use 32-byte nonce when it does not (a nonce needs
+/// uniqueness, not secrecy). Without it every login is refused ("this server
+/// has no entropy source"), so a locked board could not be unlocked
+/// (docs/defects/2026-10-21-a-locked-s3-refuses-every-login.md).
+#[cfg(not(fw_harness))]
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
+}
+
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
@@ -441,10 +459,10 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     io_thread_stack_diag::log_if_grown();
     // The radio region's high-water (`[radio-heap]`), when it grows: the
     // figure `c_heap::HEAP_RADIO_BYTES` is checked against.
-    #[cfg(feature = "radio")]
+    #[cfg(s3_radio)]
     c_heap::log_if_grown("heartbeat");
     // The station's `[wifi]` and the relay's `[relay]` lines (`wifi`).
-    #[cfg(feature = "wifi")]
+    #[cfg(s3_wifi)]
     net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
@@ -481,10 +499,10 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
 /// `AppTransport`). The mux is there whether or not the device store turns
 /// BLE on; with BLE off no radio link ever opens and every frame takes the USB
 /// path.
-#[cfg(all(feature = "ble", not(fw_harness)))]
+#[cfg(all(s3_ble, not(fw_harness)))]
 type AppTransport =
     fw_esp32_common::radio_link::LinkMuxTransport<UsbLinkTransport, embassy_time::Delay>;
-#[cfg(all(not(feature = "ble"), not(fw_harness)))]
+#[cfg(all(not(s3_ble), not(fw_harness)))]
 type AppTransport = UsbLinkTransport;
 
 /// Everything `main` needs to hand to the server loop.
@@ -513,17 +531,17 @@ pub(crate) struct CoreBoot {
     /// The radio's ESP-NOW interface and, when no station owns it, the Wi-Fi
     /// controller kept alive (dropping it stops Wi-Fi and ESP-NOW): the
     /// engine builds the ESP-NOW driver over them with its hardware registry.
-    #[cfg(feature = "radio")]
+    #[cfg(s3_radio)]
     espnow: (
         esp_radio::esp_now::EspNow<'static>,
         Option<esp_radio::wifi::WifiController<'static>>,
     ),
     /// The radio links' shared slots (`ble`): the BLE task opens a
     /// connection's link there, and the engine's link mux serves it.
-    #[cfg(feature = "ble")]
+    #[cfg(s3_ble)]
     radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
     /// BLE started this boot (the device store left it on).
-    #[cfg(feature = "ble")]
+    #[cfg(s3_ble)]
     ble_started: bool,
     /// `factory`'s `(offset, len)` from the flashed table: where a split
     /// image's region ends.
@@ -553,17 +571,17 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // The heap is main.rs's, not the board's — `init_board` deliberately does
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
-    #[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
+    #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     // A radio image cuts the arena where it reaches the boot stages' RAM, and
     // gives the radio blobs a region of their own, last (`c_heap`).
-    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
     let arena_pieces = c_heap::install_main();
     // The bootloader's segment, second: first-fit in registration order keeps
     // the boot residents in the arena above. See `dram2_heap`.
     #[cfg(feature = "heap-dram2")]
     let (dram2_base, dram2_heap) = dram2_heap::add_region();
-    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
     let (radio_base, radio_heap) = c_heap::install_radio();
     // Paint the main stack before anything deep runs, so the high-water report
     // measures the whole app (see `stack_probe`). After the arena is carved,
@@ -579,12 +597,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             "[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}+{dram2_heap}={} (dram_seg arena + dram2_seg)",
             HEAP_SIZE + dram2_heap
         );
-        #[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
+        #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
         esp_println::println!(
             "[INIT] heap regions: 0 .bss+{HEAP_SIZE} (dram_seg arena), 1 {dram2_base:#010x}+{dram2_heap} (dram2_seg, bootloader's)"
         );
     }
-    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
     {
         for piece in arena_pieces.iter().flatten() {
             esp_println::println!(
@@ -660,14 +678,14 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // order, its M2 Run G): ESP-NOW's interface to the engine's driver; the
     // controller and the station interface to the station (`wifi`), or back
     // to the driver to keep alive.
-    #[cfg(feature = "radio")]
+    #[cfg(s3_radio)]
     let (espnow, net_radio) = {
         let wifi = radio_peripherals::take_wifi().expect("init_board stashes WIFI");
         let parts = fw_esp32_radio::hardware::radio_hub::bring_up(wifi)
             .expect("Failed to initialize ESP-NOW radio");
-        #[cfg(feature = "wifi")]
+        #[cfg(s3_wifi)]
         let (kept, net_radio) = (None, Some((parts.controller, parts.station)));
-        #[cfg(not(feature = "wifi"))]
+        #[cfg(not(s3_wifi))]
         let (kept, net_radio) = (Some(parts.controller), None::<()>);
         log::info!("[radio] up: heap used {} B", esp_alloc::HEAP.used());
         ((parts.esp_now, kept), net_radio)
@@ -677,23 +695,23 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // slots hold `RefCell`s, which a `static` cannot. BLE's tasks and the
     // server loop share the main thread's executor; with the LAN's links
     // (served from `lp-net`, `wifi`) every borrow takes the port's lock.
-    #[cfg(feature = "wifi")]
+    #[cfg(s3_wifi)]
     let (radio_port, lan_port) =
         fw_esp32_common::radio_link::RadioLinkPort::leak_locked(net::net_thread::port_lock);
-    #[cfg(all(feature = "ble", not(feature = "wifi")))]
+    #[cfg(all(s3_ble, not(s3_wifi)))]
     let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
     // What the radio links are for, decided before the BLE task may open one.
     // A plain image always serves them; a split image decides in
     // `split::split_boot`, once it has entered the engine (a core-only S3
     // serves nothing over the air yet: updates are M7's).
-    #[cfg(all(feature = "ble", not(lp_split)))]
+    #[cfg(all(s3_ble, not(lp_split)))]
     radio_port.decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
     // BLE: on unless the device store turns it off, read once here, the C6's
     // rule (`fw-esp32c6/src/main.rs`): a missing store is `fresh()`
     // (Bluetooth on, locked, no keys); a damaged one, or a board whose files
     // are held or refused, is `locked()` (off). After the filesystem (the
     // store is on it), in the core, so a core-only board keeps its radio.
-    #[cfg(feature = "ble")]
+    #[cfg(s3_ble)]
     let ble_started = {
         let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
         match store.ble_enabled {
@@ -726,7 +744,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // before any Radio node exists, so "set to use Wi-Fi" holds from the
     // first frame; the station never reads the file itself
     // (`net::station_probes`).
-    #[cfg(feature = "wifi")]
+    #[cfg(s3_wifi)]
     {
         let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
         net::station_probes::boot_settings(&file);
@@ -772,7 +790,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             );
         }
     }
-    #[cfg(all(feature = "radio", not(feature = "wifi")))]
+    #[cfg(all(s3_radio, not(s3_wifi)))]
     let _ = net_radio;
 
     CoreBoot {
@@ -784,11 +802,11 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         watchdog,
         boot_guard,
         boot_assessment,
-        #[cfg(feature = "radio")]
+        #[cfg(s3_radio)]
         espnow,
-        #[cfg(feature = "ble")]
+        #[cfg(s3_ble)]
         radio_port,
-        #[cfg(feature = "ble")]
+        #[cfg(s3_ble)]
         ble_started,
         #[cfg(lp_split)]
         factory: _factory,
@@ -813,11 +831,11 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         watchdog,
         boot_guard,
         boot_assessment,
-        #[cfg(feature = "radio")]
+        #[cfg(s3_radio)]
         espnow,
-        #[cfg(feature = "ble")]
+        #[cfg(s3_ble)]
         radio_port,
-        #[cfg(feature = "ble")]
+        #[cfg(s3_ble)]
         ble_started,
         #[cfg(lp_split)]
             factory: _,
@@ -840,7 +858,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // The ESP-NOW radio's resource, on an image that registers its driver
     // (`radio`): the board profile leaves `/radio/0` out because the default
     // image registers none (`default_esp32s3_hardware_manifest`'s doc).
-    #[cfg(feature = "radio")]
+    #[cfg(s3_radio)]
     let hardware_manifest = hardware_manifest.with_resource(lpc_hardware::HwResource::new(
         lpc_hardware::HwAddress::radio(0),
         [lpc_hardware::HwCapability::Radio],
@@ -871,7 +889,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // the Radio node's. With the station in the image (`wifi`) the Radio node
     // rule holds in the driver: while the board is set to use Wi-Fi, an open
     // device answers with the rule's words and the rest of the project runs.
-    #[cfg(feature = "radio")]
+    #[cfg(s3_radio)]
     {
         let (esp_now, kept) = espnow;
         match fw_esp32_radio::hardware::espnow_radio_driver::Esp32EspNowRadioDriver::from_parts(
@@ -945,7 +963,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`); the relay's probe and its account
     // entries' hook.
-    #[cfg(feature = "wifi")]
+    #[cfg(s3_wifi)]
     {
         server.set_station_probe(Some(net::station_probes::station_probe));
         server.set_scan_probe(Some(net::station_probes::scan_probe));
@@ -986,6 +1004,9 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     server.set_packed_encoding_supported(
         fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
     );
+    // Login challenges draw from the chip's hardware RNG; the server itself
+    // never draws randomness (sans-IO).
+    server.set_entropy_source(Some(fill_random));
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).
@@ -1006,7 +1027,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // per-link lists hold memory for the board's whole life, and allocated
     // after the project they would sit above it and split the space it frees
     // (first fit; C6 silicon N7, 2026-10-06).
-    #[cfg(feature = "ble")]
+    #[cfg(s3_ble)]
     let transport = {
         server.reserve_links(1 + fw_esp32_common::radio_link::LINK_SLOTS);
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
@@ -1068,7 +1089,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
 /// (`net::net_chip`, what the station's first join waits for) and the relay's
 /// answers (relay protocol 2's picture and project facts, `relay_probes`).
 /// Every frame, so each part is cheap when it has nothing to do.
-#[cfg(all(feature = "wifi", not(fw_harness)))]
+#[cfg(all(s3_wifi, not(fw_harness)))]
 fn frame_hook(server: &LpServer) {
     net::net_chip::note_frame_served();
     net::relay_probes::serve_relay(server);

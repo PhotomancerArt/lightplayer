@@ -8,6 +8,16 @@
 //! for the seam rules.
 
 #![no_std]
+// The seam functions (`lp_seam::seam_fn!`) expand an `asm!` hint here, and
+// Xtensa `asm!` is still unstable upstream.
+#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
+#![cfg_attr(
+    target_arch = "xtensa",
+    allow(
+        unstable_features,
+        reason = "asm_experimental_arch is required for the Xtensa seam functions' hint"
+    )
+)]
 
 extern crate alloc;
 
@@ -25,8 +35,9 @@ pub mod logger;
 #[cfg(feature = "wifi")]
 pub mod net;
 pub mod output;
-// Host unit tests build it too, over the `lp-seam` dev-dependency.
-#[cfg(any(target_arch = "riscv32", test))]
+// RISC-V and Xtensa (since S3 radio M5); host unit tests build it too, over
+// the `lp-seam` dev-dependency.
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa", test))]
 pub mod seams;
 pub mod serial;
 pub mod time;

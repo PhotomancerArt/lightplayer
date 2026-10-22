@@ -103,6 +103,13 @@ it wrong is a red CI run on a correct change.
   so the rest of `test-emu-serve` and all of `test-emu-c6-cli` had not run
   and needed running on their own. CI's Emulator C6 job passed on the same
   head. The branch's own firmware is not in that test.
+- 2026-10-21 (#1249, S3 radio M5) — the fourth desk sighting, byte for byte:
+  `just test-emu-c6`'s first `emu_serve_walk` run, which built the pinned
+  reference image, read `220468 B free / 105068 B used`; a re-run of
+  `just test-emu-serve` passed whole (the walk in 5.8 s, cached). Four of
+  four now: the 64 B appear on the run that *builds* the reference image
+  and are gone on the run that reuses it — a lead for whoever takes the open
+  question, not investigated here.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread", "heap-dram2"]
+default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread", "heap-dram2", "ble"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -127,9 +127,11 @@ radio = [
 # The BLE link (S3 radio roadmap M3; the C6's since `ble-remote-control` M4,
 # docs/adr/2026-09-24-ble-transport.md): the wire, on lp-link, over a
 # Nordic-UART GATT service, one untrusted link per connection, through the
-# shared crate's `ble` over the BTDM controller (`src/ble/`). Inert until the
-# device store (`/.lp/access.json`) leaves `bleEnabled` on — read once at boot,
-# as the C6 does. `esp-radio/coex` lets BLE share the one radio with Wi-Fi.
+# shared crate's `ble` over the BTDM controller (`src/ble/`). On by default
+# since the desk walk (docs/reports/2026-10-21-s3-bluetooth-walk.md); it runs
+# unless the device store (`/.lp/access.json`) turns `bleEnabled` off — read
+# once at boot, as the C6 does. `esp-radio/coex` lets BLE share the one radio
+# with Wi-Fi.
 ble = [
     "radio",
     "esp-radio/ble",
@@ -213,6 +215,14 @@ test_loopback = ["lp-ws281x/test_hooks"]
 # fw-esp32c6's `test_button` feature. Needs `server` for the hardware
 # registry/manifest and driver types the button driver is built on.
 test_button = ["server"]
+
+# The Xtensa emulator seam ABI under the real release build (S3 radio M5):
+# this image's seam table carries the two TEST ONLY seams and two of the
+# network seam's calls, and the entrypoint calls them
+# (`src/tests/test_seam_abi.rs`). The emulator's test
+# (`lp-emu-esp32s3/tests/seam_abi_harness.rs`) proves the arguments, the
+# result and the caller's window survive an answer. Never shipped.
+test_seam_abi = []
 
 test_xt_jit_corpus = [
     "dep:lpvm-native",
