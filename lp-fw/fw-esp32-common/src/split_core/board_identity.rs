@@ -181,7 +181,13 @@ pub fn board_facts<C: SplitChip>(
         mode,
         chip: chip_code(id.chip).unwrap_or(0),
         chip_word: id.chip.into(),
-        layout: C::LAYOUT_CODE,
+        // A chip whose updates are off announces no layout: no host offers
+        // it one (and its boot state is never trusted, so nothing is written).
+        layout: if C::updates_off().is_some() {
+            0
+        } else {
+            C::LAYOUT_CODE
+        },
         loader: state.loader_version,
         target: id.target.into(),
         version: id.version.into(),

@@ -21,6 +21,7 @@ std::thread_local! {
     static FLASH: RefCell<Vec<u8>> = RefCell::new(vec![0xff; FLASH_LEN]);
     static ENTRY0: Cell<u32> = const { Cell::new(0) };
     static RESET: Cell<ResetKind> = const { Cell::new(ResetKind::Warm) };
+    static UPDATES_OFF: Cell<Option<&'static str>> = const { Cell::new(None) };
 }
 
 static SPLIT: SplitStatics<TestChip> = SplitStatics::new();
@@ -33,6 +34,12 @@ impl TestChip {
         FLASH.with(|f| f.borrow_mut().fill(0xff));
         ENTRY0.with(|e| e.set(core_off));
         RESET.with(|r| r.set(reset));
+        UPDATES_OFF.with(|o| o.set(None));
+    }
+
+    /// The part takes no update, for `why` (the S3's octal flash).
+    pub fn updates_off(why: &'static str) {
+        UPDATES_OFF.with(|o| o.set(Some(why)));
     }
 
     /// Put `bytes` at `at`, as a flasher would (no fence, no NOR rule).
@@ -54,6 +61,10 @@ impl SplitChip for TestChip {
     const FALLBACK_REGION_END: u32 = FLASH_LEN as u32;
     const ENGINE_DATA_VADDR: usize = 0;
     const CORES_MUST_READ_TREE_STORE: bool = true;
+
+    fn updates_off() -> Option<&'static str> {
+        UPDATES_OFF.with(Cell::get)
+    }
 
     fn page_size() -> u32 {
         PAGE

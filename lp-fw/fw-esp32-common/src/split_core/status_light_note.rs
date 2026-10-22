@@ -4,14 +4,14 @@
 //! so that the split image's core — which has no engine and never parses the
 //! hardware manifest — can light it while an update runs.
 //!
-//! The RMT driver notes the pad and the LED count of the first output it
-//! opens this boot ([`note_open`]); the server loop's frame hook
+//! The chip's RMT driver notes the pad and the LED count of the first output
+//! it opens this boot ([`note_open`]); the server loop's frame hook
 //! ([`persist`], installed by a split image) writes the record through the
 //! server's filesystem, **only when it differs** from what is on disk (lpfs
 //! wear-levels; a write per boot would still be a write per boot).
 //!
 //! The record's `colorOrder` is `"grb"`: the WS2812-class byte order every
-//! channel of the C6's driver is opened with. The fixture node's own colour
+//! channel of the chips' drivers is opened with. The fixture node's own colour
 //! order lives above the output provider, per lamp, where this driver never
 //! sees it; a strip wired in another order shows the light in swapped
 //! colours (dark yellow stays yellow under the common R/G swap; dark red
@@ -28,7 +28,7 @@ use lpfs::lp_path::AsLpPath;
 /// is settled.
 static FIRST: Mutex<Cell<(Option<(u8, u32)>, bool)>> = Mutex::new(Cell::new((None, false)));
 
-/// The byte order the C6's driver opens every channel with.
+/// The byte order the chips' drivers open every channel with.
 const WIRE_ORDER: &str = "grb";
 
 /// The RMT driver opened an output on `gpio` driving `leds` LEDs.
