@@ -38,6 +38,12 @@ slips through.
   `espflash@3.3.0` hit `(429) Too Many Requests: rate limit exceeded`, exit 70.
   The 30 main failures before it (back to 2026-09-08) showed no other 403/429
   install failure. Fixed by authenticating every binstall step.
+- 2026-10-22 — PR #1257, run 39809305979: `extractions/setup-just@v3`'s
+  "Install just" failed with `no release for just matching version specifier`
+  in 12 jobs on the first attempt and in "Firmware size (esp32c6)" again on
+  the re-run of the failed jobs; other branches' runs that hour were green.
+  The step resolves `just`'s release through the GitHub API and is not one of
+  the binstall steps this entry's fix authenticated. Re-ran.
 
 **Exit criteria** — no 403/429 install failure on main for a month after the
 binstall steps carry a token; then retire.
