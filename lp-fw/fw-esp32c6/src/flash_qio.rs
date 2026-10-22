@@ -11,7 +11,7 @@
 //!
 //! [`enter`] runs once, right after esp-storage's `FlashStorage::new` (whose
 //! own `RDID` size probe must come before any ROM flash access — the rule in
-//! `ota/mod.rs`, from two XIAOs) and before the boot records, the mount and
+//! `fw_esp32_common::split_core`, from two XIAOs) and before the boot records, the mount and
 //! the project load:
 //!
 //! 1. **Read the part, write nothing.** `RDID` and status register 2 (command

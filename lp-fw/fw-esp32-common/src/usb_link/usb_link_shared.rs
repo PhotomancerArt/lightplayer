@@ -197,7 +197,7 @@ impl UsbLinkShared {
     ///
     /// It checks only **this** link's hold on the frame buffer. A caller
     /// with radio links beside it checks theirs first
-    /// (`RadioLinkPort::frame_buf_in_use`; the C6's `ota::UpdateLinks`
+    /// (`RadioLinkPort::frame_buf_in_use`; `split_core::UpdateLinks`
     /// does), or a large answer could overwrite a reply a radio link is
     /// still reading.
     pub fn send_update(&self, bytes: &[u8]) -> UpdateSend {

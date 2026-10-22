@@ -100,6 +100,8 @@ mod running_hook;
 mod split_chip;
 mod split_flash;
 mod split_statics;
+#[cfg(test)]
+mod test_chip;
 mod update_edge;
 mod update_links;
 mod update_outbox;

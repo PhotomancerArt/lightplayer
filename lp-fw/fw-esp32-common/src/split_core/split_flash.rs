@@ -173,3 +173,73 @@ impl<C: SplitChip> SplitFlash<C> {
         self.unlock() && unsafe { C::flash_program(at, &w, 4) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use lp_bootctl::{Extent, ResetKind};
+
+    use super::super::test_chip::TestChip;
+    use super::*;
+
+    /// The running core at the low end, one 64 KiB block long; the region
+    /// ends at `0x380000` (the C6's `factory` end).
+    fn fenced() -> SplitFlash<TestChip> {
+        TestChip::reset(0x1_8000, ResetKind::Warm);
+        let mut flash = SplitFlash::<TestChip>::take();
+        flash.protect(
+            Extent {
+                start: 0x1_8000,
+                end: 0x2_8000,
+            },
+            0x38_0000,
+        );
+        flash
+    }
+
+    #[test]
+    fn nothing_is_written_before_the_fence_knows_the_core_and_the_region() {
+        TestChip::reset(0x1_8000, ResetKind::Warm);
+        let mut flash = SplitFlash::<TestChip>::take();
+        assert!(!flash.erase(0x30_0000));
+        assert!(!flash.erase(BOOT_RECORD_SECTORS[0]));
+        assert!(!flash.program(0x30_0000, &[0]));
+        assert!(!flash.program_word(0x30_0000, 0));
+        assert_eq!(TestChip::bytes(0x30_0000, 4), [0xff; 4]);
+    }
+
+    #[test]
+    fn the_fence_allows_the_region_and_the_records_but_never_the_running_core() {
+        let mut flash = fenced();
+        assert!(flash.erase(0x30_0000), "the region, clear of the core");
+        assert!(flash.erase_block(0x30_0000), "a block clear of the core");
+        assert!(flash.erase(BOOT_RECORD_SECTORS[0]));
+        assert!(flash.erase(BOOT_RECORD_SECTORS[1]));
+        assert!(flash.erase(PROGRESS_RECORD_SECTOR));
+        assert!(!flash.erase(0x1_8000), "the running core's first sector");
+        assert!(!flash.erase(0x2_7000), "the running core's last sector");
+        assert!(
+            !flash.erase_block(0x2_0000),
+            "a block over the running core"
+        );
+        assert!(!flash.erase(0x1_0000), "the loader");
+        assert!(!flash.erase(0x38_0000), "past the region's end (lpfs)");
+        assert!(
+            !flash.program(0x2_7ffe, &[0, 0, 0, 0]),
+            "a program into the core"
+        );
+        assert!(!flash.erase(0x30_0800), "an erase off a sector boundary");
+    }
+
+    #[test]
+    fn a_program_at_any_alignment_clears_only_its_own_bytes() {
+        let mut flash = fenced();
+        assert!(flash.program(0x30_0001, &[0x12, 0x34, 0x56, 0x78, 0x9a]));
+        assert_eq!(
+            TestChip::bytes(0x30_0000, 8),
+            [0xff, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xff, 0xff]
+        );
+        let mut back = [0u8; 5];
+        assert!(flash.read(0x30_0001, &mut back));
+        assert_eq!(back, [0x12, 0x34, 0x56, 0x78, 0x9a]);
+    }
+}

@@ -29,6 +29,8 @@ Chip facts arrive by injection instead:
 - `lp_fs::LpFsFlash` is generic over `littlefs_rust::Storage`; the flash
   adapter and partition-derived `Config` stay chip-side.
 - `logger` stores injected write fns / a type-erased `dyn SerialIo` handle.
+- `split_core` (feature `split-core`) is generic over one `SplitChip` the
+  chip implements (below).
 
 ## Contents
 
@@ -42,6 +44,34 @@ descriptors — the chip crate supplies the pin and the clock; see
 `output::rmt_state` used to sit beside the provider; it went away with its only
 consumer when `fw-esp32c6` moved onto `lp-ws281x` (2026-08-01). Per-channel RMT
 state is `lp_ws281x::ChannelState` now, shared by all three chips.
+
+## The split image's update board side (`split_core`)
+
+Feature `split-core` (the C6's `server` turns it on; its `LP_SPLIT_LINK`
+builds call it, a plain build links none of it). What a split image's core
+does about updates, on any chip: the boot records' marks (`begin`,
+`mark_started`), the boot state it trusts, the fenced raw flash
+(`SplitFlash`), the engine choice and its guard (`choose_engine`,
+`engine_guard`, the `[CORE]` line), the core's own hash, the running engine's
+channel-3 hooks (`install_running_hook`, `running_manifest`, `hello_ready`,
+`radio_update_hook`), core-only (`core_only`), and the update session's edge
+and `UpdateTarget`. It moved from `fw-esp32c6/src/ota/` unchanged in
+behaviour (S3 plan M7 P7), so the S3 runs the same session.
+
+Everything that names a chip is one trait, `SplitChip`: the flash MMU (page
+size, the engine's mapping and data-view address, a scratch window, MMU
+entry 0), the raw flash calls the fence wraps, the SHA, the reset and its
+classification, the layout code and region start, the watchdog, the update
+light, and `statics()` — the chip's one `SplitStatics` (Rust has no generic
+statics). Associated functions and types only, never `self`: an image has one
+chip, so each generic is instantiated once and every call stays direct under
+LTO. The C6's is `fw-esp32c6/src/split_core/` (`C6Split`); `test_chip.rs` is a
+host one for the fence and boot-state tests.
+
+The silicon rules (the split image ADR §7) are kept as code here: no second
+`FlashStorage`, the write fence, trust the records only when they agree with
+MMU entry 0. The chip calls `begin` right after its `FlashStorage::new`,
+before any radio.
 
 The heavy server stack (`lpa-server`, `lpc-model`, `lpc-wire`, `lpfs`,
 `lp-recovery`) is behind the `server` feature, mirroring the bin crates.

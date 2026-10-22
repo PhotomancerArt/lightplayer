@@ -209,6 +209,12 @@ image (`lp-fw/builds/README.md`).
 
 ### 9. The firmware's side (`lp-fw/fw-esp32c6/src/ota/`)
 
+> **2026-10-21:** this code moved, unchanged in behaviour, to
+> `lp-fw/fw-esp32-common/src/split_core/` (feature `split-core`), generic
+> over one `SplitChip` the chip implements (the C6's is
+> `lp-fw/fw-esp32c6/src/split_core/`), so the S3 runs the same session
+> (S3 plan M7 P7). Paths below are as they were.
+
 - **The running hook:** while the engine runs, its USB transport hands
   channel 3 to the core's update session (`Q`, `G`, an offer of another
   core → the pending record, the engine header erased, a reset into

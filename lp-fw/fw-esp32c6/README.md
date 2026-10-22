@@ -31,7 +31,11 @@ lives in `fw-esp32-radio` since plan `lp2025/2026-10-20-2335-s3-radio-and-ota`
 M2, shared with the chips to come. This crate passes it the chip's facts
 (`src/net/net_chip.rs`, `src/ble/mod.rs`) and re-exports its modules where the
 boot path names them (`src/net/mod.rs`, `src/hardware/mod.rs`); see
-`lp-fw/fw-esp32-radio/README.md`. Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
+`lp-fw/fw-esp32-radio/README.md`. The split image's update board side —
+the boot records' marks, the engine guard, core-only, the update session —
+lives in `fw-esp32-common`'s `split_core` since M7 P7 of the same plan; what
+names the C6 there (its flash MMU, ROM flash calls, SHA accelerator, reset,
+watchdog and the RMT update light) is `src/split_core/` (`C6Split`). Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
 belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.
 
 ## WS281x output
@@ -131,7 +135,8 @@ on the LAN link too (`fw-esp32-common`'s `radio_link::core_only_links`): it
 answers the link's key from the device store itself, so the key decides
 who may flash, and a LAN link opened in update mode advertises a window of
 8. A trial core with a saved network that hears from no host for three
-minutes gives the board back to its last good core (`src/ota/core_only.rs`).
+minutes gives the board back to its last good core
+(`fw-esp32-common/src/split_core/core_only.rs`).
 `lp-cli link capture lan:<board> --ota-offer <dir>` drives an update over
 it; `just test-emu-c6-ota-lan` walks it on the emulated LAN with no cable.
 See `docs/adr/2026-10-06-ota-update-protocol.md` (amendment of 2026-10-07).
@@ -286,8 +291,8 @@ the store, because they all go through `base_fs`. The table is
   partition that does not fit the window, sends every read back to the ROM
   calls (`[FS] lpfs is read by ROM calls: …` at boot for the latter).
 - **Hasher:** `src/hw_sha.rs` (`StoreSha256`): the SHA accelerator, or
-  software `sha2` while a boot hash holds it. Moved out of `ota/` because an
-  unsplit build has no `ota/`.
+  software `sha2` while a boot hash holds it. Outside `src/split_core/`
+  because an unsplit build has none.
 - **Boot words** (`fw_esp32_common::tree_fs`; D2):
   - `[FS] tree store mounted (<n> sectors, <free> free, root <seq>)` — `fs: mounted`;
   - `[FS] tree store formatted (…)` — a partition with no store and no

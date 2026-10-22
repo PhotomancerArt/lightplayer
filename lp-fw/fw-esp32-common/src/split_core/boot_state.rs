@@ -275,3 +275,104 @@ fn image_len<C: SplitChip>(flash: &mut SplitFlash<C>, at: u32) -> Option<u32> {
     let hash_appended = header[23] == 1;
     Some(len + if hash_appended { 32 } else { 0 })
 }
+
+#[cfg(test)]
+mod tests {
+    use lp_bootctl::{BootRecord, BootSlot, REGION_START};
+
+    use super::super::test_chip::TestChip;
+    use super::*;
+
+    /// The C6's `factory`: `0x10000`, ending at `0x380000`.
+    const FACTORY: Option<(u32, u32)> = Some((0x1_0000, 0x37_0000));
+
+    /// An ESP image at `at`: one segment of `seg` bytes, a hash appended.
+    fn image(at: u32, seg: u32) -> u32 {
+        let mut header = [0u8; 24];
+        header[0] = 0xE9;
+        header[1] = 1;
+        header[23] = 1;
+        TestChip::flash(at, &header);
+        let mut seg_header = [0u8; 8];
+        seg_header[4..].copy_from_slice(&seg.to_le_bytes());
+        TestChip::flash(at + 24, &seg_header);
+        (24 + 8 + seg + 1).div_ceil(16) * 16 + 32
+    }
+
+    fn record(sector: usize, core_off: u32, core_len: u32, trial: bool) {
+        let record = BootRecord {
+            seq: 1,
+            core_off,
+            core_len,
+            build: 0x1234_5678,
+            trial,
+        };
+        TestChip::flash(BOOT_RECORD_SECTORS[sector], &record.encode());
+    }
+
+    fn read() -> BootState {
+        let mut flash = SplitFlash::<TestChip>::take();
+        BootState::read(&mut flash, FACTORY, TestChip::reset_kind())
+    }
+
+    #[test]
+    fn a_core_with_no_record_is_where_the_mmu_says_and_as_long_as_its_image() {
+        TestChip::reset(REGION_START, ResetKind::Warm);
+        let len = image(REGION_START, 0x1_0000);
+        let state = read();
+        assert_eq!(state.untrusted, None);
+        assert_eq!((state.core_off, state.core_len), (REGION_START, len));
+        assert_eq!(state.standing(), "no record");
+        assert_eq!(state.engine_room::<TestChip>().start, 0x3_0000);
+    }
+
+    #[test]
+    fn records_that_disagree_with_the_mmu_are_never_trusted() {
+        TestChip::reset(0x20_0000, ResetKind::Warm);
+        image(0x20_0000, 0x1_0000);
+        record(0, REGION_START, 0x1_0000, false);
+        let state = read();
+        assert_eq!(
+            state.untrusted,
+            Some("the boot records disagree with the MMU about where this core runs")
+        );
+        assert!(state.fell_back);
+    }
+
+    #[test]
+    fn no_factory_in_the_table_writes_nothing() {
+        TestChip::reset(REGION_START, ResetKind::Warm);
+        record(0, REGION_START, 0x1_0000, true);
+        let state = super::super::begin::<TestChip>(None);
+        assert!(!state.trusted());
+        let slot = BootSlot::decode(&TestChip::bytes(
+            BOOT_RECORD_SECTORS[0],
+            BOOT_RECORD_READ_LEN,
+        ));
+        assert!(!slot.unwrap().marks.attempted);
+    }
+
+    #[test]
+    fn a_trial_core_marks_itself_attempted_then_started_and_confirmed() {
+        TestChip::reset(REGION_START, ResetKind::Warm);
+        record(0, REGION_START, 0x1_0000, true);
+        let mut state = super::super::begin::<TestChip>(FACTORY);
+        assert!(state.trusted() && state.on_trial());
+        let marks = || {
+            BootSlot::decode(&TestChip::bytes(
+                BOOT_RECORD_SECTORS[0],
+                BOOT_RECORD_READ_LEN,
+            ))
+            .unwrap()
+            .marks
+        };
+        assert!(marks().attempted && !marks().started);
+        super::super::mark_started::<TestChip>(&mut state);
+        assert!(marks().started && !marks().confirmed);
+        let mut flash = SplitFlash::<TestChip>::take();
+        flash.protect(state.core_extent(), 0x38_0000);
+        state.confirm(&mut flash);
+        assert!(marks().confirmed);
+        assert_eq!(state.standing(), "proven");
+    }
+}
