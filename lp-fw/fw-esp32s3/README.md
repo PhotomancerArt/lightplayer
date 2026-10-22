@@ -544,6 +544,39 @@ fork's switch that moves the controller's IRAM to flash (C6 only,
 `third_party/esp-hal/esp_config.yml`) is not extended to this chip: `dram_seg`
 closes without it.
 
+## PSRAM (feature `psram`, off by default)
+
+The S3R8's 8 MB of octal PSRAM, brought up in the core (`src/psram.rs`) and
+given to the engine's heap. Off by default: turning it on in the shipped image
+waits for the walk's numbers (`docs/adr/2026-10-22-s3-psram.md`).
+
+```bash
+just build-fw-esp32s3 psram                         # PSRAM first for every Rust allocation
+LP_PSRAM_HEAP=split:1024 just build-fw-esp32s3 psram   # …only for 1 KB and up
+LP_PSRAM_HEAP=off just build-fw-esp32s3 psram       # up and tested, not in the heap
+just test-emu-esp32s3-psram                         # the emulator's proof
+```
+
+- **The window:** MMU entries `0x80..0x100` (`lp_bootctl::s3_mmu::PSRAM_WINDOW`;
+  data `0x3C80_0000`, code `0x4280_0000`), on the plain and the split image
+  alike. The core links below `0x80`; `lp-fw-split` refuses one that does not.
+- **When it is up:** only on a part whose eFuse `PSRAM_CAP` says 8 MB, in octal
+  mode, after a boot self-test (a compare-and-swap and a sampled pattern, a
+  few ms). Otherwise the board boots as without the feature; one
+  `[INIT] psram:` line says which.
+- **The heap:** PSRAM is an `External` region after every internal one;
+  `LP_PSRAM_HEAP` (`all`, `split:<bytes>`, `last`, `off`) says where Rust's
+  default allocations go. `[MEM]`, the heartbeat and the load gates read
+  internal RAM; `[PSRAM] free= used= largest_free=` follows the ledger.
+- **What never lives there:** the frame the RMT ISR reads (the output copies a
+  PSRAM frame into an internal buffer first), ISR code and state, the radio's
+  C heap and DMA buffers (the radio's region is `Internal | Reserved`), thread
+  stacks.
+- **JIT code** in PSRAM is published (D-cache written back, I-cache
+  invalidated) through `lpvm_native::code_publish` before it runs.
+- **Cost on the default arena:** 3 KiB, so the main stack keeps its share
+  after the init's 2,572 B of IRAM.
+
 ## How this differs from fw-esp32c6
 
 Per the per-chip-toolchains ADR, the recovery strategy is **per chip** and does

@@ -66,6 +66,16 @@ fn the_psram_probe_prints_what_fs3_printed_by_direct_load() {
     for line in FS3_LINES {
         assert!(out.contains(line), "direct: no `{line}` in:\n{out}");
     }
+    // The publish rule's case. This machine's windows are never stale, so
+    // the call before the publish already runs the rewritten code — silicon
+    // may run the cached one there (the spike saw it), which is why only the
+    // published call counts.
+    assert!(
+        out.contains(
+            "[PSRAM] rewrite: before publish f(5) = 16 (fresh), after f(5) = 16 (want 16)"
+        ),
+        "direct: the rewrite case:\n{out}"
+    );
     let summary = m.psram_summary().expect("the chip was reached");
     println!("direct: {summary}");
     // 128 pages mapped by the driver, all filled from the chip.

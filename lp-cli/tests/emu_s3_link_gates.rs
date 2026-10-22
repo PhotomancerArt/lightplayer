@@ -453,6 +453,80 @@ fn the_radio_image_renders_the_shipped_images_frame() {
     );
 }
 
+/// **The `psram` image renders what the shipped image renders** (M10): the
+/// shipped app with PSRAM brought up in the core, the engine's heap and its
+/// JIT code in PSRAM (`LP_PSRAM_HEAP=all`) and its frames copied out to
+/// internal RAM for the RMT, against the shipped image on the same chip and
+/// the same project — and the same image on a board WITHOUT PSRAM, which must
+/// fall back to an image without the feature. Same first lit frame, all
+/// three. Frames are the machine's decode (`lp-emu:esp32s3:t1`), not
+/// silicon; PSRAM's timing is modeled and ungraded.
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_PSRAM_APP_ELF; run through `just test-emu-esp32s3-psram`"]
+fn the_psram_image_renders_the_shipped_images_frame() {
+    const TEST: &str = "the_psram_image_renders_the_shipped_images_frame";
+    let images = (|| {
+        Ok::<_, String>((
+            test_support::fw_esp32s3_image()?,
+            test_support::merged_chip_image()?,
+            test_support::psram_app_image()?,
+        ))
+    })();
+    let (elf, merged, psram_elf) = match images {
+        Ok(images) => images,
+        Err(reason) => {
+            test_support::skip_notice(TEST, &reason);
+            return;
+        }
+    };
+    let shipped = oracle_render_with("shipped", &elf, &merged, None);
+    let psram = oracle_render_with("psram", &psram_elf, &merged, None);
+    let without = oracle_render_with("psram, no chip", &psram_elf, &merged, Some(0));
+    for line in [
+        "[INIT] psram: on, 8388608 bytes at 0x3c800000",
+        "[INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)",
+    ] {
+        assert!(
+            psram.console.contains(line),
+            "psram: no `{line}`:\n{}",
+            psram.console
+        );
+    }
+    assert!(
+        without
+            .console
+            .contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
+        "psram, no chip: the fallback line:\n{}",
+        without.console
+    );
+    assert_eq!(
+        hex(&psram.first_lit),
+        hex(&shipped.first_lit),
+        "the psram image's first lit frame on pad {ORACLE_PAD} is the shipped image's"
+    );
+    assert_eq!(
+        hex(&without.first_lit),
+        hex(&shipped.first_lit),
+        "with no PSRAM the psram image's first lit frame is the shipped image's"
+    );
+    println!(
+        "ORACLE FRAME (lp-emu:esp32s3:t1) on pad {ORACLE_PAD}, {} bytes, identical x3: {}\n  \
+         shipped: {} frames, {} whole lit, by {} us\n  psram:   {} frames, {} whole lit, by {} us\n  \
+         no chip: {} frames, {} whole lit, by {} us",
+        shipped.first_lit.len(),
+        hex(&shipped.first_lit),
+        shipped.frames,
+        shipped.whole_lit,
+        shipped.at_us,
+        psram.frames,
+        psram.whole_lit,
+        psram.at_us,
+        without.frames,
+        without.whole_lit,
+        without.at_us
+    );
+}
+
 /// `D10` on the XIAO ESP32-S3 Plus profile (`scripts/emu/m4-walk.sh`'s S3
 /// arm, `LP_WALK_PAD` 9).
 const ORACLE_PAD: u8 = 9;
@@ -480,10 +554,24 @@ struct OracleRender {
 }
 
 fn oracle_render(tag: &str, elf: &Path, merged: &Path) -> OracleRender {
-    let builder = Esp32S3Builder::new()
+    oracle_render_with(tag, elf, merged, None)
+}
+
+/// [`oracle_render`] on a board with `psram_len` bytes of PSRAM (`None`: the
+/// machine's default).
+fn oracle_render_with(
+    tag: &str,
+    elf: &Path,
+    merged: &Path,
+    psram_len: Option<u32>,
+) -> OracleRender {
+    let mut builder = Esp32S3Builder::new()
         .app(AppSource::Path(elf.to_path_buf()))
         .flash(FlashBacking::Copy(merged.to_path_buf()))
         .strict(true);
+    if let Some(len) = psram_len {
+        builder = builder.psram_len(len);
+    }
     let board = S3Board::build(builder, UsbHost::Attached { draining: true })
         .unwrap_or_else(|e| panic!("{tag}: the image direct-loads: {e}"));
     let mut host = EmuLinkHost::new(board, 0x5E55_0304, true);

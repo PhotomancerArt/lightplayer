@@ -4363,9 +4363,16 @@ test-emu-esp32s3-seams:
 # by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
 # probe writes and reads all 8 MiB and runs code out of it, both ways, and
 # every line matches FS3's capture. The test that the shipped image runs the
-# same with and without PSRAM needs the shipped image, so it runs in
-# `test-emu-esp32s3-boot` instead (here it SKIPs). One firmware build and
-# about a minute of emulation (release).
+# same with and without PSRAM needs the shipped image's merged chip, so it
+# runs in `test-emu-esp32s3-boot` instead (here it SKIPs).
+#
+# M10 adds the product's `psram` image (`fw-esp32s3 --features psram`: PSRAM
+# up in the core, the engine's heap and JIT code in it) and lp-cli's oracle
+# gate over the link: it renders `shader-oracle`'s first lit frame byte for
+# byte as the shipped image does, with PSRAM and on a board without it. Three
+# firmware builds (the probe, `psram`, then the shipped image last, so the
+# shared target path ends holding the shipped one) and a few minutes of
+# emulation (release).
 test-emu-esp32s3-psram:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4386,6 +4393,21 @@ test-emu-esp32s3-psram:
       echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
     fi
     cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
+    just build-fw-esp32s3 psram
+    psram_app="$out/fw-esp32s3-psram-app.elf"
+    cp "$built" "$psram_app"
+    export LP_EMU_ESP32S3_PSRAM_APP_ELF="$psram_app"
+    just build-fw-esp32s3
+    shipped="$out/fw-esp32s3-shipped.elf"
+    cp "$built" "$shipped"
+    export LP_EMU_ESP32S3_ELF="$shipped"
+    if command -v espflash >/dev/null 2>&1; then
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$shipped" "$out/merged.bin"
+      export LP_EMU_ESP32S3_MERGED="$out/merged.bin"
+    fi
+    cargo test -p lp-cli --release --test emu_s3_link_gates the_psram_image -- --include-ignored --nocapture
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
