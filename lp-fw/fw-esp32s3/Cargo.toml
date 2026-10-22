@@ -15,6 +15,7 @@ esp32s3 = [
     "esp-bootloader-esp-idf/esp32s3",
     "esp-hal/esp32s3",
     "esp-rtos/esp32s3",
+    "fw-esp32-radio?/esp32s3",
 ]
 
 # The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
@@ -98,12 +99,43 @@ io_thread_stack_diag = ["io-thread"]
 #   just build-fw-esp32s3 radio_boot_probe
 radio_boot_probe = [
     "server",
+    "dep:enumset",
     "dep:esp-radio",
     "esp-radio/esp32s3",
     "esp-radio/ble",
     "esp-radio/coex",
     "esp-rtos/esp-radio",
     "esp-rtos/esp-alloc",
+]
+
+# The radio (S3 radio roadmap M3): esp-radio on this chip, the shared radio
+# glue (`fw-esp32-radio`), and the radio blobs' own C heap (`src/c_heap.rs`:
+# a region of its own, never `dram2_seg`, never the boot stages' RAM). On its
+# own it starts nothing: `ble` is what this chip runs today. ESP-NOW (the
+# Radio node) needs the Wi-Fi blob up (`esp_radio::wifi::new`), whose RAM is
+# Wi-Fi's milestone's (M4), so the driver is not registered yet.
+radio = [
+    "server",
+    "dep:enumset",
+    "dep:esp-radio",
+    "esp-radio/esp32s3",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "dep:fw-esp32-radio",
+    "fw-esp32-radio/radio",
+]
+# The BLE link (S3 radio roadmap M3; the C6's since `ble-remote-control` M4,
+# docs/adr/2026-09-24-ble-transport.md): the wire, on lp-link, over a
+# Nordic-UART GATT service, one untrusted link per connection, through the
+# shared crate's `ble` over the BTDM controller (`src/ble/`). Inert until the
+# device store (`/.lp/access.json`) leaves `bleEnabled` on — read once at boot,
+# as the C6 does. `esp-radio/coex` lets BLE share the one radio with Wi-Fi.
+ble = [
+    "radio",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "fw-esp32-common/radio-link",
+    "fw-esp32-radio/ble",
 ]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
@@ -261,15 +293,23 @@ esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-backtrace = { version = "0.19.0", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
-esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+# No `compat`: its `malloc` asks for no capability, so a radio blob's block
+# could land in `dram2_seg`, which the bootloader takes back on a warm reset
+# while the radio keeps writing (the C6's defect). The radio's C heap is this
+# crate's own (`src/c_heap.rs`), as on the C6.
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is
 # the public face esp-radio itself creates its threads through.
 esp-radio-rtos-driver = { version = "0.3.0", optional = true }
-# `radio_boot_probe` only: the radio stack the probe starts. The product image
-# has no esp-radio until M3/M4.
+# `radio` (and `radio_boot_probe`): the radio stack.
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-alloc", "log-04", "unstable", "wifi"] }
+# `radio`: the radio glue the C6 and this chip share (ESP-NOW, BLE, `lp-net`),
+# chip facts injected (`src/ble/`).
+fw-esp32-radio = { path = "../fw-esp32-radio", optional = true }
+# `src/c_heap.rs`: the capability sets that pick the radio's region.
+enumset = { version = "1", optional = true }
 
 # Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
 # arch-neutral ledger, plus the backtrace capture the panic path stages. Both

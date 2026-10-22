@@ -1,9 +1,10 @@
 # fw-esp32-radio
 
 The ESP32 radio glue the chip firmware crates share: everything between
-esp-radio and LightPlayer's own radio code. `fw-esp32c6` is its one consumer
-today; it is shaped so `fw-esp32s3` can be the second (plan
-`lp2025/2026-10-20-2335-s3-radio-and-ota`, M3 onward) without a fork.
+esp-radio and LightPlayer's own radio code. Its consumers are `fw-esp32c6`
+and, since the S3 radio plan's M3 (`lp2025/2026-10-20-2335-s3-radio-and-ota`),
+`fw-esp32s3`'s `ble` (BTDM controller config in
+`fw-esp32s3/src/ble/ble_controller_config.rs`).
 
 It moved here from `fw-esp32c6/src/` as-is (M2 of that plan). The C6's
 behaviour, log lines, figures and boot order did not change.

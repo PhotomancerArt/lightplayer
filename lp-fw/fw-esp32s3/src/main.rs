@@ -98,7 +98,14 @@ lpc_model::lp_embed_manifest_core! {
     ota_layout: 0,
 }
 
+// The BLE link (feature `ble`, S3 radio M3), over the shared crate.
+#[cfg(all(feature = "ble", not(fw_harness)))]
+mod ble;
 mod board;
+// The radio blobs' C heap and the regions a radio image allocates from: the
+// product radio (`radio`) and the M1 probe both link the blobs.
+#[cfg(all(any(feature = "radio", feature = "radio_boot_probe"), not(fw_harness)))]
+mod c_heap;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
 #[cfg(not(fw_harness))]
@@ -136,6 +143,11 @@ mod stack_probe;
 mod tests;
 #[cfg(not(fw_harness))]
 mod tree_flash;
+
+#[cfg(all(feature = "ble", feature = "radio_boot_probe"))]
+compile_error!(
+    "`ble` and `radio_boot_probe` both start the BTDM controller; build one or the other"
+);
 
 #[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
 use serial::usb_link_task;
@@ -190,8 +202,16 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// More heap does not come from here: `dram2_seg` (`0x3FCDB700..0x3FCED710`,
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
-#[cfg(not(feature = "radio_boot_probe"))]
+#[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
 const HEAP_SIZE: usize = 240 * 1024;
+/// The radio image's arena (`radio`, S3 radio M3): 72 KB smaller, so the main
+/// stack keeps its share of `dram_seg`. BLE costs 72,528 B of `dram_seg` at
+/// link time: the radio blobs' own region (`c_heap::HEAP_RADIO_BYTES`, 32 KB)
+/// and 39,760 B of the controller's IRAM text and the BLE stack's statics
+/// (the 240 KB arena with BLE fails to link by 20,552 B with no stack at all).
+/// The heap the radio's C blocks do not use is still Rust's, last.
+#[cfg(feature = "radio")]
+const HEAP_SIZE: usize = 168 * 1024;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
 /// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
@@ -421,6 +441,10 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // grows (`io_thread_stack_diag` only; a product image has no such line).
     #[cfg(feature = "io_thread_stack_diag")]
     io_thread_stack_diag::log_if_grown();
+    // The radio region's high-water (`[radio-heap]`), when it grows: the
+    // figure `c_heap::HEAP_RADIO_BYTES` is checked against.
+    #[cfg(feature = "radio")]
+    c_heap::log_if_grown("heartbeat");
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
@@ -451,11 +475,22 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_largest_block_bytes: 16 * 1024,
 };
 
+/// The server's transport: the USB host link (lp-link) alone, or — with
+/// `ble` — the link mux carrying it plus the BLE links (the C6's
+/// `AppTransport`). The mux is there whether or not the device store turns
+/// BLE on; with BLE off no radio link ever opens and every frame takes the USB
+/// path.
+#[cfg(all(feature = "ble", not(fw_harness)))]
+type AppTransport =
+    fw_esp32_common::radio_link::LinkMuxTransport<UsbLinkTransport, embassy_time::Delay>;
+#[cfg(all(not(feature = "ble"), not(fw_harness)))]
+type AppTransport = UsbLinkTransport;
+
 /// Everything `main` needs to hand to the server loop.
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: UsbLinkTransport,
+    transport: AppTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
@@ -474,6 +509,13 @@ pub(crate) struct CoreBoot {
     watchdog: recovery::watchdog::WatchdogFeeder,
     boot_guard: Option<lp_recovery::FrameGuard>,
     boot_assessment: lp_recovery::BootAssessment,
+    /// The radio links' shared slots (`ble`): the BLE task opens a
+    /// connection's link there, and the engine's link mux serves it.
+    #[cfg(feature = "ble")]
+    radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
+    /// BLE started this boot (the device store left it on).
+    #[cfg(feature = "ble")]
+    ble_started: bool,
     /// `factory`'s `(offset, len)` from the flashed table: where a split
     /// image's region ends.
     #[cfg(lp_split)]
@@ -502,11 +544,18 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // The heap is main.rs's, not the board's — `init_board` deliberately does
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
+    #[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    // A radio image cuts the arena where it reaches the boot stages' RAM, and
+    // gives the radio blobs a region of their own, last (`c_heap`).
+    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    let arena_pieces = c_heap::install_main();
     // The bootloader's segment, second: first-fit in registration order keeps
     // the boot residents in the arena above. See `dram2_heap`.
     #[cfg(feature = "heap-dram2")]
     let (dram2_base, dram2_heap) = dram2_heap::add_region();
+    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    let (radio_base, radio_heap) = c_heap::install_radio();
     // Paint the main stack before anything deep runs, so the high-water report
     // measures the whole app (see `stack_probe`). After the arena is carved,
     // because the paint runs on the main stack and the arena is `.bss`, not
@@ -521,9 +570,29 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             "[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}+{dram2_heap}={} (dram_seg arena + dram2_seg)",
             HEAP_SIZE + dram2_heap
         );
+        #[cfg(not(any(feature = "radio", feature = "radio_boot_probe")))]
         esp_println::println!(
             "[INIT] heap regions: 0 .bss+{HEAP_SIZE} (dram_seg arena), 1 {dram2_base:#010x}+{dram2_heap} (dram2_seg, bootloader's)"
         );
+    }
+    #[cfg(any(feature = "radio", feature = "radio_boot_probe"))]
+    {
+        for piece in arena_pieces.iter().flatten() {
+            esp_println::println!(
+                "[INIT] heap region: {:#010x}+{} (dram_seg arena, {})",
+                piece.start,
+                piece.len,
+                if piece.fenced {
+                    "a boot stage's RAM, untagged"
+                } else {
+                    "Internal"
+                }
+            );
+        }
+        esp_println::println!(
+            "[INIT] heap region: {dram2_base:#010x}+{dram2_heap} (dram2_seg, untagged)"
+        );
+        esp_println::println!("[INIT] heap region: {radio_base:#010x}+{radio_heap} (radio)");
     }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
@@ -577,6 +646,51 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
 
     let (base_fs, fs_boot_state, _factory) = mount_filesystem(flash);
 
+    // The radio links' shared slots: the BLE task opens a connection's link
+    // there and the engine's link mux serves it. On the heap, not `.bss`: its
+    // slots hold `RefCell`s, which a `static` cannot. BLE's tasks and the
+    // server loop share the main thread's executor, so it takes no lock.
+    #[cfg(feature = "ble")]
+    let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
+    // What the radio links are for, decided before the BLE task may open one.
+    // A plain image always serves them; a split image decides in
+    // `split::split_boot`, once it has entered the engine (a core-only S3
+    // serves nothing over the air yet: updates are M7's).
+    #[cfg(all(feature = "ble", not(lp_split)))]
+    radio_port.decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
+    // BLE: on unless the device store turns it off, read once here, the C6's
+    // rule (`fw-esp32c6/src/main.rs`): a missing store is `fresh()`
+    // (Bluetooth on, locked, no keys); a damaged one, or a board whose files
+    // are held or refused, is `locked()` (off). After the filesystem (the
+    // store is on it), in the core, so a core-only board keeps its radio.
+    #[cfg(feature = "ble")]
+    let ble_started = {
+        let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
+        match store.ble_enabled {
+            true => {
+                log::info!("[ble] enabled (device store, or none: on by default) — starting");
+                ble::start(spawner, radio_port)
+            }
+            false if fs_boot_state == lpc_wire::FsBootState::Refused => {
+                log::info!(
+                    "[ble] off (file store refused: the device store waits on the flash with it)"
+                );
+                false
+            }
+            false if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
+                log::info!(
+                    "[ble] off (files held for the layout change: the device store waits with \
+                     them)"
+                );
+                false
+            }
+            false => {
+                log::info!("[ble] off (device store: bleEnabled=false)");
+                false
+            }
+        }
+    };
+
     CoreBoot {
         spawner,
         usb_link,
@@ -586,6 +700,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         watchdog,
         boot_guard,
         boot_assessment,
+        #[cfg(feature = "ble")]
+        radio_port,
+        #[cfg(feature = "ble")]
+        ble_started,
         #[cfg(lp_split)]
         factory: _factory,
     }
@@ -609,6 +727,10 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         watchdog,
         boot_guard,
         boot_assessment,
+        #[cfg(feature = "ble")]
+        radio_port,
+        #[cfg(feature = "ble")]
+        ble_started,
         #[cfg(lp_split)]
             factory: _,
     } = core;
@@ -743,6 +865,28 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     if cfg!(feature = "fs-tree") {
         server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
     }
+
+    // USB plus the radio links (`ble`): every link's access state reserved
+    // now, the USB link's and each radio slot's, so a link's first sight
+    // grows nothing above its own memory; the advertised-name hook only when
+    // BLE runs. Built BEFORE the boot project loads, as on the C6: the mux's
+    // per-link lists hold memory for the board's whole life, and allocated
+    // after the project they would sit above it and split the space it frees
+    // (first fit; C6 silicon N7, 2026-10-06).
+    #[cfg(feature = "ble")]
+    let transport = {
+        server.reserve_links(1 + fw_esp32_common::radio_link::LINK_SLOTS);
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            radio_port,
+            embassy_time::Delay,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
