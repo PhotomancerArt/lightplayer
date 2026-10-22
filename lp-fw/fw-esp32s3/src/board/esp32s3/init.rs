@@ -64,6 +64,9 @@ pub fn init_board() -> (
     // BLE runs (`crate::ble::start`, after the filesystem mounts).
     #[cfg(all(s3_ble, not(fw_harness)))]
     crate::ble::stash(peripherals.BT);
+    // The PSRAM's peripheral, kept until `core_boot` brings it up.
+    #[cfg(all(feature = "psram", not(fw_harness)))]
+    crate::psram::stash(peripherals.PSRAM);
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);

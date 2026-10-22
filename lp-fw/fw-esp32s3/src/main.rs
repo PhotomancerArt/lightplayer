@@ -131,6 +131,8 @@ mod hardware;
 // inside is still app-only.
 #[cfg(any(not(fw_harness), feature = "test_loopback"))]
 mod output;
+#[cfg(all(feature = "psram", not(fw_harness)))]
+mod psram;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(not(fw_harness))]
@@ -615,6 +617,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         );
         esp_println::println!("[INIT] heap region: {radio_base:#010x}+{radio_heap} (radio)");
     }
+
+    // PSRAM (feature `psram`): up and self-tested before the filesystem maps
+    // `lpfs` or a split image maps its engine, so the core has it either way
+    // (`crate::psram`'s module docs).
+    #[cfg(feature = "psram")]
+    psram::bring_up();
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
