@@ -456,8 +456,12 @@ mux, from the shared crate `lp-fw/fw-esp32-radio` (`fw_esp32_radio::ble`).
 What is this chip's:
 
 - **The controller is BTDM**, not the C6's NPL, so its configuration is its
-  own (`src/ble/ble_controller_config.rs`): two connections (the link slots),
-  the controller task on core 0. Its three interrupts are bound to CPU0 at
+  own (`src/ble/ble_controller_config.rs`): three activities — the two link
+  slots plus the advertiser that offers the second one (BTDM counts every
+  advertising set and connection against `max_connections`; the C6's NPL
+  counts connections only:
+  docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md)
+  — and the controller task on core 0. Its three interrupts are bound to CPU0 at
   priority 1, under the link thread's lock (`src/io_thread.rs`).
 - **The radio blobs' C heap is its own** (`src/c_heap.rs`, the C6's): a 32 KB
   region the blobs' `malloc` tries first, then the arena's `Internal`
@@ -472,10 +476,13 @@ What is this chip's:
   `split_boot` enters it; a core-only S3 serves nothing over the air yet
   (updates over Bluetooth are the S3 updates plan's).
 
-**Off by default** until the desk walk (AC4) has passed on FS3: because a fresh
-board starts it, adding `ble` to `default` starts the controller on every
-fresh S3, emulated ones included. Build it with `just build-fw-esp32s3 ble` or
-`just fw-esp32s3-split esp32s3,server,float-f32,ble`.
+**On by default** since the desk walk passed on FS3
+(`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
+controller unless its device store turns Bluetooth off, emulated ones
+included (they advertise to nobody, as an emulated C6 does). A radio-free
+image is `--no-default-features --features esp32s3,server,float-f32,…`.
+Logins over it draw their nonce from the hardware RNG
+(`fill_random`, `LpServer::set_entropy_source`), as on the C6.
 
 Where a `radio` image's heap is (`[INIT] heap region:` lines at boot):
 
@@ -497,10 +504,12 @@ What it costs (plain image against plain image, 2026-10-21):
 | main arena | 240 → 168 KB | so the main stack keeps its share (54,400 B) |
 | flash | +298,792 B | `.text` + `.rodata`, inside the 64 KB headroom floor by megabytes |
 
-At boot: `[ble] up: controller +32568 B, host + GATT +3520 B` and a radio-region
-high water of 23,658 of 32,768 B while advertising — on FS3 (2026-10-21,
-**with no antenna attached**, so advertising was never heard) and on
-`lp-emu:esp32s3:t1` (controller +32,632 B, the same 23,658 B). The esp-hal
+On FS3 with an antenna, Mac Chrome as the central (2026-10-21, the walk
+record): `[ble] up: controller +33400 B, host + GATT +3520 B`; connected, the
+radio region's high water is 26,084 of 32,768 B (0 B overflowed to main) and
+the main stack's 29,312 of 54,296 B. Frame rate on `/projects/studio` (Peach
+(1D)): 37 fps radio off, 35–36 advertising (−3 to −5 %), 32 connected and
+editing (−14 %), inside the radio frame-rate budget. The esp-hal
 fork's switch that moves the controller's IRAM to flash (C6 only,
 `third_party/esp-hal/esp_config.yml`) is not extended to this chip: `dram_seg`
 closes without it.
