@@ -219,7 +219,10 @@ pub fn boot_set(
         (
             base::EFUSE,
             efuse::EFUSE_LEN,
-            Box::new(efuse::efuse(identity)),
+            Box::new(efuse::efuse(
+                identity,
+                flash.psram.lock().expect("psram poisoned").len(),
+            )),
         ),
         (
             base::I2C_ANA_MST,

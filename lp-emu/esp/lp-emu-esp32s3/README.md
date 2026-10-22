@@ -336,8 +336,8 @@ carry **8 MiB of octal PSRAM** beside the flash: flash on `CS0`, PSRAM on
 `CS1`. The firmware does not use it yet; this machine models it so an image
 that brings it up runs here, and **an image that never touches it runs
 exactly as before** — `tests/psram_boot.rs` runs the shipped image with the
-default 8 MiB chip and with none and holds the link bytes, cycles,
-instructions and cache fills equal. So the chip is present at 8 MiB by
+default 8 MiB chip and with none, by direct load and ROM-up, and holds the
+link bytes, the ROM's console, cycles, instructions and cache fills equal. So the chip is present at 8 MiB by
 default; `--psram-len 0` is a board without (`lp-cli emu run --chip esp32s3
 --psram <size>` is the same knob). `emu serve` holds C6 boards only, so it
 has no S3 PSRAM option.
@@ -347,6 +347,7 @@ has no S3 PSRAM option.
 | the chip: bytes and mode registers | [`src/psram.rs`](src/psram.rs) | the registers' reset values are **FS3's own decode** (esp-hal's `print_psram_info`, 2026-10-22): vendor `0x0D` (AP), generation 3, 64 Mbit, good die, 3 V, fast refresh, hybrid wrap, 32-byte bursts. MR0 and MR4 are unobserved and say so |
 | the mode-register reads and writes | [`src/periph/spi1.rs`](src/periph/spi1.rs), "`CS1`" | the ROM's `esp_rom_spi_cmd_start` puts `misc[1:0] = ~cs_mask`; a `usr` transaction with only `CS1` selected goes to the PSRAM. Commands `0x4040`/`0xC0C0` are esp-hal's `OPI_PSRAM_REG_READ`/`WRITE`; only MR0 takes a write |
 | the pages | [`src/cache.rs`](src/cache.rs), "PSRAM pages" | MMU bit 15 is esp-hal's `MMU_ACCESS_SPIRAM`, ORed in by `Cache_Dbus_MMU_Set` (`4004f771`). The fill copies the page into both windows, opens the DROM page to stores and mirrors them into IROM, and writes it back when the entry moves |
+| the eFuse's `PSRAM_CAP` / `PSRAM_VENDOR` | [`src/periph/efuse.rs`](src/periph/efuse.rs), "The PSRAM fields" | esp-hal's field positions; ESP-IDF's S3 eFuse table for the codes (8 MiB AP 3.3 V = capacity 1, vendor 1, what an S3R8 reads). They follow `--psram-len`, and 0 = none reads the PAC's zero as before. Not a dump: no S3's fuses have been read |
 | the SPI0 cache-side set-up, the clocks, the pads | accept-and-remember | the bytes that move do not depend on them here |
 
 What the probe proves (`fw-esp32s3 --features test_psram`, `just

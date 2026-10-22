@@ -166,9 +166,11 @@ fn a_snapshot_mid_probe_restores_to_the_same_finish() {
 }
 
 /// **The default changes nothing for an image that never touches PSRAM.**
-/// The shipped image, with the default 8 MiB chip and with none: the same
-/// bytes on the link, the same cycle and instruction counts, and the chip
-/// never reached. This is the evidence for making 8 MiB the default.
+/// The shipped image, with the default 8 MiB chip and with none, by direct
+/// load and ROM-up (the real mask ROM and IDF bootloader, which see the
+/// eFuse's PSRAM fields differ): the same bytes on the link, the same cycle
+/// and instruction counts, and the chip never reached. This is the evidence
+/// for making 8 MiB the default.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF and LP_EMU_ESP32S3_MERGED; run through `just test-emu-esp32s3-boot`"]
 fn the_shipped_image_runs_the_same_with_and_without_psram() {
@@ -179,38 +181,56 @@ fn the_shipped_image_runs_the_same_with_and_without_psram() {
             return;
         }
     };
-    let run = |psram: u32| {
-        let mut m = Esp32S3Builder::new()
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let run = |psram: u32, rom_up: bool| {
+        let mut b = Esp32S3Builder::new()
             .app(AppSource::Path(elf.clone()))
             .flash(FlashBacking::Copy(merged.clone()))
             .psram_len(psram)
             .strict(true)
-            .usb_host(UsbHost::Attached { draining: true })
-            .build()
-            .expect("the shipped image direct-loads");
+            .usb_host(UsbHost::Attached { draining: true });
+        if rom_up {
+            b = b.boot_mode(BootMode::RomUp).flash_len(len);
+        }
+        let mut m = b.build().expect("the shipped image builds");
         let outcome = m.run_until(&StopCondition::after_micros(500_000));
+        let path = if rom_up { "rom-up" } else { "direct" };
         assert!(
             matches!(outcome, Outcome::Deadline { .. }),
-            "psram={psram}: {outcome:?}"
+            "{path} psram={psram}: {outcome:?}"
         );
         assert!(
             m.psram_summary().is_none(),
-            "psram={psram}: the chip was reached"
+            "{path} psram={psram}: the chip was reached"
         );
-        (m.usb_sj(), m.cycles(), m.instructions(), m.cache_fills())
+        (
+            m.usb_sj(),
+            m.uart0().bytes(),
+            m.cycles(),
+            m.instructions(),
+            m.cache_fills(),
+        )
     };
-    let with = run(lp_emu_esp32s3::psram::DEFAULT_PSRAM_LEN);
-    let without = run(0);
-    assert!(
-        String::from_utf8_lossy(&with.0).contains("starting server loop"),
-        "the run reached the server loop"
-    );
-    assert_eq!(with.0, without.0, "the bytes on the link");
-    assert_eq!(
-        (with.1, with.2, with.3),
-        (without.1, without.2, without.3),
-        "(cycles, instructions, cache fills)"
-    );
+    for rom_up in [false, true] {
+        let with = run(lp_emu_esp32s3::psram::DEFAULT_PSRAM_LEN, rom_up);
+        let without = run(0, rom_up);
+        if !rom_up {
+            assert!(
+                String::from_utf8_lossy(&with.0).contains("starting server loop"),
+                "the direct run reached the server loop"
+            );
+        }
+        assert_eq!(with.0, without.0, "rom_up={rom_up}: the bytes on the link");
+        assert_eq!(
+            with.1, without.1,
+            "rom_up={rom_up}: the ROM's UART0 console"
+        );
+        assert_eq!(
+            (with.2, with.3, with.4),
+            (without.2, without.3, without.4),
+            "rom_up={rom_up}: (cycles, instructions, cache fills)"
+        );
+    }
 }
 
 fn probe(test: &str) -> Option<std::path::PathBuf> {
