@@ -400,6 +400,17 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// The login challenge's randomness: the S3's hardware RNG, as the C6's
+/// `fill_random`. True-random while the radio runs, and unpredictable enough
+/// for a single-use 32-byte nonce when it does not (a nonce needs
+/// uniqueness, not secrecy). Without it every login is refused ("this server
+/// has no entropy source"), so a locked board could not be unlocked
+/// (docs/defects/2026-10-21-a-locked-s3-refuses-every-login.md).
+#[cfg(not(fw_harness))]
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
+}
+
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
@@ -853,6 +864,9 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     server.set_packed_encoding_supported(
         fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
     );
+    // Login challenges draw from the chip's hardware RNG; the server itself
+    // never draws randomness (sans-IO).
+    server.set_entropy_source(Some(fill_random));
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).
