@@ -8,9 +8,10 @@
 //! The S3 has two boot stages before the core, in two places:
 //!
 //! - **the split image's loader**, [`S3_LOADER_RAM`]: code through the
-//!   instruction-bus alias ([`S3_LOADER_IRAM`]), data and stack through the
-//!   data bus. Every core's `.bss` covers it, so the core zeroes it after
-//!   the jump. Claimed by the loader forever (the S3 plan's ruling L4).
+//!   instruction-bus alias ([`S3_LOADER_IRAM`]), data through the data bus.
+//!   Every core's `.bss` covers it, so the core zeroes it after the jump.
+//!   Claimed by the loader forever (the S3 plan's ruling L4, amended
+//!   2026-10-22: see [`S3_LOADER_RAM`] for where and why).
 //! - **the ESP-IDF second-stage bootloader** espflash bundles,
 //!   [`S3_IDF_BOOTLOADER_RAM`]: espflash 3.3.0's `esp32s3-bootloader.bin`
 //!   loads its code at I `0x403C_9700..0x403C_A304` and
@@ -30,14 +31,33 @@
 use core::ops::Range;
 
 /// What the instruction bus adds to a data-bus address in SRAM1: the loader
-/// fetches `0x403A_0000` = reads `0x3FCB_0000`.
+/// fetches `0x403B_5000` = reads `0x3FCC_5000`.
 pub const SRAM1_I_FROM_D: u32 = 0x6F_0000;
 
-/// The S3 loader's RAM, data bus: code at the bottom (fetched through
-/// [`S3_LOADER_IRAM`]), data and stack above. Inside every core's `.bss`,
-/// clear of every segment the loader copies, and below the IDF
-/// bootloader's RAM, which is still live while the loader is loaded.
-pub const S3_LOADER_RAM: Range<u32> = 0x3FCB_0000..0x3FCC_0000;
+/// The S3 loader's RAM, data bus: code in the low half (fetched through
+/// [`S3_LOADER_IRAM`]), data in the high half. 16 KiB; the loader is about
+/// 3.6 KB.
+///
+/// **At the top of the core's heap arena, not in its middle** (L4 amended
+/// 2026-10-22). A core's `dram_seg` runs, bottom up: its loaded segments
+/// (`.rwtext` through the alias, `.data`), `.bss` — the radio's heap region,
+/// the main heap arena, the other statics — and the main stack up to
+/// `0x3FCD_B700`. The core registers its arena cut around this range (radio
+/// DMA may not land here across a warm reset, so the piece inside carries no
+/// capability tag), so a range in the arena's middle splits it in three:
+/// at `0x3FCB_0000..0x3FCC_0000` it left the Bluetooth image's largest free
+/// block at 73,744 B. Here the arena keeps one piece below it.
+///
+/// It ends at `0x3FCC_9000` (I `0x403B_9000`), where esp-hal's S3
+/// `memory.x` says the bootloader's startup code may begin: espflash 3.3's
+/// bundled bootloader starts at I `0x403C_9700` ([`S3_IDF_BOOTLOADER_RAM`]),
+/// and the margin is for a later IDF bootloader growing down. It is inside
+/// every core's `.bss` (`0x3FC9_40E8..0x3FCC_E2E6` at main `ccfa116b0`),
+/// clear of every segment the loader copies, and below the IDF bootloader's
+/// RAM, which is still live while the loader runs. A core whose `.bss` ends
+/// below it puts this range in its main stack instead: RAM the core neither
+/// loads nor reads before writing, which is all the loader needs.
+pub const S3_LOADER_RAM: Range<u32> = 0x3FCC_5000..0x3FCC_9000;
 /// [`S3_LOADER_RAM`] on the instruction bus.
 pub const S3_LOADER_IRAM: Range<u32> =
     S3_LOADER_RAM.start + SRAM1_I_FROM_D..S3_LOADER_RAM.end + SRAM1_I_FROM_D;
@@ -52,7 +72,7 @@ pub const S3_BOOT_STAGE_RAM: [Range<u32>; 2] = [S3_LOADER_RAM, S3_IDF_BOOTLOADER
 
 const _: () = {
     assert!(S3_LOADER_RAM.end <= S3_IDF_BOOTLOADER_RAM.start);
-    assert!(S3_LOADER_IRAM.start == 0x403A_0000);
+    assert!(S3_LOADER_IRAM.end == 0x403B_9000);
 };
 
 /// Cut the array `start..start + len` where it first reaches one of
@@ -79,9 +99,23 @@ mod tests {
 
     #[test]
     fn the_loader_is_inside_the_cores_bss_and_below_the_bootloader() {
-        // The spike's core: `.bss` 0x3FC8_C128..0x3FCC_E8C8.
-        assert!(0x3FC8_C128 <= S3_LOADER_RAM.start && S3_LOADER_RAM.end <= 0x3FCC_E8C8);
-        assert_eq!(S3_LOADER_IRAM, 0x403A_0000..0x403B_0000);
+        // The shipped split core at main `ccfa116b0` (`p2.elf`): `.bss`
+        // 0x3FC9_40E8..0x3FCC_E2E6.
+        assert!(0x3FC9_40E8 <= S3_LOADER_RAM.start && S3_LOADER_RAM.end <= 0x3FCC_E2E6);
+        assert_eq!(S3_LOADER_IRAM, 0x403B_5000..0x403B_9000);
+        // Below where esp-hal says the bootloader's startup IRAM may begin.
+        assert!(S3_LOADER_IRAM.end <= 0x403B_9000);
+    }
+
+    /// The point of the 2026-10-22 amendment: the shipped Bluetooth image's
+    /// heap arena (`HEAP_MAIN`, 0x3FC9_C108 + 172,032 B at `ccfa116b0`) is
+    /// cut once, near its top, not in the middle.
+    #[test]
+    fn the_shipped_arena_keeps_one_piece_below_the_loader() {
+        let (below, from) = split_at_s3_boot_stage_ram(0x3FC9_C108, 172_032);
+        assert_eq!(0x3FC9_C108 + below, S3_LOADER_RAM.start);
+        assert_eq!(below, 167_672);
+        assert_eq!(from, 4_360);
     }
 
     #[test]

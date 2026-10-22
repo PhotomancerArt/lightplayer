@@ -162,13 +162,14 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// `lp-emu-esp32v3/tests/boot.rs` pins the classic's. Since `ble` joined the
 /// shipped image's default features (2026-10-21, the S3 Bluetooth walk) the
 /// chain carries the radio's heap: the arena cut around the boot stages' RAM
-/// and the blobs' 32 KB region (`fw-esp32s3/src/c_heap.rs`).
+/// and the blobs' 32 KB region (`fw-esp32s3/src/c_heap.rs`). Since L4's
+/// amendment (2026-10-22) the split loader's RAM sits at the arena's top, so
+/// the arena is one `Internal` piece and a few KB untagged above it.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
 [INIT] chip=esp32s3 arch=xtensa heap=172032+73744=245776 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fc9c108+81656 (dram_seg arena, Internal)
-[INIT] heap region: 0x3fcb0000+65536 (dram_seg arena, a boot stage's RAM, untagged)
-[INIT] heap region: 0x3fcc0000+24840 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fc9c108+167672 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fcc5000+4360 (dram_seg arena, a boot stage's RAM, untagged)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
 [INIT] heap region: 0x3fc940f0+32768 (radio)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
@@ -179,8 +180,8 @@ const HELLO: &str = "\
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 638;
-const HELLO_SHA: &str = "26ab6715cc42467f8b762d2d86c26632091fc8aee050dc73ee80bbbb3ec0da94";
+const HELLO_BYTES: usize = 574;
+const HELLO_SHA: &str = "16c3272468122bff164900071ab09a8f7dcb916c5bf7e7bfa514397e7d8c687e";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
