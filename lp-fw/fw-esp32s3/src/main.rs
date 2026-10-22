@@ -57,7 +57,8 @@
     not(fw_harness),
     feature = "test_xt_jit_corpus",
     feature = "test_button",
-    feature = "test_shader_compile_incremental"
+    feature = "test_shader_compile_incremental",
+    feature = "test_psram_bench"
 ))]
 extern crate alloc;
 
@@ -125,6 +126,8 @@ mod hardware;
 // inside is still app-only.
 #[cfg(any(not(fw_harness), feature = "test_loopback"))]
 mod output;
+#[cfg(all(feature = "psram-spike", not(fw_harness)))]
+mod psram_spike;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(not(fw_harness))]
@@ -316,6 +319,9 @@ fn boot() -> ! {
         drop(peripherals);
         tests::test_seam_abi::run();
     }
+
+    #[cfg(feature = "test_psram_bench")]
+    tests::psram_bench::run(peripherals.PSRAM, peripherals.FLASH, peripherals.CPU_CTRL);
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact
@@ -380,6 +386,8 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // the endpoint tears the frame and is lost with it. The log ring rides
     // the link's log channel.
     log::info!("[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}");
+    #[cfg(feature = "psram-spike")]
+    log::info!("[MEM-T] t={}us", esp_hal::time::Instant::now().duration_since_epoch().as_micros());
     // Structural — see this function's doc comment. The S3 JITs into the heap,
     // not into a reserved code region, so there is no arena to report and the
     // residency these fields would carry is already in `used` above. Printed
@@ -451,6 +459,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // figure `c_heap::HEAP_RADIO_BYTES` is checked against.
     #[cfg(s3_radio)]
     c_heap::log_if_grown("heartbeat");
+    #[cfg(feature = "psram-spike")]
+    psram_spike::log_heartbeat();
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
@@ -562,6 +572,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     let (dram2_base, dram2_heap) = dram2_heap::add_region();
     #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
     let (radio_base, radio_heap) = c_heap::install_radio();
+    // PSRAM spike: before anything maps the `lpfs` window, so esp-hal's scan
+    // for the first free MMU entry lands after the app's own pages.
+    #[cfg(feature = "psram-spike")]
+    psram_spike::install();
     // Paint the main stack before anything deep runs, so the high-water report
     // measures the whole app (see `stack_probe`). After the arena is carved,
     // because the paint runs on the main stack and the arena is `.bss`, not

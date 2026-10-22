@@ -92,6 +92,8 @@ impl JitBuffer {
     /// has its own publish barrier in `codemem_esp32`'s device sink.
     #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
     pub(crate) fn from_code(code: Vec<u8>) -> Self {
+        #[cfg(target_arch = "xtensa")]
+        crate::exec_addr::xt_publish_code(code.as_ptr() as usize, code.len());
         let buffer = Self {
             inner: Inner::Heap { code },
         };

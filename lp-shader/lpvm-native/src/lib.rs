@@ -48,6 +48,8 @@ pub mod debug_asm;
 pub mod emit;
 pub mod error;
 mod exec_addr;
+/// PSRAM spike: where the firmware installs its code-publish routine.
+pub use exec_addr::XT_CODE_PUBLISH;
 // The Xtensa hardware-risk corpus. Feature-gated because the firmware harness
 // wants it and the app build must not pay for it; `no_std`, so the same module
 // builds for the device and for the host golden test.

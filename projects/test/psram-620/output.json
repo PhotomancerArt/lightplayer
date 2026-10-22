@@ -1,0 +1,26 @@
+{
+ "kind": "Output",
+ "ports": {
+  "0": {
+   "endpoint": "ws281x:local:D0",
+   "count": 155
+  },
+  "1": {
+   "endpoint": "ws281x:local:D1",
+   "count": 155
+  },
+  "2": {
+   "endpoint": "ws281x:local:D3",
+   "count": 155
+  },
+  "3": {
+   "endpoint": "ws281x:local:D10",
+   "count": 155
+  }
+ },
+ "bindings": {
+  "input": {
+   "source": "bus:control.out"
+  }
+ }
+}

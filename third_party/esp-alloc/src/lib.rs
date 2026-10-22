@@ -175,7 +175,15 @@ use crate::heap::Heap;
 /// cores are up — and `add_region` panics past the cap. Naming it also removes
 /// the index hazard: `stats()` writes `region_stats[id]` for every occupied
 /// slot, so the two arrays must be the same length. See `README-LP.md`.
-pub const MAX_REGIONS: usize = 5;
+pub const MAX_REGIONS: usize = 6;
+
+/// ⚠️ **PSRAM spike only** (branch `claude/spike-s3-psram-*`, never merged):
+/// Rust's global allocator sends a request of at least this many bytes to a
+/// region tagged `External` and NOT `Internal` (the PSRAM region) first, then
+/// to every region in registration order as before. `usize::MAX` (the
+/// default) is today's allocator exactly.
+pub static EXTERNAL_FIRST_MIN: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(usize::MAX);
 
 /// The global allocator instance
 #[cfg_attr(feature = "global-allocator", global_allocator)]
@@ -542,6 +550,19 @@ impl EspHeapInner {
     /// if the caller does not ensure that `layout` has non-zero size.
     ///
     /// The allocated block of memory may or may not be initialized.
+    /// PSRAM spike: the first region tagged `External` without `Internal`.
+    unsafe fn alloc_external_only(&mut self, layout: Layout) -> *mut u8 {
+        for region in self.heap.iter_mut().filter_map(|r| r.as_mut()) {
+            let caps = region.capabilities;
+            if caps.contains(MemoryCapability::External) && !caps.contains(MemoryCapability::Internal) {
+                if let Some(res) = region.allocate(layout) {
+                    return res.as_ptr();
+                }
+            }
+        }
+        ptr::null_mut()
+    }
+
     unsafe fn alloc_caps(
         &mut self,
         capabilities: EnumSet<MemoryCapability>,
@@ -715,6 +736,14 @@ impl EspHeap {
 
 unsafe impl GlobalAlloc for EspHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if layout.size() >= EXTERNAL_FIRST_MIN.load(core::sync::atomic::Ordering::Relaxed) {
+            let ptr = self
+                .inner
+                .with(|heap| unsafe { heap.alloc_external_only(layout) });
+            if !ptr.is_null() {
+                return ptr;
+            }
+        }
         unsafe { self.alloc_caps(EnumSet::empty(), layout) }
     }
 

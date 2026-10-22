@@ -9,6 +9,10 @@ pub mod loopback;
 pub mod test_button;
 #[cfg(feature = "test_seam_abi")]
 pub mod test_seam_abi;
+/// PSRAM spike (never shipped): bandwidth, latency, code fetch, JIT and
+/// flash-write hazards of the 8 MB octal PSRAM.
+#[cfg(feature = "test_psram_bench")]
+pub mod psram_bench;
 /// The FP conformance rig lives in `lp-xt-fp-harness` — the classic ESP32 runs
 /// the same corpus, and the rig is a correctness oracle that must not be
 /// duplicated. All this chip owes it is its identity.

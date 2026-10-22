@@ -152,6 +152,9 @@ const FIFO_SENTINEL: u32 = 0x1234_ABCD;
 type RxCh<'ch> = Channel<'ch, Blocking, Rx>;
 
 pub fn run(peripherals: Peripherals) -> ! {
+    // PSRAM spike: the LED stress runs after the self-test.
+    #[cfg(feature = "test_psram_bench")]
+    let spike = (peripherals.PSRAM, peripherals.FLASH, peripherals.CPU_CTRL);
     esp_println::println!(
         "fw-esp32s3: RMT loopback self-test, GPIO4-7 TX ch0-3 -> RX ch4-7, no wires"
     );
@@ -689,6 +692,9 @@ pub fn run(peripherals: Peripherals) -> ! {
              bits_written={victim_bits_written}"
         );
     }
+
+    #[cfg(feature = "test_psram_bench")]
+    crate::tests::psram_bench::led_stress(spike.0, spike.1, spike.2);
 
     // --- Verdict, repeated so any capture window catches it -----------------
     let frames_done = DRIVER.stats(0).frames;

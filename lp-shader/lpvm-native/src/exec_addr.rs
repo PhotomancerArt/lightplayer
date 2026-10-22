@@ -40,6 +40,32 @@ const S3_DUAL_MAPPED_DBUS: core::ops::Range<usize> = 0x3FC8_8000..0x3FCF_0000;
 /// ESP32-S3: distance from the D-bus view of SRAM1 to its I-bus alias.
 const S3_IBUS_ALIAS_OFFSET: usize = 0x6F_0000;
 
+/// PSRAM spike: the S3's external-memory D-bus window (flash DROM pages or
+/// PSRAM; JIT code can only be in PSRAM) and its I-bus twin's distance.
+#[cfg_attr(not(target_arch = "xtensa"), allow(dead_code))]
+const S3_PSRAM_DBUS: core::ops::Range<usize> = 0x3C00_0000..0x3E00_0000;
+#[cfg_attr(not(target_arch = "xtensa"), allow(dead_code))]
+const S3_PSRAM_IBUS_OFFSET: usize = 0x0600_0000;
+
+/// PSRAM spike: the firmware's "make `len` bytes stored at `write` fetchable"
+/// routine (D-cache write-back + I-cache invalidate), as a `fn(usize, usize)`
+/// address; 0 = none installed. Only consulted for code in PSRAM.
+pub static XT_CODE_PUBLISH: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// PSRAM spike: publish JIT code stored in the external window.
+#[cfg(target_arch = "xtensa")]
+pub(crate) fn xt_publish_code(write: usize, len: usize) {
+    if !S3_PSRAM_DBUS.contains(&write) {
+        return;
+    }
+    let f = XT_CODE_PUBLISH.load(core::sync::atomic::Ordering::Relaxed);
+    if f != 0 {
+        // SAFETY: the firmware installed a `fn(usize, usize)` here.
+        let f: fn(usize, usize) = unsafe { core::mem::transmute(f) };
+        f(write, len);
+    }
+}
+
 /// The ESP32-S3 rule as a pure function, so it is testable on any host.
 ///
 /// Returns `None` when `write` is outside the dual-mapped window, which means
@@ -93,6 +119,12 @@ pub(crate) fn exec_addr(write: usize) -> usize {
 pub(crate) fn exec_addr(write: usize) -> usize {
     match s3_exec_addr(write) {
         Some(exec) => exec,
+        // PSRAM spike: the S3's one MMU table serves both buses at one index,
+        // so a PSRAM page mapped at D-bus `0x3C00_0000 + n × 64 KiB` is
+        // fetched at I-bus `0x4200_0000 + n × 64 KiB`. The bytes must be
+        // written back from the D-cache and dropped from the I-cache first
+        // ([`xt_publish_code`]).
+        None if S3_PSRAM_DBUS.contains(&write) => write + S3_PSRAM_IBUS_OFFSET,
         None => {
             debug_assert!(
                 write >= 0x4000_0000,

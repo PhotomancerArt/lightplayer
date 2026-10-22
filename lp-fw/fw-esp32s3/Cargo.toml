@@ -210,6 +210,20 @@ test_button = ["server"]
 # result and the caller's window survive an answer. Never shipped.
 test_seam_abi = []
 
+# PSRAM spike (branch `claude/spike-s3-psram-*`, never shipped): the 8 MB octal
+# PSRAM as an app heap region under `LP_PSRAM_POLICY` (`src/psram_spike.rs`).
+psram-spike = ["server", "dep:lpvm-native"]
+
+# PSRAM spike (branch `claude/spike-s3-psram-*`, never shipped): what the 8 MB
+# octal PSRAM gives and costs on silicon (`src/tests/psram_bench.rs`).
+test_psram_bench = [
+    "dep:lpvm-native",
+    "dep:lpvm",
+    "dep:lpir",
+    "dep:lps-shared",
+    "dep:lps-builtins",
+]
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
