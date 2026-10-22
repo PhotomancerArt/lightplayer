@@ -213,6 +213,20 @@ stack. On silicon it prints `echo=7`, `take engaged=false`,
 `net engaged=false` and idles. The emulator's side is
 `lp-emu/esp/lp-emu-esp32s3/tests/seam_abi_harness.rs`.
 
+### `test_lcd_lanes` (emulator first)
+
+```bash
+just build-fw-esp32s3 test_lcd_lanes   # `just test-emu-esp32s3-lcd` builds and runs it
+```
+
+Five uneven WS281x lanes (12, 9, 7, 5 and 3 LEDs on GPIO1–5, the XIAO's
+D0–D4) out of LCD_CAM's i8080 mode at 2.5 MHz, fed by GDMA from one
+internal-RAM buffer, sent twice. It encodes its own frame (three 400 ns slots
+per WS281x bit) so that it tests the emulator's LCD_CAM and GDMA models
+(`lp-emu/esp/lp-emu-esp32s3/tests/lcd_cam_lanes.rs`, every lane byte-exact)
+and not the product's encoder. On silicon it drives the same pads (nothing
+need be attached) and prints `[LCD-LANES] frame N sent …` and `done`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four

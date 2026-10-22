@@ -4387,6 +4387,24 @@ test-emu-esp32s3-psram:
     fi
     cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
 
+# The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
+# `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —
+# sends five uneven lanes through esp-hal's i8080 driver and GDMA, and
+# `tests/lcd_cam_lanes.rs` checks every lane decodes byte-exact off its pad.
+# One firmware build and a few milliseconds of emulation; the `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it beside the seam harness.
+test-emu-esp32s3-lcd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_lcd_lanes
+    lanes="$out/fw-esp32s3-lcd-lanes.elf"
+    cp "$built" "$lanes"
+    export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
