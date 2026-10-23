@@ -8,14 +8,7 @@
 #[cfg(not(fw_harness))]
 pub mod board_quirks;
 pub mod constants;
-#[cfg(any(
-    feature = "test_cycle_probe",
-    feature = "test_msafluid",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "bench_render_loop",
-    feature = "diag_secure_link",
-))]
+// SPIKE (fluid): the bench uses it in every build.
 pub mod cycle_counter;
 pub mod init;
 #[cfg(feature = "lp_sram_heap")]

@@ -41,6 +41,8 @@ pub struct MsaFluidSolver {
     u_old: Vec<Q32>,
     v: Vec<Q32>,
     v_old: Vec<Q32>,
+    /// SPIKE: the variant `LP_FLUID_VARIANT` names, made on first use.
+    spike: Option<super::spike::AnySolver>,
 }
 
 impl MsaFluidSolver {
@@ -69,12 +71,17 @@ impl MsaFluidSolver {
             u_old: zeros.clone(),
             v: zeros.clone(),
             v_old: zeros,
+            spike: None,
         };
         s
     }
 
     /// Inject velocity impulse into the force buffer (before `update()`).
     pub fn add_force_at_cell(&mut self, i: usize, j: usize, vx: Q32, vy: Q32) {
+        if let Some(sp) = self.spike_solver() {
+            sp.add_force_at_cell(i, j, vx.to_f32(), vy.to_f32());
+            return;
+        }
         if i < 1 || i > self.nx || j < 1 || j > self.ny {
             return;
         }
@@ -113,6 +120,10 @@ impl MsaFluidSolver {
 
     /// Add dye into the source buffer (before `update()`).
     pub fn add_color_at_cell(&mut self, i: usize, j: usize, r: Q32, g: Q32, b: Q32) {
+        if let Some(sp) = self.spike_solver() {
+            sp.add_color_at_cell(i, j, r.to_f32(), g.to_f32(), b.to_f32());
+            return;
+        }
         if i < 1 || i > self.nx || j < 1 || j > self.ny {
             return;
         }
@@ -124,6 +135,12 @@ impl MsaFluidSolver {
 
     /// Advance one simulation step (RGB dye).
     pub fn update(&mut self) {
+        if self.spike_solver().is_some() {
+            let sp = self.spike.as_mut().unwrap();
+            sp.update();
+            sp.copy_dye(&mut self.r, &mut self.g, &mut self.b);
+            return;
+        }
         self.add_source_uv();
         self.swap_u();
         self.swap_v();
@@ -184,6 +201,20 @@ impl MsaFluidSolver {
 
     pub fn stride(&self) -> usize {
         self.stride
+    }
+
+    fn spike_solver(&mut self) -> Option<&mut super::spike::AnySolver> {
+        let v = super::spike::variant(option_env!("LP_FLUID_VARIANT")?)?;
+        if self.spike.is_none() {
+            self.spike = Some(super::spike::AnySolver::new(
+                v,
+                self.nx,
+                self.solver_iterations,
+                self.fade_speed.to_f32(),
+                self.visc.to_f32(),
+            ));
+        }
+        self.spike.as_mut()
     }
 }
 

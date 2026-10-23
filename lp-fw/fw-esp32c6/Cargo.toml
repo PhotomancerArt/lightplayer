@@ -547,6 +547,8 @@ lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, opt
 # firmware (the S3 app layer, M3) can list fewer of these gates on its own
 # `lpa-server` dependency and link only the node kinds it runs. See
 # `lpc-engine/README.md` for what each gate is worth in flash.
+# SPIKE (fluid): the bench reaches the solver variants.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["node-fluid"] }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-button",
     "node-power-button",

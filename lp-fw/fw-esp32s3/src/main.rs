@@ -147,6 +147,10 @@ mod hardware;
 mod output;
 #[cfg(all(feature = "psram", not(fw_harness)))]
 mod psram;
+#[cfg(not(fw_harness))]
+mod fluid_bench;
+#[cfg(not(fw_harness))]
+mod fluid_pie;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(all(s3_radio, not(fw_harness)))]
@@ -706,6 +710,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         psram::bring_up();
         psram::add_heap_region();
     }
+    fluid_bench::run();
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a

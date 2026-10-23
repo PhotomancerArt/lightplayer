@@ -186,6 +186,8 @@ mod first_light;
 mod flash_qio;
 #[cfg(not(fw_harness))]
 mod stack_probe;
+#[cfg(not(fw_harness))]
+mod fluid_bench;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
 mod stress;
 #[cfg(all(
@@ -587,6 +589,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         "[INIT] Board initialized, starting runtime... (main stack {} B)",
         stack_probe::total_bytes()
     );
+    fluid_bench::run();
 
     // Crash recovery: analyze the previous run (reset reason + persistent
     // breadcrumb region) before anything crash-prone runs, then arm the

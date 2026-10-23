@@ -528,6 +528,8 @@ fw-esp32-common = { path = "../fw-esp32-common", default-features = false, featu
 # abort tier (`panic = "abort"` + the lp-recovery RTC ledger) as of ADR
 # 2026-08-02-rv32-firmwares-are-abort-tier. The S3 got there first, and its
 # `src/recovery/panic_path.rs` is one of the two files the C6 was ported from.
+# SPIKE (fluid): the bench reaches the solver variants.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["node-fluid"] }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-button",
     "node-radio",

@@ -17,8 +17,7 @@
 pub mod constants;
 // Reads `CCOUNT` with inline asm, which is unstable on Xtensa and behind
 // `asm_experimental_arch`. The app path deliberately does not enable that
-// feature, so this module is harness-only.
-#[cfg(fw_harness)]
+// feature, so this module is harness-only. SPIKE (fluid): the bench uses it.
 #[cfg_attr(
     not(feature = "test_xt_jit_corpus"),
     allow(

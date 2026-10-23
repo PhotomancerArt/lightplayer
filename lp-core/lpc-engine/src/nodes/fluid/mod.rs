@@ -4,6 +4,7 @@ mod emit;
 mod fluid_node;
 mod sampler;
 mod solver;
+pub mod spike;
 
 pub use emit::stamp_emitter;
 pub use fluid_node::{FluidNode, fluid_emitters_path, fluid_output_path};
