@@ -66,10 +66,15 @@ pub fn start() {
     let mut cpu_control = CpuControl::new(peri);
     // SAFETY: the one reference to the stack, taken once.
     let stack = unsafe { &mut *addr_of_mut!(APP_CORE_STACK) };
-    match cpu_control.start_app_core(stack, || {
+    let sampler = pcs::enabled();
+    fw_esp32_common::stage_probe::set_window_hook(pcs::on_window);
+    match cpu_control.start_app_core(stack, move || {
         // Core 1 has its own CPENABLE: a Float-mode shader's FP ops fault
         // without coprocessor 0 armed (`board::esp32s3::fpu`).
         crate::board::esp32s3::fpu::arm();
+        if sampler {
+            pcs::sampler_loop()
+        }
         helper_loop()
     }) {
         Ok(guard) => {
@@ -89,6 +94,10 @@ pub fn start() {
     }
     if ALIVE.load(Ordering::Acquire) == 0 {
         esp_println::println!("[core1] did not reach its loop");
+        return;
+    }
+    if sampler {
+        esp_println::println!("[core1] pc sampler on (LP_CORE1_MODE=pcs)");
         return;
     }
     if let Some(min) = option_env!("LP_CORE1_MIN_SPLIT").and_then(|s| s.parse().ok()) {
@@ -143,5 +152,161 @@ fn helper_loop() {
         unsafe { lpvm_native::helper_core::run_helper_job(&*job) };
         JOBS_DONE.fetch_add(1, Ordering::Relaxed);
         JOB.store(null_mut(), Ordering::Release);
+    }
+}
+
+/// SPIKE (fps spike): core 1 as a PC sampler for core 0. `LP_CORE1_MODE=pcs`
+/// at build time starts core 1 into [`sampler_loop`] instead of the render
+/// helper. Core 1 reads core 0's PC from ASSIST_DEBUG's pdebug record
+/// register (`CORE_0_RCD_PDEBUGPC`, ESP32-S3 TRM, Debug Assistant), so a
+/// sample costs core 0 nothing and is not biased by core 0 masking
+/// interrupts. The loop runs from IRAM and writes only internal RAM, so it
+/// neither fetches through the cache nor touches the MSPI bus.
+pub mod pcs {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    const ASSIST_DEBUG: usize = 0x600C_E000;
+    const RCD_PDEBUGENABLE: usize = ASSIST_DEBUG + 0x48;
+    const RCD_RECORDING: usize = ASSIST_DEBUG + 0x4c;
+    const RCD_PDEBUGPC: usize = ASSIST_DEBUG + 0x5c;
+    const SYSTEM_CPU_PERI_CLK_EN: usize = 0x600C_0008;
+    const SYSTEM_CPU_PERI_RST_EN: usize = 0x600C_000C;
+
+    pub const N: usize = 8192;
+    static SAMPLES: [AtomicU32; N] = [const { AtomicU32::new(0) }; N];
+    /// 0 idle, 1 recording, 2 full (core 0 dumps, then re-arms).
+    static STATE: AtomicU32 = AtomicU32::new(0);
+    static ROUNDS: AtomicU32 = AtomicU32::new(0);
+    static WINDOWS: AtomicU32 = AtomicU32::new(0);
+    static PROBE: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
+
+    pub fn enabled() -> bool {
+        option_env!("LP_CORE1_MODE") == Some("pcs")
+    }
+
+    fn rounds_wanted() -> u32 {
+        option_env!("LP_PCS_ROUNDS").and_then(|s| s.parse().ok()).unwrap_or(4)
+    }
+
+    fn mean_gap_cycles() -> u32 {
+        // Mean gap between samples, in core-1 cycles (240 MHz). Default
+        // ~250 µs: 8192 samples a round span ~2 s.
+        option_env!("LP_PCS_GAP").and_then(|s| s.parse().ok()).unwrap_or(60_000)
+    }
+
+    #[inline(always)]
+    fn rd(a: usize) -> u32 {
+        // SAFETY: a peripheral register the TRM documents as readable.
+        unsafe { (a as *const u32).read_volatile() }
+    }
+    #[inline(always)]
+    fn wr(a: usize, v: u32) {
+        // SAFETY: a peripheral register the TRM documents as writable.
+        unsafe { (a as *mut u32).write_volatile(v) }
+    }
+
+    #[inline(always)]
+    fn ccount() -> u32 {
+        let c: u32;
+        // SAFETY: reads this core's cycle counter.
+        unsafe { core::arch::asm!("rsr.ccount {0}", out(reg) c) };
+        c
+    }
+
+    #[esp_hal::ram]
+    pub fn sampler_loop() -> ! {
+        super::ALIVE.store(1, Ordering::Release);
+        // The debug assistant's clock on, out of reset, core 0's pdebug
+        // interface open and recording.
+        wr(SYSTEM_CPU_PERI_CLK_EN, rd(SYSTEM_CPU_PERI_CLK_EN) | (1 << 6));
+        wr(SYSTEM_CPU_PERI_RST_EN, rd(SYSTEM_CPU_PERI_RST_EN) & !(1 << 6));
+        wr(RCD_PDEBUGENABLE, 1);
+        wr(RCD_RECORDING, 1);
+        // Liveness probe: eight back-to-back reads, ~1 µs apart.
+        for p in PROBE.iter() {
+            let t = ccount();
+            while ccount().wrapping_sub(t) < 240 {}
+            p.store(rd(RCD_PDEBUGPC), Ordering::Relaxed);
+        }
+        let mut x: u32 = 0x9E37_79B9 ^ ccount();
+        let mean = mean_gap_cycles();
+        loop {
+            if STATE.load(Ordering::Acquire) != 1 {
+                continue;
+            }
+            for slot in SAMPLES.iter() {
+                // xorshift32: a gap uniform in [mean/2, 3*mean/2), so the
+                // samples never lock to a frame-periodic pattern.
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                let gap = mean / 2 + x % mean;
+                let t = ccount();
+                while ccount().wrapping_sub(t) < gap {}
+                slot.store(rd(RCD_PDEBUGPC), Ordering::Relaxed);
+            }
+            STATE.store(2, Ordering::Release);
+        }
+    }
+
+    /// Called by core 0 once per `[perf]` window: arms after a few windows
+    /// (the project steady), dumps a full round as `[pcs]` lines.
+    pub fn on_window() {
+        if !enabled() {
+            return;
+        }
+        let w = WINDOWS.fetch_add(1, Ordering::Relaxed);
+        if w == 1 {
+            let mut line = heapless_line();
+            for p in PROBE.iter() {
+                push_hex(&mut line, p.load(Ordering::Relaxed));
+            }
+            log::info!("[pcs] probe {}", line.as_str());
+        }
+        let start_at = option_env!("LP_PCS_START").and_then(|s| s.parse().ok()).unwrap_or(3);
+        match STATE.load(Ordering::Acquire) {
+            0 if w >= start_at && ROUNDS.load(Ordering::Relaxed) < rounds_wanted() => {
+                log::info!("[pcs] armed round {}", ROUNDS.load(Ordering::Relaxed));
+                STATE.store(1, Ordering::Release);
+            }
+            2 => {
+                let r = ROUNDS.fetch_add(1, Ordering::Relaxed);
+                for (i, chunk) in SAMPLES.chunks(16).enumerate() {
+                    let mut line = heapless_line();
+                    for s in chunk {
+                        push_hex(&mut line, s.load(Ordering::Relaxed));
+                    }
+                    log::info!("[pcs] {r}.{i} {}", line.as_str());
+                }
+                log::info!("[pcs] round {r} done");
+                STATE.store(0, Ordering::Release);
+            }
+            _ => {}
+        }
+    }
+
+    struct Line {
+        buf: [u8; 160],
+        len: usize,
+    }
+    impl Line {
+        fn as_str(&self) -> &str {
+            core::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
+        }
+    }
+    fn heapless_line() -> Line {
+        Line { buf: [0; 160], len: 0 }
+    }
+    fn push_hex(l: &mut Line, v: u32) {
+        const H: &[u8; 16] = b"0123456789abcdef";
+        if l.len + 9 > l.buf.len() {
+            return;
+        }
+        for k in (0..8).rev() {
+            l.buf[l.len] = H[((v >> (k * 4)) & 0xf) as usize];
+            l.len += 1;
+        }
+        l.buf[l.len] = b' ';
+        l.len += 1;
     }
 }

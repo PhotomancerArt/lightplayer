@@ -244,7 +244,13 @@ const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM;
 /// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
 /// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
 #[cfg(s3_espnow)]
-const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM;
+const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - SPIKE_CORE1_BSS;
+/// SPIKE (fps spike): core 1's stack and the PC sampler's buffer live in
+/// `.bss`; the arena gives them back so the main stack keeps its share.
+#[cfg(feature = "core1-render")]
+const SPIKE_CORE1_BSS: usize = 16 * 1024 + core1::pcs::N * 4;
+#[cfg(not(feature = "core1-render"))]
+const SPIKE_CORE1_BSS: usize = 0;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
 /// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must

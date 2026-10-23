@@ -2,7 +2,7 @@
 """SPIKE: fold `LP_EMU_PC_SAMPLES` output into functions and buckets.
 Usage: symbolize.py <samples> <fw.elf> <rom.elf> [core]"""
 import bisect, subprocess, sys, collections, os
-NM = os.path.expanduser("~/.rustup/toolchains/esp/xtensa-esp-elf/esp-14.2.0_20240906/xtensa-esp-elf/bin/xtensa-esp32s3-elf-nm")
+NM = "/Users/yona/.rustup/toolchains/esp/xtensa-esp-elf/esp-14.2.0_20240906/xtensa-esp-elf/bin/xtensa-esp32s3-elf-nm"
 def syms(elf):
     out = subprocess.run([NM, "-C", "-n", elf], capture_output=True, text=True).stdout
     rows = []

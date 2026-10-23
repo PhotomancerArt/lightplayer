@@ -7,6 +7,12 @@ use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 static CLOCK: AtomicUsize = AtomicUsize::new(0);
 static EXTRA: AtomicUsize = AtomicUsize::new(0);
+static WINDOW_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+/// A chip's hook run once per `[perf]` window (the fps spike's PC sampler).
+pub fn set_window_hook(hook: fn()) {
+    WINDOW_HOOK.store(hook as usize, Ordering::Release);
+}
 
 /// Output provider `write` (pipeline + staging + the LCD kick when it fires).
 pub static WRITE: AtomicU32 = AtomicU32::new(0);
@@ -43,6 +49,11 @@ pub fn add(slot: &AtomicU32, started: Option<u32>) {
 
 /// Print per-frame averages (µs at 240 MHz) since the last call.
 pub fn log(frames: u32) {
+    let h = WINDOW_HOOK.load(Ordering::Acquire);
+    if h != 0 {
+        // SAFETY: only `set_window_hook` stores here, and only a `fn()`.
+        (unsafe { core::mem::transmute::<usize, fn()>(h) })();
+    }
     if CLOCK.load(Ordering::Relaxed) == 0 || frames == 0 {
         return;
     }
