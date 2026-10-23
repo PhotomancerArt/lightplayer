@@ -223,9 +223,16 @@ What changes here:
   memory FS): internal free 208,604 → 187,540 B, largest block 121,688 →
   107,560 B, internal total 278,544 → 259,088 B. At idle the Wi-Fi blob's
   ~37 KB outweighs what PSRAM takes, because an idle board's Rust heap is
-  small; the gain is under a project, where M10's walk measured 50.8 KB →
-  236 KB free on FS3 with `ble` alone (the default's figure with ESP-NOW
-  too is the PR's FS3 check, #1277).
+  small; the gain is under a project.
+- **On FS3** (XIAO ESP32-S3 Plus, 16 MB, antenna attached; 2026-10-23, the
+  split default image, `projects/test/skirt-620` on 2 × 310 px, Bluetooth
+  connected from Mac Chrome, 326 s from a reboot): internal free
+  **185,668–187,580 B**, largest block **105,704–107,576 B**, against main's
+  image on the same board and project in M10's walk (`ble` alone, no PSRAM:
+  50,780 B free, 39,584 B largest). 21.01 fps median against main's 22.15
+  (−5.1 %; M10's `all` without ESP-NOW was −3.2 %), frame p99 ≤ 75 ms in
+  every 5 s window, radio region high water 42,976 of 49,152 B, no panic,
+  one boot. Inside the radio frame-rate budget's 10 % idle ceiling.
 
 ## Follow-ups
 

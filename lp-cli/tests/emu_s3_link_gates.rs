@@ -82,6 +82,14 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         "no hello on the link:\n{}",
         host.console().join("\n")
     );
+    // ESP-NOW is a default feature since 2026-10-23: the hello says the board
+    // has a radio and the service, as its manifest does
+    // (docs/defects/2026-10-23-the-s3-espnow-image-gave-the-server-no-radio-service.md).
+    let hello = hello.unwrap_or_default();
+    assert!(
+        hello.contains("\"radio\":true") && hello.contains("\"svc.radio-espnow\""),
+        "the hello says the radio: {hello}"
+    );
     const ID: u64 = 1;
     host.send(&ClientMessage {
         id: ID,
