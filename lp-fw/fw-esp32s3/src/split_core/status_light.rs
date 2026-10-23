@@ -31,8 +31,10 @@ use lpc_update::{BoardState, StatusLightRecord, light_for};
 /// (192 words: 7 × 24 pulse codes + the end marker).
 pub const MAX_LIT: u32 = 7;
 
-/// The RMT clock (80 MHz: a 12.5 ns tick), the engine's driver's.
-const RMT_CLOCK: Rate = crate::output::rmt::shared_driver::RMT_CLOCK;
+/// The RMT clock (80 MHz: a 12.5 ns tick). The light's own: the engine's
+/// WS281x driver is LCD_CAM's by default, so the RMT module may not be in
+/// the image at all.
+const RMT_CLOCK: Rate = Rate::from_mhz(80);
 /// WS2812 bit timings in ticks: `lp_ws281x::ChannelTiming::WS2812`'s
 /// nanoseconds at 12.5 ns a tick.
 const T0H: u16 = (lp_ws281x::ChannelTiming::WS2812.t0h_ns * 2 / 25) as u16;

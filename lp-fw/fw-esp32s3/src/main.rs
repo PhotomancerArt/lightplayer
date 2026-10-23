@@ -532,8 +532,9 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The station's `[wifi]` and the relay's `[relay]` lines (`wifi`).
     #[cfg(s3_wifi)]
     net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
-    // The WS281x driver's own counters (`ws281x_telemetry` only).
-    #[cfg(feature = "ws281x_telemetry")]
+    // The RMT driver's own counters (`ws281x_telemetry` only, on an image
+    // without `lcd-ws281x`; the LCD bus logs its own `[lcd-ws281x]` line).
+    #[cfg(all(feature = "ws281x_telemetry", not(feature = "lcd-ws281x")))]
     output::rmt::shared_driver::log_telemetry();
     // Internal RAM on a `psram` image: the figures the board's gates and a
     // host's judgement are about (`crate::psram`, "The heap").
