@@ -109,11 +109,7 @@ impl JitBuffer {
         if let Inner::Heap { code } = &buffer.inner {
             let write = code.as_ptr() as usize;
             if crate::exec_addr::s3_in_cache_window(write) {
-                crate::code_publish::publish(
-                    write,
-                    crate::exec_addr::exec_addr(write),
-                    code.len(),
-                );
+                crate::code_publish::publish(write, crate::exec_addr::exec_addr(write), code.len());
             }
         }
         buffer

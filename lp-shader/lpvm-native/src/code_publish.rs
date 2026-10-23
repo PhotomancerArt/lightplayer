@@ -30,7 +30,10 @@ pub fn set_code_publish(publish: CodePublish) {
 /// Publish through the injected routine, if one is set. `true` when one ran.
 #[cfg_attr(
     not(target_arch = "xtensa"),
-    allow(dead_code, reason = "only the Xtensa heap path calls it; host tests exercise it")
+    allow(
+        dead_code,
+        reason = "only the Xtensa heap path calls it; host tests exercise it"
+    )
 )]
 pub(crate) fn publish(write: usize, exec: usize, len: usize) -> bool {
     let routine = PUBLISH.load(Ordering::Acquire);
