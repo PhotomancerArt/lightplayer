@@ -118,6 +118,8 @@ mod board;
 mod c_heap;
 #[cfg(all(feature = "core1-render", not(fw_harness)))]
 mod core1;
+#[cfg(feature = "alloc-count")]
+mod alloc_count;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
 #[cfg(not(fw_harness))]

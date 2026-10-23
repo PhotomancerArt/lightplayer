@@ -21,6 +21,15 @@ pub static ENCODE: AtomicU32 = AtomicU32::new(0);
 /// The engine's whole tick (everything but the link).
 pub static TICK: AtomicU32 = AtomicU32::new(0);
 
+/// SPIKE (fps spike): allocation calls, frees and bytes (a chip's
+/// `alloc-hooks` feeds them; zero otherwise).
+pub static ALLOCS: AtomicU32 = AtomicU32::new(0);
+pub static FREES: AtomicU32 = AtomicU32::new(0);
+pub static ALLOC_BYTES: AtomicU32 = AtomicU32::new(0);
+pub static BIG: AtomicU32 = AtomicU32::new(0);
+pub static BIG_LAST: AtomicU32 = AtomicU32::new(0);
+static LAST_ALLOC: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+
 static LAST: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
 
 /// Install the chip's cycle counter.
@@ -82,4 +91,23 @@ pub fn log(frames: u32) {
         per[3],
         per[0].saturating_sub(per[1] + per[2])
     );
+    let a = [
+        ALLOCS.load(Ordering::Relaxed),
+        FREES.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    ];
+    if a[0] != 0 {
+        let mut d = [0u32; 3];
+        for i in 0..3 {
+            d[i] = a[i].wrapping_sub(LAST_ALLOC[i].swap(a[i], Ordering::Relaxed)) / frames;
+        }
+        log::info!(
+            "[stage] per frame allocs={} frees={} bytes={} big_total={} big_last={}",
+            d[0],
+            d[1],
+            d[2],
+            BIG.load(Ordering::Relaxed),
+            BIG_LAST.load(Ordering::Relaxed)
+        );
+    }
 }

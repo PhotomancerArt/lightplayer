@@ -192,6 +192,8 @@ lcd-ws281x = []
 # `lpvm_native::helper_core`). `LP_CORE1_RENDER=0` at build time starts
 # nothing (the control).
 core1-render = ["server", "dep:lpvm-native"]
+# SPIKE (fps spike): count allocations per frame (`src/alloc_count.rs`).
+alloc-count = ["esp-alloc/alloc-hooks"]
 
 # The walk's frame check (never shipped): with `lcd-ws281x`, LCD_CAM's CAM
 # half samples every lane's pad and decodes each frame against what was sent
@@ -429,7 +431,7 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # could land in `dram2_seg`, which the bootloader takes back on a warm reset
 # while the radio keeps writing (the C6's defect). The radio's C heap is this
 # crate's own (`src/c_heap.rs`), as on the C6.
-esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator"] } # SPIKE: was + "internal-heap-stats"
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is
