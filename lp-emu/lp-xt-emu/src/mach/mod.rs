@@ -188,6 +188,37 @@ use window::{WindowEvent, WindowPolicy};
 
 use exec::Priv;
 
+/// [`inst_traits`]: the instruction is `ENTRY`, `RETW`/`RETW.N` or `MOVSP`,
+/// the three with a window check of their own in [`XtHart::step`].
+pub(crate) const TRAIT_WINDOW_OWN_CHECK: u8 = 1 << 0;
+/// [`inst_traits`]: the hart runs it itself (`exec::is_hart_owned`) rather
+/// than the shared executors.
+pub(crate) const TRAIT_HART_OWNED: u8 = 1 << 1;
+
+/// The two per-instruction questions [`XtHart::step`] asks of the decoded
+/// instruction alone, answered once. A cached slot carries the answer
+/// ([`XtSlot::traits`]) so a block's instructions skip both `match`es; a
+/// single-stepped instruction computes it here, so both paths read the one
+/// predicate.
+#[inline]
+pub(crate) fn inst_traits(inst: &Inst) -> u8 {
+    let own_check = matches!(
+        inst,
+        Inst::Entry(..)
+            | Inst::Nullary(NullaryOp::Retw)
+            | Inst::NullaryN(NullaryNarrowOp::RetwN)
+            | Inst::Rs(AluRs::Movsp, ..)
+    );
+    let mut traits = 0;
+    if own_check {
+        traits |= TRAIT_WINDOW_OWN_CHECK;
+    }
+    if exec::is_hart_owned(inst) {
+        traits |= TRAIT_HART_OWNED;
+    }
+    traits
+}
+
 /// What polling point (c) observed — [`XtHart::poll_after_store`]'s answer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AfterStore {
@@ -1286,6 +1317,9 @@ impl<B: Bus> XtHart<B> {
         //   the other one wrote, so draining here is exact for the pair.
         if self.block_cache || self.core.is_some() {
             bus.watch_code_stores(true);
+            if self.core.is_some() {
+                bus.record_every_code_store();
+            }
             if bus.code_dirty() {
                 self.drain_code_dirty(bus);
             }
@@ -1489,7 +1523,13 @@ impl<B: Bus> XtHart<B> {
                     Some(block) => Some(block),
                     None => {
                         let model = self.cycle_model;
-                        cache.build(pc, model, |out| block::decode_block(bus, pc, out))
+                        let built = cache.build(pc, model, |out| block::decode_block(bus, pc, out));
+                        // The bus's map of what is cached: a store that
+                        // touches none of it is not worth a walk.
+                        if let Some(built) = &built {
+                            bus.note_block_built(built.pc, built.bytes);
+                        }
+                        built
                     }
                 };
                 if let Some(block) = block {
@@ -1641,7 +1681,15 @@ impl<B: Bus> XtHart<B> {
             // otherwise report the block's first `pc` to the bus's trace and
             // to its unmapped-site dedup, which is keyed on `(pc, address)`.
             bus.set_issuing(pc, self.cycle_count);
-            let out = self.step_decoded(bus, pc, &slot.inst, u32::from(slot.len), tracer, hoisted);
+            let out = self.step_decoded(
+                bus,
+                pc,
+                &slot.inst,
+                u32::from(slot.len),
+                slot.traits,
+                tracer,
+                hoisted,
+            );
             ran += 1;
             if let Some(over) = out {
                 return (Some(over), ran);
@@ -1759,7 +1807,8 @@ impl<B: Bus> XtHart<B> {
                 );
             }
         };
-        self.step_decoded(bus, pc, &inst, len as u32, tracer, false)
+        let traits = inst_traits(&inst);
+        self.step_decoded(bus, pc, &inst, len as u32, traits, tracer, false)
     }
 
     /// One **already-decoded** instruction: trace it, run it, charge what the
@@ -1783,6 +1832,7 @@ impl<B: Bus> XtHart<B> {
         pc: u32,
         inst: &Inst,
         len: u32,
+        traits: u8,
         tracer: &mut T,
         hoisted: bool,
     ) -> Option<SliceEnd> {
@@ -1791,7 +1841,7 @@ impl<B: Bus> XtHart<B> {
             len: len as usize,
             inst,
         });
-        let outcome = self.step(bus, pc, inst, len, tracer, hoisted);
+        let outcome = self.step(bus, pc, inst, len, traits, tracer, hoisted);
         // Drained after the instruction, so the fetch and any load or store
         // it made are charged together, once.
         self.charge_memory(bus);
@@ -1817,6 +1867,7 @@ impl<B: Bus> XtHart<B> {
         pc: u32,
         inst: &Inst,
         len: u32,
+        traits: u8,
         tracer: &mut T,
         hoisted: bool,
     ) -> StepOutcome {
@@ -1830,14 +1881,18 @@ impl<B: Bus> XtHart<B> {
         } else {
             None
         };
-        let event = event.or_else(|| match *inst {
-            Inst::Entry(rs, _) => window::entry_check(rs.num(), woe, excm),
-            Inst::Nullary(NullaryOp::Retw) | Inst::NullaryN(NullaryNarrowOp::RetwN) => {
-                window::retw_check(&mut self.cpu, woe, excm, &mut owb)
+        let event = if event.is_none() && traits & TRAIT_WINDOW_OWN_CHECK != 0 {
+            match *inst {
+                Inst::Entry(rs, _) => window::entry_check(rs.num(), woe, excm),
+                Inst::Nullary(NullaryOp::Retw) | Inst::NullaryN(NullaryNarrowOp::RetwN) => {
+                    window::retw_check(&mut self.cpu, woe, excm, &mut owb)
+                }
+                Inst::Rs(AluRs::Movsp, ..) => window::movsp_check(&self.cpu),
+                _ => None,
             }
-            Inst::Rs(AluRs::Movsp, ..) => window::movsp_check(&self.cpu),
-            _ => None,
-        });
+        } else {
+            event
+        };
         if let Some(event) = event {
             self.charge(InstClass::System);
             self.window_exception(event, owb, pc);
@@ -1862,7 +1917,7 @@ impl<B: Bus> XtHart<B> {
         }
 
         // --- execute ---
-        let executed = if exec::is_hart_owned(inst) {
+        let executed = if traits & TRAIT_HART_OWNED != 0 {
             self.exec_priv(bus, inst, pc, len, tracer)
         } else {
             let mut view = Exec {

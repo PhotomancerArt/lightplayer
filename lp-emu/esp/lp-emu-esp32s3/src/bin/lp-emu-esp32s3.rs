@@ -121,6 +121,10 @@ OPTIONS:
                             direct load and the ROM-up boot touch is
                             modelled through P06; a strict run of the shipped
                             image reaches the server loop with unmapped=0
+    --no-block-cache        do not pre-decode blocks of instructions. Slower,
+                            and otherwise identical in every byte, count and
+                            frame: the identity oracle a speed change is
+                            checked against (scripts/emu/s3-oracle.sh)
     --efuse-mac <aa:bb:cc:dd:ee:ff>
                             the MAC the eFuse block answers. ⚠️ The default
                             is the PAC's zero, NOT a plausible board: no S3
@@ -262,6 +266,9 @@ struct Args {
     uart0: UsbSjSink,
     strap: Option<u32>,
     strict: bool,
+    /// `--no-block-cache`. The cache is ON by default, so the flag is held as
+    /// its negative.
+    no_block_cache: bool,
     core_quantum: Option<u64>,
     cpenable_reset: Option<u32>,
     time_grade: TimeGrade,
@@ -332,6 +339,7 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32S3Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .block_cache(!args.no_block_cache)
         .boot_mode(args.boot_mode)
         .cache_off_fetch(args.cache_off)
         .uart0(args.uart0.clone())
@@ -609,6 +617,11 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+    // On stderr, beside the run but out of the transcript: these are the
+    // lines a run and its `--no-block-cache` twin must differ in.
+    for line in machine.block_report_lines() {
+        eprintln!("{line}");
+    }
 }
 
 /// The whole map, and the alias mirror beside it.
@@ -998,6 +1011,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--map" => args.map = true,
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
+            "--no-block-cache" => args.no_block_cache = true,
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
             "--boot-mode" => {

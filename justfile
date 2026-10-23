@@ -4927,6 +4927,19 @@ flash-tears-sim-unaligned cuts="300" seed="1":
 bench-emu-esp32v3 *args:
     scripts/emu/bench-esp32v3.sh {{ args }}
 
+#   just bench-emu-esp32s3
+#   just bench-emu-esp32s3 --rows render-basic --runs 3
+#   scripts/emu/bench-esp32s3.sh --bin <saved-dir> --no-build   # the A/B half
+#
+# Over CI's images (`just fetch-ci-images`, then `export LP_CI_IMAGES=…`).
+# Three rows: boot-idle, and render-basic / render-620 with Bluetooth on,
+# whose figure is the steady state between 1 s and 4 s emulated;
+# `render-basic` is the row to quote. An ORACLE, never a gate:
+# `scripts/emu/s3-oracle.sh` is the identity check a speed change answers to.
+# The ESP32-S3 machine's speed probe (bench-emu-esp32v3's twin)
+bench-emu-esp32s3 *args:
+    scripts/emu/bench-esp32s3.sh {{ args }}
+
 # PGO recipe for the C6 machine binary (D4): instrumented build, one training
 # run of each reference image, merge, optimized rebuild, then the probe on
 # the result. Opt-in — never a default build or CI step, and the target is

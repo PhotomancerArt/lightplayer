@@ -240,6 +240,9 @@ impl EmuUsbBoard for S3Board {
         if m.reboots() > 0 {
             lines.push(format!("{} reboot(s)", m.reboots()));
         }
+        // The block cache's diagnostic: never compared, since a run and its
+        // `--no-block-cache` twin differ in exactly these.
+        lines.extend(m.block_report_lines());
         // `--flash-cut`: the cut, the power cycles and the in-range census.
         lines.extend(m.flash_cut_summary());
         // The seams' counters and each endpoint's wake, when any engaged.

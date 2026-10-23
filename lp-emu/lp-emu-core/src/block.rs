@@ -504,9 +504,38 @@ impl<S: Slot> BlockCache<S> {
     /// recovered by the next capacity flush. Range invalidations are rare
     /// (P1: 98 cache refills across a whole render run) and a compacting
     /// arena would be a moving-target bug for no measured gain.
+    ///
+    /// # The walk
+    ///
+    /// Every live table entry points at a block record built for its own
+    /// `pc` — [`build`](Self::build) installs `{ pc, block }` at
+    /// `index_of(pc)` and writes the record with that `pc` — so the live
+    /// entries are exactly the records `i` with `table[index_of(blocks[i].pc)]`
+    /// naming `i`. Walking the **records** therefore drops the same entries as
+    /// walking the table, and there are usually far fewer of them: the
+    /// ESP32-S3 boot-idle image holds ~2 % as many records as the table has
+    /// entries, and a range invalidation there fires hundreds of times an
+    /// emulated second (a host-side flash-window refill, a code store). The
+    /// table walk stays for a record list that has grown past the table
+    /// (orphaned records accumulate until a flush).
     pub fn invalidate_range(&mut self, lo: u32, hi: u32) {
         self.stats.range_invalidations += 1;
         if lo >= hi {
+            return;
+        }
+        if self.blocks.len() < self.table.len() {
+            let mut dropped = 0u64;
+            for i in 0..self.blocks.len() {
+                let block = self.blocks[i];
+                if block.pc < hi && block.end() > lo {
+                    let index = self.index_of(block.pc);
+                    if self.table[index].block == i as u32 {
+                        self.table[index] = EMPTY_ENTRY;
+                        dropped += 1;
+                    }
+                }
+            }
+            self.stats.range_entries_dropped += dropped;
             return;
         }
         let mut dropped = 0u64;
@@ -700,6 +729,63 @@ mod tests {
         assert!(cache.lookup(0x1010).is_some());
         assert!(cache.lookup(0x1100).is_some());
         assert_eq!(cache.stats().range_entries_dropped, 1);
+    }
+
+    /// [`BlockCache::invalidate_range`] walks the block records while there
+    /// are fewer of them than table entries and the table otherwise; either
+    /// way it must drop **exactly** the live entries whose block overlaps the
+    /// window. A 16-entry table, a few hundred builds over colliding `pc`s
+    /// (so records are reused, orphaned by invalidations and outgrow the
+    /// table), and every invalidation checked against the live set before it.
+    #[test]
+    fn invalidate_range_drops_exactly_the_overlapping_live_entries() {
+        let live = |cache: &BlockCache<Toy>| -> Vec<(u32, u32)> {
+            let mut out: Vec<(u32, u32)> = cache
+                .table
+                .iter()
+                .filter(|e| e.block != NO_BLOCK)
+                .map(|e| {
+                    let b = cache.blocks[e.block as usize];
+                    assert_eq!(b.pc, e.pc, "a live entry names a record built for its pc");
+                    (b.pc, b.end())
+                })
+                .collect();
+            out.sort_unstable();
+            out
+        };
+        let mut cache = BlockCache::<Toy>::new(4, 1 << 16, 1 << 12);
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |n: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % u64::from(n)) as u32
+        };
+        let (mut by_records, mut by_table) = (0, 0);
+        for _ in 0..2_000 {
+            if next(3) == 0 {
+                let lo = 0x1000 + next(0x200);
+                let hi = lo + next(0x40);
+                let before = live(&cache);
+                if cache.blocks.len() < cache.table.len() {
+                    by_records += 1;
+                } else {
+                    by_table += 1;
+                }
+                cache.invalidate_range(lo, hi);
+                let expect: Vec<(u32, u32)> = before
+                    .into_iter()
+                    .filter(|&(pc, end)| !(lo < hi && pc < hi && end > lo))
+                    .collect();
+                assert_eq!(live(&cache), expect, "invalidate [{lo:#x}, {hi:#x})");
+            } else {
+                build(&mut cache, 0x1000 + 4 * next(0x80), 1 + next(4));
+            }
+        }
+        assert!(
+            by_records > 0 && by_table > 0,
+            "both walks ran: {by_records} / {by_table}"
+        );
     }
 
     #[test]
