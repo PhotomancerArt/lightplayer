@@ -70,6 +70,15 @@ geometry.
 is the default and Studio over Bluetooth runs Skirt 620 for 5 minutes with 0
 panics on FS3.
 
+**On M10's image it does not happen.** FS3, 2026-10-22, 18:09–18:21: #1264's
+`psram` split image at c727af3b5, Skirt 620, and Studio from lightplayer.app
+in Mac Chrome over Bluetooth for 5 minutes. 0 panics and 0 recoveries; the
+card stayed connected and drew both outputs. Internal RAM with the central
+connected: at least 235,500 B free, largest block 148,496 B. PSRAM: 191,468 B
+used. 19–20 fps. The emulated S3 cannot show this yet: it reports no PSRAM
+(`PSRAM_CAP=0`), so the same image falls back and panics like main. This
+entry closes when the `psram` image is the S3's default.
+
 **The read is still wasteful, at any heap.** Per 310-lamp output, merging
 the geometry peaks at about 27,760 B (the producer's layout, its clone, and
 the old and new lists while it doubles) where 12,400 B would do, and it
