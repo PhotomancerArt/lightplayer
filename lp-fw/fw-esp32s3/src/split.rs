@@ -174,6 +174,7 @@ pub fn split_boot(mut core: CoreBoot) {
                 watchdog,
                 output_peripherals,
                 base_fs,
+                network_saved,
                 ..
             } = core;
             // The update light: the strip the engine recorded, if any.
@@ -197,9 +198,9 @@ pub fn split_boot(mut core: CoreBoot) {
                     usb_trust,
                     entropy: crate::fill_random,
                     light,
-                    // No Wi-Fi on this chip yet (the S3 plan's M4): no saved
-                    // network makes a trial wait on a deadline.
-                    network_saved: false,
+                    // A saved network (`wifi`): a trial core with no host
+                    // waits only so long before it gives up the trial.
+                    network_saved,
                 })
                 .unwrap(),
             );

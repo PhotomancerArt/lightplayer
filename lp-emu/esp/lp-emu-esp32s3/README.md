@@ -763,10 +763,13 @@ carries **bytes** — `lp-cli … serial:tcp://` connects to it unchanged — an
 client connecting **is** an application opening the port (`--usb-sj-drain
 manual` decouples them). `--control tcp:<addr>` carries the **cable**, one
 line per command and one reply per command: `attach`, `detach`, `open`,
-`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `state`,
-`usb-write`. `attach` and `detach` are never implied by a socket: a cable is
-not a port open, and the whole reason to model a host is that the two come
-apart. `--usb-script <file>` is the deterministic twin — declared **emulated**
+`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `power-cycle`,
+`state`, `usb-write`. `attach` and `detach` are never implied by a socket: a
+cable is not a port open, and the whole reason to model a host is that the
+two come apart. `power-cycle` is not the cable's but a hand on the plug: the
+machine's [`power_cycle`](src/machine.rs) (the power-on snapshot, the flash as
+it stands), performed at the run loop's next boundary as the C6's is; the LAN
+update test's power cuts use it (`just test-emu-esp32s3-ota-lan`). `--usb-script <file>` is the deterministic twin — declared **emulated**
 times, plus `after "<line>"` and `then +<ms>` — and two runs of one script
 deliver identical bytes at identical cycles; a socket is host time and is
 only auditable.

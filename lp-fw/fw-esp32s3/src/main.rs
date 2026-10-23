@@ -597,6 +597,11 @@ pub(crate) struct CoreBoot {
     /// filesystem mounts): which core, which record, on trial or not.
     #[cfg(lp_split)]
     ota_state: fw_esp32_common::split_core::BootState,
+    /// The boot read a saved network with Wi-Fi on (`wifi`: the station
+    /// joins one): a trial core then waits only so long for a host
+    /// (`split_core::core_only`), the C6's rule.
+    #[cfg(lp_split)]
+    network_saved: bool,
 }
 
 /// The core's half of the boot: the board, the heap, recovery and the
@@ -797,9 +802,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // before any Radio node exists, so "set to use Wi-Fi" holds from the
     // first frame; the station never reads the file itself
     // (`net::station_probes`).
+    #[cfg(not(s3_wifi))]
+    let network_saved = false;
     #[cfg(s3_wifi)]
-    {
+    let network_saved = {
         let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
+        let saved = file.wifi && !file.networks.is_empty();
         net::station_probes::boot_settings(&file);
         // The relay's account entries, from the device store; changes arrive
         // through the server's `AccessChanged`.
@@ -826,7 +834,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
                 | u64::from(esp_hal::rng::Rng::new().random());
             // A board that will join allocates its socket buffers now.
-            let will_join = file.wifi && !file.networks.is_empty();
+            let will_join = saved;
             let relay = net::relay_config::relay_config(
                 mac,
                 lpa_server::device_identity::read_device_name(base_fs.as_ref()),
@@ -842,9 +850,13 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                 &net::net_chip::NET_CHIP,
             );
         }
-    }
+        saved
+    };
     #[cfg(all(s3_espnow, not(s3_wifi)))]
     let _ = net_radio;
+    // Only a split image's core-only reads it (`split::split_boot`).
+    #[cfg(not(lp_split))]
+    let _ = network_saved;
 
     CoreBoot {
         spawner,
@@ -863,6 +875,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ble_started,
         #[cfg(lp_split)]
         ota_state: _ota_state,
+        #[cfg(lp_split)]
+        network_saved,
     }
 }
 
@@ -892,6 +906,8 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         ble_started,
         #[cfg(lp_split)]
             ota_state: _,
+        #[cfg(lp_split)]
+            network_saved: _,
     } = core;
     let transport = UsbLinkTransport::new(usb_link);
 
