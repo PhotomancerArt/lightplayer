@@ -1286,6 +1286,9 @@ impl<B: Bus> XtHart<B> {
         //   the other one wrote, so draining here is exact for the pair.
         if self.block_cache || self.core.is_some() {
             bus.watch_code_stores(true);
+            if self.core.is_some() {
+                bus.record_every_code_store();
+            }
             if bus.code_dirty() {
                 self.drain_code_dirty(bus);
             }
@@ -1489,7 +1492,13 @@ impl<B: Bus> XtHart<B> {
                     Some(block) => Some(block),
                     None => {
                         let model = self.cycle_model;
-                        cache.build(pc, model, |out| block::decode_block(bus, pc, out))
+                        let built = cache.build(pc, model, |out| block::decode_block(bus, pc, out));
+                        // The bus's map of what is cached: a store that
+                        // touches none of it is not worth a walk.
+                        if let Some(built) = &built {
+                            bus.note_block_built(built.pc, built.bytes);
+                        }
+                        built
                     }
                 };
                 if let Some(block) = block {
