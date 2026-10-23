@@ -477,7 +477,10 @@ What it took, and what it decided:
   C6 compiles the same code. Two emulated S3s share a virtual LAN in CI
   (`lp-cli/tests/emu_s3_lan_pair.rs`, `just test-emu-esp32s3-wifi`: two
   leases, each board's name answered on the segment, the same frame log
-  twice) and in the walk (`just walk-wifi-emu lan --s3`).*
+  twice) and in the walk (`just walk-wifi-emu lan --s3`,
+  docs/reports/2026-10-22-s3-wifi-emulator-walk.md). The walk found the
+  image's heap, not the LAN, short with an ordinary project loaded
+  (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md).*
 
 ## Consequences
 

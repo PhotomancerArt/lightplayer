@@ -1033,7 +1033,11 @@ engaged: no seam table` and its label stays `lp-emu:esp32s3:t1`.
 link, then both on one runner-driven LAN (two leases, each board's
 `lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
 esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
-`just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them.
+`just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them
+(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). With Peach (1D) loaded,
+the image's heap runs short and the board resets
+(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md);
+`WALK_PROJECT="Fiber Headband"` fits.
 
 ⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
 interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
