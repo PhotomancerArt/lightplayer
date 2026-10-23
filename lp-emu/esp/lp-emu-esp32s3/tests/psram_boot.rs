@@ -221,7 +221,8 @@ fn the_shipped_image_uses_psram_when_the_part_has_it() {
             );
             if psram == 0 {
                 assert!(
-                    console.contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
+                    console
+                        .contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
                     "{path}: the fallback line:\n{console}"
                 );
                 assert!(
