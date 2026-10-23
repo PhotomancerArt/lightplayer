@@ -72,7 +72,7 @@
 //
 // On the S3 the cell uploads no project: the `wifi` image's 136 KB arena runs
 // out compiling `projects/test/basic`'s shader with a relay session open
-// (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-compiling-basic-over-the-relay.md),
+// (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md),
 // so P2 is the members-only half and P3/P4 watch a board with no lamps.
 //
 // NOT CI (the cell is). Needs the rv32 target and a firmware build

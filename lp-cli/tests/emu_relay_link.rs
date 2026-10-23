@@ -1399,7 +1399,7 @@ enum BoardImage {
 
 /// Why the S3 arm runs no project (see [`BoardImage::runs_basic`]).
 const S3_BASIC_DEFECT: &str =
-    "docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-compiling-basic-over-the-relay.md";
+    "docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md";
 
 impl BoardImage {
     /// Whether the walk uploads `projects/test/basic` and checks what it

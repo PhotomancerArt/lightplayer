@@ -77,6 +77,26 @@ roadmap's M10 maps the octal PSRAM and moves the project's heap there.
 Leave this open until M10 lands, then re-run the walk below with Peach (1D)
 to close it.
 
+**Seen again (2026-10-22, the relay, S3 radio M6)** — the same image on the
+relay cell (`lp-cli/tests/emu_relay_link.rs`'s S3 arm,
+`lp-emu:esp32s3:t1+net=lan`): joined, registered, Alice's relay session
+open, `lp-cli upload projects/test/basic relay:…`. The load took 38 KB
+(95,484 B free before, 57,096 B after, largest block 46,672 B). The board
+then reset during the GLSL compile, and the next boot said:
+
+```text
+[RECOVERY] previous run crashed (panic): at node:/Basic.show/…/shader-compile:glsl:
+  memory allocation of 13092 bytes failed
+Boot: the last run's load did not finish: Basic stopped the board while it loaded
+```
+
+The recovery worked: the board came back on the relay by itself. With no
+project the relay costs about 6.5 KB registered (117,296 → 110,956 B free)
+and about 13 KB with a session open (97,660 B). Until M10 the cell's S3 arm
+uploads no project (`BoardImage::runs_basic`) and runs every relay step.
+When this closes, delete that exception, so the arm runs `basic` like the
+C6's.
+
 **Repro** — `just test-emu-esp32s3-wifi` (builds and merges the image), then
 `just walk-wifi-emu lan --s3` (needs `just studio-web-story-build`, `cargo
 build -p lp-cli`). W3's board console is `target/walk-wifi-emu/lan-s3/console/s3-a.link.log`.
