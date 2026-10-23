@@ -211,6 +211,17 @@ impl HwManifest {
             .find(|resource| resource.address() == address)
     }
 
+    /// This manifest with `resource` added, unless one already sits at its
+    /// address (the board's own description wins). For a resource the
+    /// firmware image decides rather than the board: the S3's `/radio/0`
+    /// exists only on an image that registers an ESP-NOW driver.
+    pub fn with_resource(mut self, resource: HwResource) -> Self {
+        if self.resource(resource.address()).is_none() {
+            self.resources.push(resource);
+        }
+        self
+    }
+
     pub fn with_reserved(mut self, address: HwAddress, reason: impl Into<String>) -> Self {
         let reason = reason.into();
         if let Some(resource) = self
@@ -371,5 +382,27 @@ mod tests {
         assert_eq!(manifest.product(), Some("product"));
         assert_eq!(manifest.description(), Some("A board profile"));
         assert_eq!(manifest.url(), Some("https://example.com/board"));
+    }
+
+    #[test]
+    fn with_resource_adds_a_missing_resource_and_keeps_the_boards_own() {
+        let radio = || HwResource::new(HwAddress::radio(0), [HwCapability::Radio], "Radio");
+        let manifest = HwManifest::new("board", "Board", []).with_resource(radio());
+        assert_eq!(
+            manifest
+                .resource(&HwAddress::radio(0))
+                .map(HwResource::display_label),
+            Some("Radio")
+        );
+
+        let own = HwResource::new(HwAddress::radio(0), [HwCapability::Radio], "The board's");
+        let manifest = HwManifest::new("board", "Board", [own]).with_resource(radio());
+        assert_eq!(manifest.resources().len(), 1);
+        assert_eq!(
+            manifest
+                .resource(&HwAddress::radio(0))
+                .map(HwResource::display_label),
+            Some("The board's")
+        );
     }
 }
