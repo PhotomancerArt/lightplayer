@@ -1202,6 +1202,8 @@ clippy-fw-esp32s3:
     # PSRAM (M10): off by default, so nothing above compiles it.
     echo "clippy: --features psram"
     cargo clippy --release --features psram -- --no-deps -D warnings
+    echo "clippy: --features psram,lcd-ws281x"
+    cargo clippy --release --features psram,lcd-ws281x -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
       echo "clippy: fw-esp32-radio --features $features"
       cargo clippy -p fw-esp32-radio --release --features "$features" -- --no-deps -D warnings

@@ -27,6 +27,11 @@
 //!   every flash write, which is exactly the moment this backend exists to
 //!   survive.
 //!
+//! A `psram` image checks it at every allocation (`internal_alloc`). The
+//! lanes' RGB bytes may live in PSRAM there: the encoder reads them on the
+//! render thread, never in an interrupt and never while a flash write holds
+//! the cache, and GDMA only ever reads the encoded buffer.
+//!
 //! The buffers are sized by the longest open lane, not by the per-port cap,
 //! and grow on `open`/`resize`. When they cannot be had, the open fails with
 //! a sentence saying how much was asked for and how much is free.
@@ -465,7 +470,18 @@ impl FrameBuffer {
 
 fn internal_alloc(layout: Layout) -> Option<NonNull<u8>> {
     // SAFETY: a plain allocation request; the result is checked for null.
-    NonNull::new(unsafe { esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout) })
+    let ptr =
+        NonNull::new(unsafe { esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout) })?;
+    // A `psram` image tags PSRAM's region `External` only, so an `Internal`
+    // request never lands there (docs/adr/2026-10-22-s3-psram.md, point 6).
+    // Checked, not assumed: GDMA reading a buffer in PSRAM would fail exactly
+    // during the flash writes this backend exists to survive.
+    #[cfg(all(feature = "psram", not(fw_harness)))]
+    assert!(
+        !crate::psram::in_window(ptr.as_ptr() as usize),
+        "LCD frame buffer allocated in PSRAM"
+    );
+    Some(ptr)
 }
 
 fn internal_free(ptr: NonNull<u8>, layout: Layout) {

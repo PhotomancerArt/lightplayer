@@ -460,11 +460,19 @@ pub fn in_window(addr: usize) -> bool {
 /// A byte buffer in internal RAM — any heap region but PSRAM's — that grows
 /// to the largest frame it was asked to hold. What the RMT output copies a
 /// PSRAM frame into (`output::rmt`), so its refill ISR reads internal RAM.
+#[cfg_attr(
+    feature = "lcd-ws281x",
+    allow(dead_code, reason = "an `lcd-ws281x` image registers no RMT output")
+)]
 pub struct InternalBuffer {
     ptr: *mut u8,
     cap: usize,
 }
 
+#[cfg_attr(
+    feature = "lcd-ws281x",
+    allow(dead_code, reason = "an `lcd-ws281x` image registers no RMT output")
+)]
 impl InternalBuffer {
     pub const fn empty() -> Self {
         Self {
