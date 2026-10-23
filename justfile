@@ -1186,6 +1186,9 @@ clippy-fw-esp32s3:
     cargo clippy --release --features ble -- --no-deps -D warnings
     echo "clippy: --features radio_boot_probe"
     cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
+    # PSRAM (M10): off by default, so nothing above compiles it.
+    echo "clippy: --features psram"
+    cargo clippy --release --features psram -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
       echo "clippy: fw-esp32-radio --features $features"
       cargo clippy -p fw-esp32-radio --release --features "$features" -- --no-deps -D warnings
@@ -1200,7 +1203,7 @@ clippy-fw-esp32s3:
     # payload, so a lint failure here is the first place a drift between the
     # two crates shows up without a board or a machine.
     for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance \
-                test_button test_shader_compile_incremental; do
+                test_button test_shader_compile_incremental test_psram; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
