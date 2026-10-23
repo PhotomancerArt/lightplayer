@@ -336,6 +336,57 @@ const MAX_CODE_DIRTY_HARTS: usize = 4;
 /// application's IRAM segment while the APP core is still stalled.
 const MAX_CODE_DIRTY_SPANS: usize = 64;
 
+/// The bytes one bit of [`CodeRecord::map`] stands for.
+///
+/// A word: small enough that a stack frame beside a function placed in RAM
+/// is not mistaken for it, large enough that the map over the whole arena is
+/// a few MiB at most. A store whose word holds a cached instruction byte is
+/// recorded widened to the whole word — a superset, so the safe direction.
+const CODE_MAP_GRANULE: u32 = 4;
+
+/// The store-address record (M7 XD3) and the map that decides which guest
+/// stores reach it. Behind one `Box` on [`SocBus`] — see
+/// [`SocBus::code_dirty`] for why the hot struct carries a pointer and not
+/// the record.
+struct CodeRecord {
+    /// Per hart: the spans not yet drained. See [`SocBus::code_dirty`].
+    dirty: [Vec<(u32, u32)>; MAX_CODE_DIRTY_HARTS],
+    /// **Which arena words some hart's block cache has decoded an instruction
+    /// out of** — one bit per [`CODE_MAP_GRANULE`] bytes of the arena, set by
+    /// [`Bus::note_block_built`] and empty until the first block is built.
+    ///
+    /// A host-side memo of the cache's contents, never architectural state:
+    /// it decides only which stores are worth telling a hart about. A guest
+    /// store that changes no marked word cannot have staled any cached block,
+    /// so it is not recorded; one that does is recorded (widened to the
+    /// marked words it touched) and **clears** those words, because once
+    /// every hart has drained the record no cached block covers them — the
+    /// invalidation drops every block overlapping the span, on every hart.
+    /// A block built over them afterwards marks them again.
+    ///
+    /// Why it exists: on the S3 the whole of SRAM1 is one executable region
+    /// (its D-bus door is the canonical one, DD81), so before this map every
+    /// stack push and heap write was a "store into executable memory", and
+    /// every one of them reached the hart's cache as a range invalidation —
+    /// a walk of the 2^18-entry block table. That walk was **81 % of the
+    /// S3's host time** with Bluetooth on (2026-10-22, samply).
+    map: Vec<u64>,
+    /// Sticky: a hart running a translated core asked for every store into
+    /// executable memory, because its core's code is not in [`Self::map`]
+    /// ([`Bus::record_every_code_store`]). The map then filters nothing.
+    every_store: bool,
+}
+
+impl CodeRecord {
+    fn new() -> Self {
+        Self {
+            dirty: [const { Vec::new() }; MAX_CODE_DIRTY_HARTS],
+            map: Vec::new(),
+            every_store: false,
+        }
+    }
+}
+
 /// The page granularity of [`SocBus::permission_table`]. 16 KiB is the
 /// spike's, and the size the 0.849 ns/instruction phone reading was taken
 /// with: small enough that a region boundary costs at most one page, large
@@ -433,6 +484,10 @@ pub struct SocBus {
     /// `!ram_aliases.is_empty()`, hoisted into one byte: the whole cost of
     /// [`canonical`](Self::canonical) on a bus with no alias is this test.
     has_ram_alias: bool,
+    /// The span every alias lies in, as `(lo, len)` — `len` 0 when there is
+    /// none. [`canonical`](Self::canonical)'s inline test: an address outside
+    /// it is its own canonical address, with no call.
+    alias_hull: (u32, u32),
     /// `(pc, kind)` sites the trace has already named as going through an
     /// alias door — one `ALIAS` line per site, never per access. Touched only
     /// while the trace is on, and part of the snapshot so a restored run
@@ -563,7 +618,7 @@ pub struct SocBus {
     /// **+1.2 % on the C6's `render-basic`** (measured, tight interleave,
     /// five pairs), which is a tenth of what that chip's own block cache
     /// bought.
-    code_dirty: Option<Box<[Vec<(u32, u32)>; MAX_CODE_DIRTY_HARTS]>>,
+    code_dirty: Option<Box<CodeRecord>>,
     /// Whether to record the above at all. Off until a hart whose block cache
     /// or translated core is on asks for it ([`Bus::watch_code_stores`]), and
     /// **sticky** thereafter: two harts share one bus, so one of them saying
@@ -696,6 +751,7 @@ impl SocBus {
             mmio_windows: Vec::new(),
             ram_aliases: Vec::new(),
             has_ram_alias: false,
+            alias_hull: (0, 0),
             alias_sites: BTreeSet::new(),
             strict: false,
             fault_stores_to_nothing: false,
@@ -1037,9 +1093,12 @@ impl SocBus {
     ///
     /// # Cost
     ///
-    /// On a bus with no alias — every chip today — every access pays one
-    /// `bool` test ([`has_ram_alias`](Self::has_ram_alias)) and nothing else;
-    /// the table walk is out of line. Measured as a same-window A/B of
+    /// Every access pays one subtract-and-compare against the span the
+    /// aliases lie in ([`alias_hull`](Self::alias_hull)) — on a bus with no
+    /// alias that span is empty — and only an address inside it reaches the
+    /// out-of-line table walk. (Until 2026-10-22 the inline test was a
+    /// `bool`, and on the S3, the one chip with an alias, every access made
+    /// the out-of-line call: ~3.6 % of its render loop.) Measured as a same-window A/B of
     /// `just bench-emu-c6` (M6 P02's PR body).
     ///
     /// # Panics
@@ -1154,6 +1213,14 @@ impl SocBus {
         self.ram_aliases.push(alias);
         self.ram_aliases.sort_by_key(|a| a.base);
         self.has_ram_alias = true;
+        let lo = self.ram_aliases.iter().map(|a| a.base).min().unwrap_or(0);
+        let hi = self
+            .ram_aliases
+            .iter()
+            .map(RamAlias::end)
+            .max()
+            .unwrap_or(0);
+        self.alias_hull = (lo, (hi - u64::from(lo)).min(u64::from(u32::MAX)) as u32);
     }
 
     /// Every RAM alias registered, as `(base, len, target_base)`, in address
@@ -1841,7 +1908,7 @@ impl SocBus {
                     self.note_guest_code_span(at, len);
                 }
                 if self.watch_code_stores {
-                    self.note_code_dirty(at, len);
+                    self.note_guest_code_store(off, at, len);
                 }
             }
             self.store_bytes(at, len, value);
@@ -2002,24 +2069,50 @@ impl SocBus {
         self.hart.min(MAX_CODE_DIRTY_HARTS - 1)
     }
 
-    /// Record a guest store into an executable region for **every** hart.
+    /// Record a span of executable memory as written, for **every** hart and
+    /// at **every door** onto it.
     ///
     /// The Xtensa machines' invalidation contract (M7 XD3). Off the fast
     /// path: the caller's two `bool` tests and the region's `exec` flag are
-    /// what an interpreted run pays.
+    /// what an interpreted run pays, and a guest store reaches here only
+    /// through [`note_guest_code_store`](Self::note_guest_code_store)'s map.
     ///
-    /// Contiguous stores extend the newest span — a code copy is contiguous,
+    /// `address` is canonical (every caller has been through
+    /// [`canonical`](Self::canonical)), but a hart keys its cached blocks by
+    /// the `pc` it fetched through, and on the S3 that is SRAM1's **I-bus**
+    /// door, `0x6F_0000` above the D-bus region that owns the bytes. So the
+    /// span goes in once as written and once per alias door onto it: a
+    /// shader rewritten in place through the D-bus view must drop the blocks
+    /// the hart decoded at its I-bus address, or the hart runs the old code.
+    #[inline(never)]
+    fn note_code_dirty(&mut self, address: u32, len: u32) {
+        let end = address.saturating_add(len);
+        self.push_code_dirty(address, end);
+        if self.has_ram_alias {
+            for k in 0..self.ram_aliases.len() {
+                let a = self.ram_aliases[k];
+                let lo = u64::from(address).max(u64::from(a.target_base));
+                let hi = u64::from(end).min(a.target_end());
+                if lo < hi {
+                    let door = a.base.wrapping_add((lo - u64::from(a.target_base)) as u32);
+                    self.push_code_dirty(door, door.wrapping_add((hi - lo) as u32));
+                }
+            }
+        }
+    }
+
+    /// One span onto every hart's list.
+    ///
+    /// Contiguous spans extend the newest one — a code copy is contiguous,
     /// so one `memcpy` of a JIT buffer is one span rather than a thousand —
     /// and a list that grows past [`MAX_CODE_DIRTY_SPANS`] collapses to the
     /// one span covering all of them, which invalidates a superset and is
     /// therefore always correct.
-    #[inline(never)]
-    fn note_code_dirty(&mut self, address: u32, len: u32) {
-        let end = address.saturating_add(len);
-        let lists = self
+    fn push_code_dirty(&mut self, address: u32, end: u32) {
+        let record = self
             .code_dirty
-            .get_or_insert_with(|| Box::new([const { Vec::new() }; MAX_CODE_DIRTY_HARTS]));
-        for list in lists.iter_mut() {
+            .get_or_insert_with(|| Box::new(CodeRecord::new()));
+        for list in record.dirty.iter_mut() {
             match list.last_mut() {
                 Some(span) if address <= span.1 && end >= span.0 => {
                     span.0 = span.0.min(address);
@@ -2038,6 +2131,100 @@ impl SocBus {
         }
     }
 
+    /// A guest store changed bytes in an executable region: record it if, and
+    /// only if, it can have staled a block some hart has cached.
+    ///
+    /// `off` is the store's arena offset and `address` its canonical address.
+    /// While no hart has built a block, or a translated core asked for every
+    /// store, this records the store exactly as written — the contract as it
+    /// was before the map. Otherwise the store is recorded only when it lands
+    /// on a word [`CodeRecord::map`] marks, widened to those whole words, and
+    /// the words are cleared (the map's docs say why that is exact).
+    #[inline(never)]
+    fn note_guest_code_store(&mut self, off: usize, address: u32, len: u32) {
+        let filtered = !self.watch_guest_code
+            && self
+                .code_dirty
+                .as_ref()
+                .is_some_and(|r| !r.map.is_empty() && !r.every_store);
+        if !filtered {
+            self.note_code_dirty(address, len);
+            return;
+        }
+        let granule = CODE_MAP_GRANULE as usize;
+        let first = off / granule;
+        let last = (off + len as usize - 1) / granule;
+        let mut hit = false;
+        if let Some(record) = self.code_dirty.as_mut() {
+            for g in first..=last {
+                if let Some(word) = record.map.get_mut(g / 64) {
+                    let bit = 1u64 << (g % 64);
+                    if *word & bit != 0 {
+                        *word &= !bit;
+                        hit = true;
+                    }
+                }
+            }
+        }
+        if hit {
+            let lo = address.wrapping_sub((off - first * granule) as u32);
+            self.note_code_dirty(lo, ((last - first + 1) * granule) as u32);
+        }
+    }
+
+    /// The canonical address of `address`: [`canonical`](Self::canonical)
+    /// without the trace's `ALIAS` line, for the host-side map.
+    fn canonical_quiet(&self, address: u32) -> u32 {
+        for a in &self.ram_aliases {
+            if address.wrapping_sub(a.base) < a.len {
+                return a.target_base.wrapping_add(address - a.base);
+            }
+        }
+        address
+    }
+
+    /// Mark the arena words behind `[pc, pc + bytes)` in [`CodeRecord::map`].
+    /// See [`Bus::note_block_built`].
+    #[inline(never)]
+    fn mark_cached_code(&mut self, pc: u32, bytes: u32) {
+        if bytes == 0 {
+            return;
+        }
+        let words = self.arena.len().div_ceil(CODE_MAP_GRANULE as usize);
+        let map_len = words.div_ceil(64);
+        let end = pc.saturating_add(bytes);
+        // Every byte of the block, a granule at a time and then its last
+        // byte: consecutive probes are at most one granule apart, so no
+        // granule a piece of the block lies in is stepped over, and each
+        // probe is canonicalised on its own so a block that crosses a door's
+        // edge marks the bytes on both sides of it.
+        let mut at = pc;
+        loop {
+            let c = self.canonical_quiet(at);
+            if let Some(i) = self.region_index_slow(c)
+                && self.regions[i].exec
+            {
+                let g = (c - self.arena_base) as usize / CODE_MAP_GRANULE as usize;
+                let record = self
+                    .code_dirty
+                    .get_or_insert_with(|| Box::new(CodeRecord::new()));
+                if record.map.is_empty() {
+                    // `vec!` of zeros is a zeroed allocation: the arena is a
+                    // flat map of hundreds of MiB of reservation, and only
+                    // the words behind code are ever touched.
+                    record.map = vec![0; map_len];
+                }
+                if let Some(word) = record.map.get_mut(g / 64) {
+                    *word |= 1u64 << (g % 64);
+                }
+            }
+            if at >= end - 1 {
+                break;
+            }
+            at = at.saturating_add(CODE_MAP_GRANULE).min(end - 1);
+        }
+    }
+
     /// Has the guest stored into executable memory since the executing hart
     /// last drained? See [`Bus::code_dirty`].
     #[inline]
@@ -2045,7 +2232,7 @@ impl SocBus {
         let slot = self.code_dirty_slot();
         self.code_dirty
             .as_ref()
-            .is_some_and(|lists| !lists[slot].is_empty())
+            .is_some_and(|record| !record.dirty[slot].is_empty())
     }
 
     /// Whether the store-address record is armed — what a run report and a
@@ -2470,7 +2657,7 @@ impl SocBus {
     /// executors inline.
     #[inline(always)]
     fn canonical(&mut self, address: u32, kind: Option<MemoryAccessKind>) -> u32 {
-        if !self.has_ram_alias {
+        if address.wrapping_sub(self.alias_hull.0) >= self.alias_hull.1 {
             return address;
         }
         self.canonical_slow(address, kind)
@@ -2885,7 +3072,7 @@ impl SocBus {
                     self.note_guest_code_span(address, len);
                 }
                 if self.watch_code_stores {
-                    self.note_code_dirty(address, len);
+                    self.note_guest_code_store(off, address, len);
                 }
             }
             let data = &mut self.arena;
@@ -3458,9 +3645,22 @@ impl Bus for SocBus {
     fn take_code_dirty(&mut self) -> Vec<(u32, u32)> {
         let slot = self.code_dirty_slot();
         match self.code_dirty.as_mut() {
-            Some(lists) => core::mem::take(&mut lists[slot]),
+            Some(record) => core::mem::take(&mut record.dirty[slot]),
             None => Vec::new(),
         }
+    }
+
+    #[inline]
+    fn note_block_built(&mut self, pc: u32, bytes: u32) {
+        if self.watch_code_stores {
+            self.mark_cached_code(pc, bytes);
+        }
+    }
+
+    fn record_every_code_store(&mut self) {
+        self.code_dirty
+            .get_or_insert_with(|| Box::new(CodeRecord::new()))
+            .every_store = true;
     }
 
     fn sideband_or_yield_pending(&self) -> bool {

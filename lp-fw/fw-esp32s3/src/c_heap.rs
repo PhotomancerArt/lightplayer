@@ -74,13 +74,26 @@ pub const RADIO: EnumSet<MemoryCapability> =
 /// none, so only a request that asks for nothing can land there.
 pub const FENCED: EnumSet<MemoryCapability> = EnumSet::empty();
 
-/// The radio region's size. BTDM's controller took 35,724 B at init on FS3
-/// with esp-radio's defaults (M1's radio-boot transcript, `ble_new`; six
-/// connections and an 8 KB controller task stack, which esp-rtos takes from
-/// the heap with `Internal`, so from the main arena, not from here); this
-/// image asks for two connections. The heartbeat's `[radio-heap]` line is the
-/// figure this is checked against.
+/// The radio region's size on a Bluetooth image (no `espnow`). BTDM's
+/// controller took 35,724 B at init on FS3 with esp-radio's defaults (M1's
+/// radio-boot transcript, `ble_new`; six connections and an 8 KB controller
+/// task stack, which esp-rtos takes from the heap with `Internal`, so from the
+/// main arena, not from here); this image asks for two connections and the
+/// advertiser. Connected on FS3 its high water was 26,084 B
+/// (docs/reports/2026-10-21-s3-bluetooth-walk.md). The heartbeat's
+/// `[radio-heap]` line is the figure this is checked against.
+#[cfg(not(s3_espnow))]
 pub const HEAP_RADIO_BYTES: usize = 32 * 1024;
+/// The radio region's size with the Wi-Fi blob up too (`espnow`, `wifi`): the
+/// C6's 48 KB (its joined high water 47,308 of 49,152 B, the same blobs'
+/// classes and the same lean Wi-Fi driver counts,
+/// `fw_esp32_radio::hardware::espnow_controller_config`). On this chip with
+/// both radios up and no network joined the blobs' C blocks reach ~42 KB
+/// (`lp-emu:esp32s3:t1`, S3 radio M4: a 32 KB region overflowed 9,488 B to
+/// main); joined is measured on FS3. Not a loss to Rust: the region's spare
+/// bytes are Rust's, last.
+#[cfg(s3_espnow)]
+pub const HEAP_RADIO_BYTES: usize = 48 * 1024;
 
 /// An arena the allocator gets whole, 8-aligned (a bare byte array can land
 /// on an odd address).
@@ -234,6 +247,16 @@ unsafe fn c_alloc(size: usize) -> *mut u8 {
     if ptr.is_null() {
         return ptr;
     }
+    // The rule this module exists for, checked on every block rather than
+    // trusted to the tags: nothing the radio is handed lies in a boot stage's
+    // RAM (`dram2_seg` is the IDF bootloader's; the split loader's is
+    // mid-arena). A block there would be written by the radio's DMA across a
+    // warm reset, into a boot stage, as on the C6. Two range compares a block.
+    let (clear, _) = lp_bootctl::split_at_s3_boot_stage_ram(ptr as u32, total as u32);
+    assert!(
+        clear as usize == total,
+        "a radio block at {ptr:p} lies in a boot stage's RAM"
+    );
     // SAFETY: the block is at least HEADER bytes and 4-aligned.
     unsafe {
         (ptr as *mut usize).write(total);

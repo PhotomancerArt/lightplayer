@@ -15,6 +15,7 @@ pub const PRIORITY: u32 = 1;
 pub static NET_CHIP: NetChip = NetChip {
     stack_bytes: STACK_BYTES,
     priority: PRIORITY,
+    pin_to_core: None,
     on_thread_start,
     first_light_decided: crate::first_light::decided,
     on_join_attempt,

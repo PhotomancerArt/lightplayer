@@ -114,12 +114,11 @@ radio_boot_probe = [
     "esp-rtos/esp-alloc",
 ]
 
-# The radio (S3 radio roadmap M3): esp-radio on this chip, the shared radio
-# glue (`fw-esp32-radio`), and the radio blobs' own C heap (`src/c_heap.rs`:
-# a region of its own, never `dram2_seg`, never the boot stages' RAM). On its
-# own it starts nothing: `ble` is what this chip runs today. ESP-NOW (the
-# Radio node) needs the Wi-Fi blob up (`esp_radio::wifi::new`), whose RAM is
-# Wi-Fi's milestone's (M4), so the driver is not registered yet.
+# The radio (S3 radio roadmap M3, M4): esp-radio on this chip, the shared
+# radio glue (`fw-esp32-radio`), and the radio blobs' own C heap
+# (`src/c_heap.rs`: a region of its own, never `dram2_seg`, never the boot
+# stages' RAM). On its own it starts nothing: `ble` brings the BTDM controller
+# up, `espnow` the Wi-Fi blob and the ESP-NOW driver, `wifi` the station.
 radio = [
     "server",
     "dep:enumset",
@@ -145,6 +144,28 @@ ble = [
     "fw-esp32-common/radio-link",
     "fw-esp32-radio/ble",
 ]
+# ESP-NOW (the Radio node): the radio's one bring-up (`esp_radio::wifi::new`,
+# the Wi-Fi blob) and the ESP-NOW driver, with the C6's Wi-Fi rule. Not on by
+# default: the Wi-Fi blob up costs ~37 KB of heap the S3 does not have to spare
+# beside a 620-pixel project (lane E, #1261); whether it starts by default, or
+# only when a project has a Radio node or a network is saved, is Yona's call.
+# The C6 runs it by default.
+espnow = ["radio"]
+# The Wi-Fi station and the network on `lp-net` (S3 radio roadmap M4; the
+# C6's since its Wi-Fi roadmap M6, docs/adr/2026-10-07-c6-wifi-link.md): a
+# board with a saved network joins it by itself and serves the secure lp-link
+# at `ws://<board>/link` and `lp-xxxx.local`, and dials lightplayer.app's
+# relay when Cloud relay is on and it holds an account key. The thread, the
+# station, the LAN endpoint, mDNS and the relay are `fw_esp32_radio::net`;
+# this chip's facts are `src/net/`.
+wifi = [
+    "ble",
+    "espnow",
+    "fw-esp32-common/wifi",
+    "fw-esp32-radio/wifi",
+    "dep:esp-radio-rtos-driver",
+    "dep:lpc-relay",
+]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
@@ -154,6 +175,13 @@ ble = [
 # feature: it decorates the app path rather than replacing it, so a frame-dump
 # build is the real firmware plus a transcript.
 frame-dump = []
+
+# The WS281x driver's counters on the heartbeat, one `[WS281X] ch=… frames=…
+# trips=… skips=… errors=…` line per channel that has sent a frame — OFF by
+# default, never shipped. The desk's evidence for LED output under radio load
+# (a Wi-Fi scan, BLE traffic); the C6's and the classic's feature of the same
+# name, kept to the counters this chip's walk reads.
+ws281x_telemetry = []
 
 # Emulator FIXTURES, never shipped and never in a build def: a split-image
 # core that, booted on TRIAL, marks itself attempted and then panics
@@ -364,6 +392,8 @@ esp-radio = { version = "0.18.0", optional = true, features = ["esp-alloc", "log
 # `radio`: the radio glue the C6 and this chip share (ESP-NOW, BLE, `lp-net`),
 # chip facts injected (`src/ble/`).
 fw-esp32-radio = { path = "../fw-esp32-radio", optional = true }
+# `wifi`: the relay client's configuration (`src/net/relay_config.rs`).
+lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
 # `src/c_heap.rs`: the capability sets that pick the radio's region.
 enumset = { version = "1", optional = true }
 

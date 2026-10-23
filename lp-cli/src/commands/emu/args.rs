@@ -368,6 +368,12 @@ pub struct RunArgs {
     #[arg(long = "strict-bus")]
     pub strict_bus: bool,
 
+    /// Do not pre-decode blocks of instructions (`--chip esp32s3` only).
+    /// Slower and otherwise identical: the identity oracle a speed change
+    /// is checked against (`scripts/emu/s3-oracle.sh`).
+    #[arg(long = "no-block-cache")]
+    pub no_block_cache: bool,
+
     /// The board's eFuse MAC, `a0:f2:62:87:b4:8c`. Defaults to the desk
     /// board's, which is what every transcript was captured against.
     #[arg(long = "efuse-mac")]

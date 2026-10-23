@@ -3,8 +3,9 @@
 The ESP32 radio glue the chip firmware crates share: everything between
 esp-radio and LightPlayer's own radio code. Its consumers are `fw-esp32c6`
 and, since the S3 radio plan's M3 (`lp2025/2026-10-20-2335-s3-radio-and-ota`),
-`fw-esp32s3`'s `ble` (BTDM controller config in
-`fw-esp32s3/src/ble/ble_controller_config.rs`).
+`fw-esp32s3`'s `radio`, `ble` and `wifi` (M3, M4; BTDM controller config in
+`fw-esp32s3/src/ble/ble_controller_config.rs`, its `NetChip` in
+`fw-esp32s3/src/net/net_chip.rs`).
 
 It moved here from `fw-esp32c6/src/` as-is (M2 of that plan). The C6's
 behaviour, log lines, figures and boot order did not change.
@@ -34,7 +35,7 @@ directly. What a chip decides, the chip crate passes in:
 |---|---|---|
 | The BLE controller's configuration | `ble::start(.., config)` | `fw-esp32c6/src/ble/ble_controller_config.rs` (NPL setters; the S3's controller is BTDM) |
 | Board quirks before BLE (the XIAO-C6's RF switch) | the chip runs them before it calls `ble::start` | `fw-esp32c6/src/ble/mod.rs` takes the `BoardQuirksApplied` proof |
-| `lp-net`'s stack and priority | `net::net_thread::NetChip` | `fw-esp32c6/src/net/net_chip.rs`: 8 KB, priority 1 |
+| `lp-net`'s stack, priority and core | `net::net_thread::NetChip` | `fw-esp32c6/src/net/net_chip.rs`: 8 KB, priority 1, unpinned (one core); the S3's: 12 KB, priority 1, core 0 |
 | First light (the boot's first join waits for it) | `NetChip::first_light_decided` | `crate::first_light::decided` |
 | Diagnostics (stack paint, heap tracking, radio DMA) | `NetChip::on_thread_start`, `NetChip::on_join_attempt`, `net_heartbeat::log_line(on_joined)` | no-ops unless the C6's diag features are on |
 | The network seam's wake (RISC-V only) | `NetChip::bind_seam_wake` | `crate::seams::seam_wake_handler::bind` |
