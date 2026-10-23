@@ -617,6 +617,11 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+    // On stderr, beside the run but out of the transcript: these are the
+    // lines a run and its `--no-block-cache` twin must differ in.
+    for line in machine.block_report_lines() {
+        eprintln!("{line}");
+    }
 }
 
 /// The whole map, and the alias mirror beside it.

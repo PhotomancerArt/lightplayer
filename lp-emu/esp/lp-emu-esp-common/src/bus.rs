@@ -484,6 +484,10 @@ pub struct SocBus {
     /// `!ram_aliases.is_empty()`, hoisted into one byte: the whole cost of
     /// [`canonical`](Self::canonical) on a bus with no alias is this test.
     has_ram_alias: bool,
+    /// The span every alias lies in, as `(lo, len)` — `len` 0 when there is
+    /// none. [`canonical`](Self::canonical)'s inline test: an address outside
+    /// it is its own canonical address, with no call.
+    alias_hull: (u32, u32),
     /// `(pc, kind)` sites the trace has already named as going through an
     /// alias door — one `ALIAS` line per site, never per access. Touched only
     /// while the trace is on, and part of the snapshot so a restored run
@@ -747,6 +751,7 @@ impl SocBus {
             mmio_windows: Vec::new(),
             ram_aliases: Vec::new(),
             has_ram_alias: false,
+            alias_hull: (0, 0),
             alias_sites: BTreeSet::new(),
             strict: false,
             fault_stores_to_nothing: false,
@@ -1088,9 +1093,12 @@ impl SocBus {
     ///
     /// # Cost
     ///
-    /// On a bus with no alias — every chip today — every access pays one
-    /// `bool` test ([`has_ram_alias`](Self::has_ram_alias)) and nothing else;
-    /// the table walk is out of line. Measured as a same-window A/B of
+    /// Every access pays one subtract-and-compare against the span the
+    /// aliases lie in ([`alias_hull`](Self::alias_hull)) — on a bus with no
+    /// alias that span is empty — and only an address inside it reaches the
+    /// out-of-line table walk. (Until 2026-10-22 the inline test was a
+    /// `bool`, and on the S3, the one chip with an alias, every access made
+    /// the out-of-line call: ~3.6 % of its render loop.) Measured as a same-window A/B of
     /// `just bench-emu-c6` (M6 P02's PR body).
     ///
     /// # Panics
@@ -1205,6 +1213,14 @@ impl SocBus {
         self.ram_aliases.push(alias);
         self.ram_aliases.sort_by_key(|a| a.base);
         self.has_ram_alias = true;
+        let lo = self.ram_aliases.iter().map(|a| a.base).min().unwrap_or(0);
+        let hi = self
+            .ram_aliases
+            .iter()
+            .map(RamAlias::end)
+            .max()
+            .unwrap_or(0);
+        self.alias_hull = (lo, (hi - u64::from(lo)).min(u64::from(u32::MAX)) as u32);
     }
 
     /// Every RAM alias registered, as `(base, len, target_base)`, in address
@@ -2192,8 +2208,11 @@ impl SocBus {
                 let record = self
                     .code_dirty
                     .get_or_insert_with(|| Box::new(CodeRecord::new()));
-                if record.map.len() < map_len {
-                    record.map.resize(map_len, 0);
+                if record.map.is_empty() {
+                    // `vec!` of zeros is a zeroed allocation: the arena is a
+                    // flat map of hundreds of MiB of reservation, and only
+                    // the words behind code are ever touched.
+                    record.map = vec![0; map_len];
                 }
                 if let Some(word) = record.map.get_mut(g / 64) {
                     *word |= 1u64 << (g % 64);
@@ -2638,7 +2657,7 @@ impl SocBus {
     /// executors inline.
     #[inline(always)]
     fn canonical(&mut self, address: u32, kind: Option<MemoryAccessKind>) -> u32 {
-        if !self.has_ram_alias {
+        if address.wrapping_sub(self.alias_hull.0) >= self.alias_hull.1 {
             return address;
         }
         self.canonical_slow(address, kind)

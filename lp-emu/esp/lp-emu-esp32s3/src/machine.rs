@@ -2986,6 +2986,59 @@ impl Machine {
         !self.core_stalled(core) && self.harts.get(core).is_some_and(XtHart::is_waiti)
     }
 
+    /// Whether the harts pre-decode blocks
+    /// ([`Esp32S3Builder::block_cache`]). `false` is `--no-block-cache`.
+    pub fn block_cache(&self) -> bool {
+        self.harts.first().is_some_and(XtHart::block_cache)
+    }
+
+    /// One `blocks:` line per core: what the block cache did, the window
+    /// hoist's split, and the `isync` count — the classic binary's report,
+    /// for the same diagnostic job. **Never part of a compared transcript**:
+    /// a cache hit is not architectural state, so these are exactly the
+    /// lines that differ between a run and its `--no-block-cache` twin.
+    pub fn block_report_lines(&self) -> Vec<String> {
+        (0..CORES)
+            .map(|core| {
+                let hart = &self.harts[core];
+                let isync = hart.isync_count();
+                match hart.block_stats() {
+                    Some(stats) => {
+                        let hoist = hart.window_hoist_stats();
+                        format!(
+                            "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) \
+                             slots={} mean={:.2} flushes={} capacity_flushes={} range={} \
+                             (dropping {} entries) collisions={}; window hoisted={} \
+                             slotwise={} ({:.2}% hoisted); {isync} isync",
+                            stats.decodes,
+                            stats.hits,
+                            stats.hit_rate() * 100.0,
+                            stats.decodes + stats.hits,
+                            stats.slots_run,
+                            stats.mean_block_len(),
+                            stats.flushes,
+                            stats.capacity_flushes,
+                            stats.range_invalidations,
+                            stats.range_entries_dropped,
+                            stats.collisions,
+                            hoist.hoisted,
+                            hoist.slotwise,
+                            hoist.hoisted_share() * 100.0,
+                        )
+                    }
+                    None => format!(
+                        "blocks: core{core} no cache ({}); {isync} isync",
+                        if self.block_cache() {
+                            "never needed one"
+                        } else {
+                            "--no-block-cache"
+                        },
+                    ),
+                }
+            })
+            .collect()
+    }
+
     /// Instructions retired by `core` alone.
     pub fn core_instructions(&self, core: usize) -> u64 {
         self.harts.get(core).map_or(0, XtHart::instruction_count)
@@ -3479,7 +3532,12 @@ impl Machine {
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);
 
-                if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                // Only the watch records an offence, so a window it did not
+                // run under has none to take — and this skips a lock per
+                // window on every run that is not in a cache-off span.
+                if self.cache_watch
+                    && let Some(outcome) = self.take_cache_off_fetch(issuing_pc)
+                {
                     return outcome;
                 }
 

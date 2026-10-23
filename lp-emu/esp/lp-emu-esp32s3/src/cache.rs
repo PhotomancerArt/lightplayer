@@ -950,9 +950,16 @@ impl CacheOffWatch {
 }
 
 impl MemoryCost for CacheOffWatch {
+    // Each access outside both flash windows is answered before the lock:
+    // `note_access` returns at once for one (`Window::of` is a function of
+    // the address alone), and while the watch is armed the run loop hands
+    // the hart one instruction at a time, so this is on every access of
+    // every cache-off span.
     #[inline]
     fn fetch(&mut self, addr: u32) -> u32 {
-        if let Ok(mut c) = self.cache.lock() {
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
             c.note_access(addr, true);
         }
         0
@@ -960,7 +967,9 @@ impl MemoryCost for CacheOffWatch {
 
     #[inline]
     fn load(&mut self, addr: u32, _width: u8) -> u32 {
-        if let Ok(mut c) = self.cache.lock() {
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
             c.note_access(addr, false);
         }
         0
@@ -972,7 +981,9 @@ impl MemoryCost for CacheOffWatch {
         // read-only region) with a better message than this one; a store
         // into a PSRAM page through the data window is an access the DCache
         // serves, and is checked like a load.
-        if let Ok(mut c) = self.cache.lock() {
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
             c.note_access(addr, false);
         }
         0
