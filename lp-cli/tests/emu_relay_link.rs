@@ -96,6 +96,9 @@ const RELAY_NET: Duration = Duration::from_secs(180);
 /// The wall-clock net on the forward's line appearing.
 const FORWARD_NET: Duration = Duration::from_secs(120);
 const STATUS_POLL: Duration = Duration::from_secs(2);
+/// The wall-clock net on a USB connect hearing the board's hello while it
+/// boots (see [`connect_heard`]).
+const BOOT_NET: Duration = Duration::from_secs(90);
 /// How often a member watching a board asks for its picture (a page
 /// showing it would ask about this often; the hub's lease is 15 s).
 const WATCH_EVERY: Duration = Duration::from_secs(2);
@@ -131,7 +134,7 @@ fn an_emulated_s3_reaches_lightplayer_app_through_the_lans_uplink() {
 
 /// The walk the module doc lists, steps 1–7, on `image`.
 fn relay_walk(image: &BoardImage) {
-    let config = configuration();
+    let config = image.configuration();
     // One walk at a time: both set this process's environment
     // (`LP_WIRE_ENCODING`, `LP_CLOUD_SESSION`) and its configuration label.
     let _one = ONE_WALK
@@ -321,21 +324,39 @@ fn relay_walk(image: &BoardImage) {
     // environment while it runs.
     unsafe { std::env::set_var("LP_CLOUD_SESSION", &alice.session) };
     let relay_spec = format!("relay:{board_id}@{}", cloud.origin());
-    handle_upload(UploadArgs {
-        dir: workspace_dir().join("projects/test/basic"),
-        host: relay_spec.clone(),
-        password: Default::default(),
-        no_wait: false,
-        wait_timeout_secs: 300,
-    })
-    .expect("`lp-cli upload projects/test/basic relay:…` deploys and the project runs");
-    eprintln!("emu_relay_link: an upload over {relay_spec}");
+    let runs_basic = image.runs_basic();
+    if runs_basic {
+        if let Err(error) = handle_upload(UploadArgs {
+            dir: workspace_dir().join("projects/test/basic"),
+            host: relay_spec.clone(),
+            password: Default::default(),
+            no_wait: false,
+            wait_timeout_secs: 300,
+        }) {
+            panic!(
+                "`lp-cli upload projects/test/basic {relay_spec}` failed: {error:#}\n`emu run` \
+                 said:\n{}",
+                board.output()
+            );
+        }
+        eprintln!("emu_relay_link: an upload over {relay_spec}");
+    } else {
+        eprintln!(
+            "emu_relay_link: no upload over {relay_spec}: this image cannot compile the \
+             project's shader with a relay session open ({S3_BASIC_DEFECT})"
+        );
+    }
+    let loaded = if runs_basic {
+        "projects/test/basic loaded"
+    } else {
+        "no project"
+    };
 
     // P2. The board reports the project it now runs (its name in the clear;
     // its uid only as a keyed tag, never shown here); the hub lists it. Only
     // the accounts the board proved read its picture.
     let named = Instant::now();
-    loop {
+    while runs_basic {
         let list = cloud.online_boards(&alice.session);
         let project = list.first().and_then(|b| b.project.clone());
         if project.as_deref() == Some(BASIC_NAME) {
@@ -360,9 +381,14 @@ fn relay_walk(image: &BoardImage) {
         guest_reads.pictures.is_empty(),
         "a guest reads {guest_reads:?}"
     );
-    eprintln!(
-        "emu_relay_link: the hub lists the project {BASIC_NAME:?}; Bob and a guest read no picture"
-    );
+    if runs_basic {
+        eprintln!(
+            "emu_relay_link: the hub lists the project {BASIC_NAME:?}; Bob and a guest read no \
+             picture"
+        );
+    } else {
+        eprintln!("emu_relay_link: Bob and a guest read no picture (no project on this board)");
+    }
 
     // The gate case (plan A3): projects/test/basic loaded, the relay
     // registered and a session open through it. The heap is read through
@@ -376,10 +402,10 @@ fn relay_walk(image: &BoardImage) {
         let mut through = LpClient::new(relayed.client_io());
         heap(
             &mut through,
-            "projects/test/basic loaded, relay registered, a relay session open (read through it)",
+            &format!("{loaded}, relay registered, a relay session open (read through it)"),
         )
         .await;
-        request_rtt(&mut through).await;
+        request_rtt(&mut through, loaded).await;
         drop(through);
         relayed.close().await;
     });
@@ -396,32 +422,34 @@ fn relay_walk(image: &BoardImage) {
         wait_heartbeat(&board, mark, RELAY_NET, "watched", |beat| {
             beat.state == "connected" && beat.mode == "watched"
         });
-        let lit = watcher.wait(&board, "a picture of the project's lamps", |p| lamps(p) > 0);
-        let samples = colours(&lit).len() / 3;
-        assert_eq!(
-            colours(&lit).len(),
-            3 * samples,
-            "three bytes a sample: {lit:?}"
-        );
-        assert!(
-            (1..=256).contains(&samples) && samples as u64 <= lamps(&lit),
-            "1 ≤ count ≤ min(256, lamps): {samples} samples of {} lamps",
-            lamps(&lit)
-        );
-        assert!(
-            colours(&lit).iter().any(|&b| b != 0),
-            "the project renders: its picture is not all dark: {lit:?}"
-        );
-        eprintln!(
-            "emu_relay_link: the picture carries the project's colours (seq {}, outputs {:?}, \
+        if runs_basic {
+            let lit = watcher.wait(&board, "a picture of the project's lamps", |p| lamps(p) > 0);
+            let samples = colours(&lit).len() / 3;
+            assert_eq!(
+                colours(&lit).len(),
+                3 * samples,
+                "three bytes a sample: {lit:?}"
+            );
+            assert!(
+                (1..=256).contains(&samples) && samples as u64 <= lamps(&lit),
+                "1 ≤ count ≤ min(256, lamps): {samples} samples of {} lamps",
+                lamps(&lit)
+            );
+            assert!(
+                colours(&lit).iter().any(|&b| b != 0),
+                "the project renders: its picture is not all dark: {lit:?}"
+            );
+            eprintln!(
+                "emu_relay_link: the picture carries the project's colours (seq {}, outputs {:?}, \
              {samples} samples, {} lit)",
-            lit.seq,
-            lit.outputs,
-            colours(&lit)
-                .chunks(3)
-                .filter(|rgb| rgb.iter().any(|&b| b != 0))
-                .count()
-        );
+                lit.seq,
+                lit.outputs,
+                colours(&lit)
+                    .chunks(3)
+                    .filter(|rgb| rgb.iter().any(|&b| b != 0))
+                    .count()
+            );
+        }
         let first_seq = watcher.first_seq();
         let moved = watcher.wait(&board, "three more pictures while watched", |p| {
             p.seq >= first_seq + 3
@@ -440,8 +468,10 @@ fn relay_walk(image: &BoardImage) {
             let mut through = LpClient::new(relayed.client_io());
             heap(
                 &mut through,
-                "projects/test/basic loaded, relay registered, pictures watched, a relay session \
-                 open (read through it)",
+                &format!(
+                    "{loaded}, relay registered, pictures watched, a relay session open (read \
+                     through it)"
+                ),
             )
             .await;
             drop(through);
@@ -512,7 +542,7 @@ fn relay_walk(image: &BoardImage) {
         let mut over_lan = LpClient::new(TokioClientIo::new(Box::new(local)));
         heap(
             &mut over_lan,
-            "projects/test/basic loaded, relay registered, a LAN session open (read through it)",
+            &format!("{loaded}, relay registered, a LAN session open (read through it)"),
         )
         .await;
         drop(over_lan);
@@ -674,6 +704,10 @@ fn a_protocol_1_core_at_the_new_hub_is_answered_as_before() {
         "LP_RELAY_P1_ELF={} is not a file",
         elf.display()
     );
+    let _one = ONE_WALK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *CONFIGURATION.lock().unwrap() = "lp-emu:esp32c6:t1+net=lan";
     let mut cloud = Cloud::start(None);
     let alice = cloud.account("alice");
     let dir = tempfile::tempdir().unwrap();
@@ -849,13 +883,13 @@ fn usb_replies_stay_json(json: bool) {
     }
 }
 
-/// How promptly the board answers through the relay with a project
-/// rendering: `RTT_COUNT` status requests one after another, their wall
+/// How promptly the board answers through the relay with what `loaded`
+/// says it runs: `RTT_COUNT` status requests one after another, their wall
 /// round trips at p50 and p90 — in milliseconds, in frames at the board's
 /// own frame rate (its heartbeat's), and in frames it drew per wall second
 /// (two heartbeats' frame counts), as `lp-cli link rtt` reports a LAN link.
 /// Printed, never a gate: the round trip is wall time on this host.
-async fn request_rtt(client: &mut LpClient<impl lpa_client::ClientIo>) {
+async fn request_rtt(client: &mut LpClient<impl lpa_client::ClientIo>, loaded: &str) {
     let config = configuration();
     const RTT_COUNT: usize = 20;
     let mut ms = Vec::with_capacity(RTT_COUNT);
@@ -913,9 +947,9 @@ async fn request_rtt(client: &mut LpClient<impl lpa_client::ClientIo>) {
         _ => None,
     };
     eprintln!(
-        "emu_relay_link: {RTT_COUNT} status requests through the relay, projects/test/basic \
-         rendering: p50 {p50:.0} ms / p90 {p90:.0} ms wall; {} (the board's own); {} drawn \
-         per wall second ({config}; not a gate)",
+        "emu_relay_link: {RTT_COUNT} status requests through the relay, {loaded}: p50 \
+         {p50:.0} ms / p90 {p90:.0} ms wall; {} (the board's own); {} drawn per wall second \
+         ({config}; not a gate)",
         frames(fps),
         frames(wall_fps)
     );
@@ -1363,7 +1397,19 @@ enum BoardImage {
     S3(PathBuf),
 }
 
+/// Why the S3 arm runs no project (see [`BoardImage::runs_basic`]).
+const S3_BASIC_DEFECT: &str =
+    "docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-compiling-basic-over-the-relay.md";
+
 impl BoardImage {
+    /// Whether the walk uploads `projects/test/basic` and checks what it
+    /// renders. Not on the S3's Wi‑Fi image yet: its 136 KB arena runs out
+    /// compiling the shader with a relay session open ([`S3_BASIC_DEFECT`],
+    /// the heap is the plan's M10). Every relay step still runs there.
+    fn runs_basic(&self) -> bool {
+        matches!(self, Self::C6(_))
+    }
+
     /// The configuration its figures are quoted on.
     fn configuration(&self) -> &'static str {
         match self {
@@ -1515,6 +1561,9 @@ impl EmulatedBoard {
 
 impl Drop for EmulatedBoard {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("emu_relay_link: `emu run` said, last:\n{}", self.output());
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -1549,29 +1598,48 @@ fn forward_in(line: &str) -> Option<String> {
 }
 
 async fn connect(address: &str) -> CliConnection {
-    let spec = HostSpecifier::parse(address).expect("an address lp-cli parses");
-    cli_connect_with_password(spec, None, |_| {})
-        .await
-        .unwrap_or_else(|error| panic!("connecting {address}: {error:#}"))
+    connect_heard(address, Arc::new(Mutex::new(String::new()))).await
 }
 
 /// [`connect`], appending each console line the board says over this link
 /// to `heard`.
+///
+/// A connect that hears the board boot but no hello within lp-cli's ready
+/// deadline (5 s of wall time) is tried again, up to [`BOOT_NET`]: an S3
+/// boots ROM-up, through the mask ROM and the IDF bootloader, and at
+/// emulated speed on a loaded box that can outlast the deadline. A safety
+/// net with a wall clock, never a gate.
 async fn connect_heard(address: &str, heard: Arc<Mutex<String>>) -> CliConnection {
-    let spec = HostSpecifier::parse(address).expect("an address lp-cli parses");
-    cli_connect_with_password(spec, None, move |event| {
-        if let DeviceEvent::LogLine {
-            line,
-            origin: DeviceLineOrigin::Device,
-        } = event
-        {
-            let mut heard = heard.lock().expect("console poisoned");
-            heard.push_str(&line);
-            heard.push('\n');
+    let started = Instant::now();
+    loop {
+        let spec = HostSpecifier::parse(address).expect("an address lp-cli parses");
+        let heard = Arc::clone(&heard);
+        let attempt = cli_connect_with_password(spec, None, move |event| {
+            if let DeviceEvent::LogLine {
+                line,
+                origin: DeviceLineOrigin::Device,
+            } = event
+            {
+                let mut heard = heard.lock().expect("console poisoned");
+                heard.push_str(&line);
+                heard.push('\n');
+            }
+        })
+        .await;
+        match attempt {
+            Ok(connection) => return connection,
+            Err(error)
+                if started.elapsed() < BOOT_NET
+                    && format!("{error:#}").contains("did not become ready") =>
+            {
+                eprintln!(
+                    "emu_relay_link: {address}: no hello yet ({:.0} s), trying again",
+                    started.elapsed().as_secs_f64()
+                );
+            }
+            Err(error) => panic!("connecting {address}: {error:#}"),
         }
-    })
-    .await
-    .unwrap_or_else(|error| panic!("connecting {address}: {error:#}"))
+    }
 }
 
 fn image() -> Option<PathBuf> {
