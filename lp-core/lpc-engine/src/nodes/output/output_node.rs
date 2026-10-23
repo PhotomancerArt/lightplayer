@@ -37,6 +37,7 @@
 //! this output's OWN render is what failed, and even under the
 //! `test_pattern` bypass. `FaultPresentation::Black` turns it off.
 
+use alloc::collections::TryReserveError;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -1334,10 +1335,7 @@ fn place_display_lamps(
     let source_end = source_start.saturating_add(fragment.len_samples);
 
     for lamp in &layout.lamps {
-        let lamp_end = lamp.sample_start.saturating_add(SAMPLES_PER_LAMP);
-        // Whole lamps only: a lamp straddling the edge of a run has no honest
-        // wire position, and a patch cuts on lamp boundaries by construction.
-        if lamp.sample_start < source_start || lamp_end > source_end {
+        if !lamp_in_fragment(lamp, fragment) {
             continue;
         }
         let placed = place_offset(fragment, lamp.sample_start - source_start, SAMPLES_PER_LAMP);
@@ -1392,13 +1390,38 @@ fn place_display_lamps(
 /// Extent hints are the componentwise max: the merged layout is a composite of
 /// producers that may render at different sizes, and lamp centers are already
 /// normalized, so the hints only tell a viewer what aspect to reserve.
-#[must_use]
+///
+/// The lamp list is sized once, to the exact count the fragments place, and
+/// asked of the heap with `try_reserve`: it is the one allocation here that
+/// grows with the lamp count, it used to grow by doubling (a 310-lamp run
+/// asked for 10,240 B while still holding 5,120), and on a board running
+/// near its heap — an ESP32-S3 at 620 lamps with Bluetooth up — that
+/// request panicked the board out of a card read. Not enough heap is an
+/// `Err`, which the read answers as "not this time" (see
+/// `Engine::output_frame_display_layout`), never a panic.
 pub fn merge_fragment_display_layouts(
-    placed: &[(OutputFragment, ControlLayout2d)],
+    placed: &[(OutputFragment, &ControlLayout2d)],
     revision: Revision,
-) -> ControlLayout2d {
+) -> Result<ControlLayout2d, TryReserveError> {
+    let lamp_count: usize = placed
+        .iter()
+        .map(|(fragment, layout)| {
+            layout
+                .lamps
+                .iter()
+                .filter(|lamp| lamp_in_fragment(lamp, fragment))
+                .count()
+        })
+        .sum();
+    // A path span that a rotation wraps becomes two runs.
+    let path_bound: usize = placed
+        .iter()
+        .map(|(_, layout)| layout.paths.len().saturating_mul(2))
+        .sum();
     let mut lamps = Vec::new();
+    lamps.try_reserve_exact(lamp_count)?;
     let mut paths = Vec::new();
+    paths.try_reserve_exact(path_bound)?;
     let mut width_hint = 0;
     let mut height_hint = 0;
     for (fragment, layout) in placed {
@@ -1411,7 +1434,17 @@ pub fn merge_fragment_display_layouts(
     // which is the honest picture of two strands claiming one channel.
     lamps.sort_by_key(|lamp| lamp.sample_start);
     paths.sort_by_key(|path| path.first_lamp);
-    ControlLayout2d::new(revision, width_hint, height_hint, lamps).with_paths(paths)
+    Ok(ControlLayout2d::new(revision, width_hint, height_hint, lamps).with_paths(paths))
+}
+
+/// Whether `fragment` places `lamp`: whole lamps only — a lamp straddling the
+/// edge of a run has no honest wire position, and a patch cuts on lamp
+/// boundaries by construction.
+fn lamp_in_fragment(lamp: &ControlLamp2d, fragment: &OutputFragment) -> bool {
+    let source_start = fragment.source_offset_samples;
+    let source_end = source_start.saturating_add(fragment.len_samples);
+    let lamp_end = lamp.sample_start.saturating_add(SAMPLES_PER_LAMP);
+    lamp.sample_start >= source_start && lamp_end <= source_end
 }
 
 /// What a fragment set covers: its extent, its overlaps, and its holes.
@@ -3056,6 +3089,63 @@ mod tests {
             product,
             patch: Some(runs.to_vec()),
         }
+    }
+
+    /// The merged lamp list is sized once to the lamps the fragments place —
+    /// the skirt's 310-lamp side (10 strands × 31) holds 6,200 B, where
+    /// growing by doubling asked for 10,240 B while still holding 5,120 and
+    /// panicked an S3 near its heap. A fragment that takes only part of a
+    /// producer counts only its own lamps.
+    #[test]
+    fn merged_display_layout_holds_exactly_the_placed_lamps() {
+        let lamps = (0..310)
+            .map(|channel| ControlLamp2d {
+                lamp_index: channel,
+                sample_start: channel * SAMPLES_PER_LAMP,
+                center: [0.5, 0.5],
+                radius: 0.01,
+            })
+            .collect();
+        let layout = ControlLayout2d::new(Revision::new(1), 32, 32, lamps).with_paths(
+            (0..10)
+                .map(|strand| ControlPathSpan2d {
+                    first_lamp: strand * 31,
+                    lamp_count: 31,
+                })
+                .collect(),
+        );
+        let whole = OutputFragment {
+            product: product(1, ControlExtent::new(1, 930)),
+            source_offset_samples: 0,
+            offset_samples: 0,
+            len_samples: 930,
+            reversed: false,
+            rotation_samples: 0,
+        };
+        let merged = merge_fragment_display_layouts(&[(whole, &layout)], Revision::new(2))
+            .expect("a 310-lamp merge fits the host heap");
+        assert_eq!(merged.lamps.len(), 310);
+        assert_eq!(merged.lamps.capacity(), 310);
+        assert_eq!(merged.paths.len(), 10);
+
+        // The second strand only, placed at the front of the wire.
+        let one_strand = OutputFragment {
+            source_offset_samples: 31 * SAMPLES_PER_LAMP,
+            len_samples: 31 * SAMPLES_PER_LAMP,
+            ..whole
+        };
+        let merged = merge_fragment_display_layouts(&[(one_strand, &layout)], Revision::new(2))
+            .expect("a 31-lamp merge fits the host heap");
+        assert_eq!(merged.lamps.len(), 31);
+        assert_eq!(merged.lamps.capacity(), 31);
+        assert_eq!(merged.lamps[0].sample_start, 0);
+        assert_eq!(
+            merged.paths,
+            vec![ControlPathSpan2d {
+                first_lamp: 0,
+                lamp_count: 31
+            }]
+        );
     }
 
     /// The display-rebase side of rotation: a placed run splits at the

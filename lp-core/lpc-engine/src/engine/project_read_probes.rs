@@ -728,7 +728,12 @@ impl Engine {
         }
 
         let parts = self.output_frame_display_parts(registry, candidate);
-        let display_layout = self.output_frame_display_layout(candidate, parts);
+        // Not enough heap to merge the lamps right now: defer, like a layout
+        // over the header budget — the frame still flows, and the client
+        // asks again next read.
+        let Some(display_layout) = self.output_frame_display_layout(candidate, parts) else {
+            return RevisionGateResult::Omitted;
+        };
         if let GeometryDisplayLayout::Layout(layout) = &display_layout
             && let Some(budget) = self.display_layout_budget()
         {
@@ -825,11 +830,14 @@ impl Engine {
     /// the bundle carry `Unsupported`, with the first refusal's reason so the
     /// client can say why — cached by the client under the bundle's revision,
     /// so it is not rebuilt and re-measured every read.
+    ///
+    /// `None` when the heap cannot hold the merged lamps this time: a
+    /// passing shortage, not an answer to cache, so the caller defers it.
     fn output_frame_display_layout(
         &self,
         candidate: &PublishedOutputCandidate,
         parts: OutputDisplayParts,
-    ) -> GeometryDisplayLayout {
+    ) -> Option<GeometryDisplayLayout> {
         let budget = self.display_layout_budget();
         let mut refusal: Option<String> = None;
         let mut usable: Vec<(ControlProduct, ControlLayout2d)> = Vec::new();
@@ -863,22 +871,23 @@ impl Engine {
                 continue;
             };
             revision = revision.max(layout.revision);
-            placed.push((*fragment, layout.clone()));
+            // By reference: a clone here was one more copy of every lamp.
+            placed.push((*fragment, layout));
         }
         if placed.is_empty() {
-            return GeometryDisplayLayout::Unsupported {
+            return Some(GeometryDisplayLayout::Unsupported {
                 reason: refusal.unwrap_or_else(|| {
                     String::from("no producer on this output exposes a display layout")
                 }),
-            };
+            });
         }
 
         let merged =
-            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision));
-        match display_layout_over_budget(&merged, budget) {
+            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision).ok()?);
+        Some(match display_layout_over_budget(&merged, budget) {
             Some(reason) => GeometryDisplayLayout::Unsupported { reason },
             None => GeometryDisplayLayout::Layout(merged),
-        }
+        })
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).
