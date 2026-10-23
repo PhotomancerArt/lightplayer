@@ -153,3 +153,15 @@ no record and never degrades.
 - Device-card aggregation of node `Warn`s once the heartbeat mirror
   carries statuses.
 - S3 / C6 manifests may carry their own records once measured.
+
+## Amendment, 2026-10-23: interpolation is never opened on ESP boards
+
+The ESP output provider renders each frame once, when the engine writes it,
+so the display pipeline's interpolation (which blends between frames when
+ticked between them) had nothing to do there; opened, it put the previous
+frame on the wire every frame
+(`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.md`).
+The provider now opens every pipeline with interpolation off, so on ESP
+boards the tier sheds only dithering, the notice names only dithering, and a
+manifest's `interpolationLeds` sheds nothing. The rest of this decision
+(deterministic, board-total, re-tiered on open and close) is unchanged.
