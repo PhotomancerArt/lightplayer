@@ -75,7 +75,8 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
     }
     let mut builder = Esp32S3Builder::new()
         .time_grade(TimeGrade::T1)
-        .strict(args.strict_bus);
+        .strict(args.strict_bus)
+        .block_cache(!args.no_block_cache);
     match (
         args.elf.as_deref(),
         args.merged.as_deref(),

@@ -68,3 +68,28 @@ pub fn install_isr(rmt: &mut Rmt<'_, esp_hal::Blocking>) {
     }
     rmt.set_interrupt_handler(InterruptHandler::new(rmt_isr, Priority::max()));
 }
+
+/// The driver's own counters, one `[WS281X]` line per channel that has sent a
+/// frame, at the heartbeat's cadence (`ws281x_telemetry`, off by default, never
+/// shipped): cumulative `frames`, `trips` (a refill that came too late, so the
+/// strip showed a stale or partial tail), `skips` and `errors` (TX underrun).
+/// The desk's evidence for LED output under radio load — a Wi-Fi scan, BLE
+/// traffic — which this chip otherwise reads only from its `test_loopback`
+/// harness. Integer formatting only, from the heartbeat, never the ISR.
+#[cfg(feature = "ws281x_telemetry")]
+pub fn log_telemetry() {
+    for ch in 0..TX_CHANNELS as u8 {
+        let stats = DRIVER.stats(ch);
+        if stats.frames == 0 {
+            continue;
+        }
+        log::info!(
+            "[WS281X] ch={} frames={} trips={} skips={} errors={}",
+            ch,
+            stats.frames,
+            stats.guard_trips,
+            stats.guard_skips,
+            stats.errors
+        );
+    }
+}

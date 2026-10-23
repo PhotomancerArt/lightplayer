@@ -681,6 +681,63 @@ more MMIO store — the store that zeroed the mask under X43 — then enables th
 line, and asserts the take followed within a few instructions (CCOUNT 12 →
 20) rather than at the next 256-cycle window boundary. Never single-stepped.
 
+## LCD_CAM and GDMA: parallel WS281x lanes (M9)
+
+The S3's parallel LED output drives up to eight WS281x lanes (sixteen on a
+16-bit bus) from one frame buffer: LCD_CAM's LCD half in i8080 mode shifts a
+byte per bus clock onto `LCD_DATA_0..7`, and the AHB GDMA feeds it from
+internal RAM with no CPU involvement (`led-channels-spike/report.md` in the
+plan directory). This machine plays that path, and the per-pad WS281x
+decoders from "The pad, and the frame" read each lane back unchanged.
+
+| block | where | what |
+|---|---|---|
+| `DMA` ([`periph::gdma`]) | `0x6003_F000` | the five channels' OUT half: `out_conf0/1`, `out_link` (start, stop), the `out_int` cluster, `out_peri_sel`, and `outfifo_status`, which esp-hal's `start_transfer` spins on. The IN half is accept-and-remember and warns on a start |
+| `LCD_CAM_CLOCK` ([`periph::lcd_cam::LcdClock`]) | `0x6004_1000` | `lcd_clock`, one register |
+| `LCD_CAM` ([`periph::lcd_cam::Lcd`]) | `0x6004_1010` | the LCD's registers: `lcd_user` (start, reset, update, dout, always-out, 2-byte, bit and byte order, command and dummy phases), `lcd_misc` (setup and hold cycles), `lc_dma_int_*` (`lcd_trans_done`, source 24) |
+
+**The CAM half is not mapped.** `cam_ctrl`, `cam_ctrl1` and `cam_rgb_yuv`
+(`+0x04..+0x10`) sit between the two windows, so under `--strict-bus` a CAM
+access stops the run. The CAM is the spike's analyzer, never product.
+
+**How a frame plays.**
+
+1. `outlink_start` records the chain's address and ends the window.
+2. The machine walks the descriptor chain out of internal RAM between windows
+   (`Machine::service_gdma`). A peripheral has no way into guest RAM, so this
+   is the C6's `drain_tx_log` shape.
+3. The bytes wait in the channel for LCD_CAM, and `start_transfer`'s spin
+   ends.
+4. `lcd_start` takes them (or waits for them) and drives the lanes:
+   - each slot's time is the start plus `k` PCLK periods, an exact fraction of
+     CPU cycles from `lcd_clock`;
+   - edges are driven 1,024 slots at a time from scheduled events, only where
+     a lane changes, so 8 × 500 LEDs costs a few dozen events and never a
+     per-cycle loop.
+5. At the end, `lcd_start` clears (what esp-hal's `wait` polls),
+   `lcd_trans_done` raises, and GDMA's done and EOF bits raise.
+
+**Not modelled, said so.**
+
+- The chain is read whole at the start, not as the FIFO drains.
+- RGB mode and `lcd_next_frame_en` are warnings.
+- PCLK, CS, DC and the sync lines are never driven.
+- A descriptor or buffer outside internal RAM (`0x3FC8_8000..0x3FD0_0000`)
+  is a descriptor error, and under `--strict-bus` a stop: PSRAM is ruled out
+  for this buffer by design.
+
+**The timing is modelled and ungraded.** The clock sources are the tree's
+nominal 40, 240 and 160 MHz, and a 2.5 MHz bus is exactly 96 CPU cycles a
+slot. A silicon capture grades it, not this. **The bytes transfer.**
+
+`tests/lcd_cam_lanes.rs` boots `fw-esp32s3 --features test_lcd_lanes`
+(a harness that never ships). It sends five uneven lanes (12, 9, 7, 5 and
+3 LEDs on GPIO1–5) twice through esp-hal's own i8080 driver and GDMA, and
+every lane decodes byte-exact off its pad, in lockstep, under
+`--strict-bus`. `just test-emu-esp32s3-lcd` builds the image and runs it;
+CI's `Emulator ESP32-S3 seams and heap (x64)` job runs it. An image that does
+not use LCD_CAM touches none of this and behaves as before.
+
 ## The link, and what a host can and cannot do to this chip through it
 
 The console **is** the link: `esp-println` with the `jtag-serial` feature
@@ -976,6 +1033,47 @@ interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
 to 0 (below): an unarmed core takes `EXCCAUSE=32` inside `save_context` and
 ends in the double-exception vector. The app path's `init` arms it; the seam
 harness does too, before it binds the wake.
+
+## Speed, and the identity oracle that keeps it honest (2026-10-22)
+
+The hart runs out of the shared Xtensa block cache and window hoist
+(`lp-xt-emu`'s, the classic's M7 rungs) — and until #1270 that bought
+nothing here: the whole of SRAM1 is one executable region on this chip
+(DD81), so every stack push and heap write reached the cache as a range
+invalidation, a walk of its 2^18-entry table, and that was **81 % of host
+time**. The bus now keeps a map of the words a cache has decoded and records
+only a store that changes one, at every alias door
+(`lp-emu-esp-common`'s `CodeRecord`).
+
+```bash
+just bench-emu-esp32s3                                 # an ORACLE, never a gate
+scripts/emu/s3-oracle.sh <out> render-basic 2s         # cache vs --no-block-cache
+scripts/emu/s3-oracle.sh --bin-a <main> --bin-b <branch> <out> render-620 2s
+```
+
+Both read CI's images (`just fetch-ci-images` → `LP_CI_IMAGES`, or
+`--images <dir>`). Measured 2026-10-22 on an M2 Max at load ≈ 9, user
+seconds, the shipped image with Bluetooth on:
+
+| row | before #1270 | after | × real time after |
+|---|---:|---:|---:|
+| `render-basic` (241 lamps), per emulated second, steady | 55.0 s | 3.41 s | **0.293×** |
+| `render-620`, per emulated second, steady | 53.9 s | 3.53 s | 0.283× |
+| `boot-idle`, 1 s emulated | 13.38 s | 1.58 s | 0.633× |
+
+**`render-basic` is the row to quote**: the core is ~92 % busy there, so it
+is what a walk sits in. What is left is ~65 MIPS of interpretation and a flat
+profile; 1× needs the Xtensa translator to keep a stay translated.
+
+⚠️ **A hosted run is only repeatable with its link nonce stated**
+(`lp-cli emu run … --link-nonce <hex>`; the oracle and the probe pin one). A
+product host draws a fresh nonce per open, and two runs of one binary then
+differ by ~1,000 instructions and every frame timestamp — which is exactly
+what a fast path that moved the guest would look like.
+
+`--no-block-cache` (this binary and `lp-cli emu run --chip esp32s3`) is the
+off switch, and the `blocks:` lines on stderr are the cache's counters —
+never compared, since they are what the two legs differ in.
 
 ## Three things about this machine that its siblings do not have
 

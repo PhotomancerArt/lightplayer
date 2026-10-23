@@ -82,6 +82,7 @@ mod apb_ctrl;
 mod apb_saradc;
 mod assist_debug;
 mod bb;
+mod dma;
 mod efuse;
 mod extmem;
 mod fe;
@@ -92,6 +93,7 @@ mod interrupt_core0;
 mod interrupt_core1;
 mod interrupt_sources;
 mod io_mux;
+mod lcd_cam;
 mod nrx;
 /// The GPIO matrix's **signal** numbers (M6 P07) — hand-written, because the
 /// interconnect's enumeration lives in esp-hal's metadata rather than in the
@@ -116,6 +118,7 @@ pub use apb_ctrl::APB_CTRL;
 pub use apb_saradc::APB_SARADC;
 pub use assist_debug::ASSIST_DEBUG;
 pub use bb::BB;
+pub use dma::DMA;
 pub use efuse::EFUSE;
 pub use extmem::EXTMEM;
 pub use fe::FE;
@@ -126,6 +129,7 @@ pub use interrupt_core0::INTERRUPT_CORE0;
 pub use interrupt_core1::INTERRUPT_CORE1;
 pub use interrupt_sources::{INTERRUPT_SOURCES, source};
 pub use io_mux::IO_MUX;
+pub use lcd_cam::LCD_CAM;
 pub use nrx::NRX;
 pub use rmt::RMT;
 pub use rng::RNG;
@@ -147,6 +151,7 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &APB_SARADC,
     &ASSIST_DEBUG,
     &BB,
+    &DMA,
     &EFUSE,
     &EXTMEM,
     &FE,
@@ -156,6 +161,7 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &INTERRUPT_CORE0,
     &INTERRUPT_CORE1,
     &IO_MUX,
+    &LCD_CAM,
     &NRX,
     &RMT,
     &RNG,
@@ -217,13 +223,16 @@ mod tests {
             "timg0",
             "uart0",
             "usb_device",
+            "lcd_cam",
+            "dma",
         ] {
             assert!(blocks.contains(&expected), "`{expected}` has no table");
         }
         // P01's 23 from the shipped image's census, plus the four the
         // ROM-up boot chain reaches that the application never does (P06):
-        // `assist_debug`, `apb_saradc`, `sens`, `rng`.
-        assert_eq!(blocks.len(), 27);
+        // `assist_debug`, `apb_saradc`, `sens`, `rng`; and M9's two, the
+        // parallel LED path: `lcd_cam`, `dma`.
+        assert_eq!(blocks.len(), 29);
     }
 
     /// The PAC numbers 94 sources over `0..=98`; the numbers M6 notes §3.3

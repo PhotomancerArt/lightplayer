@@ -59,6 +59,10 @@ pub struct XtSlot {
     /// operands reach — see [`ar_group_bound`] for the one instruction where
     /// it is a bound rather than the exact answer.
     pub group: u8,
+    /// [`crate::mach::inst_traits`] of [`inst`](Self::inst): the two
+    /// per-instruction `match`es the hart's `step` would otherwise make on
+    /// every execution of the slot, answered at decode.
+    pub traits: u8,
     /// The maximum [`group`](Self::group) over the whole block — **valid on
     /// the block's first slot only**, and meaningless on any other.
     ///
@@ -81,6 +85,7 @@ impl XtSlot {
     pub fn new(inst: Inst, len: u8) -> Self {
         let group = ar_group_bound(&inst);
         Self {
+            traits: crate::mach::inst_traits(&inst),
             inst,
             len,
             class: cost_bound(&inst),

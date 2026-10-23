@@ -292,6 +292,13 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "WIFI_MAC",
     "WIFI_PWR",
     "BTDM_WAKE",
+    // ---- M9: the parallel LED path (`periph::gdma`, `periph::lcd_cam`),
+    // appended for the same reason. Met only by an image that drives WS281x
+    // lanes from LCD_CAM; LCD_CAM is two windows around its unmapped CAM
+    // registers.
+    "DMA",
+    "LCD_CAM_CLOCK",
+    "LCD_CAM",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -1130,6 +1137,8 @@ pub struct Esp32S3Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: Option<bool>,
+    /// `--no-block-cache`, held as its positive. On by default.
+    block_cache: bool,
     boot_frame: Option<BootFrame>,
     cpenable_reset: Option<u32>,
     core_quantum: Option<u64>,
@@ -1191,6 +1200,7 @@ impl Default for Esp32S3Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_unsupported: None,
+            block_cache: true,
             boot_frame: None,
             cpenable_reset: None,
             core_quantum: None,
@@ -1377,6 +1387,20 @@ impl Esp32S3Builder {
     /// silently. On by default, as on the classic (DD16).
     pub fn strict_unsupported(mut self, on: bool) -> Self {
         self.strict_unsupported = Some(on);
+        self
+    }
+
+    /// Pre-decode blocks of instructions, or do not (`--no-block-cache`).
+    ///
+    /// **On by default**, and off is the identity oracle: the same binary
+    /// with the cache off must print an identical everything — the same
+    /// UART0 and USB bytes, the same `run:` line, the same frames
+    /// (`scripts/emu/s3-oracle.sh`). The classic's twin, and for the same
+    /// reason there is no `rom-up` exclusion: this chip's invalidation
+    /// contract is the store address (XD3), which catches the mask ROM's and
+    /// the bootloader's copies as it catches the JIT's.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1810,6 +1834,8 @@ impl Esp32S3Builder {
         let usb_index = bus.peripheral_index("USB_DEVICE");
         let gpio_index = bus.peripheral_index("GPIO");
         let rmt_index = bus.peripheral_index("RMT");
+        let gdma_index = bus.peripheral_index("DMA");
+        let lcd_index = bus.peripheral_index("LCD_CAM");
 
         // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
         // where the C6's has it clear, so the fabric is told what the
@@ -1874,7 +1900,12 @@ impl Esp32S3Builder {
         // otherwise would have nowhere for P04's SYSTEM view to write, and
         // nothing for a snapshot to carry.
         let harts: Vec<XtHart<SocBus>> = (0..CORES)
-            .map(|core| fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset))
+            .map(|core| {
+                let mut hart =
+                    fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset);
+                hart.set_block_cache(self.block_cache);
+                hart
+            })
             .collect();
 
         let mut machine = Machine {
@@ -1936,6 +1967,9 @@ impl Esp32S3Builder {
             gpio_index,
             strap_word: self.strap_word,
             rmt_index,
+            gdma_index,
+            lcd_index,
+            dma_violation: None,
             pins: PinObserver {
                 strip: self.strip,
                 cpu_hz: memmap::CPU_HZ,
@@ -2208,6 +2242,14 @@ pub struct Machine {
     /// The other block that watches the pads: the RMT's own logs and
     /// refill telemetry are read through it (M6 P07).
     rmt_index: Option<usize>,
+    /// M9: the AHB GDMA, whose OUT chains the machine walks between windows
+    /// ([`Machine::service_gdma`]), and LCD_CAM's LCD window, which consumes
+    /// them.
+    gdma_index: Option<usize>,
+    lcd_index: Option<usize>,
+    /// A GDMA descriptor or buffer outside internal RAM under `--strict-bus`:
+    /// the run ends on it as on any strict refusal.
+    dma_violation: Option<StrictViolation>,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
@@ -2964,6 +3006,59 @@ impl Machine {
         !self.core_stalled(core) && self.harts.get(core).is_some_and(XtHart::is_waiti)
     }
 
+    /// Whether the harts pre-decode blocks
+    /// ([`Esp32S3Builder::block_cache`]). `false` is `--no-block-cache`.
+    pub fn block_cache(&self) -> bool {
+        self.harts.first().is_some_and(XtHart::block_cache)
+    }
+
+    /// One `blocks:` line per core: what the block cache did, the window
+    /// hoist's split, and the `isync` count — the classic binary's report,
+    /// for the same diagnostic job. **Never part of a compared transcript**:
+    /// a cache hit is not architectural state, so these are exactly the
+    /// lines that differ between a run and its `--no-block-cache` twin.
+    pub fn block_report_lines(&self) -> Vec<String> {
+        (0..CORES)
+            .map(|core| {
+                let hart = &self.harts[core];
+                let isync = hart.isync_count();
+                match hart.block_stats() {
+                    Some(stats) => {
+                        let hoist = hart.window_hoist_stats();
+                        format!(
+                            "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) \
+                             slots={} mean={:.2} flushes={} capacity_flushes={} range={} \
+                             (dropping {} entries) collisions={}; window hoisted={} \
+                             slotwise={} ({:.2}% hoisted); {isync} isync",
+                            stats.decodes,
+                            stats.hits,
+                            stats.hit_rate() * 100.0,
+                            stats.decodes + stats.hits,
+                            stats.slots_run,
+                            stats.mean_block_len(),
+                            stats.flushes,
+                            stats.capacity_flushes,
+                            stats.range_invalidations,
+                            stats.range_entries_dropped,
+                            stats.collisions,
+                            hoist.hoisted,
+                            hoist.slotwise,
+                            hoist.hoisted_share() * 100.0,
+                        )
+                    }
+                    None => format!(
+                        "blocks: core{core} no cache ({}); {isync} isync",
+                        if self.block_cache() {
+                            "never needed one"
+                        } else {
+                            "--no-block-cache"
+                        },
+                    ),
+                }
+            })
+            .collect()
+    }
+
     /// Instructions retired by `core` alone.
     pub fn core_instructions(&self, core: usize) -> u64 {
         self.harts.get(core).map_or(0, XtHart::instruction_count)
@@ -3457,7 +3552,12 @@ impl Machine {
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);
 
-                if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                // Only the watch records an offence, so a window it did not
+                // run under has none to take — and this skips a lock per
+                // window on every run that is not in a cache-off span.
+                if self.cache_watch
+                    && let Some(outcome) = self.take_cache_off_fetch(issuing_pc)
+                {
                     return outcome;
                 }
 
@@ -3511,6 +3611,12 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // M9: an `outlink_start` in the window asked for this boundary;
+            // its chain is read out of RAM now, and LCD_CAM's frame starts.
+            self.service_gdma();
+            if let Some(violation) = self.dma_violation.take() {
+                return Outcome::StrictBus { violation };
+            }
             // The pads: whatever the window put on the wire, in cycle order,
             // and before the feed — a pad whose edge latches a GPIO
             // interrupt must reach the matrix in this same iteration.
@@ -3720,6 +3826,136 @@ impl Machine {
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
         }
+    }
+
+    /// M9: walk every GDMA OUT chain started since the last boundary, out of
+    /// internal RAM, and hand the bytes to the channel; then let LCD_CAM start
+    /// a frame that was waiting for them. See [`crate::periph::gdma`] for why
+    /// the walk is the machine's. One `Option` test when no image has started
+    /// a channel.
+    fn service_gdma(&mut self) {
+        let Some(gi) = self.gdma_index else {
+            return;
+        };
+        let starts = self
+            .bus
+            .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, _| g.take_starts())
+            .unwrap_or_default();
+        if starts.is_empty() {
+            return;
+        }
+        for req in starts {
+            let result = self.walk_out_chain(&req);
+            if let Err(fault) = &result
+                && fault.outside_ram
+                && self.bus.strict()
+            {
+                self.dma_violation.get_or_insert(StrictViolation {
+                    cycle: req.at,
+                    pc: self.harts[0].pc(),
+                    address: fault.address,
+                    width: lp_emu_esp_common::Width::Word,
+                    access: lp_emu_esp_common::Access::Read,
+                    in_mmio_window: false,
+                    grade: None,
+                });
+            }
+            self.bus
+                .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, cx| {
+                    g.loaded(&req, result, cx)
+                });
+        }
+        if let Some(li) = self.lcd_index {
+            self.bus
+                .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, cx| l.data_ready(cx));
+        }
+    }
+
+    /// Read one OUT chain the way the S3's GDMA does: descriptor by
+    /// descriptor from `req.first`, each one's `length` bytes from its
+    /// buffer, until `suc_eof` or a null `next`. A descriptor or buffer
+    /// outside internal RAM, or (with `out_check_owner`) a descriptor the CPU
+    /// still owns, is a fault. With `out_auto_wrback` each descriptor is
+    /// handed back to the CPU (its `owner` bit cleared) once read.
+    fn walk_out_chain(
+        &mut self,
+        req: &crate::periph::gdma::StartRequest,
+    ) -> Result<crate::periph::gdma::Chain, crate::periph::gdma::WalkFault> {
+        use crate::periph::gdma::{
+            Chain, DESC_OWNER, Descriptor, INTERNAL_RAM, MAX_DESCRIPTORS, WalkFault,
+        };
+        let outside = |address: u32, what: &str| WalkFault {
+            address,
+            outside_ram: true,
+            why: format!("{what} at {address:#010x} is outside internal RAM"),
+        };
+        let mut bytes = Vec::new();
+        let (mut addr, mut last, mut before_last) = (req.first, 0u32, 0u32);
+        for n in 0..MAX_DESCRIPTORS {
+            if !INTERNAL_RAM.contains(&addr) || !INTERNAL_RAM.contains(&(addr + 11)) {
+                return Err(outside(addr, "a descriptor"));
+            }
+            let mut words = [0u32; 3];
+            for (k, w) in words.iter_mut().enumerate() {
+                *w = self
+                    .peek_word(addr + 4 * k as u32)
+                    .ok_or_else(|| outside(addr, "a descriptor"))?;
+            }
+            let d = Descriptor::parse(addr, words);
+            if req.check_owner && !d.owner_dma {
+                return Err(WalkFault {
+                    address: addr,
+                    outside_ram: false,
+                    why: "the CPU owns the descriptor (out_check_owner)".into(),
+                });
+            }
+            if d.length > 0 {
+                let end = d.buffer.wrapping_add(d.length - 1);
+                if !INTERNAL_RAM.contains(&d.buffer) || !INTERNAL_RAM.contains(&end) {
+                    return Err(outside(d.buffer, "a buffer"));
+                }
+                let data = self
+                    .peek_bytes(d.buffer, d.length as usize)
+                    .ok_or_else(|| outside(d.buffer, "a buffer"))?;
+                bytes.extend_from_slice(&data);
+            }
+            if req.auto_wrback {
+                self.poke_word(addr, words[0] & !DESC_OWNER);
+            }
+            before_last = last;
+            last = addr;
+            if d.suc_eof || d.next == 0 {
+                return Ok(Chain {
+                    bytes,
+                    last,
+                    before_last,
+                    descriptors: n + 1,
+                });
+            }
+            addr = d.next;
+        }
+        log::warn!(
+            "GDMA: OUT channel {}: the chain from {:#010x} did not end in {MAX_DESCRIPTORS} \
+             descriptors (a ring?); its first {MAX_DESCRIPTORS} are sent",
+            req.ch,
+            req.first
+        );
+        Ok(Chain {
+            bytes,
+            last,
+            before_last,
+            descriptors: MAX_DESCRIPTORS,
+        })
+    }
+
+    /// How many frames LCD_CAM has shifted out completely (M9).
+    pub fn lcd_frames(&mut self) -> u64 {
+        self.lcd_index
+            .and_then(|li| {
+                self.bus
+                    .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, _| l.frames())
+            })
+            .unwrap_or(0)
     }
 
     /// The pads, at a slice boundary: the routing the window changed, then

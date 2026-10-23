@@ -467,6 +467,11 @@ ESP32S3_TARGETS = [
     # (`cache_dataarray_connect_1`) at cycle 36, on
     # `rom_config_instruction_cache_mode`'s path.
     _s3("sensitive", "SENSITIVE"),
+    # M9 (parallel WS281x output): the LCD half of LCD_CAM in i8080 mode,
+    # fed by the AHB GDMA's out channels. Neither is in the shipped image's
+    # census yet; the parallel LED backend is what reaches them.
+    _s3("lcd_cam", "LCD_CAM"),
+    _s3("dma", "DMA"),
 ]
 
 

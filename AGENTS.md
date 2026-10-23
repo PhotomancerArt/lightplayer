@@ -618,7 +618,7 @@ runtime.
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
-| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumers: `fw-esp32c6`, `fw-esp32s3` (`ble`) | yes (bare metal) |
+| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumers: `fw-esp32c6`, `fw-esp32s3` (`radio`/`ble`/`wifi`, off by default until walked) | yes (bare metal) |
 | `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace). Two flavours: the factory loader the IDF bootloader starts, and (`--features bootloader`) LightPlayer's own second stage at flash `0x0`, the C6's boot path since 2026-10-17 — every split image must boot through **both** (`lp-emu-esp32c6/tests/split_boot.rs`, `second_stage.rs`; `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`) | yes (bare metal) |
 | `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -1652,6 +1652,15 @@ The READMEs: `lp-base/lp-seam/README.md` (the ABI),
 `lp-emu/esp/lp-emu-esp32c6/README.md` ("Emulator seams"),
 `lp-fw/fw-esp32c6/README.md` (the table and its cost on silicon),
 `lp-emu/lp-emu-validate/README.md` ("Composite names").
+
+#### LCD_CAM and GDMA on the S3
+
+`lp-emu-esp32s3` models LCD_CAM's LCD half in i8080 mode and the AHB GDMA's
+OUT channels (M9, the parallel WS281x output): esp-hal's i8080 driver drives
+up to sixteen lanes, and the per-pad WS281x decoders read each one back.
+`just test-emu-esp32s3-lcd` proves five uneven lanes byte-exact. The CAM half
+is unmapped (a strict stop), the bytes transfer, and the timing is ungraded.
+See `lp-emu/esp/lp-emu-esp32s3/README.md`, "LCD_CAM and GDMA".
 
 #### Emulated Wi-Fi
 

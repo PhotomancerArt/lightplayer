@@ -197,6 +197,20 @@ pub fn psram_merged_image() -> Result<PathBuf, String> {
     )
 }
 
+/// The environment variable naming the **LCD lanes** ELF — `fw-esp32s3`
+/// built with `test_lcd_lanes` (M9): five uneven WS281x lanes out of
+/// LCD_CAM's i8080 mode, fed by GDMA. A test image that never ships.
+pub const LCD_LANES_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_LANES_ELF";
+
+/// The LCD lanes ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_lanes_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_LANES_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_lanes` and sets it",
+    )
+}
+
 /// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
 /// panic when it is set to a path that does not exist.
 fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {

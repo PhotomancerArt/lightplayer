@@ -1167,6 +1167,8 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --release --features ws281x_telemetry -- --no-deps -D warnings
     # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
     # stack diagnostic, and the app WITHOUT the thread (the link task back on
     # the main executor, no messages-first). Both are cfg'd out of the
@@ -1182,14 +1184,17 @@ clippy-fw-esp32s3:
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
-    # The radio (S3 radio M3): the BLE link over the shared crate, and the
-    # M1 radio probe (scaffolding, the emulator's radio image). The two start
+    # The radio (S3 radio M3, M4): each tier over the shared crate (ESP-NOW,
+    # then BLE, then the network), and the M1 radio probe (scaffolding, the
+    # emulator's radio image). The two start
     # the same controller, so they are separate passes. Then the shared radio
     # crate itself on this chip's target, at each tier this chip builds it
     # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
     # reaches a dependency.
-    echo "clippy: --features ble"
-    cargo clippy --release --features ble -- --no-deps -D warnings
+    for feat in espnow wifi; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
     echo "clippy: --features radio_boot_probe"
     cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
@@ -4393,6 +4398,24 @@ test-emu-esp32s3-psram:
     fi
     cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
 
+# The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
+# `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —
+# sends five uneven lanes through esp-hal's i8080 driver and GDMA, and
+# `tests/lcd_cam_lanes.rs` checks every lane decodes byte-exact off its pad.
+# One firmware build and a few milliseconds of emulation; the `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it beside the seam harness.
+test-emu-esp32s3-lcd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_lcd_lanes
+    lanes="$out/fw-esp32s3-lcd-lanes.elf"
+    cp "$built" "$lanes"
+    export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
@@ -4914,6 +4937,19 @@ flash-tears-sim-unaligned cuts="300" seed="1":
 # seconds GO is a different pair of instruments; see the script's header.
 bench-emu-esp32v3 *args:
     scripts/emu/bench-esp32v3.sh {{ args }}
+
+#   just bench-emu-esp32s3
+#   just bench-emu-esp32s3 --rows render-basic --runs 3
+#   scripts/emu/bench-esp32s3.sh --bin <saved-dir> --no-build   # the A/B half
+#
+# Over CI's images (`just fetch-ci-images`, then `export LP_CI_IMAGES=…`).
+# Three rows: boot-idle, and render-basic / render-620 with Bluetooth on,
+# whose figure is the steady state between 1 s and 4 s emulated;
+# `render-basic` is the row to quote. An ORACLE, never a gate:
+# `scripts/emu/s3-oracle.sh` is the identity check a speed change answers to.
+# The ESP32-S3 machine's speed probe (bench-emu-esp32v3's twin)
+bench-emu-esp32s3 *args:
+    scripts/emu/bench-esp32s3.sh {{ args }}
 
 # PGO recipe for the C6 machine binary (D4): instrumented build, one training
 # run of each reference image, merge, optimized rebuild, then the probe on

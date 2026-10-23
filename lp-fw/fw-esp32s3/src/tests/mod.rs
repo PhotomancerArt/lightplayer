@@ -9,6 +9,8 @@ pub mod lcd_ws281x;
 pub mod loopback;
 #[cfg(feature = "test_button")]
 pub mod test_button;
+#[cfg(feature = "test_lcd_lanes")]
+pub mod test_lcd_lanes;
 #[cfg(feature = "test_psram")]
 pub mod test_psram;
 #[cfg(feature = "test_seam_abi")]
