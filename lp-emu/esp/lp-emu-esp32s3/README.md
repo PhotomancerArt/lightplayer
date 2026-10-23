@@ -977,6 +977,47 @@ to 0 (below): an unarmed core takes `EXCCAUSE=32` inside `save_context` and
 ends in the double-exception vector. The app path's `init` arms it; the seam
 harness does too, before it binds the wake.
 
+## Speed, and the identity oracle that keeps it honest (2026-10-22)
+
+The hart runs out of the shared Xtensa block cache and window hoist
+(`lp-xt-emu`'s, the classic's M7 rungs) — and until #1270 that bought
+nothing here: the whole of SRAM1 is one executable region on this chip
+(DD81), so every stack push and heap write reached the cache as a range
+invalidation, a walk of its 2^18-entry table, and that was **81 % of host
+time**. The bus now keeps a map of the words a cache has decoded and records
+only a store that changes one, at every alias door
+(`lp-emu-esp-common`'s `CodeRecord`).
+
+```bash
+just bench-emu-esp32s3                                 # an ORACLE, never a gate
+scripts/emu/s3-oracle.sh <out> render-basic 2s         # cache vs --no-block-cache
+scripts/emu/s3-oracle.sh --bin-a <main> --bin-b <branch> <out> render-620 2s
+```
+
+Both read CI's images (`just fetch-ci-images` → `LP_CI_IMAGES`, or
+`--images <dir>`). Measured 2026-10-22 on an M2 Max at load ≈ 9, user
+seconds, the shipped image with Bluetooth on:
+
+| row | before #1270 | after | × real time after |
+|---|---:|---:|---:|
+| `render-basic` (241 lamps), per emulated second, steady | 55.0 s | 3.41 s | **0.293×** |
+| `render-620`, per emulated second, steady | 53.9 s | 3.53 s | 0.283× |
+| `boot-idle`, 1 s emulated | 13.38 s | 1.58 s | 0.633× |
+
+**`render-basic` is the row to quote**: the core is ~92 % busy there, so it
+is what a walk sits in. What is left is ~65 MIPS of interpretation and a flat
+profile; 1× needs the Xtensa translator to keep a stay translated.
+
+⚠️ **A hosted run is only repeatable with its link nonce stated**
+(`lp-cli emu run … --link-nonce <hex>`; the oracle and the probe pin one). A
+product host draws a fresh nonce per open, and two runs of one binary then
+differ by ~1,000 instructions and every frame timestamp — which is exactly
+what a fast path that moved the guest would look like.
+
+`--no-block-cache` (this binary and `lp-cli emu run --chip esp32s3`) is the
+off switch, and the `blocks:` lines on stderr are the cache's counters —
+never compared, since they are what the two legs differ in.
+
 ## Three things about this machine that its siblings do not have
 
 1. **SRAM1 is one region with two doors.** `0x3FC8_8000` on the data bus and
