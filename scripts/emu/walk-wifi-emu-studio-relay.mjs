@@ -119,12 +119,6 @@
 // prompt: the shim stands in for the LAN's reachability. Nothing here says
 // anything about Mac or Android Chrome's prompt.
 //
-// `--s3` (S3 radio M6; `studio-relay` only) walks the same steps with an
-// emulated ESP32-S3, `s3-a` (`emu serve --chip esp32s3`), running `fw-esp32s3
-// --features wifi` ROM-up from the merged chip `just build-emu-esp32s3-wifi`
-// writes (`LP_WALK_S3_MERGED` names another). Output in
-// `target/walk-wifi-emu/studio-relay-s3/`.
-//
 // NOT CI. Made-up test values only. Headless Chrome. Needs: `just
 // studio-web-story-build`, `just studio-firmware-package-esp32c6` (the merged
 // C6 image), `cargo build -p lp-cli -p lp-cloud-server`, Chrome. `--dry-run`
@@ -172,11 +166,7 @@ const AWAY_IP = "203.0.113.9";
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 const LP_CLOUD_SERVER = path.join(ROOT, "target/debug/lp-cloud-server");
-/// `--s3`: the board is an emulated ESP32-S3 (S3 radio M6).
-const S3 = process.argv.slice(2).includes("--s3");
-const S3_WIFI_MERGED =
-  process.env.LP_WALK_S3_MERGED ?? path.join(ROOT, "target/lp-emu-esp32s3/merged-wifi.bin");
-const A = S3 ? "s3-a" : "c6-a";
+const A = "c6-a";
 /// The account lane's second board: on the door, never on a network.
 const B = "c6-b";
 const JOIN_MS = 420_000;
@@ -203,7 +193,7 @@ const WORDS = {
 };
 
 function usage() {
-  return "usage: node scripts/emu/walk-wifi-emu.mjs <studio-relay [--s3]|studio-relay-move|studio-relay-account> [--out <dir>] [--keep-open] [--dry-run]";
+  return "usage: node scripts/emu/walk-wifi-emu.mjs <studio-relay|studio-relay-move|studio-relay-account> [--out <dir>] [--keep-open] [--dry-run]";
 }
 
 function parseArgs(argv) {
@@ -216,19 +206,14 @@ function parseArgs(argv) {
   const rest = lanes.includes(argv[0]) ? argv.slice(1) : argv;
   const move = lane === "studio-relay-move";
   const account = lane === "studio-relay-account";
-  const options = { lane, move, account, out: path.join(ROOT, `target/walk-wifi-emu/${lane}${S3 ? "-s3" : ""}`), keepOpen: false, dryRun: false };
+  const options = { lane, move, account, out: path.join(ROOT, `target/walk-wifi-emu/${lane}`), keepOpen: false, dryRun: false };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === "--out") options.out = path.resolve(rest[++i] ?? "");
     else if (arg === "--keep-open") options.keepOpen = true;
     else if (arg === "--dry-run") options.dryRun = true;
-    // Read at module load (`S3`), since the board's name is a constant.
-    else if (arg === "--s3") options.s3 = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`unknown argument ${JSON.stringify(arg)}\n${usage()}`);
-  }
-  if (S3 && lane !== "studio-relay") {
-    throw new Error(`--s3 walks \`studio-relay\` only (the move and the account lanes are the C6's)\n${usage()}`);
   }
   return options;
 }
@@ -238,9 +223,7 @@ function prerequisites() {
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
     ["a debug lp-cloud-server (cargo build -p lp-cloud-server)", LP_CLOUD_SERVER],
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, RELEASE_BUNDLE)],
-    S3
-      ? ["the S3's merged Wi‑Fi image (just build-emu-esp32s3-wifi)", S3_WIFI_MERGED]
-      : ["the packaged merged C6 image (just studio-firmware-package-esp32c6)", path.join(ROOT, PACKAGED_C6_MERGED)],
+    ["the packaged merged C6 image (just studio-firmware-package-esp32c6)", path.join(ROOT, PACKAGED_C6_MERGED)],
   ].map(([what, at]) => ({ what, at, present: existsSync(at) }));
 }
 
@@ -278,7 +261,7 @@ async function main() {
   const stateDir = path.join(out, "state");
   mkdirSync(out, { recursive: true });
   const fixturePath = path.join(out, "virtual_lan.toml");
-  const boardSpec = `${A}=${S3 ? S3_WIFI_MERGED : "{merged}"},kind=rom-up,lan=${LAN}`;
+  const boardSpec = `${A}={merged},kind=rom-up,lan=${LAN}`;
   // No `lan=`: c6-b has no network to join, ever (T9).
   const boardSpecB = `${B}={merged},kind=rom-up`;
   const boardSpecs = options.account ? [boardSpec, boardSpecB] : [boardSpec];
@@ -354,7 +337,7 @@ async function main() {
     root: ROOT,
     id: "walk-wifi-studio-relay",
     boards: boardSpecs,
-    extraArgs: [...(S3 ? ["--chip", "esp32s3"] : []), "--lan", `${LAN}=${fixturePath}`],
+    extraArgs: ["--lan", `${LAN}=${fixturePath}`],
     stateDir,
     consoleDir,
     logFile: path.join(out, "serve.log"),

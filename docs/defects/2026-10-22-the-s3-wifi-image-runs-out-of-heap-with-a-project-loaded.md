@@ -95,7 +95,10 @@ project the relay costs about 6.5 KB registered (117,296 → 110,956 B free)
 and about 13 KB with a session open (97,660 B). Until M10 the cell's S3 arm
 uploads no project (`BoardImage::runs_basic`) and runs every relay step.
 When this closes, delete that exception, so the arm runs `basic` like the
-C6's.
+C6's. Studio's relay walk (`just walk-wifi-emu studio-relay`) loads `basic`
+over USB in its first step, with no relay session open yet, and on an S3 it
+stops there the same way (`memory allocation of 240 bytes failed` in
+`shader-compile:glsl`). So that lane has no `--s3` until this closes.
 
 **Repro** — `just test-emu-esp32s3-wifi` (builds and merges the image), then
 `just walk-wifi-emu lan --s3` (needs `just studio-web-story-build`, `cargo
