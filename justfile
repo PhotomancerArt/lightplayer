@@ -3815,7 +3815,7 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
 # `fixture-trial-dies`, X with `fixture-usb-untrusted`; ~2 min each on an
 # M2 Max) and ~20 min of scenarios (the cut sweeps recover in
 # `LP_OTA_THREADS` threads, default 6). Run it when you touch `lpc-update`,
-# `lpa-update`, `fw-esp32c6/src/ota/`, channel 3 or `lp-bootctl`.
+# `lpa-update`, `fw-esp32-common/src/split_core/`, channel 3 or `lp-bootctl`.
 # `scenarios=<dir>` reuses images already built there; `filter=u03` runs one.
 test-emu-c6-ota scenarios="" filter="": install-rv32-target
     #!/usr/bin/env bash
