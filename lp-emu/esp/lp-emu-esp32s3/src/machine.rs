@@ -1130,6 +1130,8 @@ pub struct Esp32S3Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: Option<bool>,
+    /// `--no-block-cache`, held as its positive. On by default.
+    block_cache: bool,
     boot_frame: Option<BootFrame>,
     cpenable_reset: Option<u32>,
     core_quantum: Option<u64>,
@@ -1191,6 +1193,7 @@ impl Default for Esp32S3Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_unsupported: None,
+            block_cache: true,
             boot_frame: None,
             cpenable_reset: None,
             core_quantum: None,
@@ -1377,6 +1380,20 @@ impl Esp32S3Builder {
     /// silently. On by default, as on the classic (DD16).
     pub fn strict_unsupported(mut self, on: bool) -> Self {
         self.strict_unsupported = Some(on);
+        self
+    }
+
+    /// Pre-decode blocks of instructions, or do not (`--no-block-cache`).
+    ///
+    /// **On by default**, and off is the identity oracle: the same binary
+    /// with the cache off must print an identical everything — the same
+    /// UART0 and USB bytes, the same `run:` line, the same frames
+    /// (`scripts/emu/s3-oracle.sh`). The classic's twin, and for the same
+    /// reason there is no `rom-up` exclusion: this chip's invalidation
+    /// contract is the store address (XD3), which catches the mask ROM's and
+    /// the bootloader's copies as it catches the JIT's.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1874,7 +1891,12 @@ impl Esp32S3Builder {
         // otherwise would have nowhere for P04's SYSTEM view to write, and
         // nothing for a snapshot to carry.
         let harts: Vec<XtHart<SocBus>> = (0..CORES)
-            .map(|core| fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset))
+            .map(|core| {
+                let mut hart =
+                    fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset);
+                hart.set_block_cache(self.block_cache);
+                hart
+            })
             .collect();
 
         let mut machine = Machine {
