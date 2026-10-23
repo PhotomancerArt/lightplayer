@@ -1069,6 +1069,8 @@ fn mount_filesystem(
     // Right after esp-storage's own RDID size probe, before any ROM flash
     // access, as on the C6 (`flash_qio`).
     crate::flash_qio::enter();
+    #[cfg(feature = "psram")]
+    crate::flash_qio::log_clocks();
     // A split image's region ends where `factory` does, in the table the
     // chip carries (read once, here, after `FlashStorage::new`).
     //

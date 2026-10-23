@@ -53,7 +53,7 @@
 
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
-use esp_hal::psram::{Psram, PsramConfig, PsramMode, PsramSize};
+use esp_hal::psram::{Psram, PsramConfig, PsramMode, PsramSize, SpiRamFreq};
 use lp_bootctl::s3_mmu::{PSRAM_DROM, PSRAM_MMU_ENTRY, PSRAM_WINDOW_LEN};
 
 pub use lp_bootctl::s3_mmu::PSRAM_WINDOW;
@@ -140,6 +140,18 @@ fn fused_capacity() -> u8 {
     read_field_le::<u8>(PSRAM_CAP) | (u8::from(read_bit(PSRAM_CAP_3)) << 2)
 }
 
+/// PSRAM's clock: `LP_PSRAM_MHZ` as built, 80 (the default) or 40, the
+/// fallback the spike named for a part with too little margin at 80 (esp-hal
+/// tunes no MSPI timing). At 80 MHz esp-hal's init sets the MSPI core clock to
+/// 160 MHz and divides both flash and PSRAM by two, so the flash is at 80 MHz
+/// as well; at 40 the core stays at 80 and the flash is undivided.
+fn ram_frequency() -> SpiRamFreq {
+    match option_env!("LP_PSRAM_MHZ") {
+        Some("40") => SpiRamFreq::Freq40m,
+        _ => SpiRamFreq::Freq80m,
+    }
+}
+
 /// `PSRAM_CAP`'s code for 8 MB (ESP-IDF's S3 eFuse table: `1: "8M"`).
 const FUSED_8MB: u8 = 1;
 
@@ -184,6 +196,7 @@ fn try_bring_up(peri: esp_hal::peripherals::PSRAM<'static>) -> State {
     // `new_octal`: the quad path is never referenced, so none of its `#[ram]`
     // code is linked (the fork's seventh diff).
     let config = PsramConfig {
+        ram_frequency: ram_frequency(),
         mode: PsramMode::OctalSpi,
         size: PsramSize::Size(PSRAM_WINDOW_LEN as usize),
         mmu_start_entry: Some(PSRAM_MMU_ENTRY),
