@@ -29,6 +29,11 @@ src/
   timing.rs   ChannelTiming (ns) + ColorOrder -> PulseCodes (RMT words) for a
               given clock rate. Rejects timings the 15-bit duration field
               cannot express.
+  parallel.rs The other transmitter shape: up to eight lanes in lockstep on a
+              byte-wide DMA'd bus (the ESP32-S3's LCD_CAM). Three bus slots a
+              WS281x bit, an 8x8 transpose per wire byte, colour order applied
+              in the gather; and a decoder that reads a lane back out of bus
+              samples, for silicon harnesses. No RMT, no deadline.
   blocks.rs   BlockPlan: which channel owns which RMT memory blocks, and which
               channels an extension therefore makes unavailable.
   pulse.rs    The RMT item format: two level/duration pairs per u32, and the
