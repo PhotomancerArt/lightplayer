@@ -202,4 +202,15 @@ LightPlayer-owned code is licensed under the GNU Affero General Public License v
 
 Third-party code, vendored forks, and dependencies remain under their own licenses.
 
+Derived third-party sources and their vendored license texts (`licenses/`):
+
+- **Fluid solver** (`lp-core/lpc-engine/src/nodes/fluid/solver.rs`, and the
+  firmware perf experiment `lp-fw/fw-esp32c6/src/tests/msafluid_solver.rs`):
+  derived from Memo Akten's [MSAFluid](https://github.com/memoakten/p5-MSAFluid)
+  `MSAFluidSolver2D`, Copyright (c) 2008, 2009 Memo Akten, www.memo.tv,
+  BSD-3-Clause ([`licenses/MSAFluid-BSD-3-Clause.txt`](licenses/MSAFluid-BSD-3-Clause.txt);
+  the C++ port is MIT, [`licenses/MSAFluid-MIT.txt`](licenses/MSAFluid-MIT.txt)),
+  itself after Jos Stam, "Real-Time Fluid Dynamics for Games" (GDC 2003).
+- **Catalog patterns ported from WLED**: see [`catalog/COPYING.md`](catalog/COPYING.md).
+
 Contributions are accepted under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).
