@@ -103,6 +103,12 @@ impl Esp32S3LcdWs281xDriver {
         }
     }
 
+    /// Attach the CAM-half frame check (`ws281x_frame_check`).
+    #[cfg(feature = "ws281x_frame_check")]
+    pub fn attach_check(&self, check: super::frame_check::FrameCheck) {
+        self.shared.borrow_mut().bus.check = Some(check);
+    }
+
     fn endpoint_id(&self, spec: &HwEndpointSpec) -> HwEndpointId {
         HwEndpointId::for_driver_spec(self.driver_id(), spec)
     }
@@ -276,6 +282,10 @@ impl Ws281xDriver for Esp32S3LcdWs281xDriver {
             let mut shared = self.shared.borrow_mut();
             shared.lanes[lane as usize].in_use = true;
             shared.lanes[lane as usize].gpio = Some(gpio);
+            #[cfg(feature = "ws281x_frame_check")]
+            if let Some(check) = shared.bus.check.as_mut() {
+                check.bind(lane, gpio);
+            }
         }
         log::info!(
             "Esp32S3LcdWs281xDriver::open: endpoint={endpoint_id} gpio={} lane={lane} bytes={}",

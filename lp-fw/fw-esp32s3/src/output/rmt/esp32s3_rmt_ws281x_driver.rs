@@ -554,6 +554,8 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
         // refused is not one of them.
         #[cfg(feature = "frame-dump")]
         self.dump.on_write(data);
+        #[cfg(feature = "ws281x_frame_check")]
+        log_guard_trips(self.channel);
         Ok(())
     }
 
@@ -661,4 +663,28 @@ fn start_error_to_output_error(channel: u8, error: StartError) -> OutputError {
             reason: format!("RMT channel {channel} cannot start a frame: {other:?}"),
         },
     }
+}
+
+/// `ws281x_frame_check` (never shipped): the RMT's own truncation count, the
+/// guard trips summed over the channels, one line per 250 frames on channel
+/// 0's writes — the number the LCD backend's CAM check is compared against.
+#[cfg(feature = "ws281x_frame_check")]
+fn log_guard_trips(channel: u8) {
+    use core::sync::atomic::{AtomicU32, Ordering};
+    static WRITES: AtomicU32 = AtomicU32::new(0);
+    if channel != 0 {
+        return;
+    }
+    let n = WRITES.fetch_add(1, Ordering::Relaxed) + 1;
+    if n % 250 != 0 {
+        return;
+    }
+    let (mut frames, mut trips, mut errors) = (0, 0, 0);
+    for ch in 0..TX_CHANNELS as u8 {
+        let stats = DRIVER.stats(ch);
+        frames += stats.frames;
+        trips += stats.guard_trips;
+        errors += stats.errors;
+    }
+    log::info!("[ws281x-check] driver=rmt frames={frames} trips={trips} errors={errors}");
 }

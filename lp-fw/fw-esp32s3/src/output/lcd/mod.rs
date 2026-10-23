@@ -13,6 +13,8 @@
 extern crate alloc;
 
 mod esp32s3_lcd_ws281x_driver;
+#[cfg(feature = "ws281x_frame_check")]
+mod frame_check;
 mod lcd_bus;
 
 pub use esp32s3_lcd_ws281x_driver::Esp32S3LcdWs281xDriver;
@@ -32,7 +34,24 @@ pub fn new_driver(
 
     let lcd_cam = LcdCam::new(lcd_cam);
     let config = Config::default().with_frequency(Rate::from_hz(BUS_HZ));
-    I8080::new(lcd_cam.lcd, dma, config)
+    let driver = I8080::new(lcd_cam.lcd, dma, config)
         .map(|i8080| Esp32S3LcdWs281xDriver::new(registry, i8080))
-        .map_err(|error| alloc::format!("LCD_CAM init failed ({error:?})"))
+        .map_err(|error| alloc::format!("LCD_CAM init failed ({error:?})"))?;
+    // The frame check takes the CAM half, GDMA channel 1 and two back pads
+    // (GPIO11, the sampler's clock loop; GPIO12, its VSYNC), none of which
+    // this image otherwise uses.
+    #[cfg(feature = "ws281x_frame_check")]
+    {
+        // SAFETY: nothing else in a `ws281x_frame_check` image claims them.
+        let (dma, clk, vsync) = unsafe {
+            use esp_hal::peripherals::{DMA_CH1, GPIO11, GPIO12};
+            (DMA_CH1::steal(), GPIO11::steal().into(), GPIO12::steal().into())
+        };
+        if let Some(check) = frame_check::FrameCheck::new(lcd_cam.cam, dma, clk, vsync) {
+            driver.attach_check(check);
+        }
+    }
+    #[cfg(not(feature = "ws281x_frame_check"))]
+    let _ = lcd_cam.cam;
+    Ok(driver)
 }

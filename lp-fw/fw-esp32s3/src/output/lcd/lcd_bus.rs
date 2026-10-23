@@ -96,6 +96,9 @@ pub struct LcdBus {
     in_flight_sizes: Option<(usize, usize)>,
     lanes: [Lane; LANES],
     pub stats: BusStats,
+    /// The CAM-half frame check (`ws281x_frame_check`, never shipped).
+    #[cfg(feature = "ws281x_frame_check")]
+    pub check: Option<super::frame_check::FrameCheck>,
 }
 
 /// Counters since boot, for the log and the walk.
@@ -123,6 +126,8 @@ impl LcdBus {
             in_flight_sizes: None,
             lanes: [Lane::default(); LANES],
             stats: BusStats::default(),
+            #[cfg(feature = "ws281x_frame_check")]
+            check: None,
         }
     }
 
@@ -287,7 +292,24 @@ impl LcdBus {
             bytes,
             descriptors,
         } = frame;
-        match lcd.send(Command::<u8>::None, 0, buf) {
+        #[cfg(feature = "ws281x_frame_check")]
+        let sent = {
+            if let Some(check) = self.check.as_mut() {
+                check.arm(&slices, mask, len);
+            }
+            // The sampler's start and the LCD's in one masked window, so the
+            // capture always opens the same lead before the frame.
+            let check = &mut self.check;
+            critical_section::with(|_| {
+                if let Some(check) = check.as_mut() {
+                    check.trigger();
+                }
+                lcd.send(Command::<u8>::None, 0, buf)
+            })
+        };
+        #[cfg(not(feature = "ws281x_frame_check"))]
+        let sent = lcd.send(Command::<u8>::None, 0, buf);
+        match sent {
             Ok(transfer) => {
                 self.bus = Bus::Sending {
                     transfer,
@@ -354,6 +376,10 @@ impl LcdBus {
             bytes,
             descriptors,
         });
+        #[cfg(feature = "ws281x_frame_check")]
+        if let Some(check) = self.check.as_mut() {
+            check.finish();
+        }
         match (hung, result) {
             (true, _) => {
                 self.stats.timeouts = self.stats.timeouts.wrapping_add(1);
