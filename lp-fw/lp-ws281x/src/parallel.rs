@@ -387,6 +387,36 @@ mod tests {
     }
 
     #[test]
+    fn decode_reads_every_lane_at_a_coarse_4_mhz_too() {
+        // The product frame check samples at 4 MHz (1.6 samples a 400 ns
+        // slot) to fit its capture in RAM: a 0's high is 1–2 samples, a 1's
+        // 3–4, and a threshold of 2 still separates them.
+        let lane_bytes: Vec<Vec<u8>> = (0..5)
+            .map(|lane| {
+                (0..60 + lane * 9)
+                    .map(|i| (i * 53 + lane * 7) as u8)
+                    .collect()
+            })
+            .collect();
+        let lanes: Vec<&[u8]> = lane_bytes.iter().map(|lane| lane.as_slice()).collect();
+        let max = lanes.iter().map(|lane| lane.len()).max().unwrap();
+        let mut bus = vec![0u8; encoded_len(SlotPlan::THREE, max, 8)];
+        encode_frame(SlotPlan::THREE, &lanes, ColorOrder::Rgb, 8, &mut bus);
+        for phase in [0usize, 1, 3, 7] {
+            let samples = resample(&bus, 1.6, 5 + phase, 300);
+            for (lane, expected) in lane_bytes.iter().enumerate() {
+                let mut got = vec![0u8; 128];
+                let d = decode_lane(&samples, lane as u8, 2, 200, &mut got).unwrap();
+                assert_eq!(&got[..expected.len()], expected.as_slice(), "lane {lane}");
+                assert_eq!(d.bits, expected.len() * 8);
+                assert!(d.t0h.0 >= 1 && d.t0h.1 <= 2, "{d:?}");
+                assert!(d.t1h.0 >= 3 && d.t1h.1 <= 4, "{d:?}");
+                assert!(d.period.0 >= 4 && d.period.1 <= 5, "{d:?}");
+            }
+        }
+    }
+
+    #[test]
     fn decode_refuses_a_capture_that_starts_high() {
         assert_eq!(
             decode_lane(&[1, 1, 0], 0, 5, 10, &mut [0; 4]),

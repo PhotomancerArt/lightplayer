@@ -4,7 +4,7 @@
 //! how a walk states a truncation rate for this backend the way the RMT
 //! states guard trips.
 //!
-//! The sampler runs at 8 MHz on its own clock, looped out of GPIO11 and back
+//! The sampler runs at 4 MHz on its own clock, looped out of GPIO11 and back
 //! in as its pixel clock; VSYNC is GPIO12, toggled here. A lane's CAM input is
 //! bound to the lane's pad when the lane opens. The sampler's start (the VSYNC
 //! edge) and the LCD's start sit inside one short critical section, so radio
@@ -12,12 +12,12 @@
 //!
 //! A frame counts as **failed** when any lane's decode differs from what was
 //! sent: a missing or extra bit, a byte that differs, a high time outside
-//! 375–875 ns, or a stretched period, which is what an underrun would look
-//! like. A frame the check could not arm (no buffer, a capture still busy)
+//! its window (250–500 ns for a 0, 750–1000 ns for a 1, at 250 ns a sample),
+//! or a stretched period, which is what an underrun would look like. A frame the check could not arm (no buffer, a capture still busy)
 //! counts as **skipped**, never as passed.
 //!
 //! Costs, all test-only: GDMA channel 1, two back pads, a capture buffer of
-//! ~3.2 B per bus byte from internal RAM, and a decode per frame on the
+//! ~1.6 B per bus byte from internal RAM, and a decode per frame on the
 //! render thread.
 
 extern crate alloc;
@@ -34,16 +34,24 @@ use esp_hal::time::{Instant, Rate};
 use lp_ws281x::ColorOrder;
 use lp_ws281x::parallel::{self, LANES};
 
-/// 8 MHz: 125 ns a sample, 3.2 samples a 400 ns slot.
-const SAMPLE_HZ: u32 = 8_000_000;
-/// Samples a bus byte lasts.
-const SAMPLES_PER_BUS_BYTE_X10: usize = 32;
+/// 4 MHz: 250 ns a sample, 1.6 samples a 400 ns slot. Coarse on purpose:
+/// at 8 MHz a 2 × 310-LED frame's capture (76 KB) does not fit internal RAM
+/// beside the frame buffers on the radio image (FS3, 2026-10-23); at 4 MHz a
+/// 0's high is 1–2 samples and a 1's 3–4, which still decodes every bit.
+const SAMPLE_HZ: u32 = 4_000_000;
+/// Samples a bus byte lasts, ×10.
+const SAMPLES_PER_BUS_BYTE_X10: usize = 16;
 /// Margin past the frame, in samples (the latch is inside the frame).
-const MARGIN: usize = 2_000;
-/// A high longer than 5 samples (625 ns) is a 1.
-const THRESHOLD: u32 = 5;
-/// A low of 400 samples (50 µs) ends a lane's frame.
-const IDLE: u32 = 400;
+const MARGIN: usize = 1_000;
+/// A high longer than 2 samples (500 ns) is a 1.
+const THRESHOLD: u32 = 2;
+/// A low of 200 samples (50 µs) ends a lane's frame.
+const IDLE: u32 = 200;
+/// Measured widths, in samples, that pass: a 0's high 1–2 (250–500 ns), a
+/// 1's 3–4 (750–1000 ns), a period 4–5 (1000–1250 ns).
+const T0H: (u32, u32) = (1, 2);
+const T1H: (u32, u32) = (3, 4);
+const PERIOD: (u32, u32) = (4, 5);
 /// The lead between the VSYNC edge and the LCD start.
 const LEAD_US: u64 = 20;
 /// Checked frames between log lines.
@@ -207,9 +215,10 @@ impl FrameCheck {
                 let mut got = vec![0u8; expected.len() + 1];
                 match parallel::decode_lane(samples, lane as u8, THRESHOLD, IDLE, &mut got) {
                     Ok(d) => {
-                        let widths = (d.t0h.1 == 0 || (d.t0h.0 >= 3 && d.t0h.1 <= 4))
-                            && (d.t1h.1 == 0 || (d.t1h.0 >= 6 && d.t1h.1 <= 7))
-                            && (d.period.1 == 0 || (d.period.0 >= 9 && d.period.1 <= 10));
+                        let within =
+                            |m: (u32, u32), w: (u32, u32)| m.1 == 0 || (m.0 >= w.0 && m.1 <= w.1);
+                        let widths =
+                            within(d.t0h, T0H) && within(d.t1h, T1H) && within(d.period, PERIOD);
                         if d.bits != expected.len() * 8
                             || got[..expected.len()] != expected[..]
                             || !widths
