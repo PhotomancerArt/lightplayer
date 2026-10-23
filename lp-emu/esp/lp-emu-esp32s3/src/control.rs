@@ -105,6 +105,13 @@ pub enum ControlCommand {
     Reset,
     /// The download dance's effect, without the dance.
     DownloadMode,
+    /// The supply taken away and put back
+    /// ([`Machine::power_cycle`](crate::machine::Machine::power_cycle)): the
+    /// whole power-on snapshot, with the flash as it stands. Not the USB
+    /// cable's (a hand on the plug), so it does not go to `USB_DEVICE`;
+    /// the run loop performs it at its next boundary, as the C6's does, so
+    /// the run's budget is rebased onto the new clock.
+    PowerCycle,
     /// Report the host's side. Answered by [`ControlReply::State`].
     State,
     /// Host → device bytes with no byte socket in the picture (tests).
@@ -134,6 +141,7 @@ impl ControlCommand {
             ControlCommand::Signals { .. } => "signals",
             ControlCommand::Reset => "reset",
             ControlCommand::DownloadMode => "download-mode",
+            ControlCommand::PowerCycle => "power-cycle",
             ControlCommand::State => "state",
             ControlCommand::UsbWrite(_) => "usb-write",
             ControlCommand::Wait(_) => "wait",
@@ -153,6 +161,7 @@ impl ControlCommand {
         "signals",
         "reset",
         "download-mode",
+        "power-cycle",
         "state",
         "usb-write",
         "wait",
@@ -188,6 +197,7 @@ impl ControlCommand {
             "close" => no_args(ControlCommand::Close),
             "reset" => no_args(ControlCommand::Reset),
             "download-mode" => no_args(ControlCommand::DownloadMode),
+            "power-cycle" => no_args(ControlCommand::PowerCycle),
             "state" => no_args(ControlCommand::State),
             "dtr" | "rts" => {
                 let [value] = rest[..] else {
@@ -612,6 +622,7 @@ mod tests {
             ("close", ControlCommand::Close),
             ("reset", ControlCommand::Reset),
             ("download-mode", ControlCommand::DownloadMode),
+            ("power-cycle", ControlCommand::PowerCycle),
             ("state", ControlCommand::State),
             (
                 "dtr 1",
