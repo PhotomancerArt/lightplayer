@@ -21,12 +21,13 @@ use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 /// Sets up the CPU clock and returns the runtime components the app layer
 /// needs: the software-interrupt control and timer group for the executor, the
 /// USB-Serial-JTAG peripheral for `serial::io_task`, the FLASH peripheral for
-/// `flash_storage`, the RTC watchdog, and the RMT peripheral for the WS281x
-/// output driver.
+/// `flash_storage`, the RTC watchdog, and the WS281x output driver's
+/// peripherals (`crate::output::OutputPeripherals`: the RMT, or LCD_CAM and a
+/// GDMA channel under `lcd-ws281x`).
 ///
 /// The RTC watchdog is returned unarmed; the recovery subsystem (P3) arms it.
-/// The RMT peripheral is returned raw — `Rmt::new` needs the clock rate, which
-/// is the output driver's fact, not the board's.
+/// The output peripherals are returned raw — their clocks are the output
+/// driver's fact, not the board's.
 ///
 /// Unlike the C6, the heap is **not** allocated here — `main.rs` owns it. See
 /// the module doc.
@@ -36,7 +37,7 @@ pub fn init_board() -> (
     esp_hal::peripherals::USB_DEVICE<'static>,
     esp_hal::peripherals::FLASH<'static>,
     Rwdt,
-    esp_hal::peripherals::RMT<'static>,
+    crate::output::OutputPeripherals,
 ) {
     // Arm coprocessor 0 before anything can JIT a Float-mode shader (M7 D6).
     // Silicon has been measured arriving armed under this boot chain, but the
@@ -56,7 +57,13 @@ pub fn init_board() -> (
     // Extract peripherals we need before moving others.
     let usb_device = peripherals.USB_DEVICE;
     let flash = peripherals.FLASH;
-    let rmt = peripherals.RMT;
+    let outputs = crate::output::OutputPeripherals {
+        rmt: peripherals.RMT,
+        #[cfg(feature = "lcd-ws281x")]
+        lcd_cam: peripherals.LCD_CAM,
+        #[cfg(feature = "lcd-ws281x")]
+        dma: peripherals.DMA_CH0,
+    };
     // The radio probe's two peripherals, kept until the scheduler runs.
     #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
     crate::radio_boot_probe::stash(peripherals.WIFI, peripherals.BT);
@@ -73,7 +80,7 @@ pub fn init_board() -> (
     let rtc = Rtc::new(peripherals.LPWR);
     let rwdt = rtc.rwdt;
 
-    (sw_int, timg0, usb_device, flash, rwdt, rmt)
+    (sw_int, timg0, usb_device, flash, rwdt, outputs)
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.

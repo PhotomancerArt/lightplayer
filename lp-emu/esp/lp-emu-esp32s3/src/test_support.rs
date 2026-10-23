@@ -240,6 +240,19 @@ pub fn wifi_merged_image() -> Result<PathBuf, String> {
     )
 }
 
+/// The `test_lcd_backend` image (`fw-esp32s3 --features test_lcd_backend`):
+/// the product LCD_CAM backend driving five lanes.
+pub const LCD_BACKEND_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_BACKEND_ELF";
+
+/// The LCD backend ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_backend_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_BACKEND_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_backend` and sets it",
+    )
+}
+
 /// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
 /// panic when it is set to a path that does not exist.
 fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {
