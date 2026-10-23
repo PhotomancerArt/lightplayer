@@ -19,6 +19,12 @@
 //! after a desk sitting reads its id, its status register and its eFuse flash
 //! fields on silicon, and runs the read-back soak in QIO. Nothing here is
 //! guessed from a part family.
+//!
+//! **Each chip has its own list.** The evidence is a part read on a chip's
+//! own controller and a QIO soak through it, so a part read on a C6 is not
+//! evidence for an S3's controller: [`QIO_PARTS`] is the C6's,
+//! [`ESP32S3_QIO_PARTS`] the S3's (empty until an S3 sitting reads FS3's
+//! part). [`qio_ready_on`] takes the list; [`qio_ready`] is the C6's.
 
 /// One part the core may read in QIO.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +49,11 @@ pub const QIO_PARTS: &[QioPart] = &[
     },
 ];
 
+/// The S3's parts. None yet: FS3's (a XIAO ESP32-S3 Plus, 16 MB) has not had
+/// its id read on silicon, so every S3 reads in DIO until a sitting adds it
+/// with the evidence above (`fw-esp32s3/src/flash_qio.rs`).
+pub const ESP32S3_QIO_PARTS: &[QioPart] = &[];
+
 /// Status register 2's QE bit (bit 1), on every part in [`QIO_PARTS`].
 pub const SR2_QE: u32 = 1 << 1;
 
@@ -66,11 +77,17 @@ impl StaysDio {
     }
 }
 
-/// May the core read this part in QIO? `jedec` as `SPI1.W0` holds it after
-/// `RDID` (the low 24 bits are used), `sr2` as command `0x35` returns it.
+/// May a C6 core read this part in QIO? [`qio_ready_on`] with [`QIO_PARTS`].
 pub fn qio_ready(jedec: u32, sr2: u32) -> Result<(), StaysDio> {
+    qio_ready_on(QIO_PARTS, jedec, sr2)
+}
+
+/// May the core read this part in QIO, on a chip whose list is `parts`?
+/// `jedec` as `SPI1.W0` holds it after `RDID` (the low 24 bits are used),
+/// `sr2` as command `0x35` returns it.
+pub fn qio_ready_on(parts: &[QioPart], jedec: u32, sr2: u32) -> Result<(), StaysDio> {
     let jedec = jedec & 0x00ff_ffff;
-    if !QIO_PARTS.iter().any(|p| p.jedec == jedec) {
+    if !parts.iter().any(|p| p.jedec == jedec) {
         return Err(StaysDio::PartNotListed);
     }
     if sr2 & SR2_QE == 0 {
@@ -104,6 +121,16 @@ mod tests {
         assert_eq!(qio_ready(0x17_40_20, 0x02), Err(StaysDio::PartNotListed));
         // A bus that answers nothing reads all ones.
         assert_eq!(qio_ready(0xffff_ffff, 0xff), Err(StaysDio::PartNotListed));
+    }
+
+    /// A part read on a C6 is not evidence for the S3's controller.
+    #[test]
+    fn the_s3_reads_dio_until_its_own_sitting() {
+        assert_eq!(
+            qio_ready_on(ESP32S3_QIO_PARTS, 0x16_40_46, 0x02),
+            Err(StaysDio::PartNotListed)
+        );
+        assert!(ESP32S3_QIO_PARTS.is_empty());
     }
 
     #[test]
