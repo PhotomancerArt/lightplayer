@@ -243,6 +243,16 @@ test_seam_abi = []
 #   just build-fw-esp32s3 test_psram
 test_psram = []
 
+# Five uneven WS281x lanes out of LCD_CAM's i8080 mode, fed by GDMA — OFF by
+# default, never shipped (M9, the parallel LED output; `src/tests/
+# test_lcd_lanes.rs`). It is the image `lp-emu-esp32s3`'s LCD_CAM and GDMA
+# models are proven against (`tests/lcd_cam_lanes.rs`): every lane decodes
+# byte-exact off its pad. Self-contained: its encoder is the plainest one, so
+# it tests the emulator and not the product's encoder.
+#
+#   just build-fw-esp32s3 test_lcd_lanes
+test_lcd_lanes = []
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
