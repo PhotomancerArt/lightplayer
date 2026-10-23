@@ -168,8 +168,8 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
 [INIT] chip=esp32s3 arch=xtensa heap=172032+73744=245776 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fc9c108+167672 (dram_seg arena, Internal)
-[INIT] heap region: 0x3fcc5000+4360 (dram_seg arena, a boot stage's RAM, untagged)
+[INIT] heap region: 0x3fc9c090+167792 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fcc5000+4240 (dram_seg arena, a boot stage's RAM, untagged)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
 [INIT] heap region: 0x3fc94078+32768 (radio)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
@@ -181,7 +181,7 @@ const HELLO: &str = "\
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
 const HELLO_BYTES: usize = 574;
-const HELLO_SHA: &str = "16c3272468122bff164900071ab09a8f7dcb916c5bf7e7bfa514397e7d8c687e";
+const HELLO_SHA: &str = "90db44c84fefa0b0059eae97467eadf69e5f4f7a675cbf795dc4b042c18387e1";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
