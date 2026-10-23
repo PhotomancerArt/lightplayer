@@ -34,12 +34,21 @@
 //!
 //! The loops use [`add`], [`sub`] and [`mul`]: Q16.16 without saturation.
 //! A fluid's values stay far inside the Q16.16 range, where these give the
-//! bits `Q32`'s saturating operators give (`tests::output_is_pinned_bit_for_bit`
-//! holds sums taken from the saturating solver), and the saturation — an i64
-//! compare and clamp on every add — was most of a step: 53 → 20 ms at
+//! bits `Q32`'s saturating operators give (checked against the saturating
+//! solver's output when the change was made, #1282), and the saturation (an
+//! i64 compare and clamp on every add) was most of a step: 53 → 20 ms at
 //! 32×32×10 on the ESP32-S3, 71 → 47 ms on the C6 (S3 fluid spike,
 //! 2026-10-23). A project that drove a field past ±32768 got a broken
 //! picture from the saturating solver too; this one wraps instead.
+//!
+//! ## Passes
+//!
+//! The velocity's viscous solve takes one red-black pass from its source; the
+//! two pressure solves take `solver_iterations` red-black passes each,
+//! over-relaxed ([`over_relaxation`]). MSAFluid ran ten plain Gauss-Seidel
+//! passes on every solve; at 3–4 pressure passes this looks the same (judged
+//! side by side, 2026-10-23) for about half the step: S3 21 → 11 ms, C6
+//! 47 → 21 ms at 32×32.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -66,7 +75,7 @@ fn neg(a: Q32) -> Q32 {
     Q32(a.0.wrapping_neg())
 }
 
-/// lp2014 / Stam default Jacobi iteration count.
+/// Pressure passes when the node sets none (lp2014 ran ten plain passes).
 pub const DEFAULT_SOLVER_ITERATIONS: usize = 10;
 
 /// Stam-style fluid solver (three dye channels).
@@ -134,10 +143,10 @@ impl MsaFluidSolver {
         self.v_old[k] = self.v_old[k] + vy * ny_q;
     }
 
-    /// Override the number of Jacobi iterations used by the linear solvers.
-    /// lp2014 default is `DEFAULT_SOLVER_ITERATIONS` (10). Lower values are
-    /// cheaper but produce a less divergence-free pressure field and a less
-    /// converged diffusion step.
+    /// Passes of each pressure solve (two a step), red-black and
+    /// over-relaxed ([`over_relaxation`]). 3–4 look the same as the ten plain
+    /// passes lp2014 ran; 2 and fewer show striations and harder edges. The
+    /// velocity solve always takes one pass.
     pub fn set_solver_iterations(&mut self, iters: usize) {
         self.solver_iterations = iters;
     }
@@ -154,7 +163,7 @@ impl MsaFluidSolver {
     /// Kinematic viscosity of the velocity field. lp2014 default is
     /// `0.0001`; higher values damp velocity faster (smoother, less
     /// chaotic flow), lower values let small eddies persist. Affects the
-    /// `diffuse_uv` Jacobi solve, so the cycle cost is independent of the
+    /// `diffuse_uv` solve, so the cycle cost is independent of the
     /// value.
     pub fn set_viscosity(&mut self, viscosity: Q32) {
         self.visc = viscosity;
@@ -283,23 +292,45 @@ impl MsaFluidSolver {
         core::mem::swap(&mut self.b, &mut self.b_old);
     }
 
+    /// The viscous velocity solve: one red-black pass, started from its
+    /// source. The system is nearly diagonal (a ≈ 0.03 at 32×32), so the
+    /// source is almost the answer and one pass finishes it; today's ten
+    /// passes from zero looked the same (S3 fluid spike, 2026-10-23).
+    /// Never over-relaxed: on this system that overshoots and damps the
+    /// motion.
     fn diffuse_uv(&mut self) {
         let nx_q = Q32::from_i32(self.nx as i32);
         let ny_q = Q32::from_i32(self.ny as i32);
         let a = self.dt * self.visc * nx_q * ny_q;
         let c = Q32::ONE + Q32::from_i32(4) * a;
         let inv_c = Q32::ONE / c;
-        linear_solver_uv(
-            self.nx,
-            self.ny,
-            self.stride,
+        let (nx, ny, stride) = (self.nx, self.ny, self.stride);
+        self.u.copy_from_slice(&self.u_old);
+        self.v.copy_from_slice(&self.v_old);
+        let plain = Q32::ONE;
+        red_black_solver(
+            BoundaryKind::None,
             &mut self.u,
-            &mut self.v,
             &self.u_old,
+            a,
+            inv_c,
+            plain,
+            nx,
+            ny,
+            stride,
+            1,
+        );
+        red_black_solver(
+            BoundaryKind::None,
+            &mut self.v,
             &self.v_old,
             a,
             inv_c,
-            self.solver_iterations,
+            plain,
+            nx,
+            ny,
+            stride,
+            1,
         );
     }
 
@@ -347,12 +378,13 @@ impl MsaFluidSolver {
         );
 
         let inv_c_p = Q32::ONE / Q32::from_i32(4);
-        linear_solver(
+        red_black_solver(
             BoundaryKind::None,
             &mut self.u_old,
             &self.v_old,
             Q32::ONE,
             inv_c_p,
+            over_relaxation(self.solver_iterations),
             self.nx,
             self.ny,
             self.stride,
@@ -587,75 +619,64 @@ fn idx(i: usize, j: usize, stride: usize) -> usize {
     i + stride * j
 }
 
+/// How far each pressure pass over-relaxes, by the number of passes: fewer
+/// passes lean harder. Picked by eye against the ten plain passes the solver
+/// used to run (S3 fluid spike, 2026-10-23): 3 passes at 1.5 and 4 at 1.3
+/// look the same as ten; 2 and fewer change the look, so they are the
+/// project's call.
+fn over_relaxation(passes: usize) -> Q32 {
+    Q32::from_f32_wrapping(match passes {
+        0..=3 => 1.5,
+        4 => 1.3,
+        5 | 6 => 1.2,
+        7..=9 => 1.1,
+        _ => 1.0,
+    })
+}
+
+/// Red-black Gauss-Seidel: the red cells (i + j even), then the black ones,
+/// each moved `omega` of the way to its Gauss-Seidel value (`Q32::ONE` is
+/// plain red-black). Red cells read only black neighbours and the other way
+/// round, so the order within a colour doesn't matter, and over-relaxing
+/// converges in far fewer passes than the row-by-row sweep.
 #[allow(
     clippy::too_many_arguments,
     reason = "tight inner loop; bundling into a struct adds register pressure on rv32"
 )]
-fn linear_solver(
+fn red_black_solver(
     boundary: BoundaryKind,
     x: &mut [Q32],
     x0: &[Q32],
     a: Q32,
     inv_c: Q32,
+    omega: Q32,
     nx: usize,
     ny: usize,
     stride: usize,
     iters: usize,
 ) {
+    let plain = omega == Q32::ONE;
     for _k in 0..iters {
-        for j in 1..=ny {
-            for i in 1..=nx {
-                let center = idx(i, j, stride);
-                let neighbors = add(
-                    add(add(x[center - 1], x[center + 1]), x[center - stride]),
-                    x[center + stride],
-                );
-                x[center] = mul(add(mul(a, neighbors), x0[center]), inv_c);
+        for parity in 0..2 {
+            for j in 1..=ny {
+                let mut i = 1 + ((j + parity) & 1);
+                while i <= nx {
+                    let center = idx(i, j, stride);
+                    let neighbors = add(
+                        add(add(x[center - 1], x[center + 1]), x[center - stride]),
+                        x[center + stride],
+                    );
+                    let gs = mul(add(mul(a, neighbors), x0[center]), inv_c);
+                    x[center] = if plain {
+                        gs
+                    } else {
+                        add(x[center], mul(omega, sub(gs, x[center])))
+                    };
+                    i += 2;
+                }
             }
         }
         set_boundary(boundary, x, nx, ny, stride);
-    }
-}
-
-/// Linear solve for `u` and `v` simultaneously (Jacobi).
-///
-/// The Java reference calls `setBoundaryRGB` after each iteration; this
-/// port applies [`set_boundary`] to `u` and `v` with [`BoundaryKind::None`]
-/// so edge velocity samples match the scalar `setBoundary(0, …)` behavior.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "tight inner loop; bundling into a struct adds register pressure on rv32"
-)]
-fn linear_solver_uv(
-    nx: usize,
-    ny: usize,
-    stride: usize,
-    u: &mut [Q32],
-    v: &mut [Q32],
-    u0: &[Q32],
-    v0: &[Q32],
-    a: Q32,
-    inv_c: Q32,
-    iters: usize,
-) {
-    for _k in 0..iters {
-        for j in 1..=ny {
-            for i in 1..=nx {
-                let center = idx(i, j, stride);
-                let nu = add(
-                    add(add(u[center - 1], u[center + 1]), u[center - stride]),
-                    u[center + stride],
-                );
-                let nv = add(
-                    add(add(v[center - 1], v[center + 1]), v[center - stride]),
-                    v[center + stride],
-                );
-                u[center] = mul(add(mul(a, nu), u0[center]), inv_c);
-                v[center] = mul(add(mul(a, nv), v0[center]), inv_c);
-            }
-        }
-        set_boundary(BoundaryKind::None, u, nx, ny, stride);
-        set_boundary(BoundaryKind::None, v, nx, ny, stride);
     }
 }
 
@@ -707,18 +728,18 @@ mod tests {
     use crate::nodes::fluid::stamp_emitter;
     use lpc_model::FluidEmitter;
 
-    /// The solver's exact output, pinned: these sums were taken from the
-    /// saturating solver before the 2026-10-23 speed-up (skip the dye's
-    /// zero-viscosity "diffusion", zero the sources once, unsaturated
-    /// Q16.16), which must give the same bits.
+    /// The solver's exact output, pinned. These sums are the spike's
+    /// "1 velocity + N pressure" solver (`claude/s3-fluid-spike`,
+    /// `spike::fast(n, over_relaxation(n))`) on this script, the variant Yona
+    /// judged by eye on 2026-10-23; any change to the bits fails here.
     #[test]
     fn output_is_pinned_bit_for_bit() {
         let cases: [(usize, usize, f32, u32, u32); 4] = [
             // (grid, iterations, emitter velocity, sum @ 60, sum @ 300)
-            (16, 3, 0.01, 0x133aad68, 0x8d027885),
-            (32, 10, 0.01, 0x5ab27504, 0x3b63a32f),
-            (24, 10, 0.05, 0xd137aec3, 0x1b1d097a),
-            (32, 1, 0.2, 0x71dd4368, 0x956ae382),
+            (16, 3, 0.01, 0x009fb211, 0xd0c8db1f),
+            (32, 10, 0.01, 0x829f03ac, 0xd4e2e08e),
+            (24, 10, 0.05, 0x902ad363, 0x58557602),
+            (32, 1, 0.2, 0xd106ef72, 0x863e3f31),
         ];
         let mut got = std::vec::Vec::new();
         for (n, iters, velocity, _, _) in cases {
