@@ -1167,23 +1167,36 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --release --features ws281x_telemetry -- --no-deps -D warnings
     # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
     # stack diagnostic, and the app WITHOUT the thread (the link task back on
     # the main executor, no messages-first). Both are cfg'd out of the
     # defaults, so nothing else here compiles them.
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: --features lcd-ws281x"
+    cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_ws281x"
+    cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
+    echo "clippy: --features lcd_ws281x_probe"
+    cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_backend"
+    cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
-    # The radio (S3 radio M3): the BLE link over the shared crate, and the
-    # M1 radio probe (scaffolding, the emulator's radio image). The two start
+    # The radio (S3 radio M3, M4): each tier over the shared crate (ESP-NOW,
+    # then BLE, then the network), and the M1 radio probe (scaffolding, the
+    # emulator's radio image). The two start
     # the same controller, so they are separate passes. Then the shared radio
     # crate itself on this chip's target, at each tier this chip builds it
     # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
     # reaches a dependency.
-    echo "clippy: --features ble"
-    cargo clippy --release --features ble -- --no-deps -D warnings
+    for feat in espnow wifi; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
     echo "clippy: --features radio_boot_probe"
     cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
@@ -4393,6 +4406,59 @@ test-emu-esp32s3-seams:
     export LP_EMU_ESP32S3_SEAM_ABI_ELF="$seam_abi"
     cargo test -p lp-emu-esp32s3 --features test-seams --test 'seam_*' -- --include-ignored --nocapture
 
+# The S3's octal PSRAM in the emulator (lane P of the S3 radio roadmap):
+# `fw-esp32s3 --features test_psram` — a probe that never ships — built,
+# copied out of the shared target path, merged for its ROM-up boot, and run
+# by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
+# probe writes and reads all 8 MiB and runs code out of it, both ways, and
+# every line matches FS3's capture. The test that the shipped image runs the
+# same with and without PSRAM needs the shipped image, so it runs in
+# `test-emu-esp32s3-boot` instead (here it SKIPs). One firmware build and
+# about a minute of emulation (release).
+test-emu-esp32s3-psram:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_psram
+    probe="$out/fw-esp32s3-psram.elf"
+    cp "$built" "$probe"
+    export LP_EMU_ESP32S3_PSRAM_ELF="$probe"
+    if command -v espflash >/dev/null 2>&1; then
+      merged="$out/merged-psram.bin"
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$probe" "$merged"
+      export LP_EMU_ESP32S3_PSRAM_MERGED="$merged"
+    else
+      echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
+    fi
+    cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
+
+# The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
+# `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —
+# sends five uneven lanes through esp-hal's i8080 driver and GDMA, and
+# `tests/lcd_cam_lanes.rs` checks every lane decodes byte-exact off its pad.
+# One firmware build and a few milliseconds of emulation; the `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it beside the seam harness.
+test-emu-esp32s3-lcd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_lcd_lanes
+    lanes="$out/fw-esp32s3-lcd-lanes.elf"
+    cp "$built" "$lanes"
+    export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
+    # The product backend (`lcd-ws281x`'s driver) on the same models.
+    just build-fw-esp32s3 test_lcd_backend
+    backend="$out/fw-esp32s3-lcd-backend.elf"
+    cp "$built" "$backend"
+    export LP_EMU_ESP32S3_LCD_BACKEND_ELF="$backend"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
@@ -4914,6 +4980,19 @@ flash-tears-sim-unaligned cuts="300" seed="1":
 # seconds GO is a different pair of instruments; see the script's header.
 bench-emu-esp32v3 *args:
     scripts/emu/bench-esp32v3.sh {{ args }}
+
+#   just bench-emu-esp32s3
+#   just bench-emu-esp32s3 --rows render-basic --runs 3
+#   scripts/emu/bench-esp32s3.sh --bin <saved-dir> --no-build   # the A/B half
+#
+# Over CI's images (`just fetch-ci-images`, then `export LP_CI_IMAGES=…`).
+# Three rows: boot-idle, and render-basic / render-620 with Bluetooth on,
+# whose figure is the steady state between 1 s and 4 s emulated;
+# `render-basic` is the row to quote. An ORACLE, never a gate:
+# `scripts/emu/s3-oracle.sh` is the identity check a speed change answers to.
+# The ESP32-S3 machine's speed probe (bench-emu-esp32v3's twin)
+bench-emu-esp32s3 *args:
+    scripts/emu/bench-esp32s3.sh {{ args }}
 
 # PGO recipe for the C6 machine binary (D4): instrumented build, one training
 # run of each reference image, merge, optimized rebuild, then the probe on
@@ -5525,6 +5604,9 @@ walk-drop-emu *args:
 # for lightplayer.app's relay: the board's leg through the virtual LAN's
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
+# `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes:
+# `just walk-ota-ble-emu --s3`.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5535,6 +5617,19 @@ walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
+    # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
+    # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* ]]; then
+        images=target/walk-ota-emu/images-s3
+        if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+        fi
+        # Y last: build-image.sh writes the parts directory the bundle copies.
+        just studio-firmware-package-esp32s3
+        just studio-web-story-build
+        node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     images=target/walk-ota-emu/images
     if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0

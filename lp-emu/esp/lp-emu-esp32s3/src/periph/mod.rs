@@ -24,7 +24,12 @@
 //!   and — P07's blocks, here because the ROM-up boot meets them — `GPIO`
 //!   (with the strapping word) and `IO_MUX`;
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: the pad fabric and RMT (P07).
+//!   them: the pad fabric and RMT (P07), and LCD_CAM's CAM registers (M9).
+//!
+//! M9 appends two more views for the parallel LED output: [`gdma`] (the AHB
+//! GDMA's OUT channels, whose chains the machine walks out of RAM) and
+//! [`lcd_cam`] (the LCD half in i8080 mode, as two windows around the CAM's
+//! registers).
 //!
 //! ⚠️ [`usb_sj`] is the one block here that is **not** the S3's own file: it
 //! is the C6's view, moved to [`lp_emu_esp_common::ip::usb_sj`] and
@@ -74,9 +79,11 @@ pub mod accept;
 pub mod efuse;
 pub mod extmem;
 pub mod flash_mmu;
+pub mod gdma;
 pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod io_mux;
+pub mod lcd_cam;
 pub mod radio_stub;
 pub mod rmt;
 pub mod rng;
@@ -154,6 +161,9 @@ pub struct FlashSet {
     /// The flash chip — SPI1 executes commands against it and the cache
     /// fill reads through it.
     pub flash: FlashHandle,
+    /// The PSRAM on `CS1` — SPI1 answers its mode registers and the cache
+    /// fill reads and writes its pages.
+    pub psram: crate::psram::PsramHandle,
     /// The cache-enable bits, the MMU table and D4's watch slot, shared
     /// between `EXTMEM`, `FLASH_MMU` and the machine.
     pub cache: CacheHandle,
@@ -182,6 +192,10 @@ pub fn boot_set(
     usb_host: usb_sj::HostState,
     flash: &FlashSet,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
+    // M9: GDMA's OUT channels are shared with LCD_CAM, which takes their
+    // streams; LCD_CAM's two windows share its clock word.
+    let gdma = gdma::handle();
+    let lcd_clock = lcd_cam::clock_cell();
     vec![
         (
             base::SENSITIVE,
@@ -216,7 +230,10 @@ pub fn boot_set(
         (
             base::EFUSE,
             efuse::EFUSE_LEN,
-            Box::new(efuse::efuse(identity)),
+            Box::new(efuse::efuse(
+                identity,
+                flash.psram.lock().expect("psram poisoned").len(),
+            )),
         ),
         (
             base::I2C_ANA_MST,
@@ -233,7 +250,7 @@ pub fn boot_set(
         (
             base::SPI1,
             accept::SPI_LEN,
-            Box::new(spi1::Spi1::new(flash.flash.clone())),
+            Box::new(spi1::Spi1::new(flash.flash.clone(), flash.psram.clone())),
         ),
         (base::BB, accept::RF_LEN, Box::new(accept::bb())),
         (base::NRX, accept::RF_LEN, Box::new(accept::nrx())),
@@ -334,6 +351,25 @@ pub fn boot_set(
             radio_stub::BTDM_WAKE.base,
             radio_stub::BTDM_WAKE.len,
             Box::new(radio_stub::RadioStub::new(radio_stub::BTDM_WAKE)),
+        ),
+        // ---- M9: the parallel LED path, appended for the same reason ----
+        // The AHB GDMA and LCD_CAM's LCD half. LCD_CAM is two windows: its
+        // CAM registers (`+0x04..+0x10`) stay unmapped, so a CAM access is a
+        // strict stop (`lcd_cam`'s module docs).
+        (
+            base::DMA,
+            gdma::LEN,
+            Box::new(gdma::Gdma::new(gdma.clone())),
+        ),
+        (
+            base::LCD_CAM,
+            lcd_cam::CLOCK_LEN,
+            Box::new(lcd_cam::LcdClock::new(lcd_clock.clone())),
+        ),
+        (
+            base::LCD_CAM + lcd_cam::LCD_OFF,
+            lcd_cam::LCD_LEN,
+            Box::new(lcd_cam::Lcd::new(lcd_clock, gdma)),
         ),
     ]
 }

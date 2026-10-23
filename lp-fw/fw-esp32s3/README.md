@@ -213,6 +213,20 @@ stack. On silicon it prints `echo=7`, `take engaged=false`,
 `net engaged=false` and idles. The emulator's side is
 `lp-emu/esp/lp-emu-esp32s3/tests/seam_abi_harness.rs`.
 
+### `test_lcd_lanes` (emulator first)
+
+```bash
+just build-fw-esp32s3 test_lcd_lanes   # `just test-emu-esp32s3-lcd` builds and runs it
+```
+
+Five uneven WS281x lanes (12, 9, 7, 5 and 3 LEDs on GPIO1–5, the XIAO's
+D0–D4) out of LCD_CAM's i8080 mode at 2.5 MHz, fed by GDMA from one
+internal-RAM buffer, sent twice. It encodes its own frame (three 400 ns slots
+per WS281x bit) so that it tests the emulator's LCD_CAM and GDMA models
+(`lp-emu/esp/lp-emu-esp32s3/tests/lcd_cam_lanes.rs`, every lane byte-exact)
+and not the product's encoder. On silicon it drives the same pads (nothing
+need be attached) and prints `[LCD-LANES] frame N sent …` and `done`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
@@ -240,6 +254,34 @@ under the registry lease that grants exclusive use of that GPIO.
 Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
 another colour order is the fixture node's `color_order`, above this boundary —
 the driver stays GRB, exactly like the C6's.
+
+### LCD_CAM output (feature `lcd-ws281x`, not the default)
+
+`src/output/lcd/` drives **up to eight lanes** from LCD_CAM in i8080 mode,
+fed by GDMA. Build it with `just build-fw-esp32s3 lcd-ws281x`. The RMT driver
+above stays the default until the switch is ruled on (S3 radio roadmap M9;
+`docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+
+| | |
+|---|---|
+| Lanes | the manifest's `/lcd/ws281xK` resources (K < 8); the XIAO S3 Plus declares 8 |
+| Endpoints | the RMT driver's: one per board-labelled pad (`ws281x:local:D3`), shared in `src/output/ws281x_endpoints.rs`, so a project opens on either |
+| Wire | 2.5 MHz bus, three 400 ns slots a bit (T0H 400, T1H 800, period 1200 ns), GRB, 300 µs latch inside the buffer |
+| Lockstep | every lane clocks out together; a frame lasts as long as the longest lane, short lanes are held low |
+| CPU | the encode only (`lp_ws281x::parallel`), once per frame; no interrupt, no refill deadline, so a frame survives radio interrupts, masked critical sections and flash writes (`background_tx_safe() = true`) |
+| RAM | two frame buffers in **internal RAM, by capability** (`alloc_caps(Internal)`: never `dram2_seg`, never PSRAM), 72 B per LED of the longest lane + 750 B each: 9,678 B per buffer at 5 × 124, 36,750 B at 8 × 500. Sized by what is open; an open that cannot get them fails with a sentence |
+| Pins | refused at open: GPIO19/20 (USB-Serial-JTAG), GPIO26–32 (flash), GPIO33–37 (octal PSRAM) |
+| Image | +4,676 B flash, −2,616 B internal RAM against the RMT image (2026-10-22) |
+| Encode | 651 µs at 5 × 124, 3,564 µs at 8 × 500 (FS3, 240 MHz); up to 5.5 ms when the radio pre-empts it |
+| ⚠️ RAM today | on the Bluetooth image the `Internal`-tagged heap is nearly full once a project loads: a 2 × 310-LED project could not get one 23,070 B buffer (FS3, 2026-10-22), while the same project plays on the RMT. Two buffers when they fit, one when only one does; M10 (PSRAM) is what frees the room |
+
+The silicon evidence and the harness are the LED-channels spike's:
+`test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
+same pads as a CPU-free logic analyzer; build it without `ble`,
+`--no-default-features --features esp32s3,test_lcd_ws281x`, or its 8 × 500 case
+runs out of the radio image's arena), and `lcd_ws281x_probe` (the check beside
+Bluetooth and a Wi‑Fi scan loop; it brings its own LCD_CAM, so it cannot be
+built with `lcd-ws281x`).
 
 ## Input
 
@@ -477,72 +519,76 @@ rather than out of a reserved code region — so that residency is already
 inside `[MEM]`'s `used`. See `esp32_memory_stats` in `src/main.rs` and
 `src/stack_probe.rs`.
 
-## Bluetooth (feature `ble`)
+## The radio: Bluetooth, ESP-NOW and Wi-Fi (features `ble`, `espnow`, `wifi`)
 
-The C6's BLE link, on this chip (S3 radio plan M3,
-`lp2025/2026-10-20-2335-s3-radio-and-ota`): the wire on lp-link over a
-Nordic-UART GATT service, one untrusted link per connection into the link
-mux, from the shared crate `lp-fw/fw-esp32-radio` (`fw_esp32_radio::ble`).
-What is this chip's:
+The C6's radio, on this chip (S3 radio plan, M3 and M4,
+`lp2025/2026-10-20-2335-s3-radio-and-ota`), from the shared crate
+`lp-fw/fw-esp32-radio`, the C6's feature tiers:
 
-- **The controller is BTDM**, not the C6's NPL, so its configuration is its
-  own (`src/ble/ble_controller_config.rs`): three activities — the two link
-  slots plus the advertiser that offers the second one (BTDM counts every
+- **`radio`**: esp-radio and the radio blobs' C heap; it starts nothing on
+  its own.
+- **`espnow`**: the radio's one bring-up (`esp_radio::wifi::new`, the Wi-Fi
+  blob) and the ESP-NOW driver (the Radio node), with the C6's Wi-Fi rule (while the board
+  is set to use Wi-Fi, a Radio node says why it is off and the rest runs).
+  The image adds `/radio/0` to the hardware manifest itself
+  (`HwManifest::with_resource`; the board profile leaves it out for the
+  radio-less image) and says `svc.radio-espnow`.
+- **`ble`**: the BLE link — lp-link over a Nordic-UART GATT service, one
+  untrusted link per connection into the link mux. The controller is BTDM,
+  not the C6's NPL, so its configuration is this chip's
+  (`src/ble/ble_controller_config.rs`): three activities — the two link slots
+  plus the advertiser that offers the second one (BTDM counts every
   advertising set and connection against `max_connections`; the C6's NPL
   counts connections only:
   docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md)
-  — and the controller task on core 0. Its three interrupts are bound to CPU0 at
-  priority 1, under the link thread's lock (`src/io_thread.rs`).
-- **The radio blobs' C heap is its own** (`src/c_heap.rs`, the C6's): a 32 KB
-  region the blobs' `malloc` tries first, then the arena's `Internal`
-  pieces, never `dram2_seg` and never a boot stage's RAM — the radio keeps
-  writing across a warm reset, and both boot stages run in RAM the app
-  borrows. The boot checks the radio region is clear of them. esp-alloc's
-  `compat` is off (its `malloc` asks for no capability).
-- **It starts in `core_boot`**, after the filesystem, by the C6's rule: **on
-  unless the device store (`/.lp/access.json`) turns it off** — a fresh board
-  with no store starts it; a board whose files are held or refused does not.
-  On a split image the radio links serve the engine's server once
-  `split_boot` enters it; a core-only S3 serves nothing over the air yet
-  (updates over Bluetooth are the S3 updates plan's).
+  — and the controller task on core 0. Logins draw their nonce from the
+  hardware RNG (`fill_random`), as on the C6.
+- **`wifi`**: the station, the IP stack, the secure LAN link at
+  `ws://<board>/link`, mDNS `lp-xxxx.local` and the relay's device leg, on
+  `lp-net` (12 KB, priority 1, pinned to core 0: `src/net/net_chip.rs`). The
+  relay's address is a build fact (`LP_RELAY_HOST`, `src/net/relay_config.rs`).
 
-**On by default** since the desk walk passed on FS3
+All of it comes up in `core_boot`, after the filesystem, in the C6's order
+(the radio, then BLE, then `lp-net`), so a core-only board keeps its radio.
+BLE follows the C6's rule: **on unless the device store (`/.lp/access.json`)
+turns it off** — a fresh board starts it. The radios' interrupts (priority 1,
+CPU0) sit under the link thread's priority-1 lock (`src/io_thread.rs`). On a
+split image the radio links serve the engine once `split_boot` enters it; a
+core-only S3 serves nothing over the air yet (updates are the updates plan's).
+
+**`ble` is on by default** since its desk walk passed on FS3
 (`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
-controller unless its device store turns Bluetooth off, emulated ones
-included (they advertise to nobody, as an emulated C6 does). A radio-free
-image is `--no-default-features --features esp32s3,server,float-f32,…`.
-Logins over it draw their nonce from the hardware RNG
-(`fill_random`, `LpServer::set_entropy_source`), as on the C6.
+BTDM controller unless the device store turns Bluetooth off, emulated ones
+included (they advertise to nobody, as an emulated C6 does). **`espnow` is off
+by default**, unlike the C6: the Wi-Fi blob up costs about 37 KB of heap the
+S3 does not have to spare beside a 620-pixel project, and when it starts is
+Yona's call (the ADR's 2026-10-22 amendment). **`wifi` is off by default**
+until its desk walk passes:
+build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
+esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
+--features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
+probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
+`s3_espnow`, `s3_wifi` are the features minus the probe, and the source gates
+on those).
 
-Where a `radio` image's heap is (`[INIT] heap region:` lines at boot):
+**Memory** is `docs/adr/2026-10-21-s3-radio-memory.md`: the radio blobs' own
+C heap (`src/c_heap.rs`; 32 KB on a Bluetooth image, 48 KB with the Wi-Fi
+blob up), the arena cut around the boot stages' RAM and
+`dram2_seg` untagged — no radio block may land where a boot stage runs after a
+warm reset, and every block is checked as it is handed out — the Wi-Fi IRAM
+classes in flash, a 168 KB arena on a Bluetooth image and 136 KB with the
+Wi-Fi blob up, a ~52–54 KB main stack. With both radios up
+and no project the heap is 262,160 B in total and ~131 KB free (emulated),
+against 319,504 / 287,940 without a radio. A radio image prints its regions at
+boot (`[INIT] heap region: …`) and the radio region's high water at the
+heartbeat (`[radio-heap] …`).
 
-| region | tag | who lands there |
-|---|---|---|
-| arena pieces outside the boot stages' RAM | `Internal` | Rust first; the C heap's overflow; thread stacks |
-| arena piece inside the split loader's RAM (`0x3FCC_5000..0x3FCC_9000`, the arena's top) | none | Rust only |
-| `dram2_seg` | none | Rust only |
-| radio (32 KB) | `Internal` + `External` | the blobs' C heap first; Rust last |
-
-What it costs (plain image against plain image, 2026-10-21):
-
-| | Δ | what |
-|---|---:|---|
-| `dram_seg`, IRAM | +24,732 B | controller code that must run from RAM (`.rwtext.wifi` 22,584 B) |
-| `dram_seg`, `.data` | +7,968 B | |
-| `dram_seg`, `.bss` | +5,848 B | the BLE stack's statics, besides the radio region |
-| radio region | +32,768 B | |
-| main arena | 240 → 168 KB | so the main stack keeps its share (54,400 B) |
-| flash | +298,792 B | `.text` + `.rodata`, inside the 64 KB headroom floor by megabytes |
-
-On FS3 with an antenna, Mac Chrome as the central (2026-10-21, the walk
-record): `[ble] up: controller +33400 B, host + GATT +3520 B`; connected, the
-radio region's high water is 26,084 of 32,768 B (0 B overflowed to main) and
-the main stack's 29,312 of 54,296 B. Frame rate on `/projects/studio` (Peach
-(1D)): 37 fps radio off, 35–36 advertising (−3 to −5 %), 32 connected and
-editing (−14 %), inside the radio frame-rate budget. The esp-hal
-fork's switch that moves the controller's IRAM to flash (C6 only,
-`third_party/esp-hal/esp_config.yml`) is not extended to this chip: `dram_seg`
-closes without it.
+On FS3 with an antenna, Mac Chrome as the central (2026-10-21, the Bluetooth
+walk record, a `ble` image without M4's ESP-NOW): `[ble] up: controller +33400
+B, host + GATT +3520 B`; connected, the radio region's high water is 26,084 of
+32,768 B (0 B overflowed to main) and the main stack's 29,312 of 54,296 B.
+Frame rate on `/projects/studio` (Peach (1D)): 37 fps radio off, 35–36
+advertising, 32 connected and editing, inside the radio frame-rate budget.
 
 ## How this differs from fw-esp32c6
 

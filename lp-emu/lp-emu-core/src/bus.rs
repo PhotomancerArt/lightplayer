@@ -294,6 +294,26 @@ pub trait Bus {
         Vec::new()
     }
 
+    /// A hart's block cache has just decoded a block out of `[pc, pc +
+    /// bytes)`.
+    ///
+    /// The other half of the store-address contract: a bus that keeps a map
+    /// of which bytes any hart holds decoded can leave a store that touches
+    /// none of them out of [`Bus::code_dirty`] — nothing cached can have gone
+    /// stale — instead of making the hart walk its cache for every stack
+    /// push. A host-side memo, never architectural state. The default is
+    /// empty and inlines away: a bus that does not implement it records what
+    /// it always recorded.
+    #[inline(always)]
+    fn note_block_built(&mut self, _pc: u32, _bytes: u32) {}
+
+    /// A hart is running a **translated core**, whose code the bus has no map
+    /// of: record every guest store into executable memory, as the contract
+    /// did before [`Bus::note_block_built`]. Sticky, like
+    /// [`Bus::watch_code_stores`]. The default is empty.
+    #[inline(always)]
+    fn record_every_code_store(&mut self) {}
+
     // ---- what a translated core needs to peek at before it runs ----------
     //
     // A translated core (`lp-emu-jit`) executes many guest instructions

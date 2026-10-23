@@ -93,12 +93,38 @@
 //!   of the classic**, whose bare page number makes a zeroed entry *flash
 //!   page 0*. Copying the classic's semantics here would be a machine that
 //!   silently maps flash page 0 wherever the guest has not mapped anything:
-//!   it boots and lies, and no test in this milestone would catch it. (The
-//!   other flag bit, 15, is the `ext_ram` select the callers OR in; every
-//!   caller on this machine's boot path passes 0 — `ets_loader_map_range`
-//!   `40045547: movi.n a15, 0` / `40045553: mov.n a10, a15` — and this
-//!   file names no meaning for it beyond "not a flash page", because the
-//!   ROM names none.)
+//!   it boots and lies, and no test in this milestone would catch it.
+//! - **Bit 15 selects PSRAM.** It is the `ext_ram` select the callers OR in
+//!   (`4004f771: or a13, a13, a12`, the first argument). Every caller on the
+//!   boot path passes 0 — `ets_loader_map_range` `40045547: movi.n a15, 0` /
+//!   `40045553: mov.n a10, a15` — and the one caller that passes anything
+//!   else is esp-hal's PSRAM driver, `map_psram`
+//!   (`third_party/esp-hal/src/psram/esp32s3.rs`): `const MMU_ACCESS_SPIRAM:
+//!   u32 = 1 << 15`, handed to `cache_dbus_mmu_set` (`Cache_Dbus_MMU_Set`)
+//!   with the PSRAM byte address as `paddr`. So an entry with bit 15 set and
+//!   bit 14 clear is **PSRAM page `entry & 0x3fff`** ([`Target::Psram`]),
+//!   which `Cache_Count_Flash_Pages` skipping it (`bany 0xc000`) agrees with:
+//!   it is not a flash page. Bit 14 set is invalid whatever bit 15 says.
+//!
+//! # PSRAM pages
+//!
+//! A PSRAM page is served by the same fill as a flash page — copied into
+//! both windows at its index — with three differences, all in [`fill`]:
+//!
+//! - **It is writable through the data bus.** The fill opens the DROM page to
+//!   guest stores ([`SocBus::set_store_through`]); the DROM region declares
+//!   the IROM window as its store mirror, so every store is made at the same
+//!   index's IROM address too and the instruction bus never serves a stale
+//!   byte. The window stays one read-only region, so a store into a FLASH
+//!   page still faults exactly as before.
+//! - **The window page is the live copy.** Stores land in the window, not in
+//!   the chip; the fill writes the page back to [`crate::psram::Psram`]
+//!   before the entry moves to another page, and the machine writes every
+//!   live page back before a snapshot or a reset reads the chip.
+//! - **One PSRAM page at one index.** Two entries naming the same PSRAM page
+//!   would be two window copies that a store keeps apart, which silicon's
+//!   one physical page does not; the fill says so at `warn` and maps both.
+//!   esp-hal maps each page once.
 //!
 //! **What reset leaves in the table is not known**, and this file does not
 //! pretend: a ROM-up boot runs `Cache_MMU_Init` before anything reads the
@@ -196,6 +222,10 @@ pub const MMU_INVALID: u32 = 0x4000;
 /// The entry's flag bits, 15:14 — `Cache_Count_Flash_Pages` `4004f845:
 /// bany a10, 0xc000`. Either set means the entry is not a flash page.
 pub const MMU_FLAG_MASK: u32 = 0xC000;
+
+/// Bit 15: the entry names a PSRAM page, not a flash page — esp-hal's
+/// `map_psram` `MMU_ACCESS_SPIRAM` (module docs).
+pub const MMU_ACCESS_SPIRAM: u32 = 0x8000;
 
 /// The entry's page number, bits 13:0 — `Cache_Count_Flash_Pages`
 /// `4004f848: extui a10, a10, 0, 14`.
@@ -307,6 +337,29 @@ impl std::fmt::Display for Which {
             Which::ICache => "ICache",
             Which::DCache => "DCache",
         })
+    }
+}
+
+/// What one MMU entry points at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// Bit 14 set: nothing (module docs).
+    Unmapped,
+    /// Flags clear: flash page `n`.
+    Flash(u32),
+    /// Bit 15 alone: PSRAM page `n`.
+    Psram(u32),
+}
+
+impl Target {
+    pub const fn of(entry: u32) -> Self {
+        if entry & MMU_INVALID != 0 {
+            Target::Unmapped
+        } else if entry & MMU_ACCESS_SPIRAM != 0 {
+            Target::Psram(entry & MMU_PAGE_MASK)
+        } else {
+            Target::Flash(entry & MMU_PAGE_MASK)
+        }
     }
 }
 
@@ -504,10 +557,11 @@ pub struct S3Cache {
     disabled_at: [Cycles; 2],
     disabled_by: [Option<u32>; 2],
     policy: CacheOffPolicy,
-    /// Which flash page each entry's window pages already hold, or `None`
-    /// when never filled. What keeps `Cache_MMU_Init`'s 512 stores from
-    /// costing 512 page copies.
-    filled: [Option<u32>; MMU_ENTRIES],
+    /// What each entry's window pages already hold, or `None` when never
+    /// filled. What keeps `Cache_MMU_Init`'s 512 stores from costing 512 page
+    /// copies — and, for a PSRAM page, which chip page the live window copy
+    /// has to be written back to.
+    filled: [Option<Target>; MMU_ENTRIES],
     /// The first offence since the machine last took one.
     offence: Option<CacheOffAccess>,
     /// Set around a host-side peek, poke or fill, which goes through the
@@ -597,24 +651,28 @@ impl S3Cache {
         self.host_access = on;
     }
 
-    /// Does entry `index`'s window pages already hold flash page `page`?
-    pub fn already_filled(&self, index: u32, page: u32) -> bool {
-        self.filled
-            .get(index as usize)
-            .copied()
-            .flatten()
-            .is_some_and(|held| held == page)
-    }
-
-    pub fn note_filled(&mut self, index: u32, page: u32) {
+    pub fn note_filled(&mut self, index: u32, held: Target) {
         if let Some(slot) = self.filled.get_mut(index as usize) {
-            *slot = Some(page);
+            *slot = Some(held);
         }
     }
 
     /// What entry `index`'s window pages hold, if they were ever filled.
-    pub fn filled_page(&self, index: u32) -> Option<u32> {
+    pub fn filled_page(&self, index: u32) -> Option<Target> {
         self.filled.get(index as usize).copied().flatten()
+    }
+
+    /// Every entry whose window pages hold a PSRAM page: `(index, page)`.
+    /// The live copies [`write_back_psram`] reads.
+    pub fn psram_pages(&self) -> Vec<(u32, u32)> {
+        self.filled
+            .iter()
+            .enumerate()
+            .filter_map(|(i, held)| match held {
+                Some(Target::Psram(p)) => Some((i as u32, *p)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Forget what one entry's window pages hold — the bytes under them
@@ -725,10 +783,22 @@ impl S3Cache {
 /// are the closest a RAM window can come to "nothing here" without
 /// inventing an exception the hart has no model of. **Modeled**, and named
 /// as the difference it is.
-pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHandle) -> usize {
-    // `(index, entry, what the window pages held)`, gathered before the
-    // flash lock is taken so the two are never held at once.
-    let work: Vec<(u32, u32, Option<u32>)> = {
+///
+/// # PSRAM pages
+///
+/// See the module docs. In order, for an entry whose window pages held PSRAM
+/// page `q`: the live window copy is written back to `q` and the DROM page is
+/// closed to stores; then, if the entry now names PSRAM page `p`, `p` is
+/// copied into both windows and the DROM page opened again.
+pub fn fill(
+    bus: &mut SocBus,
+    flash: &crate::flash::FlashHandle,
+    psram: &crate::psram::PsramHandle,
+    cache: &CacheHandle,
+) -> usize {
+    // `(index, what the entry names, what the window pages held)`, gathered
+    // before the flash lock is taken so the two are never held at once.
+    let work: Vec<(u32, Target, Option<Target>)> = {
         let mut c = cache.lock().expect("cache poisoned");
         let dirty = c.mmu.take_dirty();
         if dirty.is_empty() {
@@ -736,59 +806,132 @@ pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHa
         }
         dirty
             .into_iter()
-            .map(|index| (index, c.mmu.entry(index as usize), c.filled_page(index)))
+            .map(|index| {
+                (
+                    index,
+                    Target::of(c.mmu.entry(index as usize)),
+                    c.filled_page(index),
+                )
+            })
             .collect()
     };
 
     let flash = flash.lock().expect("flash poisoned");
     let mut filled = 0;
-    for (index, entry, held) in work {
+    for (index, target, held) in work {
         let (drom, irom) = FlashMmu::entry_vaddrs(index);
-        if !FlashMmu::is_mapped(entry) {
-            if held.is_some() {
-                let erased = vec![0xffu8; PAGE_LEN as usize];
-                for vaddr in [drom, irom] {
-                    if let Err(e) = bus.load_image(vaddr, &erased) {
-                        log::debug!("cache: entry {index} ({vaddr:#010x}) not cleared: {e:?}");
+        if held == Some(target) {
+            continue;
+        }
+        if let Some(Target::Psram(q)) = held {
+            write_back_page(bus, psram, index, q);
+            bus.set_store_through(drom, false);
+            cache.lock().expect("cache poisoned").forget_fill(index);
+        }
+        let bytes: Vec<u8> = match target {
+            Target::Unmapped => {
+                if held.is_some() {
+                    let erased = vec![0xffu8; PAGE_LEN as usize];
+                    for vaddr in [drom, irom] {
+                        if let Err(e) = bus.load_image(vaddr, &erased) {
+                            log::debug!("cache: entry {index} ({vaddr:#010x}) not cleared: {e:?}");
+                        }
                     }
+                    log::debug!(
+                        "cache: entry {index} became unmapped; its window pages read as erased                          flash now"
+                    );
+                    cache.lock().expect("cache poisoned").forget_fill(index);
                 }
-                log::debug!(
-                    "cache: entry {index} became unmapped ({entry:#06x}); its window pages \
-                     read as erased flash now"
-                );
-                cache.lock().expect("cache poisoned").forget_fill(index);
+                continue;
             }
-            continue;
-        }
-        let page = entry & MMU_PAGE_MASK;
-        if held == Some(page) {
-            continue;
-        }
-        let paddr = page << PAGE_SHIFT;
-        let Some(bytes) = flash.peek(paddr, PAGE_LEN) else {
-            log::warn!(
-                "cache: entry {index} ({drom:#010x} / {irom:#010x}) maps flash {paddr:#010x}, \
-                 past the {:#x}-byte chip; the pages are left as they were",
-                flash.len()
-            );
-            continue;
+            Target::Flash(page) => {
+                let paddr = page << PAGE_SHIFT;
+                let Some(bytes) = flash.peek(paddr, PAGE_LEN) else {
+                    log::warn!(
+                        "cache: entry {index} ({drom:#010x} / {irom:#010x}) maps flash \
+                         {paddr:#010x}, past the {:#x}-byte chip; the pages are left as they were",
+                        flash.len()
+                    );
+                    continue;
+                };
+                bytes.to_vec()
+            }
+            Target::Psram(page) => {
+                let mut chip = psram.lock().expect("psram poisoned");
+                let Some(bytes) = chip.page(page) else {
+                    log::warn!(
+                        "cache: entry {index} ({drom:#010x} / {irom:#010x}) maps PSRAM page \
+                         {page} ({:#010x}), past the {:#x}-byte chip; the pages are left as they \
+                         were and take no stores",
+                        page << PAGE_SHIFT,
+                        chip.len()
+                    );
+                    continue;
+                };
+                let bytes = bytes.to_vec();
+                chip.note_filled();
+                drop(chip);
+                let c = cache.lock().expect("cache poisoned");
+                if let Some((other, _)) = c.psram_pages().into_iter().find(|(_, p)| *p == page) {
+                    log::warn!(
+                        "cache: PSRAM page {page} is mapped at entry {other} and now at entry \
+                         {index} too; this model keeps one window copy per entry, so a store \
+                         through one is not seen through the other (silicon has one page)"
+                    );
+                }
+                bytes
+            }
         };
         let mut ok = true;
         for vaddr in [drom, irom] {
-            if let Err(e) = bus.load_image(vaddr, bytes) {
+            if let Err(e) = bus.load_image(vaddr, &bytes) {
                 log::warn!("cache: entry {index} ({vaddr:#010x}) has no RAM behind it: {e:?}");
                 ok = false;
             }
         }
         if ok {
+            if matches!(target, Target::Psram(_)) {
+                bus.set_store_through(drom, true);
+            }
             cache
                 .lock()
                 .expect("cache poisoned")
-                .note_filled(index, page);
+                .note_filled(index, target);
             filled += 1;
         }
     }
     filled
+}
+
+/// Write the live window copy of every PSRAM page back to the chip — before a
+/// snapshot or a reset reads the chip's bytes. The window keeps its copy and
+/// the page stays mapped. Returns how many pages it wrote.
+pub fn write_back_psram(
+    bus: &SocBus,
+    psram: &crate::psram::PsramHandle,
+    cache: &CacheHandle,
+) -> usize {
+    let pages = cache.lock().expect("cache poisoned").psram_pages();
+    for (index, page) in &pages {
+        write_back_page(bus, psram, *index, *page);
+    }
+    pages.len()
+}
+
+/// Entry `index`'s DROM window page back into PSRAM page `page`.
+fn write_back_page(bus: &SocBus, psram: &crate::psram::PsramHandle, index: u32, page: u32) {
+    let (drom, _) = FlashMmu::entry_vaddrs(index);
+    let Some(bytes) = bus.peek_span(drom, PAGE_LEN) else {
+        log::warn!("cache: entry {index} ({drom:#010x}) has no RAM to write back from");
+        return;
+    };
+    if !psram
+        .lock()
+        .expect("psram poisoned")
+        .write_back(page, bytes)
+    {
+        log::warn!("cache: PSRAM page {page} is past the chip; entry {index}'s bytes are dropped");
+    }
 }
 
 /// D4's watch: a [`MemoryCost`] that charges nothing and reports the first
@@ -807,9 +950,16 @@ impl CacheOffWatch {
 }
 
 impl MemoryCost for CacheOffWatch {
+    // Each access outside both flash windows is answered before the lock:
+    // `note_access` returns at once for one (`Window::of` is a function of
+    // the address alone), and while the watch is armed the run loop hands
+    // the hart one instruction at a time, so this is on every access of
+    // every cache-off span.
     #[inline]
     fn fetch(&mut self, addr: u32) -> u32 {
-        if let Ok(mut c) = self.cache.lock() {
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
             c.note_access(addr, true);
         }
         0
@@ -817,17 +967,25 @@ impl MemoryCost for CacheOffWatch {
 
     #[inline]
     fn load(&mut self, addr: u32, _width: u8) -> u32 {
-        if let Ok(mut c) = self.cache.lock() {
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
             c.note_access(addr, false);
         }
         0
     }
 
     #[inline]
-    fn store(&mut self, _addr: u32, _width: u8) -> u32 {
-        // The flash windows are read-only regions on this bus, so a guest
-        // store into one is already a fault with a better message than this
-        // one would be.
+    fn store(&mut self, addr: u32, _width: u8) -> u32 {
+        // A store into a FLASH page is already a fault (the window is a
+        // read-only region) with a better message than this one; a store
+        // into a PSRAM page through the data window is an access the DCache
+        // serves, and is checked like a load.
+        if Window::of(addr).is_some()
+            && let Ok(mut c) = self.cache.lock()
+        {
+            c.note_access(addr, false);
+        }
         0
     }
 }
@@ -1000,6 +1158,72 @@ mod tests {
         watch.fetch(0x4205_1A2C);
         watch.load(0x3C00_0100, 4);
         assert!(handle.lock().unwrap().offence.is_none());
+    }
+
+    #[test]
+    fn bit_15_names_a_psram_page_and_bit_14_wins() {
+        // `Cache_Dbus_MMU_Set(MMU_ACCESS_SPIRAM, …)` stores `page | 0x8000`.
+        assert_eq!(Target::of(0x8000 | 5), Target::Psram(5));
+        assert_eq!(Target::of(5), Target::Flash(5));
+        assert_eq!(Target::of(MMU_INVALID), Target::Unmapped);
+        assert_eq!(Target::of(MMU_INVALID | 0x8000 | 5), Target::Unmapped);
+        // And the flash path's answers are unchanged: a PSRAM page is not a
+        // flash page.
+        let mut mmu = FlashMmu::new();
+        mmu.set_entry(2, 0x8000 | 5);
+        assert_eq!(mmu.translate(0x3C02_0000), None);
+        assert!(mmu.invalidate_page_at(5 << PAGE_SHIFT).is_empty());
+    }
+
+    /// The fill's PSRAM half, on the machine's own bus: a page copied into
+    /// both windows, a store through the data window seen through the
+    /// instruction window, the page written back when the entry moves, and a
+    /// flash page beside it still refusing stores.
+    #[test]
+    fn a_psram_page_is_filled_writable_mirrored_and_written_back() {
+        use lp_emu_core::Bus as _;
+        let mut bus = crate::bus_setup::build();
+        let flash: crate::flash::FlashHandle = Arc::new(Mutex::new(
+            crate::flash::FlashImage::blank(crate::flash::DEFAULT_FLASH_LEN),
+        ));
+        let psram = crate::psram::Psram::new(crate::psram::DEFAULT_PSRAM_LEN)
+            .unwrap()
+            .handle();
+        let cache = S3Cache::handle();
+        let page = vec![0x5au8; PAGE_LEN as usize];
+        psram.lock().unwrap().write_back(7, &page);
+        {
+            let mut c = cache.lock().unwrap();
+            c.mmu.set_entry(2, MMU_ACCESS_SPIRAM | 7);
+            c.mmu.set_entry(3, 0); // flash page 0
+        }
+        assert_eq!(fill(&mut bus, &flash, &psram, &cache), 2);
+        assert_eq!(bus.read_word(0x3C02_0040).unwrap() as u32, 0x5a5a_5a5a);
+        assert_eq!(bus.read_word(0x4202_0040).unwrap() as u32, 0x5a5a_5a5a);
+        bus.write_word(0x3C02_0040, 0x1122_3344).unwrap();
+        assert_eq!(
+            bus.read_word(0x4202_0040).unwrap() as u32,
+            0x1122_3344,
+            "mirrored"
+        );
+        assert!(
+            bus.write_word(0x3C03_0040, 1).is_err(),
+            "a flash page takes no store"
+        );
+        assert_eq!(cache.lock().unwrap().psram_pages(), vec![(2, 7)]);
+
+        // The live copy is the window's until a write-back.
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x40], 0x5a);
+        assert_eq!(write_back_psram(&bus, &psram, &cache), 1);
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x40], 0x44);
+
+        // Moving the entry writes the page back and closes the data page.
+        bus.write_word(0x3C02_0044, 0x99).unwrap();
+        cache.lock().unwrap().mmu.set_entry(2, MMU_INVALID);
+        fill(&mut bus, &flash, &psram, &cache);
+        assert_eq!(psram.lock().unwrap().page(7).unwrap()[0x44], 0x99);
+        assert!(bus.write_word(0x3C02_0040, 1).is_err(), "unmapped: closed");
+        assert!(cache.lock().unwrap().psram_pages().is_empty());
     }
 
     #[test]

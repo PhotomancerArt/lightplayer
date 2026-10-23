@@ -34,6 +34,9 @@ It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — a
 > **What does not exist:** the pad fabric and RMT (P07) — a ROM-up boot
 > reaches the application and does not light a strip.
 >
+> **And since 2026-10-22:** the octal PSRAM — an image that brings it
+> up through esp-hal boots both ways and uses all 8 MiB ("PSRAM" below).
+>
 > **And since S3 radio M1 (2026-10):** an image that starts the radio —
 > esp-radio's Wi‑Fi and the BTDM Bluetooth controller — boots both ways to
 > the server loop with nothing unmapped, and a software reset (the
@@ -325,6 +328,54 @@ from the `entry` instruction at each pc, out of the ROM and the merged
 image, and `PS.OWB = 11` and the four save-area words are measured and
 seeded. Fourteen things a direct load does not reproduce are listed in
 `loader.rs`'s module docs; every one is a place the two paths can disagree.
+
+## PSRAM: the octal chip on `CS1` (2026-10)
+
+The canonical board (the XIAO ESP32-S3, an ESP32-S3R8) and the desk's FS3
+carry **8 MiB of octal PSRAM** beside the flash: flash on `CS0`, PSRAM on
+`CS1`. The firmware does not use it yet; this machine models it so an image
+that brings it up runs here, and **an image that never touches it runs
+exactly as before** — `tests/psram_boot.rs` runs the shipped image with the
+default 8 MiB chip and with none, by direct load and ROM-up, and holds the
+link bytes, the ROM's console, cycles, instructions and cache fills equal. So the chip is present at 8 MiB by
+default; `--psram-len 0` is a board without (`lp-cli emu run --chip esp32s3
+--psram <size>` is the same knob). `emu serve` holds C6 boards only, so it
+has no S3 PSRAM option.
+
+| what | where | evidence |
+|---|---|---|
+| the chip: bytes and mode registers | [`src/psram.rs`](src/psram.rs) | the registers' reset values are **FS3's own decode** (esp-hal's `print_psram_info`, 2026-10-22): vendor `0x0D` (AP), generation 3, 64 Mbit, good die, 3 V, fast refresh, hybrid wrap, 32-byte bursts. MR0 and MR4 are unobserved and say so |
+| the mode-register reads and writes | [`src/periph/spi1.rs`](src/periph/spi1.rs), "`CS1`" | the ROM's `esp_rom_spi_cmd_start` puts `misc[1:0] = ~cs_mask`; a `usr` transaction with only `CS1` selected goes to the PSRAM. Commands `0x4040`/`0xC0C0` are esp-hal's `OPI_PSRAM_REG_READ`/`WRITE`; only MR0 takes a write |
+| the pages | [`src/cache.rs`](src/cache.rs), "PSRAM pages" | MMU bit 15 is esp-hal's `MMU_ACCESS_SPIRAM`, ORed in by `Cache_Dbus_MMU_Set` (`4004f771`). The fill copies the page into both windows, opens the DROM page to stores and mirrors them into IROM, and writes it back when the entry moves |
+| the eFuse's `PSRAM_CAP` / `PSRAM_VENDOR` | [`src/periph/efuse.rs`](src/periph/efuse.rs), "The PSRAM fields" | esp-hal's field positions; ESP-IDF's S3 eFuse table for the codes (8 MiB AP 3.3 V = capacity 1, vendor 1, what an S3R8 reads). They follow `--psram-len`, and 0 = none reads the PAC's zero as before. Not a dump: no S3's fuses have been read |
+| the SPI0 cache-side set-up, the clocks, the pads | accept-and-remember | the bytes that move do not depend on them here |
+
+What the probe proves (`fw-esp32s3 --features test_psram`, `just
+test-emu-esp32s3-psram`): esp-hal's own driver finds the chip in octal mode
+and maps all of it at `0x3C02_0000`, two index-derived patterns written and
+read back across all 8 MiB with no wrong word, and ten bytes of Xtensa copied
+in through the data bus run through the instruction bus at the same index
+(`0x4281_0000`). FS3 printed every one of those lines first; the emulated run,
+direct and ROM-up, prints them all with `unmapped = 0`.
+
+⚠️ **Three things that differ from silicon, on purpose.**
+
+- **Timing.** A PSRAM access costs what a flash-window access costs on `t1`:
+  nothing beyond the instruction. FS3's probe took ~52 cycles a word for the
+  write pass and ~34 for the read pass, this machine 8 and 9 — loop overhead
+  only. PSRAM timing is **modeled, ungraded** (`validate.toml`) until the
+  silicon spike's measurements grade it. Never quote an emulated PSRAM speed.
+- **Staleness.** As with flash, the window never serves a stale byte: a store
+  is seen by the instruction bus at once, where silicon needs the probe's
+  `Cache_WriteBack_All` + `Cache_Invalidate_ICache_All`. An image that forgot
+  them would run here and not on a board.
+- **Aliases.** One PSRAM page mapped at two MMU indices is two window copies
+  here (the fill warns); silicon has one page. esp-hal maps each page once.
+
+A software reset keeps the chip's bytes and registers (it does not take the
+chip's supply away — IDF's `EXT_RAM_NOINIT_ATTR` exists because of that); a
+power cycle zeroes them. A snapshot carries the chip with every live window
+page written back, and `None` when nothing ever wrote it.
 
 ## The peripherals, in the order the boot met them
 
@@ -630,6 +681,63 @@ more MMIO store — the store that zeroed the mask under X43 — then enables th
 line, and asserts the take followed within a few instructions (CCOUNT 12 →
 20) rather than at the next 256-cycle window boundary. Never single-stepped.
 
+## LCD_CAM and GDMA: parallel WS281x lanes (M9)
+
+The S3's parallel LED output drives up to eight WS281x lanes (sixteen on a
+16-bit bus) from one frame buffer: LCD_CAM's LCD half in i8080 mode shifts a
+byte per bus clock onto `LCD_DATA_0..7`, and the AHB GDMA feeds it from
+internal RAM with no CPU involvement (`led-channels-spike/report.md` in the
+plan directory). This machine plays that path, and the per-pad WS281x
+decoders from "The pad, and the frame" read each lane back unchanged.
+
+| block | where | what |
+|---|---|---|
+| `DMA` ([`periph::gdma`]) | `0x6003_F000` | the five channels' OUT half: `out_conf0/1`, `out_link` (start, stop), the `out_int` cluster, `out_peri_sel`, and `outfifo_status`, which esp-hal's `start_transfer` spins on. The IN half is accept-and-remember and warns on a start |
+| `LCD_CAM_CLOCK` ([`periph::lcd_cam::LcdClock`]) | `0x6004_1000` | `lcd_clock`, one register |
+| `LCD_CAM` ([`periph::lcd_cam::Lcd`]) | `0x6004_1010` | the LCD's registers: `lcd_user` (start, reset, update, dout, always-out, 2-byte, bit and byte order, command and dummy phases), `lcd_misc` (setup and hold cycles), `lc_dma_int_*` (`lcd_trans_done`, source 24) |
+
+**The CAM half is not mapped.** `cam_ctrl`, `cam_ctrl1` and `cam_rgb_yuv`
+(`+0x04..+0x10`) sit between the two windows, so under `--strict-bus` a CAM
+access stops the run. The CAM is the spike's analyzer, never product.
+
+**How a frame plays.**
+
+1. `outlink_start` records the chain's address and ends the window.
+2. The machine walks the descriptor chain out of internal RAM between windows
+   (`Machine::service_gdma`). A peripheral has no way into guest RAM, so this
+   is the C6's `drain_tx_log` shape.
+3. The bytes wait in the channel for LCD_CAM, and `start_transfer`'s spin
+   ends.
+4. `lcd_start` takes them (or waits for them) and drives the lanes:
+   - each slot's time is the start plus `k` PCLK periods, an exact fraction of
+     CPU cycles from `lcd_clock`;
+   - edges are driven 1,024 slots at a time from scheduled events, only where
+     a lane changes, so 8 × 500 LEDs costs a few dozen events and never a
+     per-cycle loop.
+5. At the end, `lcd_start` clears (what esp-hal's `wait` polls),
+   `lcd_trans_done` raises, and GDMA's done and EOF bits raise.
+
+**Not modelled, said so.**
+
+- The chain is read whole at the start, not as the FIFO drains.
+- RGB mode and `lcd_next_frame_en` are warnings.
+- PCLK, CS, DC and the sync lines are never driven.
+- A descriptor or buffer outside internal RAM (`0x3FC8_8000..0x3FD0_0000`)
+  is a descriptor error, and under `--strict-bus` a stop: PSRAM is ruled out
+  for this buffer by design.
+
+**The timing is modelled and ungraded.** The clock sources are the tree's
+nominal 40, 240 and 160 MHz, and a 2.5 MHz bus is exactly 96 CPU cycles a
+slot. A silicon capture grades it, not this. **The bytes transfer.**
+
+`tests/lcd_cam_lanes.rs` boots `fw-esp32s3 --features test_lcd_lanes`
+(a harness that never ships). It sends five uneven lanes (12, 9, 7, 5 and
+3 LEDs on GPIO1–5) twice through esp-hal's own i8080 driver and GDMA, and
+every lane decodes byte-exact off its pad, in lockstep, under
+`--strict-bus`. `just test-emu-esp32s3-lcd` builds the image and runs it;
+CI's `Emulator ESP32-S3 seams and heap (x64)` job runs it. An image that does
+not use LCD_CAM touches none of this and behaves as before.
+
 ## The link, and what a host can and cannot do to this chip through it
 
 The console **is** the link: `esp-println` with the `jtag-serial` feature
@@ -925,6 +1033,47 @@ interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
 to 0 (below): an unarmed core takes `EXCCAUSE=32` inside `save_context` and
 ends in the double-exception vector. The app path's `init` arms it; the seam
 harness does too, before it binds the wake.
+
+## Speed, and the identity oracle that keeps it honest (2026-10-22)
+
+The hart runs out of the shared Xtensa block cache and window hoist
+(`lp-xt-emu`'s, the classic's M7 rungs) — and until #1270 that bought
+nothing here: the whole of SRAM1 is one executable region on this chip
+(DD81), so every stack push and heap write reached the cache as a range
+invalidation, a walk of its 2^18-entry table, and that was **81 % of host
+time**. The bus now keeps a map of the words a cache has decoded and records
+only a store that changes one, at every alias door
+(`lp-emu-esp-common`'s `CodeRecord`).
+
+```bash
+just bench-emu-esp32s3                                 # an ORACLE, never a gate
+scripts/emu/s3-oracle.sh <out> render-basic 2s         # cache vs --no-block-cache
+scripts/emu/s3-oracle.sh --bin-a <main> --bin-b <branch> <out> render-620 2s
+```
+
+Both read CI's images (`just fetch-ci-images` → `LP_CI_IMAGES`, or
+`--images <dir>`). Measured 2026-10-22 on an M2 Max at load ≈ 9, user
+seconds, the shipped image with Bluetooth on:
+
+| row | before #1270 | after | × real time after |
+|---|---:|---:|---:|
+| `render-basic` (241 lamps), per emulated second, steady | 55.0 s | 3.41 s | **0.293×** |
+| `render-620`, per emulated second, steady | 53.9 s | 3.53 s | 0.283× |
+| `boot-idle`, 1 s emulated | 13.38 s | 1.58 s | 0.633× |
+
+**`render-basic` is the row to quote**: the core is ~92 % busy there, so it
+is what a walk sits in. What is left is ~65 MIPS of interpretation and a flat
+profile; 1× needs the Xtensa translator to keep a stay translated.
+
+⚠️ **A hosted run is only repeatable with its link nonce stated**
+(`lp-cli emu run … --link-nonce <hex>`; the oracle and the probe pin one). A
+product host draws a fresh nonce per open, and two runs of one binary then
+differ by ~1,000 instructions and every frame timestamp — which is exactly
+what a fast path that moved the guest would look like.
+
+`--no-block-cache` (this binary and `lp-cli emu run --chip esp32s3`) is the
+off switch, and the `blocks:` lines on stderr are the cache's counters —
+never compared, since they are what the two legs differ in.
 
 ## Three things about this machine that its siblings do not have
 

@@ -75,7 +75,8 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
     }
     let mut builder = Esp32S3Builder::new()
         .time_grade(TimeGrade::T1)
-        .strict(args.strict_bus);
+        .strict(args.strict_bus)
+        .block_cache(!args.no_block_cache);
     match (
         args.elf.as_deref(),
         args.merged.as_deref(),
@@ -116,6 +117,11 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
     }
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
+    }
+    if let Some(size) = args.psram.as_deref() {
+        let len =
+            lp_emu_esp32s3::psram::parse_size(size).map_err(|e| anyhow::anyhow!("--psram: {e}"))?;
+        builder = builder.psram_len(len);
     }
 
     // The seams (S3 radio M5): the request, the board's LAN and its pace.

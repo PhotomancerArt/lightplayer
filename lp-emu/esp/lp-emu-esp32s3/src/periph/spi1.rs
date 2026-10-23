@@ -78,6 +78,24 @@
 //! `fsm` is read-only and reads its reset 0, which is exactly the idle
 //! `Wait_SPI_Idle` polls for.
 //!
+//! # `CS1`: the PSRAM
+//!
+//! `misc` (`+0x34`) bits 1:0 are `cs1_dis`/`cs0_dis` (PAC: "Set this bit to
+//! raise high SPI_CS0/1 pin"); its reset `0x2` selects `CS0`, the flash, and
+//! nothing on the flash path ever moves it. The mask ROM's OPI command path
+//! does: `esp_rom_spi_cmd_start` (`0x4004_e0d0`) writes `misc[1:0] =
+//! ~cs_mask` before the trigger (`4004e0e2..f7`) and puts `0x2` back after
+//! the spin (`4004e12f..48`), and esp-hal's octal PSRAM driver calls it with
+//! `cs_mask = 1 << 1`. A `usr` transaction with **`CS1` low and `CS0` high**
+//! (`misc[1:0] == 0b01`) therefore goes to [`crate::psram::Psram`] instead of
+//! the flash — decoded by [`Spi1::execute_psram`] — and every other `misc`
+//! value takes the flash path exactly as before. What a PSRAM transaction
+//! looks like is in the trace of the driver's first one: `user2 =
+//! 0xf000_4040` (a 16-bit command phase, `0x4040`), `user1 = 0x7c00_0011`
+//! (32 address bits, 18 dummy), `addr` = the register, `miso_dlen = 15`,
+//! `misc = 0x1`, `cmd = usr`. A dedicated trigger with `CS1` selected is
+//! refused: nothing sends one.
+//!
 //! # What is *not* modelled, and what happens instead
 //!
 //! Bus width (`ctrl`'s `fread_*` bits), the clock divider, `ctrl2`'s CS
@@ -96,6 +114,7 @@ use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
 use crate::flash::{BLOCK_LEN, FlashHandle, SECTOR_LEN};
 use crate::periph::accept;
+use crate::psram::{self, PsramHandle};
 use crate::regs;
 
 /// This block's name — in its own trace lines and in the ones the engine
@@ -116,6 +135,10 @@ pub const USER2: u32 = 0x020;
 pub const MOSI_DLEN: u32 = 0x024;
 pub const MISO_DLEN: u32 = 0x028;
 pub const RD_STATUS: u32 = 0x02c;
+/// `misc` — bits 1:0 are `cs1_dis`/`cs0_dis` (module docs, "`CS1`").
+pub const MISC: u32 = 0x034;
+/// `misc[1:0]` with `CS1` driven and `CS0` held high: a PSRAM transaction.
+const MISC_CS1_ONLY: u32 = 0b01;
 /// `fsm` — bits 2:0 are `st`, the controller's state machine, which
 /// `Wait_SPI_Idle` polls on **both** controllers. Read-only in the PAC and
 /// reset 0, which is idle.
@@ -176,6 +199,8 @@ pub struct Spi1 {
     /// The chip on the other side, and the WIP/WEL latch the ROM spins on.
     /// Everything this block's `cmd` triggers ends up here.
     engine: FlashEngine,
+    /// The PSRAM on `CS1` (module docs).
+    psram: PsramHandle,
     /// Every `cmd` trigger this model does not know, once each, so a boot
     /// that reaches one says so without flooding the log.
     refused: Vec<u32>,
@@ -201,13 +226,14 @@ impl Spi1 {
     /// no command phase and move no bytes — the C6's second-boot gate caught
     /// exactly that, and the symptom was `lpfs` reformatting on the second
     /// boot rather than anything that looked like a read failure.
-    pub fn new(flash: FlashHandle) -> Self {
+    pub fn new(flash: FlashHandle, psram: PsramHandle) -> Self {
         let regs = accept::spi1()
             .with_grade(CMD, RegGrade::Documented)
             .with_grade(RD_STATUS, RegGrade::Documented);
         Self {
             regs,
             engine: FlashEngine::new(flash),
+            psram,
             refused: Vec::new(),
         }
     }
@@ -273,6 +299,16 @@ impl Spi1 {
         // `flash_pe` is a modifier ("this transfer is a program or an
         // erase") and carries no work of its own.
         let dedicated = triggered & !(CMD_USR | CMD_FLASH_PE);
+        if self.regs.stored(MISC) & 0b11 == MISC_CS1_ONLY {
+            if triggered & CMD_USR != 0 {
+                self.execute_psram(cx);
+            }
+            if dedicated != 0 {
+                self.psram.lock().expect("psram poisoned").note_refused();
+                self.refuse(dedicated, cx);
+            }
+            return;
+        }
         if triggered & CMD_USR != 0 {
             self.execute_usr(cx);
         }
@@ -438,6 +474,56 @@ impl Spi1 {
         }
     }
 
+    /// A `usr` transaction with `CS1` selected: the PSRAM's mode registers
+    /// (module docs, "`CS1`", and [`crate::psram`]).
+    fn execute_psram(&mut self, cx: &mut BusCx<'_>) {
+        let user = self.regs.stored(USER);
+        let user2 = self.regs.stored(USER2);
+        let addr = self.regs.stored(ADDR);
+        let command = if user & USER_COMMAND != 0 {
+            Some((user2 & 0xffff) as u16)
+        } else {
+            None
+        };
+        let mut chip = self.psram.lock().expect("psram poisoned");
+        match command {
+            Some(psram::CMD_REG_READ) if user & USER_MISO != 0 => {
+                let n = self.dlen_bytes(MISO_DLEN) as usize;
+                let mut data = [0xffu8; spi_flash::BUFFER_LEN];
+                chip.read_registers(addr, &mut data[..n]);
+                drop(chip);
+                self.set_buffer_bytes(&data[..n]);
+            }
+            Some(psram::CMD_REG_WRITE) if user & USER_MOSI != 0 => {
+                let n = self.dlen_bytes(MOSI_DLEN) as usize;
+                let data = self.buffer_bytes();
+                let refused = chip.write_registers(addr, &data[..n]);
+                if !refused.is_empty() {
+                    cx.trace.note(&format!(
+                        "cyc={} pc={:#010x} {NAME} PSRAM mode-register write to MR{refused:?} \
+                         refused: only MR0 takes a write in this model",
+                        cx.now, cx.pc
+                    ));
+                }
+            }
+            other => {
+                chip.note_refused();
+                drop(chip);
+                // Nothing drives the data lines for a command no part
+                // answers: a read phase reads all ones.
+                if user & USER_MISO != 0 {
+                    self.set_buffer_bytes(&[]);
+                }
+                cx.trace.note(&format!(
+                    "cyc={} pc={:#010x} {NAME} PSRAM (CS1) transaction not modelled: command \
+                     {other:x?} (user={user:#010x} user2={user2:#010x} addr={addr:#010x}); a read \
+                     phase reads 0xff",
+                    cx.now, cx.pc
+                ));
+            }
+        }
+    }
+
     /// Is the phase `bit` enables present? A command that needs a phase
     /// `user` did not enable moves nothing on the wire, and saying so is how
     /// a mis-programmed transfer is caught here rather than three layers up.
@@ -542,7 +628,10 @@ mod tests {
 
     fn rig() -> (Sandbox, Spi1, FlashHandle) {
         let flash = Arc::new(Mutex::new(FlashImage::blank(DEFAULT_FLASH_LEN)));
-        (Sandbox::new(), Spi1::new(flash.clone()), flash)
+        let psram = crate::psram::Psram::new(crate::psram::DEFAULT_PSRAM_LEN)
+            .unwrap()
+            .handle();
+        (Sandbox::new(), Spi1::new(flash.clone(), psram), flash)
     }
 
     /// `esp_storage::get_flash_size` — the write the P05 hello spun on.
@@ -754,7 +843,7 @@ mod tests {
         let buf = lp_emu_esp_common::trace::SharedBuffer::new();
         sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         let flash = Arc::new(Mutex::new(FlashImage::blank(DEFAULT_FLASH_LEN)));
-        let mut spi = Spi1::new(flash);
+        let mut spi = Spi1::new(flash, crate::psram::Psram::absent().handle());
         sb.write(&mut spi, CMD, CMD_FLASH_DP);
         sb.write(&mut spi, CMD, CMD_FLASH_DP);
         assert_eq!(sb.read(&mut spi, CMD), 0, "the guest must not spin");
@@ -772,7 +861,7 @@ mod tests {
         let buf = lp_emu_esp_common::trace::SharedBuffer::new();
         sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         let flash = Arc::new(Mutex::new(FlashImage::blank(0x1000)));
-        let mut spi = Spi1::new(flash);
+        let mut spi = Spi1::new(flash, crate::psram::Psram::absent().handle());
         sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MISO);
         sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::READ));
         sb.write(&mut spi, ADDR, 0x0ffc);

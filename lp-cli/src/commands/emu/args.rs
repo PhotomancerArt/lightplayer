@@ -264,6 +264,14 @@ pub struct RunArgs {
     #[arg(long = "flash-cut", value_name = "SPEC")]
     pub flash_cut: Option<String>,
 
+    /// The S3 only: the octal PSRAM on CS1 — `2mb`, `4mb`, `8mb`, `16mb`,
+    /// `32mb`, a byte count, or `0`/`none` for a board without. Left out, the
+    /// board has the canonical XIAO ESP32-S3's 8 MiB, which an image that
+    /// never brings PSRAM up does not notice
+    /// (`lp-emu-esp32s3/tests/psram_boot.rs`).
+    #[arg(long, value_name = "SIZE")]
+    pub psram: Option<String>,
+
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
     /// keep hosting the link (and writing the console) to the deadline.
@@ -359,6 +367,12 @@ pub struct RunArgs {
     /// reading zero and carrying on.
     #[arg(long = "strict-bus")]
     pub strict_bus: bool,
+
+    /// Do not pre-decode blocks of instructions (`--chip esp32s3` only).
+    /// Slower and otherwise identical: the identity oracle a speed change
+    /// is checked against (`scripts/emu/s3-oracle.sh`).
+    #[arg(long = "no-block-cache")]
+    pub no_block_cache: bool,
 
     /// The board's eFuse MAC, `a0:f2:62:87:b4:8c`. Defaults to the desk
     /// board's, which is what every transcript was captured against.

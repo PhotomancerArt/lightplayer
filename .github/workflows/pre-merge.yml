@@ -2819,6 +2819,22 @@ jobs:
         id: seams
         run: cd lp2025 && just test-emu-esp32s3-seams
 
+      # M9: LCD_CAM + GDMA, five WS281x lanes byte-exact off their pads (the
+      # `test_lcd_lanes` image). One more firmware build; this job has the
+      # Xtensa toolchain and the room.
+      - name: Emulator ESP32-S3 LCD_CAM lanes (the harness image, five lanes byte-exact)
+        id: lcd
+        if: success() || steps.seams.outcome == 'failure'
+        run: cd lp2025 && just test-emu-esp32s3-lcd
+
+      # The S3's octal PSRAM (lane P of the S3 radio roadmap): the
+      # `test_psram` probe image — one more Xtensa firmware build — booted
+      # both ways by `lp-emu-esp32s3/tests/psram_boot.rs`. Here rather than
+      # in `emu-esp32s3`, which runs near its budget; locally ~1 minute of
+      # emulation after the build.
+      - name: Emulator ESP32-S3 PSRAM (the probe image, direct and ROM-up)
+        run: cd lp2025 && just test-emu-esp32s3-psram
+
       # The S3's half of the heap-budget record's chip section (M6 P10). It
       # lives here rather than in `Heap budget (esp32c6 chip)` because it
       # needs the Xtensa toolchain this job already installs — a cold espup
@@ -2837,7 +2853,7 @@ jobs:
       # `emu-esp32s3` in S3 radio M5, whose budget it pushed over.)
       - name: Heap budget ratchet — the S3's own ledger
         id: figures_heap
-        if: success() || steps.seams.outcome == 'failure'
+        if: success() || steps.seams.outcome == 'failure' || steps.lcd.outcome == 'failure'
         shell: bash
         run: cd lp2025 && just heap-budget-check-chips-s3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
 

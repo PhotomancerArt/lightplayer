@@ -47,6 +47,30 @@
 //! conclude 26 MHz for a 40 MHz board. **TODO(P09): replace the seed with
 //! the desk S3's read dump.**
 //!
+//! # The PSRAM fields
+//!
+//! One exception to "nothing else is seeded": the PSRAM's capacity and vendor,
+//! because the machine has a PSRAM option and a firmware that asks the eFuse
+//! whether the part has PSRAM must get the answer the option gives
+//! ([`psram_words`]). Positions are esp-hal's (`efuse/esp32s3/fields.rs`):
+//!
+//! ```text
+//! PSRAM_CAP    = EfuseField::new(1, 4, 131, 2)   // +0x54 bits 3:4
+//! PSRAM_VENDOR = EfuseField::new(1, 4, 135, 2)   // +0x54 bits 7:8
+//! PSRAM_CAP_3  = EfuseField::new(1, 5, 179, 1)   // +0x58 bit 19, the capacity's bit 2
+//! ```
+//!
+//! and the codes are ESP-IDF's eFuse table for the S3
+//! (`components/efuse/esp32s3/esp_efuse_table.csv`, Apache-2.0, `master` read
+//! 2026-10-22): `PSRAM_CAP {0: None; 1: 8M; 2: 2M; 3: 16M; 4: 4M}` (32 MiB has
+//! no code, and reads 0), `PSRAM_VENDOR {0: None; 1: AP_3v3; 2: AP_1v8}`. An
+//! S3R8 — 8 MB from AP Memory at 3.3 V, which FS3's own PSRAM decode agrees
+//! with (vendor `0x0d` "AP", `VCC 01 (3V)`) — therefore reads capacity 1,
+//! vendor 1. A board with no PSRAM reads 0 for both, the PAC's reset, as
+//! before. `PSRAM_TEMP` (bits 133:134) stays 0: nothing here says which grade
+//! an R8 is fused as. ⚠️ No S3's fuses have been read, so these are the
+//! table's codes for the part, not a dump; FS3's dump would replace them.
+//!
 //! Writes are accepted and remembered (nothing programs eFuses at runtime),
 //! and the block reads back what was written — which is what a firmware
 //! that *did* write `pgm_data` would see on silicon before a burn.
@@ -63,6 +87,7 @@ pub const EFUSE_LEN: u32 = 0x200;
 pub const RD_MAC_SPI_SYS_0: u32 = 0x44;
 pub const RD_MAC_SPI_SYS_1: u32 = 0x48;
 pub const RD_MAC_SPI_SYS_3: u32 = 0x50;
+pub const RD_MAC_SPI_SYS_4: u32 = 0x54;
 pub const RD_MAC_SPI_SYS_5: u32 = 0x58;
 
 /// `WAFER_VERSION_MINOR_LO`: block 1 bit 114 → word 3, bit 18, three bits.
@@ -71,6 +96,36 @@ const MINOR_LO_SHIFT: u32 = 114 - 96;
 const MINOR_HI_SHIFT: u32 = 183 - 160;
 /// `WAFER_VERSION_MAJOR`: block 1 bit 184 → word 5, bits 24:25.
 const MAJOR_SHIFT: u32 = 184 - 160;
+
+/// `PSRAM_CAP`: block 1 bit 131 → word 4, bits 3:4.
+const PSRAM_CAP_SHIFT: u32 = 131 - 128;
+/// `PSRAM_VENDOR`: block 1 bit 135 → word 4, bits 7:8.
+const PSRAM_VENDOR_SHIFT: u32 = 135 - 128;
+/// `PSRAM_CAP_3`, the capacity's high bit: block 1 bit 179 → word 5, bit 19.
+const PSRAM_CAP_HI_SHIFT: u32 = 179 - 160;
+/// `PSRAM_VENDOR` 1, "AP_3v3" (module docs).
+const PSRAM_VENDOR_AP_3V3: u32 = 1;
+
+/// The bits a PSRAM of `len` bytes sets: `(word, bits)` to OR into
+/// `rd_mac_spi_sys_4` and `rd_mac_spi_sys_5`. All zero for `len == 0` (and
+/// for a size the table has no code for). See the module docs.
+pub fn psram_words(len: u32) -> [(u32, u32); 2] {
+    let cap: u32 = match len >> 20 {
+        8 => 1,
+        2 => 2,
+        16 => 3,
+        4 => 4,
+        _ => 0,
+    };
+    let vendor = if cap == 0 { 0 } else { PSRAM_VENDOR_AP_3V3 };
+    [
+        (
+            RD_MAC_SPI_SYS_4,
+            ((cap & 0b11) << PSRAM_CAP_SHIFT) | (vendor << PSRAM_VENDOR_SHIFT),
+        ),
+        (RD_MAC_SPI_SYS_5, (cap >> 2) << PSRAM_CAP_HI_SHIFT),
+    ]
+}
 
 /// The four words an identity occupies, in esp-hal's S3 layout.
 pub fn words(id: &EfuseIdentity) -> [(u32, u32); 4] {
@@ -121,19 +176,24 @@ pub fn identity(w0: u32, w1: u32, w3: u32, w5: u32) -> EfuseIdentity {
 /// | `rd_mac_spi_sys_0` +0x44 | `documented` | esp-hal `efuse/esp32s3/fields.rs:163` `MAC0` = bits 0..32 of block 1, big-endian (`efuse/mod.rs:206`); the bytes are this run's own `--efuse-mac` |
 /// | `rd_mac_spi_sys_1` +0x48 | `documented` | `MAC1` = bits 32..48 (`fields.rs:165`) |
 /// | `rd_mac_spi_sys_3` +0x50 | `documented` | `WAFER_VERSION_MINOR_LO` bits 114..117 (`fields.rs:189`) |
-/// | `rd_mac_spi_sys_5` +0x58 | `documented` | `WAFER_VERSION_MINOR_HI` bit 183, `_MAJOR` bits 184..186 (`fields.rs:225-227`) |
+/// | `rd_mac_spi_sys_4` +0x54 | `documented` | `PSRAM_CAP` bits 131..133, `PSRAM_VENDOR` bits 135..137 (module docs, "The PSRAM fields") |
+/// | `rd_mac_spi_sys_5` +0x58 | `documented` | `WAFER_VERSION_MINOR_HI` bit 183, `_MAJOR` bits 184..186 (`fields.rs:225-227`); `PSRAM_CAP_3` bit 179 |
 ///
 /// Nothing here is `measured`, and nothing can be until P09 reads a board.
-pub fn efuse(id: EfuseIdentity) -> RegFile {
+pub fn efuse(id: EfuseIdentity, psram_len: u32) -> RegFile {
     let mut rf = RegFile::new("EFUSE", EFUSE_LEN)
         .with_names(regs::EFUSE)
         .with_pac_grades()
         .with_grade(RD_MAC_SPI_SYS_0, RegGrade::Documented)
         .with_grade(RD_MAC_SPI_SYS_1, RegGrade::Documented)
         .with_grade(RD_MAC_SPI_SYS_3, RegGrade::Documented)
+        .with_grade(RD_MAC_SPI_SYS_4, RegGrade::Documented)
         .with_grade(RD_MAC_SPI_SYS_5, RegGrade::Documented);
     for (off, word) in words(&id) {
         rf.poke(off, word);
+    }
+    for (off, bits) in psram_words(psram_len) {
+        rf.poke(off, rf.stored(off) | bits);
     }
     rf
 }
@@ -185,7 +245,7 @@ mod tests {
             wafer_major: 0,
             wafer_minor: 2,
         };
-        let mut e = efuse(id);
+        let mut e = efuse(id, 0);
         assert_eq!(sb.read(&mut e, RD_MAC_SPI_SYS_0), 0x6287_b48c);
         assert_eq!(sb.read(&mut e, RD_MAC_SPI_SYS_1), 0x0000_a0f2);
         assert_eq!(sb.read(&mut e, RD_MAC_SPI_SYS_3), 2 << 18);
@@ -201,14 +261,54 @@ mod tests {
     #[test]
     fn the_default_identity_is_the_absence_of_a_dump() {
         let mut sb = Sandbox::new();
-        let mut e = efuse(EfuseIdentity::default());
+        let mut e = efuse(EfuseIdentity::default(), 0);
         for off in [
             RD_MAC_SPI_SYS_0,
             RD_MAC_SPI_SYS_1,
             RD_MAC_SPI_SYS_3,
+            RD_MAC_SPI_SYS_4,
             RD_MAC_SPI_SYS_5,
         ] {
             assert_eq!(sb.read(&mut e, off), regs::EFUSE.reset(off).unwrap_or(0));
+        }
+    }
+
+    /// esp-hal's `read_field_le` of `PSRAM_CAP` (+ `PSRAM_CAP_3`) and
+    /// `PSRAM_VENDOR`, applied to what the block holds, for each size the
+    /// machine takes — and the identity words beside them untouched.
+    #[test]
+    fn the_psram_fields_say_the_machines_psram() {
+        let mut sb = Sandbox::new();
+        let id = EfuseIdentity {
+            mac: [0xa0, 0xf2, 0x62, 0x87, 0xb4, 0x8c],
+            wafer_major: 0,
+            wafer_minor: 2,
+        };
+        // (size, PSRAM_CAP, PSRAM_VENDOR) — the IDF table's codes.
+        for (len, cap, vendor) in [
+            (0u32, 0u32, 0u32),
+            (8 << 20, 1, 1),
+            (2 << 20, 2, 1),
+            (16 << 20, 3, 1),
+            (4 << 20, 4, 1),
+            (32 << 20, 0, 0),
+        ] {
+            let mut e = efuse(id, len);
+            let w4 = sb.read(&mut e, RD_MAC_SPI_SYS_4);
+            let w5 = sb.read(&mut e, RD_MAC_SPI_SYS_5);
+            let read_cap = ((w4 >> 3) & 0b11) | (((w5 >> 19) & 1) << 2);
+            assert_eq!(read_cap, cap, "{len}: PSRAM_CAP");
+            assert_eq!((w4 >> 7) & 0b11, vendor, "{len}: PSRAM_VENDOR");
+            assert_eq!(
+                identity(
+                    sb.read(&mut e, RD_MAC_SPI_SYS_0),
+                    sb.read(&mut e, RD_MAC_SPI_SYS_1),
+                    sb.read(&mut e, RD_MAC_SPI_SYS_3),
+                    w5,
+                ),
+                id,
+                "{len}: the identity is unchanged"
+            );
         }
     }
 }

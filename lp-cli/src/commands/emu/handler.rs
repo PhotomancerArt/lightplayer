@@ -171,6 +171,12 @@ fn run(args: RunArgs) -> Result<()> {
              update path yet"
         );
     }
+    if args.psram.is_some() && args.chip != EmuChip::Esp32S3 {
+        bail!("--psram is the S3's: this chip's machine models no PSRAM");
+    }
+    if args.no_block_cache && args.chip != EmuChip::Esp32S3 {
+        bail!("--no-block-cache is an S3 flag here; the classic's own binary has its twin");
+    }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, seams, parse_duration_us(&args.timeout)?);
     }

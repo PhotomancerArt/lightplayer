@@ -170,6 +170,60 @@ pub fn seam_abi_image() -> Result<PathBuf, String> {
     )
 }
 
+/// The environment variable naming the **PSRAM probe** ELF — `fw-esp32s3`
+/// built with `test_psram` (lane P of the S3 radio roadmap): esp-hal brings
+/// the octal PSRAM up, the probe writes and reads all of it and runs code out
+/// of it. A test image that never ships.
+pub const PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_ELF";
+
+/// The PSRAM probe's merged chip, for its ROM-up boot.
+pub const PSRAM_MERGED_ENV: &str = "LP_EMU_ESP32S3_PSRAM_MERGED";
+
+/// The PSRAM probe ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn psram_image() -> Result<PathBuf, String> {
+    env_file(
+        PSRAM_IMAGE_ENV,
+        "`just test-emu-esp32s3-psram` builds `fw-esp32s3 --features test_psram` and sets it",
+    )
+}
+
+/// The PSRAM probe's merged chip, if the caller has one.
+pub fn psram_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        PSRAM_MERGED_ENV,
+        "`just test-emu-esp32s3-psram` merges the PSRAM probe with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
+/// The environment variable naming the **LCD lanes** ELF — `fw-esp32s3`
+/// built with `test_lcd_lanes` (M9): five uneven WS281x lanes out of
+/// LCD_CAM's i8080 mode, fed by GDMA. A test image that never ships.
+pub const LCD_LANES_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_LANES_ELF";
+
+/// The LCD lanes ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_lanes_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_LANES_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_lanes` and sets it",
+    )
+}
+
+/// The `test_lcd_backend` image (`fw-esp32s3 --features test_lcd_backend`):
+/// the product LCD_CAM backend driving five lanes.
+pub const LCD_BACKEND_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_BACKEND_ELF";
+
+/// The LCD backend ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_backend_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_BACKEND_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_backend` and sets it",
+    )
+}
+
 /// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
 /// panic when it is set to a path that does not exist.
 fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {

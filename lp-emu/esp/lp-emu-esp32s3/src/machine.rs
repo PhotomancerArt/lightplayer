@@ -292,6 +292,13 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "WIFI_MAC",
     "WIFI_PWR",
     "BTDM_WAKE",
+    // ---- M9: the parallel LED path (`periph::gdma`, `periph::lcd_cam`),
+    // appended for the same reason. Met only by an image that drives WS281x
+    // lanes from LCD_CAM; LCD_CAM is two windows around its unmapped CAM
+    // registers.
+    "DMA",
+    "LCD_CAM_CLOCK",
+    "LCD_CAM",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -1130,6 +1137,8 @@ pub struct Esp32S3Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: Option<bool>,
+    /// `--no-block-cache`, held as its positive. On by default.
+    block_cache: bool,
     boot_frame: Option<BootFrame>,
     cpenable_reset: Option<u32>,
     core_quantum: Option<u64>,
@@ -1167,6 +1176,8 @@ pub struct Esp32S3Builder {
     // ---- the flash, the cache and the ROM's console (M6 P06) ----
     flash_backing: FlashBacking,
     flash_len: u32,
+    /// The PSRAM's size ([`Esp32S3Builder::psram_len`]).
+    psram_len: u32,
     cache_off: CacheOffPolicy,
     uart0: UsbSjSink,
     uart0_source: Option<Box<dyn ByteSource>>,
@@ -1189,6 +1200,7 @@ impl Default for Esp32S3Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_unsupported: None,
+            block_cache: true,
             boot_frame: None,
             cpenable_reset: None,
             core_quantum: None,
@@ -1213,6 +1225,7 @@ impl Default for Esp32S3Builder {
             pace: None,
             flash_backing: FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            psram_len: crate::psram::DEFAULT_PSRAM_LEN,
             cache_off: CacheOffPolicy::default(),
             uart0: UsbSjSink::default(),
             uart0_source: None,
@@ -1248,6 +1261,7 @@ impl fmt::Debug for Esp32S3Builder {
             .field("reboot_on_reset", &self.reboot_on_reset)
             .field("flash_backing", &self.flash_backing)
             .field("flash_len", &self.flash_len)
+            .field("psram_len", &self.psram_len)
             .field("cache_off", &self.cache_off)
             .field("uart0", &self.uart0)
             .field("strap_word", &format_args!("{:#x}", self.strap_word))
@@ -1307,6 +1321,16 @@ impl Esp32S3Builder {
         self
     }
 
+    /// The octal PSRAM on `CS1` ([`crate::psram`]): one of
+    /// [`crate::psram::DENSITIES`]' sizes, or `0` for a board without. The
+    /// default is [`crate::psram::DEFAULT_PSRAM_LEN`], the canonical XIAO
+    /// ESP32-S3's 8 MiB; an image that never brings PSRAM up runs exactly as
+    /// it does with none (`tests/psram_boot.rs` holds that).
+    pub fn psram_len(mut self, bytes: u32) -> Self {
+        self.psram_len = bytes;
+        self
+    }
+
     /// `--cache-off-fetch` (D4). The default is [`CacheOffPolicy::Stop`],
     /// and that is what every gate run uses.
     pub fn cache_off_fetch(mut self, policy: CacheOffPolicy) -> Self {
@@ -1363,6 +1387,20 @@ impl Esp32S3Builder {
     /// silently. On by default, as on the classic (DD16).
     pub fn strict_unsupported(mut self, on: bool) -> Self {
         self.strict_unsupported = Some(on);
+        self
+    }
+
+    /// Pre-decode blocks of instructions, or do not (`--no-block-cache`).
+    ///
+    /// **On by default**, and off is the identity oracle: the same binary
+    /// with the cache off must print an identical everything — the same
+    /// UART0 and USB bytes, the same `run:` line, the same frames
+    /// (`scripts/emu/s3-oracle.sh`). The classic's twin, and for the same
+    /// reason there is no `rom-up` exclusion: this chip's invalidation
+    /// contract is the store address (XD3), which catches the mask ROM's and
+    /// the bootloader's copies as it catches the JIT's.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1745,6 +1783,9 @@ impl Esp32S3Builder {
             FlashImage::open(self.flash_backing, self.flash_len)
                 .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
         ));
+        let psram = crate::psram::Psram::new(self.psram_len)
+            .map_err(BuildError::Io)?
+            .handle();
         let cache = S3Cache::handle();
         cache
             .lock()
@@ -1752,6 +1793,7 @@ impl Esp32S3Builder {
             .set_policy(self.cache_off);
         let flash_set = FlashSet {
             flash: flash.clone(),
+            psram: psram.clone(),
             cache: cache.clone(),
             strap: self.strap_word,
             seed: self.seed,
@@ -1792,6 +1834,8 @@ impl Esp32S3Builder {
         let usb_index = bus.peripheral_index("USB_DEVICE");
         let gpio_index = bus.peripheral_index("GPIO");
         let rmt_index = bus.peripheral_index("RMT");
+        let gdma_index = bus.peripheral_index("DMA");
+        let lcd_index = bus.peripheral_index("LCD_CAM");
 
         // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
         // where the C6's has it clear, so the fabric is told what the
@@ -1856,7 +1900,12 @@ impl Esp32S3Builder {
         // otherwise would have nowhere for P04's SYSTEM view to write, and
         // nothing for a snapshot to carry.
         let harts: Vec<XtHart<SocBus>> = (0..CORES)
-            .map(|core| fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset))
+            .map(|core| {
+                let mut hart =
+                    fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset);
+                hart.set_block_cache(self.block_cache);
+                hart
+            })
             .collect();
 
         let mut machine = Machine {
@@ -1907,6 +1956,7 @@ impl Esp32S3Builder {
             boot_mode: self.boot_mode,
             cache,
             flash,
+            psram,
             cache_fills: 0,
             staging: FlashStaging::default(),
             cache_watch: false,
@@ -1917,6 +1967,9 @@ impl Esp32S3Builder {
             gpio_index,
             strap_word: self.strap_word,
             rmt_index,
+            gdma_index,
+            lcd_index,
+            dma_violation: None,
             pins: PinObserver {
                 strip: self.strip,
                 cpu_hz: memmap::CPU_HZ,
@@ -2167,6 +2220,9 @@ pub struct Machine {
     cache: CacheHandle,
     /// The flash chip, shared with SPI1 and read by the cache fill.
     flash: FlashHandle,
+    /// The PSRAM on `CS1`, shared with SPI1 (its mode registers) and read
+    /// and written by the cache fill (its pages).
+    psram: crate::psram::PsramHandle,
     /// How many entries the fill has copied out of the chip.
     cache_fills: u64,
     /// What a direct load staged in the chip; empty on a ROM-up machine.
@@ -2186,6 +2242,14 @@ pub struct Machine {
     /// The other block that watches the pads: the RMT's own logs and
     /// refill telemetry are read through it (M6 P07).
     rmt_index: Option<usize>,
+    /// M9: the AHB GDMA, whose OUT chains the machine walks between windows
+    /// ([`Machine::service_gdma`]), and LCD_CAM's LCD window, which consumes
+    /// them.
+    gdma_index: Option<usize>,
+    lcd_index: Option<usize>,
+    /// A GDMA descriptor or buffer outside internal RAM under `--strict-bus`:
+    /// the run ends on it as on any strict refusal.
+    dma_violation: Option<StrictViolation>,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
@@ -2261,7 +2325,7 @@ impl Machine {
     /// the emulator's so D4's watch does not arm on them ([`crate::cache`]).
     fn refill_now(&mut self) -> u64 {
         self.set_host_access(true);
-        let filled = cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        let filled = cache::fill(&mut self.bus, &self.flash, &self.psram, &self.cache) as u64;
         self.set_host_access(false);
         filled
     }
@@ -2322,6 +2386,50 @@ impl Machine {
     /// The flash chip, for a test and for the run report.
     pub fn flash(&self) -> &FlashHandle {
         &self.flash
+    }
+
+    /// The PSRAM, for a test and for the run report.
+    pub fn psram(&self) -> &crate::psram::PsramHandle {
+        &self.psram
+    }
+
+    /// The run report's `psram:` line, or `None` when the image never reached
+    /// the chip — a run that does not touch PSRAM reports what it always did.
+    pub fn psram_summary(&self) -> Option<String> {
+        let chip = self.psram.lock().expect("psram poisoned");
+        let c = chip.census();
+        if !c.touched() {
+            return None;
+        }
+        let mapped = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .psram_pages()
+            .len();
+        Some(format!(
+            "psram: {} ({} MiB, octal); {} register reads, {} writes, {} refused; {} pages \
+             filled, {} written back, {} mapped now",
+            chip.len(),
+            chip.len() >> 20,
+            c.register_reads,
+            c.register_writes,
+            c.refused,
+            c.pages_filled,
+            c.pages_written_back,
+            mapped
+        ))
+    }
+
+    /// The PSRAM's bytes as the guest sees them now: the chip, with every
+    /// page the cache holds live written back into it first.
+    pub fn psram_contents(&self) -> Option<Vec<u8>> {
+        cache::write_back_psram(&self.bus, &self.psram, &self.cache);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .contents()
+            .map(<[u8]>::to_vec)
     }
 
     /// Write the flash image back if its backing says to.
@@ -2658,6 +2766,10 @@ impl Machine {
         // the cycle was dropped, and the second boot read a chip it could not
         // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
         self.flash.lock().expect("flash poisoned").restore_power();
+        // The PSRAM is volatile: what `reboot` kept across the reset (a
+        // reset does not take the chip's supply away) is gone, and its mode
+        // registers are back at their reset.
+        self.psram.lock().expect("psram poisoned").power_off();
         // `reboot` counted a reset; this was a power cycle.
         self.reboots -= 1;
         self.power_cycles += 1;
@@ -2892,6 +3004,59 @@ impl Machine {
     /// to be taken? Such a core is given no window and costs nothing.
     pub fn parked(&self, core: usize) -> bool {
         !self.core_stalled(core) && self.harts.get(core).is_some_and(XtHart::is_waiti)
+    }
+
+    /// Whether the harts pre-decode blocks
+    /// ([`Esp32S3Builder::block_cache`]). `false` is `--no-block-cache`.
+    pub fn block_cache(&self) -> bool {
+        self.harts.first().is_some_and(XtHart::block_cache)
+    }
+
+    /// One `blocks:` line per core: what the block cache did, the window
+    /// hoist's split, and the `isync` count — the classic binary's report,
+    /// for the same diagnostic job. **Never part of a compared transcript**:
+    /// a cache hit is not architectural state, so these are exactly the
+    /// lines that differ between a run and its `--no-block-cache` twin.
+    pub fn block_report_lines(&self) -> Vec<String> {
+        (0..CORES)
+            .map(|core| {
+                let hart = &self.harts[core];
+                let isync = hart.isync_count();
+                match hart.block_stats() {
+                    Some(stats) => {
+                        let hoist = hart.window_hoist_stats();
+                        format!(
+                            "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) \
+                             slots={} mean={:.2} flushes={} capacity_flushes={} range={} \
+                             (dropping {} entries) collisions={}; window hoisted={} \
+                             slotwise={} ({:.2}% hoisted); {isync} isync",
+                            stats.decodes,
+                            stats.hits,
+                            stats.hit_rate() * 100.0,
+                            stats.decodes + stats.hits,
+                            stats.slots_run,
+                            stats.mean_block_len(),
+                            stats.flushes,
+                            stats.capacity_flushes,
+                            stats.range_invalidations,
+                            stats.range_entries_dropped,
+                            stats.collisions,
+                            hoist.hoisted,
+                            hoist.slotwise,
+                            hoist.hoisted_share() * 100.0,
+                        )
+                    }
+                    None => format!(
+                        "blocks: core{core} no cache ({}); {isync} isync",
+                        if self.block_cache() {
+                            "never needed one"
+                        } else {
+                            "--no-block-cache"
+                        },
+                    ),
+                }
+            })
+            .collect()
     }
 
     /// Instructions retired by `core` alone.
@@ -3387,7 +3552,12 @@ impl Machine {
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);
 
-                if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                // Only the watch records an offence, so a window it did not
+                // run under has none to take — and this skips a lock per
+                // window on every run that is not in a cache-off span.
+                if self.cache_watch
+                    && let Some(outcome) = self.take_cache_off_fetch(issuing_pc)
+                {
                     return outcome;
                 }
 
@@ -3441,6 +3611,12 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // M9: an `outlink_start` in the window asked for this boundary;
+            // its chain is read out of RAM now, and LCD_CAM's frame starts.
+            self.service_gdma();
+            if let Some(violation) = self.dma_violation.take() {
+                return Outcome::StrictBus { violation };
+            }
             // The pads: whatever the window put on the wire, in cycle order,
             // and before the feed — a pad whose edge latches a GPIO
             // interrupt must reach the matrix in this same iteration.
@@ -3650,6 +3826,136 @@ impl Machine {
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
         }
+    }
+
+    /// M9: walk every GDMA OUT chain started since the last boundary, out of
+    /// internal RAM, and hand the bytes to the channel; then let LCD_CAM start
+    /// a frame that was waiting for them. See [`crate::periph::gdma`] for why
+    /// the walk is the machine's. One `Option` test when no image has started
+    /// a channel.
+    fn service_gdma(&mut self) {
+        let Some(gi) = self.gdma_index else {
+            return;
+        };
+        let starts = self
+            .bus
+            .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, _| g.take_starts())
+            .unwrap_or_default();
+        if starts.is_empty() {
+            return;
+        }
+        for req in starts {
+            let result = self.walk_out_chain(&req);
+            if let Err(fault) = &result
+                && fault.outside_ram
+                && self.bus.strict()
+            {
+                self.dma_violation.get_or_insert(StrictViolation {
+                    cycle: req.at,
+                    pc: self.harts[0].pc(),
+                    address: fault.address,
+                    width: lp_emu_esp_common::Width::Word,
+                    access: lp_emu_esp_common::Access::Read,
+                    in_mmio_window: false,
+                    grade: None,
+                });
+            }
+            self.bus
+                .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, cx| {
+                    g.loaded(&req, result, cx)
+                });
+        }
+        if let Some(li) = self.lcd_index {
+            self.bus
+                .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, cx| l.data_ready(cx));
+        }
+    }
+
+    /// Read one OUT chain the way the S3's GDMA does: descriptor by
+    /// descriptor from `req.first`, each one's `length` bytes from its
+    /// buffer, until `suc_eof` or a null `next`. A descriptor or buffer
+    /// outside internal RAM, or (with `out_check_owner`) a descriptor the CPU
+    /// still owns, is a fault. With `out_auto_wrback` each descriptor is
+    /// handed back to the CPU (its `owner` bit cleared) once read.
+    fn walk_out_chain(
+        &mut self,
+        req: &crate::periph::gdma::StartRequest,
+    ) -> Result<crate::periph::gdma::Chain, crate::periph::gdma::WalkFault> {
+        use crate::periph::gdma::{
+            Chain, DESC_OWNER, Descriptor, INTERNAL_RAM, MAX_DESCRIPTORS, WalkFault,
+        };
+        let outside = |address: u32, what: &str| WalkFault {
+            address,
+            outside_ram: true,
+            why: format!("{what} at {address:#010x} is outside internal RAM"),
+        };
+        let mut bytes = Vec::new();
+        let (mut addr, mut last, mut before_last) = (req.first, 0u32, 0u32);
+        for n in 0..MAX_DESCRIPTORS {
+            if !INTERNAL_RAM.contains(&addr) || !INTERNAL_RAM.contains(&(addr + 11)) {
+                return Err(outside(addr, "a descriptor"));
+            }
+            let mut words = [0u32; 3];
+            for (k, w) in words.iter_mut().enumerate() {
+                *w = self
+                    .peek_word(addr + 4 * k as u32)
+                    .ok_or_else(|| outside(addr, "a descriptor"))?;
+            }
+            let d = Descriptor::parse(addr, words);
+            if req.check_owner && !d.owner_dma {
+                return Err(WalkFault {
+                    address: addr,
+                    outside_ram: false,
+                    why: "the CPU owns the descriptor (out_check_owner)".into(),
+                });
+            }
+            if d.length > 0 {
+                let end = d.buffer.wrapping_add(d.length - 1);
+                if !INTERNAL_RAM.contains(&d.buffer) || !INTERNAL_RAM.contains(&end) {
+                    return Err(outside(d.buffer, "a buffer"));
+                }
+                let data = self
+                    .peek_bytes(d.buffer, d.length as usize)
+                    .ok_or_else(|| outside(d.buffer, "a buffer"))?;
+                bytes.extend_from_slice(&data);
+            }
+            if req.auto_wrback {
+                self.poke_word(addr, words[0] & !DESC_OWNER);
+            }
+            before_last = last;
+            last = addr;
+            if d.suc_eof || d.next == 0 {
+                return Ok(Chain {
+                    bytes,
+                    last,
+                    before_last,
+                    descriptors: n + 1,
+                });
+            }
+            addr = d.next;
+        }
+        log::warn!(
+            "GDMA: OUT channel {}: the chain from {:#010x} did not end in {MAX_DESCRIPTORS} \
+             descriptors (a ring?); its first {MAX_DESCRIPTORS} are sent",
+            req.ch,
+            req.first
+        );
+        Ok(Chain {
+            bytes,
+            last,
+            before_last,
+            descriptors: MAX_DESCRIPTORS,
+        })
+    }
+
+    /// How many frames LCD_CAM has shifted out completely (M9).
+    pub fn lcd_frames(&mut self) -> u64 {
+        self.lcd_index
+            .and_then(|li| {
+                self.bus
+                    .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, _| l.frames())
+            })
+            .unwrap_or(0)
     }
 
     /// The pads, at a slice boundary: the routing the window changed, then
@@ -4063,7 +4369,16 @@ impl Machine {
             self.usb_sj_tried_log.bytes(),
             self.uart0_log.bytes(),
         );
+        // A reset does not take the PSRAM's supply away, so its bytes (and
+        // its mode registers, which are not in the snapshot) survive it —
+        // IDF's `EXT_RAM_NOINIT_ATTR` exists because they do. The power-on
+        // snapshot carries the chip as it was at power on; keep today's.
+        let psram = self.psram_contents();
         self.restore_state(&power_on);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(psram.as_deref());
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
         self.uart0_log.replace(&uart0);
@@ -4240,6 +4555,7 @@ impl Machine {
             console: self.usb_sj_log.bytes(),
             uart0: self.uart0_log.bytes(),
             pins: self.pins.state.clone(),
+            psram: self.psram_contents(),
         }
     }
 
@@ -4276,11 +4592,38 @@ impl Machine {
         // epoch came back with `restore_scalars`, and leaving the observer's
         // stale forces one re-read of the routing at the next boundary.
         self.pins.state = snap.pins.clone();
+        // The PSRAM's bytes, and every window page closed to stores: the fill
+        // that the restored (all-dirty) table asks for re-opens the ones it
+        // maps to PSRAM, from these bytes — which the snapshot took with the
+        // live pages written back, so they agree with the restored windows.
+        self.bus.clear_store_through();
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(snap.psram.as_deref());
         // The restore put the peripherals' blobs back, the MMU table with
         // them (it rides in `EXTMEM`'s), and marked every entry dirty; the
         // watch is re-armed from the restored enable bits at the next window.
         self.cache_watch = false;
         self.bus.set_memory_cost(None);
+        // A restored table that maps PSRAM is filled NOW, before the guest
+        // runs another instruction: the restored window bytes are already
+        // right (the regions carry them), but a PSRAM page takes no store
+        // until the fill opens it, and the next slice would otherwise fault
+        // on the first one. A table with no PSRAM entry — every power-on
+        // table a reboot restores, every image that never maps PSRAM — keeps
+        // the fill at the next boundary, exactly as before.
+        let maps_psram = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entries()
+            .iter()
+            .any(|e| matches!(cache::Target::of(*e), cache::Target::Psram(_)));
+        if maps_psram {
+            self.refill_cache();
+        }
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.
