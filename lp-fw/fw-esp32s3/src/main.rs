@@ -248,7 +248,25 @@ const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - SPIKE_CORE1_BSS;
 /// SPIKE (fps spike): core 1's stack and the PC sampler's buffer live in
 /// `.bss`; the arena gives them back so the main stack keeps its share.
 #[cfg(feature = "core1-render")]
-const SPIKE_CORE1_BSS: usize = 16 * 1024 + core1::pcs::N * 4;
+const SPIKE_CORE1_BSS: usize = 16 * 1024 + core1::pcs::N * 4 + spike_iram_bytes();
+/// SPIKE (fps spike): `LP_SPIKE_IRAM_KB` — bytes of hot code the rwtext hook
+/// moves into IRAM, given back by the arena.
+#[cfg(feature = "core1-render")]
+const fn spike_iram_bytes() -> usize {
+    match option_env!("LP_SPIKE_IRAM_KB") {
+        Some(s) => {
+            let b = s.as_bytes();
+            let mut i = 0;
+            let mut n = 0usize;
+            while i < b.len() {
+                n = n * 10 + (b[i] - b'0') as usize;
+                i += 1;
+            }
+            n * 1024
+        }
+        None => 0,
+    }
+}
 #[cfg(not(feature = "core1-render"))]
 const SPIKE_CORE1_BSS: usize = 0;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM

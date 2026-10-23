@@ -120,8 +120,12 @@ impl SmoothingTier {
     /// each exceeded feature turned OFF. Never turns a feature on.
     fn apply(&self, authored: &DisplayPipelineOptions) -> DisplayPipelineOptions {
         DisplayPipelineOptions {
+            // SPIKE (fps spike): `LP_SPIKE_NO_INTERP=1` turns interpolation
+            // off — with one write and one tick per frame it only ever puts
+            // the previous frame on the wire.
             interpolation_enabled: authored.interpolation_enabled
-                && self.interpolation_off_above.is_none(),
+                && self.interpolation_off_above.is_none()
+                && option_env!("LP_SPIKE_NO_INTERP") != Some("1"),
             dithering_enabled: authored.dithering_enabled && self.dithering_off_above.is_none(),
             ..authored.clone()
         }

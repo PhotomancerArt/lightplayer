@@ -172,7 +172,7 @@ pub mod pcs {
     const SYSTEM_CPU_PERI_CLK_EN: usize = 0x600C_0008;
     const SYSTEM_CPU_PERI_RST_EN: usize = 0x600C_000C;
 
-    pub const N: usize = 8192;
+    pub const N: usize = 2048;
     static SAMPLES: [AtomicU32; N] = [const { AtomicU32::new(0) }; N];
     /// 0 idle, 1 recording, 2 full (core 0 dumps, then re-arms).
     static STATE: AtomicU32 = AtomicU32::new(0);
