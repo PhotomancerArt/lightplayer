@@ -604,6 +604,9 @@ jobs:
               # lp-cli's.
               - 'lp-cli/src/commands/emu/**'
               - 'lp-cli/tests/emu_s3_*.rs'
+              # The relay cell's S3 arm (S3 radio M6) and the hub it stands up.
+              - 'lp-cli/tests/emu_relay_link.rs'
+              - 'lp-cli/tests/support/relay_cloud.rs'
               # The S3's split image (M7 P4): the pipeline that links it, the
               # loader that boots it and the formats both read. The job's
               # split-boot step boots what they make.
@@ -2846,6 +2849,17 @@ jobs:
         if: success() || steps.seams.outcome == 'failure' || steps.lcd.outcome == 'failure' || steps.psram.outcome == 'failure'
         run: cd lp2025 && just test-emu-esp32s3-wifi
 
+      # The cloud relay on an emulated S3 (S3 radio M6): `emu_relay_link.rs`'s
+      # S3 arm — the Wi‑Fi image the step above built, under `emu run --chip
+      # esp32s3 --link --lan`, dialing an in-process `lp-cloud-server` through
+      # the LAN's uplink: registered, a session at the edit tier, watched,
+      # the LAN takeover, busy, a deploy, Cloud relay off and on, a reset key
+      # refused. ~5 minutes on an M2 Max (309 s, the walk's own time).
+      - name: Emulator ESP32-S3 relay (the cloud relay, net=lan)
+        id: relay
+        if: success() || steps.seams.outcome == 'failure' || steps.lcd.outcome == 'failure' || steps.psram.outcome == 'failure' || steps.wifi.outcome == 'failure'
+        run: cd lp2025 && just test-emu-esp32s3-relay
+
       # The S3's half of the heap-budget record's chip section (M6 P10). It
       # lives here rather than in `Heap budget (esp32c6 chip)` because it
       # needs the Xtensa toolchain this job already installs — a cold espup
@@ -2864,7 +2878,7 @@ jobs:
       # `emu-esp32s3` in S3 radio M5, whose budget it pushed over.)
       - name: Heap budget ratchet — the S3's own ledger
         id: figures_heap
-        if: success() || steps.seams.outcome == 'failure' || steps.lcd.outcome == 'failure' || steps.psram.outcome == 'failure' || steps.wifi.outcome == 'failure'
+        if: success() || steps.seams.outcome == 'failure' || steps.lcd.outcome == 'failure' || steps.psram.outcome == 'failure' || steps.wifi.outcome == 'failure' || steps.relay.outcome == 'failure'
         shell: bash
         run: cd lp2025 && just heap-budget-check-chips-s3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
 
