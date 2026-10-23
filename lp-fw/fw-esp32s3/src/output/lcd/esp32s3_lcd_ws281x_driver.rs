@@ -312,10 +312,10 @@ struct Esp32S3LcdWs281xOutput {
 
 impl Ws281xOutput for Esp32S3LcdWs281xOutput {
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
-        // SAFETY: `data` outlives this call, and `wait_complete` below has
-        // encoded it before returning.
+        // SAFETY: `data` outlives this call, and `wait_drained` below has
+        // encoded and sent it before returning.
         unsafe { self.start(data)? };
-        self.wait_complete()
+        self.wait_drained()
     }
 
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
@@ -334,8 +334,16 @@ impl Ws281xOutput for Esp32S3LcdWs281xOutput {
         unsafe { self.shared.borrow_mut().bus.start(self.lane, data) }
     }
 
+    /// Returns once this lane's bytes are encoded into the bus's own buffer,
+    /// not when the wire is done: the provider's wait-before-stage then costs
+    /// nothing and render overlaps the wire (credit: the core-1 spike, which
+    /// measured core 0 spending 46 % of its time here on lp-emu).
     fn wait_complete(&mut self) -> Result<(), OutputError> {
-        self.shared.borrow_mut().bus.wait_complete(self.lane)
+        self.shared.borrow_mut().bus.release(self.lane)
+    }
+
+    fn wait_drained(&mut self) -> Result<(), OutputError> {
+        self.shared.borrow_mut().bus.wait_drained(self.lane)
     }
 
     /// GDMA feeds the bus from internal RAM with no CPU involved, so a frame

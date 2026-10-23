@@ -5,7 +5,7 @@
 //!
 //! 1. Each open lane's [`LcdBus::start`] records where its RGB bytes are.
 //!    The caller keeps them alive until that lane's next
-//!    [`LcdBus::wait_complete`] (`Ws281xOutput::start`'s contract).
+//!    [`LcdBus::release`] (`Ws281xOutput::start`'s contract).
 //! 2. When every open lane has started, or a lane starts again, or a lane
 //!    waits, the frame is **kicked**: all pending lanes are encoded in one pass
 //!    ([`lp_ws281x::parallel::encode_frame`], GRB on the wire) into the buffer
@@ -14,6 +14,12 @@
 //! 3. From there to the latch the CPU is not involved: no refill interrupt,
 //!    no deadline. A lane that did not start this frame is held low, and its
 //!    strip keeps showing what it last latched.
+//! 4. The caller's bytes are free from the kick on ([`LcdBus::release`]), so
+//!    the next render runs while this frame is on the wire. The next kick
+//!    encodes into the **other** buffer and waits out the transfer before it
+//!    starts its own; with one buffer (two did not fit) it waits first. No
+//!    path writes or frees a buffer the DMA is reading: `resize` and `close`
+//!    wait the bus idle before touching buffers.
 //!
 //! # Where the buffers live
 //!
@@ -99,6 +105,46 @@ pub struct LcdBus {
     /// The CAM-half frame check (`ws281x_frame_check`, never shipped).
     #[cfg(feature = "ws281x_frame_check")]
     pub check: Option<super::frame_check::FrameCheck>,
+    #[cfg(feature = "ws281x_overlap_ab")]
+    ab: OverlapAb,
+}
+
+/// `ws281x_overlap_ab` (never shipped): the overlap off and on in turns, 20 s
+/// each, in one boot, with each window's frame rate logged — a same-image
+/// A/B of render overlapping the wire against waiting it out.
+#[cfg(feature = "ws281x_overlap_ab")]
+struct OverlapAb {
+    overlap: bool,
+    window_start: Option<Instant>,
+    kicks: u32,
+}
+
+#[cfg(feature = "ws281x_overlap_ab")]
+impl OverlapAb {
+    const WINDOW: Duration = Duration::from_secs(20);
+
+    fn on_kick(&mut self) {
+        let Some(start) = self.window_start else {
+            self.window_start = Some(Instant::now());
+            return;
+        };
+        self.kicks += 1;
+        let elapsed = start.elapsed();
+        if elapsed >= Self::WINDOW {
+            let fps_x100 = u64::from(self.kicks) * 100_000_000 / elapsed.as_micros().max(1);
+            log::info!(
+                "[ws281x-ab] overlap={} frames={} window_ms={} fps={}.{:02}",
+                if self.overlap { "on" } else { "off" },
+                self.kicks,
+                elapsed.as_millis(),
+                fps_x100 / 100,
+                fps_x100 % 100,
+            );
+            self.overlap = !self.overlap;
+            self.kicks = 0;
+            self.window_start = Some(Instant::now());
+        }
+    }
 }
 
 /// Counters since boot, for the log and the walk.
@@ -128,6 +174,12 @@ impl LcdBus {
             stats: BusStats::default(),
             #[cfg(feature = "ws281x_frame_check")]
             check: None,
+            #[cfg(feature = "ws281x_overlap_ab")]
+            ab: OverlapAb {
+                overlap: false,
+                window_start: None,
+                kicks: 0,
+            },
         }
     }
 
@@ -201,7 +253,7 @@ impl LcdBus {
     /// # Safety
     ///
     /// `data` stays alive and unmodified until this lane's next
-    /// [`Self::wait_complete`] or [`Self::close_lane`].
+    /// [`Self::release`], [`Self::wait_drained`] or [`Self::close_lane`].
     pub unsafe fn start(&mut self, lane: u8, data: &[u8]) -> Result<(), OutputError> {
         let expected = self.lanes[lane as usize].bytes;
         if data.len() != expected {
@@ -223,9 +275,26 @@ impl LcdBus {
         Ok(())
     }
 
+    /// Release `lane`'s bytes: send its pending frame if it has not gone yet.
+    /// Once a frame is kicked its bytes live in the bus's own buffer, so the
+    /// caller's are free while the wire is still busy — this is what lets the
+    /// next render overlap this frame's wire time. The transfer in flight is
+    /// waited out by the next kick (it never encodes into the buffer on the
+    /// wire) or by [`Self::wait_drained`].
+    pub fn release(&mut self, lane: u8) -> Result<(), OutputError> {
+        #[cfg(feature = "ws281x_overlap_ab")]
+        if !self.ab.overlap {
+            return self.wait_drained(lane);
+        }
+        if self.lanes[lane as usize].pending.is_some() {
+            self.kick()?;
+        }
+        Ok(())
+    }
+
     /// Send `lane`'s pending frame if it has not gone yet, and wait out the
-    /// transfer carrying it.
-    pub fn wait_complete(&mut self, lane: u8) -> Result<(), OutputError> {
+    /// transfer carrying it: the wire is idle for this lane on return.
+    pub fn wait_drained(&mut self, lane: u8) -> Result<(), OutputError> {
         if self.lanes[lane as usize].pending.is_some() {
             self.kick()?;
         }
@@ -320,6 +389,8 @@ impl LcdBus {
                 // with it in `wait_idle`.
                 self.in_flight_sizes = Some((bytes, descriptors));
                 self.stats.frames = self.stats.frames.wrapping_add(1);
+                #[cfg(feature = "ws281x_overlap_ab")]
+                self.ab.on_kick();
                 // One line per 1,000 frames (~30 s at 30 fps): what a walk
                 // reads off the product image with no analyzer attached.
                 if self.stats.frames % 1_000 == 1 {

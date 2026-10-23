@@ -15,7 +15,10 @@
 //! arithmetic); the driver takes RGB and sends GRB, so the RGB handed to
 //! `start` is the wire order with each pixel's first two bytes swapped back.
 //! Two frames: all five lanes `start`, then all five `wait_complete`, which is
-//! the provider's order.
+//! the provider's order — and then the harness overwrites its bytes with the
+//! next frame's at once, while the wire may still be sending: the backend's
+//! `wait_complete` only releases the bytes (the overlap), so this is the
+//! check that it never reads them after that.
 //!
 //! # Lines
 //!
@@ -34,9 +37,21 @@ pub const LANES: [usize; 5] = [12, 9, 7, 5, 3];
 const LABELS: [&str; 5] = ["D0", "D1", "D2", "D3", "D4"];
 const FRAMES: u32 = 2;
 
-/// Lane `lane`'s wire byte `k`. The emulator's test computes the same.
-pub const fn lane_byte(lane: usize, k: usize) -> u8 {
-    ((lane as u8 + 1).wrapping_mul(29)) ^ (k as u8).wrapping_mul(13) ^ 0xa5
+/// Lane `lane`'s wire byte `k` in frame `frame`. The emulator's test
+/// computes the same.
+pub const fn lane_byte(lane: usize, k: usize, frame: u32) -> u8 {
+    ((lane as u8 + 1).wrapping_mul(29)) ^ (k as u8).wrapping_mul(13) ^ 0xa5 ^ (frame as u8 * 0x3c)
+}
+
+/// Lane `lane`'s RGB frame `frame` (GRB on the wire, so each pixel's first two
+/// wire bytes swap back), written into `out`.
+fn fill(out: &mut [u8], lane: usize, frame: u32) {
+    for (k, byte) in out.iter_mut().enumerate() {
+        *byte = lane_byte(lane, k, frame);
+    }
+    for pixel in out.chunks_exact_mut(3) {
+        pixel.swap(0, 1);
+    }
 }
 
 pub fn run(p: esp_hal::peripherals::Peripherals) -> ! {
@@ -63,11 +78,8 @@ pub fn run(p: esp_hal::peripherals::Peripherals) -> ! {
             Err(why) => fail(format_args!("open {label}: {why}")),
         }
         esp_println::println!("[LCD-BACKEND] open {label} bytes={bytes}");
-        // RGB in, GRB on the wire: swap each pixel's first two wire bytes back.
-        let mut rgb: Vec<u8> = (0..bytes).map(|k| lane_byte(lane, k)).collect();
-        for pixel in rgb.chunks_exact_mut(3) {
-            pixel.swap(0, 1);
-        }
+        let mut rgb = alloc::vec![0u8; bytes];
+        fill(&mut rgb, lane, 0);
         frames.push(rgb);
     }
 
@@ -83,6 +95,12 @@ pub fn run(p: esp_hal::peripherals::Peripherals) -> ! {
             if let Err(why) = output.wait_complete() {
                 result = Err(why);
             }
+        }
+        // `wait_complete` released the bytes; the wire may still be sending
+        // this frame. Overwrite them with the next frame now: if the backend
+        // still read them, this frame would decode as the next one.
+        for (lane, frame) in frames.iter_mut().enumerate() {
+            fill(frame, lane, n + 1);
         }
         match result {
             Ok(()) => esp_println::println!("[LCD-BACKEND] frame {n} ok"),

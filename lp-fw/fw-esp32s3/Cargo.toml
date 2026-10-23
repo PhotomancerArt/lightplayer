@@ -195,6 +195,11 @@ lcd-ws281x = []
 # two drivers' truncation the same way.
 ws281x_frame_check = []
 
+# A same-image fps A/B (never shipped): the LCD backend's overlap (render
+# running while the previous frame is on the wire) off and on in 20 s turns,
+# each window's frame rate logged as `[ws281x-ab] overlap=… fps=…`.
+ws281x_overlap_ab = []
+
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
 # what `scripts/m4-hardware-walk.sh` diffs against the host oracle, and it is

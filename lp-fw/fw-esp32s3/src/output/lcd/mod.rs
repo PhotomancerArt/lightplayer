@@ -45,7 +45,11 @@ pub fn new_driver(
         // SAFETY: nothing else in a `ws281x_frame_check` image claims them.
         let (dma, clk, vsync) = unsafe {
             use esp_hal::peripherals::{DMA_CH1, GPIO11, GPIO12};
-            (DMA_CH1::steal(), GPIO11::steal().into(), GPIO12::steal().into())
+            (
+                DMA_CH1::steal(),
+                GPIO11::steal().into(),
+                GPIO12::steal().into(),
+            )
         };
         if let Some(check) = frame_check::FrameCheck::new(lcd_cam.cam, dma, clk, vsync) {
             driver.attach_check(check);
