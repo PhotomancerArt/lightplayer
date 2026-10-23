@@ -729,9 +729,16 @@ pub fn stamp<T: Num>(solver: &mut SpikeSolver<T>, emitter: &FluidEmitter) {
 
 /// One scripted step at time `t` (25 Hz steps: `t = step / 25`).
 pub fn scripted_step<T: Num>(solver: &mut SpikeSolver<T>, step: u32) {
+    scripted_step_scaled(solver, step, 1.0);
+}
+
+/// [`scripted_step`] with every emitter's velocity scaled by `vscale`.
+pub fn scripted_step_scaled<T: Num>(solver: &mut SpikeSolver<T>, step: u32, vscale: f32) {
     let t = step as f32 / 25.0;
     for e in script_emitters(t).iter() {
-        stamp(solver, e);
+        let mut e = e.clone();
+        e.velocity *= vscale;
+        stamp(solver, &e);
     }
     solver.update();
 }

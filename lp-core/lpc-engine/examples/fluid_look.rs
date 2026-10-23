@@ -5,13 +5,15 @@
 
 use std::io::Write;
 
-use lpc_engine::nodes::fluid::spike::{Num, Opts, SpikeSolver, Sweep, scripted_step};
+use lpc_engine::nodes::fluid::spike::{Num, Opts, SpikeSolver, Sweep, scripted_step_scaled};
 use lps_q32::Q32;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let out = std::path::PathBuf::from(&args[1]);
     let steps: u32 = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(750);
+    let vscale: f32 = args.get(3).map(|s| s.parse().unwrap()).unwrap_or(1.0);
+    let only: Vec<String> = args.get(4).map(|s| s.split(',').map(String::from).collect()).unwrap_or_default();
     let rb = |w: f32| Sweep::RedBlack { omega: w };
     let e = Opts::EXACT;
     // (name, number, opts)
@@ -59,23 +61,26 @@ fn main() {
         let dir = out.join(format!("{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         for (name, num, opts) in &rows {
+            if !only.is_empty() && !only.iter().any(|o| o == name) {
+                continue;
+            }
             let path = dir.join(format!("{name}.f32"));
             match num {
-                'q' => dump::<Q32>(&path, n, *opts, steps),
-                'w' => dump::<lpc_engine::nodes::fluid::spike::Qw>(&path, n, *opts, steps),
-                _ => dump::<f32>(&path, n, *opts, steps),
+                'q' => dump::<Q32>(&path, n, *opts, steps, vscale),
+                'w' => dump::<lpc_engine::nodes::fluid::spike::Qw>(&path, n, *opts, steps, vscale),
+                _ => dump::<f32>(&path, n, *opts, steps, vscale),
             }
         }
         eprintln!("grid {n}: {} variants", rows.len());
     }
 }
 
-fn dump<T: Num>(path: &std::path::Path, n: usize, opts: Opts, steps: u32) {
+fn dump<T: Num>(path: &std::path::Path, n: usize, opts: Opts, steps: u32, vscale: f32) {
     let mut s = SpikeSolver::<T>::new(n, n, 10, 0.08, 3e-5, opts);
     let mut f = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
     let stride = s.stride();
     for k in 0..steps {
-        scripted_step(&mut s, k);
+        scripted_step_scaled(&mut s, k, vscale);
         for field in [&s.r, &s.g, &s.b] {
             for j in 1..=n {
                 for i in 1..=n {

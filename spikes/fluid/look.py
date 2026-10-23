@@ -162,3 +162,34 @@ if __name__ == "__main__":
         video(d, n, sys.argv[4], sys.argv[5:])
     elif cmd == "sheet":
         sheet(d, n, sys.argv[4], sys.argv[5:])
+
+
+def pair(d, n, out, b_name, a_label, b_label, size=400):
+    """A/B video: today's solver on the left, one candidate on the right,
+    each labelled in big type, same emitters, same seed."""
+    from PIL import ImageFont
+    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+    small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 18)
+    a, b = load(d, n, "base"), load(d, n, b_name)
+    steps = min(a.shape[0], b.shape[0])
+    gap, head, foot = 12, 44, 30
+    w, h = 2 * size + gap, head + size + foot
+    ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                           "-s", f"{w}x{h}", "-r", str(STEP_HZ), "-i", "-", "-pix_fmt", "yuv420p",
+                           "-c:v", "libx264", "-crf", "20", out], stdin=subprocess.PIPE)
+    for k in range(steps):
+        im = Image.new("RGB", (w, h), (13, 15, 18))
+        dr = ImageDraw.Draw(im)
+        for x0, arr, lab in ((0, a, a_label), (size + gap, b, b_label)):
+            img = (np.clip(arr[k], 0, 1).transpose(1, 2, 0) * 255).astype(np.uint8)
+            p = Image.fromarray(img, "RGB").transpose(Image.FLIP_TOP_BOTTOM).resize((size, size), Image.BILINEAR)
+            im.paste(p, (x0, head))
+            dr.text((x0 + 4, 8), lab, font=font, fill=(235, 237, 242))
+        dr.text((4, head + size + 6), f"t = {k / STEP_HZ:4.1f} s   (grid {n}×{n}, same emitters and seed)", font=small, fill=(150, 158, 170))
+        ff.stdin.write(im.tobytes())
+    ff.stdin.close()
+    ff.wait()
+
+
+if __name__ == "__main__" and sys.argv[1] == "pair":
+    pair(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7])
