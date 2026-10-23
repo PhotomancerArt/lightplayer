@@ -333,6 +333,11 @@ fn boot() -> ! {
     // nothing else of the peripherals is used.
     #[cfg(feature = "test_psram")]
     tests::test_psram::run(peripherals.PSRAM);
+
+    // Five WS281x lanes from LCD_CAM + GDMA (M9): the LCD, the DMA channel
+    // and five pads are taken from the singleton.
+    #[cfg(feature = "test_lcd_lanes")]
+    tests::test_lcd_lanes::run(peripherals);
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact

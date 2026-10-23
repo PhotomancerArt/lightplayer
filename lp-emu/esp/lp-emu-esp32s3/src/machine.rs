@@ -292,6 +292,13 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "WIFI_MAC",
     "WIFI_PWR",
     "BTDM_WAKE",
+    // ---- M9: the parallel LED path (`periph::gdma`, `periph::lcd_cam`),
+    // appended for the same reason. Met only by an image that drives WS281x
+    // lanes from LCD_CAM; LCD_CAM is two windows around its unmapped CAM
+    // registers.
+    "DMA",
+    "LCD_CAM_CLOCK",
+    "LCD_CAM",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -1827,6 +1834,8 @@ impl Esp32S3Builder {
         let usb_index = bus.peripheral_index("USB_DEVICE");
         let gpio_index = bus.peripheral_index("GPIO");
         let rmt_index = bus.peripheral_index("RMT");
+        let gdma_index = bus.peripheral_index("DMA");
+        let lcd_index = bus.peripheral_index("LCD_CAM");
 
         // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
         // where the C6's has it clear, so the fabric is told what the
@@ -1958,6 +1967,9 @@ impl Esp32S3Builder {
             gpio_index,
             strap_word: self.strap_word,
             rmt_index,
+            gdma_index,
+            lcd_index,
+            dma_violation: None,
             pins: PinObserver {
                 strip: self.strip,
                 cpu_hz: memmap::CPU_HZ,
@@ -2230,6 +2242,14 @@ pub struct Machine {
     /// The other block that watches the pads: the RMT's own logs and
     /// refill telemetry are read through it (M6 P07).
     rmt_index: Option<usize>,
+    /// M9: the AHB GDMA, whose OUT chains the machine walks between windows
+    /// ([`Machine::service_gdma`]), and LCD_CAM's LCD window, which consumes
+    /// them.
+    gdma_index: Option<usize>,
+    lcd_index: Option<usize>,
+    /// A GDMA descriptor or buffer outside internal RAM under `--strict-bus`:
+    /// the run ends on it as on any strict refusal.
+    dma_violation: Option<StrictViolation>,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
@@ -3591,6 +3611,12 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // M9: an `outlink_start` in the window asked for this boundary;
+            // its chain is read out of RAM now, and LCD_CAM's frame starts.
+            self.service_gdma();
+            if let Some(violation) = self.dma_violation.take() {
+                return Outcome::StrictBus { violation };
+            }
             // The pads: whatever the window put on the wire, in cycle order,
             // and before the feed — a pad whose edge latches a GPIO
             // interrupt must reach the matrix in this same iteration.
@@ -3800,6 +3826,136 @@ impl Machine {
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
         }
+    }
+
+    /// M9: walk every GDMA OUT chain started since the last boundary, out of
+    /// internal RAM, and hand the bytes to the channel; then let LCD_CAM start
+    /// a frame that was waiting for them. See [`crate::periph::gdma`] for why
+    /// the walk is the machine's. One `Option` test when no image has started
+    /// a channel.
+    fn service_gdma(&mut self) {
+        let Some(gi) = self.gdma_index else {
+            return;
+        };
+        let starts = self
+            .bus
+            .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, _| g.take_starts())
+            .unwrap_or_default();
+        if starts.is_empty() {
+            return;
+        }
+        for req in starts {
+            let result = self.walk_out_chain(&req);
+            if let Err(fault) = &result
+                && fault.outside_ram
+                && self.bus.strict()
+            {
+                self.dma_violation.get_or_insert(StrictViolation {
+                    cycle: req.at,
+                    pc: self.harts[0].pc(),
+                    address: fault.address,
+                    width: lp_emu_esp_common::Width::Word,
+                    access: lp_emu_esp_common::Access::Read,
+                    in_mmio_window: false,
+                    grade: None,
+                });
+            }
+            self.bus
+                .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, cx| {
+                    g.loaded(&req, result, cx)
+                });
+        }
+        if let Some(li) = self.lcd_index {
+            self.bus
+                .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, cx| l.data_ready(cx));
+        }
+    }
+
+    /// Read one OUT chain the way the S3's GDMA does: descriptor by
+    /// descriptor from `req.first`, each one's `length` bytes from its
+    /// buffer, until `suc_eof` or a null `next`. A descriptor or buffer
+    /// outside internal RAM, or (with `out_check_owner`) a descriptor the CPU
+    /// still owns, is a fault. With `out_auto_wrback` each descriptor is
+    /// handed back to the CPU (its `owner` bit cleared) once read.
+    fn walk_out_chain(
+        &mut self,
+        req: &crate::periph::gdma::StartRequest,
+    ) -> Result<crate::periph::gdma::Chain, crate::periph::gdma::WalkFault> {
+        use crate::periph::gdma::{
+            Chain, DESC_OWNER, Descriptor, INTERNAL_RAM, MAX_DESCRIPTORS, WalkFault,
+        };
+        let outside = |address: u32, what: &str| WalkFault {
+            address,
+            outside_ram: true,
+            why: format!("{what} at {address:#010x} is outside internal RAM"),
+        };
+        let mut bytes = Vec::new();
+        let (mut addr, mut last, mut before_last) = (req.first, 0u32, 0u32);
+        for n in 0..MAX_DESCRIPTORS {
+            if !INTERNAL_RAM.contains(&addr) || !INTERNAL_RAM.contains(&(addr + 11)) {
+                return Err(outside(addr, "a descriptor"));
+            }
+            let mut words = [0u32; 3];
+            for (k, w) in words.iter_mut().enumerate() {
+                *w = self
+                    .peek_word(addr + 4 * k as u32)
+                    .ok_or_else(|| outside(addr, "a descriptor"))?;
+            }
+            let d = Descriptor::parse(addr, words);
+            if req.check_owner && !d.owner_dma {
+                return Err(WalkFault {
+                    address: addr,
+                    outside_ram: false,
+                    why: "the CPU owns the descriptor (out_check_owner)".into(),
+                });
+            }
+            if d.length > 0 {
+                let end = d.buffer.wrapping_add(d.length - 1);
+                if !INTERNAL_RAM.contains(&d.buffer) || !INTERNAL_RAM.contains(&end) {
+                    return Err(outside(d.buffer, "a buffer"));
+                }
+                let data = self
+                    .peek_bytes(d.buffer, d.length as usize)
+                    .ok_or_else(|| outside(d.buffer, "a buffer"))?;
+                bytes.extend_from_slice(&data);
+            }
+            if req.auto_wrback {
+                self.poke_word(addr, words[0] & !DESC_OWNER);
+            }
+            before_last = last;
+            last = addr;
+            if d.suc_eof || d.next == 0 {
+                return Ok(Chain {
+                    bytes,
+                    last,
+                    before_last,
+                    descriptors: n + 1,
+                });
+            }
+            addr = d.next;
+        }
+        log::warn!(
+            "GDMA: OUT channel {}: the chain from {:#010x} did not end in {MAX_DESCRIPTORS} \
+             descriptors (a ring?); its first {MAX_DESCRIPTORS} are sent",
+            req.ch,
+            req.first
+        );
+        Ok(Chain {
+            bytes,
+            last,
+            before_last,
+            descriptors: MAX_DESCRIPTORS,
+        })
+    }
+
+    /// How many frames LCD_CAM has shifted out completely (M9).
+    pub fn lcd_frames(&mut self) -> u64 {
+        self.lcd_index
+            .and_then(|li| {
+                self.bus
+                    .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, _| l.frames())
+            })
+            .unwrap_or(0)
     }
 
     /// The pads, at a slice boundary: the routing the window changed, then
