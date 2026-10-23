@@ -1,9 +1,10 @@
 //! SPIKE (feature `core1-render`): core 1 (the APP CPU) as a render helper.
 //!
 //! Not product code. Core 1 is started once, at boot, into [`helper_loop`] —
-//! a spin on one word in internal RAM, from IRAM (`#[ram]`), with every
-//! interrupt masked (esp-hal's `start_core1_init` sets `INTENABLE` to 0 and
-//! nothing here enables one). It touches neither flash nor PSRAM while idle,
+//! a spin on one word in internal RAM, from IRAM (`#[ram]`), taking no
+//! interrupts (esp-hal's `start_core1_init` clears `INTENABLE`, then
+//! `init_vectoring` enables only its five vectored CPU lines, and no source is
+//! mapped to core 1: every driver enables from core 0). It touches neither flash nor PSRAM while idle,
 //! which the PSRAM spike measured as immune to MSPI contention and to a flash
 //! erase on core 0.
 //!
