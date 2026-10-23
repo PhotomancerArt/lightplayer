@@ -287,9 +287,8 @@ The silicon evidence and the harness are the LED-channels spike's:
 `test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
 same pads as a CPU-free logic analyzer; build it without `ble`,
 `--no-default-features --features esp32s3,test_lcd_ws281x`, or its 8 × 500 case
-runs out of the radio image's arena), and `lcd_ws281x_probe` (the check beside
-Bluetooth and a Wi‑Fi scan loop; it brings its own LCD_CAM, so it cannot be
-built with `lcd-ws281x`).
+runs out of the radio image's arena). The same check on the product image,
+beside Bluetooth and the server, is `ws281x_frame_check` (above).
 
 ## Input
 

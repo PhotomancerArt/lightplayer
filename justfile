@@ -1179,8 +1179,6 @@ clippy-fw-esp32s3:
     cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
     echo "clippy: --features test_lcd_ws281x"
     cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
-    echo "clippy: --features lcd_ws281x_probe"
-    cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
     echo "clippy: --features test_lcd_backend"
     cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
     echo "clippy: --features ws281x_frame_check"

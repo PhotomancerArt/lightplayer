@@ -279,13 +279,6 @@ test_backtrace_oracle = []
 # this feature rather than off the dependency line.
 test_loopback = ["lp-ws281x/test_hooks"]
 
-# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
-# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
-# sampling the pads. See src/tests/lcd_ws281x.rs.
-test_lcd_ws281x = []
-# The same check in the app image, beside Bluetooth and a Wi‑Fi scan loop
-# (src/lcd_probe.rs). Decorates the app path, like `radio_boot_probe`.
-lcd_ws281x_probe = ["ble", "esp-radio/wifi"]
 
 # GPIO button diagnostic mode: D9/GPIO8 with an internal pull-up, mirroring
 # fw-esp32c6's `test_button` feature. Needs `server` for the hardware
@@ -331,6 +324,11 @@ test_psram = []
 # it tests the emulator and not the product's encoder.
 #
 #   just build-fw-esp32s3 test_lcd_lanes
+# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
+# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
+# sampling the pads. See src/tests/lcd_ws281x.rs. (The product image's own
+# check beside the radios is `ws281x_frame_check`.)
+test_lcd_ws281x = []
 test_lcd_lanes = []
 # Five uneven lanes through the PRODUCT LCD_CAM backend (`lcd-ws281x`'s
 # driver: registry, board endpoints, open, start/wait_complete), for the

@@ -1,8 +1,8 @@
 //! LCD_CAM parallel WS281x — the LED-channels spike's silicon proof.
-//! **Spike code; never shipped.** Two users: the `test_lcd_ws281x` harness
+//! **Spike code; never shipped.** Its user is the `test_lcd_ws281x` harness
 //! (`tests/lcd_ws281x.rs`: the cases below, with the CPU masked or stalled in
-//! a flash write) and the `lcd_ws281x_probe` app image (`lcd_probe.rs`: the
-//! same check beside the server, Bluetooth and a Wi‑Fi scan loop).
+//! a flash write). The product image's own check is `ws281x_frame_check`
+//! (`output/lcd/frame_check.rs`).
 //!
 //! Up to eight WS281x lanes from one DMA stream: LCD_CAM's LCD half in
 //! i8080 mode shifts one byte per bus clock onto eight pads, and the frame is

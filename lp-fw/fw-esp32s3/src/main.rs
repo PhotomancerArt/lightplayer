@@ -138,8 +138,6 @@ mod hardware;
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
 // inside is still app-only.
-#[cfg(all(feature = "lcd_ws281x_probe", not(fw_harness)))]
-mod lcd_probe;
 #[cfg(any(
     not(fw_harness),
     feature = "test_loopback",
@@ -147,11 +145,6 @@ mod lcd_probe;
     feature = "test_lcd_backend"
 ))]
 mod output;
-#[cfg(all(feature = "lcd_ws281x_probe", feature = "lcd-ws281x"))]
-compile_error!(
-    "`lcd_ws281x_probe` brings its own LCD_CAM rig; it cannot share the peripheral with the \
-     `lcd-ws281x` output driver"
-);
 #[cfg(all(feature = "psram", not(fw_harness)))]
 mod psram;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
@@ -810,8 +803,6 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             true => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
                 let started = ble::start(spawner, radio_port);
-                #[cfg(feature = "lcd_ws281x_probe")]
-                lcd_probe::start(spawner);
                 started
             }
             false if fs_boot_state == lpc_wire::FsBootState::Refused => {
