@@ -763,10 +763,13 @@ carries **bytes** — `lp-cli … serial:tcp://` connects to it unchanged — an
 client connecting **is** an application opening the port (`--usb-sj-drain
 manual` decouples them). `--control tcp:<addr>` carries the **cable**, one
 line per command and one reply per command: `attach`, `detach`, `open`,
-`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `state`,
-`usb-write`. `attach` and `detach` are never implied by a socket: a cable is
-not a port open, and the whole reason to model a host is that the two come
-apart. `--usb-script <file>` is the deterministic twin — declared **emulated**
+`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `power-cycle`,
+`state`, `usb-write`. `attach` and `detach` are never implied by a socket: a
+cable is not a port open, and the whole reason to model a host is that the
+two come apart. `power-cycle` is not the cable's but a hand on the plug: the
+machine's [`power_cycle`](src/machine.rs) (the power-on snapshot, the flash as
+it stands), performed at the run loop's next boundary as the C6's is; the LAN
+update test's power cuts use it (`just test-emu-esp32s3-ota-lan`). `--usb-script <file>` is the deterministic twin — declared **emulated**
 times, plus `after "<line>"` and `then +<ms>` — and two runs of one script
 deliver identical bytes at identical cycles; a socket is host time and is
 only auditable.
@@ -1022,11 +1025,22 @@ image and runs them with `--features test-seams` (CI: `Emulator ESP32-S3
 seams and heap (x64)`, a job of its own, which also runs the S3's heap
 ratchet).
 
-⚠️ **The shipped S3 image declares no seam yet** (no network stack before
-the roadmap's M4), so on it every default run says `SEAM none engaged: no
-seam table` and its label stays `lp-emu:esp32s3:t1`. `emu serve` still holds
-C6 boards only; S3 boards there, and the two-board LAN walk, come with the
-first S3 image that has Wi‑Fi.
+**The `wifi` image declares the network seam** (S3 radio M5's second half;
+`fw-esp32s3 --features wifi`, off by default): a default run engages
+`net=lan`, the firmware says `[wifi] network: the emulator's network seam`,
+and the label is `lp-emu:esp32s3:t1+net=lan`. An image without `wifi` has no
+network stack and declares no seam, so every default run on it says `SEAM none
+engaged: no seam table` and its label stays `lp-emu:esp32s3:t1`.
+`just test-emu-esp32s3-wifi` builds and merges the `wifi` image and runs
+`lp-cli/tests/emu_s3_lan_pair.rs`: two S3s, each joined alone over its USB
+link, then both on one runner-driven LAN (two leases, each board's
+`lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
+esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
+`just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them
+(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). With Peach (1D) loaded,
+the image's heap runs short and the board resets
+(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md);
+`WALK_PROJECT="Fiber Headband"` fits.
 
 ⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
 interrupt entry saves the FP registers, and this machine's `CPENABLE` resets

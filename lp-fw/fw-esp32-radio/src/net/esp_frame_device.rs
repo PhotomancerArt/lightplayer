@@ -7,18 +7,18 @@ use core::task::Context;
 use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
 use esp_radio::wifi::Interface;
 use fw_esp32_common::net::NetFrameDevice;
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use fw_esp32_common::net::SeamFrameDevice;
 
 /// The frame device embassy-net runs over on this image: esp-radio's
 /// station interface in the radio arm of the seam boundary, the network
 /// seam's device (`fw_esp32_common::net::SeamFrameDevice`) in the seam arm,
-/// each counted. Off RISC-V there is no network seam yet, and the seam arm
+/// each counted. On a host build there is no network seam, and the seam arm
 /// is `fw_esp32_common::net::Unplugged` (compiled out).
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub type BoardFrameDevice = NetFrameDevice<Counted<Interface<'static>>, Counted<SeamFrameDevice>>;
 /// The frame device embassy-net runs over on this image (no seam arm).
-#[cfg(not(target_arch = "riscv32"))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))]
 pub type BoardFrameDevice = NetFrameDevice<Counted<Interface<'static>>>;
 
 /// Frames handed up by the frame device, since boot.

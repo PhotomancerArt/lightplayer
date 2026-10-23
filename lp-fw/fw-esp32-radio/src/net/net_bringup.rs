@@ -9,16 +9,17 @@
 //! station plug in under the same IP stack, the wake line is bound (the
 //! chip's [`NetChip::bind_seam_wake`]), and the radio's controller is kept
 //! (it still runs ESP-NOW). BLE is not touched either way. The seam is
-//! RISC-V only; off RISC-V the radio always runs.
+//! RISC-V and Xtensa only (the C6 and the S3); a host build runs the radio
+//! arm.
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use alloc::boxed::Box;
 
 use esp_radio::wifi::{Interface, WifiController};
 use fw_esp32_common::net::NetFrameDevice;
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use fw_esp32_common::net::{SeamFrameDevice, SeamStation};
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use fw_esp32_common::seams::net::net_mac;
 
 use super::board_station::BoardStation;
@@ -33,7 +34,7 @@ pub fn choose(
     interface: Interface<'static>,
     chip: &NetChip,
 ) -> (BoardFrameDevice, BoardStation) {
-    #[cfg(target_arch = "riscv32")]
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     if net_mac::engaged() {
         if let Some(mac) = fw_esp32_common::net::seam_frame_device::station_mac() {
             log::info!("[wifi] network: the emulator's network seam");
@@ -51,7 +52,7 @@ pub fn choose(
         }
         log::warn!("[wifi] network seam engaged but it gave no MAC: running the radio");
     }
-    #[cfg(not(target_arch = "riscv32"))]
+    #[cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))]
     let _ = chip;
     log::info!("[wifi] network: the radio");
     (

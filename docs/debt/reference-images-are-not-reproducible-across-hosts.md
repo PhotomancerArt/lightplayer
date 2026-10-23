@@ -116,6 +116,15 @@ it wrong is a red CI run on a correct change.
   used` and ended `test-emu-c6-boot` there; `just test-emu-serve` re-run
   passed whole, and `test-emu-c6-cli`, which the failure had skipped, was
   run on its own. Five of five on the building run.
+- 2026-10-22 (#1273, S3 radio M5's second half) — the sixth, byte for byte:
+  `just test-emu-c6`'s first `emu_serve_walk` (building the reference image,
+  load average ~60–110 with an S3 walk running beside it) read `220468 B free /
+  105068 B used`; 592 of the suite's 593 tests passed. `test-emu-serve`,
+  re-run on its own, passed whole (the walk's figure exact, the reference
+  image reused); `test-emu-c6-cli`, which the failure had skipped, was run
+  on its own. The branch's C6 image
+  is byte-identical to main's but for its build stamp, so this test's figure
+  cannot be the branch's. Six of six on the building run.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

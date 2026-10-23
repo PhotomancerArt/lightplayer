@@ -1175,6 +1175,14 @@ clippy-fw-esp32s3:
     # defaults, so nothing else here compiles them.
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: --features lcd-ws281x"
+    cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_ws281x"
+    cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
+    echo "clippy: --features lcd_ws281x_probe"
+    cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_backend"
+    cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
@@ -3802,6 +3810,20 @@ test-emu-c6-ota-lan images="" filter="": install-rv32-target
     fi
     LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
+# The S3's twin (the S3 updates plan's P12b): the same scenarios on an
+# emulated ESP32-S3, X and Y built for `esp32s3-8mb` with `wifi` (the station
+# and its LAN link are not in the S3's default image yet). Not CI either.
+test-emu-esp32s3-ota-lan images="" filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ images }}"
+    if [[ -z "$out" ]]; then
+        out=target/ota-lan-s3
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/x" a0a0a0a0 esp32s3,server,wifi
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/y" b1b1b1b1 esp32s3,server,wifi
+    fi
+    LP_OTA_LAN_CHIP=esp32s3 LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
 # lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
 # ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
 # plain `cargo build`, not a reference image, so no espflash and no git
@@ -4433,7 +4455,36 @@ test-emu-esp32s3-lcd:
     lanes="$out/fw-esp32s3-lcd-lanes.elf"
     cp "$built" "$lanes"
     export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
-    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes -- --include-ignored --nocapture
+    # The product backend (`lcd-ws281x`'s driver) on the same models.
+    just build-fw-esp32s3 test_lcd_backend
+    backend="$out/fw-esp32s3-lcd-backend.elf"
+    cp "$built" "$backend"
+    export LP_EMU_ESP32S3_LCD_BACKEND_ELF="$backend"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
+
+# Emulated Wi‑Fi on the S3 (S3 radio M5, the second half): `fw-esp32s3
+# --features wifi` (off by default) built, copied out of the shared target
+# path and merged, then `lp-cli/tests/emu_s3_lan_pair.rs`: two boards, each
+# joined alone over its USB link, then both on one runner-driven LAN — two
+# leases, each board's `lp-xxxx.local` answered on the segment, the same
+# frame log twice. Its figures are `lp-emu:esp32s3:t1+net=lan`. The `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it.
+test-emu-esp32s3-wifi:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 wifi
+    wifi="$out/fw-esp32s3-wifi.elf"
+    cp "$built" "$wifi"
+    merged="$out/merged-wifi.bin"
+    espflash save-image --chip esp32s3 --merge \
+        --partition-table lp-fw/fw-esp32s3/partitions.csv \
+        --flash-size {{ s3_flash_size }} "$wifi" "$merged"
+    export LP_EMU_ESP32S3_WIFI_ELF="$wifi"
+    export LP_EMU_ESP32S3_WIFI_MERGED="$merged"
+    cargo test -p lp-cli --test emu_s3_lan_pair -- --include-ignored --nocapture
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
@@ -5479,7 +5530,10 @@ walk-two-tabs-emu *args:
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
 # docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
-# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+# out W10's `link rtt`, which alone outlives a 10-minute command cap. `lan
+# --s3` walks the same steps on two emulated S3s booting `fw-esp32s3
+# --features wifi` (after `just test-emu-esp32s3-wifi`, which writes its
+# merged chip; S3 radio M5).
 #
 # `relay` (Wi‑Fi relay plan P9, scripts/emu/walk-wifi-emu-relay.mjs) is
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
@@ -5581,8 +5635,9 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
-# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes:
-# `just walk-ota-ble-emu --s3`.
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes
+# (`just walk-ota-ble-emu --s3`) and over Wi-Fi (`--s3 --lan`, X and Y built
+# here with `wifi`, which the S3's default image does not carry yet).
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5595,6 +5650,25 @@ walk-ota-emu *args: install-rv32-target
     cargo build -q -p lp-cli
     # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
     # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* && " {{ args }} " == *" --lan "* ]]; then
+        # Over Wi-Fi: X and Y both with `wifi` (Y's trial core must reach
+        # the LAN to be confirmed there), Y staged as this Studio's firmware.
+        images=target/walk-ota-emu/images-s3-lan
+        if [[ ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0 esp32s3,server,wifi
+        fi
+        if [[ ! -f "${images}/y/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/y" b1b1b1b1 esp32s3,server,wifi
+        fi
+        rm -rf "${images}/y-packages" "${images}/y-parts"
+        mkdir -p "${images}/y-packages" "${images}/y-parts"
+        cp -R "${images}/y/package" "${images}/y-packages/esp32s3-8mb"
+        cp -R "${images}/y/ota" "${images}/y-parts/esp32s3-8mb"
+        just studio-web-story-build
+        WALK_OTA_X="${WALK_OTA_X:-${images}/x}" WALK_Y_PACKAGES="$PWD/${images}/y-packages" \
+            WALK_Y_PARTS="$PWD/${images}/y-parts" node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     if [[ " {{ args }} " == *" --s3 "* ]]; then
         images=target/walk-ota-emu/images-s3
         if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then

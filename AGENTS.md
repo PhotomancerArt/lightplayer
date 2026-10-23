@@ -621,6 +621,7 @@ runtime.
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-nor-sim`     | The NOR flash power-cut model: a deterministic sans-IO model of the C6's SPI flash that loses power after any program or erase (torn programs, weak erases), shared by the store testbed and the emulator (`lp-emu/`, MIT) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0, BLE and Wi-Fi links (board, host, Studio, tools; Wi-Fi is the C6's LAN WebSocket and the relay carrying the same link); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
+| `lp-ws281x`      | The WS281x transmitters, chip-free (`lp-fw/`, MIT): the RMT refill state machine (`RmtHw`, bit cursor, guard word, the classic's wire pusher) every RMT backend implements, and `parallel`, lockstep lanes on a byte-wide DMA'd bus (the S3's LCD_CAM backend, feature `lcd-ws281x`, not yet the default — `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
@@ -1626,8 +1627,10 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
 The C6 and, since S3 radio M5, the **S3** answer seams (Xtensa: a `movi`
 hint, a windowed call through a volatile pointer, answered at a `break` over
 the `entry` before the window rotates — the ADR's §13; the wake is
-`SYSTEM.cpu_intr_from_cpu_3`). The shipped S3 image declares no seam until it
-has Wi‑Fi; only its `test_seam_abi` harness does.
+`SYSTEM.cpu_intr_from_cpu_3`). On the S3 the `wifi` image (off by default)
+declares the network seam, so it runs `net=lan` like the C6; an S3 image
+without `wifi` declares none. `just test-emu-esp32s3-wifi` is two S3s on one
+LAN (CI), `just walk-wifi-emu lan --s3` the walk.
 
 - **Two kinds.** A *capability* seam stands in for hardware the emulator
   cannot model: `net=lan` (the network seam, below) ships and is on by

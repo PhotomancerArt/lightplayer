@@ -172,15 +172,17 @@ pub fn split_boot(mut core: CoreBoot) {
                 spawner,
                 usb_link,
                 watchdog,
-                rmt_peripheral,
+                output_peripherals,
                 base_fs,
+                network_saved,
                 ..
             } = core;
             // The update light: the strip the engine recorded, if any.
             let record = base_fs
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
                 .ok();
-            let light = crate::split_core::StatusLight::new(record.as_deref(), rmt_peripheral);
+            let light =
+                crate::split_core::StatusLight::new(record.as_deref(), output_peripherals.rmt);
             // Its own task, like the engine's server loop (the C6's reason:
             // awaited here, its future would sit in the main task's frame).
             spawner.spawn(
@@ -196,9 +198,9 @@ pub fn split_boot(mut core: CoreBoot) {
                     usb_trust,
                     entropy: crate::fill_random,
                     light,
-                    // No Wi-Fi on this chip yet (the S3 plan's M4): no saved
-                    // network makes a trial wait on a deadline.
-                    network_saved: false,
+                    // A saved network (`wifi`): a trial core with no host
+                    // waits only so long before it gives up the trial.
+                    network_saved,
                 })
                 .unwrap(),
             );

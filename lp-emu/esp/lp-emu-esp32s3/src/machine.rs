@@ -1948,6 +1948,7 @@ impl Esp32S3Builder {
             next_host_poll: 0,
             reboot_on_reset: self.reboot_on_reset,
             flash_cut_then: AfterCut::Stop,
+            power_cycle_requested: false,
             flash_cut_armed: false,
             power_cycles: 0,
             reboots: 0,
@@ -2203,6 +2204,8 @@ pub struct Machine {
     /// What the run loop does when a flash power cut fires
     /// ([`Esp32S3Builder::flash_cut`]).
     flash_cut_then: AfterCut,
+    /// The control channel asked for a power cycle; the run loop performs it.
+    power_cycle_requested: bool,
     /// Was a flash-cut plan armed on this machine? What puts `+flash-cut`
     /// in the label, for the whole run.
     flash_cut_armed: bool,
@@ -3725,6 +3728,22 @@ impl Machine {
                     pc,
                 };
             }
+            // The control channel's `power-cycle`: performed here, at the
+            // loop's boundary, with the budget rebased as a reset's is.
+            if std::mem::take(&mut self.power_cycle_requested) {
+                let remaining = stop
+                    .stop_cycle
+                    .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                if self.power_cycle() {
+                    log::info!("machine: host power-cycle (control channel)");
+                    if let Some(remaining) = remaining {
+                        stop_cycle = self.cycles().saturating_add(remaining);
+                    }
+                    matched = 0;
+                    continue;
+                }
+                log::warn!("machine: host power-cycle refused: no power-on snapshot");
+            }
             // A peripheral asked for a reset — the RWDT's stage 0 expired, or
             // the link's control channel asked for one. Reported by default;
             // `--reboot-on-reset` performs it instead.
@@ -4240,6 +4259,15 @@ impl Machine {
     /// has no `chip_rst`, so there is no such reply here and the difference
     /// is the README's.
     fn apply_control(&mut self, command: &ControlCommand, now: Cycles) -> ControlReply {
+        // Not the USB block's: a hand on the plug. Left for the run loop,
+        // which performs it at its next boundary and rebases the budget.
+        if matches!(command, ControlCommand::PowerCycle) {
+            self.power_cycle_requested = true;
+            return ControlReply::Ok {
+                verb: "power-cycle",
+                cycle: now,
+            };
+        }
         let Some(index) = self.usb_index else {
             return ControlReply::Err("no USB_DEVICE block in this machine".to_string());
         };
@@ -4323,6 +4351,10 @@ impl Machine {
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),
                 ),
+                // Handled above: the supply is not this block's.
+                ControlCommand::PowerCycle => {
+                    Err("unreachable: `power-cycle` never reaches USB_DEVICE".to_string())
+                }
             });
 
         match outcome {

@@ -27,6 +27,7 @@ pub static NET_CHIP: NetChip = NetChip {
     on_thread_start: nothing,
     first_light_decided,
     on_join_attempt: nothing,
+    bind_seam_wake: crate::seams::seam_wake_handler::bind,
 };
 
 /// The server loop has served its first frame (set by the engine's frame

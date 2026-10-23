@@ -27,6 +27,12 @@ impl HwAddress {
         Self(format!("/rmt/ws281x{channel}"))
     }
 
+    /// One lane of a parallel (LCD-bus) WS281x output: the ESP32-S3's
+    /// LCD_CAM drives up to eight lanes from one DMA stream.
+    pub fn lcd_ws281x(lane: u8) -> Self {
+        Self(format!("/lcd/ws281x{lane}"))
+    }
+
     pub fn radio(index: u8) -> Self {
         Self(format!("/radio/{index}"))
     }
