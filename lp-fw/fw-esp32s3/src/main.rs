@@ -115,6 +115,8 @@ mod c_heap;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
 #[cfg(not(fw_harness))]
+mod flash_qio;
+#[cfg(not(fw_harness))]
 mod flash_storage;
 #[cfg(all(feature = "io-thread", not(fw_harness)))]
 mod io_thread;
@@ -1020,6 +1022,11 @@ fn mount_filesystem(
     use lpc_wire::FsBootState;
 
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
+    // From here every flash read — the code cache, the table, the mount, the
+    // project — runs at 80 MHz (and in QIO on a part an S3 sitting has read).
+    // Right after esp-storage's own RDID size probe, before any ROM flash
+    // access, as on the C6 (`flash_qio`).
+    crate::flash_qio::enter();
     // A split image's region ends where `factory` does, in the table the
     // chip carries (read once, here, after `FlashStorage::new`).
     //
