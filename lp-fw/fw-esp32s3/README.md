@@ -15,7 +15,8 @@ LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
 
 Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, the tree
 store on `lpfs`, GLSL compiled to Xtensa machine code by the on-device JIT, and real
-WS281x output on 4 concurrent RMT channels (below) — plus the hardware
+WS281x output on up to 8 lanes from LCD_CAM (or 4 RMT channels without
+`lcd-ws281x`; below) — plus the hardware
 harnesses (clocks, heap, and serial logging far enough to print the `[INIT]`
 marker family, a JIT corpus runner, and the RMT loopback self-test). The
 server and storage stacks landed as the app-layer milestone of
@@ -229,6 +230,9 @@ need be attached) and prints `[LCD-LANES] frame N sent …` and `done`.
 
 ## Output
 
+The shipped driver is LCD_CAM's (next section, `lcd-ws281x`); this one is
+what an image without that feature registers.
+
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
 channels at once**, over `lp-fw/lp-ws281x` — the portable transmitter whose
 sequencing (ping-pong refill, bit cursor, guard word) is tested on the host and
@@ -255,12 +259,16 @@ Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
 another colour order is the fixture node's `color_order`, above this boundary —
 the driver stays GRB, exactly like the C6's.
 
-### LCD_CAM output (feature `lcd-ws281x`, not the default)
+### LCD_CAM output (feature `lcd-ws281x`, the default)
 
 `src/output/lcd/` drives **up to eight lanes** from LCD_CAM in i8080 mode,
-fed by GDMA. Build it with `just build-fw-esp32s3 lcd-ws281x`. The RMT driver
-above stays the default until the switch is ruled on (S3 radio roadmap M9;
-`docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+fed by GDMA. It is the shipped image's WS281x driver since 2026-10-22 (Yona's
+ruling, S3 radio roadmap M9; `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+The RMT driver above is what an image built without `lcd-ws281x` registers;
+the `test_loopback` harness and a core-only split image's status light keep
+using the RMT. `ws281x_frame_check` (never shipped) makes either driver
+report its truncation on the log: the LCD's CAM half decodes every frame off
+the pads, the RMT counts its guard trips (`[ws281x-check] driver=…`).
 
 | | |
 |---|---|
@@ -279,9 +287,8 @@ The silicon evidence and the harness are the LED-channels spike's:
 `test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
 same pads as a CPU-free logic analyzer; build it without `ble`,
 `--no-default-features --features esp32s3,test_lcd_ws281x`, or its 8 × 500 case
-runs out of the radio image's arena), and `lcd_ws281x_probe` (the check beside
-Bluetooth and a Wi‑Fi scan loop; it brings its own LCD_CAM, so it cannot be
-built with `lcd-ws281x`).
+runs out of the radio image's arena). The same check on the product image,
+beside Bluetooth and the server, is `ws281x_frame_check` (above).
 
 ## Input
 

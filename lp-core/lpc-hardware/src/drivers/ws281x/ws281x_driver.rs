@@ -92,7 +92,14 @@ pub trait Ws281xOutput {
         self.write(data)
     }
 
-    /// Wait for the frame begun by [`Ws281xOutput::start`] to finish.
+    /// Wait until the bytes handed to [`Ws281xOutput::start`] are released:
+    /// the caller may reuse or free them once this returns.
+    ///
+    /// For a transmitter that reads the caller's bytes on the wire (the RMT
+    /// drivers), that is the end of the frame. One that copies or encodes them
+    /// into its own buffer first (the S3's LCD_CAM driver) may return while
+    /// its wire is still busy — which is why it is not the call for "the
+    /// strip has its frame": that is [`Ws281xOutput::wait_drained`].
     ///
     /// A no-op when no frame is in flight — including always, for an
     /// implementation whose `start` is the blocking default. On error the
@@ -100,6 +107,19 @@ pub trait Ws281xOutput {
     /// or free the frame bytes either way.
     fn wait_complete(&mut self) -> Result<(), OutputError> {
         Ok(())
+    }
+
+    /// Wait until this output's wire is idle: the last frame started is fully
+    /// on the strip. What cutting the strip's supply, or a blank before close,
+    /// must wait for.
+    ///
+    /// The default is [`Ws281xOutput::wait_complete`], which is the same
+    /// thing for every transmitter that reads the caller's bytes on the wire;
+    /// an implementation whose `wait_complete` returns early overrides this.
+    /// ⚠️ A delegating wrapper must forward it explicitly (see
+    /// [`Ws281xOutput::background_tx_safe`]'s note).
+    fn wait_drained(&mut self) -> Result<(), OutputError> {
+        self.wait_complete()
     }
 
     /// May a frame this output started keep transmitting while the render

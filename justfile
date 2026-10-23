@@ -1179,10 +1179,14 @@ clippy-fw-esp32s3:
     cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
     echo "clippy: --features test_lcd_ws281x"
     cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
-    echo "clippy: --features lcd_ws281x_probe"
-    cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
     echo "clippy: --features test_lcd_backend"
     cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
+    echo "clippy: --features ws281x_frame_check"
+    cargo clippy --release --features ws281x_frame_check -- --no-deps -D warnings
+    echo "clippy: --features ws281x_overlap_ab"
+    cargo clippy --release --features ws281x_overlap_ab -- --no-deps -D warnings
+    echo "clippy: the RMT image (no lcd-ws281x), with its frame check"
+    cargo clippy --release --no-default-features --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,espnow,psram,ws281x_frame_check -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings

@@ -138,8 +138,6 @@ mod hardware;
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
 // inside is still app-only.
-#[cfg(all(feature = "lcd_ws281x_probe", not(fw_harness)))]
-mod lcd_probe;
 #[cfg(any(
     not(fw_harness),
     feature = "test_loopback",
@@ -147,11 +145,6 @@ mod lcd_probe;
     feature = "test_lcd_backend"
 ))]
 mod output;
-#[cfg(all(feature = "lcd_ws281x_probe", feature = "lcd-ws281x"))]
-compile_error!(
-    "`lcd_ws281x_probe` brings its own LCD_CAM rig; it cannot share the peripheral with the \
-     `lcd-ws281x` output driver"
-);
 #[cfg(all(feature = "psram", not(fw_harness)))]
 mod psram;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
@@ -532,8 +525,9 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The station's `[wifi]` and the relay's `[relay]` lines (`wifi`).
     #[cfg(s3_wifi)]
     net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
-    // The WS281x driver's own counters (`ws281x_telemetry` only).
-    #[cfg(feature = "ws281x_telemetry")]
+    // The RMT driver's own counters (`ws281x_telemetry` only, on an image
+    // without `lcd-ws281x`; the LCD bus logs its own `[lcd-ws281x]` line).
+    #[cfg(all(feature = "ws281x_telemetry", not(feature = "lcd-ws281x")))]
     output::rmt::shared_driver::log_telemetry();
     // Internal RAM on a `psram` image: the figures the board's gates and a
     // host's judgement are about (`crate::psram`, "The heap").
@@ -809,8 +803,6 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             true => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
                 let started = ble::start(spawner, radio_port);
-                #[cfg(feature = "lcd_ws281x_probe")]
-                lcd_probe::start(spawner);
                 started
             }
             false if fs_boot_state == lpc_wire::FsBootState::Refused => {

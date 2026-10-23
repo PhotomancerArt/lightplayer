@@ -19,6 +19,7 @@ default = [
     "ble",
     "espnow",
     "psram",
+    "lcd-ws281x",
 ]
 esp32s3 = [
     "esp-backtrace/esp32s3",
@@ -180,11 +181,24 @@ wifi = [
 # WS281x output over LCD_CAM (i8080) + GDMA instead of the RMT: up to eight
 # lanes in lockstep from one internal-RAM frame buffer, with no refill
 # deadline, so radio interrupts and flash writes cannot tear a frame (S3 radio
-# roadmap M9; the LED-channels spike's evidence). NOT the default: the RMT
-# driver stays the S3's until Yona rules on the switch with the costs and a
-# real 5-strip test in front of him. The board profile declares both
+# roadmap M9; the LED-channels spike's evidence). **The default** since Yona's
+# ruling (2026-10-22), once PSRAM freed the internal RAM its frame buffers need.
+# Without it the image registers the RMT driver instead (an A/B build, and the
+# `test_loopback` harness's driver). The board profile declares both
 # `/rmt/ws281xK` and `/lcd/ws281xK`; each driver reads only its own.
 lcd-ws281x = []
+
+# The walk's frame check (never shipped): with `lcd-ws281x`, LCD_CAM's CAM
+# half samples every lane's pad and decodes each frame against what was sent
+# (GDMA channel 1, back pads GPIO11/12); without it, the RMT logs its guard
+# trips. Both print `[ws281x-check] driver=… ` lines, so one walk compares the
+# two drivers' truncation the same way.
+ws281x_frame_check = []
+
+# A same-image fps A/B (never shipped): the LCD backend's overlap (render
+# running while the previous frame is on the wire) off and on in 20 s turns,
+# each window's frame rate logged as `[ws281x-ab] overlap=… fps=…`.
+ws281x_overlap_ab = []
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
@@ -265,13 +279,6 @@ test_backtrace_oracle = []
 # this feature rather than off the dependency line.
 test_loopback = ["lp-ws281x/test_hooks"]
 
-# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
-# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
-# sampling the pads. See src/tests/lcd_ws281x.rs.
-test_lcd_ws281x = []
-# The same check in the app image, beside Bluetooth and a Wi‑Fi scan loop
-# (src/lcd_probe.rs). Decorates the app path, like `radio_boot_probe`.
-lcd_ws281x_probe = ["ble", "esp-radio/wifi"]
 
 # GPIO button diagnostic mode: D9/GPIO8 with an internal pull-up, mirroring
 # fw-esp32c6's `test_button` feature. Needs `server` for the hardware
@@ -317,6 +324,11 @@ test_psram = []
 # it tests the emulator and not the product's encoder.
 #
 #   just build-fw-esp32s3 test_lcd_lanes
+# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
+# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
+# sampling the pads. See src/tests/lcd_ws281x.rs. (The product image's own
+# check beside the radios is `ws281x_frame_check`.)
+test_lcd_ws281x = []
 test_lcd_lanes = []
 # Five uneven lanes through the PRODUCT LCD_CAM backend (`lcd-ws281x`'s
 # driver: registry, board endpoints, open, start/wait_complete), for the

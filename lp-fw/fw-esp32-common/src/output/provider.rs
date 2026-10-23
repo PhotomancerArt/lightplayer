@@ -598,7 +598,7 @@ impl OutputProvider for Esp32OutputProvider {
                     if port.gate_mask & expired == 0 {
                         continue;
                     }
-                    if let Err(error) = port.output.wait_complete() {
+                    if let Err(error) = port.output.wait_drained() {
                         log::warn!(
                             "Esp32OutputProvider::flush: handle={handle_id} did not drain before \
                              power-gate deassert: {error}"
@@ -627,10 +627,12 @@ fn blank_port(port: &mut PortState) -> Result<(), OutputError> {
     port.frame.clear();
     port.frame.resize(((port.byte_count / 3) * 3) as usize, 0);
     // SAFETY: `frame` is this port's own storage and is not touched again
-    // until the `wait_complete` below has returned, so the transmitter never
+    // until the `wait_drained` below has returned, so the transmitter never
     // reads freed or changing bytes.
     unsafe { port.output.start(&port.frame) }?;
-    port.output.wait_complete()
+    // Drained, not merely released: the black frame must be on the strip
+    // before the port is dropped (and, on a gated board, its rail may fall).
+    port.output.wait_drained()
 }
 
 fn capped_byte_count_for_len(data_len: usize) -> (u32, bool) {
@@ -1443,6 +1445,11 @@ mod power_gate_tests {
         }
 
         unsafe fn start(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            // An early-releasing transmitter waits out its own previous frame
+            // before the next goes on the wire, as the LCD bus's kick does.
+            if self.in_flight {
+                self.wait_drained()?;
+            }
             let at_us = self.clock.peek();
             let mut log = self.log.borrow_mut();
             log.events.push(Event::Start { at_us });
@@ -1451,7 +1458,17 @@ mod power_gate_tests {
             Ok(())
         }
 
+        /// A background-safe probe behaves like the S3's LCD_CAM output: the
+        /// bytes are released at once and the wire stays busy until
+        /// `wait_drained`. Any other probe drains here.
         fn wait_complete(&mut self) -> Result<(), OutputError> {
+            if self.background_safe {
+                return Ok(());
+            }
+            self.wait_drained()
+        }
+
+        fn wait_drained(&mut self) -> Result<(), OutputError> {
             if self.in_flight {
                 self.log.borrow_mut().in_flight -= 1;
                 self.in_flight = false;

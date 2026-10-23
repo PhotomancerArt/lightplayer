@@ -1,8 +1,9 @@
 # ADR: Parallel WS281x output on the ESP32-S3 (LCD_CAM i8080 + GDMA)
 
-- **Status:** Accepted for the backend, behind the `lcd-ws281x` feature.
-  **Making it the S3's default is pending Yona's ruling**, which waits on the
-  costs and a real 5-strip test (below).
+- **Status:** Accepted. **The S3's default WS281x driver since Yona's ruling
+  of 2026-10-22** ("yes", on the costs below), landed after PSRAM went on by
+  default and freed the internal RAM its frame buffers need (see "Found on the
+  product image"). The real 5-strip test is owed to a desk sitting.
 - **Date:** 2026-10-22
 - **Plan:** `lp2025/2026-10-20-2335-s3-radio-and-ota`, milestone M9; evidence
   from its LED-channels spike (`led-channels-spike/report.md`)
@@ -73,7 +74,10 @@ was the CAM half of the same peripheral sampling the pads.
    - Endpoints are the RMT driver's (`ws281x:local:<board label>`), so a
      project opens unchanged on either driver.
 6. **Selection is the `lcd-ws281x` cargo feature**, decided in one place
-   (`output::register_ws281x_driver`). The RMT driver stays the default.
+   (`output::register_ws281x_driver`). It is in the S3's `default` features
+   (amended 2026-10-23); an image built without it registers the RMT driver,
+   which the `test_loopback` harness and a core-only split image's status
+   light still use.
 
 ## Costs (measured on FS3, 2026-10-22)
 

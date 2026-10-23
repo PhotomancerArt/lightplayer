@@ -103,6 +103,12 @@ impl Esp32S3LcdWs281xDriver {
         }
     }
 
+    /// Attach the CAM-half frame check (`ws281x_frame_check`).
+    #[cfg(feature = "ws281x_frame_check")]
+    pub fn attach_check(&self, check: super::frame_check::FrameCheck) {
+        self.shared.borrow_mut().bus.check = Some(check);
+    }
+
     fn endpoint_id(&self, spec: &HwEndpointSpec) -> HwEndpointId {
         HwEndpointId::for_driver_spec(self.driver_id(), spec)
     }
@@ -276,6 +282,10 @@ impl Ws281xDriver for Esp32S3LcdWs281xDriver {
             let mut shared = self.shared.borrow_mut();
             shared.lanes[lane as usize].in_use = true;
             shared.lanes[lane as usize].gpio = Some(gpio);
+            #[cfg(feature = "ws281x_frame_check")]
+            if let Some(check) = shared.bus.check.as_mut() {
+                check.bind(lane, gpio);
+            }
         }
         log::info!(
             "Esp32S3LcdWs281xDriver::open: endpoint={endpoint_id} gpio={} lane={lane} bytes={}",
@@ -302,10 +312,10 @@ struct Esp32S3LcdWs281xOutput {
 
 impl Ws281xOutput for Esp32S3LcdWs281xOutput {
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
-        // SAFETY: `data` outlives this call, and `wait_complete` below has
-        // encoded it before returning.
+        // SAFETY: `data` outlives this call, and `wait_drained` below has
+        // encoded and sent it before returning.
         unsafe { self.start(data)? };
-        self.wait_complete()
+        self.wait_drained()
     }
 
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
@@ -324,8 +334,16 @@ impl Ws281xOutput for Esp32S3LcdWs281xOutput {
         unsafe { self.shared.borrow_mut().bus.start(self.lane, data) }
     }
 
+    /// Returns once this lane's bytes are encoded into the bus's own buffer,
+    /// not when the wire is done: the provider's wait-before-stage then costs
+    /// nothing and render overlaps the wire (credit: the core-1 spike, which
+    /// measured core 0 spending 46 % of its time here on lp-emu).
     fn wait_complete(&mut self) -> Result<(), OutputError> {
-        self.shared.borrow_mut().bus.wait_complete(self.lane)
+        self.shared.borrow_mut().bus.release(self.lane)
+    }
+
+    fn wait_drained(&mut self) -> Result<(), OutputError> {
+        self.shared.borrow_mut().bus.wait_drained(self.lane)
     }
 
     /// GDMA feeds the bus from internal RAM with no CPU involved, so a frame

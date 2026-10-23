@@ -13,7 +13,11 @@
 //! The image is `fw-esp32s3 --features test_lcd_backend`
 //! (`lp-fw/fw-esp32s3/src/tests/test_lcd_backend.rs`): D0–D4 (GPIO1–5)
 //! carrying 12, 9, 7, 5 and 3 LEDs, wire byte `k` of lane `l` being
-//! [`lane_byte`] (the image's own arithmetic), sent twice. Figures are
+//! [`lane_byte`] (the image's own arithmetic) for frames 0 and 1. The image
+//! overwrites its bytes with the next frame's as soon as `wait_complete`
+//! returns, while the wire may still be sending: each frame decoding as its
+//! own bytes is the proof that the backend's early release (render overlapping
+//! the wire) never reads the caller's bytes after it. Figures are
 //! `lp-emu:esp32s3:t1`'s: the bytes transfer, the timing is ungraded.
 //!
 //! `#[ignore]`d for the usual reason (`lp_emu_esp32s3::test_support`):
@@ -27,8 +31,8 @@ const LANES: [usize; 5] = [12, 9, 7, 5, 3];
 const DONE: &str = "[LCD-BACKEND] done";
 
 /// The image's `lane_byte`, the same arithmetic.
-const fn lane_byte(lane: usize, k: usize) -> u8 {
-    ((lane as u8 + 1).wrapping_mul(29)) ^ (k as u8).wrapping_mul(13) ^ 0xa5
+const fn lane_byte(lane: usize, k: usize, frame: u32) -> u8 {
+    ((lane as u8 + 1).wrapping_mul(29)) ^ (k as u8).wrapping_mul(13) ^ 0xa5 ^ (frame as u8 * 0x3c)
 }
 
 #[test]
@@ -77,10 +81,14 @@ fn the_product_backend_sends_five_uneven_lanes_byte_exact() {
 
     for (lane, &leds) in LANES.iter().enumerate() {
         let pad = lane as u8 + 1;
-        let expected: Vec<u8> = (0..leds * 3).map(|k| lane_byte(lane, k)).collect();
         let frames = m.frames(pad);
         assert_eq!(frames.len(), 2, "gpio{pad}: two frames");
-        for f in frames {
+        for (n, f) in frames.iter().enumerate() {
+            // Frame n's own bytes, though the image overwrote them with frame
+            // n + 1's the moment `wait_complete` returned (the overlap).
+            let expected: Vec<u8> = (0..leds * 3)
+                .map(|k| lane_byte(lane, k, n as u32))
+                .collect();
             assert!(
                 f.is_complete(),
                 "gpio{pad} frame {}: {} errors, {} trailing bits",

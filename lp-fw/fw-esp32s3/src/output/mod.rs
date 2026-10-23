@@ -36,7 +36,7 @@ pub mod lcd;
 pub mod ws281x_endpoints;
 
 /// The LED-channels spike's LCD_CAM rig (never shipped).
-#[cfg(any(feature = "test_lcd_ws281x", feature = "lcd_ws281x_probe"))]
+#[cfg(feature = "test_lcd_ws281x")]
 pub mod lcd_spike;
 
 #[cfg(not(fw_harness))]
