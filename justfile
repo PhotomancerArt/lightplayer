@@ -4365,9 +4365,9 @@ test-emu-esp32s3-seams:
 # copied out of the shared target path, merged for its ROM-up boot, and run
 # by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
 # probe writes and reads all 8 MiB and runs code out of it, both ways, and
-# every line matches FS3's capture. The test that the shipped image runs the
-# same with and without PSRAM needs the shipped image's merged chip, so it
-# runs in `test-emu-esp32s3-boot` instead (here it SKIPs).
+# every line matches FS3's capture, and the shipped image runs the same with
+# and without PSRAM (direct and ROM-up) — here, not in the S3 gate, which is
+# at its time budget.
 #
 # M10 adds the product's `psram` image (`fw-esp32s3 --features psram`: PSRAM
 # up in the core, the engine's heap and JIT code in it) and lp-cli's oracle
@@ -4395,7 +4395,6 @@ test-emu-esp32s3-psram:
     else
       echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
     fi
-    cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
     just build-fw-esp32s3 psram
     psram_app="$out/fw-esp32s3-psram-app.elf"
     cp "$built" "$psram_app"
@@ -4410,6 +4409,7 @@ test-emu-esp32s3-psram:
           --flash-size {{ s3_flash_size }} "$shipped" "$out/merged.bin"
       export LP_EMU_ESP32S3_MERGED="$out/merged.bin"
     fi
+    cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
     cargo test -p lp-cli --release --test emu_s3_link_gates the_psram_image -- --include-ignored --nocapture
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added

@@ -73,6 +73,13 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   job too: `Emulator ESP32-S3 seams and heap (x64)`, 30 minutes. The S3
   gate job is now the gate and the split boot, ~27 min cold — the next S3
   device test wants a split of the gate itself.
+- 2026-10-22 — PR #1264 (M10, PSRAM), run 39882963516: `Emulator ESP32-S3
+  (x64)` cancelled at its 35-minute budget in "Upload CI images", after its
+  gate (26 min) and split boot (6 min) had both passed. The PR had added a
+  shipped-image comparison (four boots, two ROM-up) to `psram_boot.rs`,
+  which the gate runs; main's runs of the job that evening took 25–31 min.
+  Moved the comparison to the PSRAM recipe in the S3 seams job (22 min of
+  30, its PSRAM step 10 min), the split this entry prescribes.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that
