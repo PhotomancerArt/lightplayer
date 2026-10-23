@@ -200,7 +200,7 @@ impl Rig {
             // End of frame on VSYNC, not by byte count: the byte counter is 16
             // bits, and a capture past 65,536 samples (8 × 500) stops there.
             .with_eof_mode(EofMode::VsyncSignal);
-        let cam = match Camera::new(lcd_cam.cam, rx_dma, cam_config.clone()) {
+        let cam = match Camera::new(lcd_cam.cam, rx_dma, cam_config) {
             Ok(cam) => cam,
             Err(error) => fatal_dbg("cam_new", &error),
         }

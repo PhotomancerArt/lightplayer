@@ -20,7 +20,10 @@
 //! GDMA, with no refill deadline. Which one an image registers is decided
 //! here, in [`register_ws281x_driver`], and nowhere else.
 
-#[cfg(any(all(not(fw_harness), not(feature = "lcd-ws281x")), feature = "test_loopback"))]
+#[cfg(any(
+    all(not(fw_harness), not(feature = "lcd-ws281x")),
+    feature = "test_loopback"
+))]
 pub mod rmt;
 
 #[cfg(all(not(fw_harness), feature = "lcd-ws281x"))]
@@ -72,7 +75,9 @@ pub fn register_ws281x_driver(
                 rmt,
             ))),
             Err(error) => {
-                esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
+                esp_println::println!(
+                    "[ERROR] RMT init failed ({error:?}); no LED output this boot"
+                );
             }
         }
     }

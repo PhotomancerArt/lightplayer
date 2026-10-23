@@ -1173,6 +1173,12 @@ clippy-fw-esp32s3:
     # defaults, so nothing else here compiles them.
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: --features lcd-ws281x"
+    cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_ws281x"
+    cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
+    echo "clippy: --features lcd_ws281x_probe"
+    cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings

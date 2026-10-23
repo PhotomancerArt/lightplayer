@@ -70,8 +70,8 @@ use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::s3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
 use crate::output::ws281x_endpoints::{
-    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number,
-    has_board_assigned_label, validate_byte_count, ws281x_local_spec,
+    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number, has_board_assigned_label,
+    validate_byte_count, ws281x_local_spec,
 };
 
 const DRIVER_ID: &str = "esp32s3-rmt-ws281x";

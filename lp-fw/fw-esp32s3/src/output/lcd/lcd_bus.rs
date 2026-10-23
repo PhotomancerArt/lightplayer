@@ -36,11 +36,11 @@ use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
+use esp_alloc::MemoryCapability;
 use esp_hal::Blocking;
 use esp_hal::dma::{DmaDescriptor, DmaTxBuf};
 use esp_hal::lcd_cam::lcd::i8080::{Command, I8080, I8080Transfer};
 use esp_hal::time::{Duration, Instant};
-use esp_alloc::MemoryCapability;
 use lp_ws281x::ColorOrder;
 use lp_ws281x::parallel::{self, LANES, SlotPlan};
 use lpc_hardware::{HardwareEndpointError, OutputError};
@@ -130,9 +130,10 @@ impl LcdBus {
     ) -> Result<(), HardwareEndpointError> {
         self.ensure_capacity(self.longest_open().max(bytes))
             .map_err(|reason| HardwareEndpointError::UnsupportedConfig { reason })?;
-        self.wait_idle().map_err(|error| HardwareEndpointError::Other {
-            message: format!("LCD bus did not go idle to bind a lane: {error}"),
-        })?;
+        self.wait_idle()
+            .map_err(|error| HardwareEndpointError::Other {
+                message: format!("LCD bus did not go idle to bind a lane: {error}"),
+            })?;
         match core::mem::replace(&mut self.bus, Bus::Gone) {
             Bus::Idle(lcd) => self.bus = Bus::Idle(bind(lcd)),
             other => {
@@ -203,10 +204,7 @@ impl LcdBus {
             self.kick()?;
         }
         self.lanes[lane as usize].pending = Some((data.as_ptr(), data.len()));
-        let all_started = self
-            .lanes
-            .iter()
-            .all(|l| !l.open || l.pending.is_some());
+        let all_started = self.lanes.iter().all(|l| !l.open || l.pending.is_some());
         if all_started {
             self.kick()?;
         }
@@ -323,7 +321,10 @@ impl LcdBus {
 
     /// Wait out the transfer in flight, if any, and take its buffer back.
     fn wait_idle(&mut self) -> Result<(), OutputError> {
-        let Bus::Sending { transfer, started, .. } = &self.bus else {
+        let Bus::Sending {
+            transfer, started, ..
+        } = &self.bus
+        else {
             return Ok(());
         };
         let started = *started;

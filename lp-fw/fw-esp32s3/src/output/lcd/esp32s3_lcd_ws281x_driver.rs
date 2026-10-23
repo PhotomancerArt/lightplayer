@@ -33,17 +33,17 @@ use core::cell::RefCell;
 use esp_hal::Blocking;
 use esp_hal::gpio::{AnyPin, OutputSignal};
 use esp_hal::lcd_cam::lcd::i8080::I8080;
+use lp_ws281x::parallel::LANES;
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, HwResource,
     OutputError, Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
-use lp_ws281x::parallel::LANES;
 
 use super::lcd_bus::LcdBus;
 use crate::output::ws281x_endpoints::{
-    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number,
-    has_board_assigned_label, validate_byte_count, ws281x_local_spec,
+    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number, has_board_assigned_label,
+    validate_byte_count, ws281x_local_spec,
 };
 
 const DRIVER_ID: &str = "esp32s3-lcd-ws281x";
@@ -81,7 +81,10 @@ impl Esp32S3LcdWs281xDriver {
         }; LANES];
         for (index, lane) in lanes.iter_mut().enumerate() {
             lane.declared = registry
-                .ensure_capability(&HwAddress::lcd_ws281x(index as u8), HwCapability::Ws281xOutput)
+                .ensure_capability(
+                    &HwAddress::lcd_ws281x(index as u8),
+                    HwCapability::Ws281xOutput,
+                )
                 .is_ok();
         }
         log::info!(
@@ -103,7 +106,12 @@ impl Esp32S3LcdWs281xDriver {
     }
 
     fn offered_lanes(&self) -> usize {
-        self.shared.borrow().lanes.iter().filter(|l| l.declared).count()
+        self.shared
+            .borrow()
+            .lanes
+            .iter()
+            .filter(|l| l.declared)
+            .count()
     }
 
     /// The lowest declared lane that is unclaimed here and in the registry.
@@ -360,7 +368,11 @@ fn pad_refusal(gpio: u8) -> Option<&'static str> {
     }
 }
 
-fn bind_lane(lcd: I8080<'static, Blocking>, lane: u8, pin: AnyPin<'static>) -> I8080<'static, Blocking> {
+fn bind_lane(
+    lcd: I8080<'static, Blocking>,
+    lane: u8,
+    pin: AnyPin<'static>,
+) -> I8080<'static, Blocking> {
     match lane {
         0 => lcd.with_data0(pin),
         1 => lcd.with_data1(pin),
