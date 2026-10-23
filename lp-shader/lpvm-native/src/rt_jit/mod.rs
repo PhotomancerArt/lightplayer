@@ -20,4 +20,5 @@ pub use compile_job::NativeJitCompileJob;
 pub use compiler::{compile_module_jit, compile_module_jit_placed};
 pub use engine::NativeJitEngine;
 pub use instance::NativeJitInstance;
+pub(crate) use instance::call_render_samples_raw;
 pub use module::{NativeJitDirectCall, NativeJitModule};

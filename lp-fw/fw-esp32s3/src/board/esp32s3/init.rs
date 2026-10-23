@@ -74,6 +74,9 @@ pub fn init_board() -> (
     // The PSRAM's peripheral, kept until `core_boot` brings it up.
     #[cfg(all(feature = "psram", not(fw_harness)))]
     crate::psram::stash(peripherals.PSRAM);
+    // SPIKE: core 1's control, kept until `core_boot` starts it.
+    #[cfg(all(feature = "core1-render", not(fw_harness)))]
+    crate::core1::stash(peripherals.CPU_CTRL);
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);

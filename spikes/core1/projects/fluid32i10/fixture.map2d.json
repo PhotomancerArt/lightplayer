@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "objects": [
+    { "name": "center", "shape": { "grid": { "origin": [50, 50], "cols": 1, "rows": 1, "pitch": 1 } } },
+    { "name": "disc", "shape": { "ring": {
+        "center": [50, 50], "radius": 50, "outer_count": 60, "rings": 8,
+        "counts": [60, 48, 40, 32, 24, 16, 12, 8],
+        "order": "inner_first", "start_angle_deg": 0
+    } } }
+  ]
+}
