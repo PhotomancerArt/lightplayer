@@ -1,12 +1,19 @@
-//! `lp-cli emu run --chip esp32s3 --host-link`: the S3 machine with this
-//! process as the host on its USB link.
+//! `lp-cli emu run --chip esp32s3`: the S3 machine with this process as the
+//! host on its USB link (`--host-link`), or with that link on a loopback
+//! socket whose client is the host (`--link <addr>`).
 //!
-//! Only the hosted run, and only the flags a hosted run needs. The S3's own
-//! binary (`lp-emu-esp32s3`) stays the workshop for everything else; this
-//! door exists because since wire proto 30 the S3's console IS an lp-link,
-//! and nothing under `lp-emu/` may host one (the MIT fence, D11) — so the
-//! heap ratchet's S3 arm and the S3 host-side checks need a product crate to
+//! Only those two runs, and only the flags they need. The S3's own binary
+//! (`lp-emu-esp32s3`) stays the workshop for everything else; this door
+//! exists because since wire proto 30 the S3's console IS an lp-link, and
+//! nothing under `lp-emu/` may host one (the MIT fence, D11) — so the heap
+//! ratchet's S3 arm and the S3 host-side checks need a product crate to
 //! stand on the other end.
+//!
+//! The socket run (S3 radio M6) is the C6's `--link` for the S3: the board
+//! runs on its own while a client — `lp-cli … serial:tcp://<addr>`, or a
+//! test holding the link — connects, and with `--lan` and `--rom-up-flash`
+//! it is the board the relay cell (`lp-cli/tests/emu_relay_link.rs`) drives
+//! from outside, over two boots of one flash file.
 //!
 //! Since S3 radio M7 P5 it also takes the update host's three flags, the
 //! C6's: `--rom-up-flash` (the reset vector out of a writable flash file,
@@ -29,10 +36,13 @@
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32s3::control::parse_usb_script;
 use lp_emu_esp32s3::flash::FlashBacking;
-use lp_emu_esp32s3::machine::{AppSource, BootMode, Esp32S3Builder, FrameSink, TimeGrade, UsbHost};
+use lp_emu_esp32s3::machine::{
+    AppSource, BootMode, Esp32S3Builder, FrameSink, Machine, Outcome, StopCondition, TimeGrade,
+    UsbHost, UsbSjDrain, UsbSjSink,
+};
 
 use lp_emu_esp_common::seam::SeamRequest;
-use lp_emu_esp_common::seam::net::LanDriver;
+use lp_emu_esp_common::seam::net::{LanDriver, SharedLan};
 use lp_emu_esp32s3::loader::EfuseIdentity;
 
 use super::args::{Grade, RunArgs, UsbHostArg};
@@ -44,20 +54,36 @@ use super::link_host::S3Board;
 use super::serve::default_mac;
 
 pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<()> {
-    if !args.host_link {
-        bail!(
-            "`emu run --chip esp32s3` is the hosted run only: pass --host-link (the S3's own \
-             binary, lp-emu-esp32s3, is the door for everything else)"
-        );
+    // Two runs: the hosted one (this process the host on the USB link), and
+    // the socket one (`--link`: the USB-Serial-JTAG byte stream on a loopback
+    // socket, the client the host — the C6's `--link`, which a relay or LAN
+    // cell reaches as `serial:tcp://…` while the board runs on its own).
+    match (args.host_link, args.link.is_some()) {
+        (true, true) => bail!(
+            "--host-link makes this process the host on the USB link; a --link socket cannot \
+             be that port too"
+        ),
+        (false, false) => bail!(
+            "`emu run --chip esp32s3` needs a host on its USB link: --host-link (this process) \
+             or --link <addr> (a socket a client connects to); the S3's own binary, \
+             lp-emu-esp32s3, is the door for everything else"
+        ),
+        _ => {}
     }
     let unsupported = [
-        (args.link.is_some(), "--link"),
         (
             args.flash.is_some(),
             "--flash (use --rom-up-flash: the S3's writable chip boots from the reset vector)",
         ),
-        (args.reboot_on_reset, "--reboot-on-reset"),
+        (
+            args.host_link && args.reboot_on_reset,
+            "--reboot-on-reset (a hosted S3 run always reboots on reset)",
+        ),
         (args.pin_log.is_some(), "--pin-log"),
+        (
+            args.link_kind != super::args::LinkKind::Usb,
+            "--link-kind uart0 (the S3's shipped image speaks on its USB link)",
+        ),
         (args.tx_log.is_some(), "--tx-log"),
         (!args.pin_script.is_empty(), "--pin-script"),
         (!args.wire.is_empty(), "--wire"),
@@ -183,6 +209,9 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
         }
         builder = builder.usb_script(script.commands);
     }
+    if let Some(addr) = &args.link {
+        return run_socket(builder, addr, lan.as_ref(), args, micros);
+    }
     // `--usb-host`, when given, overrides the hosted run's default
     // (attached and draining from power-on — `S3Board::build`'s own
     // default, matching what `--host-link` does for the C6).
@@ -199,6 +228,80 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
         board.machine.configuration_label()
     );
     super::run_hosted::run_hosted(board, boot, args, micros)
+}
+
+/// The socket run (`--link <addr>`): the USB-Serial-JTAG byte stream on a
+/// loopback socket whose client is the application — its connect opens the
+/// port and its close closes it (`UsbSjDrain::Auto`), so the port starts
+/// closed (`attached-idle`) unless `--usb-host` says otherwise, as on the C6
+/// (`handler::usb_host_at_power_on`). It ends at `--exit-on`, the deadline or
+/// the wall-clock net, and writes a `--rom-up-flash` file back however it
+/// ended, so the next run boots what this one left.
+fn run_socket(
+    builder: Esp32S3Builder,
+    addr: &str,
+    lan: Option<&(SharedLan, LanFixture)>,
+    args: &RunArgs,
+    micros: u64,
+) -> Result<()> {
+    let usb_host = args
+        .usb_host
+        .map(UsbHostArg::usb_host)
+        .unwrap_or(UsbHost::Attached { draining: false });
+    let mut machine = builder
+        .usb_host(usb_host)
+        .usb_sj(UsbSjSink::Tcp(addr.to_string()))
+        .usb_sj_drain(UsbSjDrain::Auto)
+        .reboot_on_reset(args.reboot_on_reset)
+        .build()
+        .map_err(|e| anyhow::anyhow!("building the S3 machine: {e}"))?;
+    let print_seams = |machine: &mut Machine| {
+        for line in machine.take_seam_lines() {
+            eprintln!("emu: {line}");
+        }
+    };
+    print_seams(&mut machine);
+    announce_lan_for(machine.net_endpoint_id(), lan)?;
+    eprintln!(
+        "emu: esp32s3 {} boot, grade {}, usb-serial-jtag on {addr} — connect with `lp-cli \
+         upload <project> serial:tcp://{addr}`",
+        machine.boot_mode().as_str(),
+        machine.configuration_label()
+    );
+    eprintln!(
+        "emu: running for {micros} us of EMULATED time (wall-clock net: {} s)",
+        args.wall_timeout_secs
+    );
+    let stop = StopCondition {
+        stop_cycle: Some(micros * lp_emu_esp32s3::memmap::CYCLES_PER_US),
+        wall_timeout: Some(std::time::Duration::from_secs(args.wall_timeout_secs)),
+        probes: Vec::new(),
+        exit_on: args.exit_on.clone(),
+    };
+    let outcome = machine.run_until(&stop);
+    print_seams(&mut machine);
+    machine.flush_frames();
+    match machine.flush_flash() {
+        Ok(true) => eprintln!("emu: flash image written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("emu: could not write the flash image back: {e}"),
+    }
+    let console = machine.console().bytes();
+    if let Some(path) = &args.console {
+        std::fs::write(path, &console)
+            .with_context(|| format!("writing the console transcript to {}", path.display()))?;
+    }
+    eprintln!(
+        "emu: {outcome:?} — {} us emulated, {} instructions, {} reboot(s) ({})",
+        machine.micros(),
+        machine.instructions(),
+        machine.reboots(),
+        machine.configuration_label()
+    );
+    match outcome {
+        Outcome::Deadline { .. } | Outcome::ExitMatched { .. } => Ok(()),
+        other => bail!("the run ended at {other:?}"),
+    }
 }
 
 #[cfg(test)]

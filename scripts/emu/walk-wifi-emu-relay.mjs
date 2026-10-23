@@ -29,8 +29,9 @@
 //     P4 the heap while watched   → a heap row read through a relay session
 //     R4 the same key on the LAN  → `closed (taken over by the same key)`
 //     R5 someone else             → `the network link is in use — busy`
-//     P5 lost at a deploy, back   → the new hub holds no picture, then one
-//        with the board             once the board is back
+//     P5 kept across a deploy,    → the new hub answers the picture the
+//        back with the board        old one wrote behind, offline (or the
+//                                   board was back first), then a live one
 //     R6 Cloud relay off / on     → answers `relay off`, then `relay connected`
 //     P6 kept while offline       → the picture kept (`online false`), then
 //                                   online again and newer
@@ -60,6 +61,15 @@
 // in a throwaway worktree at that commit (minutes; removed after). Output in
 // `target/walk-wifi-emu/relay-p1/`.
 //
+// `--s3` (S3 radio M6) walks the same steps on an emulated ESP32-S3: the
+// cell's S3 arm, `fw-esp32s3 --features wifi` booted ROM-up from its merged
+// chip under `lp-cli emu run --chip esp32s3 --link --lan`
+// (`just build-emu-esp32s3-wifi` builds it first; `LP_EMU_ESP32S3_WIFI_MERGED`
+// names another). The board's words are the same — the relay client is
+// `fw-esp32-radio`'s, shared with the C6 — and the configuration is
+// `lp-emu:esp32s3:t1+net=lan@<commit>`. Output in
+// `target/walk-wifi-emu/relay-s3/`.
+//
 // NOT CI (the cell is). Needs the rv32 target and a firmware build
 // (`LP_EMU_BUILD_FW=1` builds it; `LP_CI_IMAGES` takes CI's). One
 // foreground command, ~3–5 minutes on an M2 Max after the build (the
@@ -72,7 +82,8 @@ import process from "node:process";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const PROTOCOL_1 = process.argv.includes("--protocol-1");
-const OUT = path.join(ROOT, "target/walk-wifi-emu", PROTOCOL_1 ? "relay-p1" : "relay");
+const S3 = process.argv.includes("--s3");
+const OUT = path.join(ROOT, "target/walk-wifi-emu", PROTOCOL_1 ? "relay-p1" : S3 ? "relay-s3" : "relay");
 
 /// The last relay protocol 1 commit: `main` at the merge base of the branch
 /// that added relay protocol 2 (`claude/relay-pictures`, PR #1066) when its
@@ -81,7 +92,9 @@ const OUT = path.join(ROOT, "target/walk-wifi-emu", PROTOCOL_1 ? "relay-p1" : "r
 /// walks the same core.
 const LAST_PROTOCOL_1 = "f5039fb93c4696bf952453e2c71ae8ac66abd8e9";
 
-const MAIN_TEST = "an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink";
+const MAIN_TEST = S3
+  ? "an_emulated_s3_reaches_lightplayer_app_through_the_lans_uplink"
+  : "an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink";
 const PROTOCOL_1_TEST = "a_protocol_1_core_at_the_new_hub_is_answered_as_before";
 
 const ANSWERS = (what, relay) => new RegExp(`emu_relay_link: the board answers \\(${what}\\): relay ${relay}$`, "m");
@@ -96,7 +109,7 @@ const STEPS = [
   ["P4", "the heap while watched, a relay session open", [SAYS("heap — projects/test/basic loaded, relay registered, pictures watched, a relay session open \\(read through it\\): free")]],
   ["R4", "the same key takes the session on the LAN", [/closed \(taken over by the same key\)/]],
   ["R5", "another key is told busy", [/the network link is in use — busy/]],
-  ["P5", "lost at a deploy, back with the board", [SAYS("right after the deploy the new hub holds no picture"), SAYS("a picture is back with the board after the deploy")]],
+  ["P5", "kept across a deploy, back with the board", [SAYS("(right after the deploy the new hub answers the stored picture, offline|the board was back before the new hub could be asked)"), SAYS("a picture is back with the board after the deploy")]],
   ["R6", "Cloud relay off, then on", [ANSWERS("relay off", "off"), ANSWERS("relay connected again", "connected")]],
   ["P6", "kept while offline", [SAYS("offline, the hub keeps the board's picture"), SAYS("back online, the picture is online again and newer")]],
   ["R7", "the account key reset: refused", [ANSWERS("refused", "refused: unknownAccount")]],
@@ -160,12 +173,24 @@ function protocol1Elf() {
 
 function main() {
   if (process.argv.includes("--help")) {
-    console.log("usage: node scripts/emu/walk-wifi-emu.mjs relay | relay-p1");
+    console.log("usage: node scripts/emu/walk-wifi-emu.mjs relay [--s3] | relay-p1");
     return;
+  }
+  if (S3 && PROTOCOL_1) {
+    console.error("walk-wifi-emu: relay-p1 is the C6's lane (a core built before relay protocol 2); --s3 walks `relay`");
+    process.exit(2);
   }
   mkdirSync(OUT, { recursive: true });
   const commit = spawnSync("git", ["rev-parse", "--short=9", "HEAD"], { cwd: ROOT, encoding: "utf8" }).stdout.trim();
-  const configuration = `lp-emu:esp32c6:t1+net=lan@${commit}`;
+  const configuration = `lp-emu:${S3 ? "esp32s3" : "esp32c6"}:t1+net=lan@${commit}`;
+  const s3Merged = process.env.LP_EMU_ESP32S3_WIFI_MERGED ?? path.join(ROOT, "target/lp-emu-esp32s3/merged-wifi.bin");
+  if (S3 && !process.env.LP_EMU_ESP32S3_WIFI_MERGED) {
+    const built = spawnSync("just", ["build-emu-esp32s3-wifi"], { cwd: ROOT, stdio: "inherit" });
+    if (built.status !== 0) {
+      console.error("✗ just build-emu-esp32s3-wifi failed");
+      process.exit(1);
+    }
+  }
   const image = PROTOCOL_1 ? protocol1Elf() : null;
   console.log(
     `walk-wifi-emu ${PROTOCOL_1 ? "relay-p1" : "relay"}: ${configuration} → ${path.relative(ROOT, OUT)}/` +
@@ -173,17 +198,22 @@ function main() {
   );
   const test = PROTOCOL_1 ? PROTOCOL_1_TEST : MAIN_TEST;
   const cargo = ["cargo", "test", "-p", "lp-cli", "--test", "emu_relay_link", "--", "--include-ignored", "--nocapture", "--exact", test];
-  const run = spawnSync(PROTOCOL_1 ? cargo[0] : "scripts/ci/ci-images.py", PROTOCOL_1 ? cargo.slice(1) : ["with", "esp32c6", "--", ...cargo], {
+  // The C6 takes CI's image or builds its own (`ci-images.py with`); the S3's
+  // was built above.
+  const direct = PROTOCOL_1 || S3;
+  const run = spawnSync(direct ? cargo[0] : "scripts/ci/ci-images.py", direct ? cargo.slice(1) : ["with", "esp32c6", "--", ...cargo], {
     cwd: ROOT,
     encoding: "utf8",
     env: PROTOCOL_1
       ? { ...process.env, LP_RELAY_P1_ELF: image.elf }
-      : { ...process.env, LP_EMU_BUILD_FW: process.env.LP_EMU_BUILD_FW ?? "1" },
+      : S3
+        ? { ...process.env, LP_EMU_ESP32S3_WIFI_MERGED: s3Merged }
+        : { ...process.env, LP_EMU_BUILD_FW: process.env.LP_EMU_BUILD_FW ?? "1" },
     maxBuffer: 256 * 1024 * 1024,
   });
   const log = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   writeFileSync(path.join(OUT, "walk.log"), log);
-  if (/emu_relay_link: skipped|emu_relay_link \(protocol 1\): not asked/.test(log)) {
+  if (/emu_relay_link( \(S3\))?: skipped|emu_relay_link \(protocol 1\): not asked/.test(log)) {
     console.error("✗ the cell skipped (no firmware image) — see walk.log");
     process.exit(1);
   }
@@ -228,7 +258,7 @@ function main() {
   console.log(
     PROTOCOL_1
       ? `\n✓ the protocol 1 relay walk (${configuration}, core ${LAST_PROTOCOL_1.slice(0, 9)}) finished: registered, listed at protocol 1, routed, watched with no picture, one leg throughout, back after a deploy — with no board.`
-      : `\n✓ the relay walk (${configuration}) finished: registered with a picture, edited through the relay, watched then idle, taken over on the LAN, busy, the picture lost at a deploy and back, kept while off, refused — with no board.`,
+      : `\n✓ the relay walk (${configuration}) finished: registered with a picture, edited through the relay, watched then idle, taken over on the LAN, busy, the picture kept across a deploy and back, kept while off, refused — with no board.`,
   );
 }
 

@@ -4447,19 +4447,46 @@ test-emu-esp32s3-lcd:
 test-emu-esp32s3-wifi:
     #!/usr/bin/env bash
     set -euo pipefail
+    just build-emu-esp32s3-wifi
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    export LP_EMU_ESP32S3_WIFI_ELF="$out/fw-esp32s3-wifi.elf"
+    export LP_EMU_ESP32S3_WIFI_MERGED="$out/merged-wifi.bin"
+    cargo test -p lp-cli --test emu_s3_lan_pair -- --include-ignored --nocapture
+
+# The cloud relay on an emulated S3 (S3 radio M6): `lp-cli/tests/
+# emu_relay_link.rs`'s S3 arm — the C6's relay walk, step for step, on
+# `fw-esp32s3 --features wifi` booted ROM-up under `lp-cli emu run --chip
+# esp32s3 --link --lan`, dialing `lightplayer.app` through the LAN's uplink to
+# an in-process `lp-cloud-server`: registers, edited through
+# `relay:<mac>@<origin>`, a `lan:` client with the same key takes the slot,
+# another is told busy, a deploy, Cloud relay off and on, a reset key
+# refused. Its figures are `lp-emu:esp32s3:t1+net=lan`; times are wall time
+# and never a gate. `just walk-wifi-emu relay --s3` runs it and reads the
+# board's words for each step.
+test-emu-esp32s3-relay:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-emu-esp32s3-wifi
+    export LP_EMU_ESP32S3_WIFI_MERGED={{ justfile_directory() }}/target/lp-emu-esp32s3/merged-wifi.bin
+    cargo test -p lp-cli --test emu_relay_link -- --include-ignored --nocapture --exact \
+        an_emulated_s3_reaches_lightplayer_app_through_the_lans_uplink
+
+# `fw-esp32s3 --features wifi`, copied out of the shared target path to
+# target/lp-emu-esp32s3/fw-esp32s3-wifi.elf and merged into
+# target/lp-emu-esp32s3/merged-wifi.bin (its partition table and an empty
+# `lpfs`): the image the S3's Wi‑Fi cells and walks boot.
+build-emu-esp32s3-wifi:
+    #!/usr/bin/env bash
+    set -euo pipefail
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
     out={{ justfile_directory() }}/target/lp-emu-esp32s3
     mkdir -p "$out"
     just build-fw-esp32s3 wifi
     wifi="$out/fw-esp32s3-wifi.elf"
     cp "$built" "$wifi"
-    merged="$out/merged-wifi.bin"
     espflash save-image --chip esp32s3 --merge \
         --partition-table lp-fw/fw-esp32s3/partitions.csv \
-        --flash-size {{ s3_flash_size }} "$wifi" "$merged"
-    export LP_EMU_ESP32S3_WIFI_ELF="$wifi"
-    export LP_EMU_ESP32S3_WIFI_MERGED="$merged"
-    cargo test -p lp-cli --test emu_s3_lan_pair -- --include-ignored --nocapture
+        --flash-size {{ s3_flash_size }} "$wifi" "$out/merged-wifi.bin"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
