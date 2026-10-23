@@ -547,6 +547,13 @@ The C6's radio, on this chip (S3 radio plan, M3 and M4,
   `ws://<board>/link`, mDNS `lp-xxxx.local` and the relay's device leg, on
   `lp-net` (12 KB, priority 1, pinned to core 0: `src/net/net_chip.rs`). The
   relay's address is a build fact (`LP_RELAY_HOST`, `src/net/relay_config.rs`).
+  The relay client is the C6's (`fw_esp32_radio::net::relay_task`): it dials
+  only when joined, Cloud relay is on and the board holds an account key.
+  Emulated, `just test-emu-esp32s3-relay` (`lp-cli/tests/emu_relay_link.rs`'s
+  S3 arm) and `just walk-wifi-emu relay --s3` walk it: registered, edited as
+  `relay:<mac>@<origin>`, taken over on the LAN, busy, a deploy, Cloud relay
+  off and on, a reset key refused. On silicon it is owed until the join
+  defect is fixed (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
 
 All of it comes up in `core_boot`, after the filesystem, in the C6's order
 (the radio, then BLE, then `lp-net`), so a core-only board keeps its radio.
