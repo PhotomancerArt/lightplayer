@@ -1022,11 +1022,18 @@ image and runs them with `--features test-seams` (CI: `Emulator ESP32-S3
 seams and heap (x64)`, a job of its own, which also runs the S3's heap
 ratchet).
 
-⚠️ **The shipped S3 image declares no seam yet** (no network stack before
-the roadmap's M4), so on it every default run says `SEAM none engaged: no
-seam table` and its label stays `lp-emu:esp32s3:t1`. `emu serve` still holds
-C6 boards only; S3 boards there, and the two-board LAN walk, come with the
-first S3 image that has Wi‑Fi.
+**The `wifi` image declares the network seam** (S3 radio M5's second half;
+`fw-esp32s3 --features wifi`, off by default): a default run engages
+`net=lan`, the firmware says `[wifi] network: the emulator's network seam`,
+and the label is `lp-emu:esp32s3:t1+net=lan`. An image without `wifi` has no
+network stack and declares no seam, so every default run on it says `SEAM none
+engaged: no seam table` and its label stays `lp-emu:esp32s3:t1`.
+`just test-emu-esp32s3-wifi` builds and merges the `wifi` image and runs
+`lp-cli/tests/emu_s3_lan_pair.rs`: two S3s, each joined alone over its USB
+link, then both on one runner-driven LAN (two leases, each board's
+`lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
+esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
+`just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them.
 
 ⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
 interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
