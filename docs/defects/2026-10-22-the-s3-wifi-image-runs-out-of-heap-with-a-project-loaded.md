@@ -72,6 +72,11 @@ board's own numbers. So the emulator's numbers are very likely silicon's
 too. Silicon cannot show the LAN half until the `wifi` image joins a
 network.
 
+**Expected fix** — this is the S3's heap pressure before PSRAM: the S3 radio
+roadmap's M10 maps the octal PSRAM and moves the project's heap there.
+Leave this open until M10 lands, then re-run the walk below with Peach (1D)
+to close it.
+
 **Repro** — `just test-emu-esp32s3-wifi` (builds and merges the image), then
 `just walk-wifi-emu lan --s3` (needs `just studio-web-story-build`, `cargo
 build -p lp-cli`). W3's board console is `target/walk-wifi-emu/lan-s3/console/s3-a.link.log`.
