@@ -379,21 +379,39 @@ just test-emu-esp32s3-split-boot   # ROM-up through the IDF door to the engine's
   record), and the engine run as a plain image.
 - Test images only, never in a build def: `fixture-trial-dies`,
   `fixture-trial-hangs`, `fixture-usb-untrusted` (the C6's).
-- Measured (`just fw-esp32s3-size-check`, 2026-10-22, default features,
-  Bluetooth on, the update board side in): core 791,440 B, engine
-  2,055,057 B, `app.bin` 2,973,696 B; steady headroom 3,318,895 B, update
-  headroom 4,521,984 B; 60,528 B to the core's next page. **The split is
-  layout-sensitive on Xtensa:** the reachability walk follows shared literal
-  pools (GNU ld coalesces them across functions), so a link where an engine
-  function's pool lands next to a core one drags engine code into the core —
-  main at `ccfa116b0` carried ~400 KB of `lpc_engine`/`lpc_model`/`lpc_wire`
-  in a 1,325,216 B core that way (`lp-fw-split why` shows
-  `core_boot` → `btdm_controller_init` → a `.literal` section of
-  `lpc_engine`'s). Compare cores across builds with that in mind.
+- **The flash ledger** is below, under "The split image's flash ledger".
 
 How the split is built (GNU ld's quirks on Xtensa, the literal pools, the two
 views) is `tools/lp-fw-split/README.md`; the loader is
 `lp-fw/fw-esp32s3-loader/README.md`.
+
+### The split image's flash ledger
+
+`just fw-esp32s3-size-check` (default features, `lp-fw-split build --chip
+esp32s3`). CI fails a PR whose smallest steady-or-update headroom drops below
+64 KB. Watch the core's distance to its next 64 KiB page too: crossing it
+moves the engine's start a page.
+
+| When (commit) | What changed | core | engine | `app.bin` | steady headroom | update headroom | core to its next page |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-10-21 (`a4be3adc8`) | the split image, no radio, littlefs | 281,584 | 2,171,869 | 2,568,192 | 3,726,371 | — | 46,096 |
+| 2026-10-21 (`fcbcfe20e`) | the tree store replaces littlefs (+21,840 B monolithic; the store mounts in the core) | 310,432 | 2,166,869 | 2,564,096 | 3,731,371 | — | 17,248 |
+| 2026-10-22 (`ccfa116b0`) | Bluetooth on by default — **and a core swollen with engine code** (below) | 1,325,216 | 1,463,385 | 2,908,160 | 3,386,279 | — | — |
+| 2026-10-22 (#1256) | `lp-fw-split` decodes the blobs' branch targets | 646,176 | 2,141,633 | 2,863,104 | 3,428,927 | — | 9,184 |
+| 2026-10-23 (`06ea6b68a`) | the update board side (core-only, the session, the SHA, the light) | 717,680 | 2,131,413 | 2,920,448 | 3,373,611 | 4,784,128 | 3,216 |
+
+The monolithic image at `06ea6b68a` is 2,788,640 B. The split costs 60,453 B
+of code: the door, and literals no longer shared across the two regions.
+
+**The swollen core, and its cause.** The radio blobs (GNU-assembled C)
+keep a relocation on every branch, against `.text` with a stale addend.
+Read as `S + A`, it pointed at the literal pools at `.text`'s start, and
+those pools pulled `lpc_engine`, `lpc_model` and `lpc_wire` into the core.
+`lp-fw-split why` showed the chain: `core_boot` → `btdm_controller_init`
+→ a `.literal` section of an engine closure. `lp-fw-split` now decodes a
+branch's target from the instruction (#1256; its README's Xtensa list,
+item 5). If a core grows by hundreds of KB, ask `why` before blaming the
+code.
 
 ### Release profile
 

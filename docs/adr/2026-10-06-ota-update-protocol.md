@@ -207,7 +207,7 @@ image carries `"ota": {"layout": 1}`; a single (monolithic) image carries
 no `ota` key and is updated over USB. A plain local build stays a single
 image (`lp-fw/builds/README.md`).
 
-### 9. The firmware's side (`lp-fw/fw-esp32c6/src/ota/`)
+### 9. The firmware's side (`lp-fw/fw-esp32-common/src/split_core/`, and each chip's `src/split_core/`; first written in `lp-fw/fw-esp32c6/src/ota/`)
 
 > **2026-10-21:** this code moved, unchanged in behaviour, to
 > `lp-fw/fw-esp32-common/src/split_core/` (feature `split-core`), generic
@@ -282,7 +282,7 @@ first boot reachable and none needing USB; a heal from the host's cache in
 
 The core's own hash (§5, every boot) and the engine guard (DD34, the first
 boot after a USB flash) no longer run `sha2` in software. Both feed the C6's
-SHA block (esp-hal's `Sha`; `fw-esp32c6/src/ota/hw_sha.rs`). The core reads
+SHA block (esp-hal's `Sha`; `fw-esp32c6/src/hw_sha.rs`). The core reads
 itself through the cache: it maps its own extent into the MMU entries just
 below the engine window, checks they are unused first, and unmaps them after
 (`ScratchWindow` in `ota/engine_window.rs`). The ROM's 64-byte SPI1 reads
@@ -345,7 +345,7 @@ record is in `docs/reports/2026-10-06-ota-iphone-walk.md`.
 An lp-cli USB update, X → Y on the bench C6 (`A0:F2:62:87:B4:8C`), took
 **67.5 s** and now takes **32.1 s** (two runs each, same desk, same host).
 espflash writes the same image in about 14.5 s. The board's own profile, the
-`[OTA] timing` lines (`fw-esp32c6/src/ota/update_timing.rs`), showed where
+`[OTA] timing` lines (`fw-esp32-common/src/split_core/update_timing.rs`), showed where
 the time went. Four changes, none of them on the wire:
 
 Stage times are the host's (from the start, or the reset that began the
@@ -543,3 +543,25 @@ it (`docs/reports/2026-10-16-c6-time-to-first-light.md`). Now:
 Unchanged: the hash rules, the hello's and `M`'s bytes, channel 3, lp-link,
 every on-flash format. Only *when* the hello goes out moves: a host sees it
 after the first light, not before.
+
+## Amendment (2026-10-23): the S3's codes — chip 2, layout 2
+
+The code table (`lpc_update::code_table`) gains **chip 2**
+(`CHIP_ESP32S3`, word `"esp32s3"`) and **layout 2** (`LAYOUT_2`, the S3's
+split image on 64 KiB pages:
+[`2026-10-23-the-s3-ships-a-split-image.md`](2026-10-23-the-s3-ships-a-split-image.md)).
+Nothing else in the protocol changed. The messages, the session, the
+progress record, `ota-manifest.json` format 1 (core + engine) and the host's
+decision are the same for both chips.
+
+- **A board refuses another chip's or another layout's offer by name,
+  before writing anything** (`Incompatible { Chip | Layout }`). A C6 offered
+  an S3 build, or an S3 offered a C6 build, keeps its flash byte-identical.
+- **A host that predates the codes reads an S3 as another chip** and
+  decides "needs USB" (`OtherChip`). That is what it told the user before
+  the S3 could update, so nothing fielded is surprised. A host that knows
+  them packages and offers an S3 build like a C6 build (`lp-cli`'s
+  `requires_of` is chip-aware).
+- An S3 announces layout 2 only from its first core that can install an
+  update. A part with octal flash announces 0: its records' marks cannot be
+  re-programmed in place.
