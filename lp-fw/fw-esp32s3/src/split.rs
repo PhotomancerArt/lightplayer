@@ -180,7 +180,8 @@ pub fn split_boot(mut core: CoreBoot) {
             let record = base_fs
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
                 .ok();
-            let light = crate::split_core::StatusLight::new(record.as_deref(), output_peripherals.rmt);
+            let light =
+                crate::split_core::StatusLight::new(record.as_deref(), output_peripherals.rmt);
             // Its own task, like the engine's server loop (the C6's reason:
             // awaited here, its future would sit in the main task's frame).
             spawner.spawn(

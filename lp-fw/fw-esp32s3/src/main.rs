@@ -129,10 +129,14 @@ mod hardware;
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
 // inside is still app-only.
-#[cfg(any(not(fw_harness), feature = "test_loopback", feature = "test_lcd_ws281x"))]
-mod output;
 #[cfg(all(feature = "lcd_ws281x_probe", not(fw_harness)))]
 mod lcd_probe;
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_loopback",
+    feature = "test_lcd_ws281x"
+))]
+mod output;
 #[cfg(all(feature = "lcd_ws281x_probe", feature = "lcd-ws281x"))]
 compile_error!(
     "`lcd_ws281x_probe` brings its own LCD_CAM rig; it cannot share the peripheral with the \
