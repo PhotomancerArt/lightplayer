@@ -681,6 +681,63 @@ more MMIO store — the store that zeroed the mask under X43 — then enables th
 line, and asserts the take followed within a few instructions (CCOUNT 12 →
 20) rather than at the next 256-cycle window boundary. Never single-stepped.
 
+## LCD_CAM and GDMA: parallel WS281x lanes (M9)
+
+The S3's parallel LED output drives up to eight WS281x lanes (sixteen on a
+16-bit bus) from one frame buffer: LCD_CAM's LCD half in i8080 mode shifts a
+byte per bus clock onto `LCD_DATA_0..7`, and the AHB GDMA feeds it from
+internal RAM with no CPU involvement (`led-channels-spike/report.md` in the
+plan directory). This machine plays that path, and the per-pad WS281x
+decoders from "The pad, and the frame" read each lane back unchanged.
+
+| block | where | what |
+|---|---|---|
+| `DMA` ([`periph::gdma`]) | `0x6003_F000` | the five channels' OUT half: `out_conf0/1`, `out_link` (start, stop), the `out_int` cluster, `out_peri_sel`, and `outfifo_status`, which esp-hal's `start_transfer` spins on. The IN half is accept-and-remember and warns on a start |
+| `LCD_CAM_CLOCK` ([`periph::lcd_cam::LcdClock`]) | `0x6004_1000` | `lcd_clock`, one register |
+| `LCD_CAM` ([`periph::lcd_cam::Lcd`]) | `0x6004_1010` | the LCD's registers: `lcd_user` (start, reset, update, dout, always-out, 2-byte, bit and byte order, command and dummy phases), `lcd_misc` (setup and hold cycles), `lc_dma_int_*` (`lcd_trans_done`, source 24) |
+
+**The CAM half is not mapped.** `cam_ctrl`, `cam_ctrl1` and `cam_rgb_yuv`
+(`+0x04..+0x10`) sit between the two windows, so under `--strict-bus` a CAM
+access stops the run. The CAM is the spike's analyzer, never product.
+
+**How a frame plays.**
+
+1. `outlink_start` records the chain's address and ends the window.
+2. The machine walks the descriptor chain out of internal RAM between windows
+   (`Machine::service_gdma`). A peripheral has no way into guest RAM, so this
+   is the C6's `drain_tx_log` shape.
+3. The bytes wait in the channel for LCD_CAM, and `start_transfer`'s spin
+   ends.
+4. `lcd_start` takes them (or waits for them) and drives the lanes:
+   - each slot's time is the start plus `k` PCLK periods, an exact fraction of
+     CPU cycles from `lcd_clock`;
+   - edges are driven 1,024 slots at a time from scheduled events, only where
+     a lane changes, so 8 × 500 LEDs costs a few dozen events and never a
+     per-cycle loop.
+5. At the end, `lcd_start` clears (what esp-hal's `wait` polls),
+   `lcd_trans_done` raises, and GDMA's done and EOF bits raise.
+
+**Not modelled, said so.**
+
+- The chain is read whole at the start, not as the FIFO drains.
+- RGB mode and `lcd_next_frame_en` are warnings.
+- PCLK, CS, DC and the sync lines are never driven.
+- A descriptor or buffer outside internal RAM (`0x3FC8_8000..0x3FD0_0000`)
+  is a descriptor error, and under `--strict-bus` a stop: PSRAM is ruled out
+  for this buffer by design.
+
+**The timing is modelled and ungraded.** The clock sources are the tree's
+nominal 40, 240 and 160 MHz, and a 2.5 MHz bus is exactly 96 CPU cycles a
+slot. A silicon capture grades it, not this. **The bytes transfer.**
+
+`tests/lcd_cam_lanes.rs` boots `fw-esp32s3 --features test_lcd_lanes`
+(a harness that never ships). It sends five uneven lanes (12, 9, 7, 5 and
+3 LEDs on GPIO1–5) twice through esp-hal's own i8080 driver and GDMA, and
+every lane decodes byte-exact off its pad, in lockstep, under
+`--strict-bus`. `just test-emu-esp32s3-lcd` builds the image and runs it;
+CI's `Emulator ESP32-S3 seams and heap (x64)` job runs it. An image that does
+not use LCD_CAM touches none of this and behaves as before.
+
 ## The link, and what a host can and cannot do to this chip through it
 
 The console **is** the link: `esp-println` with the `jtag-serial` feature

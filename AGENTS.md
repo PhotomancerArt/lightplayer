@@ -1662,6 +1662,15 @@ The READMEs: `lp-base/lp-seam/README.md` (the ABI),
 `lp-fw/fw-esp32c6/README.md` (the table and its cost on silicon),
 `lp-emu/lp-emu-validate/README.md` ("Composite names").
 
+#### LCD_CAM and GDMA on the S3
+
+`lp-emu-esp32s3` models LCD_CAM's LCD half in i8080 mode and the AHB GDMA's
+OUT channels (M9, the parallel WS281x output): esp-hal's i8080 driver drives
+up to sixteen lanes, and the per-pad WS281x decoders read each one back.
+`just test-emu-esp32s3-lcd` proves five uneven lanes byte-exact. The CAM half
+is unmapped (a strict stop), the bytes transfer, and the timing is ungraded.
+See `lp-emu/esp/lp-emu-esp32s3/README.md`, "LCD_CAM and GDMA".
+
 #### Emulated Wi-Fi
 
 Every emulated C6 run whose image carries the network seam engages it, soft

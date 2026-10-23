@@ -4412,6 +4412,24 @@ test-emu-esp32s3-psram:
     cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
     cargo test -p lp-cli --release --test emu_s3_link_gates the_psram_image -- --include-ignored --nocapture
 
+# The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
+# `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —
+# sends five uneven lanes through esp-hal's i8080 driver and GDMA, and
+# `tests/lcd_cam_lanes.rs` checks every lane decodes byte-exact off its pad.
+# One firmware build and a few milliseconds of emulation; the `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it beside the seam harness.
+test-emu-esp32s3-lcd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_lcd_lanes
+    lanes="$out/fw-esp32s3-lcd-lanes.elf"
+    cp "$built" "$lanes"
+    export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
@@ -5544,6 +5562,9 @@ walk-drop-emu *args:
 # for lightplayer.app's relay: the board's leg through the virtual LAN's
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
+# `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes:
+# `just walk-ota-ble-emu --s3`.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5554,6 +5575,19 @@ walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
+    # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
+    # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* ]]; then
+        images=target/walk-ota-emu/images-s3
+        if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+        fi
+        # Y last: build-image.sh writes the parts directory the bundle copies.
+        just studio-firmware-package-esp32s3
+        just studio-web-story-build
+        node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     images=target/walk-ota-emu/images
     if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0

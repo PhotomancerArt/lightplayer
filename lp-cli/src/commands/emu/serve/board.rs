@@ -33,13 +33,13 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow};
 use lp_emu_esp32c6::flash::ESP_IMAGE_MAGIC;
 use lp_emu_esp32c6::loader::EfuseIdentity;
-use lp_emu_esp32c6::machine::{
-    Esp32C6Builder, Outcome, StopCondition, TimeGrade, UsbHost, UsbSjDrain, UsbSjSink,
-};
+use lp_emu_esp32c6::machine::{Esp32C6Builder, TimeGrade, UsbHost, UsbSjDrain, UsbSjSink};
 
 use super::air::AirTap;
+use super::serve_machine::{ServeMachine, SliceEnd, build_s3};
 use super::served_lan::{BoardOnLan, LanSeat};
-use crate::commands::emu::handler::{Image, apply_image, describe};
+use crate::commands::emu::args::EmuChip;
+use crate::commands::emu::handler::{Image, apply_image};
 use crate::commands::emu::lan_fixture::forward_to_board;
 
 /// How long one `run_until` call is allowed to hold the thread before the
@@ -126,6 +126,8 @@ pub struct Board {
     /// takes, as `GET /boards` reports it. A flashable board is a `rom-up`
     /// one, and a page that offers "flash this board" wants to know.
     pub boot: &'static str,
+    /// `esp32c6` or `esp32s3`, as `GET /boards` says it.
+    pub chip: &'static str,
     /// Whether the chip holds a bootable image at the reset vector, kept up
     /// to date by the board thread on every flush.
     ///
@@ -175,23 +177,13 @@ pub struct SeamReport {
     pub endpoints: Vec<String>,
 }
 
-impl SeamReport {
-    fn of(machine: &lp_emu_esp32c6::machine::Esp32C6Machine) -> Self {
-        Self {
-            label: machine.configuration_label(),
-            lines: machine.seams().lines.clone(),
-            endpoints: machine
-                .seam_endpoints()
-                .iter()
-                .map(|e| e.id.to_string())
-                .collect(),
-        }
-    }
-}
-
 /// The knobs a whole `serve` shares across its boards.
 #[derive(Clone)]
 pub struct BoardOptions {
+    /// The chip every board of this serve is (`--chip`): a C6, or an S3
+    /// (`serve_machine`).
+    pub chip: EmuChip,
+    /// The C6's time grade (the S3 has one, `t1`).
     pub grade: TimeGrade,
     pub strict_bus: bool,
     /// The USB host's state at power-on.
@@ -244,6 +236,10 @@ impl Board {
         let id = spec.id.clone();
         let mac = spec.mac;
         let boot = spec.kind.boot_word();
+        let chip = match options.chip {
+            EmuChip::Esp32S3 => "esp32s3",
+            _ => "esp32c6",
+        };
         let thread = {
             let shutdown = Arc::clone(&shutdown);
             let flush_now = Arc::clone(&flush_now);
@@ -284,6 +280,7 @@ impl Board {
             mac,
             merged,
             boot,
+            chip,
             has_image,
             bytes_addr,
             control_addr,
@@ -388,13 +385,12 @@ fn run_board(this: RunBoard) {
     // The ports the machine actually bound. `TcpHost::listen` goes through
     // `std::net::TcpListener::bind` and remembers `local_addr()`, so
     // `127.0.0.1:0` is an ephemeral port nobody had to pick.
-    let addrs = match (machine.usb_sj_tcp(), machine.control_tcp()) {
-        (Some(bytes), Some(control)) => Ok((bytes.local_addr(), control.local_addr())),
-        _ => Err(anyhow!(
+    let addrs = machine.doors().ok_or_else(|| {
+        anyhow!(
             "board `{}` did not bind both of its loopback doors",
             spec.id
-        )),
-    };
+        )
+    });
     // The LAN's door: the builder attached the board (its lease is
     // reserved), so a loopback port can be carried to it before it boots.
     let bound = addrs.and_then(|(bytes, control)| {
@@ -424,25 +420,20 @@ fn run_board(this: RunBoard) {
         return;
     }
 
-    if let Some(air) = &options.air {
-        machine.arm_air(lp_emu_esp_common::air::ParticipantId(options.air_seat));
+    if let Some(air) = &options.air
+        && let Some(c6) = machine.as_c6_mut()
+    {
+        c6.arm_air(lp_emu_esp_common::air::ParticipantId(options.air_seat));
         air.announce(&spec.id, options.air_seat);
     }
 
-    let stop = StopCondition {
-        // No cycle deadline: a server has none, and `reboot()` restarts the
-        // guest's clock, so an absolute one would mean a different thing
-        // after every reset. The wall net is what gives the loop its turn.
-        stop_cycle: None,
-        exit_on: None,
-        wall_timeout: Some(SLICE),
-        probes: Vec::new(),
-    };
+    // No cycle deadline (`ServeMachine::run_slice`): the wall net of one
+    // `SLICE` is what gives the loop its turn.
     report_seams(&mut machine, &spec.id, &seams);
     let mut last_flush = Instant::now();
     let mut flash_cut_said = false;
     while !shutdown.load(Ordering::SeqCst) {
-        let outcome = machine.run_until(&stop);
+        let outcome = machine.run_slice(SLICE);
         report_seams(&mut machine, &spec.id, &seams);
         // `flash_cut=`: say the cut once, when it fires (a `then=power-cycle`
         // board runs straight on through it).
@@ -452,22 +443,20 @@ fn run_board(this: RunBoard) {
         }
         reboots.store(machine.reboots(), Ordering::SeqCst);
         power_cycles.store(machine.power_cycles(), Ordering::SeqCst);
-        if let Some(air) = &options.air {
-            for frame in machine.take_air_frames() {
+        if let Some(air) = &options.air
+            && let Some(c6) = machine.as_c6_mut()
+        {
+            for frame in c6.take_air_frames() {
                 air.publish(options.air_seat, frame.at, &frame.bytes);
             }
         }
         match outcome {
             // The only ordinary end of a slice.
-            Outcome::WallTimeout { .. } => {}
-            other => {
+            SliceEnd::Slice => {}
+            SliceEnd::Stopped(why) => {
                 // A fault, a strict refusal, or a reset the guest had
                 // disabled. The board is over; the server is not.
-                eprintln!(
-                    "emu serve: board `{}` stopped — {}",
-                    spec.id,
-                    describe(&other)
-                );
+                eprintln!("emu serve: board `{}` stopped — {why}", spec.id);
                 stopped.store(true, Ordering::SeqCst);
                 break;
             }
@@ -483,11 +472,7 @@ fn run_board(this: RunBoard) {
 
 /// A chip start's `SEAM` lines, printed as they come and published for
 /// `GET /boards`. One `Vec::is_empty` a slice when nothing changed.
-fn report_seams(
-    machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine,
-    id: &str,
-    report: &std::sync::Mutex<SeamReport>,
-) {
+fn report_seams(machine: &mut ServeMachine, id: &str, report: &std::sync::Mutex<SeamReport>) {
     let lines = machine.take_seam_lines();
     let mut report = report.lock().expect("seam report poisoned");
     if lines.is_empty() && !report.label.is_empty() {
@@ -496,7 +481,7 @@ fn report_seams(
     for line in &lines {
         eprintln!("emu serve: board `{id}`: {line}");
     }
-    *report = SeamReport::of(machine);
+    *report = machine.seam_report();
 }
 
 /// Where the machine writes its flash part before it is moved into place.
@@ -512,7 +497,7 @@ fn report_seams(
 /// This is a hazard reasoned about rather than one observed: no run has been
 /// caught mid-write. It costs one rename per flush and it removes the whole
 /// class, which is worth it for the file a walk's project lives in.
-fn working_path(flash: &std::path::Path) -> PathBuf {
+pub(super) fn working_path(flash: &std::path::Path) -> PathBuf {
     let mut path = flash.to_path_buf();
     let name = path
         .file_name()
@@ -524,11 +509,7 @@ fn working_path(flash: &std::path::Path) -> PathBuf {
 
 /// Write back everything a killed server must not lose: the flash part, and
 /// the console transcript.
-fn flush(
-    machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine,
-    spec: &BoardSpec,
-    has_image: &AtomicBool,
-) {
+fn flush(machine: &mut ServeMachine, spec: &BoardSpec, has_image: &AtomicBool) {
     // Asked of the CHIP rather than of the file, and on every flush rather
     // than once: this is what turns `blank → flash → loaded` into a sequence
     // a page can watch. The machine answers it (C6-in-tab P1), so the door
@@ -553,12 +534,12 @@ fn flush(
         ),
     }
     if let Some(path) = &spec.console {
-        write_console(path, machine.usb_sj().bytes(), &spec.id);
+        write_console(path, machine.console_bytes(), &spec.id);
         // What the guest handed the IN endpoint that no host took — the
         // boot log a byte client that connects later never sees, because
         // the firmware pauses its writes when nothing is draining. A board
         // does that too; the difference is that here it can still be read.
-        let untaken = machine.usb_sj_tried().bytes();
+        let untaken = machine.untaken_bytes();
         if !untaken.is_empty() {
             write_console(&untaken_path(path), untaken, &spec.id);
         }
@@ -607,7 +588,15 @@ fn write_console(path: &std::path::Path, bytes: Vec<u8>, id: &str) {
     }
 }
 
-fn build(
+/// The board's machine, for the serve's chip.
+fn build(spec: &BoardSpec, options: &BoardOptions) -> Result<ServeMachine> {
+    match options.chip {
+        EmuChip::Esp32S3 => build_s3(spec, options),
+        _ => Ok(ServeMachine::C6(Box::new(build_c6(spec, options)?))),
+    }
+}
+
+fn build_c6(
     spec: &BoardSpec,
     options: &BoardOptions,
 ) -> Result<lp_emu_esp32c6::machine::Esp32C6Machine> {
@@ -779,6 +768,7 @@ mod tests {
             console: None,
         };
         let options = BoardOptions {
+            chip: EmuChip::Esp32C6,
             grade: TimeGrade::T1,
             strict_bus: false,
             usb_host: UsbHost::Attached { draining: false },
@@ -793,7 +783,7 @@ mod tests {
             "led=fast and the default net=lan"
         );
         let mut machine = build(&spec, &options).expect("the board builds");
-        let report = SeamReport::of(&machine);
+        let report = machine.seam_report();
         assert_eq!(report.label, "lp-emu:esp32c6:t1", "nothing engaged");
         assert_eq!(report.lines.len(), 1);
         assert!(
