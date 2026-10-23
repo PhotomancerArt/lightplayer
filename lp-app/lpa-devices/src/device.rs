@@ -79,6 +79,19 @@ pub struct Device {
     /// gesture that asks again.
     #[serde(default)]
     identify_retries: u32,
+    /// The last identify settled on an open link without hearing a hello
+    /// ("unrecognized firmware", no response, a speaker with no hello): a
+    /// hello heard later in the same window is the board's real answer,
+    /// and it re-identifies — the verdict follows it, and identify asks
+    /// what the board runs (`IdentifyActivity::ask_what_it_runs`), which
+    /// nothing else would until its first heartbeat. A board that boots
+    /// slowly misses identify's window this way: a cold board compiling a
+    /// big shader, or an emulated S3, whose hello came minutes after the
+    /// 5 s verdict (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.md).
+    /// Set when such an identify ends; cleared when it is used, and by any
+    /// identify that starts.
+    #[serde(default)]
+    late_hello_reidentifies: bool,
     /// Generations handed to coarse effects on this device. Monotonic and
     /// never reset: a marker from an effect this device started two
     /// activities ago must not be able to look current.
@@ -113,6 +126,7 @@ impl Device {
             activity: None,
             armed_timer: None,
             identify_retries: 0,
+            late_hello_reidentifies: false,
             next_effect_id: 0,
             erased: false,
         }
@@ -369,6 +383,7 @@ impl Device {
         if self.activity.is_some() || self.link().is_none() {
             return Vec::new();
         }
+        self.late_hello_reidentifies = false;
         let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
         let effect_id = self.mint_effect_id();
         let mut reducer =
@@ -841,6 +856,7 @@ impl Device {
             self.identify_retries = 0;
         }
         let mut commands = Vec::new();
+        let hello_before = self.evidence.has_hello();
 
         // 1. Fold first, so the activity always reads fresh evidence.
         let notes = self
@@ -914,6 +930,19 @@ impl Device {
         // the one that outlives its link).
         if matches!(event, Event::LinkDetached { .. }) {
             commands.extend(self.lose_link(now, ctx));
+        }
+
+        // 4b. A hello after identify settled without one: re-identify, so
+        // the verdict and the board's project follow the board's own word
+        // (`late_hello_reidentifies`).
+        if self.late_hello_reidentifies
+            && !hello_before
+            && self.evidence.has_hello()
+            && self.activity.is_none()
+            && self.evidence.presence.is_open()
+        {
+            self.late_hello_reidentifies = false;
+            commands.extend(self.spawn_identify(now, ctx));
         }
 
         // 5. Supervision looks at the clock last.
@@ -1058,6 +1087,13 @@ impl Device {
                 // re-asking would only knock on it again. It stays settled
                 // until something changes (the holder lets go, or Connect).
                 if cell.kind == ActivityKind::Identify {
+                    // Settled with no hello on a port that stays open: a
+                    // hello that comes later re-identifies (step 4b of
+                    // `handle_event`). A port another tab holds never
+                    // hears one.
+                    self.late_hello_reidentifies = !self.evidence.has_hello()
+                        && self.evidence.presence.is_open()
+                        && !self.evidence.link_held_by_tab();
                     if failed
                         && self.intent.connection == ConnectionIntent::Connected
                         && self.link().is_some()
@@ -2023,6 +2059,95 @@ mod tests {
         );
         harness.settle(&mut remembered, Millis(10));
         assert_eq!(remembered.status(), DeviceStatus::NotResponding);
+    }
+
+    /// A board that boots slowly says only boot lines inside identify's
+    /// window, so identify settles on "unrecognized firmware" — and its
+    /// hello comes later in the same window (an emulated S3, a cold board
+    /// compiling a big shader). The late hello re-identifies: the card
+    /// ends up a recognized LightPlayer and the board is asked what it
+    /// runs, with no gesture from anyone
+    /// (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.md).
+    #[test]
+    fn a_hello_after_identify_settled_unrecognized_reidentifies_and_asks_what_it_runs() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        let id = device.id;
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::Action(Action::Connect { device: id }),
+        );
+        harness.feed(
+            &mut device,
+            Millis(10),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        harness.feed(
+            &mut device,
+            Millis(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Line("booting the engine...".to_string()),
+            ),
+        );
+        let now = harness.settle(&mut device, Millis(20));
+        assert_eq!(
+            device.evidence.last_outcome,
+            Some(ActivityOutcome::Succeeded {
+                summary: "unrecognized firmware".to_string()
+            }),
+            "setup: identify settled before the board's hello"
+        );
+        assert!(!device.is_busy());
+
+        // The hello, minutes after the verdict: identify runs again.
+        let facts = harness.hello();
+        let hello = |request_id| {
+            Input::link(
+                LinkId(1),
+                LinkEvent::Frame(ServerFrame::hello(request_id, facts.clone())),
+            )
+        };
+        let late = now.plus_ms(180_000);
+        harness.feed(&mut device, late, hello(0));
+        assert!(device.is_busy(), "the late hello re-identifies");
+        assert_eq!(
+            device.activity.as_ref().map(|cell| cell.kind),
+            Some(ActivityKind::Identify)
+        );
+
+        // Its answer settles it, as a LightPlayer, and asks what it runs.
+        let commands = harness.feed(&mut device, late.plus_ms(50), hello(1));
+        assert!(!device.is_busy(), "the hello settles the re-identify");
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::SendFrame(ClientFrame {
+                        body: crate::wire::ClientFrameBody::ListLoadedProjects,
+                        ..
+                    }),
+                    ..
+                }
+            )),
+            "the board is asked what it runs: {commands:?}"
+        );
+        assert!(device.spoke_light_player());
+        assert!(matches!(
+            device.evidence.classification,
+            Classification::LightPlayer { .. }
+        ));
+        assert_eq!(device.status(), DeviceStatus::Ready);
+
+        // Once only: the next hello in the window starts nothing.
+        harness.feed(&mut device, late.plus_ms(5_000), hello(2));
+        assert!(!device.is_busy());
     }
 
     struct Harness {

@@ -54,6 +54,7 @@ mod board;
 mod door;
 mod lan_browse;
 mod parent_watch;
+mod serve_machine;
 mod served_lan;
 mod wire_tap;
 mod wire_tear;
@@ -73,11 +74,34 @@ use served_lan::{LanSeat, ServedLan, is_path_segment, parse_lans};
 pub fn serve(args: ServeArgs) -> Result<()> {
     // A bad fault spec is refused here, before any board starts.
     wire_tear::WireTear::from_env()?;
-    if args.chip != EmuChip::Esp32C6 {
-        anyhow::bail!(
-            "`emu serve` holds C6 boards only; the S3 and the classic are `emu run --chip \
-             esp32s3|esp32v3 --host-link`"
-        );
+    // C6 boards, or S3 boards (the S3 updates plan's P12: Studio's update
+    // walks against an emulated S3). The classic is `emu run --chip esp32v3
+    // --host-link`.
+    match args.chip {
+        EmuChip::Esp32C6 => {}
+        EmuChip::Esp32S3 => {
+            let c6_only = [
+                (
+                    args.air.is_some(),
+                    "--air (the radio frame tap is the C6's)",
+                ),
+                (
+                    args.lpperi_clk_en.is_some(),
+                    "--lpperi-clk-en (a C6 register)",
+                ),
+                (
+                    args.time_grade != super::args::Grade::T1,
+                    "--time-grade other than t1 (the S3 machine has one)",
+                ),
+            ];
+            if let Some((_, flag)) = c6_only.iter().find(|(set, _)| *set) {
+                bail!("`emu serve --chip esp32s3`: {flag}");
+            }
+        }
+        _ => bail!(
+            "`emu serve` holds C6 and S3 boards; the classic is `emu run --chip esp32v3 \
+             --host-link`"
+        ),
     }
 
     if args.board.is_empty() {
@@ -145,6 +169,7 @@ pub fn serve(args: ServeArgs) -> Result<()> {
             }
         });
         let options = BoardOptions {
+            chip: args.chip,
             grade: args.time_grade.time_grade(),
             strict_bus: args.strict_bus,
             usb_host: args.usb_host.usb_host(),
