@@ -177,11 +177,12 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         );
     }
     // The one boot line P04b's note fixes: the `.bss` arena (HEAP_SIZE =
-    // 168 * 1024 on a radio image, `ble` being a default feature since
-    // 2026-10-21) plus `dram2_seg` (73,744 B, RAM research E14), a two-region
-    // sum where the classic prints a four-region one.
+    // 136 * 1024 less PSRAM's 3 KiB, `espnow` and `psram` being default
+    // features since 2026-10-23) plus `dram2_seg` (73,744 B, RAM research
+    // E14), a two-region sum where the classic prints a four-region one.
+    // PSRAM's region is the internal heap's figure's business, not this line's.
     assert!(
-        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=172032+73744=245776"),
+        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=136192+73744=209936"),
         "HEAP_SIZE + dram2_seg: {text}"
     );
     assert!(
@@ -453,26 +454,27 @@ fn the_radio_image_renders_the_shipped_images_frame() {
     );
 }
 
-/// **The `psram` image renders what the shipped image renders** (M10): the
-/// shipped app with PSRAM brought up in the core, the engine's heap and its
-/// JIT code in PSRAM (`LP_PSRAM_HEAP=all`) and its frames copied out to
-/// internal RAM for the RMT, against the shipped image on the same chip and
-/// the same project — and the same image on a board WITHOUT PSRAM, which must
-/// fall back to an image without the feature. Same first lit frame, all
+/// **The shipped image renders the same frame with PSRAM and without it**
+/// (M10; PSRAM on by default since 2026-10-23): the shipped app with PSRAM
+/// brought up in the core, the engine's heap and its JIT code in PSRAM
+/// (`LP_PSRAM_HEAP=all`) and its frames copied out to internal RAM for the
+/// RMT, against the same feature set built WITHOUT `psram` on the same chip
+/// and the same project — and the shipped image on a board WITHOUT PSRAM,
+/// which must fall back to the image without it. Same first lit frame, all
 /// three. Frames are the machine's decode (`lp-emu:esp32s3:t1`), not
 /// silicon; PSRAM's timing is modeled and ungraded.
 #[test]
-#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_PSRAM_APP_ELF; run through `just test-emu-esp32s3-psram`"]
-fn the_psram_image_renders_the_shipped_images_frame() {
-    const TEST: &str = "the_psram_image_renders_the_shipped_images_frame";
+#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_NO_PSRAM_ELF; run through `just test-emu-esp32s3-psram`"]
+fn the_shipped_image_renders_the_same_frame_with_and_without_psram() {
+    const TEST: &str = "the_shipped_image_renders_the_same_frame_with_and_without_psram";
     let images = (|| {
         Ok::<_, String>((
             test_support::fw_esp32s3_image()?,
             test_support::merged_chip_image()?,
-            test_support::psram_app_image()?,
+            test_support::no_psram_image()?,
         ))
     })();
-    let (elf, merged, psram_elf) = match images {
+    let (elf, merged, no_psram_elf) = match images {
         Ok(images) => images,
         Err(reason) => {
             test_support::skip_notice(TEST, &reason);
@@ -480,47 +482,47 @@ fn the_psram_image_renders_the_shipped_images_frame() {
         }
     };
     let shipped = oracle_render_with("shipped", &elf, &merged, None);
-    let psram = oracle_render_with("psram", &psram_elf, &merged, None);
-    let without = oracle_render_with("psram, no chip", &psram_elf, &merged, Some(0));
+    let plain = oracle_render_with("no psram feature", &no_psram_elf, &merged, None);
+    let without = oracle_render_with("shipped, no chip", &elf, &merged, Some(0));
     for line in [
         "[INIT] psram: on, 8388608 bytes at 0x3c800000",
         "[INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)",
     ] {
         assert!(
-            psram.console.contains(line),
-            "psram: no `{line}`:\n{}",
-            psram.console
+            shipped.console.contains(line),
+            "shipped: no `{line}`:\n{}",
+            shipped.console
         );
     }
     assert!(
         without
             .console
             .contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
-        "psram, no chip: the fallback line:\n{}",
+        "shipped, no chip: the fallback line:\n{}",
         without.console
     );
     assert_eq!(
-        hex(&psram.first_lit),
         hex(&shipped.first_lit),
-        "the psram image's first lit frame on pad {ORACLE_PAD} is the shipped image's"
+        hex(&plain.first_lit),
+        "the shipped image's first lit frame on pad {ORACLE_PAD} is the image without psram's"
     );
     assert_eq!(
         hex(&without.first_lit),
-        hex(&shipped.first_lit),
-        "with no PSRAM the psram image's first lit frame is the shipped image's"
+        hex(&plain.first_lit),
+        "with no PSRAM the shipped image's first lit frame is the image without psram's"
     );
     println!(
         "ORACLE FRAME (lp-emu:esp32s3:t1) on pad {ORACLE_PAD}, {} bytes, identical x3: {}\n  \
-         shipped: {} frames, {} whole lit, by {} us\n  psram:   {} frames, {} whole lit, by {} us\n  \
-         no chip: {} frames, {} whole lit, by {} us",
-        shipped.first_lit.len(),
-        hex(&shipped.first_lit),
+         shipped:  {} frames, {} whole lit, by {} us\n  no psram: {} frames, {} whole lit, by {} us\n  \
+         no chip:  {} frames, {} whole lit, by {} us",
+        plain.first_lit.len(),
+        hex(&plain.first_lit),
         shipped.frames,
         shipped.whole_lit,
         shipped.at_us,
-        psram.frames,
-        psram.whole_lit,
-        psram.at_us,
+        plain.frames,
+        plain.whole_lit,
+        plain.at_us,
         without.frames,
         without.whole_lit,
         without.at_us

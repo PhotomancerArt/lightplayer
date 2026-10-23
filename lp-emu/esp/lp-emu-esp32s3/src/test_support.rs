@@ -176,17 +176,17 @@ pub fn seam_abi_image() -> Result<PathBuf, String> {
 /// of it. A test image that never ships.
 pub const PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_ELF";
 
-/// The environment variable naming the **`psram` app** ELF — `fw-esp32s3`
-/// built with the product's `psram` feature (M10 of the S3 radio roadmap):
-/// the shipped app with PSRAM brought up in the core and the engine's heap
-/// and JIT code in it. Off by default, so its own variable.
-pub const PSRAM_APP_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_APP_ELF";
+/// The environment variable naming the **image without PSRAM** — `fw-esp32s3`
+/// built with the shipped feature set minus `psram` (on by default since
+/// 2026-10-23): the image a board without PSRAM behaves as, which the
+/// shipped image's frame is checked against.
+pub const NO_PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_NO_PSRAM_ELF";
 
-/// The `psram` app ELF, if the caller has one.
-pub fn psram_app_image() -> Result<PathBuf, String> {
+/// The image without PSRAM, if the caller has one.
+pub fn no_psram_image() -> Result<PathBuf, String> {
     env_file(
-        PSRAM_APP_IMAGE_ENV,
-        "`just test-emu-esp32s3-psram` builds `fw-esp32s3 --features psram` and sets it",
+        NO_PSRAM_IMAGE_ENV,
+        "`just test-emu-esp32s3-psram` builds `fw-esp32s3` without `psram` and sets it",
     )
 }
 
