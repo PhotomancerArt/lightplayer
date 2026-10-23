@@ -380,14 +380,36 @@ impl Device {
     /// Spawn identification, unless the device is already busy (I5) or has
     /// no link to talk over.
     pub(crate) fn spawn_identify(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
+        let reducer = IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms);
+        self.spawn_identify_with(now, settle_at, reducer, ctx)
+    }
+
+    /// Identify on a window that already holds the board's hello (step 4b
+    /// of `handle_event`): it settles on that hello at its first tick and
+    /// asks the board for no other, so nothing keyed on the window's hello
+    /// runs twice on one connection ([`IdentifyActivity::on_hello_in_hand`]).
+    fn spawn_identify_on_hello_in_hand(
+        &mut self,
+        now: Millis,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        let reducer = IdentifyActivity::on_hello_in_hand(now, ctx.config.hello_request_interval_ms);
+        self.spawn_identify_with(now, now, reducer, ctx)
+    }
+
+    fn spawn_identify_with(
+        &mut self,
+        now: Millis,
+        settle_at: Millis,
+        mut reducer: IdentifyActivity,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
         if self.activity.is_some() || self.link().is_none() {
             return Vec::new();
         }
         self.late_hello_reidentifies = false;
-        let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
         let effect_id = self.mint_effect_id();
-        let mut reducer =
-            IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms);
         let commands = {
             let mut activity_ctx = ActivityCtx {
                 link: self.evidence.link(),
@@ -942,7 +964,7 @@ impl Device {
             && self.evidence.presence.is_open()
         {
             self.late_hello_reidentifies = false;
-            commands.extend(self.spawn_identify(now, ctx));
+            commands.extend(self.spawn_identify_on_hello_in_hand(now, ctx));
         }
 
         // 5. Supervision looks at the clock last.
@@ -2115,16 +2137,45 @@ mod tests {
             )
         };
         let late = now.plus_ms(180_000);
-        harness.feed(&mut device, late, hello(0));
+        let spawned = harness.feed(&mut device, late, hello(0));
         assert!(device.is_busy(), "the late hello re-identifies");
         assert_eq!(
             device.activity.as_ref().map(|cell| cell.kind),
             Some(ActivityKind::Identify)
         );
+        // It asks for no hello of its own: an answer would be a second
+        // `hello_at` on one connection, and everything once per connection
+        // keys on it (the account report went out twice:
+        // docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.md).
+        assert!(
+            !spawned.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::SendFrame(ClientFrame {
+                        body: crate::wire::ClientFrameBody::Hello,
+                        ..
+                    }),
+                    ..
+                }
+            )),
+            "no hello asked: {spawned:?}"
+        );
+        assert_eq!(device.evidence.hello_heard_at(), Some(late));
 
-        // Its answer settles it, as a LightPlayer, and asks what it runs.
-        let commands = harness.feed(&mut device, late.plus_ms(50), hello(1));
-        assert!(!device.is_busy(), "the hello settles the re-identify");
+        // The hello in hand settles it at its first tick, as a LightPlayer,
+        // and asks what the board runs.
+        let armed = device.armed_timer.expect("the re-identify arms its tick");
+        let tick = Input::Event(Event::TimerFired {
+            timer: crate::time::TimerId {
+                scope: device.scope(),
+                seq: armed.0,
+            },
+        });
+        let commands = harness.feed(&mut device, armed.1, tick);
+        assert!(
+            !device.is_busy(),
+            "the hello in hand settles the re-identify"
+        );
         assert!(
             commands.iter().any(|command| matches!(
                 command,
@@ -2144,6 +2195,11 @@ mod tests {
             Classification::LightPlayer { .. }
         ));
         assert_eq!(device.status(), DeviceStatus::Ready);
+        assert_eq!(
+            device.evidence.hello_heard_at(),
+            Some(late),
+            "one hello, one window: the connection's hello is still the board's own"
+        );
 
         // Once only: the next hello in the window starts nothing.
         harness.feed(&mut device, late.plus_ms(5_000), hello(2));

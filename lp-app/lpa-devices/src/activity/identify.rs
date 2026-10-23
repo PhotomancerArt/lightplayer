@@ -54,6 +54,10 @@ pub struct IdentifyActivity {
     /// Cancel requested: the port was asked to close and we are waiting for
     /// it. Supervision bounds this wait.
     winding_down: bool,
+    /// The window already holds the board's hello: settle on it, at the
+    /// first tick, and ask the board for nothing more ([`Self::on_hello_in_hand`]).
+    #[serde(default)]
+    hello_in_hand: bool,
 }
 
 impl IdentifyActivity {
@@ -65,6 +69,28 @@ impl IdentifyActivity {
             asks_sent: 0,
             next_request_id: 1,
             winding_down: false,
+            hello_in_hand: false,
+        }
+    }
+
+    /// An identify for a window that already holds the board's hello (a
+    /// hello that came after identify settled without one,
+    /// `Device::late_hello_reidentifies`): it asks for **no** hello, and
+    /// settles on the one in hand at its first tick, asking what the board
+    /// runs as any LightPlayer verdict does.
+    ///
+    /// Not asking is the point. A hello the board sends in answer is a new
+    /// `hello_at` in the same window, and everything that is once per
+    /// connection is keyed on it (`lpa-studio-core`'s `LoginWindow`: the
+    /// access list read, the login, the account's board report, the restart
+    /// watch; the network panel; the card's picture feed) — an asked hello
+    /// repeated each of them on the same connection
+    /// (docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.md).
+    pub fn on_hello_in_hand(started_at: Millis, ask_interval_ms: u64) -> Self {
+        Self {
+            settle_at: started_at,
+            hello_in_hand: true,
+            ..Self::new(started_at, started_at, ask_interval_ms)
         }
     }
 
@@ -74,6 +100,9 @@ impl IdentifyActivity {
         let Some(link) = ctx.link else {
             return Vec::new();
         };
+        if self.hello_in_hand && ctx.evidence.has_hello() && ctx.evidence.presence.is_open() {
+            return Vec::new();
+        }
         if ctx.evidence.presence.is_open() {
             return vec![self.ask(link, ctx)];
         }
