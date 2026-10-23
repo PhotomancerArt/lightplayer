@@ -297,6 +297,10 @@ test_psram = []
 #
 #   just build-fw-esp32s3 test_lcd_lanes
 test_lcd_lanes = []
+# Five uneven lanes through the PRODUCT LCD_CAM backend (`lcd-ws281x`'s
+# driver: registry, board endpoints, open, start/wait_complete), for the
+# emulator's `tests/lcd_backend_lanes.rs` (src/tests/test_lcd_backend.rs).
+test_lcd_backend = ["server"]
 
 test_xt_jit_corpus = [
     "dep:lpvm-native",

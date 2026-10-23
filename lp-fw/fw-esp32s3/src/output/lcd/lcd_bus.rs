@@ -31,6 +31,8 @@
 //! and grow on `open`/`resize`. When they cannot be had, the open fails with
 //! a sentence saying how much was asked for and how much is free.
 
+extern crate alloc;
+
 use alloc::format;
 use alloc::vec::Vec;
 use core::alloc::Layout;

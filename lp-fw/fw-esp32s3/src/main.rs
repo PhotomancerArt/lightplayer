@@ -143,7 +143,8 @@ mod lcd_probe;
 #[cfg(any(
     not(fw_harness),
     feature = "test_loopback",
-    feature = "test_lcd_ws281x"
+    feature = "test_lcd_ws281x",
+    feature = "test_lcd_backend"
 ))]
 mod output;
 #[cfg(all(feature = "lcd_ws281x_probe", feature = "lcd-ws281x"))]
@@ -368,6 +369,9 @@ fn boot() -> ! {
     // and five pads are taken from the singleton.
     #[cfg(feature = "test_lcd_lanes")]
     tests::test_lcd_lanes::run(peripherals);
+
+    #[cfg(feature = "test_lcd_backend")]
+    tests::test_lcd_backend::run(peripherals);
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact

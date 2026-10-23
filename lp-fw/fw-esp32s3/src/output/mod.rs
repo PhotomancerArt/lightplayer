@@ -26,10 +26,13 @@
 ))]
 pub mod rmt;
 
-#[cfg(all(not(fw_harness), feature = "lcd-ws281x"))]
+#[cfg(any(
+    all(not(fw_harness), feature = "lcd-ws281x"),
+    feature = "test_lcd_backend"
+))]
 pub mod lcd;
 
-#[cfg(not(fw_harness))]
+#[cfg(any(not(fw_harness), feature = "test_lcd_backend"))]
 pub mod ws281x_endpoints;
 
 /// The LED-channels spike's LCD_CAM rig (never shipped).
@@ -85,21 +88,10 @@ pub fn register_ws281x_driver(
     {
         // The RMT stays unclaimed: the engine has no use for it here.
         let _ = peripherals.rmt;
-        use esp_hal::lcd_cam::LcdCam;
-        use esp_hal::lcd_cam::lcd::i8080::{Config, I8080};
-        use esp_hal::time::Rate;
-
-        let lcd_cam = LcdCam::new(peripherals.lcd_cam);
-        let config = Config::default().with_frequency(Rate::from_hz(lcd::BUS_HZ));
-        match I8080::new(lcd_cam.lcd, peripherals.dma, config) {
-            Ok(i8080) => system.add_ws281x_driver(Box::new(lcd::Esp32S3LcdWs281xDriver::new(
-                Rc::clone(registry),
-                i8080,
-            ))),
-            Err(error) => {
-                esp_println::println!(
-                    "[ERROR] LCD_CAM init failed ({error:?}); no LED output this boot"
-                );
+        match lcd::new_driver(Rc::clone(registry), peripherals.lcd_cam, peripherals.dma) {
+            Ok(driver) => system.add_ws281x_driver(Box::new(driver)),
+            Err(why) => {
+                esp_println::println!("[ERROR] {why}; no LED output this boot");
             }
         }
     }

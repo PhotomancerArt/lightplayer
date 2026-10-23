@@ -23,6 +23,8 @@
 //! GPIO33–37 (octal PSRAM on R8 parts), GPIO19/20 (USB-Serial-JTAG: driving
 //! them drops the host link). The board profile reserves the rest it must.
 
+extern crate alloc;
+
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;

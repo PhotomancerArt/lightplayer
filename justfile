@@ -1181,6 +1181,8 @@ clippy-fw-esp32s3:
     cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
     echo "clippy: --features lcd_ws281x_probe"
     cargo clippy --release --features lcd_ws281x_probe -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_backend"
+    cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
@@ -4414,7 +4416,12 @@ test-emu-esp32s3-lcd:
     lanes="$out/fw-esp32s3-lcd-lanes.elf"
     cp "$built" "$lanes"
     export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
-    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes -- --include-ignored --nocapture
+    # The product backend (`lcd-ws281x`'s driver) on the same models.
+    just build-fw-esp32s3 test_lcd_backend
+    backend="$out/fw-esp32s3-lcd-backend.elf"
+    cp "$built" "$backend"
+    export LP_EMU_ESP32S3_LCD_BACKEND_ELF="$backend"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors

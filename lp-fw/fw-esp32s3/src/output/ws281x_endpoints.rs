@@ -4,6 +4,8 @@
 //! endpoints (`ws281x:local:<board label>`) over different hardware, so a
 //! project authored against one opens on the other.
 
+extern crate alloc;
+
 use alloc::format;
 use alloc::string::ToString;
 
