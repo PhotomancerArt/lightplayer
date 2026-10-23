@@ -20,10 +20,16 @@ case "$1" in
   upload)
     timeout 120 $CLI upload "$2" "serial:$PORT" 2>&1 | tail -2 ;;
   run)
-    img=$2; tag=$3; secs=${4:-45}
+    img=$2; tag=$3; secs=${4:-45}; proj=${5:-}
     espflash flash --chip esp32s3 --partition-table "$W/lp-fw/fw-esp32s3/partitions.csv" \
       --flash-size 8mb --after hard-reset --port "$PORT" "$B/images/$img.elf" 2>&1 | tail -1
-    sleep 3
+    sleep 4
+    # Uploads write flash: only ever on a single-core image (the director's rule).
+    if [[ -n "$proj" ]]; then
+      case "$img" in *2core*) echo "REFUSED: no upload on a two-core image"; exit 3 ;; esac
+      timeout 120 $CLI upload "$proj" "serial:$PORT" 2>&1 | tail -1
+      sleep 2
+    fi
     timeout $((secs+40)) $CLI link capture "$PORT" --console "$OUT/$img--$tag.txt" \
       --request reboot --seconds "$secs" > "$OUT/$img--$tag.cap.log" 2>&1; echo "capture rc=$?"
     grep -aE "\[perf\] frame=|\[perf\] frames|core1\]|compilation succeeded|panic|PANIC|Guru|rror" \

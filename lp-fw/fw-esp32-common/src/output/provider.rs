@@ -165,6 +165,103 @@ pub struct Esp32OutputProvider {
 }
 
 impl Esp32OutputProvider {
+    fn write_inner(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
+        let handle_id = handle.as_i32();
+        log::debug!(
+            "Esp32OutputProvider::write: handle={}, data_len={}",
+            handle_id,
+            data.len()
+        );
+
+        let mut ports = self.ports.borrow_mut();
+        let port = ports.get_mut(&handle_id).ok_or_else(|| {
+            log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
+            OutputError::InvalidHandle { handle: handle_id }
+        })?;
+
+        // Energise before staging, never after: this returns only once the
+        // rail's settle window has fully elapsed, so the `start` below cannot
+        // clock data into an unpowered strip. `data` is already post-gamma,
+        // post-brightness and post-power-limit, so all-black here is exactly
+        // the "nothing is lit" the gate wants — and the scan is reached only
+        // on a gated channel of a gated board.
+        if let Some(gates) = &self.power_gates {
+            if port.gate_mask != 0 {
+                gates
+                    .borrow_mut()
+                    .on_frame(port.gate_mask, is_all_black(data));
+            }
+        }
+
+        // The previous frame may still be on the wire — `start` below returns
+        // without waiting, and the transmitter keeps reading `port.frame`
+        // until it finishes. Wait it out before anything below touches state
+        // it may still be reading (the resize moves the frame's bytes; the
+        // pipeline overwrites them). In the steady state a whole render has
+        // passed since the frame started, so this returns without spinning;
+        // it only actually waits when a frame hung, in which case it aborts
+        // and reports rather than staging over a live transmission.
+        port.output.wait_complete()?;
+
+        let mut num_leds = (port.byte_count / 3) as usize;
+        let expected_len = num_leds * 3;
+
+        if data.len() > expected_len {
+            let (new_byte_count, truncated) = capped_byte_count_for_len(data.len());
+            // A frame past the cap keeps `data.len() > expected_len` true forever;
+            // only act (and warn) when the granted size actually changes, so the
+            // steady state neither re-resizes nor logs per frame.
+            if new_byte_count != port.byte_count {
+                if truncated {
+                    log::warn!(
+                        "Esp32OutputProvider::write: handle={handle_id} grew past \
+                         {WS281X_MAX_LEDS_PER_PORT} LEDs; truncating to {new_byte_count} bytes"
+                    );
+                }
+                port.output.resize(Ws281xConfig::new(new_byte_count))?;
+                port.pipeline.resize(new_byte_count / 3);
+                port.byte_count = new_byte_count;
+                num_leds = (port.byte_count / 3) as usize;
+            }
+        } else if data.len() < expected_len {
+            return Err(OutputError::DataLengthMismatch {
+                expected: expected_len as u32,
+                actual: data.len(),
+            });
+        }
+
+        // The port owns its frame storage, so a resize is the only time
+        // this allocates and a steady-state write allocates nothing at all.
+        port.frame.resize(num_leds * 3, 0);
+
+        port.pipeline.write_frame(0, data);
+        port.pipeline.write_frame(FRAME_INTERVAL_US, data);
+        let PortState {
+            output,
+            pipeline,
+            frame,
+            ..
+        } = port;
+        pipeline.tick(MID_FRAME_US, frame);
+
+        // Start the transmission and return without waiting for it. Handles
+        // written back to back in one flush therefore transmit concurrently —
+        // the frame pays for its slowest wave of wires, not the sum of all of
+        // them — and the wait happens in [`OutputProvider::flush`], the
+        // frame-wide barrier the engine calls after the last write.
+        //
+        // SAFETY: `frame` is heap storage owned by this port's entry in
+        // `self.ports`, so its bytes stay in place when the map grows or
+        // the `PortState` moves. Every path that mutates or moves those
+        // bytes — this function's resize and staging above — first calls
+        // `wait_complete`, and dropping the entry drops `output` (which stops
+        // the transmission) before `frame` (see the field-order note on
+        // `PortState`). That is exactly the lifetime `start`'s contract
+        // asks for.
+        unsafe { output.start(frame) }
+    }
+
+
     pub fn new(hardware_system: Rc<HardwareSystem>) -> Self {
         Self {
             hardware_system,
@@ -404,99 +501,11 @@ impl OutputProvider for Esp32OutputProvider {
     }
 
     fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
-        let handle_id = handle.as_i32();
-        log::debug!(
-            "Esp32OutputProvider::write: handle={}, data_len={}",
-            handle_id,
-            data.len()
-        );
-
-        let mut ports = self.ports.borrow_mut();
-        let port = ports.get_mut(&handle_id).ok_or_else(|| {
-            log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
-            OutputError::InvalidHandle { handle: handle_id }
-        })?;
-
-        // Energise before staging, never after: this returns only once the
-        // rail's settle window has fully elapsed, so the `start` below cannot
-        // clock data into an unpowered strip. `data` is already post-gamma,
-        // post-brightness and post-power-limit, so all-black here is exactly
-        // the "nothing is lit" the gate wants — and the scan is reached only
-        // on a gated channel of a gated board.
-        if let Some(gates) = &self.power_gates {
-            if port.gate_mask != 0 {
-                gates
-                    .borrow_mut()
-                    .on_frame(port.gate_mask, is_all_black(data));
-            }
-        }
-
-        // The previous frame may still be on the wire — `start` below returns
-        // without waiting, and the transmitter keeps reading `port.frame`
-        // until it finishes. Wait it out before anything below touches state
-        // it may still be reading (the resize moves the frame's bytes; the
-        // pipeline overwrites them). In the steady state a whole render has
-        // passed since the frame started, so this returns without spinning;
-        // it only actually waits when a frame hung, in which case it aborts
-        // and reports rather than staging over a live transmission.
-        port.output.wait_complete()?;
-
-        let mut num_leds = (port.byte_count / 3) as usize;
-        let expected_len = num_leds * 3;
-
-        if data.len() > expected_len {
-            let (new_byte_count, truncated) = capped_byte_count_for_len(data.len());
-            // A frame past the cap keeps `data.len() > expected_len` true forever;
-            // only act (and warn) when the granted size actually changes, so the
-            // steady state neither re-resizes nor logs per frame.
-            if new_byte_count != port.byte_count {
-                if truncated {
-                    log::warn!(
-                        "Esp32OutputProvider::write: handle={handle_id} grew past \
-                         {WS281X_MAX_LEDS_PER_PORT} LEDs; truncating to {new_byte_count} bytes"
-                    );
-                }
-                port.output.resize(Ws281xConfig::new(new_byte_count))?;
-                port.pipeline.resize(new_byte_count / 3);
-                port.byte_count = new_byte_count;
-                num_leds = (port.byte_count / 3) as usize;
-            }
-        } else if data.len() < expected_len {
-            return Err(OutputError::DataLengthMismatch {
-                expected: expected_len as u32,
-                actual: data.len(),
-            });
-        }
-
-        // The port owns its frame storage, so a resize is the only time
-        // this allocates and a steady-state write allocates nothing at all.
-        port.frame.resize(num_leds * 3, 0);
-
-        port.pipeline.write_frame(0, data);
-        port.pipeline.write_frame(FRAME_INTERVAL_US, data);
-        let PortState {
-            output,
-            pipeline,
-            frame,
-            ..
-        } = port;
-        pipeline.tick(MID_FRAME_US, frame);
-
-        // Start the transmission and return without waiting for it. Handles
-        // written back to back in one flush therefore transmit concurrently —
-        // the frame pays for its slowest wave of wires, not the sum of all of
-        // them — and the wait happens in [`OutputProvider::flush`], the
-        // frame-wide barrier the engine calls after the last write.
-        //
-        // SAFETY: `frame` is heap storage owned by this port's entry in
-        // `self.ports`, so its bytes stay in place when the map grows or
-        // the `PortState` moves. Every path that mutates or moves those
-        // bytes — this function's resize and staging above — first calls
-        // `wait_complete`, and dropping the entry drops `output` (which stops
-        // the transmission) before `frame` (see the field-order note on
-        // `PortState`). That is exactly the lifetime `start`'s contract
-        // asks for.
-        unsafe { output.start(frame) }
+        // SPIKE (core-1 spike): the stage probe's `write` bracket.
+        let t0 = crate::stage_probe::now();
+        let r = self.write_inner(handle, data);
+        crate::stage_probe::add(&crate::stage_probe::WRITE, t0);
+        r
     }
 
     /// Close a port, leaving its strip dark.

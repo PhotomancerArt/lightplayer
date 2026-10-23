@@ -269,6 +269,7 @@ impl LcdBus {
             });
         };
         let started = Instant::now();
+        let stage_t0 = fw_esp32_common::stage_probe::now();
         let len = parallel::encode_frame(
             SlotPlan::THREE,
             &slices,
@@ -276,6 +277,7 @@ impl LcdBus {
             LATCH_BYTES,
             frame.buf.as_mut_slice(),
         );
+        fw_esp32_common::stage_probe::add(&fw_esp32_common::stage_probe::ENCODE, stage_t0);
         let encode_us = started.elapsed().as_micros();
         self.stats.encode_us_last = encode_us;
         self.stats.encode_us_max = self.stats.encode_us_max.max(encode_us);

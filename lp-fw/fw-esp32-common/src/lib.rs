@@ -41,6 +41,7 @@ pub mod output;
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa", test))]
 pub mod seams;
 pub mod serial;
+pub mod stage_probe;
 pub mod time;
 
 #[cfg(feature = "fs-tree")]
