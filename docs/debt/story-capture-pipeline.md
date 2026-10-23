@@ -780,3 +780,14 @@ hours), and neither is an exit path on its own.
   re-run of the failed job (attempt 2) passed with no hang and deployed. This
   is the "two hangs in a row" the 2026-10-20 note says earns the deploy smoke
   an entry of its own; not filed here.
+
+- 2026-10-23 — **`oxipng` hit its 180 s bound on a PR with no Studio
+  change.** "Validate story baselines" on #1279 (the S3's LED driver default;
+  no `lpa-studio-*` file touched), run 39949806106 attempt 1: all 2,519
+  stories captured, then `optimizing PNGs (oxipng) — 2519/2519 captured`
+  repeated past `[+19:00]` and `Error: oxipng did not exit within 180000 ms —
+  killed.` (`studio-story-pngs.mjs:1814`, from `optimizePngs`). The job said
+  so plainly ("a pipeline failure, not story drift"). A re-run of the failed
+  job passed. The bound the 2026-08-05 entry added did its job (a loud kill,
+  not a wedge); whether 180 s is now too tight for a full 2,519-story capture
+  on a loaded runner is the open question.
