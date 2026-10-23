@@ -23,9 +23,19 @@
 # `LP_OTA_TARGET=esp32s3-8mb` builds the S3's (`lp-fw-split build --chip
 # esp32s3`; its features default to `esp32s3,server`; the S3 has one front
 # door, the IDF's, so its `merged-idf.bin` is its `merged.bin` and there is
-# no `merged-lp.bin`). Unset, the C6's, as before.
+# no `merged-lp.bin`). Unset, the C6's, as before. `--chip esp32s3` in front
+# of the arguments says the same (the spelling `emu-cut-sweep.sh` and
+# `make-engine-less.sh` take).
 set -euo pipefail
 
+if [[ "${1:-}" == "--chip" ]]; then
+    case "${2:-}" in
+        esp32c6) LP_OTA_TARGET=esp32c6-4mb ;;
+        esp32s3) LP_OTA_TARGET=esp32s3-8mb ;;
+        *) echo "build-image: --chip ${2:-}: expected esp32c6 or esp32s3" >&2; exit 2 ;;
+    esac
+    shift 2
+fi
 out="$1"
 version="$2"
 target="${LP_OTA_TARGET:-esp32c6-4mb}"
@@ -52,6 +62,12 @@ parts_dir="target/firmware-parts/$target"
 
 APP_VERSION="$version" cargo run -q -p lp-fw-split --release -- build \
     --chip "$chip" --out "$split_dir" --features "$features" --target "$target"
+if [[ "$chip" == esp32s3 ]]; then
+    jq -e '.chip == "esp32s3" and .layout == 2' "$split_dir/split.json" >/dev/null || {
+        echo "build-image: $split_dir/split.json is not an esp32s3 layout-2 split" >&2
+        exit 1
+    }
+fi
 rm -rf "$out"
 mkdir -p "$out"
 cargo run -q -p lp-cli -- firmware package "$target" --no-build --out "$out/package" >/dev/null

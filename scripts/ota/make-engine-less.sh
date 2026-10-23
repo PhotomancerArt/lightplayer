@@ -5,7 +5,11 @@
 # Y8). The same operation Part B's heal scenarios and the walk's
 # `engine-less` step do to an emulated chip, done to a real one.
 #
-#   scripts/ota/make-engine-less.sh <MAC> [--dry-run]
+#   scripts/ota/make-engine-less.sh [--chip esp32c6|esp32s3] <MAC> [--dry-run]
+#
+# `--chip esp32s3` (S3 updates plan, M7 P10): layout 2 — the region at
+# 0x20000, 64 KiB MMU pages; the boot records are where the C6's are. Written
+# for the S3's desk sitting (P11) and never run before it.
 #
 # - The board is resolved by MAC, passively (scripts/emu/board-port.py):
 #   never a port glob, never the first board on the bus. Any other board is
@@ -25,7 +29,17 @@
 # (or already engine-less), non-zero with a reason otherwise.
 set -euo pipefail
 
-usage() { sed -n '2,25p' "$0" >&2; exit 2; }
+usage() { sed -n '2,31p' "$0" >&2; exit 2; }
+chip=esp32c6
+if [[ "${1:-}" == "--chip" ]]; then
+    chip="${2:-}"
+    shift 2 || usage
+fi
+case "$chip" in
+    esp32c6) region_start=0x18000 page=0x8000 ;;
+    esp32s3) region_start=0x20000 page=0x10000 ;;
+    *) echo "make-engine-less: --chip $chip: expected esp32c6 or esp32s3" >&2; exit 2 ;;
+esac
 [[ $# -ge 1 ]] || usage
 mac="$1"
 dry_run=0
@@ -59,9 +73,9 @@ trap 'rm -rf "$work"' EXIT
 espflash read-flash --port "$port" 0x16000 0x2000 "$work/records.bin" >/dev/null
 
 # The places an engine can start, from the cores the records name.
-candidates="$(python3 - "$work/records.bin" <<'PY'
+candidates="$(python3 - "$work/records.bin" "$region_start" "$page" <<'PY'
 import struct, sys, zlib
-REGION_START, PAGE = 0x18000, 0x8000
+REGION_START, PAGE = int(sys.argv[2], 16), int(sys.argv[3], 16)
 data = open(sys.argv[1], "rb").read()
 spots = {REGION_START}
 for i in range(2):
