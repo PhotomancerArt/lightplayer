@@ -107,8 +107,14 @@ one() {
         else
             first="$first NOT-REACHABLE"
         fi
-        final=$(awk '/\[LOADER\] core @/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' "$c.rec.txt" \
-            | grep -a '"hello":{' | tail -1 | grep -o '"buildId":"[^"]*"\|"state":"[a-z-]*"' | tr '\n' ' ')
+        # Y's hello can come after the host's `done` (the board holds it
+        # until its core's hash is known), so the verdict boots the written-
+        # back flash once more, power-on, to Y's hello: Y's engine runs.
+        "$cli" emu run $pre_flags --rom-up-flash "$c.flash" --host-link $post_flags \
+            --exit-on "\"buildId\":\"$y_build\"" --timeout 300s --wall-timeout 1200 \
+            --console "$c.fin.txt" >/dev/null 2>"$c.fin.err"
+        final=$(grep -a '"hello":{' "$c.fin.txt" | tail -1 \
+            | grep -o '"buildId":"[^"]*"\|"state":"[a-z-]*"' | tr '\n' ' ')
         if grep -aq "done: UpToDate" "$c.rec.txt" && [[ "$final" == *"\"buildId\":\"$y_build\""*"\"state\":\"running\""* ]]; then
             verdict=PASS
         else

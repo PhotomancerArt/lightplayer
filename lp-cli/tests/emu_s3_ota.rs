@@ -188,7 +188,13 @@ fn cut_sweep(id: &str, raw: bool) {
     let total = core_chunks + engine_chunks;
     // `LP_S3_OTA_SWEEP=all`: a cut after EVERY request of the update, not
     // the ≥ 30 below (hours; quoted in the PR, never CI).
-    let cuts: Vec<u32> = if std::env::var("LP_S3_OTA_SWEEP").as_deref() == Ok("all") {
+    // `LP_S3_OTA_CUTS=<n>,<n>,…`: just those (a shard of the sweep, or one
+    // row looked at again).
+    let cuts: Vec<u32> = if let Ok(list) = std::env::var("LP_S3_OTA_CUTS") {
+        list.split(',')
+            .map(|n| n.trim().parse().expect("a cut"))
+            .collect()
+    } else if std::env::var("LP_S3_OTA_SWEEP").as_deref() == Ok("all") {
         (1..=total).collect()
     } else {
         cut_points(core_chunks, total)
@@ -298,9 +304,21 @@ fn recover(
         .find(|l| l.contains("[OTA] resuming"))
         .map(|l| l[l.find("resuming").unwrap()..].to_string())
         .unwrap_or_default();
-    let ota = host.ota.as_ref().unwrap();
-    let served = ota.served();
+    let (served, requests) = {
+        let ota = host.ota.as_ref().unwrap();
+        (ota.served(), ota.requests)
+    };
     let served_bytes = served.bytes_raw + served.bytes_encoded;
+    // Y's hello can come after the host's `done` (the board holds it until
+    // its core's hash is known): step a few emulated seconds for it.
+    let until = host.board.machine.micros() + 5_000_000;
+    while host.board.machine.micros() < until
+        && engine_hello_after_last_boot(&host.console().join("\n"))
+            .is_none_or(|(b, _)| b != y_build)
+    {
+        host.step().expect("the run");
+    }
+    let console = host.console().join("\n");
     let last_y = last_core_agrees(&console, y_build, true)
         && engine_hello_after_last_boot(&console)
             .is_some_and(|(b, state)| b == y_build && state == BoardState::Running);
@@ -313,7 +331,7 @@ fn recover(
         } else {
             " NOT REACHABLE"
         },
-        ota.requests,
+        requests,
     )
 }
 
@@ -661,15 +679,44 @@ fn u10_u11_u18_refusals_come_before_any_erase() {
     );
     // U18: an unknown LOW flag bit is ignored: that offer proceeds (the
     // running engine hands over and resets).
+    // The board's word for it is its flash, not the `[OTA] core-only:
+    // updating` line the C6's twin waits for: that line comes right after the
+    // reset the hand-over ends with, and the S3 can lose a log line there
+    // (`expect_last_core`'s defect). The loader's line after the reset is raw
+    // console; the pending record is what the running engine wrote before it.
     let mut low = y_offer(&y);
     low.flags = 0x04;
+    let boots = loader_lines(&host);
     host.port.send_update(&low.encode()).unwrap();
+    let until = host.board.machine.micros() + 60_000_000;
+    while loader_lines(&host) == boots && host.board.machine.micros() < until {
+        host.step().expect("the run");
+    }
     assert!(
-        wait_line(&mut host, "[OTA] core-only: updating").is_some(),
-        "{}",
+        loader_lines(&host) > boots,
+        "no reset after the offer\n{}",
         tail(&host)
     );
-    lines.push("U18 an unknown low flag bit: the offer proceeded".into());
+    let flash = flash_of(&host);
+    let progress = lp_bootctl::PROGRESS_RECORD_SECTOR as usize;
+    match lpc_update::transfer_record::TransferRecord::read(&flash[progress..progress + SECTOR]) {
+        lpc_update::transfer_record::RecordRead::V1(record, _) => assert_eq!(
+            (record.kind, record.build),
+            (
+                lpc_update::PieceKind::Core,
+                lp_bootctl::build_hash(y.build_id.as_bytes())
+            ),
+            "the record is Y's core: {record:?}"
+        ),
+        other => panic!(
+            "no transfer record after the offer: {other:?}\n{}",
+            tail(&host)
+        ),
+    }
+    lines.push(
+        "U18 an unknown low flag bit: the offer proceeded (reset; Y's core's transfer record)"
+            .into(),
+    );
     for l in &lines {
         println!("U10/U11/U18 {l}");
     }
@@ -1212,6 +1259,14 @@ fn last_core_agrees(console: &str, build: &str, engine: bool) -> bool {
         return true;
     }
     last_core_build(after).as_deref() == Some(build) && (!engine || engine_entered(after))
+}
+
+/// How many boots the console shows: the loader's lines (raw console).
+fn loader_lines(host: &EmuLinkHost<S3Board>) -> usize {
+    host.console()
+        .iter()
+        .filter(|l| l.contains("[LOADER] core @"))
+        .count()
 }
 
 /// The console since the loader's last line: the last boot.
