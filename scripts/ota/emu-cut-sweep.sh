@@ -101,7 +101,8 @@ one() {
         # board answering on its link (an engine's hello, or a manifest the
         # host recorded), Y the newest hello's firmware since the last boot.
         loader=$(grep -a -m1 -o "\[LOADER\] core @0x[0-9a-f]* ([a-z ]*)" "$c.rec.txt" | cut -c10- || true)
-        first="${loader:-NONE}${first:+ ($first)}"
+        core_line=$(grep -a -m1 -o "(\(proven\|trial\|rolled back\|fallback\)) build [^ ]*" "$c.rec.txt" || true)
+        first="${loader:-NONE}${core_line:+ [$core_line]}"
         if grep -aq '"hello":{' "$c.rec.txt" || grep -aq "\[host-ota\] board:" "$c.rec.txt"; then
             first="$first reachable"
         else
@@ -128,10 +129,13 @@ one() {
             verdict=FAIL
         fi
     fi
+    # `DROP_FLASH=1`: delete the cut's chip copy once judged (8 MB a cut on
+    # the S3; a long sweep's are gigabytes).
+    [[ -n "${DROP_FLASH:-}" ]] && rm -f "$c.flash"
     printf '%s\tcut=%s\tserving=%s\tafter-cut=%s\trecovery-served=%s\tfinal=%s\n' \
         "$verdict" "$n" "${at:-none}" "$first" "${served:-0}" "$final"
 }
 export -f one
-export x y out cli y_build z_flag pre_flags post_flags ops_range OPS chip
+export x y out cli y_build z_flag pre_flags post_flags ops_range OPS chip DROP_FLASH
 printf '%s\n' "$@" | xargs -P "${JOBS:-4}" -I{} bash -c 'one {}' | sort -t= -k2 -n | tee "$out/summary.tsv"
 echo "pass: $(grep -c ^PASS "$out/summary.tsv") / $(wc -l < "$out/summary.tsv" | tr -d ' ')"
