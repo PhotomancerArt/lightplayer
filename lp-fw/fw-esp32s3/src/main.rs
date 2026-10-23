@@ -146,9 +146,10 @@ mod radio_boot_probe;
 mod radio_peripherals;
 #[cfg(not(fw_harness))]
 mod recovery;
-// The `test_seam_abi` harness's seam table (S3 radio M5): the shipped image
-// declares no seam until it has a network stack (M4).
-#[cfg(feature = "test_seam_abi")]
+// Emulator seams (S3 radio M5): the network seam on the `wifi` image, and
+// the `test_seam_abi` harness's table. An image without a network stack
+// declares none.
+#[cfg(any(feature = "test_seam_abi", all(s3_wifi, not(fw_harness))))]
 mod seams;
 #[cfg(not(fw_harness))]
 mod serial;

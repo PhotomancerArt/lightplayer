@@ -1,15 +1,16 @@
 //! The station the station task drives on this image: the radio's, or the
 //! network seam's, behind one type (the switch shape's station half; the
 //! frame half is `esp_frame_device::BoardFrameDevice`). The seam arm is
-//! RISC-V only, like the network seam's calls (`fw_esp32_common::net`).
+//! RISC-V and Xtensa only, like the network seam's calls
+//! (`fw_esp32_common::net`).
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use esp_radio::wifi::WifiController;
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 use fw_esp32_common::net::SeamStation;
 use fw_esp32_common::net::{ConnectOutcome, StationControl};
 use lpc_wire::HeardNetwork;
@@ -23,7 +24,7 @@ pub enum BoardStation {
     /// The network seam's station (an emulated board that engaged `net=lan`).
     /// Boxed, so the silicon arm's task storage (static RAM) does not grow
     /// by the seam station's size.
-    #[cfg(target_arch = "riscv32")]
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     Seam {
         station: Box<SeamStation>,
         /// Held for the boot, not driven: it runs ESP-NOW, and dropping it
@@ -39,7 +40,7 @@ impl BoardStation {
     pub fn restore_espnow_channel(&mut self) {
         match self {
             Self::Radio(station) => station.restore_espnow_channel(),
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { .. } => {}
         }
     }
@@ -49,7 +50,7 @@ impl StationControl for BoardStation {
     async fn scan(&mut self) -> Option<Vec<HeardNetwork>> {
         match self {
             Self::Radio(station) => station.scan().await,
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { station, .. } => station.scan().await,
         }
     }
@@ -57,7 +58,7 @@ impl StationControl for BoardStation {
     async fn connect(&mut self, ssid: &str, password: &str) -> ConnectOutcome {
         match self {
             Self::Radio(station) => station.connect(ssid, password).await,
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { station, .. } => station.connect(ssid, password).await,
         }
     }
@@ -65,7 +66,7 @@ impl StationControl for BoardStation {
     async fn disconnect(&mut self) {
         match self {
             Self::Radio(station) => station.disconnect().await,
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { station, .. } => station.disconnect().await,
         }
     }
@@ -73,7 +74,7 @@ impl StationControl for BoardStation {
     async fn wait_link_lost(&mut self) {
         match self {
             Self::Radio(station) => station.wait_link_lost().await,
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { station, .. } => station.wait_link_lost().await,
         }
     }
@@ -81,7 +82,7 @@ impl StationControl for BoardStation {
     fn rssi(&self) -> Option<i8> {
         match self {
             Self::Radio(station) => station.rssi(),
-            #[cfg(target_arch = "riscv32")]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             Self::Seam { station, .. } => station.rssi(),
         }
     }
