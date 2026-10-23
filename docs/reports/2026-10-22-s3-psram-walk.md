@@ -5,7 +5,8 @@
   2026-10-22 17:36–18:09 PDT, the known-good release image (`lp-cli firmware
   install --release latest`, 2026.10.22-9/-11) flashed first and last.
 - **Images:** `fw-esp32s3 --features psram` at `270dd9fd7` plus the `[led]`
-  counter line (committed as the next commit), plain (not split), one per
+  counter line (committed as the next commit, and later folded into main's
+  `ws281x_telemetry`, which reads the same driver counters), plain (not split), one per
   heap policy (`LP_PSRAM_HEAP`), PSRAM at 80 MHz. The baseline is main's own
   shipped image (2026.10.22-11, `d3cf29ca7`: M11's 80 MHz flash merged), split,
   as the release ships it.

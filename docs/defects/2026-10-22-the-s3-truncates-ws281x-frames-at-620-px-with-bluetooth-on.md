@@ -97,8 +97,9 @@ and with fewer, longer channels; PSRAM's heap does not move it.
 
 **Regression coverage** — none:
 
-- the S3 app does not report guard trips (no `ws281x_telemetry` port; a
-  `psram` image's `[led]` line does, for the walk);
+- the S3 app reports guard trips only on a desk build
+  (`ws281x_telemetry`'s `[WS281X]` line, off by default; the walk's own
+  `[led]` line was folded into it);
 - the emulator runs no Bluetooth central and models no interrupt latency
   from the radio;
 - the loopback harness covers the driver alone, and it is clean.

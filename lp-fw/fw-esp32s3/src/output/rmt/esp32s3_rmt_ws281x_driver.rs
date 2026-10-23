@@ -459,8 +459,6 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             dump: FrameDump::new(),
             #[cfg(feature = "psram")]
             staging: crate::psram::InternalBuffer::empty(),
-            #[cfg(feature = "psram")]
-            sent: 0,
         }))
     }
 }
@@ -489,10 +487,6 @@ struct Esp32S3RmtWs281xOutput {
     /// reading PSRAM under load). 31 µs for 620 × 3 B on FS3.
     #[cfg(feature = "psram")]
     staging: crate::psram::InternalBuffer,
-    /// Frames this output sent, for the `[led]` line (a `psram` image: the
-    /// walk's LED-integrity row reads the driver's guard trips from it).
-    #[cfg(feature = "psram")]
-    sent: u32,
 }
 
 impl Ws281xOutput for Esp32S3RmtWs281xOutput {
@@ -557,22 +551,6 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
         // refused is not one of them.
         #[cfg(feature = "frame-dump")]
         self.dump.on_write(data);
-        // A `psram` image's LED-integrity figure, every 300 frames per
-        // output: the driver's own counters, cumulative since boot.
-        #[cfg(feature = "psram")]
-        {
-            self.sent = self.sent.wrapping_add(1);
-            if self.sent % 300 == 0 {
-                let st = DRIVER.stats(self.channel);
-                log::info!(
-                    "[led] ch={} frames={} guard_trips={} errors={}",
-                    self.channel,
-                    self.sent,
-                    st.guard_trips,
-                    st.errors
-                );
-            }
-        }
         Ok(())
     }
 
