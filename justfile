@@ -1167,6 +1167,8 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --release --features ws281x_telemetry -- --no-deps -D warnings
     # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
     # stack diagnostic, and the app WITHOUT the thread (the link task back on
     # the main executor, no messages-first). Both are cfg'd out of the

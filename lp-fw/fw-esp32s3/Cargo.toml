@@ -176,6 +176,13 @@ wifi = [
 # build is the real firmware plus a transcript.
 frame-dump = []
 
+# The WS281x driver's counters on the heartbeat, one `[WS281X] ch=… frames=…
+# trips=… skips=… errors=…` line per channel that has sent a frame — OFF by
+# default, never shipped. The desk's evidence for LED output under radio load
+# (a Wi-Fi scan, BLE traffic); the C6's and the classic's feature of the same
+# name, kept to the counters this chip's walk reads.
+ws281x_telemetry = []
+
 # Emulator FIXTURES, never shipped and never in a build def: a split-image
 # core that, booted on TRIAL, marks itself attempted and then panics
 # (`fixture-trial-dies`) or spins without feeding the watchdog

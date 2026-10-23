@@ -485,6 +485,9 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The station's `[wifi]` and the relay's `[relay]` lines (`wifi`).
     #[cfg(s3_wifi)]
     net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
+    // The WS281x driver's own counters (`ws281x_telemetry` only).
+    #[cfg(feature = "ws281x_telemetry")]
+    output::rmt::shared_driver::log_telemetry();
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
