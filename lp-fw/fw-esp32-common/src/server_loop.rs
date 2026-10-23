@@ -250,9 +250,12 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         let tick_start = time_provider.now_ms();
         #[cfg(feature = "frame-pace-diag")]
         let pace_tick_start = crate::frame_pace_diag::now_us();
-        let (tick_ms, send_ms, total_ms, response_count) = match server
+        let stage_t0 = crate::stage_probe::now();
+        let tick_result = server
             .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
-            .await
+            .await;
+        crate::stage_probe::add(&crate::stage_probe::TICK, stage_t0);
+        let (tick_ms, send_ms, total_ms, response_count) = match tick_result
         {
             Ok(response_count) => {
                 let tick_done = time_provider.now_ms();
@@ -324,6 +327,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                 // A line of its own: beside the [perf] line it ran past a log
                 // record's 200 B and lost its hiccup counts.
                 log::info!("[perf] frames {frame_times}");
+                crate::stage_probe::log(frames_done as u32);
                 frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }
@@ -644,9 +648,12 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         // 2.6 million cycles, and only one of those two can tell two frames
         // apart. Read immediately around `tick_and_send` and nothing else.
         let render_from = budget.cycles.map(|read| read());
-        let (tick_ms, send_ms, total_ms, response_count) = match server
+        let stage_t0 = crate::stage_probe::now();
+        let tick_result = server
             .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
-            .await
+            .await;
+        crate::stage_probe::add(&crate::stage_probe::TICK, stage_t0);
+        let (tick_ms, send_ms, total_ms, response_count) = match tick_result
         {
             Ok(response_count) => {
                 let tick_done = time_provider.now_ms();
@@ -721,6 +728,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                 // A line of its own: beside the [perf] line it ran past a log
                 // record's 200 B and lost its hiccup counts.
                 log::info!("[perf] frames {frame_times}");
+                crate::stage_probe::log(frames_done as u32);
                 frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }

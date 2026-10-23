@@ -54,6 +54,8 @@ pub fn stash(peri: esp_hal::peripherals::CPU_CTRL<'static>) {
 /// otherwise).
 pub fn start() {
     lpvm_native::helper_core::set_render_clock(ccount);
+    fw_esp32_common::stage_probe::set_clock(ccount);
+    fw_esp32_common::stage_probe::set_extra(|| lpvm_native::helper_core::render_stats().2);
     if option_env!("LP_CORE1_RENDER") == Some("0") {
         esp_println::println!("[core1] off (LP_CORE1_RENDER=0)");
         return;
