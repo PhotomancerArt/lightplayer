@@ -470,8 +470,9 @@ impl FrameBuffer {
 
 fn internal_alloc(layout: Layout) -> Option<NonNull<u8>> {
     // SAFETY: a plain allocation request; the result is checked for null.
-    let ptr =
-        NonNull::new(unsafe { esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout) })?;
+    let ptr = NonNull::new(unsafe {
+        esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout)
+    })?;
     // A `psram` image tags PSRAM's region `External` only, so an `Internal`
     // request never lands there (docs/adr/2026-10-22-s3-psram.md, point 6).
     // Checked, not assumed: GDMA reading a buffer in PSRAM would fail exactly
