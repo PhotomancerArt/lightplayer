@@ -75,17 +75,44 @@ was the CAM half of the same peripheral sampling the pads.
 6. **Selection is the `lcd-ws281x` cargo feature**, decided in one place
    (`output::register_ws281x_driver`). The RMT driver stays the default.
 
-## Costs (measured)
+## Costs (measured on FS3, 2026-10-22)
 
 | | 5 × 124 (skirt) | 8 × 500 |
 |---|---|---|
 | Frame buffer, one / double | 9,678 / 19,356 B | 36,750 / 73,500 B |
-| Wire time (all lanes at once) | 3.87 ms | 14.7 ms |
-| Encode | 1.0 ms on the spike's generic path (FS3); fast path: owed | owed |
+| Wire time (all lanes at once) | 3,880 µs measured (3,871 predicted) | 14,708 µs measured (14,700 predicted) |
+| Encode (the fast path, 240 MHz, `s`) | **651 µs** (729 first frame); 886 µs at 8 × 124 | **3,564 µs** |
+| Encode, worst, beside Bluetooth + Wi‑Fi scans | 5,471 µs (radio pre-empting the encode) | — |
 
-The image itself, for `lcd-ws281x` against the default: flash +4,676 B
-(`.text` +3,844, `.rodata` +832). Internal RAM −2,616 B (the RMT interrupt's
-IRAM and `.data`).
+The image itself, `lcd-ws281x` against the default:
+- flash +4,676 B (`.text` +3,844, `.rodata` +832);
+- internal RAM −2,616 B (the RMT interrupt's IRAM and `.data`).
+
+Frame integrity, all on FS3 through the CAM-half analyzer:
+- 5 lanes, 8 × 124 and **8 × 500**, CPU masked, **5 frames per run with the
+  CPU in a flash erase and write**, and a 1,000-frame soak: all byte-exact
+  (`RESULT pass`).
+- **Beside Bluetooth (16 connections) and back-to-back Wi‑Fi scans (75):**
+  6,250 frames, no output error seen. 17 frames were only partly checked: the
+  analyzer's window closed early because radio work delayed the LCD start by
+  0.6–1.5 ms; every captured bit and width was correct.
+
+### Found on the product image: where the buffer's RAM comes from
+
+On the Bluetooth image playing a 2 × 310-LED project, **the backend could not
+get even one 23,070 B buffer of `Internal`-tagged RAM.** Free heap was
+77,836 B and the largest block 55,504 B, but that space is in `dram2_seg`.
+`dram2_seg` is untagged so that no DMA lands there, and the engine fills the
+tagged arena first. The open failed with its sentence, as designed. The same
+project plays on the RMT image.
+
+So the switch needs RAM the tagged regions do not have today. Two ways to get
+it:
+
+- **M10 (PSRAM adoption)** moves engine RAM out of the arena.
+- **A ruling on `dram2_seg` for TX-only DMA.** The warm-reset hazard that
+  bars `dram2_seg` is DMA *writing* into the bootloader's RAM. LCD GDMA only
+  *reads* there, but the rule today is "never".
 
 ## The switch, still to be ruled
 

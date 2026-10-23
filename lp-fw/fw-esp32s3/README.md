@@ -258,6 +258,8 @@ above stays the default until the switch is ruled on (S3 radio roadmap M9;
 | RAM | two frame buffers in **internal RAM, by capability** (`alloc_caps(Internal)`: never `dram2_seg`, never PSRAM), 72 B per LED of the longest lane + 750 B each: 9,678 B per buffer at 5 × 124, 36,750 B at 8 × 500. Sized by what is open; an open that cannot get them fails with a sentence |
 | Pins | refused at open: GPIO19/20 (USB-Serial-JTAG), GPIO26–32 (flash), GPIO33–37 (octal PSRAM) |
 | Image | +4,676 B flash, −2,616 B internal RAM against the RMT image (2026-10-22) |
+| Encode | 651 µs at 5 × 124, 3,564 µs at 8 × 500 (FS3, 240 MHz); up to 5.5 ms when the radio pre-empts it |
+| ⚠️ RAM today | on the Bluetooth image the `Internal`-tagged heap is nearly full once a project loads: a 2 × 310-LED project could not get one 23,070 B buffer (FS3, 2026-10-22), while the same project plays on the RMT. Two buffers when they fit, one when only one does; M10 (PSRAM) is what frees the room |
 
 The silicon evidence and the harness are the LED-channels spike's:
 `test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the

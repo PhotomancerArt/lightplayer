@@ -244,6 +244,11 @@ impl LcdBus {
         if mask == 0 {
             return Ok(());
         }
+        // Single-buffered (two did not fit): the one buffer is in flight
+        // until the bus is idle.
+        if self.free.is_empty() {
+            self.wait_idle()?;
+        }
         let Some(mut frame) = self.free.pop() else {
             return Err(OutputError::Other {
                 message: "LCD bus has no free frame buffer".into(),
@@ -376,26 +381,27 @@ impl LcdBus {
         self.wait_idle()
             .map_err(|error| format!("LCD bus did not go idle to grow its buffers: {error}"))?;
         self.release_buffers();
+        // Two buffers, so the next frame encodes while this one sends; one
+        // when two do not fit (the encode then waits for the bus).
         let mut fresh = Vec::with_capacity(2);
         for _ in 0..2 {
             match FrameBuffer::alloc(needed) {
-                Some(frame) => {
-                    fresh.push(frame);
-                }
-                None => {
-                    for frame in fresh {
-                        frame.free();
-                    }
-                    return Err(format!(
-                        "the LED frame buffers need 2 × {needed} B of internal RAM \
-                         (longest lane {lane_bytes} B) and only {} B is free",
-                        esp_alloc::HEAP.free_caps(MemoryCapability::Internal.into())
-                    ));
-                }
+                Some(frame) => fresh.push(frame),
+                None => break,
             }
         }
+        if fresh.is_empty() {
+            return Err(format!(
+                "the LED frame buffer needs {needed} B of internal RAM (longest lane \
+                 {lane_bytes} B) and only {} B is free",
+                esp_alloc::HEAP.free_caps(MemoryCapability::Internal.into())
+            ));
+        }
         log::info!(
-            "[lcd-ws281x] frame buffers 2 × {needed} B internal (longest lane {lane_bytes} B)"
+            "[lcd-ws281x] frame buffers {} × {needed} B internal (longest lane {lane_bytes} B; \
+             internal free after: {} B)",
+            fresh.len(),
+            esp_alloc::HEAP.free_caps(MemoryCapability::Internal.into()),
         );
         self.free = fresh;
         self.capacity = needed;
