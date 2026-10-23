@@ -164,10 +164,12 @@
 // `--s3` walks emulated ESP32-S3 boards (`emu serve --chip esp32s3`, target
 // `esp32s3-8mb`, layout 2; the S3 updates plan's P12) instead of C6s: its X
 // is images-s3/x (`LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh`),
-// Y the bundle's `esp32s3-8mb` package. The door and `?ble=emu` lanes; not
-// `--tab` (the tab host is the C6's wasm), not the steps that need the
-// pre-update single image or the Wi‑Fi and relay lanes yet (the S3's Wi‑Fi
-// is its M4/M5).
+// Y the bundle's `esp32s3-8mb` package. The door, `?ble=emu` and `--lan`
+// lanes; not `--tab` (the tab host is the C6's wasm), not the steps that need
+// the pre-update single image, and not the relay lane yet (the S3's relay is
+// its M6). `--s3 --lan` needs X and Y with `wifi` (not in the S3's default
+// image yet): `just walk-ota-emu --s3 --lan` builds both and points
+// `WALK_OTA_X`, `WALK_Y_PACKAGES` and `WALK_Y_PARTS` at them.
 //
 // `WALK_OTA_X=<dir>` boards X from another image directory than images/x
 // (its merged.bin, split.json and ota/ota-manifest.json, as build-image.sh
@@ -278,9 +280,9 @@ if (TAB && BLE) {
   console.error("walk-ota-emu: --ble walks the door's boards; it does not combine with --tab");
   process.exit(2);
 }
-if (S3 && (TAB || LAN_LANE || RELAY_LANE || STEPS.includes("needs-usb") || RELEASE_STEPS)) {
+if (S3 && (TAB || RELAY_LANE || STEPS.includes("needs-usb") || RELEASE_STEPS)) {
   console.error(
-    "walk-ota-emu: --s3 walks the door's and ?ble=emu's boards (not --tab, --lan or --relay), " +
+    "walk-ota-emu: --s3 walks the door's, ?ble=emu's and --lan's boards (not --tab or --relay), " +
       "and not needs-usb or the release steps (no S3 single image or releases are built for it)",
   );
   process.exit(2);

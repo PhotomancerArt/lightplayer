@@ -5570,8 +5570,9 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
-# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes:
-# `just walk-ota-ble-emu --s3`.
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes
+# (`just walk-ota-ble-emu --s3`) and over Wi-Fi (`--s3 --lan`, X and Y built
+# here with `wifi`, which the S3's default image does not carry yet).
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5584,6 +5585,25 @@ walk-ota-emu *args: install-rv32-target
     cargo build -q -p lp-cli
     # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
     # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* && " {{ args }} " == *" --lan "* ]]; then
+        # Over Wi-Fi: X and Y both with `wifi` (Y's trial core must reach
+        # the LAN to be confirmed there), Y staged as this Studio's firmware.
+        images=target/walk-ota-emu/images-s3-lan
+        if [[ ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0 esp32s3,server,wifi
+        fi
+        if [[ ! -f "${images}/y/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/y" b1b1b1b1 esp32s3,server,wifi
+        fi
+        rm -rf "${images}/y-packages" "${images}/y-parts"
+        mkdir -p "${images}/y-packages" "${images}/y-parts"
+        cp -R "${images}/y/package" "${images}/y-packages/esp32s3-8mb"
+        cp -R "${images}/y/ota" "${images}/y-parts/esp32s3-8mb"
+        just studio-web-story-build
+        WALK_OTA_X="${WALK_OTA_X:-${images}/x}" WALK_Y_PACKAGES="$PWD/${images}/y-packages" \
+            WALK_Y_PARTS="$PWD/${images}/y-parts" node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     if [[ " {{ args }} " == *" --s3 "* ]]; then
         images=target/walk-ota-emu/images-s3
         if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
