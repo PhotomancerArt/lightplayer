@@ -211,6 +211,35 @@ pub fn lcd_lanes_image() -> Result<PathBuf, String> {
     )
 }
 
+/// The environment variable naming the **Wi‑Fi** ELF — `fw-esp32s3` built
+/// with `wifi` (S3 radio M4; off by default): the shipped app with the
+/// station, the LAN link and the relay, whose network seam an emulator
+/// answers with a virtual LAN (`net=lan`, M5). On its own variable for the
+/// one-path trap's reason.
+pub const WIFI_IMAGE_ENV: &str = "LP_EMU_ESP32S3_WIFI_ELF";
+
+/// The Wi‑Fi ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn wifi_image() -> Result<PathBuf, String> {
+    env_file(
+        WIFI_IMAGE_ENV,
+        "`just test-emu-esp32s3-wifi` builds `fw-esp32s3 --features wifi` and sets it",
+    )
+}
+
+/// The Wi‑Fi image's merged chip (`espflash save-image --merge`): its
+/// partition table and an empty `lpfs`, where a saved network goes.
+pub const WIFI_MERGED_ENV: &str = "LP_EMU_ESP32S3_WIFI_MERGED";
+
+/// The Wi‑Fi image's merged chip, if the caller has one.
+pub fn wifi_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        WIFI_MERGED_ENV,
+        "`just test-emu-esp32s3-wifi` merges the Wi-Fi image with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
 /// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
 /// panic when it is set to a path that does not exist.
 fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {
