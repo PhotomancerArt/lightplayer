@@ -70,7 +70,7 @@ pub struct NetChip {
     pub on_join_attempt: fn(),
     /// The emulator's network seam engaged: bind its wake line
     /// (`net_bringup`).
-    #[cfg(target_arch = "riscv32")]
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     pub bind_seam_wake: fn(),
 }
 /// embassy-net's socket slots: DHCP, the LAN links and the listener that

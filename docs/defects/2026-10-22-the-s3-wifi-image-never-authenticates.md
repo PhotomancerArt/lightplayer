@@ -62,3 +62,17 @@ Bluetooth coexistence. Neither experiment image is committed.
 **What it blocks** — M4's desk walk (AC5 join and LAN link, AC6 frame-rate
 cost, AC7 warm resets, LED output under a scan). `wifi` is off by default, so
 no shipped image changes.
+
+**2026-10-22, the emulated walk (S3 radio M5, #1273)** — the same `wifi`
+image joins in the emulator. Two emulated S3s (`lp-emu:esp32s3:t1+net=lan`)
+each saved a network over USB, joined it, took DHCP leases, answered mDNS and
+DNS‑SD, and served Studio's secure LAN link. Studio then edited one of them
+over that link (docs/reports/2026-10-22-s3-wifi-emulator-walk.md). On that
+arm the network seam stands in for esp-radio's station (`net_bringup` picks
+`SeamStation`, not `EspStation`). So the walk exercises the station task's
+join policy, the IP stack, the LAN endpoint and the `lp-net` thread on its S3
+facts (core 0, 12 KB stack). Those work, which makes candidate 3 unlikely.
+It says nothing about candidates 1 and 2: the radio's transmit, and the
+station configuration `EspStation` hands esp-radio, are exactly what the
+seam replaces. The silicon failure is therefore at or below `EspStation`:
+the configuration, the blob or the radio.

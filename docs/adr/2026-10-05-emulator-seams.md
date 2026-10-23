@@ -1,7 +1,8 @@
 # ADR: Emulator seams — what a host answer may claim
 
 - **Status:** Accepted (2026-10-06); amended 2026-10-06 (§11, §12 — PR #993,
-  Wi-Fi M6); amended 2026-10-21 (§13 — Xtensa seams, S3 radio M5)
+  Wi-Fi M6); amended 2026-10-21 (§13 — Xtensa seams, S3 radio M5); amended
+  2026-10-22 (§13 — the S3's Wi‑Fi image declares the network seam)
 - **Date:** 2026-10-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -462,10 +463,24 @@ What it took, and what it decided:
   and restore, and answers on whichever core reached the site. `net=lan` is
   the same soft capability default. `led=fast` cannot engage on the S3: no
   S3 image declares its seam.
-- **The shipped S3 image declares no seam yet.** It has no network stack until
+- ~~**The shipped S3 image declares no seam yet.** It has no network stack until
   the S3 radio roadmap's M4; a table naming calls the image never makes
   would let an emulator say `net=lan` engaged on a board with no network.
-  Only the `test_seam_abi` harness carries a table today.
+  Only the `test_seam_abi` harness carries a table today.~~ *(amended
+  2026-10-22, S3 radio M5's second half): the S3's **`wifi` image** declares
+  the network seam, all nine calls, in a table of its own
+  (`fw-esp32s3/src/seams/mod.rs`; the harness keeps its own), and
+  `fw-esp32-radio`'s network bring-up takes the seam arm on Xtensa as on
+  RISC-V (`net_bringup`, with `NetChip::bind_seam_wake` binding the S3's
+  wake handler). An S3 image without `wifi` still declares none, for the
+  reason above. On riscv32 the bring-up's cfg is the same as before, so the
+  C6 compiles the same code. Two emulated S3s share a virtual LAN in CI
+  (`lp-cli/tests/emu_s3_lan_pair.rs`, `just test-emu-esp32s3-wifi`: two
+  leases, each board's name answered on the segment, the same frame log
+  twice) and in the walk (`just walk-wifi-emu lan --s3`,
+  docs/reports/2026-10-22-s3-wifi-emulator-walk.md). The walk found the
+  image's heap, not the LAN, short with an ordinary project loaded
+  (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md).*
 
 ## Consequences
 
@@ -592,7 +607,7 @@ and a whole `lp-cli link rtt` session's resends fell from 42 to 2.
 - ~~Xtensa seams (roadmap M7): a windowed-ABI return.~~ *(amended
   2026-10-21): shipped, §13. The S3's shipped image declares the network
   seam once it has a network stack (S3 radio M4), and the two-board LAN walk
-  on emulated S3s follows it.*
+  on emulated S3s follows it.* *(amended 2026-10-22): both done, §13.*
 - Retake the end-user bench row in a quiet window and on the phone; the
   numbers above are provisional.
 - **Generalise the pace axis to every host** (filed 2026-10-06 from PR #993,

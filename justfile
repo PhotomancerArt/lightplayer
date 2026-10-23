@@ -4423,6 +4423,30 @@ test-emu-esp32s3-lcd:
     export LP_EMU_ESP32S3_LCD_BACKEND_ELF="$backend"
     cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
 
+# Emulated Wi‑Fi on the S3 (S3 radio M5, the second half): `fw-esp32s3
+# --features wifi` (off by default) built, copied out of the shared target
+# path and merged, then `lp-cli/tests/emu_s3_lan_pair.rs`: two boards, each
+# joined alone over its USB link, then both on one runner-driven LAN — two
+# leases, each board's `lp-xxxx.local` answered on the segment, the same
+# frame log twice. Its figures are `lp-emu:esp32s3:t1+net=lan`. The `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it.
+test-emu-esp32s3-wifi:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 wifi
+    wifi="$out/fw-esp32s3-wifi.elf"
+    cp "$built" "$wifi"
+    merged="$out/merged-wifi.bin"
+    espflash save-image --chip esp32s3 --merge \
+        --partition-table lp-fw/fw-esp32s3/partitions.csv \
+        --flash-size {{ s3_flash_size }} "$wifi" "$merged"
+    export LP_EMU_ESP32S3_WIFI_ELF="$wifi"
+    export LP_EMU_ESP32S3_WIFI_MERGED="$merged"
+    cargo test -p lp-cli --test emu_s3_lan_pair -- --include-ignored --nocapture
+
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
 # `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
@@ -5467,7 +5491,10 @@ walk-two-tabs-emu *args:
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
 # docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
-# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+# out W10's `link rtt`, which alone outlives a 10-minute command cap. `lan
+# --s3` walks the same steps on two emulated S3s booting `fw-esp32s3
+# --features wifi` (after `just test-emu-esp32s3-wifi`, which writes its
+# merged chip; S3 radio M5).
 #
 # `relay` (Wi‑Fi relay plan P9, scripts/emu/walk-wifi-emu-relay.mjs) is
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing

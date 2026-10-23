@@ -16,10 +16,12 @@
 //! A raise between the two is read by the swap, or by the next handler run;
 //! never lost.
 //!
-//! **Bound only when a capability seam is engaged** ([`bind`]): today only
-//! the `test_seam_abi` harness binds it; M4's network bring-up is where the
-//! shipped image will. Software interrupt 3 is otherwise unclaimed on this
-//! chip (esp-rtos is handed software interrupt 0; nothing takes 1–3).
+//! **Bound only when a capability seam is engaged** ([`bind`]): the `wifi`
+//! image's network bring-up binds it when `net=lan` engaged
+//! (`fw_esp32_radio::net::net_bringup`, through `NET_CHIP.bind_seam_wake`),
+//! and the `test_seam_abi` harness binds it itself. Software interrupt 3
+//! is otherwise unclaimed on this chip (esp-rtos is handed software
+//! interrupt 0; nothing takes 1–3).
 //!
 //! **In RAM.** The handler is `#[ram]` and everything it does itself is
 //! inlined into it: one store, one atomic swap, a branch.
