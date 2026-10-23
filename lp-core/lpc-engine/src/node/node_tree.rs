@@ -40,7 +40,20 @@ pub struct RuntimeNodeTree<N> {
     binding_index: NodeBindingIndex,
     next_id: u32,
     root: NodeId,
+    /// SPIKE (fps spike, `LP_SPIKE_ENGINE_CACHE=1`): per-node answers that
+    /// only a structural change moves, cleared with the binding index.
+    pub(crate) spike_cache: core::cell::RefCell<SpikeCache>,
 }
+
+/// SPIKE (fps spike): see [`RuntimeNodeTree::spike_cache`].
+#[derive(Default, Debug)]
+pub(crate) struct SpikeCache {
+    pub(crate) recovery_names: VecMap<NodeId, alloc::rc::Rc<str>>,
+    pub(crate) default_fragments_consumer: VecMap<NodeId, bool>,
+}
+
+/// SPIKE (fps spike): the engine caches are on.
+pub(crate) const SPIKE_ENGINE_CACHE: bool = option_env!("LP_SPIKE_ENGINE_CACHE").is_some();
 
 impl<N> RuntimeNodeTree<N> {
     /// Create a new tree with a root node at the given path and frame.
@@ -61,6 +74,7 @@ impl<N> RuntimeNodeTree<N> {
             binding_index: NodeBindingIndex::default(),
             next_id: 1,
             root: root_id,
+            spike_cache: Default::default(),
         }
     }
 
@@ -544,6 +558,7 @@ impl<N> RuntimeNodeTree<N> {
     }
 
     fn rebuild_binding_index(&mut self) -> Result<(), BindingError> {
+        *self.spike_cache.get_mut() = SpikeCache::default();
         self.binding_index = NodeBindingIndex::rebuild(&self.nodes)?;
         Ok(())
     }

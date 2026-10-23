@@ -962,6 +962,19 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     #[cfg(feature = "psram")]
     if psram::usable() {
         lpvm_native::code_publish::set_code_publish(psram::publish_code);
+        // SPIKE (fps spike): `LP_SPIKE_JIT_INTERNAL=1` links JIT images in
+        // internal RAM (fetched uncached through SRAM1's I-bus alias).
+        if option_env!("LP_SPIKE_JIT_INTERNAL") == Some("1") {
+            lpvm_native::code_publish::set_code_place(|linking| {
+                static SAVED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+                use core::sync::atomic::Ordering::Relaxed;
+                if linking {
+                    SAVED.store(esp_alloc::EXTERNAL_FIRST_MIN.swap(usize::MAX, Relaxed), Relaxed);
+                } else {
+                    esp_alloc::EXTERNAL_FIRST_MIN.store(SAVED.load(Relaxed), Relaxed);
+                }
+            });
+        }
     }
     let CoreBoot {
         spawner,

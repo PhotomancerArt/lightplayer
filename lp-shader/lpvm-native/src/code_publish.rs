@@ -27,6 +27,25 @@ pub fn set_code_publish(publish: CodePublish) {
     PUBLISH.store(publish as usize, Ordering::Release);
 }
 
+/// SPIKE (fps spike): a firmware hook run with `true` before a JIT link and
+/// `false` after, so the firmware can steer where the linked image is
+/// allocated (the S3: internal RAM instead of PSRAM).
+static PLACE: AtomicUsize = AtomicUsize::new(0);
+
+/// SPIKE (fps spike): install the link-placement hook.
+pub fn set_code_place(place: fn(bool)) {
+    PLACE.store(place as usize, Ordering::Release);
+}
+
+/// SPIKE (fps spike): run the link-placement hook, if one is set.
+pub(crate) fn place(linking: bool) {
+    let routine = PLACE.load(Ordering::Acquire);
+    if routine != 0 {
+        // SAFETY: only `set_code_place` stores here, and only a `fn(bool)`.
+        (unsafe { core::mem::transmute::<usize, fn(bool)>(routine) })(linking);
+    }
+}
+
 /// Publish through the injected routine, if one is set. `true` when one ran.
 #[cfg_attr(
     not(target_arch = "xtensa"),

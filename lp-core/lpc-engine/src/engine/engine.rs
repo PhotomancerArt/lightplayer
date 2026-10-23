@@ -1546,6 +1546,22 @@ impl EngineResolveHost<'_> {
     /// exactly as every output did before scatter existed — that identity
     /// is what keeps single-output projects byte-stable (A1).
     fn is_default_fragments_consumer(&self, consumer: NodeId) -> bool {
+        if crate::node::node_tree::SPIKE_ENGINE_CACHE {
+            if let Some(v) = self.tree.spike_cache.borrow().default_fragments_consumer.get(&consumer) {
+                return *v;
+            }
+            let v = self.is_default_fragments_consumer_uncached(consumer);
+            self.tree
+                .spike_cache
+                .borrow_mut()
+                .default_fragments_consumer
+                .insert(consumer, v);
+            return v;
+        }
+        self.is_default_fragments_consumer_uncached(consumer)
+    }
+
+    fn is_default_fragments_consumer_uncached(&self, consumer: NodeId) -> bool {
         use crate::dataflow::resolver::ResolveHost as _;
         let bindings = self
             .tree
@@ -3268,10 +3284,24 @@ fn restore_node_after_failed_render(
 /// Display/identity name for a node's recovery frame: its stable tree path.
 /// The path (not the numeric id) keys crash blame, so it must survive
 /// project reloads and reboots.
-fn recovery_frame_name<N>(tree: &RuntimeNodeTree<N>, node_id: NodeId) -> alloc::string::String {
-    tree.get(node_id)
+fn recovery_frame_name<N>(tree: &RuntimeNodeTree<N>, node_id: NodeId) -> alloc::rc::Rc<str> {
+    if crate::node::node_tree::SPIKE_ENGINE_CACHE {
+        if let Some(name) = tree.spike_cache.borrow().recovery_names.get(&node_id) {
+            return name.clone();
+        }
+    }
+    let name: alloc::rc::Rc<str> = tree
+        .get(node_id)
         .map(|entry| entry.path.to_string())
         .unwrap_or_default()
+        .into();
+    if crate::node::node_tree::SPIKE_ENGINE_CACHE {
+        tree.spike_cache
+            .borrow_mut()
+            .recovery_names
+            .insert(node_id, name.clone());
+    }
+    name
 }
 
 fn set_entry_status_if_changed<N>(

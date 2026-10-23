@@ -81,6 +81,7 @@ pub(crate) fn link_compiled_module_jit(
         //    module beside a full second copy of its code at the compile's
         //    peak heap moment.
         lp_perf::emit_begin!(EVENT_SHADER_LINK);
+        crate::code_publish::place(true);
         let link_result = link_jit_taking(&mut compiled, isa, |sym| {
             // First check builtins
             if let Some(addr) = builtin_table.lookup(sym) {
@@ -89,6 +90,7 @@ pub(crate) fn link_compiled_module_jit(
             // Functions are resolved during link phase
             None
         });
+        crate::code_publish::place(false);
         lp_perf::emit_end!(EVENT_SHADER_LINK);
         let linked =
             link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
