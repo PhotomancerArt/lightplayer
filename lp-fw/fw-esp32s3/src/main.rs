@@ -1035,6 +1035,14 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
     let button_service: Rc<dyn ButtonService> = hardware_system.clone();
+    // The radio service on an image with ESP-NOW (`espnow`): the hardware
+    // system holds the ESP-NOW driver registered above, so a Radio node opens
+    // it and the hello says `radio` and `svc.radio-espnow`, as the manifest
+    // does. The C6's wiring.
+    #[cfg(s3_espnow)]
+    let radio_service: Option<Rc<dyn lpa_server::RadioService>> = Some(hardware_system.clone());
+    #[cfg(not(s3_espnow))]
+    let radio_service: Option<Rc<dyn lpa_server::RadioService>> = None;
     let mut server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
@@ -1042,7 +1050,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
         Some(esp32_memory_stats),
         Some(time_provider_rc),
         Some(button_service),
-        None,
+        radio_service,
         graphics,
     );
     // The heap gates, installed on this chip for the first time: until

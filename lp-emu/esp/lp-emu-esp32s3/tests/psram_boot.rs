@@ -1,6 +1,7 @@
 //! Lane P's gate: **an image that brings the octal PSRAM up through esp-hal
-//! boots on this machine, both ways, with no unmapped access — and an image
-//! that never touches PSRAM runs exactly as it did before the chip existed.**
+//! boots on this machine, both ways, with no unmapped access — and the
+//! shipped image, which brings PSRAM up by default since 2026-10-23, uses it
+//! on a part that has it and boots without it on one that does not.**
 //!
 //! The image is `fw-esp32s3 --features test_psram`
 //! (`lp-fw/fw-esp32s3/src/tests/test_psram.rs`): esp-hal's own driver brings
@@ -174,15 +175,15 @@ fn a_snapshot_mid_probe_restores_to_the_same_finish() {
     assert_eq!(first, second, "the restored run finishes to the same bytes");
 }
 
-/// **The default changes nothing for an image that never touches PSRAM.**
-/// The shipped image, with the default 8 MiB chip and with none, by direct
-/// load and ROM-up (the real mask ROM and IDF bootloader, which see the
-/// eFuse's PSRAM fields differ): the same bytes on the link, the same cycle
-/// and instruction counts, and the chip never reached. This is the evidence
-/// for making 8 MiB the default.
+/// **The shipped image brings PSRAM up on a part that has it, and boots
+/// without it on one that does not** (PSRAM on by default since 2026-10-23).
+/// Direct load and ROM-up (the real mask ROM and IDF bootloader, which see
+/// the eFuse's PSRAM fields differ): with the default 8 MiB chip the core
+/// says `psram: on` and the chip is reached; with none it says why it is off,
+/// the chip is never reached, and the board still comes up.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_PSRAM_ELF; run through `just test-emu-esp32s3-psram`"]
-fn the_shipped_image_runs_the_same_with_and_without_psram() {
+fn the_shipped_image_uses_psram_when_the_part_has_it() {
     // Asks for the probe's variable too, so it runs in the PSRAM recipe (the
     // S3 seams job), not in the S3 gate, which runs every ignored test here
     // with the shipped image's variables set and has no time left for four
@@ -190,59 +191,52 @@ fn the_shipped_image_runs_the_same_with_and_without_psram() {
     let (elf, merged) = match (fw_esp32s3_image(), merged_chip_image(), psram_image()) {
         (Ok(e), Ok(m), Ok(_)) => (e, m),
         (Err(r), _, _) | (_, Err(r), _) | (_, _, Err(r)) => {
-            skip_notice("the_shipped_image_runs_the_same_with_and_without_psram", &r);
+            skip_notice("the_shipped_image_uses_psram_when_the_part_has_it", &r);
             return;
         }
     };
     let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
-    let run = |psram: u32, rom_up: bool| {
-        let mut b = Esp32S3Builder::new()
-            .app(AppSource::Path(elf.clone()))
-            .flash(FlashBacking::Copy(merged.clone()))
-            .psram_len(psram)
-            .strict(true)
-            .usb_host(UsbHost::Attached { draining: true });
-        if rom_up {
-            b = b.boot_mode(BootMode::RomUp).flash_len(len);
-        }
-        let mut m = b.build().expect("the shipped image builds");
-        let outcome = m.run_until(&StopCondition::after_micros(500_000));
-        let path = if rom_up { "rom-up" } else { "direct" };
-        assert!(
-            matches!(outcome, Outcome::Deadline { .. }),
-            "{path} psram={psram}: {outcome:?}"
-        );
-        assert!(
-            m.psram_summary().is_none(),
-            "{path} psram={psram}: the chip was reached"
-        );
-        (
-            m.usb_sj(),
-            m.uart0().bytes(),
-            m.cycles(),
-            m.instructions(),
-            m.cache_fills(),
-        )
-    };
     for rom_up in [false, true] {
-        let with = run(lp_emu_esp32s3::psram::DEFAULT_PSRAM_LEN, rom_up);
-        let without = run(0, rom_up);
-        if !rom_up {
+        for psram in [lp_emu_esp32s3::psram::DEFAULT_PSRAM_LEN, 0] {
+            let mut b = Esp32S3Builder::new()
+                .app(AppSource::Path(elf.clone()))
+                .flash(FlashBacking::Copy(merged.clone()))
+                .psram_len(psram)
+                .strict(true)
+                .usb_host(UsbHost::Attached { draining: true });
+            if rom_up {
+                b = b.boot_mode(BootMode::RomUp).flash_len(len);
+            }
+            let mut m = b.build().expect("the shipped image builds");
+            let outcome = m.run_until(&StopCondition::after_micros(1_000_000));
+            let path = if rom_up { "rom-up" } else { "direct" };
             assert!(
-                String::from_utf8_lossy(&with.0).contains("starting server loop"),
-                "the direct run reached the server loop"
+                matches!(outcome, Outcome::Deadline { .. }),
+                "{path} psram={psram}: {outcome:?}"
             );
+            let console = String::from_utf8_lossy(&m.usb_sj()).into_owned();
+            assert!(
+                console.contains("starting server loop"),
+                "{path} psram={psram}: the board came up:\n{console}"
+            );
+            if psram == 0 {
+                assert!(
+                    console
+                        .contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
+                    "{path}: the fallback line:\n{console}"
+                );
+                assert!(
+                    m.psram_summary().is_none(),
+                    "{path}: a part without PSRAM was reached"
+                );
+            } else {
+                assert!(
+                    console.contains("[INIT] psram: on, 8388608 bytes at 0x3c800000"),
+                    "{path}: PSRAM up:\n{console}"
+                );
+                assert!(m.psram_summary().is_some(), "{path}: the chip was reached");
+            }
         }
-        assert_eq!(with.0, without.0, "rom_up={rom_up}: the bytes on the link");
-        assert_eq!(
-            with.1, without.1,
-            "rom_up={rom_up}: the ROM's UART0 console"
-        );
-        assert_eq!(
-            (with.2, with.3, with.4),
-            (without.2, without.3, without.4),
-            "rom_up={rom_up}: (cycles, instructions, cache fills)"
-        );
     }
 }
 

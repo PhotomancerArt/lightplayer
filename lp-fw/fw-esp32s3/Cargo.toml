@@ -9,7 +9,17 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread", "heap-dram2", "ble"]
+default = [
+    "esp32s3",
+    "server",
+    "float-f32",
+    "json-pack",
+    "io-thread",
+    "heap-dram2",
+    "ble",
+    "espnow",
+    "psram",
+]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -145,11 +155,11 @@ ble = [
     "fw-esp32-radio/ble",
 ]
 # ESP-NOW (the Radio node): the radio's one bring-up (`esp_radio::wifi::new`,
-# the Wi-Fi blob) and the ESP-NOW driver, with the C6's Wi-Fi rule. Not on by
-# default: the Wi-Fi blob up costs ~37 KB of heap the S3 does not have to spare
-# beside a 620-pixel project (lane E, #1261); whether it starts by default, or
-# only when a project has a Radio node or a network is saved, is Yona's call.
-# The C6 runs it by default.
+# the Wi-Fi blob) and the ESP-NOW driver, with the C6's Wi-Fi rule. On by
+# default since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up costs
+# ~37 KB of internal heap, which PSRAM's heap gives back many times over
+# (docs/adr/2026-10-21-s3-radio-memory.md, the 2026-10-23 amendment). The C6
+# runs it by default too.
 espnow = ["radio"]
 # The Wi-Fi station and the network on `lp-net` (S3 radio roadmap M4; the
 # C6's since its Wi-Fi roadmap M6, docs/adr/2026-10-07-c6-wifi-link.md): a
@@ -276,8 +286,8 @@ test_button = ["server"]
 # result and the caller's window survive an answer. Never shipped.
 test_seam_abi = []
 
-# The octal PSRAM (S3 radio roadmap M10; `src/psram.rs`) — OFF by default:
-# turning it on in the shipped image is Yona's call on the walk's numbers. The
+# The octal PSRAM (S3 radio roadmap M10; `src/psram.rs`) — ON by default
+# since 2026-10-23 (Yona's ruling on the walk's numbers, policy `all`). The
 # core brings the XIAO ESP32-S3's 8 MB up at the fixed MMU window
 # `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries 0x80..0x100), only on a part
 # whose eFuse says 8 MB, and self-tests it; anything else boots as without

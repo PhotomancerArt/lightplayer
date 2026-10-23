@@ -164,14 +164,19 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// chain carries the radio's heap: the arena cut around the boot stages' RAM
 /// and the blobs' 32 KB region (`fw-esp32s3/src/c_heap.rs`). Since L4's
 /// amendment (2026-10-22) the split loader's RAM sits at the arena's top, so
-/// the arena is one `Internal` piece and a few KB untagged above it.
+/// the arena is one `Internal` piece and a few KB untagged above it. Since
+/// ESP-NOW and PSRAM joined the defaults (2026-10-23) the arena is the Wi-Fi
+/// blob's smaller one (136 KB less PSRAM's 3 KiB, below the boot stages' RAM,
+/// so one piece), the radio region 48 KB, and the core brings PSRAM up and
+/// adds it as the last region.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
-[INIT] chip=esp32s3 arch=xtensa heap=172032+73744=245776 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fc9c198+167528 (dram_seg arena, Internal)
-[INIT] heap region: 0x3fcc5000+4504 (dram_seg arena, a boot stage's RAM, untagged)
+[INIT] chip=esp32s3 arch=xtensa heap=136192+73744=209936 (dram_seg arena + dram2_seg)
+[INIT] heap region: 0x3fca1e20+136192 (dram_seg arena, Internal)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
-[INIT] heap region: 0x3fc94180+32768 (radio)
+[INIT] heap region: 0x3fc95e08+49152 (radio)
+[INIT] psram: on, 8388608 bytes at 0x3c800000 (MMU entries 0x80..0x100), self-test passed
+[INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
 [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
 [INIT] runtime started
@@ -180,8 +185,8 @@ const HELLO: &str = "\
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 574;
-const HELLO_SHA: &str = "cd17ebff40cec3ec6709aee4c0c0b11a3446c43b6c38d0526232529c257ae2c6";
+const HELLO_BYTES: usize = 672;
+const HELLO_SHA: &str = "d55780b2c5002312740aa2e7f4dad96ba8a12cbce8a0a47d914560ac8712e55a";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();

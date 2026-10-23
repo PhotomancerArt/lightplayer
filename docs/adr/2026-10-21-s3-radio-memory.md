@@ -94,7 +94,8 @@ before any radio. RAM is.
    esp-radio's BTDM controller task 8 KB on core 0 (`ProCpu`, its default);
    the link thread as before (4 KB, core 0). Thread stacks come from the
    arena's `Internal` pieces.
-7. **No PSRAM** (the plan's Q5): `dram_seg` closes without it.
+7. **No PSRAM** (the plan's Q5): `dram_seg` closes without it. *Superseded
+   2026-10-23: see the amendment below.*
 
 ### Why moving Wi-Fi code to flash is safe on Xtensa
 
@@ -199,6 +200,39 @@ project that fits and one that does not. **ESP-NOW is its own feature,
 `espnow`** (`radio` is the bare radio, `wifi` implies `espnow`), and it is not
 in `default`. Whether it starts by default — or only when a project has a
 Radio node or a network is saved — is Yona's call. The C6 runs it by default.
+
+## Amendment (2026-10-23): PSRAM and ESP-NOW on by default
+
+Point 7 ("No PSRAM") no longer holds. Yona ruled on M10's walk
+(`docs/reports/2026-10-22-s3-psram-walk.md`): the S3 brings its 8 MB of octal
+PSRAM up in the core by default and puts every Rust allocation there first
+(`psram`, policy `all`; `docs/adr/2026-10-22-s3-psram.md`). With Rust's heap
+out of internal RAM, the 2026-10-22 amendment's question is answered the same
+day: **`espnow` is in `default`**, as on the C6.
+
+What changes here:
+
+- **Point 1's tag.** On a `psram` image `External` is PSRAM's, so the radio's
+  region is `Internal | Reserved` (the esp-alloc fork's third diff), not
+  `Internal | External`. The radio's C heap and its DMA buffers still never
+  reach PSRAM; thread stacks stay internal.
+- **The default image is the `espnow` column of the ledger**, with PSRAM's
+  3 KiB taken out of the arena for its init's IRAM: arena 136,192 B, radio
+  region 49,152 B.
+- **The figures** (`lp-emu:esp32s3:t1`, the heap-budget gate's idle sample,
+  memory FS): internal free 208,604 → 187,540 B, largest block 121,688 →
+  107,560 B, internal total 278,544 → 259,088 B. At idle the Wi-Fi blob's
+  ~37 KB outweighs what PSRAM takes, because an idle board's Rust heap is
+  small; the gain is under a project.
+- **On FS3** (XIAO ESP32-S3 Plus, 16 MB, antenna attached; 2026-10-23, the
+  split default image, `projects/test/skirt-620` on 2 × 310 px, Bluetooth
+  connected from Mac Chrome, 326 s from a reboot): internal free
+  **185,668–187,580 B**, largest block **105,704–107,576 B**, against main's
+  image on the same board and project in M10's walk (`ble` alone, no PSRAM:
+  50,780 B free, 39,584 B largest). 21.01 fps median against main's 22.15
+  (−5.1 %; M10's `all` without ESP-NOW was −3.2 %), frame p99 ≤ 75 ms in
+  every 5 s window, radio region high water 42,976 of 49,152 B, no panic,
+  one boot. Inside the radio frame-rate budget's 10 % idle ceiling.
 
 ## Follow-ups
 
