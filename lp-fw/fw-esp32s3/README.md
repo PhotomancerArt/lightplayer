@@ -273,7 +273,7 @@ above stays the default until the switch is ruled on (S3 radio roadmap M9;
 | Pins | refused at open: GPIO19/20 (USB-Serial-JTAG), GPIO26–32 (flash), GPIO33–37 (octal PSRAM) |
 | Image | +4,676 B flash, −2,616 B internal RAM against the RMT image (2026-10-22) |
 | Encode | 651 µs at 5 × 124, 3,564 µs at 8 × 500 (FS3, 240 MHz); up to 5.5 ms when the radio pre-empts it |
-| ⚠️ RAM today | on the Bluetooth image the `Internal`-tagged heap is nearly full once a project loads: a 2 × 310-LED project could not get one 23,070 B buffer (FS3, 2026-10-22), while the same project plays on the RMT. Two buffers when they fit, one when only one does; M10 (PSRAM) is what frees the room |
+| RAM | before PSRAM (2026-10-22) the Bluetooth image's `Internal`-tagged heap was nearly full once a project loaded: a 2 × 310-LED project could not get one 23,070 B buffer (FS3), while the same project played on the RMT. PSRAM, on by default since 2026-10-23, moves Rust's heap out of internal RAM and frees the room. Two buffers when they fit, one when only one does |
 
 The silicon evidence and the harness are the LED-channels spike's:
 `test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
@@ -569,10 +569,10 @@ core-only S3 serves nothing over the air yet (updates are the updates plan's).
 **`ble` is on by default** since its desk walk passed on FS3
 (`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
 BTDM controller unless the device store turns Bluetooth off, emulated ones
-included (they advertise to nobody, as an emulated C6 does). **`espnow` is off
-by default**, unlike the C6: the Wi-Fi blob up costs about 37 KB of heap the
-S3 does not have to spare beside a 620-pixel project, and when it starts is
-Yona's call (the ADR's 2026-10-22 amendment). **`wifi` is off by default**
+included (they advertise to nobody, as an emulated C6 does). **`espnow` is on
+by default** since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up
+costs about 37 KB of internal heap, which PSRAM's heap gives back (the radio
+memory ADR's 2026-10-23 amendment). **`wifi` is off by default**
 until its desk walk passes:
 build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
 esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
@@ -600,16 +600,17 @@ B, host + GATT +3520 B`; connected, the radio region's high water is 26,084 of
 Frame rate on `/projects/studio` (Peach (1D)): 37 fps radio off, 35–36
 advertising, 32 connected and editing, inside the radio frame-rate budget.
 
-## PSRAM (feature `psram`, off by default)
+## PSRAM (feature `psram`, on by default)
 
 The S3R8's 8 MB of octal PSRAM, brought up in the core (`src/psram.rs`) and
-given to the engine's heap. Off by default: turning it on in the shipped image
-waits for the walk's numbers (`docs/adr/2026-10-22-s3-psram.md`).
+given to the engine's heap. On by default since 2026-10-23, with every Rust
+allocation going there first (`all`): Yona's ruling on the walk's numbers
+(`docs/reports/2026-10-22-s3-psram-walk.md`, `docs/adr/2026-10-22-s3-psram.md`).
 
 ```bash
-just build-fw-esp32s3 psram                         # PSRAM first for every Rust allocation
-LP_PSRAM_HEAP=split:1024 just build-fw-esp32s3 psram   # …only for 1 KB and up
-LP_PSRAM_HEAP=off just build-fw-esp32s3 psram       # up and tested, not in the heap
+just build-fw-esp32s3                               # the default: PSRAM first for every Rust allocation
+LP_PSRAM_HEAP=split:1024 just build-fw-esp32s3      # …only for 1 KB and up
+LP_PSRAM_HEAP=off just build-fw-esp32s3             # up and tested, not in the heap
 just test-emu-esp32s3-psram                         # the emulator's proof
 ```
 
@@ -627,7 +628,8 @@ just test-emu-esp32s3-psram                         # the emulator's proof
 - **What never lives there:** the frame the RMT ISR reads (the output copies a
   PSRAM frame into an internal buffer first), ISR code and state, the radio's
   C heap and DMA buffers (the radio's region is `Internal | Reserved`), thread
-  stacks.
+  stacks; nor the LCD_CAM backend's frame buffers (`Internal` by capability,
+  asserted at every allocation).
 - **JIT code** in PSRAM is published (D-cache written back, I-cache
   invalidated) through `lpvm_native::code_publish` before it runs.
 - **Cost on the default arena:** 3 KiB, so the main stack keeps its share

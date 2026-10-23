@@ -180,8 +180,8 @@ Do NOT disable the compiler. The compiler is the product.
   `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md` and
   `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
 
-- **`psram`** (`fw-esp32s3`, **off by default**; turning it on is Yona's call
-  on the walk's numbers) brings the S3R8's 8 MB octal PSRAM up in the core at
+- **`psram`** (`fw-esp32s3`, **on by default** since 2026-10-23, policy
+  `all`; a part without 8 MB of octal PSRAM boots as without it) brings the S3R8's 8 MB octal PSRAM up in the core at
   the fixed MMU window `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries
   `0x80..0x100`, so a core links below `0x80`), only on a part whose eFuse
   says 8 MB, and self-tests it. The engine's heap and JIT code go there
