@@ -116,6 +116,8 @@ mod board;
 // product radio (`radio`) and the M1 probe both link the blobs.
 #[cfg(all(any(s3_radio, feature = "radio_boot_probe"), not(fw_harness)))]
 mod c_heap;
+#[cfg(all(feature = "core1-render", not(fw_harness)))]
+mod core1;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
 #[cfg(not(fw_harness))]
@@ -467,6 +469,14 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     );
     #[cfg(feature = "psram")]
     psram::log_ledger_line();
+    #[cfg(feature = "core1-render")]
+    {
+        let (calls, points, cycles) = lpvm_native::helper_core::render_stats();
+        log::info!(
+            "[core1] jobs={} samples calls={calls} points={points} cycles={cycles}",
+            core1::jobs_done()
+        );
+    }
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,
@@ -712,6 +722,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         psram::bring_up();
         psram::add_heap_region();
     }
+
+    // SPIKE: core 1 as a render helper (`crate::core1`).
+    #[cfg(feature = "core1-render")]
+    core1::start();
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
@@ -1261,7 +1275,12 @@ fn mount_filesystem(
     use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
     use lpc_wire::FsBootState;
 
-    let mut flash_storage = esp_storage::FlashStorage::new(flash);
+    let flash_storage = esp_storage::FlashStorage::new(flash);
+    // SPIKE: with core 1 running, esp-storage refuses every write
+    // (`OtherCoreRunning`) unless told what to do with it: park it.
+    #[cfg(feature = "core1-render")]
+    let flash_storage = flash_storage.multicore_auto_park();
+    let mut flash_storage = flash_storage;
     // From here every flash read — the code cache, the table, the mount, the
     // project — runs at 80 MHz (and in QIO on a part an S3 sitting has read).
     // Right after esp-storage's own RDID size probe, before any ROM flash

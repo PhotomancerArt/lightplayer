@@ -1923,6 +1923,7 @@ impl Esp32S3Builder {
             strict_unsupported,
             cpenable_reset,
             rom: rom_image,
+            pc_sampler: PcSampler::from_env(),
             app: app_image,
             rom_segments,
             rom_data,
@@ -2156,6 +2157,8 @@ pub struct Machine {
     strict_unsupported: bool,
     cpenable_reset: u32,
     rom: ElfImage,
+    /// SPIKE: `LP_EMU_PC_SAMPLES=<file>` — every core window's ending pc.
+    pc_sampler: Option<PcSampler>,
     app: Option<ElfImage>,
     rom_segments: Vec<PlacedSegment>,
     rom_data: Vec<SeededSection>,
@@ -2931,13 +2934,54 @@ impl Machine {
         self.stall_key.stalled(core)
     }
 
+    /// SPIKE (core-1 render split): core 1 in and out of reset.
+    ///
+    /// `SYSTEM.core_1_control_0.reseting` puts slot 1 in reset; when it is
+    /// clear with the clock gate open, slot 1 comes out of reset **at the
+    /// mask ROM's reset vector** in the architectural reset state — a fresh
+    /// hart, `PRID` `0xABAB`. Where it goes from there is the ROM's own code:
+    /// `_ResetHandler` (0x4000_0454) takes the APP CPU's fast boot only if
+    /// `SYSTEM.core_1_control_1` bit 31 is set; otherwise `_start` skips the
+    /// `.bss` clear for `PRID` `0xABAB` and `main` (0x4004_3a2c) spins on
+    /// `core_1_control_1` (0x600C_0004, what `ets_set_appcpu_boot_addr`
+    /// writes) and `callx8`s the address. So nothing here chooses where a
+    /// released core starts: the reset vector is the architecture's and the
+    /// rest is ROM bytes this machine already executes.
+    ///
+    /// A machine whose guest never writes `start_core1`'s sequence never
+    /// takes either branch, so a single-core run is unchanged.
+    fn sync_core1_reset(&mut self, now: Cycles) {
+        let control = self.core_1_control();
+        if control.reseting {
+            // Held in reset (the power-on state, or a later pulse): the next
+            // release starts from the reset vector again.
+            self.stalled[1] = true;
+            return;
+        }
+        if self.stalled[1] && control.clkgate_en {
+            let mut hart = fresh_hart(
+                1,
+                self.time_grade,
+                self.strict_unsupported,
+                self.cpenable_reset,
+            );
+            hart.set_block_cache(self.harts[0].block_cache());
+            // ⚠️ Silicon's CCOUNT on core 1 starts at 0 out of reset; this
+            // machine's per-hart counter is its clock, so core 1 joins at
+            // `now`. Nothing in the firmware reads core 1's CCOUNT.
+            hart.advance_to_cycle(now);
+            self.harts[1] = hart;
+            self.stalled[1] = false;
+        }
+    }
+
     /// Which inputs hold `core` right now, by name, in the order
     /// [`core_stalled`](Self::core_stalled) consults them. Empty for a
     /// running core.
     pub fn stall_inputs(&self, core: usize) -> Vec<&'static str> {
         let mut held = Vec::new();
         if self.stalled.get(core).copied().unwrap_or(true) {
-            held.push("machine (M6 releases no core; there is no S3 measurement of where a released core starts)");
+            held.push("machine (slot 1 not yet out of reset: SYSTEM.core_1_control_0.reseting never cleared with the clock gate open)");
         }
         if core == 1 {
             let c = self.core_1_control();
@@ -3527,6 +3571,9 @@ impl Machine {
             // then core 1, each opening at `now`. A held core's counter does
             // not move.
             for core in 0..CORES {
+                if core == 1 {
+                    self.sync_core1_reset(now);
+                }
                 if self.core_stalled(core) || self.harts[core].is_waiti() {
                     continue;
                 }
@@ -3564,6 +3611,9 @@ impl Machine {
                     return outcome;
                 }
 
+                if let Some(sampler) = self.pc_sampler.as_mut() {
+                    sampler.record(core, self.harts[core].pc());
+                }
                 match end {
                     SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
                     SliceEnd::Wfi => {
@@ -4694,5 +4744,38 @@ impl fmt::Debug for Machine {
             .field("pc", &format_args!("{:#010x}", self.harts[0].pc()))
             .field("pc1", &format_args!("{:#010x}", self.harts[1].pc()))
             .finish()
+    }
+}
+
+/// SPIKE (core-1 render split): a crude guest profile — the pc each core
+/// window ended at, counted, written as `core pc count` lines on drop.
+struct PcSampler {
+    path: PathBuf,
+    counts: std::collections::HashMap<(usize, u32), u64>,
+}
+
+impl PcSampler {
+    fn from_env() -> Option<Self> {
+        let path = std::env::var_os("LP_EMU_PC_SAMPLES")?;
+        Some(Self {
+            path: PathBuf::from(path),
+            counts: std::collections::HashMap::new(),
+        })
+    }
+
+    fn record(&mut self, core: usize, pc: u32) {
+        *self.counts.entry((core, pc)).or_insert(0) += 1;
+    }
+}
+
+impl Drop for PcSampler {
+    fn drop(&mut self) {
+        let mut rows: Vec<_> = self.counts.iter().collect();
+        rows.sort_by(|a, b| b.1.cmp(a.1));
+        let mut out = String::new();
+        for ((core, pc), n) in rows {
+            out.push_str(&format!("{core} {pc:#010x} {n}\n"));
+        }
+        let _ = std::fs::write(&self.path, out);
     }
 }

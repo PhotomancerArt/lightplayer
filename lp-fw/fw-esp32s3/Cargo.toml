@@ -175,6 +175,11 @@ wifi = [
 # real 5-strip test in front of him. The board profile declares both
 # `/rmt/ws281xK` and `/lcd/ws281xK`; each driver reads only its own.
 lcd-ws281x = []
+# SPIKE (never default, never merged): core 1 starts at boot as a render
+# helper and takes half of every render-samples batch (`src/core1.rs`,
+# `lpvm_native::helper_core`). `LP_CORE1_RENDER=0` at build time starts
+# nothing (the control).
+core1-render = ["server", "dep:lpvm-native"]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is

@@ -41,6 +41,9 @@ pub struct NativeJitInstance {
     pub(crate) globals_size: u32,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
+    /// SPIKE (core-1 render split): the helper core's own vmctx, allocated
+    /// on the first split call and freed with the instance.
+    pub(crate) helper_vmctx: Option<u32>,
 }
 
 /// The vmctx buffer is the instance's: `instantiate` allocates it and
@@ -56,6 +59,10 @@ impl Drop for NativeJitInstance {
             // SAFETY: `instantiate` allocated exactly this layout at this
             // address, and the instance is not `Clone`, so this is the one free.
             unsafe { alloc::alloc::dealloc(self.vmctx_guest as usize as *mut u8, layout) };
+            if let Some(helper) = self.helper_vmctx.take() {
+                // SAFETY: `split_render_samples` allocated it with this layout.
+                unsafe { alloc::alloc::dealloc(helper as usize as *mut u8, layout) };
+            }
         }
     }
 }
@@ -143,6 +150,97 @@ impl NativeJitInstance {
                 invocation,
             })
         }
+    }
+
+    /// SPIKE (core-1 render split): the upper half of the batch on the
+    /// helper core, against a copy of this instance's vmctx; the lower half
+    /// here; then both trap words.
+    fn split_render_samples(
+        &mut self,
+        helper: crate::helper_core::HelperCore,
+        entry: usize,
+        points: i32,
+        out: i32,
+        count: u32,
+    ) -> Result<(), NativeError> {
+        let size = self.module.vmctx_alloc_size();
+        let helper_vmctx = match self.helper_vmctx {
+            Some(v) => v,
+            None => {
+                let layout = core::alloc::Layout::from_size_align(size, VMCTX_ALIGN)
+                    .map_err(|_| NativeError::Call(CallError::Unsupported("vmctx layout".into())))?;
+                // SAFETY: non-zero size (at least VMCTX_ALIGN).
+                let p = unsafe { alloc::alloc::alloc(layout) };
+                if p.is_null() {
+                    return Err(NativeError::Call(CallError::Unsupported(
+                        "helper vmctx alloc".into(),
+                    )));
+                }
+                self.helper_vmctx = Some(p as usize as u32);
+                p as usize as u32
+            }
+        };
+        // SAFETY: both allocations are `size` bytes; the uniforms were bound
+        // and the fuel header armed on the instance's vmctx just before.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.vmctx_guest as usize as *const u8,
+                helper_vmctx as usize as *mut u8,
+                size,
+            );
+        }
+        let low = count / 2;
+        let stride = self.points_stride();
+        let job = crate::helper_core::HelperJob {
+            entry,
+            vmctx: helper_vmctx as i32,
+            points: points.wrapping_add((low * stride) as i32),
+            out: out.wrapping_add((low * 8) as i32),
+            count: (count - low) as i32,
+        };
+        let started = (helper.start)(&job);
+        let mine = crate::helper_core::HelperJob {
+            entry,
+            vmctx: self.vmctx_guest as i32,
+            points,
+            out,
+            count: low as i32,
+        };
+        // SAFETY: the instance's own entry, vmctx and buffers.
+        unsafe { call_render_samples_raw(&mine) };
+        if started {
+            (helper.join)();
+        } else {
+            unsafe { call_render_samples_raw(&job) };
+        }
+        self.take_trap()?;
+        // The helper's trap word, offset into the whole batch's numbering.
+        let base = helper_vmctx as usize as *const u8;
+        let (trap, invocation) = unsafe {
+            (
+                (base.add(VMCTX_OFFSET_TRAP) as *const u32).read(),
+                (base.add(VMCTX_OFFSET_FUEL + 4) as *const u32).read(),
+            )
+        };
+        if trap != TRAP_CODE_NONE {
+            return Err(NativeError::Trap {
+                code: trap,
+                invocation: invocation.wrapping_add(low),
+            });
+        }
+        Ok(())
+    }
+
+    /// Bytes per packed point: 4 for a 1D shader's `[t]`, 8 for 2D's `[x, y]`.
+    fn points_stride(&self) -> u32 {
+        let one_d = self
+            .module
+            .inner
+            .meta
+            .functions
+            .iter()
+            .any(|f| f.name == "render_1d");
+        if one_d { 4 } else { 8 }
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<usize, NativeError> {
@@ -699,6 +797,13 @@ impl LpvmInstance for NativeJitInstance {
 
         self.arm_fuel_header();
 
+        let t0 = crate::helper_core::clock_now();
+        if let Some(helper) = crate::helper_core::helper_for(count) {
+            let r = self.split_render_samples(helper, entry, points_offset, out_offset, count);
+            crate::helper_core::record_call(count, t0);
+            return r;
+        }
+
         // See `call_render_texture` for why there is no arch cfg here.
         unsafe {
             jit_entry_call(
@@ -714,6 +819,7 @@ impl LpvmInstance for NativeJitInstance {
             );
         }
 
+        crate::helper_core::record_call(count, t0);
         self.take_trap()?;
 
         Ok(())
@@ -778,5 +884,17 @@ impl LpvmInstance for NativeJitInstance {
             .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{name}: {e}"))))?;
         self.invoke_flat(name, &[])?;
         Ok(())
+    }
+}
+
+/// SPIKE (core-1 render split): one render-samples entry call, as either core
+/// makes it. The vmctx's fuel header must be armed.
+///
+/// # Safety
+///
+/// `job` names a live JIT entry, a vmctx of its module and valid buffers.
+pub(crate) unsafe fn call_render_samples_raw(job: &crate::helper_core::HelperJob) {
+    unsafe {
+        jit_entry_call(job.entry, job.vmctx, job.points, job.out, job.count, 0, 0, 0, 0);
     }
 }

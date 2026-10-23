@@ -224,6 +224,15 @@ impl LcdBus {
         if self.lanes[lane as usize].pending.is_some() {
             self.kick()?;
         }
+        // SPIKE (core-1 spike, `LP_LCD_OVERLAP=1`): the lane's bytes were
+        // copied into the bus's own buffer by `kick`'s encode, so the caller
+        // may reuse them now; the transfer only has to end before the next
+        // kick starts one, and `kick` waits for that itself. Without this the
+        // next frame's first `write` waits out the whole wire time, so render
+        // and wire never overlap.
+        if option_env!("LP_LCD_OVERLAP") == Some("1") {
+            return Ok(());
+        }
         if let Bus::Sending { lanes, .. } = &self.bus {
             if lanes & (1 << lane) != 0 {
                 self.wait_idle()?;

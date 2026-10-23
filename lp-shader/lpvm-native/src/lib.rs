@@ -49,6 +49,7 @@ pub mod debug_asm;
 pub mod emit;
 pub mod error;
 mod exec_addr;
+pub mod helper_core;
 // The Xtensa hardware-risk corpus. Feature-gated because the firmware harness
 // wants it and the app build must not pay for it; `no_std`, so the same module
 // builds for the device and for the host golden test.
