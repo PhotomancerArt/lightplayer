@@ -1188,7 +1188,7 @@ clippy-fw-esp32s3:
     echo "clippy: --features ws281x_overlap_ab"
     cargo clippy --release --features ws281x_overlap_ab -- --no-deps -D warnings
     echo "clippy: the RMT image (no lcd-ws281x), with its frame check"
-    cargo clippy --release --no-default-features --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,ws281x_frame_check -- --no-deps -D warnings
+    cargo clippy --release --no-default-features --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,espnow,psram,ws281x_frame_check -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
