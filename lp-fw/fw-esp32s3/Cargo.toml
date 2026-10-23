@@ -276,6 +276,17 @@ test_button = ["server"]
 # result and the caller's window survive an answer. Never shipped.
 test_seam_abi = []
 
+# The octal PSRAM (S3 radio roadmap M10; `src/psram.rs`) — OFF by default:
+# turning it on in the shipped image is Yona's call on the walk's numbers. The
+# core brings the XIAO ESP32-S3's 8 MB up at the fixed MMU window
+# `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries 0x80..0x100), only on a part
+# whose eFuse says 8 MB, and self-tests it; anything else boots as without
+# the feature. What may and may not live there is the ADR's
+# (docs/adr/2026-10-22-s3-psram.md). Where the Rust heap goes is the
+# build-time knob `LP_PSRAM_HEAP` (`src/psram.rs`): `all` (the default),
+# `split:<bytes>`, `last` or `off`.
+psram = ["server", "esp-alloc/external-first", "dep:enumset", "dep:lpvm-native"]
+
 # The octal PSRAM probe — OFF by default, never shipped (lane P of the S3 radio
 # roadmap; `src/tests/test_psram.rs`). Brings the XIAO ESP32-S3's 8 MB octal
 # PSRAM up through esp-hal's own driver, writes and reads back two address-

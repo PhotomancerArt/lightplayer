@@ -85,9 +85,21 @@ The C6's `ws281x_telemetry` lines in the app would name the window: per-trip
   never waits on the MSPI bus. This guards against PSRAM-induced lateness
   only; it does not fix whatever masks the ISR here.
 
+**Measured again: Bluetooth connected, two 310-pixel outputs (2026-10-22,
+M10's walk, `docs/reports/2026-10-22-s3-psram-walk.md`)** — FS3,
+`projects/test/skirt-620` (2 × 310), `fw-esp32s3 --features psram`, which
+counts the driver's guard trips (`[led]`). With a central **connected** (Mac
+Chrome via CDP, heartbeats only) every heap policy truncated **21.7–27.9 %**
+of frames, the heap-internal one (`off`) included (24.8 %, 24.0 %); two runs
+whose central had not reconnected, the radio only advertising, truncated
+**4.8 %** and **5.1 %**. So the rate grows several-fold with a connection,
+and with fewer, longer channels; PSRAM's heap does not move it.
+
 **Regression coverage** — none:
 
-- the S3 app does not report guard trips (no `ws281x_telemetry` port);
+- the S3 app reports guard trips only on a desk build
+  (`ws281x_telemetry`'s `[WS281X]` line, off by default; the walk's own
+  `[led]` line was folded into it);
 - the emulator runs no Bluetooth central and models no interrupt latency
   from the radio;
 - the loopback harness covers the driver alone, and it is clean.

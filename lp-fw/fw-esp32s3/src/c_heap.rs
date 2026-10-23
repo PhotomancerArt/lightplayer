@@ -22,9 +22,11 @@
 //!   arena, and the IDF bootloader's, which is `dram2_seg` and the top of
 //!   `dram_seg`. So nothing the radio can DMA into may live in either.
 //!
-//! The regions are picked by capability. The S3 has PSRAM on some boards, but
-//! this firmware never maps it, so `MemoryCapability::External` is borrowed as
-//! a tag nothing else asks for, as on the C6:
+//! The regions are picked by capability. Without the `psram` feature this
+//! firmware never maps PSRAM, so `MemoryCapability::External` is borrowed as
+//! a tag nothing else asks for, as on the C6; a `psram` image tags the radio
+//! region `Internal | Reserved` instead (esp-alloc's third diff), because
+//! `External` is PSRAM's there:
 //!
 //! | region | tag | who lands there |
 //! |---|---|---|
@@ -57,8 +59,16 @@ use enumset::EnumSet;
 use esp_alloc::MemoryCapability;
 
 /// The capability set that selects the radio's region alone.
+#[cfg(not(feature = "psram"))]
 pub const RADIO: EnumSet<MemoryCapability> =
     enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::External);
+/// The capability set that selects the radio's region alone, on a `psram`
+/// image: `External` is PSRAM's there, so the radio's region takes the
+/// esp-alloc fork's `Reserved` instead (its third diff), and nothing steered
+/// to PSRAM can land in the region the radio's DMA uses.
+#[cfg(feature = "psram")]
+pub const RADIO: EnumSet<MemoryCapability> =
+    enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::Reserved);
 
 /// The capability set of the main arena's piece inside a boot stage's RAM:
 /// none, so only a request that asks for nothing can land there.
@@ -123,7 +133,12 @@ pub struct ArenaPiece {
 /// and the arena's top inside it (three if a link puts the arena across it;
 /// the arena ends below the IDF bootloader's RAM, which starts inside the
 /// main stack).
+#[cfg(not(feature = "psram"))]
 pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 2;
+/// …and less the PSRAM's region, on a `psram` image (whose esp-alloc holds
+/// one more region, so the arena keeps its three).
+#[cfg(feature = "psram")]
+pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 3;
 
 /// Register the main arena, cut around every boot stage's RAM: pieces
 /// outside are `Internal`, pieces inside carry no tag. Bottom-up, so Rust's

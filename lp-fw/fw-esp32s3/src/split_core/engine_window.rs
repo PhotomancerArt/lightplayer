@@ -20,6 +20,8 @@ const MMU_PAGE_MASK: u32 = 0x3FFF;
 const LINE: usize = 32;
 
 unsafe extern "C" {
+    #[cfg(feature = "psram")]
+    fn Cache_WriteBack_All() -> i32;
     fn Cache_Invalidate_DCache_All();
     fn Cache_Invalidate_ICache_All();
     /// The S3 mask ROM's range invalidate (`esp32s3.rom.ld`). 0 = done.
@@ -38,9 +40,14 @@ fn mmu_write(entry: u32, value: u32) {
 }
 
 fn invalidate_caches() {
-    // SAFETY: ROM routines with no arguments; flash pages are read-only, so
-    // nothing dirty is lost.
+    // SAFETY: ROM routines with no arguments. Flash pages are read-only, so
+    // invalidating them loses nothing — but a PSRAM page's dirty lines are
+    // the only copy of what was stored there, and the engine is mapped after
+    // the core brought PSRAM up (and may already have allocated in it), so a
+    // `psram` image writes the data cache back first.
     unsafe {
+        #[cfg(feature = "psram")]
+        Cache_WriteBack_All();
         Cache_Invalidate_DCache_All();
         Cache_Invalidate_ICache_All();
     }

@@ -71,6 +71,9 @@ pub fn init_board() -> (
     // after the filesystem mounts (`crate::radio_peripherals`).
     #[cfg(all(s3_radio, not(fw_harness)))]
     crate::radio_peripherals::stash(peripherals.WIFI, peripherals.BT);
+    // The PSRAM's peripheral, kept until `core_boot` brings it up.
+    #[cfg(all(feature = "psram", not(fw_harness)))]
+    crate::psram::stash(peripherals.PSRAM);
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);

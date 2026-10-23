@@ -460,6 +460,8 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             byte_count: config.byte_count(),
             #[cfg(feature = "frame-dump")]
             dump: FrameDump::new(),
+            #[cfg(feature = "psram")]
+            staging: crate::psram::InternalBuffer::empty(),
         }))
     }
 }
@@ -482,6 +484,12 @@ struct Esp32S3RmtWs281xOutput {
     /// compile-time rather than a runtime flag.
     #[cfg(feature = "frame-dump")]
     dump: FrameDump,
+    /// A `psram` image's copy of a frame the engine rendered into PSRAM: the
+    /// refill ISR reads its frame from internal RAM only (M10 P4; the PSRAM
+    /// spike measured its margin shrinking from 4/9 to 7/9 of the deadline
+    /// reading PSRAM under load). 31 µs for 620 × 3 B on FS3.
+    #[cfg(feature = "psram")]
+    staging: crate::psram::InternalBuffer,
 }
 
 impl Ws281xOutput for Esp32S3RmtWs281xOutput {
@@ -493,6 +501,25 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
                 actual: data.len(),
             });
         }
+
+        // A frame in PSRAM goes out of an internal copy (see `staging`).
+        #[cfg(feature = "psram")]
+        let data: &[u8] = if crate::psram::in_window(data.as_ptr() as usize) {
+            match self.staging.copy_of(data) {
+                Some(copy) => copy,
+                None => {
+                    return Err(OutputError::Other {
+                        message: format!(
+                            "RMT channel {}: no internal RAM for the frame's {} B copy",
+                            self.channel,
+                            data.len()
+                        ),
+                    });
+                }
+            }
+        } else {
+            data
+        };
 
         // Blocking send: the borrow of `data` provably outlives the
         // transmission because `send_blocking` does not return until the

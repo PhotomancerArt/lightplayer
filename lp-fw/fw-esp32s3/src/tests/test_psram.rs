@@ -23,7 +23,8 @@
 //!    `Cache_Invalidate_ICache_All`), then called at the same page's
 //!    instruction-bus address. The S3's one MMU table serves both buses at
 //!    one index, so the instruction-bus address is the data-bus address plus
-//!    `0x4200_0000 - 0x3C00_0000`.
+//!    `0x4200_0000 - 0x3C00_0000`. Then the same code rewritten in place,
+//!    called before and after the publish: the publish rule's case.
 //!
 //! The cycle counts beside each pass are this core's `CCOUNT`, printed for a
 //! reader comparing runs on one configuration. An emulated run's are the
@@ -117,6 +118,28 @@ pub fn run(peri: esp_hal::peripherals::PSRAM<'static>) -> ! {
     let got = f(core::hint::black_box(5));
     esp_println::println!("[PSRAM] exec at {code_i:#010x}: f(5) = {got} (want 22)");
     ok &= got == 22;
+
+    // The publish rule: rewrite the code in place (`g(x) = x * 3 + 1`, one
+    // byte differs) and call it before and after publishing. Before, silicon
+    // may still run the cached `f` (the spike saw it stale); the emulator's
+    // windows are never stale, so it prints `fresh`. Only the published call
+    // counts towards `ok`.
+    unsafe { write_volatile(code_d.add(6), 0x1b) };
+    let before = f(core::hint::black_box(5));
+    unsafe {
+        Cache_WriteBack_All();
+        Cache_Invalidate_ICache_All();
+    }
+    let after = f(core::hint::black_box(5));
+    esp_println::println!(
+        "[PSRAM] rewrite: before publish f(5) = {before} ({}), after f(5) = {after} (want 16)",
+        match before {
+            22 => "stale",
+            16 => "fresh",
+            _ => "neither",
+        }
+    );
+    ok &= after == 16;
 
     drop(psram);
     finish(ok);

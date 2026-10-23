@@ -137,7 +137,20 @@ pub fn enter() {
 }
 
 /// Whether both controllers already run the flash at an 80 MHz core clock.
+///
+/// A `psram` image asks the frequency instead (M10): its PSRAM init, which
+/// runs before this, leaves the MSPI core clock at 160 MHz with the flash and
+/// PSRAM each divided by two — flash at 80 MHz already. The register pattern
+/// below would not see that, and the switch would take the core clock back
+/// to 80 MHz and PSRAM down to 40 with it.
 fn at_80mhz() -> bool {
+    #[cfg(feature = "psram")]
+    {
+        let c = clocks();
+        if c.flash_spi0 == 80 && c.flash_spi1 == 80 {
+            return true;
+        }
+    }
     Mspi::rd(MSPI.spi0 + CORE_CLK_SEL) & CORE_CLK_MASK == CORE_CLK_80M
         && Mspi::rd(MSPI.spi0 + CLOCK) & CLK_EQU_SYSCLK != 0
         && Mspi::rd(MSPI.spi1 + CLOCK) & CLK_EQU_SYSCLK != 0
@@ -224,4 +237,60 @@ fn switch_to_qio() -> u8 {
         Cache_Resume_ICache(i_autoload);
         v
     }
+}
+
+/// `SPI_MEM_SRAM_CLK` (`0x50`, SPI0): PSRAM's clock, the same shape as
+/// [`CLOCK`] (bits 23:16 the divider less one, bit 31 undivided).
+#[cfg(feature = "psram")]
+const SRAM_CLK: usize = 0x50;
+
+/// The MSPI clocks as the controllers hold them, in MHz.
+#[cfg(feature = "psram")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MspiClocks {
+    pub core: u32,
+    pub flash_spi0: u32,
+    pub flash_spi1: u32,
+    pub psram: u32,
+}
+
+/// Read the four clocks off the registers (esp-hal's own encodings:
+/// `spi0_timing_config_set_core_clock`, `…_set_flash_clock`,
+/// `…_set_psram_clock`).
+#[cfg(feature = "psram")]
+pub fn clocks() -> MspiClocks {
+    let core = match Mspi::rd(MSPI.spi0 + CORE_CLK_SEL) & CORE_CLK_MASK {
+        0 => 80,
+        1 => 120,
+        2 => 160,
+        _ => 240,
+    };
+    let divided = |reg: u32| {
+        if reg & CLK_EQU_SYSCLK != 0 {
+            core
+        } else {
+            core / (((reg >> 16) & 0xff) + 1)
+        }
+    };
+    MspiClocks {
+        core,
+        flash_spi0: divided(Mspi::rd(MSPI.spi0 + CLOCK)),
+        flash_spi1: divided(Mspi::rd(MSPI.spi1 + CLOCK)),
+        psram: divided(Mspi::rd(MSPI.spi0 + SRAM_CLK)),
+    }
+}
+
+/// The boot line that states where the two writers of these clocks — PSRAM's
+/// init and [`enter`] — left them (a `psram` image; ADR
+/// `2026-10-22-s3-psram.md`, point 10).
+#[cfg(feature = "psram")]
+pub fn log_clocks() {
+    let c = clocks();
+    esp_println::println!(
+        "[INIT] mspi clocks: core {} MHz, flash {} MHz (SPI0) {} MHz (SPI1), psram {} MHz",
+        c.core,
+        c.flash_spi0,
+        c.flash_spi1,
+        c.psram
+    );
 }

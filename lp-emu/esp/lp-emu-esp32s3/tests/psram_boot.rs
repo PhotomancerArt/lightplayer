@@ -16,9 +16,8 @@
 //!
 //! `#[ignore]`d for the usual reason (`lp_emu_esp32s3::test_support`): a plain
 //! `cargo test --workspace` must never start a cross-target firmware build.
-//! `just test-emu-esp32s3-psram` builds the probe, merges it and names both;
-//! `just test-emu-esp32s3-boot` names the shipped image, which the last test
-//! needs.
+//! `just test-emu-esp32s3-psram` builds the probe, merges it and names both,
+//! and builds the shipped image the last test also needs.
 
 use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::machine::{
@@ -66,6 +65,16 @@ fn the_psram_probe_prints_what_fs3_printed_by_direct_load() {
     for line in FS3_LINES {
         assert!(out.contains(line), "direct: no `{line}` in:\n{out}");
     }
+    // The publish rule's case. This machine's windows are never stale, so
+    // the call before the publish already runs the rewritten code — silicon
+    // may run the cached one there (the spike saw it), which is why only the
+    // published call counts.
+    assert!(
+        out.contains(
+            "[PSRAM] rewrite: before publish f(5) = 16 (fresh), after f(5) = 16 (want 16)"
+        ),
+        "direct: the rewrite case:\n{out}"
+    );
     let summary = m.psram_summary().expect("the chip was reached");
     println!("direct: {summary}");
     // 128 pages mapped by the driver, all filled from the chip.
@@ -172,11 +181,15 @@ fn a_snapshot_mid_probe_restores_to_the_same_finish() {
 /// and instruction counts, and the chip never reached. This is the evidence
 /// for making 8 MiB the default.
 #[test]
-#[ignore = "needs LP_EMU_ESP32S3_ELF and LP_EMU_ESP32S3_MERGED; run through `just test-emu-esp32s3-boot`"]
+#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_PSRAM_ELF; run through `just test-emu-esp32s3-psram`"]
 fn the_shipped_image_runs_the_same_with_and_without_psram() {
-    let (elf, merged) = match (fw_esp32s3_image(), merged_chip_image()) {
-        (Ok(e), Ok(m)) => (e, m),
-        (Err(r), _) | (_, Err(r)) => {
+    // Asks for the probe's variable too, so it runs in the PSRAM recipe (the
+    // S3 seams job), not in the S3 gate, which runs every ignored test here
+    // with the shipped image's variables set and has no time left for four
+    // more boots (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md).
+    let (elf, merged) = match (fw_esp32s3_image(), merged_chip_image(), psram_image()) {
+        (Ok(e), Ok(m), Ok(_)) => (e, m),
+        (Err(r), _, _) | (_, Err(r), _) | (_, _, Err(r)) => {
             skip_notice("the_shipped_image_runs_the_same_with_and_without_psram", &r);
             return;
         }

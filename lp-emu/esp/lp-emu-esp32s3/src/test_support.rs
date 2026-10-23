@@ -176,6 +176,20 @@ pub fn seam_abi_image() -> Result<PathBuf, String> {
 /// of it. A test image that never ships.
 pub const PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_ELF";
 
+/// The environment variable naming the **`psram` app** ELF — `fw-esp32s3`
+/// built with the product's `psram` feature (M10 of the S3 radio roadmap):
+/// the shipped app with PSRAM brought up in the core and the engine's heap
+/// and JIT code in it. Off by default, so its own variable.
+pub const PSRAM_APP_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_APP_ELF";
+
+/// The `psram` app ELF, if the caller has one.
+pub fn psram_app_image() -> Result<PathBuf, String> {
+    env_file(
+        PSRAM_APP_IMAGE_ENV,
+        "`just test-emu-esp32s3-psram` builds `fw-esp32s3 --features psram` and sets it",
+    )
+}
+
 /// The PSRAM probe's merged chip, for its ROM-up boot.
 pub const PSRAM_MERGED_ENV: &str = "LP_EMU_ESP32S3_PSRAM_MERGED";
 

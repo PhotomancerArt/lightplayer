@@ -50,7 +50,9 @@ pub static ESP32C6_SEGMENTS: SegmentRules = SegmentRules {
 };
 
 /// The S3 (`fw-esp32s3-loader`). Both buses are mapped through one MMU
-/// table; the core's part of each is everything below the engine's view.
+/// table; the core's part of each is everything below the PSRAM's window
+/// (`s3_mmu::PSRAM_WINDOW`, entries `0x80..0x100`), which sits below the
+/// engine's — a core segment that reaches it would be mapped over by PSRAM.
 /// RAM is esp-hal's `dram_seg` (`ld/esp32s3/memory.x`: `0x3FC8_8000` to
 /// `dram2_seg`'s `0x3FCD_B700`, where the IDF bootloader's own RAM begins)
 /// and its instruction-bus alias (`+0x6F_0000`; the core's vectors and
@@ -61,11 +63,11 @@ pub static ESP32S3_SEGMENTS: SegmentRules = SegmentRules {
     flash: &[
         FlashWindow {
             window: s3_mmu::DROM_BASE..s3_mmu::DROM_BASE + s3_mmu::MMU_ENTRIES * s3_mmu::MMU_PAGE,
-            core: s3_mmu::DROM_BASE..s3_mmu::ENGINE_DROM,
+            core: s3_mmu::DROM_BASE..s3_mmu::PSRAM_DROM,
         },
         FlashWindow {
             window: s3_mmu::IROM_BASE..s3_mmu::IROM_BASE + s3_mmu::MMU_ENTRIES * s3_mmu::MMU_PAGE,
-            core: s3_mmu::IROM_BASE..s3_mmu::ENGINE_IROM,
+            core: s3_mmu::IROM_BASE..s3_mmu::PSRAM_IROM,
         },
     ],
     ram: &[S3_DRAM, S3_IRAM],
@@ -89,6 +91,38 @@ mod tests {
         assert!(r.ram[0].start <= r.loader_ram[0].start && r.loader_ram[0].end <= r.ram[0].end);
         assert!(r.ram[1].start <= r.loader_ram[1].start && r.loader_ram[1].end <= r.ram[1].end);
         assert_eq!(r.ram[1].start, 0x4037_8000, "the core's vectors");
+    }
+
+    /// A core's flash ends where the PSRAM window begins, on both buses: a
+    /// segment reaching entry 0x80 would be mapped over by PSRAM.
+    #[test]
+    fn an_s3_core_segment_that_reaches_the_psram_window_is_refused() {
+        use crate::core_segments::CoreSegment;
+        let seg = |addr: u32, len: u32| CoreSegment {
+            index: 1,
+            addr,
+            len,
+            data_offset: addr % LAYOUT_2_PAGE,
+        };
+        let r = &ESP32S3_SEGMENTS;
+        // The last page below the window, on each bus: placed.
+        assert!(
+            seg(s3_mmu::PSRAM_DROM - 0x1_0000, 0x1_0000)
+                .placement_in(r)
+                .is_ok()
+        );
+        assert!(
+            seg(s3_mmu::PSRAM_IROM - 0x1_0000, 0x1_0000)
+                .placement_in(r)
+                .is_ok()
+        );
+        // One byte into it: refused, data and code alike.
+        for addr in [s3_mmu::PSRAM_DROM - 0x1_0000, s3_mmu::PSRAM_IROM - 0x1_0000] {
+            let e = seg(addr, 0x1_0001).placement_in(r).unwrap_err();
+            assert!(e.contains("not inside the core's flash"), "{e}");
+        }
+        assert!(seg(s3_mmu::PSRAM_DROM, 4).placement_in(r).is_err());
+        assert!(seg(s3_mmu::ENGINE_IROM, 4).placement_in(r).is_err());
     }
 
     /// Where the S3 numbers come from: esp-hal's memory map.

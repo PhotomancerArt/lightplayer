@@ -1199,6 +1199,11 @@ clippy-fw-esp32s3:
     done
     echo "clippy: --features radio_boot_probe"
     cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
+    # PSRAM (M10): off by default, so nothing above compiles it.
+    echo "clippy: --features psram"
+    cargo clippy --release --features psram -- --no-deps -D warnings
+    echo "clippy: --features psram,lcd-ws281x"
+    cargo clippy --release --features psram,lcd-ws281x -- --no-deps -D warnings
     for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
       echo "clippy: fw-esp32-radio --features $features"
       cargo clippy -p fw-esp32-radio --release --features "$features" -- --no-deps -D warnings
@@ -1213,7 +1218,7 @@ clippy-fw-esp32s3:
     # payload, so a lint failure here is the first place a drift between the
     # two crates shows up without a board or a machine.
     for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance \
-                test_button test_shader_compile_incremental; do
+                test_button test_shader_compile_incremental test_psram; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -4389,10 +4394,17 @@ test-emu-esp32s3-seams:
 # copied out of the shared target path, merged for its ROM-up boot, and run
 # by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
 # probe writes and reads all 8 MiB and runs code out of it, both ways, and
-# every line matches FS3's capture. The test that the shipped image runs the
-# same with and without PSRAM needs the shipped image, so it runs in
-# `test-emu-esp32s3-boot` instead (here it SKIPs). One firmware build and
-# about a minute of emulation (release).
+# every line matches FS3's capture, and the shipped image runs the same with
+# and without PSRAM (direct and ROM-up) — here, not in the S3 gate, which is
+# at its time budget.
+#
+# M10 adds the product's `psram` image (`fw-esp32s3 --features psram`: PSRAM
+# up in the core, the engine's heap and JIT code in it) and lp-cli's oracle
+# gate over the link: it renders `shader-oracle`'s first lit frame byte for
+# byte as the shipped image does, with PSRAM and on a board without it. Three
+# firmware builds (the probe, `psram`, then the shipped image last, so the
+# shared target path ends holding the shipped one) and a few minutes of
+# emulation (release).
 test-emu-esp32s3-psram:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4412,7 +4424,22 @@ test-emu-esp32s3-psram:
     else
       echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
     fi
+    just build-fw-esp32s3 psram
+    psram_app="$out/fw-esp32s3-psram-app.elf"
+    cp "$built" "$psram_app"
+    export LP_EMU_ESP32S3_PSRAM_APP_ELF="$psram_app"
+    just build-fw-esp32s3
+    shipped="$out/fw-esp32s3-shipped.elf"
+    cp "$built" "$shipped"
+    export LP_EMU_ESP32S3_ELF="$shipped"
+    if command -v espflash >/dev/null 2>&1; then
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$shipped" "$out/merged.bin"
+      export LP_EMU_ESP32S3_MERGED="$out/merged.bin"
+    fi
     cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
+    cargo test -p lp-cli --release --test emu_s3_link_gates the_psram_image -- --include-ignored --nocapture
 
 # The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
 # `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —

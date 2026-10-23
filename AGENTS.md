@@ -180,6 +180,16 @@ Do NOT disable the compiler. The compiler is the product.
   `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md` and
   `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
 
+- **`psram`** (`fw-esp32s3`, **off by default**; turning it on is Yona's call
+  on the walk's numbers) brings the S3R8's 8 MB octal PSRAM up in the core at
+  the fixed MMU window `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries
+  `0x80..0x100`, so a core links below `0x80`), only on a part whose eFuse
+  says 8 MB, and self-tests it. The engine's heap and JIT code go there
+  (`LP_PSRAM_HEAP`); **the LED frame the RMT ISR reads, ISR code and state,
+  the radio's C heap and DMA, and thread stacks never do**, and the load
+  gates read internal RAM. JIT code in PSRAM runs only once published
+  (`lpvm_native::code_publish`). See `docs/adr/2026-10-22-s3-psram.md`.
+
 > **Gating the crate that *uses* a table does not gate the crate that *holds*
 > it.** `lps-builtin-ids` is linked by every firmware image and is not behind
 > `float-f32`; reaching its f32 name→id tables on a runtime value cost

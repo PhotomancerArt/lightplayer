@@ -51,6 +51,30 @@ is registered first and owns that address by its `bottom`).
 The fix is one comparison, `ptr < top`, the same exclusive end the TLSF
 region in `src/heap/tlsf.rs` already uses (`pool_end > addr`).
 
+## The third diff: PSRAM-first placement (feature `external-first`)
+
+All of it behind a new cargo feature, `external-first`, which only the S3's
+`psram` image turns on; without it this crate is the two diffs above, byte for
+byte, on every chip.
+
+- `EXTERNAL_FIRST_MIN` (an `AtomicUsize`, default `usize::MAX`): a Rust
+  default allocation (`GlobalAlloc::alloc`, which asks for no capability) of
+  at least this many bytes tries the regions whose capabilities are exactly
+  `External` first, then every region in registration order as upstream. `0`
+  is "the whole Rust heap in PSRAM first"; `usize::MAX` is upstream's
+  placement. The PSRAM spike's `EXTERNAL_FIRST_MIN` is the prototype.
+- `MemoryCapability::Reserved`: a region only a caller that names it lands in.
+  The S3's radio region (its blobs' C heap) borrowed `External` for that
+  purpose while no image mapped PSRAM; a `psram` image tags it
+  `Internal | Reserved` instead, so nothing steered to `External` reaches it.
+- `MAX_REGIONS` is 6, not 5: the S3 radio image's arena pieces, `dram2_seg`,
+  the radio region and PSRAM.
+- `free_excluding` / `alloc_excluding`: the free heap in, and an allocation
+  from, every region carrying none of a set of capabilities. The S3's load
+  gates read internal RAM as "every region not `External`", tagged or not.
+
+Re-apply on a re-sync with `grep -n 'third diff' src/lib.rs Cargo.toml`.
+
 ## Re-syncing with upstream
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,

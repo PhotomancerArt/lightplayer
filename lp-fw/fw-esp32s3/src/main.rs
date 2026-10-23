@@ -152,6 +152,8 @@ compile_error!(
     "`lcd_ws281x_probe` brings its own LCD_CAM rig; it cannot share the peripheral with the \
      `lcd-ws281x` output driver"
 );
+#[cfg(all(feature = "psram", not(fw_harness)))]
+mod psram;
 #[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
 mod radio_boot_probe;
 #[cfg(all(s3_radio, not(fw_harness)))]
@@ -232,7 +234,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
 #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
-const HEAP_SIZE: usize = 240 * 1024;
+const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM;
 /// A Bluetooth image's arena (`radio` without `espnow`, S3 radio M3): 72 KB
 /// smaller, so the main stack keeps its share of `dram_seg`. BLE costs 72,528 B
 /// of `dram_seg` at link time: the radio blobs' own region
@@ -240,21 +242,34 @@ const HEAP_SIZE: usize = 240 * 1024;
 /// text and the BLE stack's statics. The heap the radio's C blocks do not use
 /// is still Rust's, last.
 #[cfg(all(s3_radio, not(s3_espnow)))]
-const HEAP_SIZE: usize = 168 * 1024;
+const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM;
 /// The arena with the Wi-Fi blob up too (`espnow`, and `wifi`, S3 radio M4):
 /// 104 KB smaller than a radio-free image's, so the main stack keeps its share
 /// of `dram_seg` (about 52 KB) with both radios in the image. Where the bytes
 /// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
 /// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
 #[cfg(s3_espnow)]
-const HEAP_SIZE: usize = 136 * 1024;
+const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
 /// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
 /// keep about today's share. Where the product radio's RAM comes from is M4's
 /// plan, not this probe's.
 #[cfg(feature = "radio_boot_probe")]
-const HEAP_SIZE: usize = 160 * 1024;
+const HEAP_SIZE: usize = 160 * 1024 - PSRAM_INIT_IRAM;
+
+/// What a `psram` image's PSRAM init takes of `dram_seg`, given back by the
+/// arena so the main stack keeps its share (M10 P2). esp-hal's octal init is
+/// `#[ram]`: 2,572 B of `.rwtext` after the fork's seventh diff (from 5,364 B
+/// with the quad path linked and the decode inlined), and `.rwtext` comes out
+/// of the same span as `.stack`. 3 KiB keeps the stack at or above the
+/// default image's (2026-10-22: 54,880 B against 54,392 B); the arena's loss
+/// is nothing beside the 8 MiB PSRAM brings, and an image whose PSRAM does
+/// not come up runs with an arena 3 KiB smaller than a default image's.
+#[cfg(feature = "psram")]
+const PSRAM_INIT_IRAM: usize = 3 * 1024;
+#[cfg(not(feature = "psram"))]
+const PSRAM_INIT_IRAM: usize = 0;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
@@ -426,8 +441,12 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // `HEAP_SIZE`, so its high-water mark is what sizes the heap — see
     // `stack_probe`.
     stack_probe::log_if_grown("heartbeat");
-    let free = esp_alloc::HEAP.free();
-    let used = esp_alloc::HEAP.used();
+    // On a `psram` image `[MEM]` is internal RAM's (comparable with every
+    // other image's), and PSRAM has a line of its own after the triple.
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
     let largest = recovery::panic_path::largest_free_block();
     // Structural — see this function's doc comment. No OOM retry allocator on
     // this chip, so the honest count of retries that saved an allocation is 0.
@@ -446,6 +465,8 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     log::info!(
         "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
     );
+    #[cfg(feature = "psram")]
+    psram::log_ledger_line();
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,
@@ -514,8 +535,14 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The WS281x driver's own counters (`ws281x_telemetry` only).
     #[cfg(feature = "ws281x_telemetry")]
     output::rmt::shared_driver::log_telemetry();
-    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    // Internal RAM on a `psram` image: the figures the board's gates and a
+    // host's judgement are about (`crate::psram`, "The heap").
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
+    let free = free.min(u32::MAX as usize) as u32;
+    let used = used.min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
         free_bytes: free,
         used_bytes: used,
@@ -675,6 +702,15 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             "[INIT] heap region: {dram2_base:#010x}+{dram2_heap} (dram2_seg, untagged)"
         );
         esp_println::println!("[INIT] heap region: {radio_base:#010x}+{radio_heap} (radio)");
+    }
+
+    // PSRAM (feature `psram`): up and self-tested before the filesystem maps
+    // `lpfs` or a split image maps its engine, so the core has it either way
+    // (`crate::psram`'s module docs).
+    #[cfg(feature = "psram")]
+    {
+        psram::bring_up();
+        psram::add_heap_region();
     }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
@@ -889,6 +925,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
 #[cfg(not(fw_harness))]
 #[inline(never)]
 pub(crate) fn lp_engine_entry(core: CoreBoot) {
+    // JIT code in PSRAM runs only once published (M10 P5): the engine's JIT
+    // calls this firmware's routine for every buffer it links there.
+    #[cfg(feature = "psram")]
+    if psram::usable() {
+        lpvm_native::code_publish::set_code_publish(psram::publish_code);
+    }
     let CoreBoot {
         spawner,
         usb_link,
@@ -1225,6 +1267,8 @@ fn mount_filesystem(
     // Right after esp-storage's own RDID size probe, before any ROM flash
     // access, as on the C6 (`flash_qio`).
     crate::flash_qio::enter();
+    #[cfg(feature = "psram")]
+    crate::flash_qio::log_clocks();
     // A split image's region ends where `factory` does, in the table the
     // chip carries (read once, here, after `FlashStorage::new`).
     //
