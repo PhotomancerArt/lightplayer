@@ -4,6 +4,24 @@
 //!   Memo Akten's MSAFluidSolver2D (lp2014, mono path), itself a port
 //!   of Jos Stam, "Real-Time Fluid Dynamics for Games", GDC 2003.
 //!
+//! Provenance: derived from MSAFluidSolver2D by Memo Akten (MSAFluid).
+//!   Upstream:  https://github.com/memoakten/p5-MSAFluid @
+//!              6873c94c277cdd9fd45827fbe8027533cd331baa,
+//!              src/msafluid/MSAFluidSolver2D.java (identical header to the
+//!              lp2014 copy this was ported from:
+//!              LightPlayer/PlayerCore/.../rendering/msafluid/MSAFluidSolver2D.java).
+//!              The C++ port, https://github.com/memo/ofxMSAFluid @
+//!              b424123652793fec721c0cb6e533936a7bd4970d, is MIT.
+//!   License:   BSD-3-Clause, Copyright (c) 2008, 2009, Memo Akten,
+//!              www.memo.tv. Text at licenses/MSAFluid-BSD-3-Clause.txt
+//!              (and, for the C++ port, licenses/MSAFluid-MIT.txt).
+//!   Here:      this file is a Rust/Q32 port and is distributed under
+//!              AGPL-3.0-or-later; the upstream copyright notice, conditions
+//!              and disclaimer are retained in licenses/ and must travel with
+//!              any source or binary redistribution. MSA Visuals' name may
+//!              not be used to endorse products derived from it.
+//!              See docs/adr/2026-07-29-license-provenance-discipline.md.
+//!
 //! ## Scratch layout
 //!
 //! `project()` mirrors `MSAFluidSolver2D.project(u, v, uOld, vOld)` in
