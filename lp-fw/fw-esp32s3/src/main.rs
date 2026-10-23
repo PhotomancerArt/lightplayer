@@ -832,6 +832,9 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     };
     #[cfg(all(s3_espnow, not(s3_wifi)))]
     let _ = net_radio;
+    // Only a split image's core-only reads it (`split::split_boot`).
+    #[cfg(not(lp_split))]
+    let _ = network_saved;
 
     CoreBoot {
         spawner,
