@@ -665,6 +665,18 @@ what changes here:
 - **No relay-protocol change**: the hello, `RELAY_PROTO_VERSION` and the
   goldens are as they were.
 
+## Amendment (2026-10-22): the S3 dials the relay too (S3 radio M6)
+
+The board half above is no longer the C6's alone: the relay task moved into
+`fw-esp32-radio` (S3 radio M2), and the S3's `wifi` image runs it with its
+own build facts (`fw-esp32s3/src/net/relay_config.rs`: the host, `LP_RELAY_HOST`
+for a desk image, the name and firmware its hello carries). It speaks the
+same relay protocol 2 as the C6, so the hub needs nothing new:
+`RELAY_PROTO_VERSION` and the goldens are as they were. Walked on an
+emulated S3 (`lp-cli/tests/emu_relay_link.rs`'s S3 arm); not yet on
+silicon, which waits for the S3's Wi‑Fi join
+(`docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md`).
+
 ## Consequences
 
 - lightplayer.app serves one plain-HTTP path, and the redirect that keeps

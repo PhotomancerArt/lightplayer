@@ -343,7 +343,9 @@ the app through the same view model and presses the same actions. See
   is a relay client **in the core** (`fw-esp32-radio/src/net/relay_task.rs` on
   `lp-net`, the loop in `fw-esp32-common/src/net/relay/`): it dials only when
   joined, Cloud relay is on and it holds an account key, and
-  `NetworkStatus.relay` says how far it got. The product image always dials
+  `NetworkStatus.relay` says how far it got. The S3's `wifi` image (off by
+  default) runs the same client (S3 radio M6; walked emulated, silicon
+  owed). The product image always dials
   `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
   desk image that dials another host and says so at boot — never a release
   build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
@@ -1708,7 +1710,9 @@ unchanged and no seam was added. **`just walk-wifi-emu relay`** is its walk
 words; `lp-cli/tests/emu_relay_link.rs` is its CI cell in `test-emu-serve`):
 the board registers, `relay:<mac>@<origin>` edits it, a `lan:` client with the
 same key takes the slot, another is told busy, a restarted server gets the
-board back, Cloud relay off/on, a reset key is refused. Record:
+board back, Cloud relay off/on, a reset key is refused; `--s3` walks the
+same steps on an emulated S3 (the cell's S3 arm, `just
+test-emu-esp32s3-relay`, under `emu run --chip esp32s3 --link`). Record:
 `docs/reports/2026-10-07-wifi-relay-emulator-walk.md`. **Trust caveat:** it
 proves the board's code and the relay's protocol, never NAT, a real resolver,
 the internet, or the 15 s reconnect (a desk-only measurement; the cell prints
