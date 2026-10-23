@@ -3799,6 +3799,20 @@ test-emu-c6-ota-lan images="" filter="": install-rv32-target
     fi
     LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
+# The S3's twin (the S3 updates plan's P12b): the same scenarios on an
+# emulated ESP32-S3, X and Y built for `esp32s3-8mb` with `wifi` (the station
+# and its LAN link are not in the S3's default image yet). Not CI either.
+test-emu-esp32s3-ota-lan images="" filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ images }}"
+    if [[ -z "$out" ]]; then
+        out=target/ota-lan-s3
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/x" a0a0a0a0 esp32s3,server,wifi
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/y" b1b1b1b1 esp32s3,server,wifi
+    fi
+    LP_OTA_LAN_CHIP=esp32s3 LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
 # lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
 # ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
 # plain `cargo build`, not a reference image, so no espflash and no git

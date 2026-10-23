@@ -24,6 +24,12 @@
 //! first (`emu run --host-link --request networkAdd`), which is the one step
 //! that has a cable. Test values only (`lp-ota-net`). Figures it prints are
 //! `lp-emu:esp32c6:t1+net=lan`. Not in CI (DM26).
+//!
+//! **The S3's twin** (the S3 updates plan's P12b): `LP_OTA_LAN_CHIP=esp32s3`
+//! runs the same scenarios on an emulated ESP32-S3 (`--chip esp32s3`, images
+//! built for `esp32s3-8mb` with `wifi`; `just test-emu-esp32s3-ota-lan`). Its
+//! machine always reboots on a reset, so it takes no `--reboot-on-reset`, and
+//! its figures are `lp-emu:esp32s3:t1+net=lan`.
 
 mod support;
 
@@ -51,7 +57,31 @@ signal_dbm = -50
 /// The wall-clock net on one whole update (three resets, three rejoins).
 const UPDATE_NET: Duration = Duration::from_secs(480);
 /// The id of the one board.
-const BOARD: &str = "c6";
+const BOARD: &str = "board";
+
+/// The chip under test: the C6, or the S3 with `LP_OTA_LAN_CHIP=esp32s3`.
+fn s3() -> bool {
+    std::env::var("LP_OTA_LAN_CHIP").is_ok_and(|chip| chip == "esp32s3")
+}
+
+/// `emu run`'s and `emu serve`'s chip flag, and what an `emu run` that
+/// prepares a board needs to see the reset its request makes.
+fn chip_args() -> &'static [&'static str] {
+    if s3() {
+        &["--chip", "esp32s3"]
+    } else {
+        &["--reboot-on-reset"]
+    }
+}
+
+/// The configuration a figure from this run carries.
+fn configuration() -> &'static str {
+    if s3() {
+        "lp-emu:esp32s3:t1+net=lan"
+    } else {
+        "lp-emu:esp32c6:t1+net=lan"
+    }
+}
 
 // --- 1, 4: X -> Y over the LAN with a backup; the trial confirmed by the LAN ------
 
@@ -349,14 +379,9 @@ fn prepared(x: &Image, dir: &Path) -> PathBuf {
         .arg(&flash)
         .args(["--host-link", "--lan"])
         .arg(&fixture)
+        .args(chip_args())
         .args(["--request", &request, "--exit-on", "[wifi] connected"])
-        .args([
-            "--reboot-on-reset",
-            "--timeout",
-            "120s",
-            "--wall-timeout",
-            "360",
-        ])
+        .args(["--timeout", "120s", "--wall-timeout", "360"])
         .output()
         .expect("lp-cli emu run");
     let said = String::from_utf8_lossy(&output.stderr);
@@ -395,19 +420,14 @@ fn prepared_locked(x: &Image, dir: &Path) -> PathBuf {
         .args(["emu", "run", "--rom-up-flash"])
         .arg(&flash)
         .args(["--host-link", "--lan"])
-        .arg(&fixture);
+        .arg(&fixture)
+        .args(chip_args());
     for request in &requests {
         command.args(["--request", request]);
     }
     let output = command
         .args(["--exit-on", "[wifi] connected"])
-        .args([
-            "--reboot-on-reset",
-            "--timeout",
-            "120s",
-            "--wall-timeout",
-            "360",
-        ])
+        .args(["--timeout", "120s", "--wall-timeout", "360"])
         .output()
         .expect("lp-cli emu run");
     let said = String::from_utf8_lossy(&output.stderr);
@@ -444,11 +464,11 @@ impl LanBoard {
         let fixture = fixture(dir);
         let lan = format!("home={}", fixture.display());
         let spec = format!("{BOARD}={},kind=rom-up,lan=home", flash.display());
-        let serve = Serve::start_specs(
-            &[spec],
-            &["--lan", &lan, "--usb-host", "absent"],
-            dir.join("serve"),
-        );
+        let mut flags = vec!["--lan", &lan, "--usb-host", "absent"];
+        if s3() {
+            flags.extend(["--chip", "esp32s3"]);
+        }
+        let serve = Serve::start_specs(&[spec], &flags, dir.join("serve"));
         let forward = serve.board(BOARD)["forward"]
             .as_str()
             .expect("a forward")
@@ -636,6 +656,6 @@ fn report(id: &str, console: &str) {
             || l.contains("[host-ota] done")
             || l.contains("LAN link back")
     }) {
-        eprintln!("emu_ota_lan {id} (lp-emu:esp32c6:t1+net=lan): {line}");
+        eprintln!("emu_ota_lan {id} ({}): {line}", configuration());
     }
 }
