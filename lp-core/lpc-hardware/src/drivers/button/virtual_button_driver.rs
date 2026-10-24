@@ -44,11 +44,21 @@ impl VirtualButtonDriver {
 
     /// Every button endpoint, built one at a time as the caller asks for it.
     fn endpoint_stream(&self) -> impl Iterator<Item = HwEndpoint> + '_ {
+        self.endpoints_where(|_| true)
+    }
+
+    /// The button endpoints whose manifest label `keep` accepts, built one at
+    /// a time; a rejected resource costs a label comparison, nothing built.
+    fn endpoints_where<'a>(
+        &'a self,
+        keep: impl Fn(&str) -> bool + 'a,
+    ) -> impl Iterator<Item = HwEndpoint> + 'a {
         self.registry
             .manifest()
             .resources()
             .iter()
             .filter(|resource| resource.supports(HwCapability::GpioInput))
+            .filter(move |resource| keep(resource.display_label()))
             .map(|resource| {
                 let address = resource.address().clone();
                 let spec = button_local_spec(resource.display_label());
@@ -105,6 +115,14 @@ impl ButtonDriver for VirtualButtonDriver {
         preferred_endpoint(self.endpoint_stream(), matches)
     }
 
+    fn find_endpoint_by_spec(&self, spec: &HwEndpointSpec) -> Option<HwEndpoint> {
+        // `button:local:<label>`, matched against each label in place: no
+        // spec string, address clone or status lookup for the resources that
+        // are not it (every GPIO a board declares).
+        let label = spec.as_str().strip_prefix(BUTTON_LOCAL_PREFIX)?;
+        preferred_endpoint(self.endpoints_where(|l| l == label), &|_| true)
+    }
+
     fn open(
         &self,
         endpoint_id: &HwEndpointId,
@@ -126,8 +144,10 @@ impl ButtonDriver for VirtualButtonDriver {
     }
 }
 
+const BUTTON_LOCAL_PREFIX: &str = "button:local:";
+
 fn button_local_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(alloc::format!("button:local:{config}"))
+    HwEndpointSpec::parse(alloc::format!("{BUTTON_LOCAL_PREFIX}{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }
 
