@@ -16,7 +16,9 @@ pub struct FluidDef {
     /// Solver grid size.
     pub size: Dim2uSlot,
 
-    /// Jacobi iterations per solver step.
+    /// Passes of each pressure solve per step (red-black, over-relaxed).
+    /// 3–4 look like the ten plain passes the MSAFluid reference ran; 2 and
+    /// fewer show striations and harder edges.
     pub solver_iterations: ValueSlot<u32>,
 
     /// Target simulation update rate in Hz.
