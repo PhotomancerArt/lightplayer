@@ -567,6 +567,21 @@ pub struct S3Cache {
     /// Set around a host-side peek, poke or fill, which goes through the
     /// bus's decode and would otherwise look like a guest access.
     host_access: bool,
+    /// The flash-busy model: the cycle `SPI1`'s program or erase finishes
+    /// at, while one is in progress (the machine sets it at every window
+    /// boundary).
+    flash_busy: Option<Cycles>,
+    /// The first window access made while `flash_busy` was set.
+    busy_offence: Option<FlashBusyAccess>,
+}
+
+/// An access through a window while the flash was busy (the flash-busy
+/// model).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlashBusyAccess {
+    pub addr: u32,
+    pub fetch: bool,
+    pub busy_until: Cycles,
 }
 
 /// The table and the cache state, shared between the register views and the
@@ -590,6 +605,8 @@ impl S3Cache {
             filled: [None; MMU_ENTRIES],
             offence: None,
             host_access: false,
+            flash_busy: None,
+            busy_offence: None,
         }
     }
 
@@ -640,10 +657,23 @@ impl S3Cache {
     }
 
     /// Should the machine arm D4's watch? Only under
-    /// [`CacheOffPolicy::Stop`], and only while **either** cache is off —
-    /// one core runs on this chip, so there is one watch.
+    /// [`CacheOffPolicy::Stop`], and only while **either** cache is off; or
+    /// while the flash-busy model says `SPI1` is mid-write. One watch serves
+    /// both cores: the caches are shared.
     pub fn watch_wanted(&self) -> bool {
-        self.policy == CacheOffPolicy::Stop && !(self.enabled[0] && self.enabled[1])
+        (self.policy == CacheOffPolicy::Stop && !(self.enabled[0] && self.enabled[1]))
+            || self.flash_busy.is_some()
+    }
+
+    /// The flash-busy model's state: `Some(until)` while a program or erase
+    /// is in progress.
+    pub fn set_flash_busy(&mut self, until: Option<Cycles>) {
+        self.flash_busy = until;
+    }
+
+    /// The flash-busy offence, if there is one, cleared.
+    pub fn take_busy_offence(&mut self) -> Option<FlashBusyAccess> {
+        self.busy_offence.take()
     }
 
     /// See [`S3Cache`]'s `host_access`.
@@ -696,6 +726,16 @@ impl S3Cache {
         let Some(window) = Window::of(addr) else {
             return;
         };
+        if let Some(busy_until) = self.flash_busy {
+            if self.busy_offence.is_none() {
+                self.busy_offence = Some(FlashBusyAccess {
+                    addr,
+                    fetch,
+                    busy_until,
+                });
+            }
+            return;
+        }
         let cache = window.cache();
         if self.enabled(cache) {
             return;

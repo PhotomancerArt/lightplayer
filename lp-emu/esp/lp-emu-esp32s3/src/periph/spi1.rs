@@ -191,6 +191,7 @@ const DLEN_MASK: u32 = 0x3ff;
 // WEL (1) belong to the SPI NOR command set, so they live with the chip in
 // [`lp_emu_esp_common::engine::spi_flash`] and are re-exported here for the
 // paths that already say `spi1::SR_WEL`.
+use lp_emu_esp_common::engine::nor_timing::NorTiming;
 pub use lp_emu_esp_common::engine::spi_flash::{SR_WEL, SR_WIP};
 
 /// The flash controller.
@@ -242,6 +243,19 @@ impl Spi1 {
         self.engine.status()
     }
 
+    /// Hold WIP set for `part`'s busy times after each program and erase
+    /// (`None`: complete inside the write, as this model always has). The
+    /// flash-busy model (`Esp32S3Builder::flash_busy`).
+    pub fn set_nor_timing(&mut self, part: Option<NorTiming>) {
+        self.engine.set_timing(part, crate::memmap::CPU_HZ);
+    }
+
+    /// The guest cycle the part's current program or erase finishes at (0:
+    /// none in progress, or no timing).
+    pub fn busy_until(&self) -> u64 {
+        self.engine.busy_until()
+    }
+
     /// The `w0..w15` buffer as bytes, little-endian per word — the layout
     /// the ROM's copy loops assume (whole words out of `0x6000_2058 + 4n`,
     /// `SPI_read_data` `40049921..2d`).
@@ -286,9 +300,18 @@ impl Spi1 {
             FlashOp::Program { .. } => self.buffer_bytes(),
             _ => [0u8; spi_flash::BUFFER_LEN],
         };
+        let busy_before = self.engine.busy_until();
         let outcome = self.engine.execute(op, &mut buffer, NAME, cx);
         if outcome == FlashOutcome::Buffer {
             self.set_buffer_bytes(&buffer);
+        }
+        // A program or erase just started a busy window (the flash-busy
+        // model; without a timing `busy_until` stays 0): end the slice, so
+        // the machine arms its watch before the next instruction of either
+        // core runs.
+        let busy_after = self.engine.busy_until();
+        if busy_after != busy_before && busy_after > cx.now {
+            cx.yield_to_machine();
         }
         outcome
     }
@@ -555,6 +578,12 @@ impl Spi1 {
 impl Peripheral for Spi1 {
     fn name(&self) -> &'static str {
         NAME
+    }
+
+    /// The machine reaches in for the flash-busy model
+    /// ([`Spi1::set_nor_timing`], [`Spi1::busy_until`]).
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
     }
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {

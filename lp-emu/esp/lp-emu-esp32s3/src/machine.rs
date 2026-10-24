@@ -27,14 +27,15 @@
 //! next load with no store buffer and no cache-coherence window in between,
 //! so cross-core visibility is *stronger* than the part's, on purpose.
 //!
-//! # Slot 1 is held, and nothing in this milestone releases it
+//! # Slot 1: held at reset, released through the ROM's own path
 //!
-//! Q4: two slots, slot 1 **permanently held**. That is not a simplification,
-//! it is what this firmware does. `fw-esp32s3` calls no `start_app_core`, and
-//! `ets_set_appcpu_boot_addr` is linker-provided but **unreferenced**
-//! (`m6/notes.md` §2.4). The 12 `INTERRUPT_CORE1` accesses the census found
-//! are esp-hal's per-core-*generic* code — `interrupt::mapped_to_raw` and
-//! friends indexing a table by `raw_core()` — not a second core starting.
+//! M6's Q4 held slot 1 for good, because `fw-esp32s3` started no second
+//! core. Since `two-core` (2026-10-24) it does: core 1 is the render helper
+//! (`fw-esp32s3/src/core1.rs`), and [`Machine::sync_core1_reset`] releases
+//! slot 1 the way the silicon does — at the mask ROM's reset vector, from
+//! whose code the APP CPU's own path reaches the address the guest wrote
+//! (the core-1 spike's §4). An image that never clears `reseting` with the
+//! clock gate open is unchanged by any of this.
 //!
 //! [`Machine::core_stalled`] is the OR of three inputs:
 //!
@@ -50,17 +51,9 @@
 //!   cpu_control.rs:55-77`) — [`crate::periph::rtc_cntl::StallKey`], P04's
 //!   third input, published by the RTC_CNTL view and read here.
 //!
-//! ⚠️ **This machine does not implement a core-1 release, and the classic's
-//! must not be copied.** DD53's model — core 1 begins at `appcpu_ctrl_d`'s
-//! address with no ROM code run — is the classic's *finding*, pinned on
-//! classic silicon by a canary (`lp-emu-esp32v3/src/machine.rs`'s module
-//! docs). The S3's registers are different ones and no equivalent
-//! measurement exists. So the **hold** is modelled, faithfully and with the
-//! register cited, and the release is left unimplemented and said to be. A
-//! guest that wrote `start_core1`'s sequence would clear the hold's inputs
-//! and this machine would notice — see [`Machine::core_stalled`] — and there
-//! is deliberately nothing behind that to put a core anywhere, because
-//! "where" is a measurement nobody has made.
+//! The classic's release (DD53: core 1 begins at `appcpu_ctrl_d`'s address
+//! with no ROM code run) is the classic's *finding* and is not copied: here
+//! nothing chooses where a released core starts, the ROM's bytes do.
 //!
 //! # Why the ROM comes before everything
 //!
@@ -122,6 +115,7 @@ use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, W
 use crate::control::{ControlCommand, ControlReply, HostReport};
 use crate::flash::{FlashBacking, FlashHandle, FlashImage, LPFS_LEN, LPFS_OFFSET};
 use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT};
+use crate::periph::spi1::Spi1;
 use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
 use crate::periph::{FlashSet, HostStreams};
 
@@ -160,7 +154,8 @@ const STRICT_SLICE_CYCLES: u64 = 1_024;
 /// scheduling.
 pub const CORE_QUANTUM_DEFAULT: u64 = 256;
 
-/// The number of cores the S3 has. Both are constructed; slot 1 is held.
+/// The number of cores the S3 has. Both are constructed; slot 1 is held at
+/// reset until the guest releases it ([`Machine::sync_core1_reset`]).
 pub const CORES: usize = 2;
 
 /// The order the S3's peripheral blocks are registered in. See the module
@@ -775,6 +770,26 @@ pub enum Outcome {
         symbol: Option<String>,
         access: CacheOffAccess,
     },
+    /// **The flash-busy model** ([`Esp32S3Builder::flash_busy`]): a core
+    /// reached through the flash/PSRAM windows while `SPI1` was programming
+    /// or erasing the flash. On silicon both go over the MSPI bus the write
+    /// holds, and a refill during an erase hung FS3 (PSRAM spike, 2026-10-22):
+    /// every flash writer must stall core 1 first, and core 0 runs from IRAM
+    /// with interrupts masked. Exit code 9.
+    FlashBusyFetch {
+        cycle: Cycles,
+        /// The core that made the access.
+        core: usize,
+        /// The instruction that made it: exact, one instruction a window
+        /// while the watch is armed.
+        pc: u32,
+        symbol: Option<String>,
+        /// The window address, and whether it was a fetch (else a read).
+        addr: u32,
+        fetch: bool,
+        /// The guest cycle the program or erase finishes at.
+        busy_until: Cycles,
+    },
     /// A `--flash-cut` plan fired: the supply went in the middle of the
     /// program or erase `report` names, the chip tore it, and the run stops
     /// with the flash as the cut left it (`then=power-cycle` runs on instead
@@ -796,12 +811,13 @@ impl Outcome {
     /// **A cross-machine contract**, so a script that drives all three
     /// machines reads one table: 0 deadline or `--exit-on`, 2 fault or a
     /// reset the machine could not perform, 3 strict-bus refusal, 4 wall
-    /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence.
+    /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence, 8 power
+    /// cut, 9 flash-busy access (this chip's, [`Outcome::FlashBusyFetch`]).
     ///
     /// **7 cannot arise here**, and saying so is cheaper than leaving a
     /// reader to wonder: it is a flash-MMU divergence between two cores'
-    /// tables (the classic's ruling R4), and **one core runs on this chip
-    /// with one table** — `Cache_Ibus_MMU_Set` and `Cache_Dbus_MMU_Set`
+    /// tables (the classic's ruling R4), and **both cores share one table**
+    /// on this chip — `Cache_Ibus_MMU_Set` and `Cache_Dbus_MMU_Set`
     /// write the same `0x600C_5000` array — so there is no second table to
     /// diverge from. The code stays reserved across the family and this
     /// machine never emits it; there is no `--app-mmu-divergence` flag to
@@ -815,6 +831,7 @@ impl Outcome {
             Outcome::Breakpoint { .. } => 5,
             Outcome::CacheOffFetch { .. } => 6,
             Outcome::PowerCut { .. } => 8,
+            Outcome::FlashBusyFetch { .. } => 9,
             Outcome::Seam { .. } => 64,
         }
     }
@@ -827,6 +844,7 @@ impl Outcome {
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::ExitMatched { cycle }
             | Outcome::CacheOffFetch { cycle, .. }
+            | Outcome::FlashBusyFetch { cycle, .. }
             | Outcome::PowerCut { cycle, .. }
             | Outcome::Seam { cycle, .. }
             | Outcome::Reset { cycle, .. } => *cycle,
@@ -1139,6 +1157,7 @@ pub struct Esp32S3Builder {
     strict_unsupported: Option<bool>,
     /// `--no-block-cache`, held as its positive. On by default.
     block_cache: bool,
+    flash_busy: bool,
     boot_frame: Option<BootFrame>,
     cpenable_reset: Option<u32>,
     core_quantum: Option<u64>,
@@ -1201,6 +1220,7 @@ impl Default for Esp32S3Builder {
             strict: false,
             strict_unsupported: None,
             block_cache: true,
+            flash_busy: false,
             boot_frame: None,
             cpenable_reset: None,
             core_quantum: None,
@@ -1401,6 +1421,23 @@ impl Esp32S3Builder {
     /// the bootloader's copies as it catches the JIT's.
     pub fn block_cache(mut self, on: bool) -> Self {
         self.block_cache = on;
+        self
+    }
+
+    /// **The flash-busy model**, off by default (a run without it is the
+    /// machine as it was, byte for byte): `SPI1` holds WIP for a program's
+    /// or an erase's busy time, so the ROM's own poll loop spins through it,
+    /// and while it does any access through the flash/PSRAM windows by
+    /// **either** core stops the run ([`Outcome::FlashBusyFetch`]). The
+    /// check a two-core image's flash writers are held to: every one must
+    /// stall core 1 first.
+    ///
+    /// The busy times are CX1's part ([`NorTiming::CX1`](lp_emu_esp_common::engine::nor_timing::NorTiming::CX1),
+    /// a C6's): there is no S3 measurement, so they are an estimate here, and
+    /// nothing gates on them. What the model proves is the overlap, not the
+    /// duration.
+    pub fn flash_busy(mut self, on: bool) -> Self {
+        self.flash_busy = on;
         self
     }
 
@@ -1836,6 +1873,14 @@ impl Esp32S3Builder {
         let rmt_index = bus.peripheral_index("RMT");
         let gdma_index = bus.peripheral_index("DMA");
         let lcd_index = bus.peripheral_index("LCD_CAM");
+        let spi1_index = bus.peripheral_index("SPI1");
+        if self.flash_busy
+            && let Some(index) = spi1_index
+        {
+            bus.with_peripheral::<Spi1, _>(index, |spi, _| {
+                spi.set_nor_timing(Some(lp_emu_esp_common::engine::nor_timing::NorTiming::CX1))
+            });
+        }
 
         // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
         // where the C6's has it clear, so the fabric is told what the
@@ -1914,6 +1959,7 @@ impl Esp32S3Builder {
             // Slot 1 is held by the machine as well as by the chip's own
             // reset state, and nothing in M6 P03 clears either.
             stalled: [false, true],
+            core1_releases: 0,
             core_1_control,
             stall_key,
             reset_cause: self.reset_cause,
@@ -1942,6 +1988,7 @@ impl Esp32S3Builder {
             usb_sj_drain: self.usb_sj_drain,
             usb_client_connected: false,
             usb_index,
+            flash_busy_spi1: if self.flash_busy { spi1_index } else { None },
             control,
             script: self.usb_script.into(),
             control_lines: 0,
@@ -2137,10 +2184,12 @@ fn fresh_hart(
 /// The ESP32-S3 machine.
 pub struct Machine {
     pub(crate) bus: SocBus,
-    /// **Two** slots: the S3 is dual-core. Slot 1 is held — see the module
+    /// **Two** slots: the S3 is dual-core. Slot 1 is held at reset — see the module
     /// docs.
     pub harts: Vec<XtHart<SocBus>>,
     stalled: [bool; CORES],
+    /// Times slot 1 came out of reset ([`Machine::sync_core1_reset`]).
+    core1_releases: u64,
     /// `SYSTEM.core_1_control_0`, shared with the `SYSTEM` view.
     core_1_control: CoreOneHandle,
     /// RTC_CNTL's two-register stall key, published by its view.
@@ -2192,6 +2241,8 @@ pub struct Machine {
     usb_client_connected: bool,
     /// `USB_DEVICE`'s peripheral index, the control channel's target.
     usb_index: Option<usize>,
+    /// `SPI1`'s index when the flash-busy model is on ([`Esp32S3Builder::flash_busy`]).
+    flash_busy_spi1: Option<usize>,
     control: Option<ControlChannel>,
     /// Scripted control commands still to apply, in file order.
     script: std::collections::VecDeque<(Cycles, ControlCommand)>,
@@ -2562,14 +2613,70 @@ impl Machine {
     /// The offence the watch recorded during the window just run, as an
     /// outcome. `pc` is the instruction that made the access — the window
     /// was one instruction long, which is what makes that exact.
-    fn take_cache_off_fetch(&mut self, pc: u32) -> Option<Outcome> {
-        let access = self.cache.lock().expect("cache poisoned").take_offence()?;
+    fn take_cache_off_fetch(&mut self, core: usize, pc: u32) -> Option<Outcome> {
+        let mut cache = self.cache.lock().expect("cache poisoned");
+        if let Some(busy) = cache.take_busy_offence() {
+            drop(cache);
+            return Some(Outcome::FlashBusyFetch {
+                cycle: self.harts[core].cycle_count(),
+                core,
+                pc,
+                symbol: self.symbolize(pc),
+                addr: busy.addr,
+                fetch: busy.fetch,
+                busy_until: busy.busy_until,
+            });
+        }
+        let access = cache.take_offence()?;
+        drop(cache);
         Some(Outcome::CacheOffFetch {
-            cycle: self.harts[0].cycle_count(),
+            cycle: self.harts[core].cycle_count(),
             pc,
             symbol: self.symbolize(pc),
             access,
         })
+    }
+
+    /// The flash-busy model: tell the watch whether `SPI1` is mid-program or
+    /// mid-erase at `now`. A run without the model asks nothing.
+    fn sync_flash_busy(&mut self, now: Cycles) {
+        let Some(index) = self.flash_busy_spi1 else {
+            return;
+        };
+        let until = self
+            .bus
+            .with_peripheral::<Spi1, _>(index, |spi, _| spi.busy_until())
+            .unwrap_or(0);
+        let busy = (now < until).then_some(until);
+        self.cache
+            .lock()
+            .expect("cache poisoned")
+            .set_flash_busy(busy);
+    }
+
+    /// What the flash-busy stop says.
+    pub fn flash_busy_message(
+        &self,
+        cycle: Cycles,
+        core: usize,
+        pc: u32,
+        addr: u32,
+        fetch: bool,
+        busy_until: Cycles,
+    ) -> String {
+        let symbol = match self.symbolize(pc) {
+            Some(name) => format!(" ({name})"),
+            None => String::new(),
+        };
+        let what = if fetch { "fetch" } else { "read" };
+        format!(
+            "FLASH-BUSY ACCESS  core={core}  cycle={cycle}\n  \
+             pc={pc:#010x}{symbol}  {what} through the window at {addr:#010x}\n  \
+             while SPI1 is programming or erasing the flash (busy until cycle {busy_until})\n\n  \
+             On silicon the MSPI bus is the write's: a cache refill now returns garbage\n  \
+             or hangs the chip. Every flash writer must stall core 1 first, and core 0\n  \
+             must run from IRAM with interrupts masked. This emulator refuses instead."
+        )
     }
 
     /// What D4's stop says, and what it does not claim. Written for a reader
@@ -2931,13 +3038,62 @@ impl Machine {
         self.stall_key.stalled(core)
     }
 
+    /// Core 1 in and out of reset, at a window boundary.
+    ///
+    /// `SYSTEM.core_1_control_0.reseting` puts slot 1 in reset. When it is
+    /// clear with the clock gate open, slot 1 comes out of reset **at the
+    /// mask ROM's reset vector** in the architectural reset state: a fresh
+    /// hart, `PRID` `0xABAB`. Where it goes from there is the ROM's own code:
+    /// `_ResetHandler` (`0x4000_0454`) takes the APP CPU's fast boot only if
+    /// `SYSTEM.core_1_control_1` bit 31 is set, and otherwise `_start` skips
+    /// the `.bss` clear for `PRID` `0xABAB` and `main` (`0x4004_3a2c`) spins
+    /// on `core_1_control_1` (`0x600C_0004`, which `ets_set_appcpu_boot_addr`
+    /// writes) and `callx8`s the address. So nothing here chooses where a
+    /// released core starts: the reset vector is the architecture's, and the
+    /// rest is ROM bytes this machine already executes (core-1 spike,
+    /// 2026-10-23, §4).
+    ///
+    /// A guest that never clears `reseting` with the gate open (every
+    /// single-core image) never takes either branch: its run is unchanged.
+    fn sync_core1_reset(&mut self, now: Cycles) {
+        let control = self.core_1_control();
+        if control.reseting {
+            // Held in reset (the power-on state, or a later pulse): the next
+            // release starts from the reset vector again.
+            self.stalled[1] = true;
+            return;
+        }
+        if self.stalled[1] && control.clkgate_en {
+            let mut hart = fresh_hart(
+                1,
+                self.time_grade,
+                self.strict_unsupported,
+                self.cpenable_reset,
+            );
+            hart.set_block_cache(self.block_cache());
+            // ⚠️ Silicon's CCOUNT on core 1 starts at 0 out of reset; this
+            // machine's per-hart counter is its clock, so core 1 joins at
+            // `now`. Nothing in the firmware reads core 1's CCOUNT as an
+            // absolute.
+            hart.advance_to_cycle(now);
+            self.harts[1] = hart;
+            self.stalled[1] = false;
+            self.core1_releases += 1;
+        }
+    }
+
+    /// How many times slot 1 has come out of reset this run.
+    pub fn core1_releases(&self) -> u64 {
+        self.core1_releases
+    }
+
     /// Which inputs hold `core` right now, by name, in the order
     /// [`core_stalled`](Self::core_stalled) consults them. Empty for a
     /// running core.
     pub fn stall_inputs(&self, core: usize) -> Vec<&'static str> {
         let mut held = Vec::new();
         if self.stalled.get(core).copied().unwrap_or(true) {
-            held.push("machine (M6 releases no core; there is no S3 measurement of where a released core starts)");
+            held.push("machine (slot 1 in reset: SYSTEM.core_1_control_0.reseting never cleared with the clock gate open)");
         }
         if core == 1 {
             let c = self.core_1_control();
@@ -3527,6 +3683,9 @@ impl Machine {
             // then core 1, each opening at `now`. A held core's counter does
             // not move.
             for core in 0..CORES {
+                if core == 1 {
+                    self.sync_core1_reset(now);
+                }
                 if self.core_stalled(core) || self.harts[core].is_waiti() {
                     continue;
                 }
@@ -3539,6 +3698,7 @@ impl Machine {
                 // and the `EXTMEM` view asks for a boundary the moment an
                 // enable bit moves — so the window between "the cache went
                 // off" and "the check is on" is zero instructions.
+                self.sync_flash_busy(now);
                 self.sync_cache_watch();
                 let budget = if self.cache_watch {
                     // `MemoryCost` sees the address and not the pc, so while
@@ -3559,7 +3719,7 @@ impl Machine {
                 // run under has none to take — and this skips a lock per
                 // window on every run that is not in a cache-off span.
                 if self.cache_watch
-                    && let Some(outcome) = self.take_cache_off_fetch(issuing_pc)
+                    && let Some(outcome) = self.take_cache_off_fetch(core, issuing_pc)
                 {
                     return outcome;
                 }

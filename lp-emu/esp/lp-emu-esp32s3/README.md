@@ -1221,3 +1221,24 @@ matrix has 99 map entries and the table 94 rows.
 MIT, as a unit with the rest of `lp-emu/` — not the workspace's AGPL. See
 `lp-emu/LICENSE-MIT`, `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md` and
 `just lint-emu-fence`.
+
+## Core 1 and the flash-busy model
+
+Core 1 is held at reset and released the way the silicon releases it: when
+the guest clears `SYSTEM.core_1_control_0.reseting` with the clock gate open,
+slot 1 starts at the mask ROM's reset vector, and the ROM's own APP-CPU path
+reaches the address the guest wrote (`Machine::sync_core1_reset`; the core-1
+spike's §4). The shipped image does that since `two-core` (2026-10-24): core 1
+renders half of every batch and parks in `waiti` between jobs, woken by
+`FROM_CPU_INTR2`. A single-core image never takes the path and runs as
+before, byte for byte.
+
+`--flash-busy` (`Esp32S3Builder::flash_busy`; `lp-cli emu run --chip esp32s3
+--flash-busy`) holds the flash part's WIP for each program's and erase's busy
+time, using CX1's numbers as an estimate (there is no S3 measurement), so the
+ROM's poll loop spins through it. While it does, an access through the
+flash or PSRAM windows by **either** core stops the run with
+`FLASH-BUSY ACCESS` (exit 9), naming the core, the pc and the address: on
+silicon the MSPI bus is the write's. It is what every flash writer's stall of
+core 1 is held to (`tests/flash_busy_stop.rs`,
+`lp-cli/tests/emu_s3_core1_gates.rs`). Off by default.
