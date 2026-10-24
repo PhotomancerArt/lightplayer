@@ -15,9 +15,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::section_graph::SectionGraph;
 #[cfg(doc)]
 use crate::section_graph::Node;
+use crate::section_graph::SectionGraph;
 
 /// The two halves of one link.
 pub struct Split {

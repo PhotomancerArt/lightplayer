@@ -67,8 +67,7 @@ pub fn stash(peripheral: esp_hal::peripherals::CPU_CTRL<'static>) {
 
 /// Start core 1 into the sampler. Once, from `core_boot`.
 pub fn start() {
-    let Some(peripheral) = critical_section::with(|cs| PERIPHERAL.borrow_ref_mut(cs).take())
-    else {
+    let Some(peripheral) = critical_section::with(|cs| PERIPHERAL.borrow_ref_mut(cs).take()) else {
         return;
     };
     let mut cpu_control = CpuControl::new(peripheral);
@@ -99,17 +98,23 @@ pub fn start() {
 }
 
 fn rounds_wanted() -> u32 {
-    option_env!("LP_PCS_ROUNDS").and_then(|s| s.parse().ok()).unwrap_or(4)
+    option_env!("LP_PCS_ROUNDS")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4)
 }
 
 fn start_beat() -> u32 {
-    option_env!("LP_PCS_START").and_then(|s| s.parse().ok()).unwrap_or(3)
+    option_env!("LP_PCS_START")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3)
 }
 
 /// Mean gap between samples, in core-1 cycles at 240 MHz: ~250 µs, so a round
 /// spans about half a second.
 fn mean_gap_cycles() -> u32 {
-    option_env!("LP_PCS_GAP").and_then(|s| s.parse().ok()).unwrap_or(60_000)
+    option_env!("LP_PCS_GAP")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60_000)
 }
 
 #[inline(always)]
@@ -139,8 +144,14 @@ fn ccount() -> u32 {
 fn sampler_loop() -> ! {
     // The debug assistant's clock on, out of reset, core 0's pdebug interface
     // open and recording.
-    wr(SYSTEM_CPU_PERI_CLK_EN, rd(SYSTEM_CPU_PERI_CLK_EN) | ASSIST_DEBUG_BIT);
-    wr(SYSTEM_CPU_PERI_RST_EN, rd(SYSTEM_CPU_PERI_RST_EN) & !ASSIST_DEBUG_BIT);
+    wr(
+        SYSTEM_CPU_PERI_CLK_EN,
+        rd(SYSTEM_CPU_PERI_CLK_EN) | ASSIST_DEBUG_BIT,
+    );
+    wr(
+        SYSTEM_CPU_PERI_RST_EN,
+        rd(SYSTEM_CPU_PERI_RST_EN) & !ASSIST_DEBUG_BIT,
+    );
     wr(RCD_PDEBUGENABLE, 1);
     wr(RCD_RECORDING, 1);
     // A liveness probe the first dump prints: eight reads ~1 µs apart.
