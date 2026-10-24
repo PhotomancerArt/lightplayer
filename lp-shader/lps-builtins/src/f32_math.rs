@@ -188,7 +188,7 @@ unsafe extern "C" {
 /// Within the family's declared band (`docs/design/float.md` §6: `1e-6`
 /// relative, `1e-6` absolute floor) over the fast range; the tests sweep it.
 pub fn sincos(x: f32) -> (f32, f32) {
-    if !(abs(x) <= SINCOS_FAST_MAX) {
+    if x.is_nan() || abs(x) > SINCOS_FAST_MAX {
         return (libm::sinf(x), libm::cosf(x));
     }
     // sin(x) = x to f32 precision here (the next term is x³/6, under 2·10⁻⁹
@@ -217,13 +217,13 @@ pub fn sincos(x: f32) -> (f32, f32) {
 
 /// [`sincos`]'s fast range: `|x|` at most this reduces in `f32` alone.
 const SINCOS_FAST_MAX: f32 = 100_000.0;
-const FRAC_2_PI: f32 = 0.636_619_8;
+const FRAC_2_PI: f32 = core::f32::consts::FRAC_2_PI;
 const ROUND_MAGIC: f32 = 12_582_912.0;
 /// π/2 = A + B + C: A and B with 8 significant bits (`0x3FC9_0000`,
 /// `0x39FD_0000`), C its next 24 (`0x35AA_2217`).
-const PIO2_A: f32 = 1.570_312_5;
-const PIO2_B: f32 = 4.825_592_041_015_625e-4;
-const PIO2_C: f32 = 1.267_590_846_509_847_3e-6;
+const PIO2_A: f32 = f32::from_bits(0x3FC9_0000);
+const PIO2_B: f32 = f32::from_bits(0x39FD_0000);
+const PIO2_C: f32 = f32::from_bits(0x35AA_2217);
 
 #[cfg(test)]
 mod tests {
