@@ -209,7 +209,7 @@ pc-sampler = []
 # never allocate (`src/guarded_heap.rs`). Not with `pc-sampler`: one core 1.
 # On by default since FS3 measured +24-31 % (2026-10-24); a `pc-sampler`
 # image is built with `--no-default-features` and the rest named.
-two-core = ["server", "dep:lpvm-native"]
+two-core = ["server", "dep:lpvm-native", "lpvm-native?/helper-core"]
 
 # A same-image fps A/B (never shipped): the LCD backend's overlap (render
 # running while the previous frame is on the wire) off and on in 20 s turns,

@@ -43,6 +43,7 @@ pub struct NativeJitInstance {
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
     /// The helper core's own vmctx ([`crate::helper_core`]): allocated on the
     /// first split call, on the calling core, and freed with the instance.
+    #[cfg(feature = "helper-core")]
     pub(crate) helper_vmctx: Option<u32>,
 }
 
@@ -59,6 +60,7 @@ impl Drop for NativeJitInstance {
             // SAFETY: `instantiate` allocated exactly this layout at this
             // address, and the instance is not `Clone`, so this is the one free.
             unsafe { alloc::alloc::dealloc(self.vmctx_guest as usize as *mut u8, layout) };
+            #[cfg(feature = "helper-core")]
             if let Some(helper) = self.helper_vmctx.take() {
                 // SAFETY: `split_render_samples` allocated it with this layout.
                 unsafe { alloc::alloc::dealloc(helper as usize as *mut u8, layout) };
@@ -75,6 +77,7 @@ impl NativeJitInstance {
     /// half on the helper against a copy of this instance's armed vmctx, the
     /// lower half here, then both trap words. A helper that does not take or
     /// finish its half leaves it to this core.
+    #[cfg(feature = "helper-core")]
     fn split_render_samples(
         &mut self,
         helper: crate::helper_core::HelperCore,
@@ -155,6 +158,7 @@ impl NativeJitInstance {
     }
 
     /// Bytes per packed point: 4 for a 1D shader's `[t]`, 8 for 2D's `[x, y]`.
+    #[cfg(feature = "helper-core")]
     fn points_stride(&self) -> u32 {
         let one_d = self
             .module
@@ -801,6 +805,7 @@ impl LpvmInstance for NativeJitInstance {
 
         self.arm_fuel_header();
 
+        #[cfg(feature = "helper-core")]
         if let Some(helper) = crate::helper_core::helper_for(count) {
             return self.split_render_samples(helper, entry, points_offset, out_offset, count);
         }
@@ -888,6 +893,7 @@ impl LpvmInstance for NativeJitInstance {
 }
 
 /// Bytes per output sample: four unorm16 channels (RGBA16).
+#[cfg(feature = "helper-core")]
 const SAMPLE_BYTES: u32 = 8;
 
 /// One render-samples entry call, as either core makes it
@@ -897,6 +903,7 @@ const SAMPLE_BYTES: u32 = 8;
 ///
 /// `job` names a live JIT entry, an armed vmctx of its module and valid
 /// buffers.
+#[cfg(feature = "helper-core")]
 pub(crate) unsafe fn call_render_samples_raw(job: &crate::helper_core::HelperJob) {
     unsafe {
         jit_entry_call(
