@@ -142,9 +142,9 @@ the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
 A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
-⚠️ **The heap line is a two-region sum**, `heap=92160+73744=165904` on the
+⚠️ **The heap line is a two-region sum**, `heap=83968+73744=157712` on the
 shipped image (`HEAP_SIZE = 136 * 1024` less PSRAM's 3 KiB since `espnow` and
-`psram` became default features, less the IRAM hot set's 43 KiB since
+`psram` became default features, less the IRAM hot set's 43 KiB and core 1's 8 KiB stack since
 2026-10-24, plus `dram2_seg`; PSRAM's 8 MiB has its own
 `heap region` line), where the classic prints a four-region sum. Anything comparing the two
 chips' boot captures must not expect the same line. There is no

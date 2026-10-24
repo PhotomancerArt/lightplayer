@@ -186,12 +186,12 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     }
     // The one boot line P04b's note fixes: the `.bss` arena (HEAP_SIZE =
     // 136 * 1024 less PSRAM's 3 KiB, `espnow` and `psram` being default
-    // features since 2026-10-23, less the IRAM hot set's 43 KiB since
-    // 2026-10-24) plus `dram2_seg` (73,744 B, RAM research
+    // features since 2026-10-23, less the IRAM hot set's 43 KiB and core
+    // 1's 8 KiB stack since 2026-10-24) plus `dram2_seg` (73,744 B, RAM research
     // E14), a two-region sum where the classic prints a four-region one.
     // PSRAM's region is the internal heap's figure's business, not this line's.
     assert!(
-        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=92160+73744=165904"),
+        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=83968+73744=157712"),
         "HEAP_SIZE + dram2_seg: {text}"
     );
     assert!(
