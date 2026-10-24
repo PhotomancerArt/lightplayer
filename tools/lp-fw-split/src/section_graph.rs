@@ -76,6 +76,23 @@ impl Node {
     pub fn is_ram_code(&self) -> bool {
         RAM_CODE_OUTS.contains(&self.out.as_str())
     }
+
+    /// RAM code that is only there for speed: a Rust function's own
+    /// `.text.<sym>` (or its `.literal.<sym>` pool) that a linker-script
+    /// rule moved into RAM code — the S3's IRAM hot set
+    /// (`lp-fw/fw-esp32s3/rwtext_hook.x`). Code that must be in RAM is named
+    /// so by its section (`#[ram]` is `.rwtext.*`, the blobs' `.iram1.*`)
+    /// or is not a Rust object. The bootloader loads it with the core, but
+    /// being in RAM does not make it core: it is core only if the core
+    /// reaches it, and it may call engine code when the core does not.
+    pub fn is_hot_ram_code(&self) -> bool {
+        if !self.is_ram_code() {
+            return false;
+        }
+        let (obj, sec) = self.object_and_section();
+        (sec.starts_with(".text.") || sec.starts_with(".literal."))
+            && crate::engine_script::is_rust_object(obj)
+    }
 }
 
 /// Input sections, sorted by address, and the relocation edges between them.

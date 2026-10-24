@@ -65,6 +65,18 @@ ESP_HAL_CONFIG_PLACE_WIFI_RX_SLP_IRAM_IN_FLASH = "true"
 ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
 ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"
 
+# The IRAM hot set: ~40 KB of the flash functions core 0 spends its frame in
+# (the engine's per-lane graph walk, the allocator, the hottest builtins),
+# linked into `.rwtext` so they run from internal SRAM instead of streaming
+# through the 32 KB instruction cache from flash. esp-hal INCLUDEs
+# `rwtext_hook.x` (found via build.rs's link-search path, like
+# `rwdata_hook.x`) inside `.rwtext`. The list is generated, never edited:
+# `hot_iram/README.md` says how it is measured and kept current, and
+# `just s3-hot-iram-check` (CI's S3 size job) fails when it goes stale. The
+# arena gives the bytes back (`HOT_IRAM_BYTES` in src/main.rs). ADR:
+# docs/adr/2026-10-24-s3-hot-code-in-iram.md.
+ESP_HAL_CONFIG_USE_RWTEXT_LD_HOOK = "true"
+
 [unstable]
 build-std = ["core", "alloc"]
 build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

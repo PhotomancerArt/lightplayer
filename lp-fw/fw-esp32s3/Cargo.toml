@@ -195,6 +195,13 @@ lcd-ws281x = []
 # two drivers' truncation the same way.
 ws281x_frame_check = []
 
+# Core 1 as a PC sampler for core 0 (never shipped): the debug assistant's
+# recorded PC, read from IRAM at random gaps, dumped as `[pcs]` lines once a
+# heartbeat. The measurement the IRAM hot set (`rwtext_hook.x`) is generated
+# from: `hot_iram/README.md`, `scripts/s3-hot-iram.py fold`. Starts core 1, so
+# `FlashStorage` auto-parks it for a write.
+pc-sampler = []
+
 # A same-image fps A/B (never shipped): the LCD backend's overlap (render
 # running while the previous frame is on the wire) off and on in 20 s turns,
 # each window's frame rate logged as `[ws281x-ab] overlap=… fps=…`.
