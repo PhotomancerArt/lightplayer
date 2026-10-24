@@ -791,3 +791,12 @@ hours), and neither is an exit path on its own.
   job passed. The bound the 2026-08-05 entry added did its job (a loud kill,
   not a wedge); whether 180 s is now too tight for a full 2,519-story capture
   on a loaded runner is the open question.
+- 2026-10-24 — **`oxipng` hit its 180 s bound again on a PR with no Studio
+  change**, the second time in two days. "Validate story baselines" on #1291
+  (an S3 firmware desk probe and a defect entry; no `lpa-studio-*` file),
+  run 40138424523 attempt 1: all 2,519 stories captured, `optimizing PNGs
+  (oxipng) — 2519/2519 captured` from `[+14:00]` to `[+17:00]`, then
+  `Error: oxipng did not exit within 180000 ms — killed.` Re-ran the failed
+  job. Twice in two days on the full capture makes the 2026-10-23 question
+  (is 180 s too tight for 2,519 stories on a loaded runner) a recurring
+  burden, not a one-off.
