@@ -286,6 +286,8 @@ impl Ws281xDriver for Esp32S3LcdWs281xDriver {
             if let Some(check) = shared.bus.check.as_mut() {
                 check.bind(lane, gpio);
             }
+            #[cfg(feature = "ws281x_pad_probe")]
+            shared.bus.probe.bind(lane, gpio);
         }
         log::info!(
             "Esp32S3LcdWs281xDriver::open: endpoint={endpoint_id} gpio={} lane={lane} bytes={}",
@@ -369,6 +371,8 @@ impl Drop for Esp32S3LcdWs281xOutput {
                 }
             });
             shared.lanes[self.lane as usize].in_use = false;
+            #[cfg(feature = "ws281x_pad_probe")]
+            shared.bus.probe.unbind(self.lane);
         }
         if let Some(lease) = self.lease.take() {
             if let Err(error) = self.registry.release(&lease) {

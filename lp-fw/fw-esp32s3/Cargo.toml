@@ -196,6 +196,12 @@ lcd-ws281x = []
 # two drivers' truncation the same way.
 ws281x_frame_check = []
 
+# The D6 pad probe (never shipped): with `lcd-ws281x`, reads each open lane's
+# IO_MUX, GPIO-matrix and enable registers at bind and every frame, its level
+# just before a frame, and UART0's TX_DONE, and logs any change
+# (`[pad-probe]` lines; docs/defects/2026-10-24-the-s3s-d6-pad-garbles-its-lcd-ws281x-lane.md).
+ws281x_pad_probe = []
+
 # Core 1 as a PC sampler for core 0 (never shipped): the debug assistant's
 # recorded PC, read from IRAM at random gaps, dumped as `[pcs]` lines once a
 # heartbeat. The measurement the IRAM hot set (`rwtext_hook.x`) is generated
