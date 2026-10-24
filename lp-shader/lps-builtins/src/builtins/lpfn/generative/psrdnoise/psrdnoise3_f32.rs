@@ -93,8 +93,7 @@ fn grad(hash: i32, sin_alpha: f32, cos_alpha: f32) -> [f32; 3] {
     let sz = h * SZ_SLOPE + SZ_BIAS;
     let psi = h * PSI_STEP;
 
-    let ct = libm::cosf(theta);
-    let st = libm::sinf(theta);
+    let (st, ct) = crate::f32_math::sincos(theta);
     let sz_prime = sqrt(1.0 - sz * sz);
 
     // Orthogonal tangent vector q and spiral point p.
@@ -102,8 +101,7 @@ fn grad(hash: i32, sin_alpha: f32, cos_alpha: f32) -> [f32; 3] {
     let p = [-sz * ct, -sz * st, sz_prime];
 
     // Base gradient after psi rotation: g_b = cos(psi)*p + sin(psi)*(q, 0).
-    let cp = libm::cosf(psi);
-    let sp = libm::sinf(psi);
+    let (sp, cp) = crate::f32_math::sincos(psi);
     let gb = [cp * p[0] + sp * q[0], cp * p[1] + sp * q[1], cp * p[2]];
 
     // Alpha rotation about q (qz == 0).
@@ -147,8 +145,7 @@ pub extern "C" fn __lp_lpfn_psrdnoise3_f32(
 ) -> f32 {
     let _ = seed;
 
-    let sin_alpha = libm::sinf(alpha);
-    let cos_alpha = libm::cosf(alpha);
+    let (sin_alpha, cos_alpha) = crate::f32_math::sincos(alpha);
 
     // Transform to simplex space (tetrahedral grid): uvw = x + dot(x, 1/3).
     let dot_sum = (x + y + z) * (1.0 / 3.0);
