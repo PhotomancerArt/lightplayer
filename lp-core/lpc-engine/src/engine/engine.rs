@@ -1549,10 +1549,9 @@ impl EngineResolveHost<'_> {
         // Every output asks this every frame, and the answer rebuilds static
         // binding topology (several Vecs, path clones). It moves only with a
         // structural change, which clears the tree's cache.
-        self.tree
-            .default_fragments_consumer_cached(consumer, || {
-                self.is_default_fragments_consumer_uncached(consumer)
-            })
+        self.tree.default_fragments_consumer_cached(consumer, || {
+            self.is_default_fragments_consumer_uncached(consumer)
+        })
     }
 
     fn is_default_fragments_consumer_uncached(&self, consumer: NodeId) -> bool {

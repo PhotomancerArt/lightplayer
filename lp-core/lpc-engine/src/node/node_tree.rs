@@ -797,7 +797,10 @@ mod tests {
         let a = add_test_child(&mut tree, "a");
         let entry = tree.get(a).unwrap();
         let first = entry.recovery_name();
-        assert_eq!(&*first, alloc::string::ToString::to_string(&entry.path).as_str());
+        assert_eq!(
+            &*first,
+            alloc::string::ToString::to_string(&entry.path).as_str()
+        );
         assert!(alloc::rc::Rc::ptr_eq(&first, &entry.recovery_name()));
     }
 
