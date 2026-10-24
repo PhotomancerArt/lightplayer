@@ -118,6 +118,12 @@ different instruction:
   no other core executes anything. If core 1 is ever started this argument
   must be redone: `esp_sync::RawMutex` is cross-core for the lock word, not
   for what the other core is executing from flash.
+  **Redone 2026-10-24** (`two-core`, `docs/adr/2026-10-24-s3-second-core-renders.md`):
+  core 1 now runs render jobs, and every flash writer stalls it with
+  RTC_CNTL's stall key for the call (`FlashStorage::multicore_auto_park`, and
+  the split image's raw ROM calls through `core1::with_core1_parked`). So
+  during a flash call core 1 executes nothing, and the moved classes still
+  run on core 0 only, where interrupts are masked. The argument holds.
 
 The moved classes are code ESP-IDF already runs from flash under the same
 condition (its flash writes disable the cache and mask non-IRAM interrupts).
