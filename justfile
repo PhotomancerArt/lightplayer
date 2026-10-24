@@ -1284,6 +1284,7 @@ iram-flash-literals-esp32s3 *args:
       export PATH="$GCC_BIN:$PATH"
     fi
     python3 scripts/iram-flash-literals.py {{ fw_esp32s3_elf }} --chip esp32s3 \
+        --hot-hook lp-fw/fw-esp32s3/rwtext_hook.x \
         --baseline lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt {{ args }}
 
 # The ISR-in-RAM guard for fw-esp32c6: which lookup tables a RAM-resident
@@ -2479,6 +2480,9 @@ fw-esp32s3-size-check margin="65536" unsplit="":
     fi
     cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" \
         --partitions lp-fw/fw-esp32s3/partitions.csv --margin {{ margin }}
+    # The IRAM hot set is still applied, within the arena's reservation, and
+    # not stale (lp-fw/fw-esp32s3/hot_iram/README.md).
+    just s3-hot-iram-check "${out}/p2.elf"
     if [ -n "{{ unsplit }}" ]; then
         just build-fw-esp32s3
         img="$(mktemp)"
@@ -2492,6 +2496,29 @@ fw-esp32s3-size-check margin="65536" unsplit="":
         echo "code delta (core + engine − monolithic): $(( core + engine - mono )) B"
         echo "image delta (app.bin − monolithic): $(( app - mono )) B"
     fi
+
+# The S3's IRAM hot set (lp-fw/fw-esp32s3/hot_iram/README.md): fails when a
+# hook pattern places a function anywhere but IRAM, when the hot set outgrows
+# the arena's reservation (`HOT_IRAM_BYTES`), or when functions it names have
+# vanished from the image carrying more than 10 % of its samples. Reads a
+# linked image: the split build's `p2.elf` (as `fw-esp32s3-size-check` passes
+# it) or a plain build's ELF (the default).
+s3-hot-iram-check elf=fw_esp32s3_elf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/s3-hot-iram.py check "{{ elf }}"
+
+# Rewrite lp-fw/fw-esp32s3/rwtext_hook.x from the committed profile
+# (lp-fw/fw-esp32s3/hot_iram/profile.tsv): greedy by samples per byte under
+# `budget`. The same profile always writes the same hook. Run it when
+# `s3-hot-iram-check` says the hot set went stale; take a new profile on FS3
+# when the engine's shape has moved (the README's runbook).
+s3-hot-iram-gen budget="40960":
+    python3 scripts/s3-hot-iram.py gen --budget {{ budget }}
 
 # The S3 split image's boot gate (`lp-cli/tests/emu_s3_split_boot.rs`): the
 # packaged image from the reset vector through the IDF door to the engine's

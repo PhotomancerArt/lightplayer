@@ -2,7 +2,12 @@
 //!
 //! The core's roots are the reset entry, the app descriptor, every
 //! RAM-resident code section (the bootloader loads those, so they are core
-//! whatever reaches them), and any extra root a caller names. The engine
+//! whatever reaches them), and any extra root a caller names. The one RAM
+//! code that is not a root is code a linker rule moved there for speed (the
+//! S3's IRAM hot set, [`Node::is_hot_ram_code`]): it is core if the core
+//! reaches it, and engine code that happens to ride in the core's RAM
+//! segment if only the engine does. Rooting it would pull everything it calls
+//! — most of the engine — into the core. The engine
 //! header is not a root and nothing in the core names it — the core reads it
 //! through a plain address — so the walk never crosses into the engine
 //! through it. Placement is by reachability, never by crate: a crate's code
@@ -10,6 +15,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[cfg(doc)]
+use crate::section_graph::Node;
 use crate::section_graph::SectionGraph;
 
 /// The two halves of one link.
@@ -54,7 +61,7 @@ fn roots(graph: &SectionGraph, extra_roots: &[usize]) -> Vec<usize> {
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, n)| n.is_ram_code() || n.out == ".flash.appdesc")
+        .filter(|(_, n)| (n.is_ram_code() && !n.is_hot_ram_code()) || n.out == ".flash.appdesc")
         .map(|(i, _)| i)
         .collect();
     if let Some(e) = graph.node_at(graph.entry as i64) {
@@ -148,6 +155,49 @@ mod tests {
         assert_eq!(core, [0x50, 0x100, 0x200, 0x300, 0x400]);
         let engine: Vec<u64> = split.engine(&g).iter().map(|i| g.nodes[*i].vma).collect();
         assert_eq!(engine, [0x500, 0x600, 0x700]);
+    }
+
+    #[test]
+    fn hot_ram_code_is_core_only_when_the_core_reaches_it() {
+        // A Rust function's own `.text.*` moved into `.rwtext` (0x50) calls
+        // engine code (0x400); only the engine (0x500) calls it. Another hot
+        // one (0x60) the core calls (0x100 -> 0x60) is core, and so is what
+        // it calls (0x200). A `#[ram]` function (0x70) is a root as ever.
+        let hot = |vma: u64| Node {
+            vma,
+            size: 0x10,
+            out: ".rwtext".into(),
+            desc: format!("/x/fw-1234.fw.abc-cgu.0.rcgu.o:(.text._RNv{vma:x})"),
+        };
+        let g = SectionGraph::build(
+            vec![
+                hot(0x50),
+                hot(0x60),
+                Node {
+                    vma: 0x70,
+                    size: 0x10,
+                    out: ".rwtext".into(),
+                    desc: "/x/fw-1234.fw.abc-cgu.0.rcgu.o:(.rwtext._RNvisr)".into(),
+                },
+                node(0x100, ".text"),
+                node(0x200, ".text"),
+                node(0x300, ".text"),
+                node(0x400, ".text"),
+                node(0x500, ".text"),
+            ],
+            &[
+                (0x50, 0x400),
+                (0x500, 0x50),
+                (0x100, 0x60),
+                (0x60, 0x200),
+                (0x70, 0x300),
+            ],
+            0x100,
+        );
+        let split = Split::compute(&g, &[]);
+        let mut core: Vec<u64> = split.core.iter().map(|i| g.nodes[*i].vma).collect();
+        core.sort();
+        assert_eq!(core, [0x60, 0x70, 0x100, 0x200, 0x300]);
     }
 
     #[test]

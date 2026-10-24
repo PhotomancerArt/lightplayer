@@ -168,13 +168,15 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// ESP-NOW and PSRAM joined the defaults (2026-10-23) the arena is the Wi-Fi
 /// blob's smaller one (136 KB less PSRAM's 3 KiB, below the boot stages' RAM,
 /// so one piece), the radio region 48 KB, and the core brings PSRAM up and
-/// adds it as the last region.
+/// adds it as the last region. Since the IRAM hot set (2026-10-24,
+/// `fw-esp32s3/hot_iram/`) the arena is 43 KiB smaller again: `.rwtext`
+/// carries ~40 KB of engine code and takes the bytes from the same span.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
-[INIT] chip=esp32s3 arch=xtensa heap=136192+73744=209936 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fca1400+136192 (dram_seg arena, Internal)
+[INIT] chip=esp32s3 arch=xtensa heap=92160+73744=165904 (dram_seg arena + dram2_seg)
+[INIT] heap region: 0x3fcab788+92160 (dram_seg arena, Internal)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
-[INIT] heap region: 0x3fc953e8+49152 (radio)
+[INIT] heap region: 0x3fc9f770+49152 (radio)
 [INIT] psram: on, 8388608 bytes at 0x3c800000 (MMU entries 0x80..0x100), self-test passed
 [INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
@@ -185,8 +187,8 @@ const HELLO: &str = "\
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 672;
-const HELLO_SHA: &str = "337b6d2f941a694cb32980350af0278ff39ee60d2e3bac9c777358aa493c7583";
+const HELLO_BYTES: usize = 670;
+const HELLO_SHA: &str = "f7f50a1624bf962564778b163e56afc4ac66e67c496e471f8be443552e45f82c";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
