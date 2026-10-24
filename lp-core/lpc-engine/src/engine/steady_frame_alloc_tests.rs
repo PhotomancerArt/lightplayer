@@ -150,3 +150,52 @@ fn payloads_off_is_stable_too() {
         "payloads-off frames must allocate identically"
     );
 }
+
+/// Steady-frame allocations per lane (a fixture and the output it feeds) on
+/// the REAL fixture, shader and output nodes, measured as the difference
+/// between two projects with the same 1,024 LEDs: `projects/test/lanes-8x128`
+/// minus `lanes-2x512`, over the six lanes between them. The LED term cancels,
+/// so what is left is what the engine re-derives per lane per frame.
+///
+/// A ratchet, not a target (planning `lp2025/2026-10-24-0208-engine-frame-plan`,
+/// AC3): each frame-plan phase lowers it, and the plan ends at ≤ 2.
+pub(crate) const PER_LANE_STEADY_ALLOCS_BUDGET: u64 = 45;
+
+#[test]
+fn steady_frame_allocations_do_not_scale_with_lanes() {
+    let two = steady_project_allocs("lanes-2x512");
+    let eight = steady_project_allocs("lanes-8x128");
+    let per_lane = eight.allocs.saturating_sub(two.allocs).div_ceil(6);
+    std::eprintln!(
+        "steady frame: lanes-2x512 {two:?}, lanes-8x128 {eight:?}; \
+         {per_lane} allocations per lane (budget {PER_LANE_STEADY_ALLOCS_BUDGET})"
+    );
+    assert!(
+        per_lane <= PER_LANE_STEADY_ALLOCS_BUDGET,
+        "a steady frame makes {per_lane} allocation requests per lane; the budget is \
+         {PER_LANE_STEADY_ALLOCS_BUDGET}. If the growth is intentional, raise \
+         PER_LANE_STEADY_ALLOCS_BUDGET in the same change and say why in the commit."
+    );
+}
+
+/// One steady frame of a checked-in test project, loaded through the project
+/// loader with the CPU graphics backend: three warm-up frames (the first
+/// compiles), then the measured one.
+fn steady_project_allocs(project: &str) -> AllocSnapshot {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../projects/test")
+        .join(project);
+    let fs = lpfs::LpFsStd::new(dir);
+    let root = alloc::format!("/{}.show", project.replace('-', "_"));
+    let services = crate::EngineServices::new(lpc_model::TreePath::parse(&root).expect("root"));
+    let mut rt = crate::ProjectLoader::load_from_root(&fs, services).expect("load lane project");
+    rt.set_graphics(Some(alloc::sync::Arc::new(
+        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+    )));
+    for _ in 0..3 {
+        rt.tick(16).expect("warm-up");
+    }
+    let (result, churn) = measure(|| rt.tick(16));
+    result.expect("measured tick");
+    churn
+}
