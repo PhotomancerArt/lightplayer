@@ -1,9 +1,9 @@
 {
   "_about": "The C6's first-light ratchet (docs/first-light-ratchet.md): `first_light_ms` is the firmware's own `[perf] first light at <ms> ms`, read off a ROM-up power-on boot of the split image through our bootloader on lp-emu:esp32c6:t4, projects/test/basic with a saved Wi-Fi network on the emulated LAN, the higher of two boots. CI fails above 500 ms, warns above 400 ms, fails more than 5 ms above this value until Yona blesses it (`just bless-first-light`, label `first-light-blessed`), and hands back a patch when it drops. `recorded_by`: initial | ci-ratchet | emulator-model | yona.",
   "case": "basic+net",
-  "commit": "cb2c67911",
+  "commit": "7145d4f6a",
   "configuration": "lp-emu:esp32c6:t4",
-  "first_light_ms": 375,
-  "recorded": "2026-10-23",
-  "recorded_by": "ci-ratchet"
+  "first_light_ms": 383,
+  "recorded": "2026-10-24",
+  "recorded_by": "yona"
 }
