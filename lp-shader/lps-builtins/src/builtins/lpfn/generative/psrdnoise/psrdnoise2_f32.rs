@@ -134,7 +134,8 @@ pub extern "C" fn __lp_lpfn_psrdnoise2_f32(
     let mut g = [[0.0f32; 2]; 3];
     for k in 0..3 {
         let psi = hash(iu[k], iv[k]) as f32 * 0.07482;
-        g[k] = [libm::cosf(psi + alpha), libm::sinf(psi + alpha)];
+        let (s, c) = crate::f32_math::sincos(psi + alpha);
+        g[k] = [c, s];
     }
 
     let xs = [x0, x1, x2];

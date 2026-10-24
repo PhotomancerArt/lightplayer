@@ -62,7 +62,7 @@ pub fn fract(x: f32) -> f32 {
 /// sign of the dividend, while GLSL's takes the sign of the divisor.
 #[inline(always)]
 pub fn glsl_mod(x: f32, y: f32) -> f32 {
-    x - y * floor(x / y)
+    x - y * floor(div(x, y))
 }
 
 /// GLSL `mix(a, b, t) = a + t * (b - a)`.
@@ -101,9 +101,178 @@ pub fn sign(x: f32) -> f32 {
     }
 }
 
+/// `a / b`, correctly rounded, through the FPU on Xtensa.
+///
+/// `a / b` in Rust compiles, on Xtensa, to `compiler_builtins`' software
+/// `__divsf3`. This runs the FPU's own divide sequence there instead (see
+/// `builtins/lpir/fdiv_f32.rs` for where it comes from and how it was
+/// checked), and is plain `a / b` everywhere else.
+#[inline(always)]
+pub fn div(a: f32, b: f32) -> f32 {
+    #[cfg(target_arch = "xtensa")]
+    {
+        // SAFETY: a leaf kernel that reads its two arguments and writes only
+        // FP registers, none of which the windowed ABI preserves across a call.
+        f32::from_bits(unsafe { lps_fdiv_seq_f32(a.to_bits(), b.to_bits()) })
+    }
+    #[cfg(not(target_arch = "xtensa"))]
+    {
+        a / b
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+core::arch::global_asm!(
+    ".section .text.lps_fdiv_seq_f32,\"ax\",@progbits",
+    ".align 4",
+    ".global lps_fdiv_seq_f32",
+    ".type lps_fdiv_seq_f32,@function",
+    "lps_fdiv_seq_f32:",
+    "  entry a1, 32",
+    "  wfr f1, a2",
+    "  wfr f2, a3",
+    "  div0.s f3, f2",
+    "  nexp01.s f4, f2",
+    "  const.s f5, 1",
+    "  maddn.s f5, f4, f3",
+    "  mov.s f6, f3",
+    "  mov.s f7, f2",
+    "  nexp01.s f2, f1",
+    "  maddn.s f6, f5, f6",
+    "  const.s f5, 1",
+    "  const.s f0, 0",
+    "  neg.s f8, f2",
+    "  maddn.s f5, f4, f6",
+    "  maddn.s f0, f8, f3",
+    "  mkdadj.s f7, f1",
+    "  maddn.s f6, f5, f6",
+    "  maddn.s f8, f4, f0",
+    "  const.s f3, 1",
+    "  maddn.s f3, f4, f6",
+    "  maddn.s f0, f8, f6",
+    "  neg.s f2, f2",
+    "  maddn.s f6, f3, f6",
+    "  maddn.s f2, f4, f0",
+    "  addexpm.s f0, f7",
+    "  addexp.s f6, f7",
+    "  divn.s f0, f2, f6",
+    "  rfr a2, f0",
+    "  retw",
+    ".size lps_fdiv_seq_f32, .-lps_fdiv_seq_f32",
+);
+
+#[cfg(target_arch = "xtensa")]
+unsafe extern "C" {
+    fn lps_fdiv_seq_f32(a: u32, b: u32) -> u32;
+}
+
+/// `(sin(x), cos(x))` in single precision: one range reduction, two short
+/// polynomials, nothing wider than `f32`.
+///
+/// This is the f32 family's sine and cosine. `libm::sinf`/`cosf` compute their
+/// kernels in `f64`, which on the ESP32-S3 is software emulation: the fps
+/// spike (2026-10-23) found more than half of an f32 shader's sampling time in
+/// `__muldf3`/`__subdf3`, and Float mode 4.9× slower than Q32 because of it.
+/// Here every operation is one the LX7's single-precision FPU executes.
+///
+/// - **Reduction:** `k` = `x · 2/π` rounded to nearest; `r = x − k·π/2` with
+///   π/2 split into three `f32` parts (Cody–Waite). The first two carry 8
+///   significant bits each, so `k·A` and `k·B` are exact for `|k| < 2¹⁶`, and
+///   the third is π/2's next 24 bits (the split's residual is 5·10⁻¹⁴).
+/// - **Polynomials:** Taylor series of `sin` to `r⁹` and of `cos` to `r¹⁰` on
+///   `|r| ≤ π/4`; truncation is under 2·10⁻⁹, far inside an `f32` ulp. The
+///   coefficients are `1/n!`: arithmetic, not a fitted table.
+/// - **Large or non-finite `x`** (`|x| > 100 000`, NaN, ±∞): `libm`, which
+///   reduces exactly. Slow, correct, and rare in a shader.
+///
+/// Within the family's declared band (`docs/design/float.md` §6: `1e-6`
+/// relative, `1e-6` absolute floor) over the fast range; the tests sweep it.
+pub fn sincos(x: f32) -> (f32, f32) {
+    if !(abs(x) <= SINCOS_FAST_MAX) {
+        return (libm::sinf(x), libm::cosf(x));
+    }
+    // sin(x) = x to f32 precision here (the next term is x³/6, under 2·10⁻⁹
+    // relative), and returning `x` keeps `sin(-0) = -0`, which the polynomial
+    // would round to +0.
+    if abs(x) < 1.0e-4 {
+        return (x, 1.0 - 0.5 * x * x);
+    }
+    // Round to nearest by the 1.5·2²³ trick: exact for |x·2/π| < 2²², which
+    // the bound above keeps (|k| ≤ 63 662).
+    let kf = (x * FRAC_2_PI + ROUND_MAGIC) - ROUND_MAGIC;
+    let r = ((x - kf * PIO2_A) - kf * PIO2_B) - kf * PIO2_C;
+    let z = r * r;
+    let s =
+        r + r * z * (-1.0 / 6.0 + z * (1.0 / 120.0 + z * (-1.0 / 5040.0 + z * (1.0 / 362_880.0))));
+    let c = 1.0 - 0.5 * z
+        + z * z
+            * (1.0 / 24.0 + z * (-1.0 / 720.0 + z * (1.0 / 40_320.0 + z * (-1.0 / 3_628_800.0))));
+    match (kf as i32) & 3 {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        _ => (-c, s),
+    }
+}
+
+/// [`sincos`]'s fast range: `|x|` at most this reduces in `f32` alone.
+const SINCOS_FAST_MAX: f32 = 100_000.0;
+const FRAC_2_PI: f32 = 0.636_619_8;
+const ROUND_MAGIC: f32 = 12_582_912.0;
+/// π/2 = A + B + C: A and B with 8 significant bits (`0x3FC9_0000`,
+/// `0x39FD_0000`), C its next 24 (`0x35AA_2217`).
+const PIO2_A: f32 = 1.570_312_5;
+const PIO2_B: f32 = 4.825_592_041_015_625e-4;
+const PIO2_C: f32 = 1.267_590_846_509_847_3e-6;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The family's band (`float.md` §6) against the `f64` reference.
+    fn within_band(got: f32, want: f64) -> bool {
+        (got as f64 - want).abs() <= (1e-6 * want.abs()).max(1e-6)
+    }
+
+    #[test]
+    fn sincos_is_within_the_band_over_the_fast_range() {
+        // Dense near zero, then out to the bound, plus every multiple of π/2
+        // up to it and its neighbours (where sin or cos crosses zero).
+        extern crate std;
+        let mut xs: std::vec::Vec<f32> = (-200_000..=200_000).map(|i| i as f32 * 1e-4).collect();
+        let mut x = 20.0f32;
+        while x <= SINCOS_FAST_MAX {
+            xs.push(x);
+            xs.push(-x);
+            x *= 1.000_37;
+        }
+        for k in 0..63_600 {
+            let m = (k as f64 * core::f64::consts::FRAC_PI_2) as f32;
+            xs.extend([
+                m,
+                f32::from_bits(m.to_bits() + 1),
+                f32::from_bits(m.to_bits().saturating_sub(1)),
+            ]);
+        }
+        for x in xs {
+            let (s, c) = sincos(x);
+            let (ws, wc) = ((x as f64).sin(), (x as f64).cos());
+            assert!(within_band(s, ws), "sin({x:e}) = {s:e}, want {ws:e}");
+            assert!(within_band(c, wc), "cos({x:e}) = {c:e}, want {wc:e}");
+        }
+    }
+
+    #[test]
+    fn sincos_keeps_the_signed_zero_and_the_edges() {
+        assert_eq!(sincos(0.0), (0.0, 1.0));
+        assert_eq!(sincos(-0.0).0.to_bits(), (-0.0f32).to_bits());
+        let (s, c) = sincos(f32::NAN);
+        assert!(s.is_nan() && c.is_nan());
+        let (s, c) = sincos(f32::INFINITY);
+        assert!(s.is_nan() && c.is_nan());
+        // Past the fast range: libm's exact reduction.
+        assert_eq!(sincos(1.0e6), (libm::sinf(1.0e6), libm::cosf(1.0e6)));
+    }
 
     #[test]
     fn fract_is_floor_based_not_truncated() {
