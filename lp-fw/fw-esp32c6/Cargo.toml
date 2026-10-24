@@ -223,7 +223,7 @@ heap_map_diag = ["lpc-shared"]
 # by default, never shipped: the tree store's RAM figures (plan
 # `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D5). It owns
 # esp-alloc's hooks, so not with `heap_map_diag`. The wire is unchanged.
-heap_peak_diag = ["esp-alloc/alloc-hooks"]
+heap_peak_diag = ["esp-alloc/alloc-hooks", "esp-alloc/internal-heap-stats"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
@@ -378,7 +378,7 @@ test_ble_coex = ["test_ble", "esp-radio/coex"]
 # See `src/tests/comms_lab/mod.rs`. Never shipped.
 #
 # `lpc-shared` for `recovery/panic_path.rs`, as `test_rmt` (M5 P1, DD37).
-test_comms_lab = ["dep:lp-link", "lpc-shared"]
+test_comms_lab = ["dep:lp-link", "lpc-shared", "esp-alloc/internal-heap-stats"]
 # The same with the BLE NUS pipe beside USB (datagram framing, one frame per
 # notification / write).
 test_comms_lab_ble = ["test_comms_lab", "ble"]
@@ -472,7 +472,11 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md)
 # that is not the reclaimed bootloader segment
 # (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
-esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
+# No `internal-heap-stats`: it keeps a lifetime `max_usage` and two running
+# totals by walking every region's `used()` on every allocation (~210
+# instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads
+# them. The diagnostics that do turn it back on.
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator"] }
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }

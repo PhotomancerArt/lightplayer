@@ -431,7 +431,11 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # could land in `dram2_seg`, which the bootloader takes back on a warm reset
 # while the radio keeps writing (the C6's defect). The radio's C heap is this
 # crate's own (`src/c_heap.rs`), as on the C6.
-esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
+# No `internal-heap-stats`: it keeps a lifetime `max_usage` and two running
+# totals by walking every region's `used()` on every allocation (~210
+# instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads
+# them. The diagnostics that do turn it back on.
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator"] }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is
