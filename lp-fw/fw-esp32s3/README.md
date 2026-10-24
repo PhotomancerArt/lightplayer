@@ -567,6 +567,22 @@ It costs the arena 43 KiB (`HOT_IRAM_BYTES`): internal free at boot went from
 187,580 to 143,548 B on FS3, the tagged arena is 92,160 B, and the largest
 free block is `dram2_seg`'s 73,744 B. Rust's own allocations are in PSRAM.
 
+## Two cores (feature `two-core`, on by default)
+
+Core 1 renders the upper half of every render-samples batch
+(`src/core1.rs`, `lpvm_native::helper_core`). It parks in `waiti` between
+jobs and is woken by `FROM_CPU_INTR2`. Every flash writer stalls it
+(`FlashStorage::multicore_auto_park`, `core1::with_core1_parked` around the
+split image's raw ROM calls). It may never allocate: the global allocator
+is `src/guarded_heap.rs`, which halts core 1 instead. A panic, an exception
+or a forbidden allocation on core 1 halts core 1 alone, and core 0 renders on
+after a 2 s join timeout (`[core1] stopped: …`). On FS3 it took 620 / 1,488 /
+2,048 LEDs from 41.1 / 20.6 / 15.8 to 50.9 / 26.7 / 20.7 fps (2026-10-24).
+The decision is `docs/adr/2026-10-24-s3-second-core-renders.md`; the
+emulator's gates are `lp-cli/tests/emu_s3_core1_gates.rs`. Core 1's stack
+costs the arena 8 KiB. A `pc-sampler` image (core 1 as the PC sampler)
+builds without it.
+
 ## The radio: Bluetooth, ESP-NOW and Wi-Fi (features `ble`, `espnow`, `wifi`)
 
 The C6's radio, on this chip (S3 radio plan, M3 and M4,

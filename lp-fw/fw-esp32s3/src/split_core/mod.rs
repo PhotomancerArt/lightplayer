@@ -66,27 +66,27 @@ impl SplitChip for S3Split {
 
     unsafe fn flash_read(at: u32, dst: *mut u32, len: u32) -> bool {
         // SAFETY: the caller's word-aligned buffer of `len` bytes.
-        unsafe { esp_storage::ll::spiflash_read(at, dst, len) }.is_ok()
+        parked(|| unsafe { esp_storage::ll::spiflash_read(at, dst, len) }.is_ok())
     }
 
     unsafe fn flash_program(at: u32, src: *const u32, len: u32) -> bool {
         // SAFETY: the caller's word-aligned buffer, a span its fence allowed.
-        unsafe { esp_storage::ll::spiflash_write(at, src, len) }.is_ok()
+        parked(|| unsafe { esp_storage::ll::spiflash_write(at, src, len) }.is_ok())
     }
 
     unsafe fn flash_erase_sector(index: u32) -> bool {
         // SAFETY: a sector the caller's fence allowed.
-        unsafe { esp_storage::ll::spiflash_erase_sector(index) }.is_ok()
+        parked(|| unsafe { esp_storage::ll::spiflash_erase_sector(index) }.is_ok())
     }
 
     unsafe fn flash_erase_block(index: u32) -> bool {
         // SAFETY: a block the caller's fence allowed.
-        unsafe { esp_storage::ll::spiflash_erase_block(index) }.is_ok()
+        parked(|| unsafe { esp_storage::ll::spiflash_erase_block(index) }.is_ok())
     }
 
     unsafe fn flash_unlock() -> bool {
         // SAFETY: the ROM's write-protect clear.
-        unsafe { esp_storage::ll::spiflash_unlock() }.is_ok()
+        parked(|| unsafe { esp_storage::ll::spiflash_unlock() }.is_ok())
     }
 
     type Sha = split_sha::BootSha256;
@@ -133,4 +133,16 @@ impl FeedWatchdog for crate::recovery::watchdog::WatchdogFeeder {
     fn feed(&mut self, now_ms: u64) {
         crate::recovery::watchdog::WatchdogFeeder::feed(self, now_ms);
     }
+}
+
+/// Run a raw ROM flash call with core 1 stalled (`two-core`): these bypass
+/// esp-storage's `FlashStorage`, whose writes park core 1 themselves, and a
+/// core-1 cache refill from flash during an erase or program hangs the chip.
+/// Reads too: SPI1 owns the flash for the call.
+#[inline(always)]
+fn parked<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(s3_two_core)]
+    return crate::core1::with_core1_parked(f);
+    #[cfg(not(s3_two_core))]
+    f()
 }

@@ -20,6 +20,7 @@ default = [
     "espnow",
     "psram",
     "lcd-ws281x",
+    "two-core",
 ]
 esp32s3 = [
     "esp-backtrace/esp32s3",
@@ -201,6 +202,14 @@ ws281x_frame_check = []
 # from: `hot_iram/README.md`, `scripts/s3-hot-iram.py fold`. Starts core 1, so
 # `FlashStorage` auto-parks it for a write.
 pc-sampler = []
+
+# Core 1 as a render helper: the upper half of every render-samples batch
+# runs on the APP CPU (`src/core1.rs`, `lpvm_native::helper_core`). Core 1
+# parks in `waiti` between jobs, every flash writer stalls it, and it may
+# never allocate (`src/guarded_heap.rs`). Not with `pc-sampler`: one core 1.
+# On by default since FS3 measured +24-31 % (2026-10-24); a `pc-sampler`
+# image is built with `--no-default-features` and the rest named.
+two-core = ["server", "dep:lpvm-native"]
 
 # A same-image fps A/B (never shipped): the LCD backend's overlap (render
 # running while the previous frame is on the wire) off and on in 20 s turns,
@@ -435,7 +444,9 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # totals by walking every region's `used()` on every allocation (~210
 # instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads
 # them. The diagnostics that do turn it back on.
-esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator"] }
+# No `global-allocator`: `src/guarded_heap.rs` is the global allocator, a
+# check in front of `esp_alloc::HEAP` (core 1 must never take its lock).
+esp-alloc = { version = "0.10.0", default-features = false }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is

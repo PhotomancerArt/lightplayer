@@ -147,6 +147,12 @@ mod hardware;
 mod output;
 #[cfg(all(feature = "psram", not(fw_harness)))]
 mod psram;
+// The global allocator: `esp_alloc::HEAP` behind a check that core 1 never
+// takes its lock (`two-core`).
+mod guarded_heap;
+// Core 1 as a render helper: half of every render-samples batch.
+#[cfg(s3_two_core)]
+mod core1;
 // Core 1 as a PC sampler for core 0: the IRAM hot set's measurement
 // (`hot_iram/README.md`). A diagnostic image, never the product.
 #[cfg(all(feature = "pc-sampler", not(fw_harness)))]
@@ -231,7 +237,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
 #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
-const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS;
+const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
 /// A Bluetooth image's arena (`radio` without `espnow`, S3 radio M3): 72 KB
 /// smaller, so the main stack keeps its share of `dram_seg`. BLE costs 72,528 B
 /// of `dram_seg` at link time: the radio blobs' own region
@@ -239,21 +245,21 @@ const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMP
 /// text and the BLE stack's statics. The heap the radio's C blocks do not use
 /// is still Rust's, last.
 #[cfg(all(s3_radio, not(s3_espnow)))]
-const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS;
+const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
 /// The arena with the Wi-Fi blob up too (`espnow`, and `wifi`, S3 radio M4):
 /// 104 KB smaller than a radio-free image's, so the main stack keeps its share
 /// of `dram_seg` (about 52 KB) with both radios in the image. Where the bytes
 /// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
 /// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
 #[cfg(s3_espnow)]
-const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS;
+const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
 /// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
 /// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
 /// keep about today's share. Where the product radio's RAM comes from is M4's
 /// plan, not this probe's.
 #[cfg(feature = "radio_boot_probe")]
-const HEAP_SIZE: usize = 160 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS;
+const HEAP_SIZE: usize = 160 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
 
 /// What a `psram` image's PSRAM init takes of `dram_seg`, given back by the
 /// arena so the main stack keeps its share (M10 P2). esp-hal's octal init is
@@ -285,6 +291,13 @@ const PC_SAMPLER_BSS: usize = pc_sampler::BSS_BYTES;
 #[cfg(not(all(feature = "pc-sampler", not(fw_harness))))]
 const PC_SAMPLER_BSS: usize = 0;
 
+/// What `two-core` takes of `dram_seg`'s `.bss` (core 1's stack), given back
+/// by the arena.
+#[cfg(s3_two_core)]
+const CORE1_BSS: usize = core1::BSS_BYTES;
+#[cfg(not(s3_two_core))]
+const CORE1_BSS: usize = 0;
+
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
 /// can report what died.
@@ -306,6 +319,13 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         esp_println::println!("\n\n====================== PANIC ======================");
         esp_println::println!("{info}");
         esp_hal::system::software_reset()
+    }
+    // A panic on core 1 (the render helper's) halts core 1 alone: no lock,
+    // no print, no reset. Core 0 notices and renders on (`core1`).
+    #[cfg(s3_two_core)]
+    if core1::on_core1() {
+        let _ = info;
+        core1::halt_core1(core1::Stop::Panic);
     }
     #[cfg(not(fw_harness))]
     {
@@ -538,6 +558,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The PC sampler's round, armed or dumped at the heartbeat's cadence.
     #[cfg(feature = "pc-sampler")]
     pc_sampler::on_heartbeat();
+    #[cfg(s3_two_core)]
+    core1::log_heartbeat();
     // The link thread's stack high-water, at the heartbeat's cadence, when it
     // grows (`io_thread_stack_diag` only; a product image has no such line).
     #[cfg(feature = "io_thread_stack_diag")]
@@ -785,6 +807,9 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // read mode is settled.
     #[cfg(feature = "pc-sampler")]
     pc_sampler::start();
+    // Core 1 into the render helper, once the flash's read mode is settled.
+    #[cfg(s3_two_core)]
+    core1::start();
 
     // The radio's one bring-up (`fw_esp32_radio::hardware::radio_hub`), in
     // the core so a core-only board keeps its radio, and before BLE (the C6's
@@ -1292,7 +1317,7 @@ fn mount_filesystem(
     let flash_storage = esp_storage::FlashStorage::new(flash);
     // The PC sampler keeps core 1 running, and esp-storage refuses a write
     // while it does; the sampler holds no lock, so it may be stalled anywhere.
-    #[cfg(feature = "pc-sampler")]
+    #[cfg(any(feature = "pc-sampler", s3_two_core))]
     let flash_storage = flash_storage.multicore_auto_park();
     let mut flash_storage = flash_storage;
     // From here every flash read — the code cache, the table, the mount, the

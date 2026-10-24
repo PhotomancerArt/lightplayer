@@ -4391,6 +4391,10 @@ test-emu-esp32s3-boot:
       # The S3's gates that need a link host since wire proto 30 (lp-cli's:
       # a link host is a product crate, which the lp-emu fence keeps out).
       cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      # Core 1, the render helper (`two-core`): released, woken, halted
+      # cleanly on a stall, a fault or an allocation; every flash writer
+      # stalls it (the flash-busy model).
+      cargo test -p lp-cli --release --test emu_s3_core1_gates -- --include-ignored --nocapture || status=$?
       # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
       cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
       exit "$status"
@@ -4433,6 +4437,10 @@ test-emu-esp32s3-boot:
     # The S3's gates that need a link host since wire proto 30 (lp-cli's:
     # a link host is a product crate, which the lp-emu fence keeps out).
     cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    # Core 1, the render helper (`two-core`): released, woken, halted
+    # cleanly on a stall, a fault or an allocation; every flash writer
+    # stalls it (the flash-busy model).
+    cargo test -p lp-cli --release --test emu_s3_core1_gates -- --include-ignored --nocapture || status=$?
     # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
     cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
     exit "$status"
