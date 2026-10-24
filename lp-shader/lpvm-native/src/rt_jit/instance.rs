@@ -41,6 +41,9 @@ pub struct NativeJitInstance {
     pub(crate) globals_size: u32,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
+    /// The helper core's own vmctx ([`crate::helper_core`]): allocated on the
+    /// first split call, on the calling core, and freed with the instance.
+    pub(crate) helper_vmctx: Option<u32>,
 }
 
 /// The vmctx buffer is the instance's: `instantiate` allocates it and
@@ -56,6 +59,10 @@ impl Drop for NativeJitInstance {
             // SAFETY: `instantiate` allocated exactly this layout at this
             // address, and the instance is not `Clone`, so this is the one free.
             unsafe { alloc::alloc::dealloc(self.vmctx_guest as usize as *mut u8, layout) };
+            if let Some(helper) = self.helper_vmctx.take() {
+                // SAFETY: `split_render_samples` allocated it with this layout.
+                unsafe { alloc::alloc::dealloc(helper as usize as *mut u8, layout) };
+            }
         }
     }
 }
@@ -64,6 +71,101 @@ impl Drop for NativeJitInstance {
 pub(crate) const VMCTX_ALIGN: usize = 16;
 
 impl NativeJitInstance {
+    /// A render-samples call on two cores ([`crate::helper_core`]): the upper
+    /// half on the helper against a copy of this instance's armed vmctx, the
+    /// lower half here, then both trap words. A helper that does not take or
+    /// finish its half leaves it to this core.
+    fn split_render_samples(
+        &mut self,
+        helper: crate::helper_core::HelperCore,
+        entry: usize,
+        points: i32,
+        out: i32,
+        count: u32,
+    ) -> Result<(), NativeError> {
+        use crate::helper_core::HelperJob;
+        let size = self.module.vmctx_alloc_size();
+        let helper_vmctx = match self.helper_vmctx {
+            Some(v) => v,
+            None => {
+                let layout =
+                    core::alloc::Layout::from_size_align(size, VMCTX_ALIGN).map_err(|_| {
+                        NativeError::Call(CallError::Unsupported("helper vmctx layout".into()))
+                    })?;
+                // SAFETY: non-zero size (at least VMCTX_ALIGN).
+                let p = unsafe { alloc::alloc::alloc(layout) };
+                if p.is_null() {
+                    return Err(NativeError::Call(CallError::Unsupported(
+                        "helper vmctx alloc".into(),
+                    )));
+                }
+                self.helper_vmctx = Some(p as usize as u32);
+                p as usize as u32
+            }
+        };
+        // SAFETY: both allocations are `size` bytes, distinct; the uniforms
+        // were bound, the globals reset and the fuel header armed on the
+        // instance's vmctx just before.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.vmctx_guest as usize as *const u8,
+                helper_vmctx as usize as *mut u8,
+                size,
+            );
+        }
+        let low = count / 2;
+        let job = HelperJob {
+            entry,
+            vmctx: helper_vmctx as i32,
+            points: points.wrapping_add((low * self.points_stride()) as i32),
+            out: out.wrapping_add((low * SAMPLE_BYTES) as i32),
+            count: (count - low) as i32,
+        };
+        let started = (helper.start)(&job);
+        let mine = HelperJob {
+            entry,
+            vmctx: self.vmctx_guest as i32,
+            points,
+            out,
+            count: low as i32,
+        };
+        // SAFETY: the instance's own entry, armed vmctx and buffers.
+        unsafe { call_render_samples_raw(&mine) };
+        if !(started && (helper.join)()) {
+            // SAFETY: as above; the helper is not running this job.
+            unsafe { call_render_samples_raw(&job) };
+        }
+        self.take_trap()?;
+        // The helper half's trap word, numbered in the whole batch.
+        let base = helper_vmctx as usize as *const u8;
+        // SAFETY: inside the helper's `size`-byte vmctx.
+        let (trap, invocation) = unsafe {
+            (
+                (base.add(VMCTX_OFFSET_TRAP) as *const u32).read_volatile(),
+                (base.add(VMCTX_OFFSET_FUEL + 4) as *const u32).read_volatile(),
+            )
+        };
+        if trap != TRAP_CODE_NONE {
+            return Err(NativeError::Trap {
+                code: trap,
+                invocation: invocation.wrapping_add(low),
+            });
+        }
+        Ok(())
+    }
+
+    /// Bytes per packed point: 4 for a 1D shader's `[t]`, 8 for 2D's `[x, y]`.
+    fn points_stride(&self) -> u32 {
+        let one_d = self
+            .module
+            .inner
+            .meta
+            .functions
+            .iter()
+            .any(|f| f.name == "render_1d");
+        if one_d { 4 } else { 8 }
+    }
+
     /// Initialize globals by calling `__shader_init` if it exists,
     /// then memcpy globals -> snapshot to capture the initialized state.
     pub fn init_globals(&mut self) -> Result<(), NativeError> {
@@ -699,6 +801,10 @@ impl LpvmInstance for NativeJitInstance {
 
         self.arm_fuel_header();
 
+        if let Some(helper) = crate::helper_core::helper_for(count) {
+            return self.split_render_samples(helper, entry, points_offset, out_offset, count);
+        }
+
         // See `call_render_texture` for why there is no arch cfg here.
         unsafe {
             jit_entry_call(
@@ -778,5 +884,23 @@ impl LpvmInstance for NativeJitInstance {
             .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{name}: {e}"))))?;
         self.invoke_flat(name, &[])?;
         Ok(())
+    }
+}
+
+/// Bytes per output sample: four unorm16 channels (RGBA16).
+const SAMPLE_BYTES: u32 = 8;
+
+/// One render-samples entry call, as either core makes it
+/// ([`crate::helper_core`]). The vmctx's fuel header must be armed.
+///
+/// # Safety
+///
+/// `job` names a live JIT entry, an armed vmctx of its module and valid
+/// buffers.
+pub(crate) unsafe fn call_render_samples_raw(job: &crate::helper_core::HelperJob) {
+    unsafe {
+        jit_entry_call(
+            job.entry, job.vmctx, job.points, job.out, job.count, 0, 0, 0, 0,
+        );
     }
 }
