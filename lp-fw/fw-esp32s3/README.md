@@ -406,6 +406,8 @@ moves the engine's start a page.
 | 2026-10-22 (`ccfa116b0`) | Bluetooth on by default — **and a core swollen with engine code** (below) | 1,325,216 | 1,463,385 | 2,908,160 | 3,386,279 | — | — |
 | 2026-10-22 (#1256) | `lp-fw-split` decodes the blobs' branch targets | 646,176 | 2,141,633 | 2,863,104 | 3,428,927 | — | 9,184 |
 | 2026-10-23 (`06ea6b68a`) | the update board side (core-only, the session, the SHA, the light) | 717,680 | 2,131,413 | 2,920,448 | 3,373,611 | 4,784,128 | 3,216 |
+| 2026-10-24 (`1973c140c` + #1286) | before the IRAM hot set: Bluetooth, PSRAM, ESP-NOW, LCD_CAM by default | 1,042,336 | 2,126,801 | 3,244,032 | 3,050,543 | 4,128,768 | 6,240 |
+| 2026-10-24 (#1286) | the IRAM hot set: ~40 KB of engine code rides in the core's RAM segment (below) | 1,080,960 | 2,088,945 | 3,268,608 | 3,022,863 | 3,997,696 | 33,152 |
 
 The monolithic image at `06ea6b68a` is 2,788,640 B. The split costs 60,453 B
 of code: the door, and literals no longer shared across the two regions.
@@ -419,6 +421,11 @@ those pools pulled `lpc_engine`, `lpc_model` and `lpc_wire` into the core.
 branch's target from the instruction (#1256; its README's Xtensa list,
 item 5). If a core grows by hundreds of KB, ask `why` before blaming the
 code.
+
+**The IRAM hot set in the core.** Since #1286 the core carries ~38 KB of
+engine code in its RAM segment: the hot set's engine functions, which
+`lp-fw-split` keeps engine by reachability (they are not roots), linked into
+`.rwtext`. See [The IRAM hot set](#the-iram-hot-set) below.
 
 ### Release profile
 
@@ -543,6 +550,22 @@ line is zeros because the S3 JITs out of the heap through SRAM1's I-bus alias
 rather than out of a reserved code region — so that residency is already
 inside `[MEM]`'s `used`. See `esp32_memory_stats` in `src/main.rs` and
 `src/stack_probe.rs`.
+
+## The IRAM hot set
+
+The ~40 KB of flash functions core 0 spends its frame in (the engine's
+per-lane graph walk, the allocator, the hottest builtins) are linked into
+`.rwtext`, internal SRAM, instead of streaming through the 32 KB instruction
+cache from flash. On FS3 that took 620 / 1,488 / 2,048 LEDs from 32.0 / 14.6 /
+11.1 to 41.2 / 20.6 / 15.8 fps (2026-10-24). The list (`rwtext_hook.x`) is
+generated from a committed silicon profile (`hot_iram/profile.tsv`) and
+checked by `just s3-hot-iram-check` in `just fw-esp32s3-size-check`; how it
+is measured and kept current is [`hot_iram/README.md`](hot_iram/README.md),
+the decision `docs/adr/2026-10-24-s3-hot-code-in-iram.md`.
+
+It costs the arena 43 KiB (`HOT_IRAM_BYTES`): internal free at boot went from
+187,580 to 143,548 B on FS3, the tagged arena is 92,160 B, and the largest
+free block is `dram2_seg`'s 73,744 B. Rust's own allocations are in PSRAM.
 
 ## The radio: Bluetooth, ESP-NOW and Wi-Fi (features `ble`, `espnow`, `wifi`)
 

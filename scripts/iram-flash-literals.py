@@ -118,7 +118,7 @@ def hot_patterns(hook: Path | None) -> list[str]:
     """The function-symbol globs of a `rwtext_hook.x` (the S3's IRAM hot set)."""
     if hook is None:
         return []
-    return re.findall(r"\.text\.(\S+?)\)", hook.read_text())
+    return re.findall(r"\*\(\.literal\.(\S+) ", hook.read_text())
 
 
 def flash_literals_per_function(
