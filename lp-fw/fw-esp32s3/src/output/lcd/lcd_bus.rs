@@ -105,6 +105,9 @@ pub struct LcdBus {
     /// The CAM-half frame check (`ws281x_frame_check`, never shipped).
     #[cfg(feature = "ws281x_frame_check")]
     pub check: Option<super::frame_check::FrameCheck>,
+    /// The pad probe (`ws281x_pad_probe`, never shipped).
+    #[cfg(feature = "ws281x_pad_probe")]
+    pub probe: super::pad_probe::PadProbe,
     #[cfg(feature = "ws281x_overlap_ab")]
     ab: OverlapAb,
 }
@@ -174,6 +177,8 @@ impl LcdBus {
             stats: BusStats::default(),
             #[cfg(feature = "ws281x_frame_check")]
             check: None,
+            #[cfg(feature = "ws281x_pad_probe")]
+            probe: super::pad_probe::PadProbe::new(),
             #[cfg(feature = "ws281x_overlap_ab")]
             ab: OverlapAb {
                 overlap: false,
@@ -361,6 +366,8 @@ impl LcdBus {
             bytes,
             descriptors,
         } = frame;
+        #[cfg(feature = "ws281x_pad_probe")]
+        self.probe.before_frame();
         #[cfg(feature = "ws281x_frame_check")]
         let sent = {
             if let Some(check) = self.check.as_mut() {

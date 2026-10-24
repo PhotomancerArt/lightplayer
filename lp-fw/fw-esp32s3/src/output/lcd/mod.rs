@@ -16,6 +16,8 @@ mod esp32s3_lcd_ws281x_driver;
 #[cfg(feature = "ws281x_frame_check")]
 mod frame_check;
 mod lcd_bus;
+#[cfg(feature = "ws281x_pad_probe")]
+mod pad_probe;
 
 pub use esp32s3_lcd_ws281x_driver::Esp32S3LcdWs281xDriver;
 pub use lcd_bus::BUS_HZ;
