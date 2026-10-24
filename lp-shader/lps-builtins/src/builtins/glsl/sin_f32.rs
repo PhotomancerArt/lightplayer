@@ -1,9 +1,11 @@
 //! Native f32 `sin` — the f32 sibling of [`super::sin_q32`].
 //!
-//! **Implementation:** `libm::sinf`. `libm` is a `no_std` workspace
-//! dependency and is the same code the `interp.f32` conformance oracle reaches
-//! through `StdMathHandler`, so the builtin and the oracle agree by
-//! construction rather than by tuning.
+//! **Implementation:** [`crate::f32_math::sincos`], single precision
+//! throughout, so the LX7's FPU runs it. `libm::sinf` (what this was, and what
+//! the `interp.f32` conformance oracle still reaches through
+//! `StdMathHandler`) computes its kernel in `f64`, which on the ESP32-S3 is
+//! software: the fps spike measured Float mode 4.9× slower than Q32 for it.
+//! The two agree within the band below, not bit for bit.
 //!
 //! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor, against the f64 reference. That is f32 round-off, not a
@@ -16,12 +18,13 @@
 //! `inversesqrt` is the real case — it is spelled out in that file with its own
 //! band. Speed-over-ulp (roadmap D6) is a licence, not an obligation.
 //!
-//! **Domain:** All finite inputs. Large arguments are range-reduced by `libm`.
+//! **Domain:** All finite inputs. Arguments past 100 000 are range-reduced by
+//! `libm`.
 
 /// GLSL `sin(x)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_sin_f32(x: f32) -> f32 {
-    libm::sinf(x)
+    crate::f32_math::sincos(x).0
 }
 
 #[cfg(test)]
