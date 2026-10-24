@@ -71,6 +71,9 @@ pub fn init_board() -> (
     // after the filesystem mounts (`crate::radio_peripherals`).
     #[cfg(all(s3_radio, not(fw_harness)))]
     crate::radio_peripherals::stash(peripherals.WIFI, peripherals.BT);
+    // Core 1's control, kept until `core_boot` starts the render helper.
+    #[cfg(s3_two_core)]
+    crate::core1::stash(peripherals.CPU_CTRL);
     // Core 1's control, kept until `core_boot` starts the PC sampler on it.
     #[cfg(all(feature = "pc-sampler", not(fw_harness)))]
     crate::pc_sampler::stash(peripherals.CPU_CTRL);

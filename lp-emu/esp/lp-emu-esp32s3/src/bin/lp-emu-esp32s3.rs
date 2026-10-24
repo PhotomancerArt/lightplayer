@@ -121,6 +121,9 @@ OPTIONS:
                             direct load and the ROM-up boot touch is
                             modelled through P06; a strict run of the shipped
                             image reaches the server loop with unmapped=0
+    --flash-busy            the flash-busy model: WIP held for each program's
+                            and erase's busy time, and a window access by
+                            either core meanwhile stops the run (exit 9)
     --no-block-cache        do not pre-decode blocks of instructions. Slower,
                             and otherwise identical in every byte, count and
                             frame: the identity oracle a speed change is
@@ -269,6 +272,8 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held as
     /// its negative.
     no_block_cache: bool,
+    /// `--flash-busy`: the flash-busy model ([`Esp32S3Builder::flash_busy`]).
+    flash_busy: bool,
     core_quantum: Option<u64>,
     cpenable_reset: Option<u32>,
     time_grade: TimeGrade,
@@ -340,6 +345,7 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .block_cache(!args.no_block_cache)
+        .flash_busy(args.flash_busy)
         .boot_mode(args.boot_mode)
         .cache_off_fetch(args.cache_off)
         .uart0(args.uart0.clone())
@@ -915,6 +921,20 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         } => {
             println!("{}", machine.cache_off_message(*cycle, *pc, access));
         }
+        Outcome::FlashBusyFetch {
+            core,
+            pc,
+            addr,
+            fetch,
+            busy_until,
+            cycle,
+            ..
+        } => {
+            println!(
+                "{}",
+                machine.flash_busy_message(*cycle, *core, *pc, *addr, *fetch, *busy_until)
+            );
+        }
         Outcome::PowerCut { report, .. } => {
             println!("POWER CUT cycle={cycle} ({micros} us emulated): {report}");
         }
@@ -1012,6 +1032,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
+            "--flash-busy" => args.flash_busy = true,
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
             "--boot-mode" => {

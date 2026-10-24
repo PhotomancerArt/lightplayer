@@ -82,7 +82,16 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_WIFI").is_some() && !probe {
         println!("cargo::rustc-cfg=s3_wifi");
     }
+    // Core 1 as the render helper (`two-core`, a default): not in a
+    // `pc-sampler` image, whose sampler is core 1, and not in a harness.
+    println!("cargo::rustc-check-cfg=cfg(s3_two_core)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
+    if std::env::var_os("CARGO_FEATURE_TWO_CORE").is_some()
+        && std::env::var_os("CARGO_FEATURE_PC_SAMPLER").is_none()
+        && !harness
+    {
+        println!("cargo::rustc-cfg=s3_two_core");
+    }
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }

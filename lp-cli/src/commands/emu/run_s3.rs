@@ -102,7 +102,8 @@ pub(super) fn run_s3(args: &RunArgs, seams: SeamRequest, micros: u64) -> Result<
     let mut builder = Esp32S3Builder::new()
         .time_grade(TimeGrade::T1)
         .strict(args.strict_bus)
-        .block_cache(!args.no_block_cache);
+        .block_cache(!args.no_block_cache)
+        .flash_busy(args.flash_busy);
     match (
         args.elf.as_deref(),
         args.merged.as_deref(),
@@ -300,6 +301,18 @@ fn run_socket(
     );
     match outcome {
         Outcome::Deadline { .. } | Outcome::ExitMatched { .. } => Ok(()),
+        Outcome::FlashBusyFetch {
+            cycle,
+            core,
+            pc,
+            addr,
+            fetch,
+            busy_until,
+            ..
+        } => bail!(
+            "{}",
+            machine.flash_busy_message(cycle, core, pc, addr, fetch, busy_until)
+        ),
         other => bail!("the run ended at {other:?}"),
     }
 }

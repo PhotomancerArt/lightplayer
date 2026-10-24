@@ -374,6 +374,13 @@ pub struct RunArgs {
     #[arg(long = "no-block-cache")]
     pub no_block_cache: bool,
 
+    /// The flash-busy model (`--chip esp32s3` only): SPI1 holds WIP for each
+    /// program's and erase's busy time, and an access through the flash or
+    /// PSRAM windows by either core while it does stops the run (exit 9).
+    /// What a two-core image's flash writers are held to. Off by default.
+    #[arg(long = "flash-busy")]
+    pub flash_busy: bool,
+
     /// The board's eFuse MAC, `a0:f2:62:87:b4:8c`. Defaults to the desk
     /// board's, which is what every transcript was captured against.
     #[arg(long = "efuse-mac")]

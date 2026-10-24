@@ -131,6 +131,8 @@ impl LpvmModule for NativeJitModule {
             globals_size,
             render_texture_cache: None,
             render_samples_cache: None,
+            #[cfg(feature = "helper-core")]
+            helper_vmctx: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot

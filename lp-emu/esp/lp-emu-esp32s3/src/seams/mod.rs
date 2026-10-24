@@ -22,7 +22,8 @@
 //!   S3 keeps its software interrupts in `SYSTEM`, not in an `INTPRI` as the
 //!   C6 does ([`seam_wake`]).
 //! - **Two cores.** A seam is answered on whichever core reached it; the
-//!   sites are the machine's, shared by both. Core 1 is held today.
+//!   sites are the machine's, shared by both. Core 1 runs render jobs
+//!   since `two-core`, and no seam sits on its path.
 //! - **No park.** No S3 image declares `led=fast`'s seam
 //!   (`ws281x_wait_step`), so it cannot engage here; were one to, its answer
 //!   is a plain return ([`seam_answer`]).
