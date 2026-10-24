@@ -9,6 +9,11 @@
 //!   `lab-mapping-radiance-gen`, placeholder counts): 55 panel shapes × 5,
 //!   22,000 lamps, 10 outputs × 32 ports, patched by hand.
 //!
+//! - Sean's eaves (`lab/mapping/projects/eaves`): two runs turning their
+//!   corners on jumpers, auto-flowing across D10 and D9; its piece is
+//!   wired as `eaves-wired` says (the house: the front run reversed on
+//!   D10, the side run on D9), for the hand-patching walk.
+//!
 //! Only what the lab reads is baked in: the JSON, and each shader's GLSL,
 //! which the inspector shows (the lab never runs it).
 
@@ -19,6 +24,9 @@ pub struct Embedded {
     pub key: &'static str,
     pub title: &'static str,
     files: &'static [(&'static str, &'static str)],
+    /// Another project whose patch wires the piece (the install as it
+    /// really is), when it isn't this one's own as it opens.
+    pub wired_as: Option<&'static Embedded>,
 }
 
 impl Embedded {
@@ -39,6 +47,7 @@ pub const CHOKER: Embedded = Embedded {
     files: files!("../../../../catalog/projects/playful-choker":
         "project.json", "module.json", "clock.json", "fixture.json", "output.json",
         "power.json", "shader.json", "shader.glsl", "playful.map2d.json"),
+    wired_as: None,
 };
 
 pub const ZOOK_DOME: Embedded = Embedded {
@@ -47,6 +56,7 @@ pub const ZOOK_DOME: Embedded = Embedded {
     files: files!("../../../../catalog/projects/zook-dome":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "shader.json", "shader.glsl"),
+    wired_as: None,
 };
 
 pub const RADIANCE_DOME: Embedded = Embedded {
@@ -57,7 +67,28 @@ pub const RADIANCE_DOME: Embedded = Embedded {
         "dome.map2d.json", "dome.patch.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),
+    wired_as: None,
+};
+
+pub const EAVES: Embedded = Embedded {
+    key: "eaves",
+    title: "Sean's eaves",
+    files: files!("../../projects/eaves":
+        "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
+        "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
+    wired_as: Some(&EAVES_WIRED),
+};
+
+/// The eaves as the house is wired: the piece for [`EAVES`].
+pub const EAVES_WIRED: Embedded = Embedded {
+    key: "eaves-wired",
+    title: "Sean's eaves, as wired",
+    files: files!("../../projects/eaves-wired":
+        "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
+        "fixture.patch.json", "output.json", "effect/module.json", "effect/shader.json",
+        "effect/shader.glsl"),
+    wired_as: None,
 };
 
 /// Every baked-in project, in the picker's order.
-pub const ALL: [&Embedded; 3] = [&CHOKER, &ZOOK_DOME, &RADIANCE_DOME];
+pub const ALL: [&Embedded; 4] = [&CHOKER, &ZOOK_DOME, &RADIANCE_DOME, &EAVES];

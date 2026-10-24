@@ -33,8 +33,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId, PatchRule,
-    Project, Vec2,
+    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId,
+    PatchTarget, Project, Vec2, Wire,
 };
 use serde_json::{Map, Value, json};
 
@@ -158,13 +158,8 @@ impl<'a> Writer<'a> {
                 || "control.out".to_string(),
                 |f| crate::channels::fixture_writes(&f.value),
             );
-            let auto = n.fixture().and_then(|f| {
-                f.rules.iter().find_map(|r| match r {
-                    PatchRule::Auto { output } if p.output(output).is_some() => Some(output),
-                    _ => None,
-                })
-            });
-            let channel = match auto {
+            let auto = p.auto_output(&n.id).filter(|o| p.output(o).is_some());
+            let channel = match auto.as_ref() {
                 None => carried,
                 Some(x) if self.default_output(&n.id, &carried).as_ref() == Some(x) => carried,
                 Some(x) => {
@@ -218,10 +213,8 @@ impl<'a> Writer<'a> {
         for n in p.fixtures() {
             let channel = self.channels.get(&n.id).cloned().unwrap_or_default();
             let default = self.default_output(&n.id, &channel);
-            for r in n.fixture().map(|f| f.rules.as_slice()).unwrap_or_default() {
-                let PatchRule::Place { output, .. } = r else {
-                    continue;
-                };
+            let (rows, _) = patch_rows(p, n);
+            for Row { output, .. } in &rows {
                 if self.labels.contains_key(output) || Some(output) == default.as_ref() {
                     continue;
                 }
@@ -419,48 +412,46 @@ impl<'a> Writer<'a> {
             let same = s == start && count.map_or(s + c == total, |want| want == c);
             same.then_some(PatchSource::Range(start, count))
         };
-        for r in &fx.rules {
-            match r {
-                PatchRule::Auto { output } => auto |= p.output(output).is_some(),
-                PatchRule::Place {
-                    object,
-                    output,
-                    port,
-                    pixel,
-                    reversed,
-                    rotation,
-                } => {
-                    let (Some(out), Some(c)) = (p.output(output), p.component(&object.component))
-                    else {
+        let _ = fx;
+        let (rows, flows) = patch_rows(p, n);
+        auto |= flows;
+        for Row {
+            object,
+            output,
+            port,
+            pixel,
+            reversed,
+            rotation,
+        } in rows
+        {
+            let (Some(out), Some(c)) = (p.output(&output), p.component(&object.component)) else {
+                continue;
+            };
+            let Some(start) = out.port_start(&port) else {
+                continue;
+            };
+            let source = match read_as_range(&object) {
+                Some(range) => range,
+                None => {
+                    let Some(path) = self.object_path(&n.id, c, &object.key) else {
                         continue;
                     };
-                    let Some(start) = out.port_start(port) else {
-                        continue;
-                    };
-                    let source = match read_as_range(object) {
-                        Some(range) => range,
-                        None => {
-                            let Some(path) = self.object_path(&n.id, c, &object.key) else {
-                                continue;
-                            };
-                            addressed.insert(c.id.clone());
-                            PatchSource::Path { path, range: None }
-                        }
-                    };
-                    let output_name = match self.labels.get(output) {
-                        Some(l) => Some(l.clone()),
-                        None if Some(output) == default.as_ref() => None,
-                        None => Some(p.node_name(output)),
-                    };
-                    entries.push(PatchEntry {
-                        source,
-                        output: output_name,
-                        lamp: start + pixel,
-                        reversed: *reversed,
-                        offset: *rotation,
-                    });
+                    addressed.insert(c.id.clone());
+                    PatchSource::Path { path, range: None }
                 }
-            }
+            };
+            let output_name = match self.labels.get(&output) {
+                Some(l) => Some(l.clone()),
+                None if Some(&output) == default.as_ref() => None,
+                None => Some(p.node_name(&output)),
+            };
+            entries.push(PatchEntry {
+                source,
+                output: output_name,
+                lamp: start + pixel,
+                reversed,
+                offset: rotation,
+            });
         }
         let doc = PatchDoc {
             manual: !auto,
@@ -702,4 +693,91 @@ fn insert_after(obj: &mut Map<String, Value>, key: &str, value: Value, after: &s
     let mut entries = entries;
     entries.insert(at, (key.to_string(), value));
     obj.extend(entries);
+}
+
+/// One patch row: an object at its address.
+struct Row {
+    object: ObjectId,
+    output: NodeId,
+    port: String,
+    pixel: u32,
+    reversed: bool,
+    rotation: u32,
+}
+
+/// A fixture's patch rows, and whether its file says `flow: auto`.
+///
+/// Placements the rows can say — the fixture's own wire (auto, or unset
+/// for manual) and objects at an address of their own, reversed or turned
+/// — are written as they are. Anything else (a component placed, an
+/// object reversed or turned while it follows, an object taken off the
+/// wire under auto) can't be said in today's rows (plan D14: patch
+/// format 4), so the fixture is written expanded: every object that lands
+/// at the address its placements give it, and auto kept only while every
+/// object lands (else auto would put back what is meant to be dark).
+fn patch_rows(p: &Project, n: &Node) -> (Vec<Row>, bool) {
+    let Some(fx) = n.fixture() else {
+        return (Vec::new(), false);
+    };
+    let auto = p.auto_output(&n.id).is_some_and(|o| p.output(&o).is_some());
+    let sayable = fx.places.iter().all(|pl| match &pl.on {
+        PatchTarget::Fixture => {
+            pl.direction.is_none() && matches!(pl.wire, None | Some(Wire::Auto { .. }))
+        }
+        PatchTarget::Object(_) => matches!(pl.wire, Some(Wire::At { .. })),
+        PatchTarget::Component(_) => false,
+    });
+    if sayable {
+        let rows = fx
+            .places
+            .iter()
+            .filter_map(|pl| {
+                let (
+                    PatchTarget::Object(object),
+                    Some(Wire::At {
+                        output,
+                        port,
+                        pixel,
+                    }),
+                ) = (&pl.on, &pl.wire)
+                else {
+                    return None;
+                };
+                let n = p.object(object).map_or(1, |o| o.lamps.len() as u32).max(1);
+                Some(Row {
+                    object: object.clone(),
+                    output: output.clone(),
+                    port: port.clone(),
+                    pixel: *pixel,
+                    reversed: pl.direction.is_some_and(|d| d.is_reversed()),
+                    rotation: pl.turn.unwrap_or(0) % n,
+                })
+            })
+            .collect();
+        return (rows, auto);
+    }
+    let patch = p.effective_patch();
+    let mut rows = Vec::new();
+    for r in patch.runs.iter().filter(|r| r.fixture == n.id) {
+        let Some(out) = p.output(&r.output) else {
+            continue;
+        };
+        let Some((i, pixel)) = out.port_at(r.wire) else {
+            continue;
+        };
+        rows.push(Row {
+            object: r.object.clone(),
+            output: r.output.clone(),
+            port: out.ports[i].key.clone(),
+            pixel,
+            reversed: r.reversed,
+            rotation: r.rotation,
+        });
+    }
+    let all_land = p
+        .objects_in(&n.id)
+        .iter()
+        .filter(|o| !o.lamps.is_empty())
+        .all(|o| rows.iter().any(|r| r.object == o.id));
+    (rows, auto && all_land)
 }

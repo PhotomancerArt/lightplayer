@@ -146,7 +146,7 @@ impl Shown {
 /// render source or a card the lab doesn't simulate.
 fn is_fixture_side(p: &Project, t: &Target) -> bool {
     match t {
-        Target::Port { .. } | Target::Pixel { .. } => false,
+        Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => false,
         Target::Node(id) => matches!(
             p.node(id).map(|n| &n.kind),
             Some(NodeKind::Fixture(_) | NodeKind::Module { .. })

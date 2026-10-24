@@ -35,7 +35,10 @@ impl Project {
         patch: &crate::EffectivePatch,
         rows: &mut Vec<TreeRow>,
     ) {
-        if matches!(t, Target::Lamp { .. } | Target::Pixel { .. }) {
+        if matches!(
+            t,
+            Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. }
+        ) {
             return;
         }
         let lamps = self.lamp_count_under(t);
@@ -82,7 +85,7 @@ impl Project {
                 };
                 format!("{lamps} lamps{dir}")
             }
-            Target::Lamp { .. } | Target::Pixel { .. } => String::new(),
+            Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => String::new(),
         };
         rows.push(TreeRow {
             target: t.clone(),

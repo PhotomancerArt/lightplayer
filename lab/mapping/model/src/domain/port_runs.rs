@@ -30,7 +30,7 @@ impl Project {
         let count = self.port_pixels(output, key);
         let mut spans: Vec<(u32, u32, ObjectId)> = self
             .effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .filter(|s| &s.output == output && s.port == key)
             .map(|s| {

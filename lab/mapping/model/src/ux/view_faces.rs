@@ -8,10 +8,14 @@ use crate::domain::geom::{Vec2, along_polyline, polyline_length};
 use crate::domain::node::{Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::placement::Frame;
+use crate::domain::port_runs::PortRun;
+use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::card_geometry::{CARD_WIDTH, card_row};
 use crate::ux::editor::{Editor, Tool};
+use crate::ux::patching::PairEnd;
 use crate::ux::pixel_grid::PixelGrid;
+use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::{
     Emphasis, FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace,
     UiPortRow, UiRun, UiShape, UiSourceFace, UiWire,
@@ -93,6 +97,7 @@ impl Editor {
                 ui
             })
             .collect();
+        let pitch = lamp_pitch(p, id);
         let not_shown = p.fixture(id).and_then(|f| f.unsupported.as_ref()).map(|u| {
             format!(
                 "The Graph can't show {} yet. Edit it in {}.",
@@ -111,6 +116,7 @@ impl Editor {
                 samples: None,
                 render_size: None,
                 not_shown,
+                pitch,
             };
         }
         let dp = p.data_path(id);
@@ -134,6 +140,35 @@ impl Editor {
             samples: p.visual_source(id),
             render_size: p.fixture(id).and_then(|f| f.render_size),
             not_shown,
+            pitch,
+        }
+    }
+
+    /// A port's runs as the card groups them (`port_grouping.rs`).
+    fn grouped_runs(&self, id: &NodeId, key: &str, size: u32) -> Vec<PortRun> {
+        let runs = self.project.port_runs(id, key);
+        match self.grouping {
+            PortGrouping::Objects => runs,
+            PortGrouping::Pixels => runs.into_iter().filter(|r| r.object.is_some()).collect(),
+            PortGrouping::Groups => runs
+                .into_iter()
+                .flat_map(|r| match r.object {
+                    Some(_) => vec![r],
+                    None => {
+                        let mut out = Vec::new();
+                        let mut at = r.pixels.start;
+                        while at < r.pixels.end {
+                            let end = (at + size.max(1)).min(r.pixels.end);
+                            out.push(PortRun {
+                                pixels: at..end,
+                                object: None,
+                            });
+                            at = end;
+                        }
+                        out
+                    }
+                })
+                .collect(),
         }
     }
 
@@ -159,13 +194,17 @@ impl Editor {
         let marked = &cx.marked;
         // The rows span the card as wide as it was placed.
         let width = p.node_rect(id).map_or(CARD_WIDTH, |r| r.width());
+        // While a patch is armed, the candidate in focus is lit (an object)
+        // or ringed (a free segment), as a hover would be.
+        let candidate = self.focused_candidate();
+        let size = self.segment_size();
         let ports = output
             .ports
             .iter()
             .enumerate()
             .filter_map(|(i, port)| {
                 let row = card_row(i, width);
-                let port_runs = p.port_runs(id, &port.key);
+                let port_runs = self.grouped_runs(id, &port.key, size);
                 let pixels = p.port_pixels(id, &port.key);
                 let starts = port_runs.iter().skip(1).map(|r| r.pixels.start).collect();
                 let grid = PixelGrid::in_row(row, pixels, starts);
@@ -175,6 +214,16 @@ impl Editor {
                         rects: grid.run_outline(run.pixels.clone()),
                         emphasis: match &run.object {
                             Some(o) if lit_by(o) => Emphasis::Lit,
+                            Some(o)
+                                if self.selection.iter().any(
+                                    |t| matches!(t, Target::Span { object: Some(x), .. } if x == o),
+                                ) =>
+                            {
+                                Emphasis::Lit
+                            }
+                            Some(o) if candidate == Some(PairEnd::Object(o.clone())) => {
+                                Emphasis::Lit
+                            }
                             Some(_) => Emphasis::Full,
                             None => Emphasis::Quiet,
                         },
@@ -184,6 +233,52 @@ impl Editor {
                     output: id.clone(),
                     key: port.key.clone(),
                 };
+                let mut overlaps = Vec::new();
+                let mut shared = 0;
+                for x in patch
+                    .overlaps
+                    .iter()
+                    .filter(|x| &x.output == id && x.port == port.key)
+                {
+                    overlaps.extend(grid.run_outline(x.pixels.clone()));
+                    shared += x.pixels.len();
+                }
+                let mut marked: Vec<u32> = marked
+                    .iter()
+                    .filter_map(|t| match t {
+                        Target::Pixel { output, key, index }
+                            if output == id && *key == port.key =>
+                        {
+                            Some(*index)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                // A selected gap rings its pixels.
+                for t in &self.selection {
+                    if let Target::Span {
+                        output,
+                        key,
+                        object: None,
+                        ..
+                    } = t
+                        && output == id
+                        && *key == port.key
+                        && let Some(gap) = p.span_of(t)
+                    {
+                        marked.extend(gap.pixels.filter(|&px| px < grid.count));
+                    }
+                }
+                if let Some(PairEnd::Segment {
+                    output,
+                    port: key,
+                    pixels,
+                }) = &candidate
+                    && output == id
+                    && *key == port.key
+                {
+                    marked.extend(pixels.clone().filter(|&px| px < grid.count));
+                }
                 Some(UiPortRow {
                     key: port.key.clone(),
                     name: port.name.clone(),
@@ -192,17 +287,9 @@ impl Editor {
                     tinted: tinted.contains(&target),
                     grid,
                     runs,
-                    marked: marked
-                        .iter()
-                        .filter_map(|t| match t {
-                            Target::Pixel { output, key, index }
-                                if output == id && *key == port.key =>
-                            {
-                                Some(*index)
-                            }
-                            _ => None,
-                        })
-                        .collect(),
+                    marked,
+                    overlaps,
+                    overlap: (shared > 0).then(|| format!("overlap {shared}")),
                 })
             })
             .collect();
@@ -272,3 +359,30 @@ pub(crate) fn direction_arrow(shape: &UiShape, lamps: &[Vec2]) -> Option<(Vec2, 
     let len = dir.length();
     (len > 1e-9).then(|| (at, dir * (1.0 / len)))
 }
+
+/// A fixture's usual lamp spacing, in its own units: the median gap
+/// between one lamp and the next along its objects. A fixture with no two
+/// lamps in a row takes the drawing tools' spacing.
+fn lamp_pitch(p: &Project, fixture: &NodeId) -> f64 {
+    let frame = p.frame(fixture);
+    let mut gaps: Vec<f64> = p
+        .objects_in(fixture)
+        .iter()
+        .flat_map(|o| {
+            o.lamps
+                .windows(2)
+                .map(|w| frame.to_local(w[0].pos).distance(frame.to_local(w[1].pos)))
+                .collect::<Vec<_>>()
+        })
+        .filter(|d| *d > 1e-9)
+        .collect();
+    if gaps.is_empty() {
+        return DEFAULT_PITCH;
+    }
+    let mid = gaps.len() / 2;
+    gaps.select_nth_unstable_by(mid, f64::total_cmp);
+    gaps[mid]
+}
+
+/// The drawing tools' lamp spacing (`Editor::spacing`'s default).
+pub const DEFAULT_PITCH: f64 = 2.4;

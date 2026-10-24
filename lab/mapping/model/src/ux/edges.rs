@@ -76,7 +76,7 @@ impl Editor {
             add(&b.from, &b.to, b.channel.to_string());
         }
         // A fixture reaching an output only by place rules still shows.
-        for s in &p.effective_patch().spans {
+        for s in &p.effective_patch().pixel_runs {
             add(&s.fixture, &s.output, String::new());
         }
         let hovered = self.edge_hover_now();
@@ -119,7 +119,7 @@ impl Editor {
         let from_t = Target::Node(from.clone());
         let to_t = Target::Node(to.clone());
         let mut lands_on: Vec<String> = Vec::new();
-        for s in &p.effective_patch().spans {
+        for s in &p.effective_patch().pixel_runs {
             if &s.fixture == from && &s.output == to && !lands_on.contains(&s.port) {
                 lands_on.push(s.port.clone());
             }
@@ -179,7 +179,7 @@ impl Project {
     pub(crate) fn carried(&self, from: &NodeId, to: &NodeId) -> String {
         let mut lamps = 0u32;
         let mut keys: Vec<&str> = Vec::new();
-        for s in &self.effective_patch().spans {
+        for s in &self.effective_patch().pixel_runs {
             if &s.fixture == from && &s.output == to {
                 lamps += s.len();
                 if !keys.contains(&s.port.as_str()) {

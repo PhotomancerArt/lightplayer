@@ -221,9 +221,9 @@ impl Project {
                 // In the order they start on its wire.
                 let start = |f: &NodeId| {
                     patch
-                        .spans
+                        .pixel_runs
                         .iter()
-                        .zip(&wiring.spans)
+                        .zip(&wiring.pixel_runs)
                         .filter(|(s, _)| s.output == n.id && &s.fixture == f)
                         .filter_map(|(_, w)| {
                             let w = w.as_ref()?;
@@ -372,7 +372,7 @@ impl Board<'_> {
         // Where each feeder starts on the wire: (port, pixel).
         let mut starts: HashMap<&NodeId, (usize, u32)> = HashMap::new();
         let patch = self.project.effective_patch();
-        for (s, w) in patch.spans.iter().zip(&wiring.spans) {
+        for (s, w) in patch.pixel_runs.iter().zip(&wiring.pixel_runs) {
             let (Some(w), Some(first_port)) = (w, first_port) else {
                 continue;
             };

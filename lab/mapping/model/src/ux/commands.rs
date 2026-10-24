@@ -89,6 +89,18 @@ impl Editor {
                         rings.push(o.clone());
                     }
                 }
+                // A span is where an object lands, a view of the wire:
+                // there is nothing of its own to delete.
+                Target::Span { object, .. } => {
+                    refused.push((
+                        t.clone(),
+                        "a span is where an object lands on the wire".into(),
+                        match object {
+                            Some(_) => "U puts its object back to following; choose Not on the wire in its Patch section to take it off".into(),
+                            None => "nothing is there to delete".into(),
+                        },
+                    ));
+                }
                 Target::Pixel { output, key, .. } => {
                     let n = f.port_pixels(output, key);
                     let port = t.port_of_pixel().unwrap_or_else(|| t.clone());
@@ -314,6 +326,7 @@ impl Editor {
                 Target::Lamp { .. }
                 | Target::Node(_)
                 | Target::Port { .. }
+                | Target::Span { .. }
                 | Target::Pixel { .. } => {}
             }
         }
@@ -377,7 +390,9 @@ impl crate::Project {
         match t {
             Target::Component(id) => kind_has(id),
             Target::Object(o) | Target::Lamp { object: o, .. } => kind_has(&o.component),
-            Target::Node(_) | Target::Port { .. } | Target::Pixel { .. } => false,
+            Target::Node(_) | Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
+                false
+            }
         }
     }
 }
