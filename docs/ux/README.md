@@ -86,6 +86,20 @@ bad:  XIAO ESP32-S3 Plus (sim) · Simulated · off · Simulated XIAO …   # shi
 bad:  You can edit · anyone can edit                                  # shipped: twice in one row
 ```
 
+Work too: the card's top says it with the one bar and the one number, and
+the row doing it says only its verb, its spinner in the icon's place.
+
+```text
+do:   │ This board is updating its firmware.  ━━━━━━━━━──────  42% │
+      │ ◌ Firmware  v2026.10.08-9                       updating   │
+bad:  │ This board is updating its firmware.  ━━━━━━━━━──────  42% │   # FS3 over Bluefy 10-24: "the update
+      │ ◌ Firmware  v2026.10.08-9                 updating · 42%   │   #   progress is doubled", the row's
+      │ ━━━━━━━━━━━━━━━━━━━━━━━━──────────────────────────────     │   #   own rainbow bar under it
+bad:  │ ▲ Firmware  v2026.10.08-9                       updating   │   # the next round, 10-24: one step too far,
+                                                                   #   "having some indicator on the row that
+                                                                   #   something is happening is nice"
+```
+
 One exception: the primary button may repeat a row's own button (P19).
 
 app: `lpa-studio-core/…/board_card/status_corner.rs`, `primary_action.rs`
@@ -107,6 +121,15 @@ bad:  the card leaves Online boards for Offline boards and comes back, every few
                                               #   "jarring and resets the ui"
 ```
 
+A live number only moves forward: progress that goes back reads as the
+work starting over.
+
+```text
+do:   … 96% · 98% · done
+bad:  … 98% · 50% · done      # FS3 over Bluefy 10-24: the board writes the engine's
+                              #   first chunk last, and its offset read as 0 %
+```
+
 A board's events never reset what someone is doing on its card: open
 details stay open, an armed button stays armed, and the card keeps its
 place.
@@ -126,6 +149,14 @@ do:   ▲ Firmware  v2026.10.08-9   crashing │ Reinstall │    ← red
 bad:  ● 899 fps                       # shipped: the corner, for us
 bad:  Live                            # spike r1: "means nothing to me… that should be the default"
 bad:  Firmware up to date             # spike r1: the version already says it
+```
+
+Motion is loud. A check nobody asked for and nobody can act on stays still.
+
+```text
+do:   ○ Access    —         checking
+bad:  ◌ Access    checking                # FS3 over Bluefy 10-24: spun through the whole update,
+      ━━━━ ⇄                              #   "very motion-y"
 ```
 
 ## P5. details on demand
@@ -213,6 +244,17 @@ bad:  studio                     # shipped: a name alone
 The card's bars share one shape in code (icon · summary · aside · tone ·
 action). Their words had no shared grammar until the anatomy gave them one:
 [board card](anatomy/board-card.md).
+
+One row grammar in every state: the name column is the value (a dash while
+it isn't known), the state column is what is happening. Work never moves a
+word into the name's place or makes the name bold.
+
+```text
+do:   ○ Access    —               checking
+      ◌ Firmware  v2026.10.08-9   updating
+bad:  ◌ Access    **checking**                         # FS3 over Bluefy 10-24: bold, in the name's place…
+      ◌ Firmware  **v2026.10.08-9**   updating · 42%   #   …and light, in the state's: "we should have one model"
+```
 
 The same holds for one control across siblings. Three radio rows that can
 each be turned off turn off the same way, in the same place:

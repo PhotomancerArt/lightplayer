@@ -384,6 +384,21 @@ fn fixture_card(
         liveness: FeedLiveness::Live,
         from_lens: false,
     });
+    // A Bluetooth link mid-update has not settled its access: the board is
+    // busy with the update, so its hello's tier is still being checked
+    // (Yona's S3 over Bluefy, 2026-10-24).
+    let updating = matches!(
+        row,
+        UpdateFixtureRow::Updating
+            | UpdateFixtureRow::Finishing
+            | UpdateFixtureRow::FinishingResumed
+            | UpdateFixtureRow::Restoring
+    );
+    let checking = (link == Link::Bluetooth && updating).then(|| UiDeviceAccess {
+        over_bluetooth: true,
+        waiting: Some(lpa_studio_core::UiAccessWait::Checking),
+        ..UiDeviceAccess::default()
+    });
     // Only the play row tells its access: unlocked with friends, for play.
     let access = (row == UpdateFixtureRow::PlayOnly).then(|| UiDeviceAccess {
         over_bluetooth: true,
@@ -397,6 +412,7 @@ fn fixture_card(
         }),
         waiting: None,
     });
+    let access = access.or(checking);
     rsx! {
         div { class: CARD_FRAME,
             StoryDeviceCard {

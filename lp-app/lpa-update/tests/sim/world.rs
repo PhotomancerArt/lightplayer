@@ -59,6 +59,8 @@ pub struct Outcome {
     pub at_cut: Option<(PieceKind, u32, u32)>,
     /// Times the driver asked for credentials (a core-side login).
     pub logins: u32,
+    /// Every progress the driver reported, in order: stage, done, total.
+    pub progress: Vec<(lpa_update::Stage, u32, u32)>,
 }
 
 /// The world.
@@ -155,6 +157,7 @@ impl World {
                 chunks_served: 0,
                 at_cut: None,
                 logins: 0,
+                progress: Vec::new(),
             },
         }
     }
@@ -185,6 +188,7 @@ impl World {
                 chunks_served: 0,
                 at_cut: None,
                 logins: 0,
+                progress: Vec::new(),
             },
         );
         (out, self)
@@ -338,7 +342,10 @@ impl World {
                         self.driver.login_with(&creds);
                     }
                     DriverEffect::Done(f) => self.out.finish = Some(f),
-                    DriverEffect::Progress { .. } | DriverEffect::Decided(_) => {}
+                    DriverEffect::Progress { stage, done, total } => {
+                        self.out.progress.push((stage, done, total));
+                    }
+                    DriverEffect::Decided(_) => {}
                 }
             }
             self.flush_chunks(&mut chunks);

@@ -137,6 +137,43 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     ));
 }
 
+/// The update's one number only moves forward, from the first percent to
+/// the end, across the reset between its two parts. The engine's first
+/// chunk holds its header, and the board writes it last (a half-written
+/// engine never looks valid): its request is at offset 0, and the card
+/// once read that as the engine starting over — 98 %, then 50 %, then
+/// done (FS3 over Bluefy, 2026-10-24).
+#[test]
+fn an_updates_one_number_only_moves_forward() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    let mut said: Vec<u8> = Vec::new();
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        if let Some(percent) = bench.standing(device).whole_percent()
+            && said.last() != Some(&percent)
+        {
+            said.push(percent);
+        }
+        if bench.outcome(device).is_some() {
+            break;
+        }
+    }
+    bench.assert_runs(&y());
+    assert!(
+        said.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the number went back: {said:?}"
+    );
+    assert!(said.first().is_some_and(|first| *first < 50), "{said:?}");
+    assert!(
+        said.last().is_some_and(|last| *last >= 90),
+        "the last number before done: {said:?}"
+    );
+}
+
 /// The board's resets keep the port open (the link's session resets, as
 /// over the emulator's door): the update host drops what was in flight on
 /// the old session, comes back up when the board speaks on the new one —
@@ -901,10 +938,8 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
         said.iter().any(|words| words.starts_with("backing up")),
         "{said:?}"
     );
-    assert!(
-        said.iter().any(|words| words.starts_with("updating · ")),
-        "{said:?}"
-    );
+    // The surface carries the update's number; the row says its verb.
+    assert!(said.iter().any(|words| words == "updating"), "{said:?}");
     assert!(
         said.iter().all(|words| !words.contains("of 2")),
         "one number, never 1 of 2: {said:?}"

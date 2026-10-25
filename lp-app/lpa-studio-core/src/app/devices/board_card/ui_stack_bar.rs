@@ -23,6 +23,10 @@ use super::ui_detail_panel::UiDetailPanel;
 use super::ui_detail_switch::UiDetailSwitch;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 
+/// A row's name while its value is not known yet: a dash, so the name
+/// column is never empty and work's words stay the state (one grammar, P8).
+pub const NOT_KNOWN_YET: &str = "\u{2014}";
+
 /// One row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiStackBar {
