@@ -5,6 +5,9 @@
       "ref": "./shader.json"
     }
   },
+  "inputs": [
+    "palette"
+  ],
   "provenance": {
     "author": "WLED contributors / Photomancer port",
     "version": "1",

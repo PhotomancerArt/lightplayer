@@ -125,6 +125,52 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
     );
 }
 
+/// A declared input stands in the band (D6): the playing pattern's own
+/// control for it, written at the playlist's level, and gone from the
+/// pattern's own group, which shows it again only while the pattern holds
+/// its own value (D14).
+#[test]
+fn a_declared_input_stands_in_the_band_and_leaves_the_patterns_group() {
+    let session = Session::connect_with(SHARING_PATTERN_MODULE);
+    let panel = root_panel(&session.view);
+    let root = panel.target.expect("the root panel's scope");
+
+    let tail = panel
+        .controls
+        .iter()
+        .find(|control| control.channel == "tail")
+        .unwrap_or_else(|| {
+            panic!(
+                "the band shows the shared tail: {:?}",
+                panel
+                    .controls
+                    .iter()
+                    .map(|c| &c.channel)
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        tail.control
+            .panel_target
+            .as_ref()
+            .map(|target| target.scope),
+        Some(root),
+        "a write lands at the playlist's level, where every pattern inherits it"
+    );
+    assert_eq!(
+        tail.control.label, "Tail",
+        "meta follows the pattern's binding"
+    );
+    assert!(
+        panel
+            .groups
+            .iter()
+            .flat_map(|group| group.controls.iter())
+            .all(|control| control.channel != "tail"),
+        "the pattern's own tail is not shown while it holds no value of its own"
+    );
+}
+
 #[test]
 fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     let mut session = Session::connect();
@@ -311,7 +357,12 @@ fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
 
 impl Session {
     fn connect() -> Self {
-        let server = Rc::new(RefCell::new(pattern_set_e2e_server()));
+        Self::connect_with(PATTERN_MODULE)
+    }
+
+    /// The same set, every pattern module being `pattern_module`.
+    fn connect_with(pattern_module: &'static str) -> Self {
+        let server = Rc::new(RefCell::new(pattern_set_e2e_server(pattern_module)));
         let io = InProcessServerIo {
             server,
             inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -422,6 +473,13 @@ const PATTERN_MODULE: &str = r#"{
   "kind": "Module",
   "nodes": { "shader": { "ref": "./shader.json" } }
 }"#;
+/// The same pattern, declaring its `tail` as an input the piece shares
+/// (playlists-on-the-bus D4).
+const SHARING_PATTERN_MODULE: &str = r#"{
+  "kind": "Module",
+  "nodes": { "shader": { "ref": "./shader.json" } },
+  "inputs": ["tail"]
+}"#;
 const PATTERN_SHADER: &str = r#"{
   "kind": "Shader",
   "source": "shader.glsl",
@@ -444,7 +502,7 @@ const PATTERN_GLSL: &str = "layout(binding = 0) uniform float tail;\n\nvec4 rend
 const BROKEN_GLSL: &str = "layout(binding = 0) uniform float tail;\n\nvec4 render_2d(vec2 pos) {\n    return not_a_function(pos);\n}\n";
 
 /// Four pattern entries; the fourth does not compile. Idle is the first.
-fn pattern_set_e2e_server() -> LpServer {
+fn pattern_set_e2e_server(pattern_module: &'static str) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -515,7 +573,7 @@ fn pattern_set_e2e_server() -> LpServer {
         ("scanner", PATTERN_GLSL),
         ("broken", BROKEN_GLSL),
     ] {
-        files.push((format!("modules/{folder}/module.json"), PATTERN_MODULE));
+        files.push((format!("modules/{folder}/module.json"), pattern_module));
         files.push((format!("modules/{folder}/shader.json"), PATTERN_SHADER));
         files.push((format!("modules/{folder}/shader.glsl"), glsl));
     }

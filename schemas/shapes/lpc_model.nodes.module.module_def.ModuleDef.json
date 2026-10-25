@@ -55,6 +55,26 @@
         }
       },
       {
+        "name": "inputs",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1907811207,
+                  "meta": {},
+                  "ty": {
+                    "list": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "exports",
         "shape": {
           "map": {
