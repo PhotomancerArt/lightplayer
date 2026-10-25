@@ -82,7 +82,7 @@ use alloc::string::String;
 
 use lp_emu_core::arena::ArenaGuard;
 
-use crate::host::{EXCHANGE_FLAGS, Exit, HostOps};
+use crate::host::{Exit, HostOps};
 
 // The JS side of the seam. TWO imports, both called once per translation
 // event, neither on any hot path.
@@ -450,7 +450,12 @@ impl<H: HostOps + 'static> BrowserCore<H> {
         unsafe { *(&raw mut CURRENT) = None };
 
         let flags = {
-            let x = &self.ops.exchange()[EXCHANGE_FLAGS as usize..];
+            // DD111 — the layout's own offset, for `host_wasmtime::enter`'s
+            // reason: `EXCHANGE_FLAGS` is RV32's constant and an Xtensa module
+            // puts the flags past a 64-word `AR` file. Unchanged for RV32,
+            // whose layout is `ExchangeLayout::RV32`.
+            let at = self.ops.layout().flags() as usize;
+            let x = &self.ops.exchange()[at..];
             i32::from_le_bytes([x[0], x[1], x[2], x[3]])
         };
         Ok(Exit {
