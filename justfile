@@ -3524,7 +3524,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-firmware-closure lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-firmware-closure lint-ci-durations lint-defects lint-power-cut-verdict lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3559,6 +3559,14 @@ lint-classic-capture:
 # --check comparison, on a synthetic three-lamp board built in memory.
 lint-pcb-export:
     python3 scripts/pcb-export-to-map2d.py --self-test
+
+# The C6/S3 power-cut runner's verdict (scripts/ota/hw-power-cut.py) must be
+# able to fail: a cut that cannot show the board lost power is NO-CUT-PROOF,
+# never a PASS (docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
+# This replays the verdict against captured C6 logs, a real update with no cut
+# among them. It opens no port.
+lint-power-cut-verdict:
+    python3 scripts/ota/test_hw_power_cut.py
 
 # The flash-tears analyzer's own self-test, which needs no transcript: the
 # zero-run reconstruction, the unaligned program plan, and `--check-model`'s
