@@ -130,11 +130,25 @@ pub trait ResolveHost {
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
     ) -> Option<alloc::string::String> {
         let _ = (node, name, revision);
         None
+    }
+
+    /// The producing node's patch generation for `product`
+    /// ([`crate::node::NodeRuntime::control_patch_generation`]); 0 where
+    /// nothing models patching.
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        let _ = product;
+        0
+    }
+
+    /// The revision the registered output-name set last changed at, without
+    /// copying the names: what a plan keyed on the set reads every frame.
+    fn output_identity_revision(&self) -> Revision {
+        Revision::default()
     }
 
     /// The registered output-name set and the revision it last changed at.

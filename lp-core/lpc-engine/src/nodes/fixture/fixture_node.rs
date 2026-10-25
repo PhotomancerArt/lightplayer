@@ -146,6 +146,10 @@ pub struct FixtureNode {
     /// honest fallback, since the alternative is placing lamps the document
     /// no longer describes — and says so in `patch_error`.
     resolved_patch: Option<((Revision, Revision, Revision), alloc::vec::Vec<PatchedRun>)>,
+    /// Bumped whenever [`Self::resolved_patch`]'s runs change: an output's
+    /// frame plan holds this fixture's placement and keys on it
+    /// ([`NodeRuntime::control_patch_generation`]).
+    patch_generation: u64,
     /// Per-strand instance addresses from the resolved map2d document
     /// ([`lpc_mapping::object_instance_spans`]) — what `/sector/2`-style
     /// patch entries lower through. Empty for shape-less strips and
@@ -237,6 +241,7 @@ impl FixtureNode {
             patch_source: None,
             patch_version: mapping_version,
             resolved_patch: None,
+            patch_generation: 0,
             object_spans: alloc::vec::Vec::new(),
             patch_error: None,
             input_error: None,
@@ -320,6 +325,23 @@ impl FixtureNode {
         self
     }
 
+    /// Store a patch resolution, bumping [`Self::patch_generation`] when the
+    /// runs an output would place differ from the ones it holds.
+    fn set_resolved_patch(
+        &mut self,
+        resolved: Option<((Revision, Revision, Revision), alloc::vec::Vec<PatchedRun>)>,
+    ) {
+        let held_runs = self
+            .resolved_patch
+            .as_ref()
+            .map(|(_, runs)| runs.as_slice());
+        let new_runs = resolved.as_ref().map(|(_, runs)| runs.as_slice());
+        if held_runs != new_runs {
+            self.patch_generation = self.patch_generation.wrapping_add(1);
+        }
+        self.resolved_patch = resolved;
+    }
+
     /// Resolve the patch document against the CURRENT lamp count, if that
     /// pair has moved since the last resolve.
     ///
@@ -327,7 +349,7 @@ impl FixtureNode {
     /// patched one re-resolves only when its document or its mapping changed.
     fn ensure_patch_resolved(&mut self, ctx: &TickContext<'_>) {
         let Some(source) = &self.patch_source else {
-            self.resolved_patch = None;
+            self.set_resolved_patch(None);
             return;
         };
         // An empty AUTO document is a CLEARED patch, and a cleared patch
@@ -341,16 +363,18 @@ impl FixtureNode {
         // run list: an empty list is indistinguishable from "unpatched"
         // downstream, so the flag is what keeps those lamps off the wire.
         let Some(doc) = source.doc.as_ref().filter(|doc| !doc.entries.is_empty()) else {
-            self.resolved_patch = None;
+            self.set_resolved_patch(None);
             return;
         };
-        let (known_outputs, topology_revision) = ctx.known_output_names();
+        // The key first: the name set is copied only when it is needed.
+        let topology_revision = ctx.output_identity_revision();
         let key = (self.patch_version, self.mapping_version, topology_revision);
         if let Some((resolved_key, _)) = &self.resolved_patch
             && *resolved_key == key
         {
             return;
         }
+        let (known_outputs, _) = ctx.known_output_names();
         // The same count the control product is sized from, and the same one
         // the patch document's ranges are written against.
         let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
@@ -395,7 +419,7 @@ impl FixtureNode {
                         })
                     })
                     .collect();
-                self.resolved_patch = Some((key, runs));
+                self.set_resolved_patch(Some((key, runs)));
                 // The kernel's own per-entry degrades (duplicate paths)
                 // outrank a dangling name: both leave lamps auto-flowing,
                 // but the duplicate names the entry to delete.
@@ -415,7 +439,7 @@ impl FixtureNode {
                 // readable, it just does not describe this fixture — so fall
                 // back to auto-flow rather than lighting lamps by a rule
                 // nobody authored.
-                self.resolved_patch = None;
+                self.set_resolved_patch(None);
                 self.patch_error = Some(format!("resolve fixture patch: {error}"));
             }
         }
@@ -900,6 +924,10 @@ impl NodeRuntime for FixtureNode {
         self.resolved_patch
             .as_ref()
             .map(|(_, runs)| runs.as_slice())
+    }
+
+    fn control_patch_generation(&self) -> u64 {
+        self.patch_generation
     }
 
     /// The fixture's own patch document answers this — including while it is

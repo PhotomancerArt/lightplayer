@@ -303,6 +303,15 @@ pub trait NodeRuntime {
         None
     }
 
+    /// Moves whenever [`Self::control_patch_placement`]'s answer does. An
+    /// output's frame plan holds its producers' placements and keys on their
+    /// generations: a producer can re-resolve its patch on a frame no
+    /// structural key moved (the first frame it sees a sibling output's
+    /// name). A producer whose placement never changes leaves it at 0.
+    fn control_patch_generation(&self) -> u64 {
+        0
+    }
+
     /// Does this producer's patch declare MANUAL flow (`flow: "manual"`,
     /// P5b)?
     ///

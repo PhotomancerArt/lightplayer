@@ -116,10 +116,11 @@ pub struct Engine {
     /// names exist at all (the fixture's dangling-entry report). Entries for
     /// dead nodes are pruned on registration.
     output_identities: alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
-    /// Bumped whenever [`Self::output_identities`] CHANGES, so a fixture's
-    /// cached patch resolution (keyed on it) re-runs when the topology
-    /// settles — a name registered one tick after the fixture resolved must
-    /// clear a transient dangling report without a patch edit.
+    /// Bumped whenever [`Self::output_identities`] CHANGES — a count of
+    /// changes, not a frame stamp — so a fixture's cached patch resolution
+    /// and an output's frame plan (keyed on it) re-run when the topology
+    /// settles: a name registered one tick (or one output) after the fixture
+    /// resolved must clear a transient dangling report without a patch edit.
     output_identity_revision: Revision,
     /// The most bytes a serialized display layout may occupy in one
     /// project-read answer, declared by the EMBEDDER for its transport
@@ -2186,18 +2187,24 @@ impl ResolveHost for EngineResolveHost<'_> {
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
     ) -> Option<alloc::string::String> {
-        // Prune the dead so a deleted output releases its name.
+        // Prune the dead so a deleted output releases its name. The caller
+        // is mid-`consume` — its runtime is out of the tree, `Executing` — and
+        // is alive by definition: sweeping it too removed and re-added every
+        // output's own entry on every frame, which moved
+        // `output_identity_revision` every frame and re-ran every fixture's
+        // patch resolution with it.
         let dead: Vec<NodeId> = self
             .output_identities
             .keys()
             .copied()
             .filter(|id| {
-                self.tree
-                    .get(*id)
-                    .is_none_or(|entry| !matches!(entry.state.value(), NodeEntryState::Alive(_)))
+                *id != node
+                    && self.tree.get(*id).is_none_or(|entry| {
+                        !matches!(entry.state.value(), NodeEntryState::Alive(_))
+                    })
             })
             .collect();
         let mut changed = false;
@@ -2205,18 +2212,39 @@ impl ResolveHost for EngineResolveHost<'_> {
             self.output_identities.remove(&id);
             changed = true;
         }
-        if self.output_identities.get(&node) != Some(&name) {
-            self.output_identities.insert(node, name.clone());
+        if self.output_identities.get(&node).map(Option::as_deref) != Some(name) {
+            self.output_identities
+                .insert(node, name.map(alloc::string::String::from));
             changed = true;
         }
         if changed {
-            *self.output_identity_revision = revision;
+            // A change COUNTER, not the frame's revision: two outputs
+            // registering in the same frame are two changes, and a plan or
+            // cache keyed between them (an output's fragments, a fixture's
+            // patch resolution) must see both.
+            let _ = revision;
+            *self.output_identity_revision = Revision::new(self.output_identity_revision.0 + 1);
         }
         let name = name?;
         self.output_identities
             .iter()
-            .find(|(other, other_name)| **other != node && other_name.as_deref() == Some(&name))
-            .map(|_| name)
+            .find(|(other, other_name)| **other != node && other_name.as_deref() == Some(name))
+            .map(|_| alloc::string::String::from(name))
+    }
+
+    fn output_identity_revision(&self) -> Revision {
+        *self.output_identity_revision
+    }
+
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        match self
+            .tree
+            .get(product.node())
+            .map(|entry| entry.state.value())
+        {
+            Some(NodeEntryState::Alive(node)) => node.control_patch_generation(),
+            _ => 0,
+        }
     }
 
     fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {

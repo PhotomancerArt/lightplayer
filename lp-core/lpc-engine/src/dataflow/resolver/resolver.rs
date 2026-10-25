@@ -34,6 +34,7 @@ use lp_collection::VecMap;
 use lpc_model::LpValue;
 use lpc_model::NodeId;
 use lpc_model::Revision;
+use lpc_model::SlotAccessor;
 use lpc_model::SlotPath;
 use lpc_model::SlotPathError;
 use lpc_model::WithRevision;
@@ -103,6 +104,16 @@ pub struct Resolver {
     /// means a `ChannelName(String)` per read, allocated only to be hashed
     /// and dropped.
     static_bus: VecMap<(Option<ScopeRef>, &'static str), QueryId>,
+    /// `(node, compiled accessor)` → the consumed-slot query it names,
+    /// sorted for an allocation-free lookup by borrowed accessor.
+    ///
+    /// The sibling of [`Self::static_paths`] for reads through a compiled
+    /// def view (`reader.get(ctx)`: a fixture's `render_size` and
+    /// `brightness`, an output's `test_pattern`): building the
+    /// `QueryKey::ConsumedSlotAccessor` cloned the accessor's path and steps
+    /// on every read, only to find the id the table already held. One clone
+    /// per epoch now, at the first read.
+    static_accessors: Vec<(NodeId, SlotAccessor, QueryId)>,
     /// The shared handles produced-slot [`crate::dataflow::resolver::Production`]s
     /// carry, one per distinct produced path. Sorted, so lookup is a binary
     /// search over path comparisons and never allocates.
@@ -127,6 +138,7 @@ impl Resolver {
             force_invalidate_per_frame: false,
             static_paths: VecMap::new(),
             static_bus: VecMap::new(),
+            static_accessors: Vec::new(),
             produced_paths: Vec::new(),
         }
     }
@@ -180,6 +192,27 @@ impl Resolver {
         let id = self.intern.intern(&QueryKey::ConsumedSlot { node, slot });
         self.static_paths.insert((node, path), id);
         Ok(id)
+    }
+
+    /// Id for `node`'s consumed slot read through `accessor`, cloning the
+    /// accessor into a key at most once per epoch.
+    pub fn intern_consumed_accessor(&mut self, node: NodeId, accessor: &SlotAccessor) -> QueryId {
+        self.assert_not_batching();
+        let found = self
+            .static_accessors
+            .binary_search_by(|(held_node, held, _)| (held_node, held).cmp(&(&node, accessor)));
+        match found {
+            Ok(index) => self.static_accessors[index].2,
+            Err(index) => {
+                let id = self.intern.intern(&QueryKey::ConsumedSlotAccessor {
+                    node,
+                    accessor: accessor.clone(),
+                });
+                self.static_accessors
+                    .insert(index, (node, accessor.clone(), id));
+                id
+            }
+        }
     }
 
     /// Id for the bus query on `channel` in `scope`, building the
@@ -277,6 +310,7 @@ impl Resolver {
         self.intern.clear();
         self.static_paths.clear();
         self.static_bus.clear();
+        self.static_accessors.clear();
         // Paths outlive epochs, but a node the change removed should not
         // keep its paths resident; the survivors re-intern on their next
         // produce.

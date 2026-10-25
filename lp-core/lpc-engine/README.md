@@ -103,7 +103,13 @@ What each plan holds and its key:
 |---|---|---|
 | engine | `LaneTopology`: per node, whether it is the default fragments consumer of its bus channel (where unaddressed patch runs and auto-flow land) | structure epoch |
 | engine | output sink configurations, re-read from the defs | structure epoch (checked like a plan in `Check` mode) |
+| output | `OutputFramePlan`: the fragments planned from its producers' placements, their coverage and its status (and the products it was built for) | structure epoch, `output_identity_revision` (a change count), the producers' summed `control_patch_generation` |
 | engine | per dispatch: the recovery-frame name (`RuntimeNodeEntry::recovery_name`, the path rendered once) and the produce call key (the resolver's interned path handle) | the node's path / the epoch's intern table |
+
+Reads through a compiled def view (`reader.get(ctx)`) resolve by an id the
+resolver interns once per epoch per `(node, accessor)`
+(`Resolver::intern_consumed_accessor`) instead of cloning the accessor into
+a key on every read.
 
 The resolver's own share: a bus read nobody provides is cached as a
 `ResolvedRoute::NoBusProvider` decision (it still answers the same error

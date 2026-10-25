@@ -404,10 +404,8 @@ impl<'r> TickContext<'r> {
         T: FromLpValue,
     {
         let production = self
-            .resolve(&QueryKey::ConsumedSlotAccessor {
-                node: self.node_id,
-                accessor: accessor.clone(),
-            })
+            .resolver
+            .resolve_consumed_accessor(self.node_id, accessor)
             .map_err(|e| {
                 NodeError::msg(alloc::format!(
                     "resolve consumed slot {}: {e:?}",
@@ -507,11 +505,35 @@ impl<'r> TickContext<'r> {
     /// claims it (surface it as runtime status; routing stays exact-match).
     pub fn register_output_identity(
         &mut self,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
     ) -> Option<alloc::string::String> {
         let node = self.node_id;
         let revision = self.revision;
         self.resolver.register_output_identity(node, name, revision)
+    }
+
+    /// `product`'s producer's patch generation — see
+    /// [`crate::node::NodeRuntime::control_patch_generation`].
+    pub fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        self.resolver.control_patch_generation(product)
+    }
+
+    /// The revision the registered output-name set last changed at (no copy
+    /// of the names): a frame plan's key.
+    pub fn output_identity_revision(&self) -> Revision {
+        self.resolver.output_identity_revision()
+    }
+
+    /// Resolve one of this node's consumed slots through a compiled accessor
+    /// and hand back the production itself — for a read that borrows the
+    /// value (a text slot compared against last frame's) instead of
+    /// converting it.
+    pub fn resolve_consumed_accessor(
+        &mut self,
+        accessor: &SlotAccessor,
+    ) -> Result<Production, ResolveError> {
+        let node = self.node_id;
+        self.resolver.resolve_consumed_accessor(node, accessor)
     }
 
     /// Every registered output name plus the revision the set last changed

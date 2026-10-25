@@ -109,6 +109,18 @@ impl<'a> EngineSession<'a> {
         self.resolve_id(host, id)
     }
 
+    /// Resolve `node`'s consumed slot through a compiled `accessor`, without
+    /// rebuilding the key each read ([`Resolver::intern_consumed_accessor`]).
+    pub fn resolve_consumed_accessor<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Result<Production, SessionResolveError> {
+        let id = self.resolver.intern_consumed_accessor(node, accessor);
+        self.resolve_id(host, id)
+    }
+
     /// Resolve the bus `channel` in `scope` at a compile-time-constant
     /// channel name, building the [`ChannelName`] at most once per epoch.
     pub fn resolve_static_bus<H: ResolveHost + ?Sized>(
