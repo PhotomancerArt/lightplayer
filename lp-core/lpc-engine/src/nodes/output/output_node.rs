@@ -339,7 +339,9 @@ pub struct OutputNode {
     scatter_runs: Vec<ControlTargetRun>,
     /// Where each producer's samples land, planned once per edit
     /// ([`OutputFramePlan`]). Rebuildable: dropped under memory pressure.
-    frame_plan: PlanSlot<OutputPlanKey, OutputFramePlan>,
+    /// Boxed: the render lends the slot out of the node and back every
+    /// frame, and a box moves as a pointer where the plan would be copied.
+    frame_plan: PlanSlot<OutputPlanKey, alloc::boxed::Box<OutputFramePlan>>,
     /// This frame's resolved control products, gathered into storage kept
     /// across frames and compared with the plan's.
     products_scratch: Vec<ControlProduct>,
@@ -619,7 +621,9 @@ impl OutputNode {
             slot.clear();
         }
         let key = OutputFramePlan::key(ctx, products);
-        let plan = slot.get_or_build(key, ctx, |ctx| OutputFramePlan::build(ctx, products));
+        let plan = slot.get_or_build(key, ctx, |ctx| {
+            alloc::boxed::Box::new(OutputFramePlan::build(ctx, products))
+        });
         let result =
             self.render_fragments_into(ctx, &plan.fragments, &plan.coverage, &plan.status, samples);
         self.frame_plan = slot;
