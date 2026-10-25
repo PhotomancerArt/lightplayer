@@ -197,6 +197,12 @@ old code the same build measured 1.141 ms per lane, because the new engine
 functions ran from flash. A restructured engine path needs a re-profile, as
 the hot-set README says.
 
+**The C6 cost was accepted by Yona on 2026-10-24 ("yes accept them").** It
+covers: core +80–96 B (a link-time reshuffle that adds no core code), engine
++5.1 KB, about +0.5 KB of load-retained heap per lane, and a lower stack.
+From then on, the plan's core-image bar reads "no core code added" rather
+than 0 B.
+
 - **The emulator underprices this walk.** Emulated per lane fell 44 %;
   silicon fell 79 %. The per-lane walk on the S3 was fetch- and
   PSRAM-bound, and allocation and pointer chasing cost more there than the
