@@ -66,7 +66,11 @@ What the strip-test session knew, before the probe:
   pad at runtime (the ROM's `printf` channel, the radio blobs), and GPIO43's
   pad defaults differing from the other pads'.
 
-**Workaround** — wire WS281x strips to D0–D5 and D7–D10, not D6.
+**Workaround** — wire WS281x strips to D0–D5 and D7–D10, not D6. Since
+2026-10-24 the board file says so: `xiao-esp32-s3-plus.display.json` gives
+D6 a "LED defect" warn cell on Studio's board picture and a board note naming
+this entry. It warns and does not refuse, so a project that uses D6 still
+loads and opens it (Yona: flag it, chase it later).
 
 **Fix** — none in the firmware, and the board definition keeps offering D6:
 nothing on the chip side is wrong with it.
