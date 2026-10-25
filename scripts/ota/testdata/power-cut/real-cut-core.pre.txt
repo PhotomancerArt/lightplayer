@@ -1,0 +1,55 @@
+[link] up (session 0)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +19436 B, host + GATT +3520 B, heap used 82824 B (slots 2)
+[INFO] fw_esp32c6::ota::engine_guard: [OTA] engine guard: the engine (1828914 B) matches its digest (1385 ms)
+[INFO] fw_esp32c6: [CORE] core @0x18000 +1214800 (proven) build a0a0a0a0+0172481a0929 · loader v1 · region end 0x350000 · page 0x8000 · engine 1828914 B · digest 238b6118
+[INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 1244 ms (1214800 B)
+[INIT] Initializing RMT peripheral at 80MHz...
+[INIT] RMT peripheral initialized
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+[INIT] Creating output provider...
+[INIT] Output provider created
+[INIT] Creating LpServer instance...
+[INIT] LpServer created
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[INFO] fw_esp32_common::boot: Boot: found configured startup project: studio
+[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 212336 B free / 89200 B used (207k / 87k)
+[INFO] lpa_server::project: [mem] project new start: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after root path: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after services: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after core project: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after graphics: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after wrapper: 172k free / 121k used
+[INFO] lpa_server::project_manager: Project loaded: studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 173120 B free / 128416 B used (169k / 125k)
+[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/studio
+[INIT] Creating time provider...
+[INIT] Time provider created
+[INIT] fw-esp32 initialized, starting server loop... proto=38 commit=0172481a0929 dirty=false
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+M!{"id":0,"msg":{"hello":{"proto":38,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.power-button","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","version":"a0a0a0a0","commit":"0172481a0929","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:fe:ff","fs":"mounted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"},"firmware":{"proto":1,"target":"esp32c6-4mb","chip":"esp32c6","version":"a0a0a0a0","buildId":"a0a0a0a0+0172481a0929","wireProto":38,"coreSha256":"3cd545e813c7ad47066f7b9ba163cb89569cdd49343a051cb28db310d1c5993b","coreLen":1214800,"engineSha256":"238b6118ae0f097e5b326b5c3a0fdac216069138503de4034685179095342eb4","engineLen":1828914,"layout":1,"loader":1,"regionLen":3375104,"state":"running","refusedBuild":null,"transfer":null}}}}
+[WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=219
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=219
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[link] wire: replies packed (JSON Pack v2, learned)
+[INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 1)
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 1971 bytes)
+[INFO] lpc_shared::memory: [mem] shader compile before: 107k free / 186k used
+[INFO] lpc_shared::memory: [mem] shader compile after: 102k free / 191k used
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=46ms, lpir_inst_count=198, lpir_func_count=3, lpir_import_count=3, final_inst_count=686, final_code_size=274
+[INFO] trouble_host::host: [host] using packet pool with MTU 251 capacity 16
+[INFO] trouble_host::host: [host] filter accept list size: 12
+[INFO] trouble_host::host: [host] setting txq to 24, fragmenting at 255
+[INFO] trouble_host::host: [host] configuring host buffers (1 packets of size 255)
+[INFO] trouble_host::host: [host] initialized
+[INFO] trouble_host::host: [host] Device Address A2:F2:62:87:B4:8D
+[INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-studio
+[INFO] fw_esp32_common::server_loop: [perf] frame=188 fps=37 elapsed=5009ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.53244,"sdev":0,"min":37.53244,"max":37.53244},"frame_count":188,"loaded_projects":[{"handle":1,"path":"/projects/studio"}],"uptime_ms":5009,"memory":{"freeBytes":103824,"usedBytes":197712,"totalBytes":301536,"largestFreeBlock":65535},"recovery":{"level":"green","resetReason":"user-reset","bootCount":5,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":78,"framesRx":34,"bytesTx":5741,"bytesRx":476,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}

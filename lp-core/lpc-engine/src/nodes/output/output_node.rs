@@ -25,6 +25,19 @@
 //! a gap warns, and the wire keeps being driven either way. A frame-killing
 //! resolve error would take out an entire show over one mis-patched strand.
 //!
+//! # Planned once per edit
+//!
+//! Where each producer's samples land does not change frame to frame, so the
+//! fragments, their coverage and its complaint live in an
+//! [`super::output_frame_plan::OutputFramePlan`], built the first frame
+//! after its key moves (the structure epoch, the registered output names,
+//! the producers' patch generations — or the producers' products
+//! themselves) and replayed after it. Each frame still resolves the input
+//! (which runs the producers), renders every product into its runs, applies
+//! reversal and rotation, and paints the overlays. The name and `highlight`
+//! text are compared with last frame's and copied or re-parsed only when
+//! they change. See `docs/adr/2026-10-24-frame-plan-once-per-edit.md`.
+//!
 //! # A fault is never black
 //!
 //! When the engine reports a PROJECT fault — any node in
@@ -48,8 +61,9 @@ use lpc_model::{
 };
 use lpc_shared::output::OutputPortSmoothing;
 
-use crate::dataflow::resolver::QueryKey;
+use super::output_frame_plan::{OutputFramePlan, OutputPlanKey};
 use crate::engine::FaultPresentation;
+use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PatchedRun,
     PressureLevel, TickContext, ensure_scratch_len, err_ctx,
@@ -323,6 +337,36 @@ pub struct OutputNode {
     /// by [`ensure_scratch_len`]: the only allocation is the high-water one,
     /// so the patched path costs the tick nothing per frame.
     scatter_runs: Vec<ControlTargetRun>,
+    /// Where each producer's samples land, planned once per edit
+    /// ([`OutputFramePlan`]). Rebuildable: dropped under memory pressure.
+    /// Boxed: the render lends the slot out of the node and back every
+    /// frame, and a box moves as a pointer where the plan would be copied.
+    frame_plan: PlanSlot<OutputPlanKey, alloc::boxed::Box<OutputFramePlan>>,
+    /// This frame's resolved control products, gathered into storage kept
+    /// across frames and compared with the plan's.
+    products_scratch: Vec<ControlProduct>,
+    /// This frame's placed spans, built in storage kept across frames and
+    /// copied into [`Self::published_sample_layout`] only when they change.
+    spans_scratch: Vec<ControlSpan>,
+    /// The authored name as last read (its raw text and what it parsed to),
+    /// so the steady frame compares the resolved text instead of copying it.
+    name_text: Option<String>,
+    name: Option<String>,
+    /// The `highlight` slot's text as last read, and what it parsed to: the
+    /// microformat is parsed once per change, not once per frame.
+    highlight_text: Option<String>,
+    highlight: Highlight,
+    /// The per-frame reads, each planned to its interned query id.
+    reads: OutputReads,
+}
+
+/// [`OutputNode`]'s per-frame reads ([`PlannedRead`]).
+#[derive(Clone, Copy, Debug, Default)]
+struct OutputReads {
+    name: PlannedRead,
+    test_pattern: PlannedRead,
+    highlight: PlannedRead,
+    input: PlannedRead,
 }
 
 impl OutputNode {
@@ -343,6 +387,14 @@ impl OutputNode {
             smoothing: None,
             open_failure: None,
             scatter_runs: Vec::new(),
+            frame_plan: PlanSlot::new(),
+            products_scratch: Vec::new(),
+            spans_scratch: Vec::new(),
+            name_text: None,
+            name: None,
+            highlight_text: None,
+            highlight: Highlight::default(),
+            reads: OutputReads::default(),
         }
     }
 
@@ -367,9 +419,14 @@ impl OutputNode {
     /// that cannot exist in the `OutputDef` shape is a different thing — a
     /// code bug — and it still fails loudly, out of `def_view`, because
     /// compiling the view is exactly that shape check.
+    #[inline(never)]
     fn test_pattern_active(&mut self, ctx: &mut TickContext<'_>) -> Result<bool, NodeError> {
-        let reader = self.def_view(ctx)?.test_pattern();
-        match reader.get(ctx) {
+        let Self {
+            def_view, reads, ..
+        } = self;
+        let def = OutputDefView::get_or_compile(def_view, ctx.slot_shapes())
+            .map_err(err_ctx("compile output def view"))?;
+        match ctx.read_planned_accessor(&mut reads.test_pattern, def.test_pattern().accessor()) {
             Ok(active) => Ok(active),
             Err(error) => {
                 log::debug!("[output] test_pattern unavailable: {error}");
@@ -382,20 +439,36 @@ impl OutputNode {
     /// `test_pattern`. "Absent" (unset option, no def behind a bare
     /// runtime output) quietly reads as `None` — an unnamed output is the
     /// ordinary single-output state, not a fault.
-    fn authored_name(&mut self, ctx: &mut TickContext<'_>) -> Option<String> {
-        match ctx.resolve_static_consumed("name.some") {
-            Ok(production) => production
-                .value_leaf()
-                .and_then(|leaf| {
-                    <lpc_model::OutputName as lpc_model::FromLpValue>::from_lp_value(leaf.value())
-                        .ok()
-                })
-                .map(|name| String::from(name.as_str())),
+    ///
+    /// Updates [`Self::name`], copying the text only when it changed.
+    #[inline(never)]
+    fn refresh_authored_name(&mut self, ctx: &mut TickContext<'_>) {
+        let production = match ctx.resolve_planned_static(&mut self.reads.name, "name.some") {
+            Ok(production) => production,
             Err(error) => {
                 log::debug!("[output] name unavailable: {}", error.message);
-                None
+                self.name_text = None;
+                self.name = None;
+                return;
             }
+        };
+        let Some(leaf) = production.value_leaf() else {
+            self.name_text = None;
+            self.name = None;
+            return;
+        };
+        if let (LpValue::String(text), Some(held)) = (leaf.value(), self.name_text.as_deref())
+            && text.as_str() == held
+        {
+            return;
         }
+        self.name_text = match leaf.value() {
+            LpValue::String(text) => Some(text.clone()),
+            _ => None,
+        };
+        self.name = <lpc_model::OutputName as lpc_model::FromLpValue>::from_lp_value(leaf.value())
+            .ok()
+            .map(|name| String::from(name.as_str()));
     }
 
     /// Read the `highlight` Debug slot's value for this frame.
@@ -403,15 +476,52 @@ impl OutputNode {
     /// Same tolerance contract as [`Self::test_pattern_active`]: an
     /// unresolvable slot reads as "no highlight" and is logged, never fatal.
     /// The microformat parse is equally forgiving — see [`parse_highlight`].
-    fn highlight_value(&mut self, ctx: &mut TickContext<'_>) -> Result<Highlight, NodeError> {
-        let reader = self.def_view(ctx)?.highlight();
-        match reader.get::<_, String>(ctx) {
-            Ok(text) => Ok(parse_highlight(&text)),
+    ///
+    /// Updates [`Self::highlight`], re-parsing only when the text changed.
+    #[inline(never)]
+    fn refresh_highlight(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let production = {
+            let Self {
+                def_view, reads, ..
+            } = self;
+            let def = OutputDefView::get_or_compile(def_view, ctx.slot_shapes())
+                .map_err(err_ctx("compile output def view"))?;
+            ctx.resolve_planned_accessor(&mut reads.highlight, def.highlight().accessor())
+        };
+        let production = match production {
+            Ok(production) => production,
             Err(error) => {
-                log::debug!("[output] highlight unavailable: {error}");
-                Ok(Highlight::default())
+                log::debug!("[output] highlight unavailable: {}", error.message);
+                self.highlight_text = None;
+                self.highlight = Highlight::default();
+                return Ok(());
             }
+        };
+        let text = match production.value_leaf().map(|leaf| leaf.value()) {
+            Some(LpValue::String(text)) => text.as_str(),
+            _ => {
+                // Not a string: the reader's own conversion decides (and
+                // reports), exactly as before.
+                let reader = self.def_view(ctx)?.highlight();
+                match reader.get::<_, String>(ctx) {
+                    Ok(text) => {
+                        self.highlight = parse_highlight(&text);
+                        self.highlight_text = Some(text);
+                    }
+                    Err(error) => {
+                        log::debug!("[output] highlight unavailable: {error}");
+                        self.highlight_text = None;
+                        self.highlight = Highlight::default();
+                    }
+                }
+                return Ok(());
+            }
+        };
+        if self.highlight_text.as_deref() != Some(text) {
+            self.highlight = parse_highlight(text);
+            self.highlight_text = Some(String::from(text));
         }
+        Ok(())
     }
 
     /// Paint the highlight over whatever frame is in the buffer, in the mode
@@ -474,39 +584,53 @@ impl OutputNode {
     fn render_graph_frame(
         &mut self,
         ctx: &mut TickContext<'_>,
-        highlight: &Highlight,
         samples: &mut Vec<u16>,
     ) -> Result<(), NodeError> {
         let prod = ctx
-            .resolve(&QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot: output_input_path(),
-            })
+            .resolve_planned_static(&mut self.reads.input, "input")
             .map_err(|e| NodeError::msg(format!("resolve output input: {}", e.message)))?;
 
-        let products = control_products(prod.data())?;
-        // Each producer's patch, asked for at the moment it is placed. A
-        // fixture resolves its patch in its own `produce` — which the input
-        // resolve above just ran — so this reads THIS frame's answer, and an
-        // edited patch document moves the wire on the next tick with no cache
-        // to invalidate.
-        let placements: Vec<FragmentPlacement> = products
-            .into_iter()
-            .map(|product| FragmentPlacement {
-                patch: ctx.control_patch_placement(product),
-                product,
-            })
-            .collect();
-        let fragments = plan_fragments(&placements);
-        self.render_fragments_into(ctx, &fragments, samples)?;
+        let mut products = core::mem::take(&mut self.products_scratch);
+        products.clear();
+        let result = gather_control_products(prod.data(), &mut products)
+            .and_then(|()| self.render_planned(ctx, &products, samples));
+        self.products_scratch = products;
+        result?;
         // The highlight overlay repaints AFTER the real render, so the frame
         // underneath stays the graph's and un-highlighted lamps are untouched.
         // With no highlight this is a no-op — the byte-identical path every
         // unpulsed project takes.
-        if !highlight.is_empty() {
-            self.paint_highlight(samples, highlight, ctx.time_seconds());
+        if !self.highlight.is_empty() {
+            self.paint_highlight(samples, &self.highlight, ctx.time_seconds());
         }
         Ok(())
+    }
+
+    /// Render `products` through this output's frame plan, building it when
+    /// its key moved or the products differ from the ones it was built for.
+    ///
+    /// Each producer's patch is asked for at plan build — a fixture resolves
+    /// its patch in its own `produce`, which the input resolve just ran — and
+    /// every edit that can move a patch (the patch document, a mapping, an
+    /// output rename) moves the plan's key.
+    fn render_planned(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        products: &[ControlProduct],
+        samples: &mut Vec<u16>,
+    ) -> Result<(), NodeError> {
+        let mut slot = core::mem::take(&mut self.frame_plan);
+        if slot.get().is_some_and(|plan| plan.products != products) {
+            slot.clear();
+        }
+        let key = OutputFramePlan::key(ctx, products);
+        let plan = slot.get_or_build(key, ctx, |ctx| {
+            alloc::boxed::Box::new(OutputFramePlan::build(ctx, products))
+        });
+        let result =
+            self.render_fragments_into(ctx, &plan.fragments, &plan.coverage, &plan.status, samples);
+        self.frame_plan = slot;
+        result
     }
 
     /// Paint the fault pattern over the WHOLE buffer, if the project has
@@ -692,7 +816,11 @@ impl OutputNode {
         fragments: &[OutputFragment],
     ) -> Result<(), NodeError> {
         let mut samples = self.take_channel_samples(ctx)?;
-        if let Err(error) = self.render_fragments_into(ctx, fragments, &mut samples) {
+        let coverage = fragment_coverage(fragments);
+        let status = coverage_status(&coverage);
+        if let Err(error) =
+            self.render_fragments_into(ctx, fragments, &coverage, &status, &mut samples)
+        {
             self.restore_channel_samples(ctx, samples);
             return Err(error);
         }
@@ -713,14 +841,34 @@ impl OutputNode {
         &mut self,
         ctx: &mut TickContext<'_>,
         fragments: &[OutputFragment],
+        coverage: &FragmentCoverage,
+        status: &Option<NodeRuntimeStatus>,
         samples: &mut Vec<u16>,
     ) -> Result<(), NodeError> {
-        let coverage = fragment_coverage(fragments);
-        self.fragment_status = coverage_status(&coverage);
+        if self.fragment_status != *status {
+            self.fragment_status = status.clone();
+        }
 
         samples.resize(coverage.total_samples as usize, 0);
 
-        let mut spans = Vec::new();
+        let mut spans = core::mem::take(&mut self.spans_scratch);
+        spans.clear();
+        let rendered = self.render_groups(ctx, fragments, samples, &mut spans);
+        if rendered.is_ok() {
+            self.finish_fragments(ctx, fragments, coverage, samples, &spans);
+        }
+        self.spans_scratch = spans;
+        rendered
+    }
+
+    /// Render each product group of `fragments` once and place its spans.
+    fn render_groups(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        fragments: &[OutputFragment],
+        samples: &mut Vec<u16>,
+        spans: &mut Vec<ControlSpan>,
+    ) -> Result<(), NodeError> {
         // The planner emits all of a producer's runs together, so a product
         // is one consecutive group of fragments. Each group renders ONCE —
         // however many runs the patch cut it into — and places its spans
@@ -740,12 +888,25 @@ impl OutputNode {
                     .iter()
                     .filter(|fragment| fragment_is_placed(fragment, samples.len()))
                 {
-                    place_spans(&layout, fragment, &mut spans);
+                    place_spans(&layout, fragment, spans);
                 }
             }
             first = end;
         }
+        Ok(())
+    }
 
+    /// Zero the gaps and contested ranges, and latch the frame's
+    /// interpretation metadata — copying the spans and fragments only when
+    /// they changed.
+    fn finish_fragments(
+        &mut self,
+        ctx: &TickContext<'_>,
+        fragments: &[OutputFragment],
+        coverage: &FragmentCoverage,
+        samples: &mut [u16],
+        spans: &[ControlSpan],
+    ) {
         for (start, end) in coverage.gaps.iter().chain(coverage.contested.iter()) {
             let range = (*start as usize)..(*end as usize);
             if let Some(samples) = samples.get_mut(range) {
@@ -758,14 +919,15 @@ impl OutputNode {
             .as_ref()
             .is_none_or(|published| published.spans != spans)
         {
-            self.published_sample_layout = Some(ControlLayout { spans });
+            self.published_sample_layout = Some(ControlLayout {
+                spans: spans.to_vec(),
+            });
             self.sample_layout_revision = ctx.revision();
         }
         if self.published_fragments != fragments {
             self.published_fragments = fragments.to_vec();
             self.placement_revision = ctx.revision();
         }
-        Ok(())
     }
 
     /// Render one product for `group` — its consecutive fragments, all the
@@ -893,19 +1055,31 @@ pub fn output_input_path() -> SlotPath {
 /// receiver gets an index-keyed map (the resolver's provider order, one entry
 /// per producer), and a single-binding route still gets a bare leaf. The map
 /// is index-keyed and `VecMap` is key-sorted, so iteration IS the order.
-fn control_products(data: &SlotData) -> Result<Vec<ControlProduct>, NodeError> {
+///
+/// Appends to `out` (kept across frames by the caller).
+fn gather_control_products(
+    data: &SlotData,
+    out: &mut Vec<ControlProduct>,
+) -> Result<(), NodeError> {
     match data {
-        SlotData::Value(value) => Ok(Vec::from([control_product(value.get())?])),
-        SlotData::Map(map) => map
-            .entries
-            .values()
-            .map(|entry| match entry {
-                SlotData::Value(value) => control_product(value.get()),
-                _ => Err(NodeError::msg(
-                    "output input fragment resolved to aggregate data, expected control product",
-                )),
-            })
-            .collect(),
+        SlotData::Value(value) => {
+            out.push(control_product(value.get())?);
+            Ok(())
+        }
+        SlotData::Map(map) => {
+            for entry in map.entries.values() {
+                match entry {
+                    SlotData::Value(value) => out.push(control_product(value.get())?),
+                    _ => {
+                        return Err(NodeError::msg(
+                            "output input fragment resolved to aggregate data, expected control \
+                             product",
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
         _ => Err(NodeError::msg(
             "output input resolved to aggregate data, expected control product",
         )),
@@ -939,7 +1113,7 @@ fn control_product(value: &LpValue) -> Result<ControlProduct, NodeError> {
 /// and no gap: its lamps are patched onto some other output (D40's
 /// zero-runs-here case), which is not the same thing as `None` — auto-flow
 /// me. The engine's placement query documents the distinction.
-fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
+pub(crate) fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
     let mut cursor = 0u32;
     for placement in placements {
         for range in placement.patch.iter().flatten() {
@@ -1420,7 +1594,7 @@ pub fn merge_fragment_display_layouts(
 /// the check that earns its keep the moment offsets become authored. Ranges
 /// come back merged and ordered so a report reads as "34–41", not as a list
 /// of pairwise collisions.
-fn fragment_coverage(fragments: &[OutputFragment]) -> FragmentCoverage {
+pub(crate) fn fragment_coverage(fragments: &[OutputFragment]) -> FragmentCoverage {
     let total_samples = fragments
         .iter()
         .map(OutputFragment::end_samples)
@@ -1498,7 +1672,7 @@ fn smoothing_status(notice: OutputPortSmoothing) -> NodeRuntimeStatus {
 /// for are pixels nobody can trust, and the author has to choose. A gap is a
 /// `Warn`: dark lamps in the middle of a wire are usually a patch in progress,
 /// not a broken show. Neither ever stops the frame.
-fn coverage_status(coverage: &FragmentCoverage) -> Option<NodeRuntimeStatus> {
+pub(crate) fn coverage_status(coverage: &FragmentCoverage) -> Option<NodeRuntimeStatus> {
     if !coverage.contested.is_empty() {
         return Some(NodeRuntimeStatus::Error(format!(
             "lamps {} contested by more than one producer; those lamps are dark",
@@ -1604,8 +1778,8 @@ impl NodeRuntime for OutputNode {
         // Identity first, resolve second: the fixtures this resolve ticks
         // read the registered-name set for their dangling-entry checks, so
         // this output's name must be on the books before they run.
-        let name = self.authored_name(ctx);
-        let collision = ctx.register_output_identity(name);
+        self.refresh_authored_name(ctx);
+        let collision = ctx.register_output_identity(self.name.as_deref());
         self.identity_status = collision.map(|name| {
             NodeRuntimeStatus::Error(format!(
                 "two outputs are named {name:?}; patch entries naming it are ambiguous — \
@@ -1621,11 +1795,11 @@ impl NodeRuntime for OutputNode {
         // A pattern only ever REPAINTS an extent the graph already established;
         // before the first rendered frame there is nothing to repaint, so that
         // frame renders the graph and establishes it.
-        let highlight = self.highlight_value(ctx)?;
+        self.refresh_highlight(ctx)?;
         if self.test_pattern_active(ctx)? && self.established_samples > 0 {
             let mut samples = self.take_channel_samples(ctx)?;
             Self::fill_solid(&mut samples, TEST_PATTERN_RGB);
-            self.paint_highlight(&mut samples, &highlight, ctx.time_seconds());
+            self.paint_highlight(&mut samples, &self.highlight, ctx.time_seconds());
             // The bypass paints the fault pattern too: an output left on
             // `test_pattern` while the project faults would otherwise be the
             // one wire still lying, and a test pattern is exactly what an
@@ -1642,7 +1816,7 @@ impl NodeRuntime for OutputNode {
         // establish. The error still travels: the engine reads it and faults
         // this node on it.
         let mut samples = self.take_channel_samples(ctx)?;
-        let rendered = self.render_graph_frame(ctx, &highlight, &mut samples);
+        let rendered = self.render_graph_frame(ctx, &mut samples);
         let painted = self.apply_fault_pattern(ctx, &mut samples);
         if rendered.is_ok() || painted {
             // A good frame, or the fault pattern over what a failed one
@@ -1692,10 +1866,15 @@ impl NodeRuntime for OutputNode {
 
     fn handle_memory_pressure(
         &mut self,
-        _level: PressureLevel,
+        level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Nothing droppable here, deliberately. This handler used to clear
+        // The frame plan is rebuildable state: the next frame builds it
+        // again (docs/adr/2026-10-24-frame-plan-once-per-edit.md, D8).
+        if level >= PressureLevel::High {
+            self.frame_plan.clear();
+        }
+        // The samples are not droppable here, deliberately. This handler used to clear
         // `control_samples` at `High` (the #303 compile window). Measurement
         // on 2026-08-04 showed the output's own `produce` resizes that buffer
         // back to the control extent EARLIER in the same tick than the shader
@@ -1723,7 +1902,9 @@ mod tests {
         SlotShapeRegistry,
     };
 
-    use crate::dataflow::resolver::{Production, ProductionSource, ResolveError, TickResolver};
+    use crate::dataflow::resolver::{
+        Production, ProductionSource, QueryKey, ResolveError, TickResolver,
+    };
     use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
     use crate::resource::RuntimeBuffer;
 
@@ -1783,6 +1964,9 @@ mod tests {
         /// mid-render (the fuel case) — the failure that used to take the
         /// output's whole tick with it and leave the wire dark.
         render_control_fails: bool,
+        /// The structure epoch the fake reports. A test that edits what the
+        /// engine treats as structure (a patch) moves it, as the engine does.
+        epoch: u64,
     }
 
     impl FakeResolver {
@@ -1803,6 +1987,7 @@ mod tests {
                 paint_by_product: false,
                 patches: Vec::new(),
                 render_control_fails: false,
+                epoch: 0,
             }
         }
 
@@ -1816,6 +2001,10 @@ mod tests {
     }
 
     impl TickResolver for FakeResolver {
+        fn structure_epoch(&self) -> u64 {
+            self.epoch
+        }
+
         fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
             let path = query
                 .consumed_slot_path()
@@ -3231,6 +3420,8 @@ mod tests {
         );
 
         // The patch moves the second producer: same products, new placement.
+        // A patch edit is a structural edit: the engine moves its epoch.
+        resolver.epoch += 1;
         resolver.patches = vec![(
             product(2, ONE_LAMP),
             vec![PatchedRun {
@@ -3625,7 +3816,7 @@ mod tests {
                 entries
             }));
 
-        assert!(control_products(&map).is_err());
+        assert!(gather_control_products(&map, &mut Vec::new()).is_err());
     }
 
     // --- Patched placement -------------------------------------------------

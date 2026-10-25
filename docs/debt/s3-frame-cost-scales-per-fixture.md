@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired
 since: 2026-07-31
 logged: 2026-07-31
 area: lpc-engine dataflow resolver + lpc-hardware registry (per-frame costs)
@@ -11,6 +11,10 @@ related:
 ---
 # Frame cost is per-frame resolution machinery, not the shader: ~8.4 ms/fixture flat on the S3
 
+> **2026-10-24: retired.** The per-lane term is paid down: 1.393 → 0.286 ms
+> per lane on FS3 (the engine frame plan; see the 2026-10-24 incident-log
+> entry and `docs/adr/2026-10-24-frame-plan-once-per-edit.md`).
+>
 > **2026-08-01 status:** both mechanisms named below are fixed (PRs #243,
 > #244). The per-chain cost they were blamed for moved only 9.7 → 8.0 ms, so
 > the linear degradation this entry exists for **remains open** and is now
@@ -219,6 +223,34 @@ nothing else helps, by measurement.
   channel blocking RMT send. **This entry stays open on that basis** — a third
   attribution pass on the 8 ms, not a third guess.
 
+- **2026-10-24** — **The per-lane term, attributed and paid down.** The S3
+  fps spike (2026-10-23) fitted the non-shader frame on FS3 as
+  `5.7 ms + 4.7 ms × lanes + 1.9 µs × LEDs` (a lane = a fixture and its
+  output; ~1.85 ms per lane after the IRAM hot set) and attributed the lane
+  term to per-frame graph walking: names parsed, binding topology rebuilt,
+  def-view keys cloned, span `Vec`s built two or three times, 45 allocations
+  per lane. The engine frame plan (planning
+  `lp2025/2026-10-24-0208-engine-frame-plan`, PRs #1293 and #1296) builds
+  that work once per edit and replays it. FS3 (XIAO ESP32-S3 Plus,
+  D8:3B:DA:47:29:70), plain images, two-core, main `9e9c20d3f` → the plan,
+  frame time at equal LEDs (`projects/test/lanes-8x128` − `lanes-2x512`, ÷ 6):
+
+  | | per lane | 2×512 | 8×128 | 6×248 | 8×256 | skirt-620 |
+  |---|---:|---:|---:|---:|---:|---:|
+  | main | 1.393 ms | 41.1 fps | 30.6 | 28.3 | 21.9 | 53.6 |
+  | frame plan | **0.286 ms** | 44.6 | 41.4 | 34.5 | 27.3 | 59.3 |
+
+  The IRAM hot set had to be re-profiled on the new engine: with the old
+  profile the same build measured 1.141 ms per lane (the new engine code
+  ran from flash). Emulated (`scripts/perf/per-lane-cost.sh`, lp-emu
+  esp32-c6 model): 69,326 → 38,643 cycles and 46 → 6 allocations per lane;
+  the emulator underprices this walk on the S3. What is left per lane, by
+  the emulated profile: the crash-recovery frames each dispatch enters
+  (~13 k cycles; `lp_recovery`, in the C6 core image), the output input's
+  fragment merge, and dispatch overhead. **Retired** on the exit criteria
+  below: the lane term is a few tenths of a millisecond and no longer
+  allocator/string machinery.
+
 **Exit criteria** — A profiled optimization pass that makes resolved bindings
 and endpoint status persist across frames (invalidate on tree/binding/
 hardware change, not per tick), after which frame cost is dominated by actual
@@ -233,7 +265,8 @@ the desk S3 as the oracle.
       in steady state; the S3 never paid it.
 - [x] **Desk-S3 re-measurement** — done 2026-08-01, separately and jointly.
       Both halves on one image: 25 fps at 4 fixtures, 68 fps at 1.
-- [ ] **The linear term itself** — the two named mechanisms are fixed and
+- [x] **The linear term itself** — paid down 2026-10-24 by the engine
+      frame plan (1.393 → 0.286 ms per lane on FS3). Before that: the two named mechanisms are fixed and
       per-chain cost still sits at ~8.0 ms (was ~9.7). This entry stays open
       on that number, not on either mechanism. Next step is attribution of
       that 8 ms, not another guess; `projects/test/quad-strips-1fix` vs

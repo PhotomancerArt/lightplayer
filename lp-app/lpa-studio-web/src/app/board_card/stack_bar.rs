@@ -11,7 +11,9 @@
 //! ([`aside_style`]). While the row works, the
 //! conic spinner takes the icon's place and the work's words are its state
 //! ([`row_words`]), with the iridescent fill along its foot
-//! ([`WorkFoot`](super::bar_work::WorkFoot)).
+//! ([`WorkFoot`](super::bar_work::WorkFoot)) — unless the card's top says
+//! the same work, which then has the bar and the number (the row is
+//! carried: its verb and its spinner, no fill).
 //!
 //! The icon, kind, name and state are ONE full-width button: the trigger of
 //! the row's details ([`BarDetails`], the merged detail card). The action
@@ -95,9 +97,10 @@ pub fn StackBar(
         },
     };
     let chevron = end.is_none() && opens_details(&bar).is_none();
+    // Work the card's top carries moves there, not here: no fill (P2).
     let foot = bar.work.as_ref().and_then(|work| match work.state {
-        BarWorkState::Running => Some((work.percent, work.other_device)),
-        BarWorkState::Done | BarWorkState::Failed { .. } => None,
+        BarWorkState::Running if !work.carried => Some((work.percent, work.other_device)),
+        BarWorkState::Running | BarWorkState::Done | BarWorkState::Failed { .. } => None,
     });
     let lit = bar.todo && tone == UiStatusKind::Neutral && bar.work.is_none();
     rsx! {
@@ -151,13 +154,11 @@ pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
 }
 
 /// The row's name and state, as drawn: at rest the summary and the aside;
-/// while it works, the name stays and the work's words are its state. A
-/// row with no name while it works puts them where the name goes:
-/// "installing · 30%", and a link row whose state the work says
-/// ("connecting").
+/// while it works, the name stays and the work's words are its state. Core
+/// never leaves the name empty (a dash while its value is not known yet:
+/// "USB  —  connecting"), so work's words never take the name's place.
 pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
     match &bar.work {
-        Some(work) if bar.summary.is_empty() => (work.words.clone(), None),
         Some(work) => (
             bar.summary.clone(),
             Some(work.words.clone()).filter(|words| !words.is_empty()),
@@ -194,10 +195,6 @@ fn opens_details(bar: &UiStackBar) -> Option<&'static str> {
 /// and the section that opens its details.
 fn bar_line(bar: &UiStackBar) -> Element {
     let toned = row_tone(bar) != UiStatusKind::Neutral;
-    let working = matches!(
-        bar.work.as_ref().map(|work| &work.state),
-        Some(BarWorkState::Running)
-    );
     let dim = if bar.stale { STALE_CLASS } else { "" };
     let icon_class = format!(
         "{} {dim}",
@@ -219,6 +216,8 @@ fn bar_line(bar: &UiStackBar) -> Element {
             STATE_CLASS
         }
     );
+    // The spinner stands in the icon's place while the row works, carried
+    // or not: it ties the row to the work the card's top shows.
     let lead = match bar.work.as_ref().map(|work| &work.state) {
         Some(BarWorkState::Running) => rsx! {
             span { class: "{conic_spinner_class()} ux-board-spinner", aria_hidden: "true" }
@@ -238,13 +237,11 @@ fn bar_line(bar: &UiStackBar) -> Element {
         },
     };
     let (name, state) = row_words(bar);
+    // One model: the name is the value, drawn the same while the row works;
+    // the work's words are the state.
     let name_class = format!(
         "{} {dim}",
-        match (toned, working) {
-            (true, _) => NAME_TONED_CLASS,
-            (false, true) => NAME_WORKING_CLASS,
-            (false, false) => NAME_CLASS,
-        }
+        if toned { NAME_TONED_CLASS } else { NAME_CLASS }
     );
     let aside = state.as_deref().map(aside_style);
     rsx! {
@@ -396,8 +393,6 @@ const WORDS_CLASS: &str = "ux-board-bar-words";
 /// alone is wider than the row.
 const NAME_CLASS: &str = "ux-board-bar-name tw:text-foreground";
 const NAME_TONED_CLASS: &str = "ux-board-bar-name tw:font-bold";
-/// The name while the row works: strong, the row neutral.
-const NAME_WORKING_CLASS: &str = "ux-board-bar-name tw:font-bold tw:text-strong-foreground";
 const STATE_CLASS: &str = "tw:text-subtle-foreground";
 /// …in a toned row: the row's own ink.
 const STATE_TONED_CLASS: &str = "";
@@ -528,7 +523,7 @@ mod tests {
         let html = dioxus_ssr::render_element(bar_line(&row));
         assert!(html.contains(&format!("{ASIDE_CLASS}\"")), "{html}");
         assert!(html.contains("--ux-aside-min: 6ch"), "{html}");
-        for class in [NAME_CLASS, NAME_TONED_CLASS, NAME_WORKING_CLASS] {
+        for class in [NAME_CLASS, NAME_TONED_CLASS] {
             assert!(
                 !class.contains("tw:flex-1"),
                 "the CSS sizes the name: {class}"
@@ -537,7 +532,7 @@ mod tests {
     }
 
     /// While a row works its name stays and the work's words are its
-    /// state; a row with no name while it works says them in its place.
+    /// state, a dash's beside it as anyone's (one grammar).
     #[test]
     fn work_keeps_the_name_and_says_its_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -554,13 +549,37 @@ mod tests {
             )
         );
         let mut link = link_row(None);
-        link.summary = String::new();
+        link.summary = "\u{2014}".to_string();
         link.work = Some(running("connecting"));
-        assert_eq!(row_words(&link), ("connecting".to_string(), None));
-        let mut nameless =
-            lpa_studio_core::UiStackBar::new(lpa_studio_core::BarLayer::Firmware, "firmware", "");
-        nameless.work = Some(running("installing · 30%"));
-        assert_eq!(row_words(&nameless), ("installing · 30%".to_string(), None));
+        assert_eq!(
+            row_words(&link),
+            ("\u{2014}".to_string(), Some("connecting".to_string()))
+        );
+    }
+
+    /// Work the card's top carries keeps its spinner on its row, which ties
+    /// the row to the top, but draws no fill along the foot: the bar is the
+    /// top's (P2). Work nothing else shows spins and fills.
+    #[test]
+    fn carried_work_spins_with_no_fill() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.08-9",
+        );
+        row.work = Some(running("backing up · 40%"));
+        let moving = render_row(row.clone());
+        assert!(moving.contains(conic_spinner_class()), "{moving}");
+        assert!(moving.contains("data-work-track"), "{moving}");
+        row.work = Some(lpa_studio_core::UiBarWork {
+            carried: true,
+            ..running("updating")
+        });
+        let carried = render_row(row);
+        assert!(carried.contains(conic_spinner_class()), "{carried}");
+        assert!(!carried.contains("data-work-track"), "{carried}");
+        assert!(carried.contains(">updating<"), "{carried}");
+        assert!(carried.contains(">v2026.10.08-9<"), "{carried}");
     }
 
     /// A stale row is dimmed and says the same words.
@@ -651,7 +670,7 @@ mod tests {
             assert!(!class.contains("min-h"), "{class}");
             assert!(!class.contains("tw:py-"), "{class}");
         }
-        for class in [NAME_CLASS, NAME_TONED_CLASS, NAME_WORKING_CLASS] {
+        for class in [NAME_CLASS, NAME_TONED_CLASS] {
             assert!(class.contains("ux-board-bar-name"), "{class}");
         }
         assert!(TRIGGER_CLASS.contains("tw:h-full"));
@@ -723,6 +742,7 @@ mod tests {
             state: BarWorkState::Running,
             cancel: None,
             other_device: false,
+            carried: false,
         }
     }
 }

@@ -175,8 +175,10 @@ fn payloads_off_is_stable_too() {
 /// A ratchet, not a target (planning `lp2025/2026-10-24-0208-engine-frame-plan`,
 /// AC3): each frame-plan phase lowers it, and the plan ends at ≤ 2. 45 before
 /// the plan; 42 after PR A (the engine's own per-dispatch and per-frame
-/// scratch).
-pub(crate) const PER_LANE_STEADY_ALLOCS_BUDGET: u64 = 42;
+/// scratch); 8 with the output's frame plan, def-view reads by interned id,
+/// and the output identity no longer re-registered every frame; 5 with the
+/// fixture's frame plan and its settings reads by planned id.
+pub(crate) const PER_LANE_STEADY_ALLOCS_BUDGET: u64 = 5;
 
 #[test]
 fn steady_frame_allocations_do_not_scale_with_lanes() {

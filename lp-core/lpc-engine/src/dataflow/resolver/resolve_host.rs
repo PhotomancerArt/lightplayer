@@ -137,14 +137,31 @@ pub trait ResolveHost {
 
     /// Record `node`'s authored output name for patch routing; answers a
     /// live sibling's colliding claim (see the engine implementation).
+    /// `structure_epoch` is the resolver's: an output can only die through
+    /// a structural edit, so the dead sweep runs once per epoch.
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
+        structure_epoch: u64,
     ) -> Option<alloc::string::String> {
-        let _ = (node, name, revision);
+        let _ = (node, name, revision, structure_epoch);
         None
+    }
+
+    /// The producing node's patch generation for `product`
+    /// ([`crate::node::NodeRuntime::control_patch_generation`]); 0 where
+    /// nothing models patching.
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        let _ = product;
+        0
+    }
+
+    /// The revision the registered output-name set last changed at, without
+    /// copying the names: what a plan keyed on the set reads every frame.
+    fn output_identity_revision(&self) -> Revision {
+        Revision::default()
     }
 
     /// The registered output-name set and the revision it last changed at.

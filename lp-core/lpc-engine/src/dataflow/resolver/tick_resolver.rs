@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use crate::dataflow::resolver::QueryId;
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::ResolveError;
@@ -44,6 +45,48 @@ pub trait TickResolver {
         self.resolve(&QueryKey::Bus {
             scope,
             channel: ChannelName(alloc::string::String::from(channel)),
+        })
+    }
+
+    /// The interned id of `node`'s consumed slot at a constant path, for a
+    /// caller that keeps it ([`crate::frame_plan::PlannedRead`]). `None` on
+    /// a test fake, whose callers fall back to the keyed reads.
+    fn intern_static_consumed_id(&mut self, node: NodeId, path: &'static str) -> Option<QueryId> {
+        let _ = (node, path);
+        None
+    }
+
+    /// The interned id of `node`'s consumed slot read through `accessor`;
+    /// `None` on a test fake.
+    fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Option<QueryId> {
+        let _ = (node, accessor);
+        None
+    }
+
+    /// Resolve a query by an id interned THIS epoch. Only reachable with an
+    /// id one of the `intern_*_id` methods returned, so a fake never sees it.
+    fn resolve_query_id(&mut self, id: QueryId) -> Result<Production, ResolveError> {
+        let _ = id;
+        Err(ResolveError::new(alloc::string::String::from(
+            "this resolver interns no query ids",
+        )))
+    }
+
+    /// Resolve one of `node`'s consumed slots through a compiled accessor,
+    /// without rebuilding the query each read. Defaulted through
+    /// [`Self::resolve`] for test fakes.
+    fn resolve_consumed_accessor(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Result<Production, ResolveError> {
+        self.resolve(&QueryKey::ConsumedSlotAccessor {
+            node,
+            accessor: accessor.clone(),
         })
     }
 
@@ -153,11 +196,25 @@ pub trait TickResolver {
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
     ) -> Option<alloc::string::String> {
         let _ = (node, name, revision);
         None
+    }
+
+    /// The producing node's patch generation for `product`
+    /// ([`crate::node::NodeRuntime::control_patch_generation`]); 0 where
+    /// nothing models patching.
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        let _ = product;
+        0
+    }
+
+    /// The revision the registered output-name set last changed at, without
+    /// copying the names: what a plan keyed on the set reads every frame.
+    fn output_identity_revision(&self) -> Revision {
+        Revision::default()
     }
 
     /// The registered output-name set and the revision it last changed at.
@@ -255,6 +312,34 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.session.intern_key(query)
     }
 
+    fn resolve_consumed_accessor(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Result<Production, ResolveError> {
+        self.session
+            .resolve_consumed_accessor(self.host, node, accessor)
+            .map_err(ResolveError::from)
+    }
+
+    fn intern_static_consumed_id(&mut self, node: NodeId, path: &'static str) -> Option<QueryId> {
+        self.session.intern_static_consumed_id(node, path)
+    }
+
+    fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Option<QueryId> {
+        Some(self.session.intern_consumed_accessor_id(node, accessor))
+    }
+
+    fn resolve_query_id(&mut self, id: QueryId) -> Result<Production, ResolveError> {
+        self.session
+            .resolve_query_id(self.host, id)
+            .map_err(ResolveError::from)
+    }
+
     fn produced_slot_path(&mut self, slot: &SlotPath) -> alloc::rc::Rc<SlotPath> {
         self.session.produced_slot_path(slot)
     }
@@ -315,14 +400,24 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
     ) -> Option<alloc::string::String> {
-        self.host.register_output_identity(node, name, revision)
+        let epoch = self.session.structure_epoch();
+        self.host
+            .register_output_identity(node, name, revision, epoch)
     }
 
     fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
         self.host.known_output_names()
+    }
+
+    fn output_identity_revision(&self) -> Revision {
+        self.host.output_identity_revision()
+    }
+
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        self.host.control_patch_generation(product)
     }
 
     fn render_texture(

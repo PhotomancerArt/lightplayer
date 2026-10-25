@@ -106,6 +106,7 @@ pub(crate) fn take_over_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
         state,
         cancel: None,
         other_device: false,
+        carried: false,
     })
 }
 

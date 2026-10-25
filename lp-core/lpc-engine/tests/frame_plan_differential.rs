@@ -121,6 +121,8 @@ fn every_mode_renders_the_same_bytes_through_every_edit() {
             report.push(format!("{name}: SKIPPED ({why})"));
             continue;
         }
+        // Named before the run: a strict-checked lane panics mid-project.
+        eprintln!("frame plan differential: {name}");
         let outcome = run_project(name, dir);
         report.push(format!("{name}: {}", outcome.steps.join(", ")));
         failures.extend(outcome.failures);

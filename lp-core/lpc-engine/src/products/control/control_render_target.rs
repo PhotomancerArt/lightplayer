@@ -163,6 +163,31 @@ impl<'a> ControlRenderTarget<'a> {
         }
     }
 
+    /// Zero every product sample from `product_offset` on, wherever this
+    /// target maps it — [`Self::clear`] for the tail a render did not reach.
+    pub fn clear_product_from(&mut self, product_offset: usize) {
+        match self.placement {
+            None => {
+                if let Some(tail) = self.samples.get_mut(product_offset..) {
+                    tail.fill(0);
+                }
+            }
+            Some(runs) => {
+                for run in runs {
+                    let source = run.source_offset as usize;
+                    let end = source + run.len as usize;
+                    let from = product_offset.max(source);
+                    if from >= end {
+                        continue;
+                    }
+                    let start = run.offset as usize + (from - source);
+                    let stop = run.offset as usize + (end - source);
+                    self.samples[start..stop].fill(0);
+                }
+            }
+        }
+    }
+
     /// Place `values` at product sample `product_offset`.
     ///
     /// Contiguous: one slice copy. Scattered: the intersection with every
