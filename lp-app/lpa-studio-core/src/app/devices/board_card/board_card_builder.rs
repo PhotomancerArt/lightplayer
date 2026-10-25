@@ -16,7 +16,9 @@ use super::access_bar::{access_bar, pending_access_bar};
 use super::bluetooth_bar::bluetooth_bar;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
-use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
+use super::board_surface::{
+    board_surface, carried_layer, carries_work, pending_surface, surface_state,
+};
 use super::cloud_bar::cloud_bar;
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
@@ -28,6 +30,7 @@ use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_board_card::{UiBoardCard, UiBoardPresence};
 use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
+use super::ui_board_surface::SurfaceState;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
 use super::ui_stack_bar::{BarLayer, UiStackBar};
@@ -70,6 +73,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         state_action(input, state).as_ref(),
     );
     let bars = quiet_rows(bars, carried_layer(input, state));
+    let bars = still_rows(bars, state);
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -119,6 +123,19 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
             let loud = matches!(bar.tone, UiStatusKind::Attention | UiStatusKind::Error);
             if Some(bar.layer) == carried && loud {
                 bar.tone = UiStatusKind::Neutral;
+            }
+            bar
+        })
+        .collect()
+}
+
+/// A row whose work the surface says goes still: its verb alone, no
+/// spinner and no fill, so one work moves in one place (P2).
+fn still_rows(bars: Vec<UiStackBar>, state: SurfaceState) -> Vec<UiStackBar> {
+    bars.into_iter()
+        .map(|mut bar| {
+            if carries_work(state, bar.layer) {
+                bar.work = bar.work.map(UiBarWork::carried_by_surface);
             }
             bar
         })

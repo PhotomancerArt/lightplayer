@@ -305,6 +305,21 @@ pub(crate) fn carried_layer(input: &BoardCardInput<'_>, state: SurfaceState) -> 
     }
 }
 
+/// Whether the surface, in `state`, says the work of the row at `layer`
+/// with its own bar or spinner: that row is carried and goes still
+/// ([`super::ui_bar_work::UiBarWork::carried_by_surface`]), so one work
+/// moves in one place (P2). A connect is the row of the link it takes.
+pub(crate) fn carries_work(state: SurfaceState, layer: BarLayer) -> bool {
+    use SurfaceState::*;
+    match state {
+        Updating | Installing | Erasing => layer == BarLayer::Firmware,
+        Sending | Removing => layer == BarLayer::Project,
+        Identifying => layer == BarLayer::Hardware,
+        Connecting | Reconnecting | MovingHere => layer.is_link(),
+        _ => false,
+    }
+}
+
 /// How an offline board is reached, and the offer that reaches it: its
 /// `connect` (Wi‑Fi first, then lightplayer.app, then its cable, as the
 /// controller chose the road), else — a board with no registry row — the
@@ -878,12 +893,11 @@ mod tests {
                 .find(|bar| bar.layer == BarLayer::Firmware)
                 .and_then(|bar| bar.work.clone())
                 .expect("the Firmware row works");
+            // The row is carried: its verb alone, still; the number is
+            // the surface's to say (P2).
             assert_eq!(work.percent, Some(percent), "{row:?}");
-            assert!(
-                work.words.ends_with(&format!(" · {percent}%")),
-                "{row:?}: {}",
-                work.words
-            );
+            assert!(work.carried, "{row:?}");
+            assert!(!work.words.contains('%'), "{row:?}: {}", work.words);
             said.push((row, percent));
         }
         // The new firmware at 40 % is the whole update at 20 %; its last

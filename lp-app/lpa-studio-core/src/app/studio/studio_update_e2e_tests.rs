@@ -938,10 +938,8 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
         said.iter().any(|words| words.starts_with("backing up")),
         "{said:?}"
     );
-    assert!(
-        said.iter().any(|words| words.starts_with("updating · ")),
-        "{said:?}"
-    );
+    // The surface carries the update's number; the row says its verb.
+    assert!(said.iter().any(|words| words == "updating"), "{said:?}");
     assert!(
         said.iter().all(|words| !words.contains("of 2")),
         "one number, never 1 of 2: {said:?}"
