@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "payload": "radio-boot",
+  "chip": "esp32s3",
+  "configuration": "lp-emu:esp32s3:t1",
+  "date": "2026-10-21",
+  "firmware_commit": "e5d8eeebe7f4",
+  "firmware_features": [
+    "esp32s3",
+    "server",
+    "float-f32",
+    "radio_boot_probe"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "2f811c872b1a82578ba21b7143c4d1b8e3db1d77bbb0977430c9ecaf3b6ab2d0",
+  "tools": {
+    "link-host": "cargo run -q -p lp-cli --release -- emu run --host-link --json-replies --link-nonce 4c500001 (e5d8eeebe+dirty)",
+    "lp-emu-esp32s3": "40.0.0 (e5d8eeebe+dirty)",
+    "rom": "esp32s3_rev0_rom.elf sha256 c0ce0f338d1de1bdc6efbef1591779a2a42c1ab7d759d3c6ae8ae63a7dd34cfd"
+  },
+  "source": "(cd lp-fw/fw-esp32s3 && cargo build --target xtensa-esp32s3-none-elf --profile release-esp32s3 --features esp32s3,server,float-f32,radio_boot_probe) && scripts/emu/build-merged-image.sh --chip esp32s3 target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3 target/xtensa-esp32s3-none-elf/release-esp32s3/merged.bin && cargo run -q -p lp-cli --release -- emu run --host-link --json-replies --link-nonce 4c500001 --chip esp32s3 --merged target/xtensa-esp32s3-none-elf/release-esp32s3/merged.bin --time-grade t1 --console target/validate/radio-boot.cap --usb-host attached --timeout 120s --wall-timeout 4800 --strict-bus --exit-on '[RADIO] wifi scan done'",
+  "capture": "lp-cli validate record s3-radio --config lp-emu:esp32s3:t1",
+  "note": "captured through a LINK HOST: this image speaks lp-link on its USB link, so the capture is the host's decoded console (raw text as it arrived, log records as `[LEVEL] target: text`, each wire message as its `M!{json}` line, `[link] …` notes) rather than the port's bytes. The host uses a fixed link nonce, so two runs are the same run, and does NOT ask the board to pack its replies (`--json-replies`, the heap ratchet's state), so no memory figure here depends on a host's opt-in. A product host does ask. the boot is `poweron` / strap `app`, and `lp-emu-esp32s3`'s machine takes no flag for either: it models one reset cause (`loader::ResetCause::PowerOn`) and latches `GPIO_STRAP_SPI_FAST_FLASH_BOOT`, which are exactly those two. Recorded here rather than passed, so the transcript still says what the ROM banner's `rst:` and `boot:` words are a record of.",
+  "quantum": 256,
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "modeled",
+      "because": "the allocator is the guest's own and the RAM model is byte-exact — but there is NO SILICON CAPTURE OF THIS CHIP YET, so unlike `lp-emu:esp32v3:t1` this row cites no field-by-field comparison and claims none. What exists today is the image's own ledger: M6 P04b (PR #742) gave `fw-esp32s3` the classic's `stack_probe`, `panic_path::largest_free_block` and the three elicited lines, so a `boot-idle` transcript from this configuration carries `[stack] heartbeat:` / `[MEM] free=…used=…largest_free=…retry_saves=…` / `[JIT] used=…` in the classic's own field order. TWO OF THOSE FIELDS ARE STRUCTURAL ON THIS CHIP AND ARE NOT MEASUREMENTS: `[MEM] retry_saves` is always 0 (there is no OOM retry allocator in this image — 0 is the true number of retries that saved an allocation, not a missing one), and the whole `[JIT]` line is zeros including `cap=0` (the S3 has no reserved code region: SRAM1 is dual-mapped, the JIT allocates code straight from the `esp_alloc` heap and executes it through that buffer's I-bus alias, so its residency is already inside `[MEM] used`). A comparison that treated either as a counter would be comparing nothing. A THIRD SHAPE DIFFERENCE survives even so and is not a model difference at all: this chip's boot heap line is one number, `[INIT] chip=esp32s3 arch=xtensa heap=245760`, where the classic prints the four-region sum `heap=15072+112640+98304+15536=241552` — the FIELDS are comparable across the three chips, the LINE is not, and P11 repeats that in the walk record. Main stack 37,280 B, and there is no `[INIT] main stack <N> B` line on this chip: the total is in every `[stack]` line instead. P09 takes the silicon capture this row will then have to name both halves of, wins and gaps alike"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "t1 counts one cycle per instruction — no cache, no flash wait states, no LX7 per-class cost model — and this machine defines NO OTHER GRADE (notes Q2). There is nothing on the S3 to calibrate a `t2` against yet: `rsr.ccount` is free-running at 240 MHz and `board/esp32s3/cycle_counter.rs` already reads it, which is why a `cycle-probe` arm is named future work rather than dropped, but no kernel has been run on an S3 and no per-class table exists. Nothing in this class is gated on either side; a `boot-idle` run's stop-all lands 1 ms of emulated time after its trigger line where a desk host's select loop polls at 50 ms, which is host latency and the reason nothing in this class is compared between the two sides. FRAME RATE UNDER LINK LOAD IS NOT GRADED: PR #942's desk sitting found this configuration rendering `shader-oracle` 4.3x faster than silicon (239 vs 55 fps) and showing essentially no frame-rate cost for link requests at all (main +0.3 %, branch +0.2 %) where silicon lost 7-9 % on main and 19-20 % on the branch while requests were answered (`docs/defects/2026-10-03-the-emulated-s3-shows-no-frame-rate-cost-for-link-load.md`). The same blind spot as the C6's cold-code-path defect, on a chip with no grade beyond t1 to narrow it. Never trust an emulated fps-under-link-load figure here; a link-load frame-rate or per-request cost claim on this chip needs a desk number"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "and today it is the class with the least to show, because the boot chain is not here yet: M6 P05 direct-loads the application and the ROM-up path — the real `esp32s3_rev0_rom.elf` banner and espflash 3.3.0's bundled ESP-IDF second-stage bootloader — is **P06's**, which is also why `boot-idle`'s arm names `RomUp` for an image this machine cannot yet start that way. What IS pinned is the application's own `[INIT]` chain, byte for byte with its length and sha256, by `lp-emu-esp32s3/tests/boot_idle.rs`'s `HELLO` — and, in the same file, where the boot stops and whose stop it is: after `[INIT] I/O task spawned` the image mounts `lpfs` through SPI1, an accept block here, and spins on `cmd.usr` for ever. Nothing is vendored and nothing is synthesised (DD25), so when P06 lands, the image is the provenance; this row is re-stated against a diffed silicon banner when P09 has one to diff"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "modeled",
+      "because": "⚠️ and the reason is the one a reader is most likely to mistake for a promotion: the S3's USB-Serial-JTAG block IS the C6's IP — same offsets, same bitfields, same reset values across `0x00`…`0x48` and `date 0x80` (M6 notes §3.1) — and M6 P05 moved the view into `lp-emu-esp-common/src/ip/usb_sj.rs` so both chips run one model. The C6's transcripts sit behind that model, and THEY ARE NOT A MEASUREMENT OF AN S3: no S3 has been recorded over this link at all yet. What is pinned today is the model's three host states on this chip's image — attached-and-draining from boot, a host that never drains (nothing delivered, the first commit on the observation stream, then silence), and attached-idle then `open` with the committed packet held until the drain latency — plus determinism across two runs (`lp-emu-esp32s3/tests/boot_idle.rs`, `usb_socket.rs`). P09's capture is what would let any of it be graded on evidence from this part"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "both readings of a pad are ours — the fabric and the decoder are both in the machine. M6 P07 landed the RMT view, the GPIO matrix and `--dump-frames`/`--pin-log` on this chip, so `records_pins` is `true` above and a whole WS2812 frame now comes off gpio9 with zero bit errors and decodes back to the bytes the engine fetched (`lp-emu-esp32s3/tests/pin_frames.rs`). That is a model agreeing with itself three ways — the words the RMT fetched, the edges on the fabric, the bytes the decoder read — and it is emphatically NOT a measurement: NO INSTRUMENT HAS BEEN ON AN ESP32-S3 PAD (no logic analyser, no scope, no LED), which the walk record says in as many words. The grade therefore stays `modeled` and does not move on the strength of a waveform — a waveform is not a register's bit map and it is not silicon. No payload in this milestone makes a pin claim on this chip (D7 (b)), so nothing is being graded here; the row exists to say all of that plainly rather than by silence, and P09's capture is what could change it"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "the bytes are the guest's own, handed to the modelled USB-Serial-JTAG endpoint and delivered to whatever host state the run declares, so their content and order are the firmware's. What is not the firmware's is WHEN a host's bytes arrive on a live socket — that is host time, not guest time — and `--usb-script` is the deterministic path for anything a transcript should carry, which is why `boot-idle`'s elicitation is a committed file (`walks/s3-stop-all.script`) and not a socket. There is no cable to model on this chip and no auto-reset truth table to get wrong: the link is native USB, one rate, and the classic's CH340K story has no counterpart here"
+    }
+  ]
+}

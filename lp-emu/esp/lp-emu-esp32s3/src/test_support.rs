@@ -125,6 +125,173 @@ pub fn merged_chip_image() -> Result<PathBuf, String> {
     }
 }
 
+/// The environment variable naming the **radio probe** ELF — `fw-esp32s3`
+/// built with `radio_boot_probe` (S3 radio M1): the shipped boot with
+/// esp-radio's Wi‑Fi and BTDM started beside it. A separate image, so a
+/// separate variable: the two build to the same target path and must never
+/// be confused (the module docs' trap).
+pub const RADIO_IMAGE_ENV: &str = "LP_EMU_ESP32S3_RADIO_ELF";
+
+/// The radio probe's merged chip, as [`MERGED_ENV`] is the shipped image's.
+pub const RADIO_MERGED_ENV: &str = "LP_EMU_ESP32S3_RADIO_MERGED";
+
+/// The radio probe ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn radio_image() -> Result<PathBuf, String> {
+    env_file(
+        RADIO_IMAGE_ENV,
+        "`just test-emu-esp32s3-boot` builds `fw-esp32s3 --features radio_boot_probe` \
+         and sets it",
+    )
+}
+
+/// The radio probe's merged chip, if the caller has one. Same contract as
+/// [`merged_chip_image`].
+pub fn radio_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        RADIO_MERGED_ENV,
+        "`just test-emu-esp32s3-boot` merges the radio probe image with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
+/// The environment variable naming the **seam ABI harness** ELF —
+/// `fw-esp32s3` built with `test_seam_abi` (S3 radio M5): a release build
+/// that calls the Xtensa seam shims and prints what came back. A test image
+/// that never ships, on its own variable for the one-path trap's reason.
+pub const SEAM_ABI_IMAGE_ENV: &str = "LP_EMU_ESP32S3_SEAM_ABI_ELF";
+
+/// The seam ABI harness ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn seam_abi_image() -> Result<PathBuf, String> {
+    env_file(
+        SEAM_ABI_IMAGE_ENV,
+        "`just test-emu-esp32s3-seams` builds `fw-esp32s3 --features test_seam_abi` and sets it",
+    )
+}
+
+/// The environment variable naming the **PSRAM probe** ELF — `fw-esp32s3`
+/// built with `test_psram` (lane P of the S3 radio roadmap): esp-hal brings
+/// the octal PSRAM up, the probe writes and reads all of it and runs code out
+/// of it. A test image that never ships.
+pub const PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_PSRAM_ELF";
+
+/// The environment variable naming the **image without PSRAM** — `fw-esp32s3`
+/// built with the shipped feature set minus `psram` (on by default since
+/// 2026-10-23): the image a board without PSRAM behaves as, which the
+/// shipped image's frame is checked against.
+pub const NO_PSRAM_IMAGE_ENV: &str = "LP_EMU_ESP32S3_NO_PSRAM_ELF";
+
+/// The image without PSRAM, if the caller has one.
+pub fn no_psram_image() -> Result<PathBuf, String> {
+    env_file(
+        NO_PSRAM_IMAGE_ENV,
+        "`just test-emu-esp32s3-psram` builds `fw-esp32s3` without `psram` and sets it",
+    )
+}
+
+/// The PSRAM probe's merged chip, for its ROM-up boot.
+pub const PSRAM_MERGED_ENV: &str = "LP_EMU_ESP32S3_PSRAM_MERGED";
+
+/// The PSRAM probe ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn psram_image() -> Result<PathBuf, String> {
+    env_file(
+        PSRAM_IMAGE_ENV,
+        "`just test-emu-esp32s3-psram` builds `fw-esp32s3 --features test_psram` and sets it",
+    )
+}
+
+/// The PSRAM probe's merged chip, if the caller has one.
+pub fn psram_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        PSRAM_MERGED_ENV,
+        "`just test-emu-esp32s3-psram` merges the PSRAM probe with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
+/// The environment variable naming the **LCD lanes** ELF — `fw-esp32s3`
+/// built with `test_lcd_lanes` (M9): five uneven WS281x lanes out of
+/// LCD_CAM's i8080 mode, fed by GDMA. A test image that never ships.
+pub const LCD_LANES_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_LANES_ELF";
+
+/// The LCD lanes ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_lanes_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_LANES_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_lanes` and sets it",
+    )
+}
+
+/// The environment variable naming the **Wi‑Fi** ELF — `fw-esp32s3` built
+/// with `wifi` (S3 radio M4; off by default): the shipped app with the
+/// station, the LAN link and the relay, whose network seam an emulator
+/// answers with a virtual LAN (`net=lan`, M5). On its own variable for the
+/// one-path trap's reason.
+pub const WIFI_IMAGE_ENV: &str = "LP_EMU_ESP32S3_WIFI_ELF";
+
+/// The Wi‑Fi ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn wifi_image() -> Result<PathBuf, String> {
+    env_file(
+        WIFI_IMAGE_ENV,
+        "`just test-emu-esp32s3-wifi` builds `fw-esp32s3 --features wifi` and sets it",
+    )
+}
+
+/// The Wi‑Fi image's merged chip (`espflash save-image --merge`): its
+/// partition table and an empty `lpfs`, where a saved network goes.
+pub const WIFI_MERGED_ENV: &str = "LP_EMU_ESP32S3_WIFI_MERGED";
+
+/// The Wi‑Fi image's merged chip, if the caller has one.
+pub fn wifi_merged_image() -> Result<PathBuf, String> {
+    env_file(
+        WIFI_MERGED_ENV,
+        "`just test-emu-esp32s3-wifi` merges the Wi-Fi image with `espflash save-image \
+         --chip esp32s3 --merge` and sets it",
+    )
+}
+
+/// The `test_lcd_backend` image (`fw-esp32s3 --features test_lcd_backend`):
+/// the product LCD_CAM backend driving five lanes.
+pub const LCD_BACKEND_IMAGE_ENV: &str = "LP_EMU_ESP32S3_LCD_BACKEND_ELF";
+
+/// The LCD backend ELF, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`].
+pub fn lcd_backend_image() -> Result<PathBuf, String> {
+    env_file(
+        LCD_BACKEND_IMAGE_ENV,
+        "`just test-emu-esp32s3-lcd` builds `fw-esp32s3 --features test_lcd_backend` and sets it",
+    )
+}
+
+/// `Ok(path)` when `var` names a file; `Err` (a SKIP) when it is unset; a
+/// panic when it is set to a path that does not exist.
+fn env_file(var: &str, how: &str) -> Result<PathBuf, String> {
+    match std::env::var_os(var) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{var}={} names a file that does not exist",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{var} is not set. {how}; a bare `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
 /// Print why a test did nothing, in the one shape a log reader greps for.
 pub fn skip_notice(test: &str, reason: &str) {
     println!("SKIP {test}: {reason}");

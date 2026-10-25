@@ -42,11 +42,12 @@
 use std::path::Path;
 
 use lp_cloud_domain::{
-    AccountAccess, CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore,
-    ProjectRefs, SessionRecord, StoredEvent,
+    AccountAccess, BoardRecord, BoardSightings, CloudProject, CloudUser, HeadRef, MemberRecord,
+    MemberRole, MetaStore, ProjectRefs, SessionRecord, StoredEvent, StoredPicture,
 };
 use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
+use lpc_relay::RelayBoardId;
 use rusqlite::{Connection, Params, Row, params};
 
 use crate::migrations::run_migrations;
@@ -340,6 +341,89 @@ impl MetaStore for SqliteMetaStore {
             params![key_salt.as_slice()],
             decode_account_access,
         )
+    }
+
+    // ---- board list ----------------------------------------------------
+
+    fn put_board_record(&mut self, record: BoardRecord) {
+        let picture = record.picture.as_ref();
+        self.execute(
+            "MetaStore::put_board_record",
+            "INSERT INTO account_boards\n\
+                 (user_uid, board_id, label, model, firmware, project, joined_at, seen_relay_at, seen_usb_at, seen_ble_at, seen_lan_at, picture_at, picture_outputs, picture_colors, picture_accounts)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)\n\
+             ON CONFLICT (user_uid, board_id) DO UPDATE SET\n\
+                 label = excluded.label,\n\
+                 model = excluded.model,\n\
+                 firmware = excluded.firmware,\n\
+                 project = excluded.project,\n\
+                 joined_at = excluded.joined_at,\n\
+                 seen_relay_at = excluded.seen_relay_at,\n\
+                 seen_usb_at = excluded.seen_usb_at,\n\
+                 seen_ble_at = excluded.seen_ble_at,\n\
+                 seen_lan_at = excluded.seen_lan_at,\n\
+                 picture_at = excluded.picture_at,\n\
+                 picture_outputs = excluded.picture_outputs,\n\
+                 picture_colors = excluded.picture_colors,\n\
+                 picture_accounts = excluded.picture_accounts",
+            params![
+                record.user.to_string(),
+                record.board.to_string(),
+                record.label,
+                record.model,
+                record.firmware,
+                record.project,
+                record.joined_at,
+                record.seen.relay,
+                record.seen.usb,
+                record.seen.ble,
+                record.seen.lan,
+                picture.map(|picture| picture.at),
+                picture.map(|picture| encode_lamp_counts(&picture.outputs)),
+                picture.map(|picture| picture.colors.as_slice()),
+                picture.map(|picture| encode_uid_list(&picture.accounts)),
+            ],
+        );
+    }
+
+    fn board_record(&self, user: PrefixedUid, board: RelayBoardId) -> Option<BoardRecord> {
+        self.query_one(
+            "MetaStore::board_record",
+            "SELECT user_uid, board_id, label, model, firmware, project, joined_at, seen_relay_at, seen_usb_at, seen_ble_at, seen_lan_at, picture_at, picture_outputs, picture_colors, picture_accounts\n\
+             FROM account_boards WHERE user_uid = ?1 AND board_id = ?2",
+            params![user.to_string(), board.to_string()],
+            decode_board_record,
+        )
+    }
+
+    fn board_records_for_user(&self, user: PrefixedUid) -> Vec<BoardRecord> {
+        self.query_all(
+            "MetaStore::board_records_for_user",
+            "SELECT user_uid, board_id, label, model, firmware, project, joined_at, seen_relay_at, seen_usb_at, seen_ble_at, seen_lan_at, picture_at, picture_outputs, picture_colors, picture_accounts\n\
+             FROM account_boards WHERE user_uid = ?1 ORDER BY joined_at, board_id",
+            params![user.to_string()],
+            decode_board_record,
+        )
+    }
+
+    fn board_records_for_board(&self, board: RelayBoardId) -> Vec<BoardRecord> {
+        // `account_boards_by_board` (migration 0007) makes this an index
+        // seek: the relay asks whenever a board comes or goes.
+        self.query_all(
+            "MetaStore::board_records_for_board",
+            "SELECT user_uid, board_id, label, model, firmware, project, joined_at, seen_relay_at, seen_usb_at, seen_ble_at, seen_lan_at, picture_at, picture_outputs, picture_colors, picture_accounts\n\
+             FROM account_boards WHERE board_id = ?1 ORDER BY user_uid",
+            params![board.to_string()],
+            decode_board_record,
+        )
+    }
+
+    fn delete_board_record(&mut self, user: PrefixedUid, board: RelayBoardId) -> bool {
+        self.execute(
+            "MetaStore::delete_board_record",
+            "DELETE FROM account_boards WHERE user_uid = ?1 AND board_id = ?2",
+            params![user.to_string(), board.to_string()],
+        ) > 0
     }
 
     // ---- sessions ----------------------------------------------------
@@ -646,6 +730,47 @@ fn decode_account_access(row: &Row<'_>) -> rusqlite::Result<AccountAccess> {
     })
 }
 
+fn decode_board_record(row: &Row<'_>) -> rusqlite::Result<BoardRecord> {
+    let picture_at: Option<f64> = row.get(11)?;
+    let outputs: Option<Vec<u8>> = row.get(12)?;
+    let colors: Option<Vec<u8>> = row.get(13)?;
+    let accounts: Option<String> = row.get(14)?;
+    let picture = match (picture_at, outputs, colors, accounts) {
+        (Some(at), Some(outputs), Some(colors), Some(accounts)) => Some(StoredPicture {
+            at,
+            outputs: decode_lamp_counts(&outputs),
+            colors,
+            accounts: decode_uid_list(&accounts),
+        }),
+        (None, None, None, None) => None,
+        _ => fatal(
+            "decoding account_boards.picture_*",
+            Err("the picture columns are neither all set nor all NULL"),
+        ),
+    };
+    Ok(BoardRecord {
+        user: parse_uid(&row.get::<_, String>(0)?),
+        board: fatal(
+            "decoding account_boards.board_id",
+            row.get::<_, String>(1)?
+                .parse::<RelayBoardId>()
+                .map_err(|bad| bad.to_string()),
+        ),
+        label: row.get(2)?,
+        model: row.get(3)?,
+        firmware: row.get(4)?,
+        project: row.get(5)?,
+        joined_at: row.get(6)?,
+        seen: BoardSightings {
+            relay: row.get(7)?,
+            usb: row.get(8)?,
+            ble: row.get(9)?,
+            lan: row.get(10)?,
+        },
+        picture,
+    })
+}
+
 /// A BLOB column that must hold exactly `N` bytes. Anything else is a
 /// corrupted row, and fatal like every other decode failure here.
 fn fixed_bytes<const N: usize>(column: &str, bytes: Vec<u8>) -> [u8; N] {
@@ -751,6 +876,45 @@ fn decode_hashes(json: &str) -> Vec<ContentHash> {
     decode_json(json)
 }
 
+/// A picture's lamps per output: each a `u32` little-endian, concatenated.
+fn encode_lamp_counts(outputs: &[u32]) -> Vec<u8> {
+    outputs
+        .iter()
+        .flat_map(|lamps| lamps.to_le_bytes())
+        .collect()
+}
+
+fn decode_lamp_counts(bytes: &[u8]) -> Vec<u32> {
+    if bytes.len() % 4 != 0 {
+        fatal::<(), _>(
+            "decoding account_boards.picture_outputs",
+            Err(format!(
+                "{} bytes is not a whole number of u32s",
+                bytes.len()
+            )),
+        );
+    }
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
+}
+
+/// A list of uids joined by `,` (a base-32 uid never holds one).
+fn encode_uid_list(uids: &[PrefixedUid]) -> String {
+    uids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn decode_uid_list(text: &str) -> Vec<PrefixedUid> {
+    text.split(',')
+        .filter(|uid| !uid.is_empty())
+        .map(parse_uid)
+        .collect()
+}
+
 fn encode_json<T: serde::Serialize>(value: &T) -> String {
     fatal("encoding a JSON column", serde_json::to_string(value))
 }
@@ -851,6 +1015,78 @@ mod tests {
         assert_eq!(user.email, "seven@example.com");
         assert_eq!(user.created_at, 7.5);
         assert_eq!(store.schema_version(), crate::migrations::latest_version());
+    }
+
+    /// The port has no user deletion, so the conformance suite cannot ask
+    /// this; the schema still promises it: an account's rows go with it,
+    /// and only its own.
+    #[test]
+    fn deleting_an_account_takes_its_board_list_with_it() {
+        let mut store = SqliteMetaStore::open_in_memory();
+        let board = RelayBoardId([0x10, 0xbd, 0xa3, 0xb0, 0x8e, 0x30]);
+        let users = [7u8, 8u8].map(|n| PrefixedUid::mint(UidPrefix::User, &[n; 16]));
+        for uid in users {
+            store.put_user(CloudUser {
+                uid,
+                google_sub: format!("g-{uid}"),
+                email: format!("{uid}@example.com"),
+                display_name: "X".into(),
+                given_name: None,
+                family_name: None,
+                picture_url: None,
+                provider: "google".into(),
+                created_at: 1.0,
+                anonymous: false,
+            });
+            store.put_board_record(BoardRecord {
+                user: uid,
+                board,
+                label: "Lamp".into(),
+                model: None,
+                firmware: None,
+                project: None,
+                joined_at: 2.0,
+                seen: BoardSightings::default(),
+                picture: None,
+            });
+        }
+        store
+            .conn
+            .execute("DELETE FROM users WHERE uid = ?1", [users[0].to_string()])
+            .unwrap();
+
+        assert_eq!(store.board_record(users[0], board), None);
+        assert!(store.board_record(users[1], board).is_some());
+    }
+
+    /// The four picture columns are all set or all NULL; a row holding half
+    /// a picture is corrupt, and fatal like every other decode failure.
+    #[test]
+    #[should_panic(expected = "account_boards.picture_")]
+    fn half_a_stored_picture_is_fatal() {
+        let mut store = SqliteMetaStore::open_in_memory();
+        let uid = PrefixedUid::mint(UidPrefix::User, &[7; 16]);
+        store.put_user(CloudUser {
+            uid,
+            google_sub: "g-7".into(),
+            email: "seven@example.com".into(),
+            display_name: "Seven".into(),
+            given_name: None,
+            family_name: None,
+            picture_url: None,
+            provider: "google".into(),
+            created_at: 1.0,
+            anonymous: false,
+        });
+        store
+            .conn
+            .execute(
+                "INSERT INTO account_boards (user_uid, board_id, label, joined_at, picture_at)\n\
+                 VALUES (?1, '10bda3b08e30', 'Lamp', 1.0, 2.0)",
+                [uid.to_string()],
+            )
+            .unwrap();
+        store.board_records_for_user(uid);
     }
 
     /// The pragmas are the posture; a silently-ignored one would cost us

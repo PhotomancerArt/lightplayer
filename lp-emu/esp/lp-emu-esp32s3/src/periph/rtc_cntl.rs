@@ -142,13 +142,39 @@
 //! All of them are accept-and-remember at the PAC's resets: nothing in the
 //! image reads a bit back that hardware would have changed.
 //!
-//! # `options0.sw_{app,pro}cpu_rst` are reported, not performed
+//! # `options0.sw_sys_rst` is a request the machine performs
 //!
-//! On this chip the software resets are **per core**: `sw_appcpu_rst` bit
-//! 4 and `sw_procpu_rst` bit 5, write-only in the PAC (`options0.rs:223-
-//! 228`); there is no whole-system `sw_sys_rst` bit 31 as on the classic.
-//! A write to either leaves a trace note and a warning and is not
-//! remembered; performing it is P06's.
+//! ⚠️ **Corrected (S3 radio M1).** This section used to say the S3's
+//! software resets are per core only, with no whole-system bit. Both the
+//! PAC and the ROM say otherwise: `options0.sw_sys_rst` is **bit 31** here
+//! as on the classic (`esp32s3-0.35.2/src/rtc_cntl/options0.rs:316-319`,
+//! "SW system reset"), and it is the whole of the mask ROM's
+//! `software_reset` — which `esp_hal::system::software_reset` calls through
+//! the ROM table, and which is the firmware's requested reboot
+//! (`fw-esp32s3`'s `reset_now`):
+//!
+//! ```text
+//! 4004466c <software_reset>:
+//! 4004466f:  l32r   a9, (0x60008000)     ; RTC_CNTL
+//! 40044672:  l32r   a10, (0x80000000)    ; bit 31
+//! 40044678:  l32i.n a8, a9, 0
+//! 4004467a:  or     a8, a8, a10
+//! 40044680:  s32i.n a8, a9, 0            ; options0 |= sw_sys_rst
+//! ```
+//!
+//! A write with bit 31 set leaves a trace note and asks the machine for a
+//! reset through [`MachineRequest::Reset`] with [`ResetSource::Software`].
+//! A run built with `--reboot-on-reset` performs it
+//! (`Machine::reboot_for`): the power-on state back **with RTC fast and
+//! slow memory kept**, and `reset_state` reading [`SW_SYS_RESET_CODE`] in
+//! both halves — esp-hal's `SocResetReason::CoreSw`, "Software resets the
+//! digital core by RTC_CNTL_SW_SYS_RST" (`rtc_cntl/rtc/esp32s3.rs:22-23`).
+//! Any other run reports the reset and ends there, as an RWDT expiry does.
+//!
+//! `sw_appcpu_rst` (bit 4) and `sw_procpu_rst` (bit 5) — the ROM's
+//! `software_reset_cpu` (`0x4004_4684`: 16 for APP, 32 for PRO) — are still
+//! **reported, not performed**: a trace note, a warning, nothing
+//! remembered. Nothing in the product writes them.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -221,6 +247,18 @@ pub const STALLED: u32 = 0x86;
 /// `options0.sw_appcpu_rst` / `sw_procpu_rst` — write-only per-core
 /// software resets.
 const SW_CPU_RST: u32 = (1 << 4) | (1 << 5);
+/// `options0.sw_sys_rst` — the ROM's `software_reset` (module docs).
+const SW_SYS_RST: u32 = 1 << 31;
+
+/// `reset_state`'s cause code after a software system reset: esp-hal's
+/// `SocResetReason::CoreSw` on this chip (`rtc_cntl/rtc/esp32s3.rs:22-23`),
+/// "Software resets the digital core by RTC_CNTL_SW_SYS_RST".
+pub const SW_SYS_RESET_CODE: u32 = 0x03;
+
+/// `reset_state`'s code after a host's chip reset through the
+/// USB-Serial-JTAG bridge (`USB_UART_CHIP_RESET`, esp-hal's `CoreUsbUart`):
+/// RTC memory kept, as after [`SW_SYS_RESET_CODE`].
+pub const USB_UART_CHIP_RESET_CODE: u32 = 0x15;
 
 const WDT_EN: u32 = 1 << 31;
 const STG0_SHIFT: u32 = 28;
@@ -305,6 +343,15 @@ impl RtcCntl {
         out
     }
 
+    /// `reset_state` reads `code` in both halves (PRO bits 5:0, APP bits
+    /// 11:6), as a reset of that kind leaves it — the classic's own
+    /// arithmetic, at this chip's offset.
+    pub fn set_reset_cause_code(&mut self, code: u32) {
+        let word = self.regs.stored(RESET_STATE) & !0xfff;
+        self.regs
+            .poke(RESET_STATE, word | (code & 0x3f) | ((code & 0x3f) << 6));
+    }
+
     /// The handle the machine holds.
     pub fn stall_key(&self) -> StallKey {
         self.stall.clone()
@@ -371,12 +418,28 @@ impl RtcCntl {
     fn write_word(&mut self, off: u32, value: u32, cx: &mut BusCx<'_>) {
         match off {
             OPTIONS0 => {
+                if value & SW_SYS_RST != 0 {
+                    let line = format!(
+                        "cyc={} pc=0x{:08x} RTC_CNTL options0.sw_sys_rst written (a software \
+                         system reset: the machine performs it under --reboot-on-reset, and \
+                         reports it otherwise)",
+                        cx.now, cx.pc
+                    );
+                    cx.trace.note(&line);
+                    let at = cx.now;
+                    cx.request(MachineRequest::Reset {
+                        source: "RTC_CNTL options0.sw_sys_rst",
+                        at,
+                        strap: Strap::App,
+                        cause: ResetSource::Software,
+                    });
+                }
                 if value & SW_CPU_RST != 0 && !self.warned_cpu_rst {
                     self.warned_cpu_rst = true;
                     let line = format!(
                         "cyc={} pc=0x{:08x} RTC_CNTL options0.sw_{{app,pro}}cpu_rst written (a \
-                         per-core software reset; this machine has no boot chain to restart \
-                         before P06, so the run carries on)",
+                         per-core software reset; reported, not performed, so the run \
+                         carries on)",
                         cx.now, cx.pc
                     );
                     cx.trace.note(&line);
@@ -386,10 +449,10 @@ impl RtcCntl {
                         cx.pc
                     );
                 }
-                // The two reset bits are write-only pulses in the PAC;
+                // The three reset bits are write-only pulses in the PAC;
                 // everything else in the word is accept-and-remember, the
                 // stall halves included.
-                self.regs.poke(OPTIONS0, value & !SW_CPU_RST);
+                self.regs.poke(OPTIONS0, value & !(SW_CPU_RST | SW_SYS_RST));
                 self.publish_stall();
             }
             SW_CPU_STALL => {
@@ -456,6 +519,12 @@ impl RtcCntl {
 impl Peripheral for RtcCntl {
     fn name(&self) -> &'static str {
         "RTC_CNTL"
+    }
+
+    /// The machine reaches in after a software reset to set `reset_state`
+    /// (`Machine::reboot_for`).
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn attached(&mut self, index: usize) {
@@ -803,6 +872,44 @@ mod tests {
             sb.read(&mut r, OPTIONS0),
             o0,
             "a write-only pulse, not remembered"
+        );
+    }
+
+    #[test]
+    fn a_system_software_reset_asks_the_machine_for_one() {
+        let mut sb = Sandbox::new();
+        sb.now = 1234;
+        let mut r = block();
+        let o0 = sb.read(&mut r, OPTIONS0);
+        // The ROM's `software_reset`: `options0 |= 0x8000_0000`.
+        sb.write(&mut r, OPTIONS0, o0 | SW_SYS_RST);
+        assert_eq!(
+            sb.request,
+            Some(MachineRequest::Reset {
+                source: "RTC_CNTL options0.sw_sys_rst",
+                at: 1234,
+                strap: Strap::App,
+                cause: ResetSource::Software,
+            })
+        );
+        assert_eq!(
+            sb.read(&mut r, OPTIONS0),
+            o0,
+            "a write-only pulse, not remembered"
+        );
+    }
+
+    #[test]
+    fn a_software_reset_cause_reads_in_both_halves() {
+        let mut r = block();
+        r.set_reset_cause_code(SW_SYS_RESET_CODE);
+        let word = r.regs.stored(RESET_STATE);
+        assert_eq!(word & 0x3f, 0x03, "PRO");
+        assert_eq!((word >> 6) & 0x3f, 0x03, "APP");
+        assert_eq!(
+            word & !0xfff,
+            regs::RTC_CNTL.reset(RESET_STATE).unwrap_or(0) & !0xfff,
+            "the rest of the word is untouched"
         );
     }
 

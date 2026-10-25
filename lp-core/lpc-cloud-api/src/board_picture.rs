@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::base64_bytes::Base64Bytes;
 
-/// Ask for the cached pictures of up to
-/// [`MAX_LISTED_BOARDS`](crate::MAX_LISTED_BOARDS) boards; the rest of a
+/// Ask for the last pictures of up to
+/// [`MAX_ACCOUNT_BOARDS`](crate::MAX_ACCOUNT_BOARDS) boards; the rest of a
 /// longer list is ignored. Answered with [`BoardPictureList`]. Only the
 /// accounts a board proved read its picture; a guest reads nothing, and an
 /// anonymous caller is [`crate::error::CloudError::NotAuthenticated`].
@@ -55,8 +55,9 @@ pub struct BoardPictureList {
 pub struct BoardPicture {
     /// The board's relay id.
     pub id: String,
-    /// Whether the board is on the relay now. A picture outlives its board
-    /// until the cloud next deploys.
+    /// Whether the board is on the relay now. An offline board's picture
+    /// is the last one the relay kept (written behind to the account's
+    /// board list, so it survives a deploy).
     pub online: bool,
     /// Moves on every picture the relay accepts from the board: the
     /// caller's "do I have the latest?".

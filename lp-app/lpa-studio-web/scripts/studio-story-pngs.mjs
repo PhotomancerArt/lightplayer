@@ -1744,8 +1744,29 @@ async function runChrome(args, options) {
   return await runProcess(
     chrome,
     ["--no-first-run", "--no-default-browser-check", ...args],
-    options,
+    // Only a `--dump-dom` run has a page on stdout to vouch for the exit.
+    args.includes("--dump-dom")
+      ? { acceptExit: isTeardownWatchdogExit, ...options }
+      : options,
   );
+}
+
+// Ticket lp2025/_auto/2026-10-20-story-discovery-teardown-exit. On the desk,
+// Google Chrome 155 and Brave write the whole `--dump-dom` page and THEN exit 2
+// from their teardown watchdog, which made every local
+// `just studio-story-pngs` fail at discovery (docs/debt/story-capture-pipeline.md,
+// 2026-10-20). CI's Chrome for Testing never does this. Accept exactly that:
+// exit code 2 (not a signal), "Teardown watchdog expired" on stderr, and
+// stdout holding the page's HTML. A crash, an empty dump or any other code
+// still fails. Returns the reason to log, or null to refuse.
+function isTeardownWatchdogExit({ code, stdout, stderr }) {
+  if (code !== 2 || !stderr.includes("Teardown watchdog expired")) {
+    return null;
+  }
+  if (!/<html|<!DOCTYPE html/i.test(stdout)) {
+    return null;
+  }
+  return `exit 2 after "Teardown watchdog expired" with ${stdout.length} chars of HTML on stdout`;
 }
 
 // Wait for a child process, BOUNDED. The bare `once(child, "exit")` this
@@ -1753,7 +1774,14 @@ async function runChrome(args, options) {
 // (docs/debt/story-capture-pipeline.md, 2026-08-05): nothing else in this file
 // covers a child that never exits, because every other timeout guards the CDP
 // capture path.
-async function runProcess(command, args, { timeoutMs = subprocessTimeoutMs, label } = {}) {
+//
+// `acceptExit({ code, stdout, stderr })` may vouch for ONE named non-zero exit
+// by returning the reason (logged); anything it refuses fails as before.
+async function runProcess(
+  command,
+  args,
+  { timeoutMs = subprocessTimeoutMs, label, acceptExit } = {},
+) {
   const name = label ?? path.basename(command);
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
@@ -1789,7 +1817,11 @@ async function runProcess(command, args, { timeoutMs = subprocessTimeoutMs, labe
     );
   }
   if (outcome.code !== 0) {
-    throw new Error(`${name} exited with ${outcome.code}: ${stderr.trim()}`);
+    const reason = acceptExit?.({ code: outcome.code, stdout, stderr });
+    if (!reason) {
+      throw new Error(`${name} exited with ${outcome.code}: ${stderr.trim()}`);
+    }
+    console.log(`${name}: accepted non-zero exit (${reason}).`);
   }
   return stdout;
 }

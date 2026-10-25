@@ -1,5 +1,5 @@
 //! One accepted connection on the harness: the std twin of the C6's
-//! `lan_link_task` and `refuse_task` (`fw-esp32c6/src/net/lan_endpoint_task.rs`).
+//! `lan_link_task` and `refuse_task` (`fw-esp32-radio/src/net/lan_endpoint_task.rs`).
 //!
 //! The steps, and their order, are the C6's: upgrade the WebSocket, mint a
 //! link id, open the network slot's secure lp-link responder, announce

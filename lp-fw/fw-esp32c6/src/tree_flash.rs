@@ -25,7 +25,7 @@
 //! (3.4375 MB since the tree-store cutover's table), which ends below the
 //! window's first page — no MMU entry here is
 //! one either of them uses. The core's own hash maps its scratch pages
-//! just below the engine (`ota/engine_window.rs`): disjoint.
+//! just below the engine (`split_core/engine_window.rs`): disjoint.
 //!
 //! **Coherence.** The cache knows nothing of SPI1's programs and erases.
 //! `lp_tree_store::WindowedFlash` invalidates the range after every one,

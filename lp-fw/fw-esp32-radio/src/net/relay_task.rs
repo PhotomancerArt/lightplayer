@@ -1,0 +1,241 @@
+//! The cloud relay on `lp-net` (Wi-Fi relay plan P8): the board dials
+//! lightplayer.app by itself and holds its device leg, so a browser signed
+//! in to one of its accounts can reach it from anywhere.
+//!
+//! The work is `fw_esp32_common::net::relay`'s — the driver (the `lpc-relay`
+//! client joined to the network slot it shares with the LAN endpoint) and
+//! the device-leg loop — over this board's platform ([`BoardRelayIo`]): DNS and
+//! TCP from embassy-net, the hardware RNG, the station's address
+//! (`net_address`), and the settings the main thread hands over
+//! (`relay_probes::RELAY_BOARD`).
+//!
+//! - **In the core.** `core_boot` starts it with the station, the LAN
+//!   endpoint and mDNS, so an engine-less core reaches the relay too (OTA
+//!   M8's rule).
+//! - **It dials only when** the station has an address, Cloud relay is on,
+//!   and the board holds an account key (the driver's rule, RD8).
+//! - **Where.** `lightplayer.app:80`, always, on the product image; a desk
+//!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
+//!   says so at boot (RD14). Both are the chip crate's build facts, so the
+//!   [`RelayClientConfig`] comes from it (the C6's `net::relay_config`).
+//! - **Relay protocol 2.** The hello carries the build's version (the
+//!   config's `firmware`: the manifest's version slot, what the wire hello
+//!   reports; on a split image the core and the engine come from one link,
+//!   so it is the core's too). The project's facts and the pictures the hub
+//!   asks for come from the main thread through `RELAY_BOARD` (its frame
+//!   hook, `relay_probes::serve_relay`); this task only moves them.
+//! - **Memory.** The leg's TCP and WebSocket buffers (5,830 B) exist only
+//!   while the board may dial (joined, Cloud relay on, an account entry
+//!   held: RD8), and the route's outgoing frame (1,091 B) only while a
+//!   route holds the network slot; `run_relay_leg` allocates both, fallibly,
+//!   and gives them back (Wi-Fi relay plan, round 2: Yona's 2026-10-07
+//!   ruling, reversing P8's boot-time allocation). A board with Cloud relay
+//!   on but no account key holds none, exactly like one with it off: P9
+//!   measured the boot-time 6,921 B taking the largest free block from
+//!   19,556 B to 13,448 B on the emulated C6 with `projects/test/basic`
+//!   loaded and a network session open, under the read gate's 16,384 B.
+//!   A picture's buffer (at most 836 B, `MAX_BOARD_PICTURE_FRAME`) is
+//!   reserved by the main thread only once the hub asks for a picture, goes
+//!   back and forth between the threads after that, and is freed whenever
+//!   the leg ends or the board may not dial.
+
+use alloc::collections::VecDeque;
+use core::cell::RefCell;
+
+use embassy_futures::select::{Either, select};
+use embassy_net::dns::DnsQueryType;
+use embassy_net::tcp::TcpSocket;
+use embassy_net::{IpAddress, Ipv4Address, Stack};
+use embassy_time::{Duration, Instant, Timer};
+use fw_esp32_common::net::relay::{
+    RelayDriver, RelayLegIo, RelayLegSizes, RelayPictureSlot, run_relay_leg,
+};
+use fw_esp32_common::net::ws::RX_OVERHEAD;
+use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
+use fw_esp32_common::radio_link::{RADIO_LINK_SLOTS, SharedPort};
+use lpc_relay::{LanAddress, ROUTE_FRAME_OVERHEAD, RelayClientConfig, RelayEvent};
+
+use super::lan_endpoint_task::LINK_PORT;
+use super::net_address::{self, AddressWatch};
+use super::relay_probes::RELAY_BOARD;
+use super::tcp_byte_stream::TcpStream;
+
+/// The device leg's TCP buffers: the LAN link's sizes (one network session
+/// rides either path, at the same window).
+const TCP_RX: usize = 2 * 1024;
+const TCP_TX: usize = 2560;
+/// The WebSocket's receive buffer: one route frame (3 bytes and one
+/// network-link frame), with room for a control frame between fragments.
+const WS_RX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME + RX_OVERHEAD;
+/// One outgoing route frame (allocated by the leg while a route holds the
+/// network slot).
+const FRAME_TX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME;
+/// A leg that hears nothing for this long is gone. The hub pings every
+/// 25 s, and the driver closes a leg silent for 60 s itself first.
+const SOCKET_TIMEOUT: Duration = Duration::from_secs(75);
+
+/// The relay task: `config` is the board's fixed facts (MAC, name, wire
+/// version) and where the relay is.
+#[embassy_executor::task]
+pub async fn relay_task(stack: Stack<'static>, port: SharedPort, config: RelayClientConfig) {
+    let index = RADIO_LINK_SLOTS;
+    let io = BoardRelayIo {
+        stack,
+        address: RefCell::new(net_address::watch()),
+        queue: RefCell::new(VecDeque::new()),
+    };
+    let mut driver = RelayDriver::new(config, fill_random, port.port(), index);
+    io.prime(&mut driver);
+    let sizes = RelayLegSizes {
+        tcp_rx: TCP_RX,
+        tcp_tx: TCP_TX,
+        ws_rx: WS_RX,
+        frame_tx: FRAME_TX,
+    };
+    run_relay_leg(&mut driver, &io, &port, index, sizes).await;
+}
+
+/// The relay's platform on the board.
+struct BoardRelayIo {
+    stack: Stack<'static>,
+    address: RefCell<AddressWatch>,
+    /// Inputs taken together (the address and its LAN address), handed out
+    /// one at a time.
+    queue: RefCell<VecDeque<RelayEvent<'static>>>,
+}
+
+impl BoardRelayIo {
+    /// What the board already knows at start: the station's address, the
+    /// switch and the account entries `core_boot` handed over.
+    fn prime(&self, driver: &mut RelayDriver) {
+        let now = self.now_us();
+        let address = self.address.borrow_mut().try_get().flatten();
+        driver.handle(now, RelayEvent::Lan(lan_address(address)));
+        if let Some(on) = RELAY_BOARD.take_cloud_relay() {
+            driver.handle(now, RelayEvent::CloudRelay(on));
+        }
+        if let Some(accounts) = RELAY_BOARD.take_accounts() {
+            driver.handle(now, RelayEvent::Accounts(accounts));
+        }
+        if let Some(facts) = RELAY_BOARD.take_project() {
+            driver.handle(now, RelayEvent::Project(facts));
+        }
+        driver.handle(
+            now,
+            RelayEvent::Network {
+                joined: address.is_some(),
+            },
+        );
+    }
+
+    fn push_address(&self, address: Option<[u8; 4]>) {
+        let mut queue = self.queue.borrow_mut();
+        queue.push_back(RelayEvent::Lan(lan_address(address)));
+        queue.push_back(RelayEvent::Network {
+            joined: address.is_some(),
+        });
+    }
+}
+
+impl RelayLegIo for BoardRelayIo {
+    type Stream<'b>
+        = TcpStream<'b>
+    where
+        Self: 'b;
+
+    fn now_us(&self) -> u64 {
+        Instant::now().as_micros()
+    }
+
+    fn entropy(&self) -> fn(&mut [u8]) {
+        fill_random
+    }
+
+    async fn resolve(&self, host: &str) -> Option<[u8; 4]> {
+        match self.stack.dns_query(host, DnsQueryType::A).await {
+            Ok(addresses) => addresses.first().map(|address| match address {
+                IpAddress::Ipv4(v4) => v4.octets(),
+            }),
+            Err(_) => {
+                log::info!("[relay] {host} did not resolve");
+                None
+            }
+        }
+    }
+
+    async fn connect<'b>(
+        &'b self,
+        addr: [u8; 4],
+        port: u16,
+        tcp_rx: &'b mut [u8],
+        tcp_tx: &'b mut [u8],
+    ) -> Option<TcpStream<'b>> {
+        let mut socket = TcpSocket::new(self.stack, tcp_rx, tcp_tx);
+        socket.set_timeout(Some(SOCKET_TIMEOUT));
+        // One write is one whole WebSocket message: send it now (the LAN
+        // endpoint's reason).
+        socket.set_nagle_enabled(false);
+        match socket.connect((Ipv4Address::from(addr), port)).await {
+            Ok(()) => Some(TcpStream(socket)),
+            Err(_) => None,
+        }
+    }
+
+    async fn sleep_until(&self, at: Option<u64>) {
+        match at {
+            Some(at) => Timer::at(Instant::from_micros(at)).await,
+            None => core::future::pending().await,
+        }
+    }
+
+    async fn next_input(&self) -> RelayEvent<'static> {
+        loop {
+            if let Some(input) = self.queue.borrow_mut().pop_front() {
+                return input;
+            }
+            if let Some(on) = RELAY_BOARD.take_cloud_relay() {
+                return RelayEvent::CloudRelay(on);
+            }
+            if let Some(accounts) = RELAY_BOARD.take_accounts() {
+                return RelayEvent::Accounts(accounts);
+            }
+            if let Some(facts) = RELAY_BOARD.take_project() {
+                return RelayEvent::Project(facts);
+            }
+            if RELAY_BOARD.pictures.news() {
+                return RelayEvent::PictureReady;
+            }
+            let changed = {
+                let mut address = self.address.borrow_mut();
+                match select(RELAY_BOARD.wait(), address.changed()).await {
+                    Either::First(()) => None,
+                    Either::Second(address) => Some(address),
+                }
+            };
+            if let Some(address) = changed {
+                self.push_address(address);
+            }
+        }
+    }
+
+    fn picture_slot(&self) -> &RelayPictureSlot {
+        &RELAY_BOARD.pictures
+    }
+
+    fn publish(&self, driver: &RelayDriver) {
+        RELAY_BOARD.publish(driver, self.now_us());
+    }
+}
+
+/// The board's LAN address for the relay's hello: where its LAN link
+/// listens.
+fn lan_address(address: Option<[u8; 4]>) -> Option<LanAddress> {
+    address.map(|ip| LanAddress {
+        ip,
+        port: LINK_PORT,
+    })
+}
+
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
+}

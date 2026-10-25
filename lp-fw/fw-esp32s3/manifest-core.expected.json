@@ -1,7 +1,7 @@
 {
   "lpManifestCore": 3,
   "package": "fw-esp32s3",
-  "target": "unknown",
+  "target": "esp32s3-8mb",
   "platform": {
     "family": "esp32",
     "chip": "esp32s3",
@@ -18,10 +18,15 @@
     "node.texture",
     "gfx.lpvm",
     "svc.button",
-    "shader.f32"
+    "svc.radio-espnow",
+    "shader.f32",
+    "fs.tree"
   ],
   "limits": {
     "flashAppBytes": 6291456
   },
-  "wireProto": 44
+  "wireProto": 45,
+  "ota": {
+    "layout": 2
+  }
 }

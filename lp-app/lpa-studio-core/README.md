@@ -552,9 +552,15 @@ which the home page can hold (`app/studio/connected_board.rs`,
   board closes first: one board is connected at a time. Connect reaches the
   board if it must, then opens its panel, in one press: on a closed port
   (`device_offers.rs`) it opens the port; on an offline board it takes the
-  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
-  then the cable (`ConnectReach`, the same code `connect-wifi`,
-  `connect-relay` and `reconnect` run). Then it holds the intent
+  first of its roads (`devices/best_link.rs`, pure): Wi‑Fi — at the address
+  the account's list gives while it says the board shares this network,
+  else the remembered one; skipped while the list says another network or
+  the page cannot reach the LAN (`LanReach`, reported by the web) — then
+  lightplayer.app, then the cable (`ConnectReach`, the same code
+  `connect-wifi`, `connect-relay` and `reconnect` run). A Wi‑Fi try that
+  fails goes on to lightplayer.app in the same press (`connect_flow.rs`,
+  `fall_through`), with one log line. The list's address is read in one
+  place (`studio_controller/lan_hint.rs`) and never stored. Then it holds the intent
   (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
   board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
   "The board didn't answer in time" (`StudioController::connect_failure`),
@@ -598,30 +604,77 @@ holds the board's network slot. The progress is
 ### The account's boards, on every computer
 
 Signed in, the web edge (`lpa-studio-web/src/cloud/account_boards.rs`) asks
-lightplayer.app's relay for the account's online boards (`ListBoards`, at
-load and every 30 s while the page is visible) and hands them in as
+lightplayer.app for the account's board list (`ListAccountBoards`, at load
+and every 30 s while the page is visible: every board that proved the
+account's key, online at the relay or not;
+`docs/adr/2026-10-20-the-account-board-list.md`) and hands it in as
 `StudioCommand::AccountBoards` (`None`: signed out, or no answer — keep
-nothing); core holds them by MAC (`AccountBoards`, sans-IO) and the
+nothing); core holds the rows by MAC (`AccountBoards`, sans-IO) and the
 controller joins them onto the roster (`studio_controller/account_boards_flow.rs`,
-`DeviceRosterView.cloud_boards`):
+`DeviceRosterView.cloud_boards`, each `UiCloudBoard` saying whether it is
+`online`):
 
-- a board this browser knows that no link of the tab reaches is in Online
-  boards, "Online at lightplayer.app"; a board with a USB, Bluetooth or LAN
-  link keeps it, and the list only lets its lightplayer.app row say online;
+- a board online at lightplayer.app that no link of the tab reaches is in
+  Online boards, "Online at lightplayer.app"; a board with a USB, Bluetooth
+  or LAN link keeps it, and the list only lets its lightplayer.app row say
+  online;
+- a board offline everywhere is in Offline boards: the offline card, its
+  last picture the one lightplayer.app kept (dimmed), lightplayer.app
+  "<email> · 2 h ago", no Connect. A board this browser remembers
+  takes the record's name, firmware, project and last-seen time only where
+  the record saw it more recently;
 - a board it never met is an in-memory roster entry under `mac-<12 hex>`
-  (handle `account_board_device`), named by the row and offered
-  `connect-relay` alone. It is never written to `/registry.json`: once its
-  hello comes over the relay it is a stranger the roster remembers as
-  usual, and the entry folds into that board.
+  (handle `account_board_device`), named by the row: offered
+  `connect-relay` while it is online, and Remove from your account. It is
+  never written to `/registry.json`: once its hello comes over the relay it
+  is a stranger the roster remembers as usual, and the entry folds into
+  that board.
 
-`connect-relay` is offered on either while someone is signed in and no link
-of this tab reaches the board. The cards that draw lightplayer.app's picture
+`connect-relay` is offered while someone is signed in, the board is online
+there, and no link of this tab reaches it. A board never met whose list row
+says it shares this network is offered `connect-wifi` first, as its Connect:
+pressed, a Wi‑Fi try that fails goes on through lightplayer.app.
+
+**The move onto Wi‑Fi** (`devices/lan_move.rs`, the machine;
+`studio_controller/lan_move_flow.rs`, driven from the refresh tick): a board
+reached through lightplayer.app, idle, holding a tier, whose list row says
+it shares this network at an address, moves onto the LAN once per page
+load. Its LAN link presents the relay's keys first
+(`NetworkLinkKeys::present_as_relay`, for as long as it is on Wi‑Fi), its
+relay session is parked (`RelayLinkSource::park`) before the LAN dial, and
+once the board's own link is the LAN's (8 s at most) the editor is rebound
+onto it in one step (`rebind_lens_onto`, shared with the held lens's
+resume) and the relay session is let go. A failure stays, in one log line.
+A moved board whose Wi‑Fi link goes is back through lightplayer.app after
+5 s, unless the link closed with 1000 or the list no longer names it
+(`docs/adr/2026-10-08-studio-network-links.md`, its 2026-10-21 amendment).
+
+**The report and the two forgets** (`studio_controller/account_board_requests_flow.rs`,
+`AccountBoardRequest`): when the access controller reads a board's list (USB,
+or Bluetooth/LAN at edit) and finds the account's **current** key, core asks
+the web edge to `ReportBoard` it, once per link per connection, with the
+board's own name (never this browser's rename) and facts. On a board the
+list holds, `devices/<board>/forget-from-account` — **Remove from your
+account**, Lasting — takes it off the list at once and asks `ForgetBoard`; a
+failed forget brings it back and its lightplayer.app row's details say why.
+The card's `forget` reads **Forget on this browser**, and on an account board
+says the board still shows from the account. Core makes no call: the edge
+answers on core's own queue (`StudioCommand::AccountBoardAnswered`; a
+`BoardListFull` answer is said once on the card, "list full"). The cards that draw lightplayer.app's picture
 (`DeviceRosterView.cloud_picture_asks`, home page only) are what the web asks
 `BoardPictures` for, watching, every half second; the pictures come back as
 `StudioCommand::AccountBoardPictures` and draw as `PictureSource::Cloud`, one
 row of lamps per output (`cloud_board_picture.rs`). The card's state is
 `SurfaceState::OnlineAtCloud`: the picture, no words, Connect
 (`docs/ux/anatomy/board-card.md`).
+
+All of this is walked end to end on the shipped C6 image through a local
+lp-cloud-server, in three lanes of `just walk-wifi-emu`: `studio-relay`
+(the relay connect, a never-met profile seeing an online board),
+`studio-relay-move` (the move onto Wi‑Fi and back, the best link) and
+`studio-relay-account` (a board with no Wi‑Fi reported over USB, both
+boards offline on a never-met profile with their last facts, Remove from
+your account).
 
 ### Which board plays which project
 

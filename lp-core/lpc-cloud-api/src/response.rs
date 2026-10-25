@@ -19,10 +19,10 @@ use lpc_history::{ContentHash, HistoryEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::account_access_info::AccountAccessInfo;
+use crate::account_board::AccountBoardList;
 use crate::ack::Ack;
 use crate::actor::Actor;
 use crate::board_picture::BoardPictureList;
-use crate::board_presence::BoardList;
 use crate::head_info::{HeadInfo, PushOutcome};
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
@@ -60,8 +60,8 @@ pub enum CloudResponse {
     LoginOptionsInfo(LoginOptionsInfo),
     /// See [`crate::account_access_info::AccountAccessInfo`].
     AccountAccessInfo(AccountAccessInfo),
-    /// See [`crate::board_presence::BoardList`].
-    BoardList(BoardList),
+    /// See [`crate::account_board::AccountBoardList`].
+    AccountBoardList(AccountBoardList),
     /// See [`crate::board_picture::BoardPictureList`].
     BoardPictureList(BoardPictureList),
 }
@@ -205,9 +205,9 @@ impl From<LoginOptionsInfo> for CloudResponse {
     }
 }
 
-impl From<BoardList> for CloudResponse {
-    fn from(response: BoardList) -> Self {
-        CloudResponse::BoardList(response)
+impl From<AccountBoardList> for CloudResponse {
+    fn from(response: AccountBoardList) -> Self {
+        CloudResponse::AccountBoardList(response)
     }
 }
 

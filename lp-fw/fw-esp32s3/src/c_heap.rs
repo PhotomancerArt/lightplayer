@@ -1,0 +1,361 @@
+//! The heap's regions on a radio image, and the C heap: `malloc` and friends
+//! for the radio blobs, placed in the radio's own region first.
+//!
+//! The S3's copy of `fw-esp32c6/src/c_heap.rs` (feature `radio`, and the
+//! `radio_boot_probe` scaffolding). Both of the C6's radio-heap defects apply
+//! to this chip as they are, so both of its answers do:
+//!
+//! - **Fragmentation.** The BLE link layer allocates every time advertising
+//!   restarts (the advertised name follows the loaded project), and blocks
+//!   that land in the main arena above a project split the space the next
+//!   project needs
+//!   (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+//!   So the blobs' blocks go to a region of their own, [`HEAP_RADIO`].
+//! - **Warm-reset DMA.** A radio keeps running across a warm reset of the
+//!   system, and its DMA keeps writing into buffers the previous app gave
+//!   it. On the C6 those writes crashed the second-stage bootloader
+//!   (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md)
+//!   and could reach the split loader's RAM
+//!   (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+//!   On this chip the boot stages are `lp_bootctl::S3_BOOT_STAGE_RAM`: the
+//!   split loader's RAM, inside the core's `.bss` at the top of the main
+//!   arena, and the IDF bootloader's, which is `dram2_seg` and the top of
+//!   `dram_seg`. So nothing the radio can DMA into may live in either.
+//!
+//! The regions are picked by capability. Without the `psram` feature this
+//! firmware never maps PSRAM, so `MemoryCapability::External` is borrowed as
+//! a tag nothing else asks for, as on the C6; a `psram` image tags the radio
+//! region `Internal | Reserved` instead (esp-alloc's third diff), because
+//! `External` is PSRAM's there:
+//!
+//! | region | tag | who lands there |
+//! |---|---|---|
+//! | main arena, outside the boot stages' RAM | `Internal` | Rust first; C when the radio region is full; thread stacks |
+//! | main arena, inside a boot stage's RAM (the loader's) | none ([`FENCED`]) | Rust only |
+//! | `dram2_seg` (`crate::dram2_heap`) | none | Rust only (capability-free requests) |
+//! | radio ([`HEAP_RADIO`]) | `Internal` and `External` ([`RADIO`]) | C first; Rust last of all |
+//!
+//! The arena is cut only around the boot stages' own ranges, not from the
+//! first one up: anything of the arena above a range is ordinary RAM that
+//! `Internal` requests need (cutting from the loader up left the M1 probe
+//! 54,816 B of `Internal`, which Wi-Fi's blobs filled, and esp-rtos could
+//! not allocate the link thread's stack: FS3, 2026-10-21). The loader's
+//! 16 KiB sits at the arena's top (L4, amended 2026-10-22: at
+//! `0x3FCB_0000..0x3FCC_0000`, mid-arena, it cut the Bluetooth image's
+//! arena in three and its largest free block fell to 73,744 B), so the
+//! arena is one `Internal` piece below it and a few KB untagged inside it. A request carrying `Internal` (the C fallback,
+//! esp-radio's own `InternalMemory`, esp-rtos's thread stacks) therefore
+//! never reaches `dram2_seg` nor the loader's RAM. Rust's global allocator
+//! asks for nothing and tries the regions in registration order: the arena's
+//! pieces bottom-up, `dram2_seg`, radio.
+//!
+//! Semantics are esp-alloc 0.10's `compat` ones (`malloc.rs`), which this
+//! replaces (`compat` is off: its `malloc` asks for no capability): a 4-byte
+//! size header in front of each block, 4-byte alignment.
+
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+use enumset::EnumSet;
+use esp_alloc::MemoryCapability;
+
+/// The capability set that selects the radio's region alone.
+#[cfg(not(feature = "psram"))]
+pub const RADIO: EnumSet<MemoryCapability> =
+    enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::External);
+/// The capability set that selects the radio's region alone, on a `psram`
+/// image: `External` is PSRAM's there, so the radio's region takes the
+/// esp-alloc fork's `Reserved` instead (its third diff), and nothing steered
+/// to PSRAM can land in the region the radio's DMA uses.
+#[cfg(feature = "psram")]
+pub const RADIO: EnumSet<MemoryCapability> =
+    enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::Reserved);
+
+/// The capability set of the main arena's piece inside a boot stage's RAM:
+/// none, so only a request that asks for nothing can land there.
+pub const FENCED: EnumSet<MemoryCapability> = EnumSet::empty();
+
+/// The radio region's size on a Bluetooth image (no `espnow`). BTDM's
+/// controller took 35,724 B at init on FS3 with esp-radio's defaults (M1's
+/// radio-boot transcript, `ble_new`; six connections and an 8 KB controller
+/// task stack, which esp-rtos takes from the heap with `Internal`, so from the
+/// main arena, not from here); this image asks for two connections and the
+/// advertiser. Connected on FS3 its high water was 26,084 B
+/// (docs/reports/2026-10-21-s3-bluetooth-walk.md). The heartbeat's
+/// `[radio-heap]` line is the figure this is checked against.
+#[cfg(not(s3_espnow))]
+pub const HEAP_RADIO_BYTES: usize = 32 * 1024;
+/// The radio region's size with the Wi-Fi blob up too (`espnow`, `wifi`): the
+/// C6's 48 KB (its joined high water 47,308 of 49,152 B, the same blobs'
+/// classes and the same lean Wi-Fi driver counts,
+/// `fw_esp32_radio::hardware::espnow_controller_config`). On this chip with
+/// both radios up and no network joined the blobs' C blocks reach ~42 KB
+/// (`lp-emu:esp32s3:t1`, S3 radio M4: a 32 KB region overflowed 9,488 B to
+/// main); joined is measured on FS3. Not a loss to Rust: the region's spare
+/// bytes are Rust's, last.
+#[cfg(s3_espnow)]
+pub const HEAP_RADIO_BYTES: usize = 48 * 1024;
+
+/// An arena the allocator gets whole, 8-aligned (a bare byte array can land
+/// on an odd address).
+#[repr(C, align(8))]
+struct HeapArena<const N: usize>(core::mem::MaybeUninit<[u8; N]>);
+
+static mut HEAP_MAIN: HeapArena<{ crate::HEAP_SIZE }> = HeapArena(core::mem::MaybeUninit::uninit());
+static mut HEAP_RADIO: HeapArena<HEAP_RADIO_BYTES> = HeapArena(core::mem::MaybeUninit::uninit());
+
+/// Where the radio's region is: `(start, size)`, set once by [`install`].
+static RADIO_START: AtomicUsize = AtomicUsize::new(0);
+
+/// Live C bytes (headers included) in the radio's region.
+static RADIO_LIVE: AtomicUsize = AtomicUsize::new(0);
+/// The most [`RADIO_LIVE`] has been.
+static RADIO_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
+/// C bytes the radio region could not hold, which went to the main arena.
+static OVERFLOWED: AtomicUsize = AtomicUsize::new(0);
+/// The high-water [`log_if_grown`] last reported.
+#[cfg(s3_radio)]
+static LOGGED_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
+
+/// Bytes of header in front of every C block: its total size.
+const HEADER: usize = 4;
+
+/// One piece of the main arena: where it is, how long, and whether it lies in
+/// a boot stage's RAM (registered untagged) or not (`Internal`).
+#[derive(Clone, Copy)]
+pub struct ArenaPiece {
+    pub start: usize,
+    pub len: usize,
+    pub fenced: bool,
+}
+
+/// The most pieces the arena may be cut into: the regions esp-alloc holds,
+/// less `dram2_seg` and the radio region. Two today: below the loader's RAM,
+/// and the arena's top inside it (three if a link puts the arena across it;
+/// the arena ends below the IDF bootloader's RAM, which starts inside the
+/// main stack).
+#[cfg(not(feature = "psram"))]
+pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 2;
+/// …and less the PSRAM's region, on a `psram` image (whose esp-alloc holds
+/// one more region, so the arena keeps its three).
+#[cfg(feature = "psram")]
+pub const MAX_ARENA_PIECES: usize = esp_alloc::MAX_REGIONS - 3;
+
+/// Register the main arena, cut around every boot stage's RAM: pieces
+/// outside are `Internal`, pieces inside carry no tag. Bottom-up, so Rust's
+/// first fit fills the arena as before. Replaces `esp_alloc::heap_allocator!`
+/// on a radio image. Then `dram2_seg` (its own module), then
+/// [`install_radio`], so Rust reaches the radio region only once the arena
+/// and `dram2_seg` are both full.
+pub fn install_main() -> [Option<ArenaPiece>; MAX_ARENA_PIECES] {
+    let main = core::ptr::addr_of_mut!(HEAP_MAIN).cast::<u8>();
+    let pieces = arena_pieces(main as usize, crate::HEAP_SIZE);
+    for piece in pieces.iter().flatten() {
+        let caps = if piece.fenced {
+            FENCED
+        } else {
+            MemoryCapability::Internal.into()
+        };
+        // SAFETY: the pieces are disjoint and together the array, which is
+        // handed to the allocator exactly once, here.
+        unsafe {
+            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+                piece.start as *mut u8,
+                piece.len,
+                caps,
+            ));
+        }
+    }
+    pieces
+}
+
+/// Cut `start..start + len` around [`lp_bootctl::S3_BOOT_STAGE_RAM`] (lowest
+/// range first), bottom-up. Panics past [`MAX_ARENA_PIECES`]: a link that
+/// put the arena across more boot-stage RAM than esp-alloc has regions for,
+/// which the boot gates see at once.
+fn arena_pieces(start: usize, len: usize) -> [Option<ArenaPiece>; MAX_ARENA_PIECES] {
+    let mut pieces = [None; MAX_ARENA_PIECES];
+    let mut count = 0;
+    let mut push = |from: usize, to: usize, fenced: bool| {
+        if to > from {
+            assert!(
+                count < MAX_ARENA_PIECES,
+                "the heap arena crosses more boot-stage RAM than esp-alloc has regions for"
+            );
+            pieces[count] = Some(ArenaPiece {
+                start: from,
+                len: to - from,
+                fenced,
+            });
+            count += 1;
+        }
+    };
+    let end = start + len;
+    let mut at = start;
+    for range in lp_bootctl::S3_BOOT_STAGE_RAM {
+        let (lo, hi) = (range.start as usize, range.end as usize);
+        if hi <= at || lo >= end {
+            continue;
+        }
+        push(at, lo.max(at), false);
+        push(lo.max(at), hi.min(end), true);
+        at = hi.min(end);
+    }
+    push(at, end, false);
+    pieces
+}
+
+/// Register the radio region, last of all (see [`install_main`]). It must lie
+/// clear of every boot stage's RAM — it is the one region the radio's DMA
+/// lands in — and that is a fact of the link, so it is checked here, at
+/// boot, where the emulator's boot gates see it. Returns `(start, size)`.
+pub fn install_radio() -> (usize, usize) {
+    let radio = core::ptr::addr_of_mut!(HEAP_RADIO).cast::<u8>();
+    let (clear, _) = lp_bootctl::split_at_s3_boot_stage_ram(radio as u32, HEAP_RADIO_BYTES as u32);
+    assert!(
+        clear as usize == HEAP_RADIO_BYTES,
+        "the radio heap at {radio:p} reaches a boot stage's RAM"
+    );
+    RADIO_START.store(radio as usize, Ordering::Relaxed);
+    // SAFETY: the array is handed to the allocator exactly once, here.
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(radio, HEAP_RADIO_BYTES, RADIO));
+    }
+    radio_region()
+}
+
+/// The radio region: `(start, size)`.
+pub fn radio_region() -> (usize, usize) {
+    (RADIO_START.load(Ordering::Relaxed), HEAP_RADIO_BYTES)
+}
+
+/// Allocate `size` bytes for C: the radio's region first, then the main
+/// arena below the boot stages — never `dram2_seg`, never the loader's RAM.
+unsafe fn c_alloc(size: usize) -> *mut u8 {
+    let total = size + HEADER;
+    // SAFETY: HEADER > 0, so the layout is non-zero; align 4 is valid.
+    let layout = unsafe { core::alloc::Layout::from_size_align_unchecked(total, 4) };
+    let mut ptr = unsafe { esp_alloc::HEAP.alloc_caps(RADIO, layout) };
+    if ptr.is_null() {
+        ptr = unsafe { esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout) };
+        if !ptr.is_null() {
+            OVERFLOWED.fetch_add(total, Ordering::Relaxed);
+        }
+    } else {
+        let live = RADIO_LIVE.fetch_add(total, Ordering::Relaxed) + total;
+        RADIO_HIGH_WATER.fetch_max(live, Ordering::Relaxed);
+    }
+    if ptr.is_null() {
+        return ptr;
+    }
+    // The rule this module exists for, checked on every block rather than
+    // trusted to the tags: nothing the radio is handed lies in a boot stage's
+    // RAM (`dram2_seg` is the IDF bootloader's; the split loader's is
+    // mid-arena). A block there would be written by the radio's DMA across a
+    // warm reset, into a boot stage, as on the C6. Two range compares a block.
+    let (clear, _) = lp_bootctl::split_at_s3_boot_stage_ram(ptr as u32, total as u32);
+    assert!(
+        clear as usize == total,
+        "a radio block at {ptr:p} lies in a boot stage's RAM"
+    );
+    // SAFETY: the block is at least HEADER bytes and 4-aligned.
+    unsafe {
+        (ptr as *mut usize).write(total);
+        ptr.add(HEADER)
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn malloc(size: usize) -> *mut u8 {
+    unsafe { c_alloc(size) }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn malloc_internal(size: usize) -> *mut u8 {
+    // The radio's region and the main arena are both internal RAM.
+    unsafe { c_alloc(size) }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn free(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: `ptr` came from `c_alloc`, which put the block's total size
+    // HEADER bytes in front of it; the global allocator frees in whichever
+    // region the block is.
+    unsafe {
+        let block = ptr.sub(HEADER);
+        let total = (block as *const usize).read();
+        if in_radio_region(block) {
+            RADIO_LIVE.fetch_sub(total, Ordering::Relaxed);
+        }
+        alloc::alloc::dealloc(
+            block,
+            core::alloc::Layout::from_size_align_unchecked(total, 4),
+        );
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn free_internal(ptr: *mut u8) {
+    unsafe { free(ptr) }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn calloc(number: u32, size: usize) -> *mut u8 {
+    let total = number as usize * size;
+    let ptr = unsafe { c_alloc(total) };
+    if !ptr.is_null() {
+        // SAFETY: `ptr` has `total` writable bytes.
+        unsafe { core::ptr::write_bytes(ptr, 0, total) };
+    }
+    ptr
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn calloc_internal(number: u32, size: usize) -> *mut u8 {
+    unsafe { calloc(number, size) }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn realloc_internal(ptr: *mut u8, new_size: usize) -> *mut u8 {
+    let new = unsafe { c_alloc(new_size) };
+    if !new.is_null() && !ptr.is_null() {
+        // SAFETY: both blocks come from `c_alloc`; the old one's payload is
+        // its total minus the header.
+        unsafe {
+            let old_len = (ptr.sub(HEADER) as *const usize).read() - HEADER;
+            core::ptr::copy_nonoverlapping(ptr, new, old_len.min(new_size));
+            free(ptr);
+        }
+    }
+    new
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn get_free_internal_heap_size() -> usize {
+    esp_alloc::HEAP.free_caps(MemoryCapability::Internal.into())
+}
+
+/// Log `[radio-heap]` when the radio region's high-water has grown since the
+/// last line — the number [`HEAP_RADIO_BYTES`] is checked against, the way
+/// `stack_probe`'s `[stack]` line checks the main stack. The product radio's
+/// heartbeat only (`radio`): the M1 probe's output stays as it was recorded.
+#[cfg(s3_radio)]
+pub fn log_if_grown(tag: &str) {
+    let high = RADIO_HIGH_WATER.load(Ordering::Relaxed);
+    if high > LOGGED_HIGH_WATER.swap(high, Ordering::Relaxed) {
+        log::info!(
+            "[radio-heap] {tag}: high-water {high} B of {HEAP_RADIO_BYTES} B, {} B live, {} B \
+             overflowed to main",
+            RADIO_LIVE.load(Ordering::Relaxed),
+            OVERFLOWED.load(Ordering::Relaxed),
+        );
+    }
+}
+
+/// Whether `block` lies in the radio's region.
+fn in_radio_region(block: *mut u8) -> bool {
+    let (start, size) = radio_region();
+    (start..start + size).contains(&(block as usize))
+}

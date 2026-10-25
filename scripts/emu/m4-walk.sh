@@ -7,6 +7,7 @@
 #   scripts/emu/m4-walk.sh --monolith          # the C6's unsplit dev image
 #   scripts/emu/m4-walk.sh --after-update      # the C6 split, walked after an OTA update
 #   LP_WALK_FLASH_PART=cx1 scripts/emu/m4-walk.sh   # on a desk flash part: the core reads in QIO
+#   LP_WALK_S3_FEATURES=psram scripts/emu/m4-walk.sh --chip esp32s3   # the S3 image with more features
 #
 # TWO chips, one script (M6 P10). Both have a native USB-Serial-JTAG link, the
 # same generation of RMT, and a board whose `D10` pad is the one
@@ -246,8 +247,11 @@ esp32s3)
     # own comment says so — so the image is the shipped one plus the readout,
     # which is exactly what `just flash-fw-esp32s3 <port> frame-dump` writes to
     # the board in the hardware walk.
-    echo "==> building fw-esp32s3 (defaults + frame-dump)"
-    just build-fw-esp32s3 frame-dump
+    # `LP_WALK_S3_FEATURES` adds to that, for an image a feature changes
+    # underneath the render (`psram`: the engine's heap and JIT code in PSRAM).
+    s3_features="frame-dump${LP_WALK_S3_FEATURES:+,$LP_WALK_S3_FEATURES}"
+    echo "==> building fw-esp32s3 (defaults + $s3_features)"
+    just build-fw-esp32s3 "$s3_features"
     built="$REPO/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3"
     ;;
 esac

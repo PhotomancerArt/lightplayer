@@ -62,6 +62,17 @@ pub trait RelayLinkSource {
     /// away (the relay's close code, or no held key opening it). `Err`
     /// carries the session's own words, and a failed session is not kept.
     fn connect(&self, board: &str) -> DeviceTransportFuture<Result<(), String>>;
+
+    /// Park `board`'s session: until [`Self::unpark`], a close (for any
+    /// code) is neither redialled nor a departure, and the session stays
+    /// present. The page's move onto the LAN parks it before the LAN
+    /// connection takes the board's one network slot, so the relay session
+    /// does not redial and take the slot back.
+    fn park(&self, board: &str);
+
+    /// Unpark `board`'s session: redialled at once if it closed while
+    /// parked (the move onto the LAN failed), else unchanged.
+    fn unpark(&self, board: &str);
 }
 
 /// The relay half of the composite.
@@ -72,6 +83,22 @@ pub struct RelayDeviceTransport {
 impl RelayDeviceTransport {
     pub fn new(source: Rc<dyn RelayLinkSource>) -> Self {
         Self { source }
+    }
+
+    /// Park `board`'s session ([`RelayLinkSource::park`]).
+    pub fn park(&self, board: &str) {
+        self.source.park(board);
+    }
+
+    /// Unpark `board`'s session ([`RelayLinkSource::unpark`]).
+    pub fn unpark(&self, board: &str) {
+        self.source.unpark(board);
+    }
+
+    /// Let `board`'s session go by request: closed, no longer present or
+    /// redialled (the move onto the LAN is done).
+    pub fn forget_session(&self, board: &str) -> DeviceTransportFuture<Result<(), String>> {
+        self.source.forget(board)
     }
 
     /// Reach `board` through lightplayer.app now, answering why not in plain
@@ -246,6 +273,23 @@ mod tests {
     }
 
     #[test]
+    fn parking_and_letting_go_address_the_boards_session() {
+        let source = Rc::new(DoubleSource::default());
+        let transport = RelayDeviceTransport::new(Rc::clone(&source) as Rc<dyn RelayLinkSource>);
+        transport.park(BOARD);
+        transport.unpark(BOARD);
+        block_on(transport.forget_session(BOARD)).unwrap();
+        assert_eq!(
+            source.asked.borrow().as_slice(),
+            [
+                format!("park {BOARD}"),
+                format!("unpark {BOARD}"),
+                format!("forget {BOARD}")
+            ]
+        );
+    }
+
+    #[test]
     fn a_connect_answers_in_plain_words() {
         let source = Rc::new(DoubleSource::default());
         let transport = RelayDeviceTransport::new(Rc::clone(&source) as Rc<dyn RelayLinkSource>);
@@ -334,6 +378,14 @@ mod tests {
                 Some(words) => Err(words.clone()),
                 None => Ok(()),
             }))
+        }
+
+        fn park(&self, board: &str) {
+            self.asked.borrow_mut().push(format!("park {board}"));
+        }
+
+        fn unpark(&self, board: &str) {
+            self.asked.borrow_mut().push(format!("unpark {board}"));
         }
     }
 

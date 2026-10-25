@@ -1,23 +1,85 @@
 # lp-fw-split
 
-Builds the ESP32-C6's **split image**: one firmware link, split by
-reachability into a **core** (boot, radios, links, the filesystem, the boot
-bookkeeping) and an **engine** (everything else — the server, the node graph,
-the GLSL compiler), plus the RAM-only loader that boots the core and the two
-boot records that say which core to boot.
+Builds a **split image**: one firmware link, split by reachability into a
+**core** (boot, radios, links, the filesystem, the boot bookkeeping) and an
+**engine** (everything else — the server, the node graph, the GLSL compiler),
+plus the RAM-only loader that boots the core and the two boot records that
+say which core to boot. The ESP32-C6's is the product image; the ESP32-S3's
+(`--chip esp32s3`, the S3 roadmap's M7) takes the same shape.
 
 ```text
-lp-fw-split build --out target/fw-split/<slug> [--features esp32c6,server]
-lp-fw-split reach  <elf> <map> --emit-ld <engine.x>   # one link → placement rules
-lp-fw-split verify <elf> <map>                        # one (pass-2) link → verdict
-lp-fw-split segments <core.bin>...                    # an image's segments; fails on one the loader cannot place
+lp-fw-split build --out target/fw-split/<slug> [--chip esp32c6|esp32s3] [--features …]
+lp-fw-split reach  <elf> <map> --emit-ld <engine.x> [--chip …]  # one link → placement rules
+lp-fw-split verify <elf> <map> [--chip …]                       # one (pass-2) link → verdict
+lp-fw-split why    <elf> <map> <substring> [--chip …]           # how the core reaches a section
+lp-fw-split segments <core.bin>... [--chip …]                   # an image's segments; fails on one the loader cannot place
+lp-fw-split headroom <out>/split.json [--margin 65536]
 ```
 
 `lp-cli firmware build|package` use the library; the just recipes use the
 binary. It is a host tool (`std`) with no Python and no binutils: the ELF and
-the map are read from the ELF32 specification and lld's map format, images
-are made by espflash 3.3's library, and the boot-record format and layout
-come from `lp-bootctl` itself.
+the map are read from the ELF32 specification and the linker's own map
+format, images are made by espflash 3.3's library, and the boot-record
+format and layout come from `lp-bootctl` itself.
+
+## Chip profiles
+
+Every step reads its chip-specific facts from a `ChipProfile`
+(`src/chip_profile.rs`). The C6's reproduces the pipeline as it shipped,
+byte for byte (the profile refactor was checked by building the C6 with the
+tool before and after on one tree: identical `engine.x`, `core.bin`,
+`engine.bin`, `app.bin`, `loader.bin`, `bootloader.bin` and merged images).
+The S3's is the C6's shape with only what the chip forces changed:
+
+| | ESP32-C6 | ESP32-S3 |
+|---|---|---|
+| firmware, target | `lp-fw/fw-esp32c6`, `riscv32imac-unknown-none-elf` | `lp-fw/fw-esp32s3`, `xtensa-esp32s3-none-elf` |
+| linker, map | `rust-lld`, lld's map | GNU ld through `xtensa-esp32s3-elf-gcc` (`-Wl,…`; the espup toolchain's binutils when not on `PATH`), GNU ld's map (`gnu_map`) |
+| relocation targets | `S + A` | **from the linked bytes** (`xtensa_targets`, below) |
+| engine | one window at `0x4240_0000` | rodata at `0x3D00_0000` (data view), code at the instruction view of the next byte (`0x4300_xxxx`): one run of flash pages, MMU entries `0x100..`, both views |
+| literal pools | — | each engine function's `.literal.X` placed right before its `.text.X` (`literal_pools`) |
+| page, layout | 32 KiB, layout 1 (region at `factory + 0x8000`) | 64 KiB, layout 2 (region at `factory + 0x1_0000`) |
+| loader | `lp-fw/fw-esp32c6-loader`, factory + our second stage | `lp-fw/fw-esp32s3-loader`, factory only |
+| doors | ours (default) and the IDF's | the IDF's (espflash's bundled S3 bootloader) |
+| seam table | required | none yet (Xtensa seams are the S3 roadmap's M5) |
+
+### What GNU ld on Xtensa does that lld on RV32 does not
+
+Found by the split-image spike (2026-10-20) on GNU ld's output — never read
+off its source (AGENTS.md, license rule):
+
+1. **Stale addends.** `--emit-relocs` keeps a zero addend on relocations
+   against a merged section's symbol: 18,355 of 30,236 `R_XTENSA_32` read
+   `<section> + 0` while the word they patch points well inside it. `S + A`
+   aimed half the data edges at the first section of `.rodata`, and the
+   first spike run "passed" with 389 core sections in the engine. The S3
+   reader takes an `R_XTENSA_32`'s target from the word at `r_offset`.
+2. **Literal coalescing.** Equal literals of different functions share one
+   pool slot, so a function's `l32r` can load from another function's pool.
+   An `l32r` is therefore an edge to the address **its slot holds** (when the
+   slot carries an `R_XTENSA_32`; a constant is no edge), never to the pool:
+   the spike's second run made the whole engine core through
+   `lp_engine_entry`'s pool. Code reaches its own pool one way, so a core
+   function's pool is core.
+3. **`l32r` reaches only 256 KiB backwards**, so the engine script writes
+   every engine function's pool rule right before its code rule. A pool that
+   relaxation emptied in pass 1 is no node there, but pass 2 starts from the
+   object's own pools again, so the rule is written regardless.
+4. **Every call is `l32r` + `callx8`** (relaxation narrows the in-range ones
+   to `call8`, whose target is decoded): a call has no range, so engine →
+   core calls across 16 MiB link.
+5. **The blobs' branches carry stale addends too** (found when the radio
+   linked in, 2026-10-22). GNU-assembled C keeps a relocation on every
+   branch and jump, against the output section's symbol with the input
+   section's addend (`.text + 0x5f8` for a `bgeui` in
+   `btdm_controller_init`). `S + A` is `.text`'s first bytes, the literal
+   pools there, and their slots made the engine core: the S3 core was
+   1.3 MB with Bluetooth and 2.5 MB with Wi-Fi, 646 KB and 964 KB once a
+   branch's target is decoded from the instruction (`branch_target`,
+   checked against objdump's printed target for all 4,591 of the
+   Bluetooth image's). `ASM_EXPAND`/`ASM_SIMPLIFY` mark an `l32r` +
+   `callx` whose `l32r` carries the edge, and are no edge of their own.
+   LLVM's objects carry neither.
 
 ## The pipeline
 
@@ -98,7 +160,12 @@ come from `lp-bootctl` itself.
 
 Outputs: `p1.elf p1.map engine.x p2.elf p2.map verify.txt loader.elf
 loader.bin bootloader.elf bootloader.bin core.bin engine.bin app.bin
-merged-idf.bin merged-lp.bin merged.bin split.json`.
+merged-idf.bin merged-lp.bin merged.bin split.json` (the S3 has no
+`bootloader.*` or `merged-lp.bin`: its only door is the IDF's).
+
+The steps above are the C6's words; the S3 takes each one with its profile's
+facts (its region at `0x2_0000`, 64 KiB pages, an 8 MiB chip, espflash's
+bundled IDF bootloader). `split.json` names the chip and the region start.
 
 ## Why placement is by reachability (the spike's six traps)
 
@@ -121,6 +188,16 @@ The split-link spike (2026-10-01) hit six traps; each is now built in:
    the engine sections around. This tool never runs objcopy: it re-types the
    two section headers instead, and espflash takes its segments from
    `PROGBITS` sections only.
+
+## When the core is bigger than it should be
+
+`lp-fw-split why <p1.elf> <p1.map> <substring> [--chip …]` prints the chain
+of input sections by which the core's roots reach the first section whose
+`object:(section)` contains the substring — the question to ask when
+something of the engine (`lp_engine_entry`, `LpServer`, `lps_glsl`) shows
+up in the core. A chain through shared generic code (`RawVec::grow_one`
+folded across types) is expected; a chain through a literal pool or a
+section's first node is a reader bug.
 
 ## Reading `verify.txt`
 

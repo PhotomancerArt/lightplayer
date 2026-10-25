@@ -46,6 +46,12 @@ extern "C" {
     #[wasm_bindgen(js_name = hold)]
     fn js_hold(id: u32, ms: u32);
 
+    #[wasm_bindgen(js_name = park)]
+    fn js_park(id: u32);
+
+    #[wasm_bindgen(js_name = unpark)]
+    fn js_unpark(id: u32);
+
     #[wasm_bindgen(js_name = setFallback)]
     fn js_set_fallback(id: u32, url: &str);
 
@@ -154,6 +160,19 @@ pub fn open_relay_session(
 /// is unchanged.
 pub fn hold(session: u32, ms: u32) {
     js_hold(session, ms);
+}
+
+/// Park `session`: until [`unpark`], a close is neither redialled nor said
+/// as a drop, and the session stays listed (the page's move of a board's
+/// relay session onto the LAN, which takes the board's one slot from it).
+pub fn park(session: u32) {
+    js_park(session);
+}
+
+/// Unpark `session`: redialled at once if it closed while parked, else
+/// unchanged.
+pub fn unpark(session: u32) {
+    js_unpark(session);
 }
 
 /// The sessions Studio should hold a link for right now.

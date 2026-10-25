@@ -259,6 +259,14 @@ pub enum Inst {
     AmoandW { rd: Gpr, rs1: Gpr, rs2: Gpr },
     /// AMOOR.W: Atomic OR word
     AmoorW { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// AMOMIN.W: Atomic signed minimum word
+    AmominW { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// AMOMAX.W: Atomic signed maximum word
+    AmomaxW { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// AMOMINU.W: Atomic unsigned minimum word
+    AmominuW { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// AMOMAXU.W: Atomic unsigned maximum word
+    AmomaxuW { rd: Gpr, rs1: Gpr, rs2: Gpr },
 
     // Compressed instructions (RVC extension)
     // These expand to standard instruction forms
@@ -469,6 +477,10 @@ impl Inst {
             Inst::AmoxorW { rd, rs1, rs2 } => format!("amoxor.w {rd}, {rs2}, ({rs1})"),
             Inst::AmoandW { rd, rs1, rs2 } => format!("amoand.w {rd}, {rs2}, ({rs1})"),
             Inst::AmoorW { rd, rs1, rs2 } => format!("amoor.w {rd}, {rs2}, ({rs1})"),
+            Inst::AmominW { rd, rs1, rs2 } => format!("amomin.w {rd}, {rs2}, ({rs1})"),
+            Inst::AmomaxW { rd, rs1, rs2 } => format!("amomax.w {rd}, {rs2}, ({rs1})"),
+            Inst::AmominuW { rd, rs1, rs2 } => format!("amominu.w {rd}, {rs2}, ({rs1})"),
+            Inst::AmomaxuW { rd, rs1, rs2 } => format!("amomaxu.w {rd}, {rs2}, ({rs1})"),
 
             // Compressed instructions
             Inst::CAddi { rd, imm } => format!("c.addi {}, {}", rd, format_imm(*imm)),
@@ -610,6 +622,10 @@ impl Inst {
             Inst::AmoxorW { .. } => 0x2000202f,  // amoxor.w a0, zero, (zero)
             Inst::AmoandW { .. } => 0x6000202f,  // amoand.w a0, zero, (zero)
             Inst::AmoorW { .. } => 0x4000202f,   // amoor.w a0, zero, (zero)
+            Inst::AmominW { .. } => 0x8000202f,  // amomin.w a0, zero, (zero)
+            Inst::AmomaxW { .. } => 0xa000202f,  // amomax.w a0, zero, (zero)
+            Inst::AmominuW { .. } => 0xc000202f, // amominu.w a0, zero, (zero)
+            Inst::AmomaxuW { .. } => 0xe000202f, // amomaxu.w a0, zero, (zero)
 
             // Compressed instructions - encode as their expanded forms
             Inst::CAddi { rd, imm } => addi(*rd, *rd, *imm),

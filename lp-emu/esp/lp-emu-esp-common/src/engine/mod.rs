@@ -34,6 +34,7 @@
 //! events fire. The view packs the ids and hands them in.
 
 pub mod flash_cut;
+pub mod flash_cut_spec;
 pub mod flash_op_census;
 pub mod flash_weak_bits;
 pub mod nor_timing;

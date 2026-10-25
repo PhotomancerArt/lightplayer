@@ -11,6 +11,8 @@ description = "Persistent lp-cloud-domain adapters: a rusqlite MetaStore plus fi
 lp-cloud-domain = { path = "../lp-cloud-domain" }
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
 lpc-history = { path = "../../lp-core/lpc-history" }
+# A board on an account's list is keyed by its relay id (its MAC).
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

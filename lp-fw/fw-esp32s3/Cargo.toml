@@ -9,12 +9,25 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread", "heap-dram2"]
+default = [
+    "esp32s3",
+    "server",
+    "float-f32",
+    "json-pack",
+    "io-thread",
+    "heap-dram2",
+    "ble",
+    "espnow",
+    "psram",
+    "lcd-ws281x",
+    "two-core",
+]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
     "esp-hal/esp32s3",
     "esp-rtos/esp32s3",
+    "fw-esp32-radio?/esp32s3",
 ]
 
 # The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
@@ -29,7 +42,14 @@ esp32s3 = [
 # now (ADR 2026-08-02-rv32-firmwares-are-abort-tier). See the dependency
 # section for why each entry is load-bearing.
 server = [
+    "fs-tree",
     "fw-esp32-common/server",
+    # The split image's update board side (`src/split_core/` is the S3's
+    # chip for it, the S3 plan's M7 P8). Only `LP_SPLIT_LINK` builds call
+    # it; a plain build links none of it.
+    "fw-esp32-common/split-core",
+    "dep:lpc-update",
+    "dep:sha2",
     "dep:lpa-server",
     "dep:lp-gfx-lpvm",
     "dep:lpc-hardware",
@@ -37,6 +57,18 @@ server = [
     "dep:lpc-wire",
     "dep:lpc-model",
 ]
+
+# The tree store on `lpfs` (`src/tree_flash.rs`), as the C6's `fs-tree`, which
+# `server` implies: every flash-backed build mounts it (littlefs left this
+# crate with it). A partition with no store is formatted (lazily) unless a
+# littlefs superblock is found there — then the board HOLDS (`fs:
+# legacy_held`, files untouched); a newer or damaged store is REFUSED. Records
+# are hashed in software (`lp-tree-store`'s `soft-sha`; the C6 uses its SHA
+# accelerator). The core carries the store's mark
+# (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`), and the manifest lists
+# `fs.tree`. See docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md
+# and docs/adr/2026-10-16-c6-tree-store-cutover-migration.md.
+fs-tree = ["fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 
 # `dram2_seg` — the 73,744 B the second-stage bootloader runs in — as a second
 # heap region after the `.bss` arena, with no capability tag (the C6's rule:
@@ -71,6 +103,125 @@ io-thread = ["esp-rtos/esp-radio", "esp-rtos/esp-alloc", "dep:esp-radio-rtos-dri
 # stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
 io_thread_stack_diag = ["io-thread"]
 
+# The radio boot probe — OFF by default, never shipped; scaffolding for the S3
+# emulator's radio windows (S3 radio roadmap M1, `src/radio_boot_probe.rs`).
+# The shipped boot plus esp-radio started beside it: Wi‑Fi (`wifi::new`, a
+# station, one scan) and the BTDM Bluetooth controller (`BleConnector::new`,
+# one HCI reset), with `coex` between them. It is the image that drives the
+# esp-radio blobs through every window they own, so `lp-emu-esp32s3`'s stubs
+# have something to answer; it is deliberately NOT `radio`/`ble`/`wifi`, which
+# are the product's (M3/M4) and may delete or reuse this. Not `test_*`: it
+# decorates the app path (the server still boots and renders) rather than
+# replacing it.
+#
+#   just build-fw-esp32s3 radio_boot_probe
+radio_boot_probe = [
+    "server",
+    "dep:enumset",
+    "dep:esp-radio",
+    "esp-radio/esp32s3",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+]
+
+# The radio (S3 radio roadmap M3, M4): esp-radio on this chip, the shared
+# radio glue (`fw-esp32-radio`), and the radio blobs' own C heap
+# (`src/c_heap.rs`: a region of its own, never `dram2_seg`, never the boot
+# stages' RAM). On its own it starts nothing: `ble` brings the BTDM controller
+# up, `espnow` the Wi-Fi blob and the ESP-NOW driver, `wifi` the station.
+radio = [
+    "server",
+    "dep:enumset",
+    "dep:esp-radio",
+    "esp-radio/esp32s3",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "dep:fw-esp32-radio",
+    "fw-esp32-radio/radio",
+]
+# The BLE link (S3 radio roadmap M3; the C6's since `ble-remote-control` M4,
+# docs/adr/2026-09-24-ble-transport.md): the wire, on lp-link, over a
+# Nordic-UART GATT service, one untrusted link per connection, through the
+# shared crate's `ble` over the BTDM controller (`src/ble/`). On by default
+# since the desk walk (docs/reports/2026-10-21-s3-bluetooth-walk.md); it runs
+# unless the device store (`/.lp/access.json`) turns `bleEnabled` off — read
+# once at boot, as the C6 does. `esp-radio/coex` lets BLE share the one radio
+# with Wi-Fi.
+ble = [
+    "radio",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "fw-esp32-common/radio-link",
+    "fw-esp32-radio/ble",
+]
+# ESP-NOW (the Radio node): the radio's one bring-up (`esp_radio::wifi::new`,
+# the Wi-Fi blob) and the ESP-NOW driver, with the C6's Wi-Fi rule. On by
+# default since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up costs
+# ~37 KB of internal heap, which PSRAM's heap gives back many times over
+# (docs/adr/2026-10-21-s3-radio-memory.md, the 2026-10-23 amendment). The C6
+# runs it by default too.
+espnow = ["radio"]
+# The Wi-Fi station and the network on `lp-net` (S3 radio roadmap M4; the
+# C6's since its Wi-Fi roadmap M6, docs/adr/2026-10-07-c6-wifi-link.md): a
+# board with a saved network joins it by itself and serves the secure lp-link
+# at `ws://<board>/link` and `lp-xxxx.local`, and dials lightplayer.app's
+# relay when Cloud relay is on and it holds an account key. The thread, the
+# station, the LAN endpoint, mDNS and the relay are `fw_esp32_radio::net`;
+# this chip's facts are `src/net/`.
+wifi = [
+    "ble",
+    "espnow",
+    "fw-esp32-common/wifi",
+    "fw-esp32-radio/wifi",
+    "dep:esp-radio-rtos-driver",
+    "dep:lpc-relay",
+]
+
+# WS281x output over LCD_CAM (i8080) + GDMA instead of the RMT: up to eight
+# lanes in lockstep from one internal-RAM frame buffer, with no refill
+# deadline, so radio interrupts and flash writes cannot tear a frame (S3 radio
+# roadmap M9; the LED-channels spike's evidence). **The default** since Yona's
+# ruling (2026-10-22), once PSRAM freed the internal RAM its frame buffers need.
+# Without it the image registers the RMT driver instead (an A/B build, and the
+# `test_loopback` harness's driver). The board profile declares both
+# `/rmt/ws281xK` and `/lcd/ws281xK`; each driver reads only its own.
+lcd-ws281x = []
+
+# The walk's frame check (never shipped): with `lcd-ws281x`, LCD_CAM's CAM
+# half samples every lane's pad and decodes each frame against what was sent
+# (GDMA channel 1, back pads GPIO11/12); without it, the RMT logs its guard
+# trips. Both print `[ws281x-check] driver=… ` lines, so one walk compares the
+# two drivers' truncation the same way.
+ws281x_frame_check = []
+
+# The D6 pad probe (never shipped): with `lcd-ws281x`, reads each open lane's
+# IO_MUX, GPIO-matrix and enable registers at bind and every frame, its level
+# just before a frame, and UART0's TX_DONE, and logs any change
+# (`[pad-probe]` lines; docs/defects/2026-10-24-the-s3s-d6-pad-garbles-its-lcd-ws281x-lane.md).
+ws281x_pad_probe = []
+
+# Core 1 as a PC sampler for core 0 (never shipped): the debug assistant's
+# recorded PC, read from IRAM at random gaps, dumped as `[pcs]` lines once a
+# heartbeat. The measurement the IRAM hot set (`rwtext_hook.x`) is generated
+# from: `hot_iram/README.md`, `scripts/s3-hot-iram.py fold`. Starts core 1, so
+# `FlashStorage` auto-parks it for a write.
+pc-sampler = []
+
+# Core 1 as a render helper: the upper half of every render-samples batch
+# runs on the APP CPU (`src/core1.rs`, `lpvm_native::helper_core`). Core 1
+# parks in `waiti` between jobs, every flash writer stalls it, and it may
+# never allocate (`src/guarded_heap.rs`). Not with `pc-sampler`: one core 1.
+# On by default since FS3 measured +24-31 % (2026-10-24); a `pc-sampler`
+# image is built with `--no-default-features` and the rest named.
+two-core = ["server", "dep:lpvm-native", "lpvm-native?/helper-core"]
+
+# A same-image fps A/B (never shipped): the LCD backend's overlap (render
+# running while the previous frame is on the wire) off and on in 20 s turns,
+# each window's frame rate logged as `[ws281x-ab] overlap=… fps=…`.
+ws281x_overlap_ab = []
+
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
 # what `scripts/m4-hardware-walk.sh` diffs against the host oracle, and it is
@@ -79,6 +230,28 @@ io_thread_stack_diag = ["io-thread"]
 # feature: it decorates the app path rather than replacing it, so a frame-dump
 # build is the real firmware plus a transcript.
 frame-dump = []
+
+# The WS281x driver's counters on the heartbeat, one `[WS281X] ch=… frames=…
+# trips=… skips=… errors=…` line per channel that has sent a frame — OFF by
+# default, never shipped. The desk's evidence for LED output under radio load
+# (a Wi-Fi scan, BLE traffic); the C6's and the classic's feature of the same
+# name, kept to the counters this chip's walk reads.
+ws281x_telemetry = []
+
+# Emulator FIXTURES, never shipped and never in a build def: a split-image
+# core that, booted on TRIAL, marks itself attempted and then panics
+# (`fixture-trial-dies`) or spins without feeding the watchdog
+# (`fixture-trial-hangs`) before it marks itself started — the two ways a new
+# core fails its first boot, for the loader's rollback and cold-cap scenarios
+# (the S3 plan's P10 builds them). Inert in a plain (unsplit) build. The
+# C6's features of the same names. Not `test_*`: that prefix selects a
+# harness entrypoint instead of the app.
+fixture-trial-dies = []
+fixture-trial-hangs = []
+# Emulator FIXTURE, never shipped: the USB link is NOT trusted by the split
+# image's update session, so the emulator (which has only USB) can prove a
+# core install is refused without a login. The C6's feature of the same name.
+fixture-usb-untrusted = []
 
 # Hardware float. This is the board that has an FPU, so this is the board that
 # gets `FloatMode::F32` compiled in — the whole point of M7.
@@ -128,10 +301,61 @@ test_backtrace_oracle = []
 # this feature rather than off the dependency line.
 test_loopback = ["lp-ws281x/test_hooks"]
 
+
 # GPIO button diagnostic mode: D9/GPIO8 with an internal pull-up, mirroring
 # fw-esp32c6's `test_button` feature. Needs `server` for the hardware
 # registry/manifest and driver types the button driver is built on.
 test_button = ["server"]
+
+# The Xtensa emulator seam ABI under the real release build (S3 radio M5):
+# this image's seam table carries the two TEST ONLY seams and two of the
+# network seam's calls, and the entrypoint calls them
+# (`src/tests/test_seam_abi.rs`). The emulator's test
+# (`lp-emu-esp32s3/tests/seam_abi_harness.rs`) proves the arguments, the
+# result and the caller's window survive an answer. Never shipped.
+test_seam_abi = []
+
+# The octal PSRAM (S3 radio roadmap M10; `src/psram.rs`) — ON by default
+# since 2026-10-23 (Yona's ruling on the walk's numbers, policy `all`). The
+# core brings the XIAO ESP32-S3's 8 MB up at the fixed MMU window
+# `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries 0x80..0x100), only on a part
+# whose eFuse says 8 MB, and self-tests it; anything else boots as without
+# the feature. What may and may not live there is the ADR's
+# (docs/adr/2026-10-22-s3-psram.md). Where the Rust heap goes is the
+# build-time knob `LP_PSRAM_HEAP` (`src/psram.rs`): `all` (the default),
+# `split:<bytes>`, `last` or `off`.
+psram = ["server", "esp-alloc/external-first", "dep:enumset", "dep:lpvm-native"]
+
+# The octal PSRAM probe — OFF by default, never shipped (lane P of the S3 radio
+# roadmap; `src/tests/test_psram.rs`). Brings the XIAO ESP32-S3's 8 MB octal
+# PSRAM up through esp-hal's own driver, writes and reads back two address-
+# derived patterns across every byte it mapped, and runs a ten-byte function
+# copied into PSRAM through the instruction bus. It is the image
+# `lp-emu-esp32s3`'s PSRAM model is proven against (`tests/psram_boot.rs`);
+# on silicon it prints the same lines. Where the product's heap goes is
+# decided after the silicon spike, not here.
+#
+#   just build-fw-esp32s3 test_psram
+test_psram = []
+
+# Five uneven WS281x lanes out of LCD_CAM's i8080 mode, fed by GDMA — OFF by
+# default, never shipped (M9, the parallel LED output; `src/tests/
+# test_lcd_lanes.rs`). It is the image `lp-emu-esp32s3`'s LCD_CAM and GDMA
+# models are proven against (`tests/lcd_cam_lanes.rs`): every lane decodes
+# byte-exact off its pad. Self-contained: its encoder is the plainest one, so
+# it tests the emulator and not the product's encoder.
+#
+#   just build-fw-esp32s3 test_lcd_lanes
+# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
+# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
+# sampling the pads. See src/tests/lcd_ws281x.rs. (The product image's own
+# check beside the radios is `ws281x_frame_check`.)
+test_lcd_ws281x = []
+test_lcd_lanes = []
+# Five uneven lanes through the PRODUCT LCD_CAM backend (`lcd-ws281x`'s
+# driver: registry, board endpoints, open, start/wait_complete), for the
+# emulator's `tests/lcd_backend_lanes.rs` (src/tests/test_lcd_backend.rs).
+test_lcd_backend = ["server"]
 
 test_xt_jit_corpus = [
     "dep:lpvm-native",
@@ -218,12 +442,31 @@ esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-backtrace = { version = "0.19.0", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
-esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+# No `compat`: its `malloc` asks for no capability, so a radio blob's block
+# could land in `dram2_seg`, which the bootloader takes back on a warm reset
+# while the radio keeps writing (the C6's defect). The radio's C heap is this
+# crate's own (`src/c_heap.rs`), as on the C6.
+# No `internal-heap-stats`: it keeps a lifetime `max_usage` and two running
+# totals by walking every region's `used()` on every allocation (~210
+# instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads
+# them. The diagnostics that do turn it back on.
+# No `global-allocator`: `src/guarded_heap.rs` is the global allocator, a
+# check in front of `esp_alloc::HEAP` (core 1 must never take its lock).
+esp-alloc = { version = "0.10.0", default-features = false }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 # `io-thread` only: esp-rtos's own thread creation is crate-private; this is
 # the public face esp-radio itself creates its threads through.
 esp-radio-rtos-driver = { version = "0.3.0", optional = true }
+# `radio` (and `radio_boot_probe`): the radio stack.
+esp-radio = { version = "0.18.0", optional = true, features = ["esp-alloc", "log-04", "unstable", "wifi"] }
+# `radio`: the radio glue the C6 and this chip share (ESP-NOW, BLE, `lp-net`),
+# chip facts injected (`src/ble/`).
+fw-esp32-radio = { path = "../fw-esp32-radio", optional = true }
+# `wifi`: the relay client's configuration (`src/net/relay_config.rs`).
+lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
+# `src/c_heap.rs`: the capability sets that pick the radio's region.
+enumset = { version = "1", optional = true }
 
 # Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
 # arch-neutral ledger, plus the backtrace capture the panic path stages. Both
@@ -233,6 +476,17 @@ esp-radio-rtos-driver = { version = "0.3.0", optional = true }
 # rest of the crate is stripped at link time.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+# The split image's formats (`lp_split` builds): the boot records, the engine
+# header, the digest slot, layout 2 and the S3's MMU plan.
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
+# The over-the-air update session (protocol v1) the split image's core runs,
+# in core-only and as the running engine's channel-3 hook
+# (`fw_esp32_common::split_core`): its codes, its board types, the update
+# light's record. The C6's line.
+lpc-update = { path = "../../lp-core/lpc-update", optional = true }
+# The SHA accelerator's software fallback while a boot hash holds it
+# (`src/split_core/split_sha.rs`), as on the C6.
+sha2 = { workspace = true, optional = true }
 
 # Direct dep for `stack_probe::paint`, which masks interrupts while it writes
 # the paint pattern into the unused main stack. The implementation comes from
@@ -265,7 +519,8 @@ embedded-storage = "0.3"
 # a disabled cache mid-write. `default-features = false` without it compiles
 # fine and corrupts silently — exactly the trap M2 hit twice.
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
-littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+# The tree store (`fs-tree`), with its software SHA-256.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs", "soft-sha"], optional = true }
 
 # The boot-time `ServerHello` plus the wire types `io_task` hands to
 # `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved

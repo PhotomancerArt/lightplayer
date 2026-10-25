@@ -40,6 +40,16 @@
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
 
+/// How long one control command may wait for its reply before the channel is
+/// given up on. A normal reply is milliseconds (the door answers from the
+/// host, not from the guest's clock). 20 s is far above that, and above
+/// `virtual_serial.js`'s `HOLD_SETTLE_DEADLINE_MS` (15 s), so a detach that is
+/// legitimately waiting out the settle never trips it. A timeout means the
+/// reply queue can no longer be trusted to line up (replies are matched to
+/// commands by order), so it fails every command in flight and closes the
+/// control socket, which also releases the door's one-client claim.
+export const COMMAND_TIMEOUT_MS = 20_000;
+
 /// `GET /boards` — the registry, in the order the server was given them.
 export async function listBoards(baseUrl, { fetchImpl = null } = {}) {
   const url = new URL("boards", baseWithSlash(baseUrl));
@@ -111,6 +121,7 @@ export class EmulatorPort {
     this._control = null;
     this._bytes = null;
     this._pending = [];
+    this._commandTimeoutMs = transport.commandTimeoutMs ?? COMMAND_TIMEOUT_MS;
     this._byteListeners = new Set();
     // Bytes that arrived before anyone was reading. A real port buffers them
     // between `open()` and `getReader()` and so does this one — dropping them
@@ -270,9 +281,44 @@ export class EmulatorPort {
       );
     }
     return new Promise((resolve, reject) => {
-      this._pending.push({ resolve, reject, line });
-      socket.send(line);
+      const entry = { resolve, reject, line, timer: null };
+      entry.timer = setTimeout(() => {
+        this._failControl(socket, `got no reply in ${this._commandTimeoutMs} ms`);
+      }, this._commandTimeoutMs);
+      this._pending.push(entry);
+      try {
+        socket.send(line);
+      } catch (error) {
+        this._pending.splice(this._pending.indexOf(entry), 1);
+        clearTimeout(entry.timer);
+        reject(error);
+      }
     });
+  }
+
+  /// The control channel is gone (it closed, or stopped answering): reject
+  /// every command still waiting for a reply, each naming the channel and its
+  /// own command. They would otherwise wait forever, and a caller like the
+  /// bus's `detach` never reached `unplug`. `channelLost` is how a caller
+  /// tells this from the door's own `err` reply.
+  _failControl(socket, why) {
+    if (this._control === socket) {
+      this._control = null;
+    }
+    for (const pending of this._pending.splice(0, this._pending.length)) {
+      clearTimeout(pending.timer);
+      const error = new Error(
+        `emulated board ${this.boardId}: control channel ${why}; ` +
+          `\`${pending.line}\` was never answered`,
+      );
+      error.channelLost = true;
+      pending.reject(error);
+    }
+    try {
+      socket.close();
+    } catch {
+      // Already closed.
+    }
   }
 
   // --- events --------------------------------------------------------------
@@ -315,6 +361,7 @@ export class EmulatorPort {
     this._bytes = null;
     this._control = null;
     for (const pending of this._pending.splice(0, this._pending.length)) {
+      clearTimeout(pending.timer);
       pending.reject(new Error(`emulated board ${this.boardId}: port disposed`));
     }
     // Both closes are STARTED before either is awaited. This runs from
@@ -345,9 +392,9 @@ export class EmulatorPort {
       });
       socket.addEventListener("message", (event) => this._onControlMessage(event));
       socket.addEventListener("close", () => {
-        if (this._control === socket) {
-          this._control = null;
-        }
+        // A command in flight when the door closes the channel (it does when
+        // a board stops) gets no reply, ever: settle it here.
+        this._failControl(socket, "closed");
       });
     });
   }
@@ -355,6 +402,9 @@ export class EmulatorPort {
   _onControlMessage(event) {
     const line = String(event.data ?? "").trim();
     const pending = this._pending.shift();
+    if (pending) {
+      clearTimeout(pending.timer);
+    }
     const cycle = cycleOf(line);
     if (cycle !== null) {
       if (this._lastCycle >= 0 && cycle < this._lastCycle) {

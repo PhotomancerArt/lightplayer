@@ -28,7 +28,7 @@ justfile recipes.
 | `partitionsCsv` | Repo-relative partition table, the same file espflash flashes with. |
 | `chip.family` / `chip.name` | espflash chip identity (`--chip`). |
 | `bootloader` | Optional. Repo-relative second-stage bootloader to merge instead of the one the installed espflash bundles (`--bootloader`). Provenance and the rule for changing it: `lp-fw/bootloaders/README.md`. |
-| `split` | Optional, ESP32-C6 only. `true` builds the **split image** (`tools/lp-fw-split`): the loader, the boot records, the core and the engine inside `factory` (`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`). The package is still one merged image at `0x0`, plus a `split` block in `manifest.json`; `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never into the package. Absent: one linked image. |
+| `split` | Optional, for a chip with a split profile (the ESP32-C6, layout 1; the ESP32-S3, layout 2). `true` builds the **split image** (`tools/lp-fw-split --chip <chip>`): the loader, the boot records, the core and the engine inside `factory` (`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`). The package is still one merged image at `0x0`, plus a `split` block in `manifest.json`; `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never into the package. Absent: one linked image. |
 
 ## The target
 

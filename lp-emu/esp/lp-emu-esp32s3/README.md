@@ -33,6 +33,15 @@ It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — a
 >
 > **What does not exist:** the pad fabric and RMT (P07) — a ROM-up boot
 > reaches the application and does not light a strip.
+>
+> **And since 2026-10-22:** the octal PSRAM — an image that brings it
+> up through esp-hal boots both ways and uses all 8 MiB ("PSRAM" below).
+>
+> **And since S3 radio M1 (2026-10):** an image that starts the radio —
+> esp-radio's Wi‑Fi and the BTDM Bluetooth controller — boots both ways to
+> the server loop with nothing unmapped, and a software reset (the
+> firmware's requested reboot) is **performed**, not just reported ("The
+> radio windows, and the reset a reboot asks for" below).
 
 ## Running it
 
@@ -133,8 +142,11 @@ the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
 A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
-⚠️ **The heap line is a single number**, `heap=245760` (`HEAP_SIZE = 240 *
-1024`), where the classic prints a four-region sum. Anything comparing the two
+⚠️ **The heap line is a two-region sum**, `heap=83968+73744=157712` on the
+shipped image (`HEAP_SIZE = 136 * 1024` less PSRAM's 3 KiB since `espnow` and
+`psram` became default features, less the IRAM hot set's 43 KiB and core 1's 8 KiB stack since
+2026-10-24, plus `dram2_seg`; PSRAM's 8 MiB has its own
+`heap region` line), where the classic prints a four-region sum. Anything comparing the two
 chips' boot captures must not expect the same line. There is no
 `[INIT] main stack <N> B` line either; the S3's 37,280 B total appears in
 every `[stack]` line's `of <total> B`.
@@ -318,6 +330,54 @@ from the `entry` instruction at each pc, out of the ROM and the merged
 image, and `PS.OWB = 11` and the four save-area words are measured and
 seeded. Fourteen things a direct load does not reproduce are listed in
 `loader.rs`'s module docs; every one is a place the two paths can disagree.
+
+## PSRAM: the octal chip on `CS1` (2026-10)
+
+The canonical board (the XIAO ESP32-S3, an ESP32-S3R8) and the desk's FS3
+carry **8 MiB of octal PSRAM** beside the flash: flash on `CS0`, PSRAM on
+`CS1`. The firmware does not use it yet; this machine models it so an image
+that brings it up runs here, and **an image that never touches it runs
+exactly as before** — `tests/psram_boot.rs` runs the shipped image with the
+default 8 MiB chip and with none, by direct load and ROM-up, and holds the
+link bytes, the ROM's console, cycles, instructions and cache fills equal. So the chip is present at 8 MiB by
+default; `--psram-len 0` is a board without (`lp-cli emu run --chip esp32s3
+--psram <size>` is the same knob). `emu serve` holds C6 boards only, so it
+has no S3 PSRAM option.
+
+| what | where | evidence |
+|---|---|---|
+| the chip: bytes and mode registers | [`src/psram.rs`](src/psram.rs) | the registers' reset values are **FS3's own decode** (esp-hal's `print_psram_info`, 2026-10-22): vendor `0x0D` (AP), generation 3, 64 Mbit, good die, 3 V, fast refresh, hybrid wrap, 32-byte bursts. MR0 and MR4 are unobserved and say so |
+| the mode-register reads and writes | [`src/periph/spi1.rs`](src/periph/spi1.rs), "`CS1`" | the ROM's `esp_rom_spi_cmd_start` puts `misc[1:0] = ~cs_mask`; a `usr` transaction with only `CS1` selected goes to the PSRAM. Commands `0x4040`/`0xC0C0` are esp-hal's `OPI_PSRAM_REG_READ`/`WRITE`; only MR0 takes a write |
+| the pages | [`src/cache.rs`](src/cache.rs), "PSRAM pages" | MMU bit 15 is esp-hal's `MMU_ACCESS_SPIRAM`, ORed in by `Cache_Dbus_MMU_Set` (`4004f771`). The fill copies the page into both windows, opens the DROM page to stores and mirrors them into IROM, and writes it back when the entry moves |
+| the eFuse's `PSRAM_CAP` / `PSRAM_VENDOR` | [`src/periph/efuse.rs`](src/periph/efuse.rs), "The PSRAM fields" | esp-hal's field positions; ESP-IDF's S3 eFuse table for the codes (8 MiB AP 3.3 V = capacity 1, vendor 1, what an S3R8 reads). They follow `--psram-len`, and 0 = none reads the PAC's zero as before. Not a dump: no S3's fuses have been read |
+| the SPI0 cache-side set-up, the clocks, the pads | accept-and-remember | the bytes that move do not depend on them here |
+
+What the probe proves (`fw-esp32s3 --features test_psram`, `just
+test-emu-esp32s3-psram`): esp-hal's own driver finds the chip in octal mode
+and maps all of it at `0x3C02_0000`, two index-derived patterns written and
+read back across all 8 MiB with no wrong word, and ten bytes of Xtensa copied
+in through the data bus run through the instruction bus at the same index
+(`0x4281_0000`). FS3 printed every one of those lines first; the emulated run,
+direct and ROM-up, prints them all with `unmapped = 0`.
+
+⚠️ **Three things that differ from silicon, on purpose.**
+
+- **Timing.** A PSRAM access costs what a flash-window access costs on `t1`:
+  nothing beyond the instruction. FS3's probe took ~52 cycles a word for the
+  write pass and ~34 for the read pass, this machine 8 and 9 — loop overhead
+  only. PSRAM timing is **modeled, ungraded** (`validate.toml`) until the
+  silicon spike's measurements grade it. Never quote an emulated PSRAM speed.
+- **Staleness.** As with flash, the window never serves a stale byte: a store
+  is seen by the instruction bus at once, where silicon needs the probe's
+  `Cache_WriteBack_All` + `Cache_Invalidate_ICache_All`. An image that forgot
+  them would run here and not on a board.
+- **Aliases.** One PSRAM page mapped at two MMU indices is two window copies
+  here (the fill warns); silicon has one page. esp-hal maps each page once.
+
+A software reset keeps the chip's bytes and registers (it does not take the
+chip's supply away — IDF's `EXT_RAM_NOINIT_ATTR` exists because of that); a
+power cycle zeroes them. A snapshot carries the chip with every live window
+page written back, and `None` when nothing ever wrote it.
 
 ## The peripherals, in the order the boot met them
 
@@ -623,6 +683,63 @@ more MMIO store — the store that zeroed the mask under X43 — then enables th
 line, and asserts the take followed within a few instructions (CCOUNT 12 →
 20) rather than at the next 256-cycle window boundary. Never single-stepped.
 
+## LCD_CAM and GDMA: parallel WS281x lanes (M9)
+
+The S3's parallel LED output drives up to eight WS281x lanes (sixteen on a
+16-bit bus) from one frame buffer: LCD_CAM's LCD half in i8080 mode shifts a
+byte per bus clock onto `LCD_DATA_0..7`, and the AHB GDMA feeds it from
+internal RAM with no CPU involvement (`led-channels-spike/report.md` in the
+plan directory). This machine plays that path, and the per-pad WS281x
+decoders from "The pad, and the frame" read each lane back unchanged.
+
+| block | where | what |
+|---|---|---|
+| `DMA` ([`periph::gdma`]) | `0x6003_F000` | the five channels' OUT half: `out_conf0/1`, `out_link` (start, stop), the `out_int` cluster, `out_peri_sel`, and `outfifo_status`, which esp-hal's `start_transfer` spins on. The IN half is accept-and-remember and warns on a start |
+| `LCD_CAM_CLOCK` ([`periph::lcd_cam::LcdClock`]) | `0x6004_1000` | `lcd_clock`, one register |
+| `LCD_CAM` ([`periph::lcd_cam::Lcd`]) | `0x6004_1010` | the LCD's registers: `lcd_user` (start, reset, update, dout, always-out, 2-byte, bit and byte order, command and dummy phases), `lcd_misc` (setup and hold cycles), `lc_dma_int_*` (`lcd_trans_done`, source 24) |
+
+**The CAM half is not mapped.** `cam_ctrl`, `cam_ctrl1` and `cam_rgb_yuv`
+(`+0x04..+0x10`) sit between the two windows, so under `--strict-bus` a CAM
+access stops the run. The CAM is the spike's analyzer, never product.
+
+**How a frame plays.**
+
+1. `outlink_start` records the chain's address and ends the window.
+2. The machine walks the descriptor chain out of internal RAM between windows
+   (`Machine::service_gdma`). A peripheral has no way into guest RAM, so this
+   is the C6's `drain_tx_log` shape.
+3. The bytes wait in the channel for LCD_CAM, and `start_transfer`'s spin
+   ends.
+4. `lcd_start` takes them (or waits for them) and drives the lanes:
+   - each slot's time is the start plus `k` PCLK periods, an exact fraction of
+     CPU cycles from `lcd_clock`;
+   - edges are driven 1,024 slots at a time from scheduled events, only where
+     a lane changes, so 8 × 500 LEDs costs a few dozen events and never a
+     per-cycle loop.
+5. At the end, `lcd_start` clears (what esp-hal's `wait` polls),
+   `lcd_trans_done` raises, and GDMA's done and EOF bits raise.
+
+**Not modelled, said so.**
+
+- The chain is read whole at the start, not as the FIFO drains.
+- RGB mode and `lcd_next_frame_en` are warnings.
+- PCLK, CS, DC and the sync lines are never driven.
+- A descriptor or buffer outside internal RAM (`0x3FC8_8000..0x3FD0_0000`)
+  is a descriptor error, and under `--strict-bus` a stop: PSRAM is ruled out
+  for this buffer by design.
+
+**The timing is modelled and ungraded.** The clock sources are the tree's
+nominal 40, 240 and 160 MHz, and a 2.5 MHz bus is exactly 96 CPU cycles a
+slot. A silicon capture grades it, not this. **The bytes transfer.**
+
+`tests/lcd_cam_lanes.rs` boots `fw-esp32s3 --features test_lcd_lanes`
+(a harness that never ships). It sends five uneven lanes (12, 9, 7, 5 and
+3 LEDs on GPIO1–5) twice through esp-hal's own i8080 driver and GDMA, and
+every lane decodes byte-exact off its pad, in lockstep, under
+`--strict-bus`. `just test-emu-esp32s3-lcd` builds the image and runs it;
+CI's `Emulator ESP32-S3 seams and heap (x64)` job runs it. An image that does
+not use LCD_CAM touches none of this and behaves as before.
+
 ## The link, and what a host can and cannot do to this chip through it
 
 The console **is** the link: `esp-println` with the `jtag-serial` feature
@@ -648,10 +765,13 @@ carries **bytes** — `lp-cli … serial:tcp://` connects to it unchanged — an
 client connecting **is** an application opening the port (`--usb-sj-drain
 manual` decouples them). `--control tcp:<addr>` carries the **cable**, one
 line per command and one reply per command: `attach`, `detach`, `open`,
-`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `state`,
-`usb-write`. `attach` and `detach` are never implied by a socket: a cable is
-not a port open, and the whole reason to model a host is that the two come
-apart. `--usb-script <file>` is the deterministic twin — declared **emulated**
+`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `power-cycle`,
+`state`, `usb-write`. `attach` and `detach` are never implied by a socket: a
+cable is not a port open, and the whole reason to model a host is that the
+two come apart. `power-cycle` is not the cable's but a hand on the plug: the
+machine's [`power_cycle`](src/machine.rs) (the power-on snapshot, the flash as
+it stands), performed at the run loop's next boundary as the C6's is; the LAN
+update test's power cuts use it (`just test-emu-esp32s3-ota-lan`). `--usb-script <file>` is the deterministic twin — declared **emulated**
 times, plus `after "<line>"` and `then +<ms>` — and two runs of one script
 deliver identical bytes at identical cycles; a socket is host time and is
 only auditable.
@@ -690,6 +810,286 @@ captures of *that* chip. No S3 silicon has been read (P09 owns that), so this
 chip's grade table is **empty** and every register answers `modeled` — the
 data path included. A run under `--strict-grade documented` stops at the first
 register the console touches, which is correct and is what the flag is for.
+
+## The radio windows, and the reset a reboot asks for
+
+*S3 radio roadmap M1 (`lp2025/2026-10-20-2335-s3-radio-and-ota`).*
+
+### The image
+
+There is no product radio on the S3 yet (M3 and M4 own `radio`, `ble`,
+`wifi`). So M1 boots **`fw-esp32s3 --features radio_boot_probe`**
+(`lp-fw/fw-esp32s3/src/radio_boot_probe.rs`): the shipped boot, untouched,
+with esp-radio started beside it — `wifi::new`, a station, one scan; and
+`BleConnector::new` (BTDM, with `coex`), one HCI Reset whose Command
+Complete is read back. Scaffolding, never shipped; its `.bss` heap arena is
+80 KB smaller because the blobs' IRAM text and statics do not otherwise fit
+`dram_seg` (where the product radio's RAM comes from is M4's plan).
+`just test-emu-esp32s3-boot` builds it beside the shipped image and names it
+`LP_EMU_ESP32S3_RADIO_ELF` / `LP_EMU_ESP32S3_RADIO_MERGED`.
+
+### One instruction the hart did not have
+
+The boot first stopped on an **unsupported instruction**, not a window:
+`saltu` (`62 a8 60`) in the blobs' `_vsnprintf`. `salt`/`saltu` ("set AR if
+less than", RST2 `op2` 7/6) are LX7 instructions the classic's LX6 lacks —
+`xtensa-esp32-elf-as` refuses them — and `lp-xt-inst` now decodes them,
+`lp-xt-emu` executes them and `lp-xt-jit` translates them. Encodings are
+read off `xtensa-esp32s3-elf-as`'s output
+(`lp-xt/lp-xt-inst/tests/machine_golden_vectors.rs`).
+
+### The windows
+
+Every MMIO window the blobs touch that the PAC does not name is an
+accept-and-remember [`RadioStub`](src/periph/radio_stub.rs) — the C6's
+method (`lp-emu-esp32c6/src/periph/wifi_stub.rs`), on this chip's addresses.
+They come from a census of the probe image's `l32r` literals that land in no
+modelled block, grouped by page and named after the blob routines that load
+them; the names are ours, by address range, because the layouts are
+Espressif's closed blobs.
+
+| window | range | whose | the probe reaches it |
+|---|---|---|---|
+| `PBUS` | `0x6000_6100..0x6000_7000` | the PHY's pbus, above the PAC's `FE` | yes |
+| `I2C_MST_HI` | `0x6000_E04C..0x6000_F000` | the PHY's frequency/PLL registers above the analog master's three PAC registers | yes |
+| `BT` | `0x6001_1000..0x6001_3000` | Bluetooth baseband (`bt_bb_*`) | yes |
+| `RF_CTRL` | `0x6001_C000..0x6001_CC00` | RX gain/AGC, below the PAC's `NRX` | yes |
+| `NRX_HI` | `0x6001_CD00..0x6001_D000` | `NRX`'s page above its `0x100` | yes |
+| `BLE_RW` | `0x6003_1000..0x6003_3000` | the BLE link layer (`r_lld_*`, `r_emi_*`) | yes |
+| `WIFI_MAC` | `0x6003_3000..0x6003_4F6C` | the Wi‑Fi MAC (`hal_init`, `mac_txrx_init`, `hal_crypto_*`) | yes |
+| `WIFI_PWR` | `0x6003_508C..0x6003_6000` | TSF and power timers (`tsf_hal_*`) | yes |
+| `BTDM_WAKE` | `0x6004_2000..0x6004_3000` | BTDM sleep/wake (`btdm_wakeup_request`) | **no — census only** |
+
+⚠️ The PAC's `RNG` block sits at the odd base `0x6003_4F6C` so that its one
+register lands at `+0x110`; its aperture swallows `0x6003_4F6C..0x6003_508C`,
+and the radio's accesses there (the census's `0x6003_5000..0x6003_5034`) are
+answered by `RNG`'s register file, which remembers every offset but `data`.
+
+### The overrides, each with what asked for it
+
+Seven, all in [`src/periph/radio_stub.rs`](src/periph/radio_stub.rs) with
+the disassembly that justifies them. Four are **done flags** a calibration
+polls (`rom_pkdet_vol_start`'s 3-bit field == 7, `txdc_cal_v70` bit 24,
+`ram_iq_est_enable` bit 16, `hal_init` bit 0) — the same shapes the C6's
+`WIFI_MAC` overrides answer; two are **self-clearing strobes** the BLE ROM
+waits on (`r_rwip_time_get`'s clock-sample bit 31, `r_rwip_driver_init`'s
+soft-reset bit 31); and one is an **identity word** an assertion checks
+(`r_lld_core_init` panics unless `0x6003_1004` reads `0x0900_1B00`).
+
+Two lessons the bring-up paid for, worth carrying:
+
+- **The spin detector keys on one register.** `ram_iq_est_enable` alternates
+  two reads, so no `SPIN` line fired; a 3 s deadline with the pc parked in
+  the loop found it. Run without a trace to a deadline and read the pc.
+- **An assertion is not a spin.** The BLE controller's `assert_wrapper`
+  panic came from a value read once; `--break-at r_rwip_assert_hack` plus a
+  `--trace-block BLE_RW` trace named the read.
+
+Nothing here raises an interrupt. The blobs map three sources — `WIFI_MAC`
+(0), `WIFI_PWR` (2) and `RWBLE` (8), all to CPU interrupt 1 — through
+[`src/intmatrix.rs`](src/intmatrix.rs), which accepts every one of its 99
+map registers (`tests/radio_boot.rs` pins the set), and enable and clear them
+in the windows above, which remember. Raising RX/TX completions is the
+emulated Wi‑Fi milestone's (M5).
+
+`tests/radio_boot.rs` is the gate: both boot paths reach the server loop
+strict with `unmapped=0`, the controller's Command Complete arrives, the
+scan ends, and every window is reached — or, for a census-only one, is
+**not**, so the flag stays true. `lp-cli/tests/emu_s3_link_gates.rs`'s
+`the_radio_image_renders_the_shipped_images_frame` pushes
+`projects/test/shader-oracle` to both images and holds the first lit frame
+on pad 9 byte-equal.
+
+### The reset a reboot asks for
+
+The firmware's requested reboot is `esp_hal::system::software_reset` → the
+ROM's `software_reset` (`0x4004_466c`) → `RTC_CNTL.options0 |=
+0x8000_0000`, **`sw_sys_rst`**. This machine's `rtc_cntl.rs` used to say the
+S3 had no such bit — the PAC (`options0.rs:316-319`) and the ROM both say it
+does — and dropped the write, so a reboot spun in the ROM for ever. Now the
+write asks the machine for a reset (`ResetSource::Software`), and under
+`--reboot-on-reset` (`Machine::reboot_for`) the machine performs it:
+
+- back to the power-on state, the ROM-up chain or the direct load replayed;
+- **RTC fast and slow memory kept** — the recovery ledger lives in RTC fast
+  memory on that promise;
+- `reset_state` reading **`CoreSw` (3)** in both halves, esp-hal's
+  "Software resets the digital core by RTC_CNTL_SW_SYS_RST", which the
+  firmware reports as `cause=software-reset`.
+
+`lp-cli`'s hosted S3 board (`S3Board`, `lp-cli emu run --chip esp32s3
+--host-link`) is built to reboot on reset, as the classic's is;
+`emu_s3_link_gates.rs`'s `a_requested_reboot_reboots_with_the_software_reset_cause`
+sends `Reboot` and reads the second boot's recovery line.
+
+### Still not modelled
+
+- **Radio behaviour.** No frame is received or sent; the scan finishes with
+  zero access points; BLE never advertises to anyone. M5 brings the network
+  seam to this chip; Bluetooth's air is not emulated on any chip.
+- **A TX completion.** Nothing in the probe transmits, so whether this
+  chip's MAC can be made to complete a send is unasked — the C6's open
+  question (`docs/debt/emu-c6-radio-tx-never-completes.md`) is M5's here.
+- **The other resets' causes.** A watchdog's or a host `chip_rst`'s reboot
+  still comes back reading power-on with RTC memory cleared; silicon reads
+  `SysRtcWdt`/`CoreUsbUart` and keeps RTC memory. The per-core
+  `sw_{app,pro}cpu_rst` bits are reported, not performed.
+- **Timing.** Every PHY calibration completes the instant it is asked; the
+  boot's time to the server loop with the radio on is `lp-emu:esp32s3:t1`'s
+  and says nothing about silicon's.
+
+## Power cuts, a writable chip, and an update host (S3 radio M7 P5)
+
+The update work needs three things of this machine that only the C6 had.
+
+| flag | where | what |
+|---|---|---|
+| `--flash-cut <spec>` | `lp-emu-esp32s3` and `lp-cli emu run --chip esp32s3 --host-link` | a power cut at the Nth program or erase in `lpfs`: `<n>:<model>:<seed>[,range=<off>+<len>][,then=stop\|power-cycle]`, the C6's spec (`lp_emu_esp_common::engine::flash_cut_spec`, moved there from the C6 crate, which re-exports it). The range defaults to the chip's own `lpfs` row (`machine::lpfs_range`) |
+| `--rom-up-flash <chip.bin>` | `lp-cli emu run --chip esp32s3 --host-link` | the reset vector out of a **writable** flash file, written back when the run ends — an early end is a power cut, and the next run boots what the flash held. (The raw binary's `--flash <file> --boot-mode rom-up` is the same thing.) |
+| `--ota-offer <dir>`, `--ota-cut-after N` | `lp-cli emu run --chip esp32s3 --host-link` | an update on lp-link channel 3 from the host this process is; `--ota-cut-after` ends the run as a power cut, the flash written back through `--rom-up-flash` — the C6's plumbing, shared; on the S3 it has no request to count until an update-capable core answers (P8), so it is not exercised here yet |
+
+**What a cut does here.** The NOR engine is the C6's (`engine::spi_flash` on
+`lp-nor-sim`); a cut tears the command and asks the machine for a
+`PowerCut`. `then=stop` ends the run (`Outcome::PowerCut`, exit code **8** —
+the C6's power cut exits 6, which is this chip's cache-off fetch).
+`then=power-cycle` restores the **power-on snapshot** over the flash as the
+cut left it (`Machine::power_cycle`) and runs on, the plan spent. That is a
+power cycle, not the performed *software* reset of M1: RTC memory and
+`reset_state` go back to power-on, and it is counted apart
+(`power_cycles()`, not `reboots()`). The run's label gains `+flash-cut`
+(`Machine::configuration_label`), which `lp-cli validate` refuses to record.
+`tests/flash_cut.rs` holds both endings over a writable copy of the shipped
+image's merged chip, and that the next boot after a stop comes up.
+
+**What an offer does today.** The shipped image is a single image with no
+channel-3 hook, so it answers an offer with **nothing** — no manifest, no
+request, no refusal — and writes nothing; Studio's "needs USB" comes from the
+hello's `ota_layout: 0`, never from this channel. The offer survives the
+board's software reset (`lp-cli`'s `run_s3` test). An update end to end needs
+the split, update-capable S3 core (M7 P8) and is P10's.
+
+⚠️ **Op indices are this layout's, not the C6's.** On a fresh merged S3
+chip the first boot's own `lpfs` format is the first handful of in-range ops
+(a cut at op 5 lands in it); by op 20 a cut is already inside an
+`--upload`'s writes.
+A cut inside an upload ends the upload too: the board restarts under it,
+and lp-cli's client waits on a transaction the board no longer holds until
+the wall-clock net. And `then=power-cycle` gives the flash its supply back
+(`FlashImage::restore_power`, as the C6's restart does): until M7 P9 it did
+not, every write after the cycle was dropped, and the next boot looked like
+a filesystem that refuses writes
+(`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
+
+## Emulator seams, the wake and `net=lan` (S3 radio M5)
+
+The C6's seams (`docs/adr/2026-10-05-emulator-seams.md`, its §13 for
+Xtensa), on this chip: `src/seams/` is the C6's `src/seams/` file for file,
+over the same chip-neutral `lp_emu_esp_common::seam`.
+
+| flag | where | what |
+|---|---|---|
+| `--seams <atoms\|none>` | `lp-emu-esp32s3` and `lp-cli emu run --chip esp32s3 --host-link` | engage seams, STRICT (a seam that cannot engage exits 64, `Outcome::Seam`) |
+| `--seams-prefer <atoms>` | both | the same, SOFT: engage what the image allows, else `SEAM none engaged: <why>` |
+| `--seams-info <image>` | both | print an image's seam tables and exit |
+| `--lan <fixture>`, `--pace`, `--seam-trace` | `lp-cli emu run --chip esp32s3 --host-link` | the C6's: the board on a virtual LAN of its own, its forward printed as `forward lan:127.0.0.1:<port>`; a board on a LAN with no `--efuse-mac` gets `emu serve`'s first board's locally administered MAC, because this machine's default eFuse MAC is all zeros |
+
+With neither `--seams` flag the capability defaults (`net=lan`) are asked for
+softly, exactly as on the C6; `--seams none` scans nothing.
+
+**What is Xtensa's here.**
+
+- **Arming** checks that a site opens with an `entry` and that its hint
+  (`movi`/`movi.n` of the seam's immediate) follows within 64 bytes, decoding
+  both by hand (`seams::seam_arming::holds_xtensa_seam_hint`; `lp-xt-inst` is
+  outside the MIT fence), then plants `break 1, 15` over the three-byte
+  `entry` in the cache window — never in the chip — and re-arms after every
+  fill and restore.
+- **Answering** happens at that `break`, before `entry` rotates the window:
+  `n = PS.CALLINC`, arguments at `a(4n+2)..`, the result to `a(4n+2)`, the
+  return to the windowed return address's low 30 bits under the pc's top two
+  (the 1 GiB rule below). On whichever core reached the site.
+- **The wake** raises `SYSTEM.cpu_intr_from_cpu_3` (source 82), the S3's
+  software interrupt, not the C6's `INTPRI`; the run loop feeds the cores at
+  once and bounds the window and the all-cores-in-`waiti` skip by the
+  pacer's next raise and the LAN's next due cycle.
+- **The app has started** when core 0 first runs from the IROM window (the
+  C6 waits for its one flash window the same way), so a ROM-up boot's
+  bootloader, which reads the app through the window to check it, never
+  sees a patch.
+
+`tests/seam_abi_harness.rs` runs `fw-esp32s3 --features test_seam_abi` (a
+harness image that never ships): silicon's answers with seams off; the
+emulator's `test=echo` and `test=take` answers through the release build's
+LTO; `net=lan` engaged by default with `net_mac` writing the eFuse MAC
+through its out-pointer; and the wake reaching a core asleep in `waiti`,
+each queue delivered exactly once. `just test-emu-esp32s3-seams` builds the
+image and runs them with `--features test-seams` (CI: `Emulator ESP32-S3
+seams and heap (x64)`, a job of its own, which also runs the S3's heap
+ratchet).
+
+**The `wifi` image declares the network seam** (S3 radio M5's second half;
+`fw-esp32s3 --features wifi`, off by default): a default run engages
+`net=lan`, the firmware says `[wifi] network: the emulator's network seam`,
+and the label is `lp-emu:esp32s3:t1+net=lan`. An image without `wifi` has no
+network stack and declares no seam, so every default run on it says `SEAM none
+engaged: no seam table` and its label stays `lp-emu:esp32s3:t1`.
+`just test-emu-esp32s3-wifi` builds and merges the `wifi` image and runs
+`lp-cli/tests/emu_s3_lan_pair.rs`: two S3s, each joined alone over its USB
+link, then both on one runner-driven LAN (two leases, each board's
+`lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
+esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
+`just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them
+(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). With Peach (1D) loaded,
+the image's heap runs short and the board resets
+(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md);
+`WALK_PROJECT="Fiber Headband"` fits.
+
+⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
+interrupt entry saves the FP registers, and this machine's `CPENABLE` resets
+to 0 (below): an unarmed core takes `EXCCAUSE=32` inside `save_context` and
+ends in the double-exception vector. The app path's `init` arms it; the seam
+harness does too, before it binds the wake.
+
+## Speed, and the identity oracle that keeps it honest (2026-10-22)
+
+The hart runs out of the shared Xtensa block cache and window hoist
+(`lp-xt-emu`'s, the classic's M7 rungs) — and until #1270 that bought
+nothing here: the whole of SRAM1 is one executable region on this chip
+(DD81), so every stack push and heap write reached the cache as a range
+invalidation, a walk of its 2^18-entry table, and that was **81 % of host
+time**. The bus now keeps a map of the words a cache has decoded and records
+only a store that changes one, at every alias door
+(`lp-emu-esp-common`'s `CodeRecord`).
+
+```bash
+just bench-emu-esp32s3                                 # an ORACLE, never a gate
+scripts/emu/s3-oracle.sh <out> render-basic 2s         # cache vs --no-block-cache
+scripts/emu/s3-oracle.sh --bin-a <main> --bin-b <branch> <out> render-620 2s
+```
+
+Both read CI's images (`just fetch-ci-images` → `LP_CI_IMAGES`, or
+`--images <dir>`). Measured 2026-10-22 on an M2 Max at load ≈ 9, user
+seconds, the shipped image with Bluetooth on:
+
+| row | before #1270 | after | × real time after |
+|---|---:|---:|---:|
+| `render-basic` (241 lamps), per emulated second, steady | 55.0 s | 3.41 s | **0.293×** |
+| `render-620`, per emulated second, steady | 53.9 s | 3.53 s | 0.283× |
+| `boot-idle`, 1 s emulated | 13.38 s | 1.58 s | 0.633× |
+
+**`render-basic` is the row to quote**: the core is ~92 % busy there, so it
+is what a walk sits in. What is left is ~65 MIPS of interpretation and a flat
+profile; 1× needs the Xtensa translator to keep a stay translated.
+
+⚠️ **A hosted run is only repeatable with its link nonce stated**
+(`lp-cli emu run … --link-nonce <hex>`; the oracle and the probe pin one). A
+product host draws a fresh nonce per open, and two runs of one binary then
+differ by ~1,000 instructions and every frame timestamp — which is exactly
+what a fast path that moved the guest would look like.
+
+`--no-block-cache` (this binary and `lp-cli emu run --chip esp32s3`) is the
+off switch, and the `blocks:` lines on stderr are the cache's counters —
+never compared, since they are what the two legs differ in.
 
 ## Three things about this machine that its siblings do not have
 
@@ -821,3 +1221,24 @@ matrix has 99 map entries and the table 94 rows.
 MIT, as a unit with the rest of `lp-emu/` — not the workspace's AGPL. See
 `lp-emu/LICENSE-MIT`, `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md` and
 `just lint-emu-fence`.
+
+## Core 1 and the flash-busy model
+
+Core 1 is held at reset and released the way the silicon releases it: when
+the guest clears `SYSTEM.core_1_control_0.reseting` with the clock gate open,
+slot 1 starts at the mask ROM's reset vector, and the ROM's own APP-CPU path
+reaches the address the guest wrote (`Machine::sync_core1_reset`; the core-1
+spike's §4). The shipped image does that since `two-core` (2026-10-24): core 1
+renders half of every batch and parks in `waiti` between jobs, woken by
+`FROM_CPU_INTR2`. A single-core image never takes the path and runs as
+before, byte for byte.
+
+`--flash-busy` (`Esp32S3Builder::flash_busy`; `lp-cli emu run --chip esp32s3
+--flash-busy`) holds the flash part's WIP for each program's and erase's busy
+time, using CX1's numbers as an estimate (there is no S3 measurement), so the
+ROM's poll loop spins through it. While it does, an access through the
+flash or PSRAM windows by **either** core stops the run with
+`FLASH-BUSY ACCESS` (exit 9), naming the core, the pc and the address: on
+silicon the MSPI bus is the write's. It is what every flash writer's stall of
+core 1 is held to (`tests/flash_busy_stop.rs`,
+`lp-cli/tests/emu_s3_core1_gates.rs`). Off by default.

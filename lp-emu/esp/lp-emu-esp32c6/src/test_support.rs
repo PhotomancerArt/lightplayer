@@ -581,7 +581,7 @@ pub fn split_slug(image: &FwImage) -> String {
 /// default-features image can be split (the pipeline keeps the defaults on).
 /// The shipped set is built as the target `esp32c6-4mb`, so its manifest core
 /// says what the packaged image's does, and as a figure build (version
-/// `0000000`, stamped clean), so it is the heap ratchet's bytes.
+/// `0000000`, commit `000000000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
     assert!(
         image.default_features,

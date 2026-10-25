@@ -1,5 +1,6 @@
 //! Flash-persisted instructions to the next boot: the boot-control sector,
-//! and the ESP32-C6 split image's formats.
+//! and the split image's formats (the ESP32-C6's layout 1, the ESP32-S3's
+//! layout 2).
 //!
 //! This crate is the single definition of every on-flash format the boot
 //! path shares between writers and readers. It is `no_std`, IO-free and
@@ -34,6 +35,35 @@
 //!
 //! These bind once a fielded core can install an update (see
 //! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`).
+//!
+//! # Layout 2: the ESP32-S3's
+//!
+//! The S3 ships the same split image with the region moved to the next
+//! 64 KiB page, the only MMU page the S3 has ([`split_layout_2`],
+//! [`SplitLayout::layout_2`]). Everything below `0x18000` is layout 1's
+//! bytes at layout 1's offsets, so the records, `choose`, the engine header,
+//! the progress record and the engine digest are the same formats:
+//!
+//! ```text
+//! 0x10000  loader                 (layout 1's)
+//! 0x15000  progress record        (layout 1's)
+//! 0x16000  boot record, sector 0  (layout 1's)
+//! 0x17000  boot record, sector 1  (layout 1's)
+//! 0x18000  reserved               erased, never written (LAYOUT_2_RESERVED)
+//! 0x20000  core                   the region, on 64 KiB pages
+//!  page↑   engine
+//!   …      free to factory's end
+//! ```
+//!
+//! - [`s3_mmu`]: the S3's flash MMU plan — the core's, the engine's and the
+//!   loader's entries, and what the loader claims of the MMU forever.
+//! - [`ResetKind::from_s3_reason`]: the S3's reset codes in the C6's classes,
+//!   cited to the S3 ROM's own name table.
+//! - [`S3_BOOT_STAGE_RAM`]: the S3 loader's and the IDF bootloader's RAM,
+//!   which no radio DMA may reach across a warm reset.
+//!
+//! Layout 2 binds from the first release whose S3 core can install an
+//! update.
 //!
 //! # The boot-control sector
 //!
@@ -103,8 +133,11 @@ pub mod engine_digest;
 pub mod engine_header;
 pub mod loader_identity;
 mod reset_kind;
+mod s3_boot_stage_ram;
+pub mod s3_mmu;
 mod sector;
 mod split_layout;
+pub mod split_layout_2;
 
 pub use boot_choice::{BootChoice, booted_by, choose, cold_retry_to_count, failed};
 pub use boot_record::{
@@ -117,10 +150,15 @@ pub use bootloader_identity::{BOOTLOADER_VERSION, find_bootloader_version};
 pub use engine_header::{EngineHeader, EngineHeaderError};
 pub use loader_identity::{LOADER_VERSION, find_loader_version};
 pub use reset_kind::ResetKind;
+pub use s3_boot_stage_ram::{
+    S3_BOOT_STAGE_RAM, S3_IDF_BOOTLOADER_RAM, S3_LOADER_IRAM, S3_LOADER_RAM, SRAM1_I_FROM_D,
+    split_at_s3_boot_stage_ram,
+};
 pub use split_layout::{
     BOOT_RECORD_SECTORS, Extent, LOADER_MAX_LEN, LOADER_OFFSET, PROGRESS_RECORD_SECTOR,
     REGION_START, SplitLayout,
 };
+pub use split_layout_2::{LAYOUT_2_PAGE, LAYOUT_2_REGION_START, LAYOUT_2_RESERVED};
 
 pub use boot_control::{BootAction, BootControl, DecodeOutcome, decode};
 pub use boot_flags::BootFlags;

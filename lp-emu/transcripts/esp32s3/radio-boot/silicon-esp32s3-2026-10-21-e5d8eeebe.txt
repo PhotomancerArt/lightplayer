@@ -1,0 +1,14 @@
+[link] up (session 0)
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=start heap_free=237528 heap_used=52
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=wifi_new heap_free=190924 heap_used=46656
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=station_started heap_free=190924 heap_used=46656
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=ble_new heap_free=155200 heap_used=82380
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=ble_hci_reset_sent heap_free=155160 heap_used=82420
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=answers_task_spawned heap_free=155160 heap_used=82420
+[INFO] fw_esp32s3: [fw-esp32s3] hardware manifest: seeed/xiao-esp32-s3-plus (XIAO ESP32-S3 Plus)
+[INFO] fw_esp32s3::output::rmt::esp32s3_rmt_ws281x_driver: Esp32S3RmtWs281xDriver: 4 WS281x channels for 4 declared (plan=Some([1, 1, 1, 1]) ch0_window_words=48 ch0_half_words=24)
+[WARN] fw_esp32_common::boot: Boot: not loading a project: PLAYFUL Choker stopped the board while it loaded at startup, so no project is running
+[ERROR] fw_esp32_common::server_loop: [RECOVERY] previous run crashed (panic): at node:/PLAYFUL_Choke/node:/PLAYFUL_Choke/node:/PLAYFUL_Choke/shader-compile:glsl: memory allocation of 2096 bytes failed (at /U
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] wifi scan done: 3 access points

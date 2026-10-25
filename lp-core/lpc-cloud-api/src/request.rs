@@ -22,6 +22,7 @@ use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 use serde::{Deserialize, Serialize};
 
 use crate::access::Access;
+use crate::account_board::{ForgetBoard, ReportBoard};
 use crate::account_password_tier::AccountPasswordTier;
 use crate::board_picture::BoardPictures;
 use crate::sidecar_meta::SidecarMeta;
@@ -75,8 +76,12 @@ pub enum CloudRequest {
     SetAccountPassword(SetAccountPassword),
     /// See [`ResetAccountKey`].
     ResetAccountKey,
-    /// See [`ListBoards`].
-    ListBoards,
+    /// See [`ListAccountBoards`].
+    ListAccountBoards,
+    /// See [`crate::account_board::ReportBoard`].
+    ReportBoard(ReportBoard),
+    /// See [`crate::account_board::ForgetBoard`].
+    ForgetBoard(ForgetBoard),
     /// See [`crate::board_picture::BoardPictures`].
     BoardPictures(BoardPictures),
 }
@@ -272,13 +277,14 @@ pub struct SetAccountPassword {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResetAccountKey;
 
-/// The signed-in account's boards that are online at the relay: those that
-/// registered with a proof of this account's key. Answered with
-/// [`crate::board_presence::BoardList`]; a guest's list is empty (no board
-/// holds a guest's key), and an anonymous caller is
+/// The signed-in account's board list: every board that proved it holds
+/// the account's key (at the relay, or to a Studio linked to it), with its
+/// presence where it is online at the relay now. Answered with
+/// [`crate::account_board::AccountBoardList`]; a guest's list is empty (no
+/// board holds a guest's key), and an anonymous caller is
 /// [`crate::error::CloudError::NotAuthenticated`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ListBoards;
+pub struct ListAccountBoards;
 
 impl From<WhoAmI> for CloudRequest {
     fn from(_: WhoAmI) -> Self {
@@ -406,9 +412,21 @@ impl From<ResetAccountKey> for CloudRequest {
     }
 }
 
-impl From<ListBoards> for CloudRequest {
-    fn from(_: ListBoards) -> Self {
-        CloudRequest::ListBoards
+impl From<ListAccountBoards> for CloudRequest {
+    fn from(_: ListAccountBoards) -> Self {
+        CloudRequest::ListAccountBoards
+    }
+}
+
+impl From<ReportBoard> for CloudRequest {
+    fn from(request: ReportBoard) -> Self {
+        CloudRequest::ReportBoard(request)
+    }
+}
+
+impl From<ForgetBoard> for CloudRequest {
+    fn from(request: ForgetBoard) -> Self {
+        CloudRequest::ForgetBoard(request)
     }
 }
 
@@ -634,14 +652,6 @@ mod tests {
     }
 
     /// Pinned JSON literals for the vocabulary-v4 account-access calls.
-    #[test]
-    fn pinned_json_literal_list_boards() {
-        assert_eq!(
-            serde_json::to_string(&CloudRequest::ListBoards).unwrap(),
-            "\"listBoards\""
-        );
-    }
-
     #[test]
     fn pinned_json_literal_account_access_calls() {
         assert_eq!(

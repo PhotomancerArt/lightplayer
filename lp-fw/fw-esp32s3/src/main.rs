@@ -82,24 +82,53 @@ lpc_model::lp_embed_manifest_core! {
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
         lpc_model::manifest::feature_fragment(
+            cfg!(s3_espnow),
+            lpc_model::LpFeature::SvcRadioEspnow,
+        ),
+        lpc_model::manifest::feature_fragment(
             cfg!(feature = "float-f32"),
             lpc_model::LpFeature::ShaderF32,
         ),
+        // The tree store on `lpfs` (`fs-tree`, which `server` implies): what
+        // hosts read before they route a core here (`requires.fsTree`), as
+        // on the C6.
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "fs-tree"),
+            lpc_model::LpFeature::FsTree,
+        ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
-    // A single image: no update over a link.
-    ota_layout: 0,
+    // The split image takes over-the-air updates in layout 2 (the S3 plan's
+    // M7 P8); a plain (single-image) build says nothing — only USB updates
+    // it. An octal-flash part says 0 at run time instead (`split_core`).
+    ota_layout: if cfg!(lp_split) {
+        lpc_update::code_table::LAYOUT_2
+    } else {
+        0
+    },
 }
 
+// The BLE link (feature `ble`, S3 radio M3), over the shared crate.
+#[cfg(all(s3_ble, not(fw_harness)))]
+mod ble;
 mod board;
+// The radio blobs' C heap and the regions a radio image allocates from: the
+// product radio (`radio`) and the M1 probe both link the blobs.
+#[cfg(all(any(s3_radio, feature = "radio_boot_probe"), not(fw_harness)))]
+mod c_heap;
 #[cfg(all(feature = "heap-dram2", not(fw_harness)))]
 mod dram2_heap;
 #[cfg(not(fw_harness))]
+mod flash_qio;
+#[cfg(not(fw_harness))]
 mod flash_storage;
+// The Wi-Fi station and the network on `lp-net` (feature `wifi`, S3 radio M4).
 #[cfg(all(feature = "io-thread", not(fw_harness)))]
 mod io_thread;
 #[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
 mod io_thread_stack_diag;
+#[cfg(all(s3_wifi, not(fw_harness)))]
+mod net;
 // Not simply `not(fw_harness)`: the `test_button` harness drives the same
 // registry-facing driver the app path registers, and a self-test against a
 // different driver would prove nothing.
@@ -109,16 +138,50 @@ mod hardware;
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
 // inside is still app-only.
-#[cfg(any(not(fw_harness), feature = "test_loopback"))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_loopback",
+    feature = "test_lcd_ws281x",
+    feature = "test_lcd_backend"
+))]
 mod output;
+#[cfg(all(feature = "psram", not(fw_harness)))]
+mod psram;
+// The global allocator: `esp_alloc::HEAP` behind a check that core 1 never
+// takes its lock (`two-core`).
+mod guarded_heap;
+// Core 1 as a render helper: half of every render-samples batch.
+#[cfg(s3_two_core)]
+mod core1;
+// Core 1 as a PC sampler for core 0: the IRAM hot set's measurement
+// (`hot_iram/README.md`). A diagnostic image, never the product.
+#[cfg(all(feature = "pc-sampler", not(fw_harness)))]
+mod pc_sampler;
+#[cfg(all(feature = "radio_boot_probe", not(fw_harness)))]
+mod radio_boot_probe;
+#[cfg(all(s3_radio, not(fw_harness)))]
+mod radio_peripherals;
 #[cfg(not(fw_harness))]
 mod recovery;
+// Emulator seams (S3 radio M5): the network seam on the `wifi` image, and
+// the `test_seam_abi` harness's table. An image without a network stack
+// declares none.
+#[cfg(any(feature = "test_seam_abi", all(s3_wifi, not(fw_harness))))]
+mod seams;
 #[cfg(not(fw_harness))]
 mod serial;
+#[cfg(all(lp_split, not(fw_harness)))]
+mod split;
+// The S3's side of the split image's update board side, which is shared
+// (`fw_esp32_common::split_core`): `S3Split`, the update light.
+#[cfg(all(lp_split, not(fw_harness)))]
+mod split_core;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(fw_harness)]
 mod tests;
+#[cfg(not(fw_harness))]
+mod tree_flash;
 
 #[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
 use serial::usb_link_task;
@@ -127,12 +190,12 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32s3::init::{init_board, start_runtime},
     core::cell::RefCell,
-    flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
+    flash_storage::LpfsPartition,
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::usb_link::{UsbLinkShared, UsbLinkTransport},
-    fw_esp32_common::{boot, log_ring_logger, lp_fs},
+    fw_esp32_common::{boot, log_ring_logger},
     hardware::button::Esp32GpioButtonDriver,
     lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{ButtonService, LpGraphics, LpServer},
@@ -140,7 +203,7 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
-    output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
+    output::Esp32OutputProvider,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -173,7 +236,67 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// More heap does not come from here: `dram2_seg` (`0x3FCDB700..0x3FCED710`,
 /// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
 /// `dram2_heap`), so the stack keeps its share.
-const HEAP_SIZE: usize = 240 * 1024;
+#[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
+const HEAP_SIZE: usize = 240 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
+/// A Bluetooth image's arena (`radio` without `espnow`, S3 radio M3): 72 KB
+/// smaller, so the main stack keeps its share of `dram_seg`. BLE costs 72,528 B
+/// of `dram_seg` at link time: the radio blobs' own region
+/// (`c_heap::HEAP_RADIO_BYTES`, 32 KB) and 39,760 B of the controller's IRAM
+/// text and the BLE stack's statics. The heap the radio's C blocks do not use
+/// is still Rust's, last.
+#[cfg(all(s3_radio, not(s3_espnow)))]
+const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
+/// The arena with the Wi-Fi blob up too (`espnow`, and `wifi`, S3 radio M4):
+/// 104 KB smaller than a radio-free image's, so the main stack keeps its share
+/// of `dram_seg` (about 52 KB) with both radios in the image. Where the bytes
+/// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
+/// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
+#[cfg(s3_espnow)]
+const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
+/// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
+/// text and statics take about 75 KB of the D/IRAM `dram_seg` shares with
+/// `iram_seg` (the 240 KB arena fails to link by 21,988 B), and the stack must
+/// keep about today's share. Where the product radio's RAM comes from is M4's
+/// plan, not this probe's.
+#[cfg(feature = "radio_boot_probe")]
+const HEAP_SIZE: usize = 160 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
+
+/// What a `psram` image's PSRAM init takes of `dram_seg`, given back by the
+/// arena so the main stack keeps its share (M10 P2). esp-hal's octal init is
+/// `#[ram]`: 2,572 B of `.rwtext` after the fork's seventh diff (from 5,364 B
+/// with the quad path linked and the decode inlined), and `.rwtext` comes out
+/// of the same span as `.stack`. 3 KiB keeps the stack at or above the
+/// default image's (2026-10-22: 54,880 B against 54,392 B); the arena's loss
+/// is nothing beside the 8 MiB PSRAM brings, and an image whose PSRAM does
+/// not come up runs with an arena 3 KiB smaller than a default image's.
+#[cfg(feature = "psram")]
+const PSRAM_INIT_IRAM: usize = 3 * 1024;
+#[cfg(not(feature = "psram"))]
+const PSRAM_INIT_IRAM: usize = 0;
+
+/// What the IRAM hot set takes of `dram_seg`, given back by the arena so the
+/// main stack keeps its share. `.rwtext` comes out of the same span as
+/// `.stack` (esp-hal's `.rwdata_dummy` skips it), and `rwtext_hook.x` moves
+/// ~40 KB of flash functions, with their literal pools, into it: `.rwtext`
+/// grew by 43,296 B on the first hot set (2026-10-24). The figure is that,
+/// rounded up; `just s3-hot-iram-check` fails a build whose hot set outgrows
+/// it, and the stack's own figure moves if it ever does. See
+/// `hot_iram/README.md` and docs/adr/2026-10-24-s3-hot-code-in-iram.md.
+const HOT_IRAM_BYTES: usize = 43 * 1024;
+
+/// What the `pc-sampler` diagnostic takes of `dram_seg`'s `.bss` (core 1's
+/// stack and one round of samples), given back by the arena.
+#[cfg(all(feature = "pc-sampler", not(fw_harness)))]
+const PC_SAMPLER_BSS: usize = pc_sampler::BSS_BYTES;
+#[cfg(not(all(feature = "pc-sampler", not(fw_harness))))]
+const PC_SAMPLER_BSS: usize = 0;
+
+/// What `two-core` takes of `dram_seg`'s `.bss` (core 1's stack), given back
+/// by the arena.
+#[cfg(s3_two_core)]
+const CORE1_BSS: usize = core1::BSS_BYTES;
+#[cfg(not(s3_two_core))]
+const CORE1_BSS: usize = 0;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
@@ -196,6 +319,13 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         esp_println::println!("\n\n====================== PANIC ======================");
         esp_println::println!("{info}");
         esp_hal::system::software_reset()
+    }
+    // A panic on core 1 (the render helper's) halts core 1 alone: no lock,
+    // no print, no reset. Core 0 notices and renders on (`core1`).
+    #[cfg(s3_two_core)]
+    if core1::on_core1() {
+        let _ = info;
+        core1::halt_core1(core1::Stop::Panic);
     }
     #[cfg(not(fw_harness))]
     {
@@ -235,6 +365,9 @@ fn boot() -> ! {
     #[cfg(feature = "test_loopback")]
     tests::loopback::run(peripherals);
 
+    #[cfg(feature = "test_lcd_ws281x")]
+    tests::lcd_ws281x::run(peripherals);
+
     #[cfg(feature = "test_xt_jit_corpus")]
     {
         drop(peripherals);
@@ -270,6 +403,25 @@ fn boot() -> ! {
         drop(peripherals);
         tests::incremental_shader_compile::run();
     }
+
+    #[cfg(feature = "test_seam_abi")]
+    {
+        drop(peripherals);
+        tests::test_seam_abi::run();
+    }
+
+    // The PSRAM probe takes the PSRAM singleton esp-hal's driver asks for;
+    // nothing else of the peripherals is used.
+    #[cfg(feature = "test_psram")]
+    tests::test_psram::run(peripherals.PSRAM);
+
+    // Five WS281x lanes from LCD_CAM + GDMA (M9): the LCD, the DMA channel
+    // and five pads are taken from the singleton.
+    #[cfg(feature = "test_lcd_lanes")]
+    tests::test_lcd_lanes::run(peripherals);
+
+    #[cfg(feature = "test_lcd_backend")]
+    tests::test_lcd_backend::run(peripherals);
 }
 
 /// Heap free/used, and the board's three-line memory ledger. A chip fact
@@ -323,8 +475,12 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // `HEAP_SIZE`, so its high-water mark is what sizes the heap — see
     // `stack_probe`.
     stack_probe::log_if_grown("heartbeat");
-    let free = esp_alloc::HEAP.free();
-    let used = esp_alloc::HEAP.used();
+    // On a `psram` image `[MEM]` is internal RAM's (comparable with every
+    // other image's), and PSRAM has a line of its own after the triple.
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
     let largest = recovery::panic_path::largest_free_block();
     // Structural — see this function's doc comment. No OOM retry allocator on
     // this chip, so the honest count of retries that saved an allocation is 0.
@@ -343,10 +499,23 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     log::info!(
         "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
     );
+    #[cfg(feature = "psram")]
+    psram::log_ledger_line();
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,
     ))
+}
+
+/// The login challenge's randomness: the S3's hardware RNG, as the C6's
+/// `fill_random`. True-random while the radio runs, and unpredictable enough
+/// for a single-use 32-byte nonce when it does not (a nonce needs
+/// uniqueness, not secrecy). Without it every login is refused ("this server
+/// has no entropy source"), so a locked board could not be unlocked
+/// (docs/defects/2026-10-21-a-locked-s3-refuses-every-login.md).
+#[cfg(not(fw_harness))]
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
 }
 
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
@@ -386,12 +555,34 @@ fn reset_now() -> ! {
 /// structural, neither is invented).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    // The PC sampler's round, armed or dumped at the heartbeat's cadence.
+    #[cfg(feature = "pc-sampler")]
+    pc_sampler::on_heartbeat();
+    #[cfg(s3_two_core)]
+    core1::log_heartbeat();
     // The link thread's stack high-water, at the heartbeat's cadence, when it
     // grows (`io_thread_stack_diag` only; a product image has no such line).
     #[cfg(feature = "io_thread_stack_diag")]
     io_thread_stack_diag::log_if_grown();
-    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    // The radio region's high-water (`[radio-heap]`), when it grows: the
+    // figure `c_heap::HEAP_RADIO_BYTES` is checked against.
+    #[cfg(s3_radio)]
+    c_heap::log_if_grown("heartbeat");
+    // The station's `[wifi]` and the relay's `[relay]` lines (`wifi`).
+    #[cfg(s3_wifi)]
+    net::net_heartbeat::log_line(net::net_chip::on_heartbeat_joined);
+    // The RMT driver's own counters (`ws281x_telemetry` only, on an image
+    // without `lcd-ws281x`; the LCD bus logs its own `[lcd-ws281x]` line).
+    #[cfg(all(feature = "ws281x_telemetry", not(feature = "lcd-ws281x")))]
+    output::rmt::shared_driver::log_telemetry();
+    // Internal RAM on a `psram` image: the figures the board's gates and a
+    // host's judgement are about (`crate::psram`, "The heap").
+    #[cfg(not(feature = "psram"))]
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    #[cfg(feature = "psram")]
+    let (free, used) = (psram::internal_free(), psram::internal_used());
+    let free = free.min(u32::MAX as usize) as u32;
+    let used = used.min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
         free_bytes: free,
         used_bytes: used,
@@ -420,32 +611,100 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_largest_block_bytes: 16 * 1024,
 };
 
+/// The server's transport: the USB host link (lp-link) alone, or — with
+/// `ble` — the link mux carrying it plus the BLE links (the C6's
+/// `AppTransport`). The mux is there whether or not the device store turns
+/// BLE on; with BLE off no radio link ever opens and every frame takes the USB
+/// path.
+#[cfg(all(s3_ble, not(fw_harness)))]
+type AppTransport =
+    fw_esp32_common::radio_link::LinkMuxTransport<UsbLinkTransport, embassy_time::Delay>;
+#[cfg(all(not(s3_ble), not(fw_harness)))]
+type AppTransport = UsbLinkTransport;
+
 /// Everything `main` needs to hand to the server loop.
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: UsbLinkTransport,
+    transport: AppTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
 
+/// Everything the core hands the engine, as the C6's `CoreBoot`: what
+/// `core_boot` brought up, by value, through `lp_engine_entry`. Core and
+/// engine come from one link, so this crosses the boundary as an ordinary
+/// Rust value.
+#[cfg(not(fw_harness))]
+pub(crate) struct CoreBoot {
+    spawner: embassy_executor::Spawner,
+    usb_link: &'static UsbLinkShared,
+    output_peripherals: output::OutputPeripherals,
+    base_fs: Box<dyn lpfs::LpFs>,
+    fs_boot_state: lpc_wire::FsBootState,
+    watchdog: recovery::watchdog::WatchdogFeeder,
+    boot_guard: Option<lp_recovery::FrameGuard>,
+    boot_assessment: lp_recovery::BootAssessment,
+    /// The radio's ESP-NOW interface and, when no station owns it, the Wi-Fi
+    /// controller kept alive (dropping it stops Wi-Fi and ESP-NOW): the
+    /// engine builds the ESP-NOW driver over them with its hardware registry.
+    #[cfg(s3_espnow)]
+    espnow: (
+        esp_radio::esp_now::EspNow<'static>,
+        Option<esp_radio::wifi::WifiController<'static>>,
+    ),
+    /// The radio links' shared slots (`ble`): the BLE task opens a
+    /// connection's link there, and the engine's link mux serves it.
+    #[cfg(s3_ble)]
+    radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
+    /// BLE started this boot (the device store left it on).
+    #[cfg(s3_ble)]
+    ble_started: bool,
+    /// This boot's split-image state (`split_core::begin`, run as the
+    /// filesystem mounts): which core, which record, on trial or not.
+    #[cfg(lp_split)]
+    ota_state: fw_esp32_common::split_core::BootState,
+    /// The boot read a saved network with Wi-Fi on (`wifi`: the station
+    /// joins one): a trial core then waits only so long for a host
+    /// (`split_core::core_only`), the C6's rule.
+    #[cfg(lp_split)]
+    network_saved: bool,
+}
+
+/// The core's half of the boot: the board, the heap, recovery and the
+/// watchdog, the runtime, the host link and the filesystem — everything a
+/// board needs to stay reachable. On a split image, everything that is not
+/// the engine.
+///
+/// ⚠️ **Every radio's bring-up belongs here** (Bluetooth, Wi‑Fi, the relay),
+/// never behind the engine door: a board whose engine is missing or
+/// crashing runs core-only, and it must still be reachable on every link it
+/// has. What the engine needs of a radio crosses in [`CoreBoot`], as the
+/// C6's radio port and driver do.
 #[cfg(not(fw_harness))]
 #[inline(never)]
-fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init` — the
     // boot skeleton that used to call it directly here is gone, and the harness
     // entrypoint above (which never runs `init_board`) is cfg-exclusive with
     // this function. Do not add a second `esp_hal::init` anywhere on this path.
-    let (sw_int, timg0, usb_device, flash, rwdt, rmt_peripheral) = init_board();
+    let (sw_int, timg0, usb_device, flash, rwdt, output_peripherals) = init_board();
     // The heap is main.rs's, not the board's — `init_board` deliberately does
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
+    #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    // A radio image cuts the arena where it reaches the boot stages' RAM, and
+    // gives the radio blobs a region of their own, last (`c_heap`).
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
+    let arena_pieces = c_heap::install_main();
     // The bootloader's segment, second: first-fit in registration order keeps
     // the boot residents in the arena above. See `dram2_heap`.
     #[cfg(feature = "heap-dram2")]
     let (dram2_base, dram2_heap) = dram2_heap::add_region();
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
+    let (radio_base, radio_heap) = c_heap::install_radio();
     // Paint the main stack before anything deep runs, so the high-water report
     // measures the whole app (see `stack_probe`). After the arena is carved,
     // because the paint runs on the main stack and the arena is `.bss`, not
@@ -460,9 +719,38 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             "[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}+{dram2_heap}={} (dram_seg arena + dram2_seg)",
             HEAP_SIZE + dram2_heap
         );
+        #[cfg(not(any(s3_radio, feature = "radio_boot_probe")))]
         esp_println::println!(
             "[INIT] heap regions: 0 .bss+{HEAP_SIZE} (dram_seg arena), 1 {dram2_base:#010x}+{dram2_heap} (dram2_seg, bootloader's)"
         );
+    }
+    #[cfg(any(s3_radio, feature = "radio_boot_probe"))]
+    {
+        for piece in arena_pieces.iter().flatten() {
+            esp_println::println!(
+                "[INIT] heap region: {:#010x}+{} (dram_seg arena, {})",
+                piece.start,
+                piece.len,
+                if piece.fenced {
+                    "a boot stage's RAM, untagged"
+                } else {
+                    "Internal"
+                }
+            );
+        }
+        esp_println::println!(
+            "[INIT] heap region: {dram2_base:#010x}+{dram2_heap} (dram2_seg, untagged)"
+        );
+        esp_println::println!("[INIT] heap region: {radio_base:#010x}+{radio_heap} (radio)");
+    }
+
+    // PSRAM (feature `psram`): up and self-tested before the filesystem maps
+    // `lpfs` or a split image maps its engine, so the core has it either way
+    // (`crate::psram`'s module docs).
+    #[cfg(feature = "psram")]
+    {
+        psram::bring_up();
+        psram::add_heap_region();
     }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
@@ -480,6 +768,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
+    // Scaffolding for the emulator's radio windows (`radio_boot_probe`):
+    // esp-radio needs the scheduler, and its heap is taken before the server's.
+    #[cfg(feature = "radio_boot_probe")]
+    radio_boot_probe::start(spawner);
 
     // The host link runs lp-link over USB-Serial-JTAG (plan
     // `lp-link-usb-cutover`): a random session nonce per boot, so a host
@@ -507,10 +799,204 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // From here on `log::*` rides the link's log channel; the `esp_println!`
     // lines above are raw text outside frames.
     log_ring_logger::init();
+    #[cfg(feature = "radio_boot_probe")]
+    radio_boot_probe::replay_stages_to_log();
 
+    let (base_fs, fs_boot_state, _ota_state) = mount_filesystem(flash);
+    // Core 1 into the PC sampler (diagnostic images only), once the flash's
+    // read mode is settled.
+    #[cfg(feature = "pc-sampler")]
+    pc_sampler::start();
+    // Core 1 into the render helper, once the flash's read mode is settled.
+    #[cfg(s3_two_core)]
+    core1::start();
+
+    // The radio's one bring-up (`fw_esp32_radio::hardware::radio_hub`), in
+    // the core so a core-only board keeps its radio, and before BLE (the C6's
+    // order, its M2 Run G): ESP-NOW's interface to the engine's driver; the
+    // controller and the station interface to the station (`wifi`), or back
+    // to the driver to keep alive.
+    #[cfg(s3_espnow)]
+    let (espnow, net_radio) = {
+        let wifi = radio_peripherals::take_wifi().expect("init_board stashes WIFI");
+        let parts = fw_esp32_radio::hardware::radio_hub::bring_up(wifi)
+            .expect("Failed to initialize ESP-NOW radio");
+        #[cfg(s3_wifi)]
+        let (kept, net_radio) = (None, Some((parts.controller, parts.station)));
+        #[cfg(not(s3_wifi))]
+        let (kept, net_radio) = (Some(parts.controller), None::<()>);
+        log::info!("[radio] up: heap used {} B", esp_alloc::HEAP.used());
+        ((parts.esp_now, kept), net_radio)
+    };
+    // The radio links' shared slots: the BLE task opens a connection's link
+    // there and the engine's link mux serves it. On the heap, not `.bss`: its
+    // slots hold `RefCell`s, which a `static` cannot. BLE's tasks and the
+    // server loop share the main thread's executor; with the LAN's links
+    // (served from `lp-net`, `wifi`) every borrow takes the port's lock.
+    #[cfg(s3_wifi)]
+    let (radio_port, lan_port) =
+        fw_esp32_common::radio_link::RadioLinkPort::leak_locked(net::net_thread::port_lock);
+    #[cfg(all(s3_ble, not(s3_wifi)))]
+    let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
+    // What the radio links are for, decided before the BLE task may open one.
+    // A plain image always serves them; a split image decides in
+    // `split::split_boot`, once it has entered the engine (a core-only S3
+    // serves nothing over the air yet: updates are M7's).
+    #[cfg(all(s3_ble, not(lp_split)))]
+    radio_port.decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
+    // BLE: on unless the device store turns it off, read once here, the C6's
+    // rule (`fw-esp32c6/src/main.rs`): a missing store is `fresh()`
+    // (Bluetooth on, locked, no keys); a damaged one, or a board whose files
+    // are held or refused, is `locked()` (off). After the filesystem (the
+    // store is on it), in the core, so a core-only board keeps its radio.
+    #[cfg(s3_ble)]
+    let ble_started = {
+        let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
+        match store.ble_enabled {
+            true => {
+                log::info!("[ble] enabled (device store, or none: on by default) — starting");
+                let started = ble::start(spawner, radio_port);
+                started
+            }
+            false if fs_boot_state == lpc_wire::FsBootState::Refused => {
+                log::info!(
+                    "[ble] off (file store refused: the device store waits on the flash with it)"
+                );
+                false
+            }
+            false if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
+                log::info!(
+                    "[ble] off (files held for the layout change: the device store waits with \
+                     them)"
+                );
+                false
+            }
+            false => {
+                log::info!("[ble] off (device store: bleEnabled=false)");
+                false
+            }
+        }
+    };
+
+    // The network on its own thread, in the core (the C6's plan MD6), after
+    // the radio and BLE: the network file read here, on the main thread,
+    // before any Radio node exists, so "set to use Wi-Fi" holds from the
+    // first frame; the station never reads the file itself
+    // (`net::station_probes`).
+    #[cfg(not(s3_wifi))]
+    let network_saved = false;
+    #[cfg(s3_wifi)]
+    let network_saved = {
+        let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
+        let saved = file.wifi && !file.networks.is_empty();
+        net::station_probes::boot_settings(&file);
+        // The relay's account entries, from the device store; changes arrive
+        // through the server's `AccessChanged`.
+        net::relay_probes::boot_access(&lpa_server::access_store::device_store_at_boot(
+            base_fs.as_ref(),
+            fs_boot_state,
+        ));
+        log::info!(
+            "[wifi] {} network(s) saved, Wi-Fi {}, Cloud relay {}",
+            file.networks.len(),
+            if file.wifi { "on" } else { "off" },
+            if file.cloud_relay { "on" } else { "off" }
+        );
+        if net::relay_config::relay_host_overridden() {
+            esp_println::println!(
+                "[INIT] desk image: the relay is {}:{} (LP_RELAY_HOST), not lightplayer.app",
+                net::relay_config::RELAY_HOST,
+                net::relay_config::relay_port()
+            );
+        }
+        if let Some((controller, station)) = net_radio {
+            let mac = net::net_thread::base_mac();
+            let host = fw_esp32_common::net::mdns::mdns_host(mac);
+            let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
+                | u64::from(esp_hal::rng::Rng::new().random());
+            // A board that will join allocates its socket buffers now.
+            let will_join = saved;
+            let relay = net::relay_config::relay_config(
+                mac,
+                lpa_server::device_identity::read_device_name(base_fs.as_ref()),
+            );
+            net::net_thread::start(
+                controller,
+                station,
+                host,
+                seed,
+                lan_port,
+                will_join,
+                relay,
+                &net::net_chip::NET_CHIP,
+            );
+        }
+        saved
+    };
+    #[cfg(all(s3_espnow, not(s3_wifi)))]
+    let _ = net_radio;
+    // Only a split image's core-only reads it (`split::split_boot`).
+    #[cfg(not(lp_split))]
+    let _ = network_saved;
+
+    CoreBoot {
+        spawner,
+        usb_link,
+        output_peripherals,
+        base_fs,
+        fs_boot_state,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+        #[cfg(s3_espnow)]
+        espnow,
+        #[cfg(s3_ble)]
+        radio_port,
+        #[cfg(s3_ble)]
+        ble_started,
+        #[cfg(lp_split)]
+        ota_state: _ota_state,
+        #[cfg(lp_split)]
+        network_saved,
+    }
+}
+
+/// The engine door: the hardware system, the output provider, the server and
+/// the on-device JIT, the project's auto-load, and the server loop as its own
+/// task. A plain build calls this directly after `core_boot`; a split build
+/// reaches it only through the engine header's `entry` (`split.rs`), so
+/// everything reachable from here and not from the core links into the
+/// engine, the shader compiler included.
+#[cfg(not(fw_harness))]
+#[inline(never)]
+pub(crate) fn lp_engine_entry(core: CoreBoot) {
+    // JIT code in PSRAM runs only once published (M10 P5): the engine's JIT
+    // calls this firmware's routine for every buffer it links there.
+    #[cfg(feature = "psram")]
+    if psram::usable() {
+        lpvm_native::code_publish::set_code_publish(psram::publish_code);
+    }
+    let CoreBoot {
+        spawner,
+        usb_link,
+        output_peripherals,
+        base_fs,
+        fs_boot_state,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+        #[cfg(s3_espnow)]
+        espnow,
+        #[cfg(s3_ble)]
+        radio_port,
+        #[cfg(s3_ble)]
+        ble_started,
+        #[cfg(lp_split)]
+            ota_state: _,
+        #[cfg(lp_split)]
+            network_saved: _,
+    } = core;
     let transport = UsbLinkTransport::new(usb_link);
-
-    let (base_fs, fs_boot_state) = mount_filesystem(flash);
 
     // The compiled-in fallback is the XIAO ESP32-S3 Plus profile — the desk
     // board. It is deliberately partial (no user LED, no castellated pads); see
@@ -525,29 +1011,48 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_manifest.board_id(),
         hardware_manifest.board_name()
     );
+    // The ESP-NOW radio's resource, on an image that registers its driver
+    // (`espnow`): the board profile leaves `/radio/0` out because the default
+    // image registers none (`default_esp32s3_hardware_manifest`'s doc).
+    #[cfg(s3_espnow)]
+    let hardware_manifest = hardware_manifest.with_resource(lpc_hardware::HwResource::new(
+        lpc_hardware::HwAddress::radio(0),
+        [lpc_hardware::HwCapability::Radio],
+        "ESP-NOW Radio 0",
+    ));
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
 
-    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
-    // with divider 1 gives the 12.5 ns tick `lp_ws281x::PulseCodes` assumes; a
-    // failure here is a clock-tree problem, and it costs the board its output
-    // rather than its boot, so it is logged and not fatal.
-    match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
-        Ok(rmt) => {
-            hardware_system.add_ws281x_driver(Box::new(Esp32S3RmtWs281xDriver::new(
-                Rc::clone(&hardware_registry),
-                rmt,
-            )));
-        }
-        Err(error) => {
-            esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
-        }
-    }
+    // The WS281x driver: the RMT's, or LCD_CAM's under `lcd-ws281x`
+    // (`output::register_ws281x_driver`).
+    output::register_ws281x_driver(&mut hardware_system, &hardware_registry, output_peripherals);
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
-    // Still no radio driver: `LpServer` takes it as an `Option`, so it is
-    // simply absent rather than stubbed. Radio is a future milestone.
+    // The ESP-NOW driver over the interface `core_boot` brought up (`espnow`):
+    // the Radio node's. With the station in the image (`wifi`) the Radio node
+    // rule holds in the driver: while the board is set to use Wi-Fi, an open
+    // device answers with the rule's words and the rest of the project runs.
+    #[cfg(s3_espnow)]
+    {
+        let (esp_now, kept) = espnow;
+        match fw_esp32_radio::hardware::espnow_radio_driver::Esp32EspNowRadioDriver::from_parts(
+            Rc::clone(&hardware_registry),
+            esp_now,
+            kept,
+            fw_esp32_radio::hardware::espnow_radio_driver::DEFAULT_ESPNOW_CHANNEL,
+        ) {
+            Ok(driver) => {
+                log::info!(
+                    "[fw-esp32s3] ESP-NOW radio ready: device_id={:?} channel={}",
+                    driver.device_id(),
+                    driver.default_channel()
+                );
+                hardware_system.add_radio_driver(Box::new(driver));
+            }
+            Err(error) => log::error!("[fw-esp32s3] ESP-NOW radio driver: {error}"),
+        }
+    }
     let hardware_system = Rc::new(hardware_system);
 
     // The provider itself is chip-agnostic and comes from fw-esp32-common
@@ -575,6 +1080,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
     let button_service: Rc<dyn ButtonService> = hardware_system.clone();
+    // The radio service on an image with ESP-NOW (`espnow`): the hardware
+    // system holds the ESP-NOW driver registered above, so a Radio node opens
+    // it and the hello says `radio` and `svc.radio-espnow`, as the manifest
+    // does. The C6's wiring.
+    #[cfg(s3_espnow)]
+    let radio_service: Option<Rc<dyn lpa_server::RadioService>> = Some(hardware_system.clone());
+    #[cfg(not(s3_espnow))]
+    let radio_service: Option<Rc<dyn lpa_server::RadioService>> = None;
     let mut server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
@@ -582,7 +1095,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(esp32_memory_stats),
         Some(time_provider_rc),
         Some(button_service),
-        None,
+        radio_service,
         graphics,
     );
     // The heap gates, installed on this chip for the first time: until
@@ -598,6 +1111,19 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // The station's probes and its settings hook (`wifi`): the server reads
+    // what the station publishes, and hands it the network file after every
+    // change (`net::station_probes`); the relay's probe and its account
+    // entries' hook.
+    #[cfg(s3_wifi)]
+    {
+        server.set_station_probe(Some(net::station_probes::station_probe));
+        server.set_scan_probe(Some(net::station_probes::scan_probe));
+        server.set_last_attempt_probe(Some(net::station_probes::last_attempt_probe));
+        server.set_network_changed(Some(net::station_probes::network_changed));
+        server.set_relay_probe(Some(net::relay_probes::relay_probe));
+        server.set_access_changed(Some(net::relay_probes::access_changed));
+    }
     // With the link on its own thread, answer a tick's requests before its
     // render: the replies then go out while the frame renders (`io_thread`).
     // Never without the thread: on the shared executor the link task would
@@ -629,6 +1155,26 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_packed_encoding_supported(
         fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
     );
+    // Login challenges draw from the chip's hardware RNG; the server itself
+    // never draws randomness (sans-IO).
+    server.set_entropy_source(Some(fill_random));
+    // A split image's hello carries its board manifest: the core's update
+    // session says it, as it answers `Q` on channel 3 (the C6's, wire 38).
+    #[cfg(lp_split)]
+    server.set_firmware_manifest(Some(
+        fw_esp32_common::split_core::running_manifest::<split_core::S3Split>,
+    ));
+    // ...whose core hash the frame hook takes a slice a frame: the
+    // unsolicited hello waits for it; a host's own `Hello` has the rest
+    // taken at once.
+    #[cfg(lp_split)]
+    fw_esp32_common::server_loop::set_hello_gate(
+        fw_esp32_common::split_core::hello_ready::<split_core::S3Split>,
+    );
+    // ...and records the strip its update light may drive; with the station,
+    // the same hook notes the first frame and serves the relay's answers.
+    #[cfg(any(lp_split, s3_wifi))]
+    fw_esp32_common::server_loop::set_frame_hook(frame_hook);
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).
@@ -636,6 +1182,39 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     if cfg!(feature = "float-f32") {
         server.declare_embedder_features(&[lpc_model::LpFeature::ShaderF32]);
     }
+    // The filesystem this build serves, said in the hello as in the manifest
+    // core (the tree store), as the C6 says it.
+    if cfg!(feature = "fs-tree") {
+        server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+    }
+
+    // USB plus the radio links (`ble`): every link's access state reserved
+    // now, the USB link's and each radio slot's, so a link's first sight
+    // grows nothing above its own memory; the advertised-name hook only when
+    // BLE runs. Built BEFORE the boot project loads, as on the C6: the mux's
+    // per-link lists hold memory for the board's whole life, and allocated
+    // after the project they would sit above it and split the space it frees
+    // (first fit; C6 silicon N7, 2026-10-06).
+    #[cfg(s3_ble)]
+    let transport = {
+        server.reserve_links(1 + fw_esp32_common::radio_link::LINK_SLOTS);
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            radio_port,
+            embassy_time::Delay,
+        );
+        // Each radio link's channel 3 goes to the core's update session,
+        // with the tier its login granted (the C6's).
+        #[cfg(lp_split)]
+        let mux = mux.with_update_hook(
+            fw_esp32_common::split_core::radio_update_hook::<split_core::S3Split>,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
@@ -658,54 +1237,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // a far stronger claim than "reached the end of boot".
     drop(boot_guard);
 
-    FirmwareApp {
-        server,
-        transport,
-        time_provider,
-        watchdog,
-    }
-}
-
-/// Mount the `lpfs` partition, falling back to RAM so an unformattable or
-/// mis-flashed board still comes up reachable and can say so over the wire.
-#[cfg(not(fw_harness))]
-fn mount_filesystem(
-    flash: esp_hal::peripherals::FLASH<'static>,
-) -> (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) {
-    let mut flash_storage = esp_storage::FlashStorage::new(flash);
-    let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
-        // Not a runtime condition: it means the image was flashed without
-        // `--partition-table lp-fw/fw-esp32s3/partitions.csv` and espflash
-        // silently substituted its own default. Say so rather than guess an
-        // offset and erase running code.
-        esp_println::println!(
-            "[ERROR] no `lpfs` partition in the flashed table — reflash with \
-             --partition-table lp-fw/fw-esp32s3/partitions.csv; using memory FS"
-        );
-        return (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory);
-    };
-    match lp_fs::LpFsFlash::init(LpFlashStorage::new(flash_storage, partition), lpfs_config) {
-        Ok((fs, formatted)) => {
-            esp_println::println!("[INIT] flash filesystem mounted");
-            let state = if formatted {
-                lpc_wire::FsBootState::Formatted
-            } else {
-                lpc_wire::FsBootState::Mounted
-            };
-            (Box::new(fs), state)
-        }
-        Err(e) => {
-            esp_println::println!("[WARN] flash FS failed: {e}, falling back to memory");
-            (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory)
-        }
-    }
-}
-
-#[cfg(not(fw_harness))]
-#[esp_rtos::main]
-async fn main(spawner: embassy_executor::Spawner) {
-    let app = boot_firmware(spawner);
-
     // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
     // literally by `lpa_link::device_session::device_readiness` (and by lp-cli
     // fwcheck through it). It is chip-agnostic on purpose — writing
@@ -717,7 +1248,44 @@ async fn main(spawner: embassy_executor::Spawner) {
         env!("LP_BUILD_COMMIT"),
         env!("LP_BUILD_DIRTY"),
     );
+    spawner.spawn(
+        engine_task(FirmwareApp {
+            server,
+            transport,
+            time_provider,
+            watchdog,
+        })
+        .unwrap(),
+    );
+}
 
+/// The server loop's one frame hook (`server_loop::set_frame_hook`), as the
+/// C6's: on a split image (`lp_split`) one slice more of the core's own hash
+/// until it is known (the hello waits on it) and the strip the update light
+/// may drive, recorded once it is known; with the station (`wifi`) this
+/// boot's first frame (`net::net_chip`, what the station's first join waits
+/// for) and the relay's answers (relay protocol 2's picture and project
+/// facts, `relay_probes`). Every frame, so each part is cheap when it has
+/// nothing to do.
+#[cfg(all(any(lp_split, s3_wifi), not(fw_harness)))]
+fn frame_hook(server: &LpServer) {
+    #[cfg(lp_split)]
+    {
+        fw_esp32_common::split_core::core_hash_step::<split_core::S3Split>();
+        fw_esp32_common::split_core::status_light_note::persist(server);
+    }
+    #[cfg(s3_wifi)]
+    {
+        net::net_chip::note_frame_served();
+        net::relay_probes::serve_relay(server);
+    }
+}
+
+/// The server loop, as its own task (spawned by the engine door): the door
+/// returns to the core, which has nothing left to do.
+#[cfg(not(fw_harness))]
+#[embassy_executor::task]
+async fn engine_task(app: FirmwareApp) {
     let mut watchdog = app.watchdog;
     OutlinedPoll(run_server_loop(
         app.server,
@@ -727,6 +1295,145 @@ async fn main(spawner: embassy_executor::Spawner) {
         move |now_ms| watchdog.feed(now_ms),
     ))
     .await;
+}
+
+/// A split image's boot state, from [`mount_filesystem`] (nothing in a
+/// plain build).
+#[cfg(all(lp_split, not(fw_harness)))]
+type OtaState = fw_esp32_common::split_core::BootState;
+#[cfg(all(not(lp_split), not(fw_harness)))]
+type OtaState = ();
+
+/// Mount the tree store on `lpfs`, falling back to RAM so an unformattable,
+/// held or mis-flashed board still comes up reachable and can say so over
+/// the wire. The C6's mount (`fw-esp32c6/src/main.rs`), on this chip.
+#[cfg(not(fw_harness))]
+fn mount_filesystem(
+    flash: esp_hal::peripherals::FLASH<'static>,
+) -> (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState, OtaState) {
+    use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
+    use lpc_wire::FsBootState;
+
+    let flash_storage = esp_storage::FlashStorage::new(flash);
+    // The PC sampler keeps core 1 running, and esp-storage refuses a write
+    // while it does; the sampler holds no lock, so it may be stalled anywhere.
+    #[cfg(any(feature = "pc-sampler", s3_two_core))]
+    let flash_storage = flash_storage.multicore_auto_park();
+    let mut flash_storage = flash_storage;
+    // From here every flash read — the code cache, the table, the mount, the
+    // project — runs at 80 MHz (and in QIO on a part an S3 sitting has read).
+    // Right after esp-storage's own RDID size probe, before any ROM flash
+    // access, as on the C6 (`flash_qio`).
+    crate::flash_qio::enter();
+    #[cfg(feature = "psram")]
+    crate::flash_qio::log_clocks();
+    // A split image's region ends where `factory` does, in the table the
+    // chip carries (read once, here, after `FlashStorage::new`).
+    //
+    // Split builds: read the boot records — and a trial core marks itself
+    // attempted — right here, before the mount and before any radio comes
+    // up (a new core that dies in that bring-up must still read as a failed
+    // trial). NOT before `FlashStorage::new` (the C6's silicon rule: no ROM
+    // flash access before its RDID size probe).
+    #[cfg(lp_split)]
+    let ota_state = fw_esp32_common::split_core::begin::<split_core::S3Split>(
+        LpfsPartition::locate_factory(&mut flash_storage),
+    );
+    #[cfg(not(lp_split))]
+    let ota_state = ();
+    let memory = |state, ota_state| -> (Box<dyn lpfs::LpFs>, FsBootState, OtaState) {
+        (Box::new(LpFsMemory::new()), state, ota_state)
+    };
+    let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
+        // Not a runtime condition: it means the image was flashed without
+        // `--partition-table lp-fw/fw-esp32s3/partitions.csv` and espflash
+        // silently substituted its own default. Say so rather than guess an
+        // offset and erase running code.
+        esp_println::println!(
+            "[ERROR] no `lpfs` partition in the flashed table — reflash with \
+             --partition-table lp-fw/fw-esp32s3/partitions.csv; using memory FS"
+        );
+        return memory(FsBootState::Memory, ota_state);
+    };
+    // An octal-flash part (eFuse `FLASH_TYPE` = 8 data lines) cannot take
+    // the store: it re-programs words in place (a record's marks), which
+    // octal/ECC flash forbids (ruling Q7). Never mounted there, never
+    // formatted: the board serves from RAM and says why.
+    if esp_hal::efuse::read_bit(esp_hal::efuse::FLASH_TYPE) {
+        esp_println::println!(
+            "[FS] octal flash: the tree store re-programs words, which this part \
+             forbids — not mounted; using memory FS"
+        );
+        return memory(FsBootState::Memory, ota_state);
+    }
+    // The tree store: mount; a partition with no store on it is formatted
+    // (lazily) only when no littlefs superblock says a board's files are
+    // still in littlefs — HELD then, never formatted (the C6's AD3). A store
+    // the mount will not adopt (a newer or damaged header) is REFUSED —
+    // nothing written, files kept, access locked (`fs: refused`).
+    let summary = |how: &str, s: lp_tree_store::MountSummary| {
+        esp_println::println!(
+            "[FS] tree store {how} ({} sectors, {} free, root {})",
+            s.sectors,
+            s.free_sectors,
+            s.root_seq
+        );
+    };
+    match init_tree_guarded(
+        crate::tree_flash::tree_flash(flash_storage, partition),
+        lp_tree_store::SoftSha256,
+        lp_tree_store::StoreConfig::default(),
+        |flash| {
+            if crate::tree_flash::littlefs_found(flash) {
+                FormatVerdict::Hold
+            } else {
+                FormatVerdict::Format
+            }
+        },
+    ) {
+        TreeFsInit::Mounted(fs, s) => {
+            esp_println::println!("[INIT] flash filesystem mounted");
+            summary("mounted", s);
+            (Box::new(fs), FsBootState::Mounted, ota_state)
+        }
+        TreeFsInit::Formatted(fs, s) => {
+            esp_println::println!("[INIT] flash filesystem mounted");
+            summary("formatted", s);
+            (Box::new(fs), FsBootState::Formatted, ota_state)
+        }
+        TreeFsInit::Held(_) => {
+            esp_println::println!(
+                "[FS] legacy-layout filesystem found — not formatting; files are held \
+                 (littlefs, not yet in the tree store); using memory FS"
+            );
+            memory(FsBootState::LegacyHeld, ota_state)
+        }
+        TreeFsInit::Refused { why, .. } => {
+            esp_println::println!(
+                "[FS] tree store refused: a newer or damaged store header — files kept \
+                 ({why}); using memory FS, access locked"
+            );
+            memory(FsBootState::Refused, ota_state)
+        }
+        TreeFsInit::FormatFailed => {
+            esp_println::println!("[WARN] tree store format failed, falling back to memory");
+            memory(FsBootState::Memory, ota_state)
+        }
+    }
+}
+
+#[cfg(not(fw_harness))]
+#[esp_rtos::main]
+async fn main(spawner: embassy_executor::Spawner) {
+    let core = core_boot(spawner);
+    #[cfg(not(lp_split))]
+    lp_engine_entry(core);
+    // A split build enters the engine through its header, or stays
+    // core-only (`split.rs`).
+    #[cfg(lp_split)]
+    split::split_boot(core);
+    // The engine's server loop is a task of its own; the main task idles.
+    core::future::pending::<()>().await;
 }
 
 /// Keeps `run_server_loop`'s future out of `main`'s own generator frame.

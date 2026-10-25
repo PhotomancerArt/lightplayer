@@ -52,6 +52,10 @@ lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
 # and LAN links, driving the board's update session (`lpc-update`, no_std,
 # sans-IO). Already in every split image's core.
 lpc-update = { path = "../../lp-core/lpc-update", optional = true }
+# `split_core` (feature `split-core`): the split image's boot records,
+# marks, layout and engine header. no_std, sans-IO; already in every split
+# image, with the chip crates' own `default-features = false`.
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false, optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 # `tree_fs` + `aligned_nor_flash` (feature `fs-tree`): the tree store as the
 # board's filesystem, over any word-aligned `embedded-storage` part. No
@@ -90,9 +94,9 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 lp-gfx = { path = "../../lp-gfx/lp-gfx", optional = true, features = ["null-backend"] }
 
 # Emulator seams (`src/seams/`; ADR docs/adr/2026-10-05-emulator-seams.md):
-# the seam ABI, MIT, no_std, no deps. RISC-V only — the seam functions are RV32
-# assembly — so the Xtensa firmwares that build this crate do not even see it.
-[target.'cfg(target_arch = "riscv32")'.dependencies]
+# the seam ABI, MIT, no_std, no deps. RISC-V and, since S3 radio M5, Xtensa:
+# the targets whose seam functions an emulator can answer.
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 lp-seam = { path = "../../lp-base/lp-seam" }
 
 [features]
@@ -150,6 +154,12 @@ host-lan-harness = [
 # tree-store cutover (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7).
 # The S3 and the classic stay on littlefs (`lp_fs`).
 fs-tree = ["server", "dep:lp-tree-store", "dep:lp-crc32", "dep:embedded-storage", "dep:lpc-access"]
+# The split image's update board side (`split_core`; S3 plan M7 P7): the
+# boot records' marks, the engine guard, the update session's edge and
+# core-only, over one chip (`split_core::SplitChip`). The C6's `server` turns
+# it on (its `LP_SPLIT_LINK` builds call it; a plain build calls nothing, and
+# links none of it).
+split-core = ["server", "usb-link", "dep:lp-bootctl", "dep:lpc-update", "dep:lpc-access"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]

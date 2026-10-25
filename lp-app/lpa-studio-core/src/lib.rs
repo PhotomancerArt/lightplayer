@@ -74,25 +74,25 @@ pub use app::devices::device_update_fixtures::{
     UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
 };
 pub use app::devices::{
-    AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
-    BluetoothReach, BoardRef, BoardRefError, CompletedPush, CompositeDeviceTransport,
-    DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView,
-    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceFace,
-    DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine,
-    DeviceOfferFacts, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
-    DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
-    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+    AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BestLinkFacts, BleDeviceTransport,
+    BleLinkSource, BluetoothReach, BoardRef, BoardRefError, CompletedPush,
+    CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS,
+    DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
+    DeviceFace, DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
+    DeviceIdentityLine, DeviceOfferFacts, DevicePushOp, DeviceRoster, DeviceRosterView,
+    DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp,
+    EMU_TRANSPORT, EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
     FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb,
     FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LAN_LINK_PATH, LanDeviceTransport,
-    LanFlag, LanLinkSource, LensFrameSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM,
-    NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
-    ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, RememberedView,
-    ResetReach, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp,
-    SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier,
-    StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, USB_NEEDS_WEB_SERIAL,
-    UiLanLink, UiLinkKind, UiRuntimeBand, add_device_offers, backing_for, ble_endpoint,
-    ble_link_info, blocked_erase_action, delete_sim_record, device_card_feed_view,
+    LanFlag, LanHint, LanLinkSource, LanReach, LensFrameSource, LensLineTap, LensTapEvent,
+    NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM,
+    PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload,
+    PushSource, PushSourceChoice, PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_AUTHOR,
+    RESET_WAITS_FOR_ANSWER, RememberedView, ResetReach, RosterSplit, RuntimeKind, SIM_TRANSPORT,
+    SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl,
+    SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope,
+    USB_NEEDS_WEB_SERIAL, UiLanLink, UiLinkKind, UiRuntimeBand, add_device_offers, backing_for,
+    ble_endpoint, ble_link_info, blocked_erase_action, delete_sim_record, device_card_feed_view,
     device_card_feed_views, device_chip, device_escape_action, device_escape_action_for,
     device_firmware_line, device_id_from_ble_endpoint, device_identity_line, device_offers,
     device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
@@ -107,8 +107,9 @@ pub use app::devices::{
 };
 /// The account's boards online at lightplayer.app, and their pictures.
 pub use app::devices::{
-    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, CloudPictureAsk,
-    UiCloudBoard, account_board_device,
+    AccountBoardAnswer, AccountBoardLink, AccountBoardNote, AccountBoardPicture,
+    AccountBoardPresence, AccountBoardReport, AccountBoardRequest, AccountBoardRow,
+    AccountBoardRows, AccountBoards, CloudPictureAsk, UiCloudBoard, account_board_device,
 };
 pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
@@ -146,6 +147,11 @@ pub use app::devices::{
     UpdateVersion, UpdateVersionDisplay, firmware_file_action, update_offers, update_route,
     update_session_words, update_standing, update_words, wants_auto_start,
 };
+/// Remove from your account: the account's list, not this browser's.
+pub use app::devices::{
+    FORGET_FROM_ACCOUNT_VERB, ForgetFromAccountOp, REMOVE_FROM_YOUR_ACCOUNT,
+    forget_from_account_offer, forget_on_this_browser_copy,
+};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::devices::{
     RELAY_CONNECTING, RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS,
@@ -162,7 +168,7 @@ pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
     WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
     WifiAddressReach, WifiConnectFailure, WifiConnectOp, WifiConnectTarget, WifiConnects,
-    connect_wifi_offer,
+    connect_wifi_first_offer, connect_wifi_offer,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;

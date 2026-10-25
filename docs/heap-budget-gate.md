@@ -230,7 +230,7 @@ the shipped features and target, as a **figure build** (below), into
 `LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO` names an already-built split directory.
 
 **The C6's image is a figure build** (`LP_FIGURE_BUILD=1`,
-`tools/lp-app-version`): stamped with the fixed version `0000000` and
+`tools/lp-app-version`): stamped with the fixed version `0000000`, the fixed commit `000000000000` and
 `LP_BUILD_DIRTY=false`, whatever the tree's state. The version's length
 reaches the boot heap, and `lp-fw-split` stamps it afresh on every build, so
 until 2026-10-10 the re-check CI runs after a re-baseline — on the tree the

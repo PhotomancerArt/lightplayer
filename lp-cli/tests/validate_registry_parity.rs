@@ -158,6 +158,10 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // port, on each of the TWO machines the lockstep pair runs.
             "espnow-broadcast",
             "boot-idle",
+            // S3 radio M1's radio image to its first scan: the shipped boot
+            // with esp-radio beside it, over the shipped link, which somebody
+            // has to be draining for its lines to arrive.
+            "radio-boot",
             "usb-negative-control",
             "usb-detach-reattach",
             "usb-host-absent",

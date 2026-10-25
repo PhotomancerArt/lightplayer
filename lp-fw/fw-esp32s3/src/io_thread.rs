@@ -36,13 +36,16 @@
 //!   the RMT refill ISR (`Priority::max()`, `output/rmt/shared_driver.rs`).
 //!   It is already cross-core in this `multi_core` build (esp-sync takes an
 //!   owner word by compare-and-swap, keyed by core id), so a later move to
-//!   core 1 keeps it. The S3 runs no radio today; esp-radio's S3 Wi-Fi binds
-//!   its MAC interrupt to CPU0 at priority 1
-//!   (`third_party/esp-radio/src/wifi/os_adapter/esp32s3.rs`), so Wi-Fi here
-//!   would put that interrupt under this lock — the radio-safe lock the C6
-//!   needs (roadmap M6) would be needed here too. The lock asserts it is not
-//!   entered inside a critical section, and the shared link keeps what runs
-//!   under it short.
+//!   core 1 keeps it. **The radio is under it** (S3 radio M3): with `ble` the
+//!   BTDM controller binds its three interrupts (`rwbt`, `bb`, `rwble`) to
+//!   CPU0 at priority 1 (`third_party/esp-radio/src/ble/os_adapter_esp32c3_s3.rs`),
+//!   and Wi-Fi binds its MAC interrupt the same way
+//!   (`third_party/esp-radio/src/wifi/os_adapter/esp32s3.rs`), so while
+//!   either side holds the link the radio's interrupts wait. That is the C6's
+//!   radio-safe rule, the same lock family on both chips
+//!   (`fw-esp32c6/src/io_thread.rs`): **keep what runs under it short** — no
+//!   large copy under one closure. The lock asserts it is not entered inside
+//!   a critical section, and the shared link keeps what runs under it short.
 //! - **The stack** is [`STACK_BYTES`], a start above the C6's 3 KB because
 //!   the Xtensa windowed ABI's frames are larger than RV32's.
 //!   `io_thread_stack_diag` paints it and logs its high-water

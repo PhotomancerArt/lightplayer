@@ -6,7 +6,7 @@
 //!   link, or a challenge for the slot when a LAN session holds it;
 //! - [`relay_leg`]: the device leg's async loop over a platform's sockets
 //!   ([`RelayLegIo`]), shared by the C6's relay task
-//!   (`fw-esp32c6/src/net/relay_task.rs`) and the host harness;
+//!   (`fw-esp32-radio/src/net/relay_task.rs`) and the host harness;
 //! - [`relay_route_link`], [`relay_driver_action`]: what the driver keeps
 //!   and asks;
 //! - [`relay_board`]: what the relay task and the main thread share;

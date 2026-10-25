@@ -13,9 +13,11 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow, bail};
 use espflash::elf::ElfFirmwareImage;
-use espflash::flasher::{FlashData, FlashFrequency, FlashMode, FlashSettings, FlashSize};
-use espflash::targets::{Chip, XtalFrequency};
+use espflash::flasher::{FlashData, FlashFrequency, FlashMode, FlashSettings};
+use espflash::targets::XtalFrequency;
 use lp_bootctl::LOADER_OFFSET;
+
+use crate::chip_profile::ChipProfile;
 
 /// The bootloader a split image carries unless told otherwise: espflash
 /// 3.3.0's bundled one, rebuilt from source and committed byte-identical
@@ -50,6 +52,26 @@ pub fn merge(
     partitions: &Path,
     bootloader: Option<&Path>,
 ) -> Result<Vec<u8>> {
+    merge_for(
+        &crate::chip_profile::ESP32C6,
+        loader_elf,
+        app,
+        partitions,
+        bootloader,
+    )
+}
+
+/// [`merge`] for `profile`'s chip: its flash size and length, the same flash
+/// settings (DIO, 40 MHz); `bootloader: None` merges espflash's bundled one
+/// (the S3's IDF door).
+pub fn merge_for(
+    profile: &ChipProfile,
+    loader_elf: &[u8],
+    app: &[u8],
+    partitions: &Path,
+    bootloader: Option<&Path>,
+) -> Result<Vec<u8>> {
+    let flash_len = profile.flash_len;
     let image = ElfFirmwareImage::try_from(loader_elf).map_err(|e| anyhow!("{e}"))?;
     let flash_data = FlashData::new(
         bootloader,
@@ -58,17 +80,18 @@ pub fn merge(
         None,
         FlashSettings::new(
             Some(FlashMode::Dio),
-            Some(FlashSize::_4Mb),
+            Some(profile.flash_size),
             Some(FlashFrequency::_40Mhz),
         ),
         0,
     )
     .map_err(|e| anyhow!("{e}"))?;
-    let built = Chip::Esp32c6
+    let built = profile
+        .espflash_chip
         .into_target()
         .get_flash_image(&image, flash_data, None, XtalFrequency::_40Mhz)
         .map_err(|e| anyhow!("{e}"))?;
-    let mut out = Vec::with_capacity(FLASH_LEN);
+    let mut out = Vec::with_capacity(flash_len);
     let mut app_at = None;
     for segment in built.flash_segments() {
         let addr = segment.addr as usize;
@@ -84,13 +107,13 @@ pub fn merge(
     let Some(app_at) = app_at else {
         bail!("the partition table does not put the app at {LOADER_OFFSET:#x}");
     };
-    if app_at + app.len() > FLASH_LEN {
+    if app_at + app.len() > flash_len {
         bail!("app.bin runs past the end of the flash");
     }
-    out.resize(FLASH_LEN.max(out.len()), 0xff);
+    out.resize(flash_len.max(out.len()), 0xff);
     out[app_at..app_at + app.len()].copy_from_slice(app);
-    if out.len() != FLASH_LEN {
-        bail!("the merged image is {} B, not {FLASH_LEN}", out.len());
+    if out.len() != flash_len {
+        bail!("the merged image is {} B, not {flash_len}", out.len());
     }
     Ok(out)
 }

@@ -17,8 +17,12 @@ use crate::{ActionClass, ActionMeta, ActionPriority, ControllerOp};
 /// Who to reach over Wi‑Fi.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WifiConnectOp {
-    /// A known board, at the address this browser remembers for it.
-    Board { device: DeviceId },
+    /// A known board, at its Wi‑Fi address: the one lightplayer.app says it
+    /// gave while the board shares this network, else the one this browser
+    /// remembers (`best_link.rs`). With `then_relay`, a try that fails goes
+    /// on to lightplayer.app in the same press: the board's Connect, on a
+    /// board whose first road this verb is.
+    Board { device: DeviceId, then_relay: bool },
     /// Whatever board answers at `url` (`ws://<host>/link`, normalised).
     Address { url: String },
 }
@@ -84,6 +88,7 @@ mod tests {
     fn both_connects_are_routine_and_name_wifi() {
         let card = WifiConnectOp::action_for(WifiConnectOp::Board {
             device: DeviceId(1),
+            then_relay: false,
         });
         assert_eq!(card.meta().label, "Connect over Wi\u{2011}Fi");
         assert!(card.meta().consequence.is_routine());

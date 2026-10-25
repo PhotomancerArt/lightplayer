@@ -25,7 +25,7 @@ use lpc_firmware_release::{
     OTA_MANIFEST_FILE, OtaManifest, TargetName, asset_name, sha256_hex, split_asset_name,
 };
 use lpc_update::PieceKind;
-use lpc_update::code_table::{CHUNK, LAYOUT_1, LOADER_1};
+use lpc_update::code_table::{CHUNK, LOADER_1, layout_known};
 use lpc_update::dictionary_rule::WINDOW;
 use serde_json::Value;
 
@@ -242,9 +242,9 @@ fn check_target_files(
     );
 
     // `requires`: the code table's layout and loader, and the image's own.
-    let expected = requires_of(split, &image)?;
+    let expected = requires_of(split, &image, &identity.chip)?;
     ensure!(
-        ota.requires == expected && (expected.layout, expected.loader) == (LAYOUT_1, LOADER_1),
+        ota.requires == expected && layout_known(expected.layout) && expected.loader == LOADER_1,
         "requires is {{layout {}, loader {}}}, the image and the code table say {{layout {}, loader {}}}",
         ota.requires.layout,
         ota.requires.loader,

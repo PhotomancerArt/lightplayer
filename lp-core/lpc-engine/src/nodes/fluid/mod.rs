@@ -1,4 +1,7 @@
 //! Fluid simulation node and solver support.
+//!
+//! The solver derives from Memo Akten's MSAFluid (BSD-3-Clause); see the
+//! provenance header in `solver.rs` and `licenses/MSAFluid-BSD-3-Clause.txt`.
 
 mod emit;
 mod fluid_node;

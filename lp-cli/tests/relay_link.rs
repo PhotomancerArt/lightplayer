@@ -15,7 +15,7 @@
 //! - the board's one session: a second client is told busy;
 //! - a deploy (the server going away and coming back on the same port)
 //!   brings the board back within 15 s;
-//! - two boards under one account are both in `ListBoards`, on the same
+//! - two boards under one account are both online in `ListAccountBoards`, on the same
 //!   network as the caller (loopback);
 //! - with 100 ms added each way on the device leg, the session still comes
 //!   up well inside its login deadline and requests answer (numbers printed);
@@ -207,7 +207,7 @@ fn after_a_deploy_the_board_is_back_within_fifteen_seconds() {
     let session = cloud.session_for(alice.uid);
     let deadline = restarted + Duration::from_secs(15);
     loop {
-        if cloud.list_boards(&session).boards.len() == 1 {
+        if cloud.online_boards(&session).len() == 1 {
             break;
         }
         assert!(
@@ -236,19 +236,19 @@ fn two_boards_under_one_account_are_both_listed_on_the_same_network() {
     let two = HostBoard::start(&cloud.origin(), vec![alice.entry()], &[]);
     cloud.wait_for_boards(2);
 
-    let list = cloud.list_boards(&alice.session);
-    let mut ids: Vec<String> = list.boards.iter().map(|board| board.id.clone()).collect();
+    let list = cloud.online_boards(&alice.session);
+    let mut ids: Vec<String> = list.iter().map(|board| board.id.clone()).collect();
     ids.sort();
     let mut expected = vec![one.to_string(), two.to_string()];
     expected.sort();
     assert_eq!(ids, expected);
-    for board in &list.boards {
+    for board in &list {
         assert!(board.same_network, "loopback is one network");
         assert_eq!(board.lan, None, "a host board reports no LAN address");
         assert_eq!(board.wire_proto, lpc_wire::WIRE_PROTO_VERSION);
     }
     let bob = cloud.account("bob");
-    assert!(cloud.list_boards(&bob.session).boards.is_empty());
+    assert!(cloud.online_boards(&bob.session).is_empty());
 }
 
 /// R2: the relay adds round trip. With 100 ms added each way on the device
@@ -297,11 +297,11 @@ fn a_boards_own_relay_driver_registers_with_its_lan_address_and_carries_a_sessio
     let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
     cloud.wait_for_boards(1);
 
-    let list = cloud.list_boards(&alice.session);
-    assert_eq!(list.boards.len(), 1);
-    assert_eq!(list.boards[0].id, board.to_string());
+    let list = cloud.online_boards(&alice.session);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, board.to_string());
     assert_eq!(
-        list.boards[0].lan.as_deref(),
+        list[0].lan.as_deref(),
         Some(harness.addr().to_string().as_str()),
         "the board's LAN address rides its hello"
     );
@@ -342,9 +342,9 @@ fn a_boards_own_relay_driver_sends_pictures_and_its_picture_outlives_it() {
     assert!(picture.online);
     assert!(picture.outputs.is_empty(), "the harness plays nothing");
     assert_eq!(picture.colors.map(|colors| colors.0.len()), Some(0));
-    let listed = cloud.list_boards(&alice.session);
-    assert_eq!(listed.boards[0].relay_proto, 2);
-    assert_eq!(listed.boards[0].firmware.as_deref(), Some("host-harness"));
+    let listed = cloud.online_boards(&alice.session);
+    assert_eq!(listed[0].relay_proto, 2);
+    assert_eq!(listed[0].firmware.as_deref(), Some("host-harness"));
 
     let before = harness.relay_status().1.pictures;
     let started = Instant::now();
@@ -447,9 +447,8 @@ fn a_host_board_sends_its_project_and_its_picture_and_members_read_them() {
     cloud.wait_for_boards(1);
 
     let listed = wait_until(Duration::from_secs(10), || {
-        let list = cloud.list_boards(&alice.session);
-        list.boards
-            .into_iter()
+        let list = cloud.online_boards(&alice.session);
+        list.into_iter()
             .find(|presence| presence.id == board.to_string() && presence.project.is_some())
     })
     .expect("the board's project reaches the hub");
@@ -527,9 +526,8 @@ fn a_host_board_with_no_project_sends_an_empty_picture() {
         Some(0),
         "count 0"
     );
-    let list = cloud.list_boards(&alice.session);
+    let list = cloud.online_boards(&alice.session);
     let presence = list
-        .boards
         .iter()
         .find(|presence| presence.id == board.to_string())
         .expect("listed");

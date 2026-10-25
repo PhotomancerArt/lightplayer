@@ -12,10 +12,12 @@
 
 use anyhow::{Context, Result, bail};
 use espflash::elf::ElfFirmwareImage;
-use espflash::flasher::{FlashData, FlashSettings, FlashSize};
-use espflash::targets::{Chip, XtalFrequency};
+use espflash::flasher::{FlashData, FlashSettings};
+use espflash::targets::XtalFrequency;
 use object::Endianness;
 use object::read::elf::{FileHeader, SectionHeader};
+
+use crate::chip_profile::{ChipProfile, EngineRegion};
 
 /// The engine's output sections, in link order.
 pub const ENGINE_SECTIONS: [&str; 2] = [".engine_rodata", ".engine_text"];
@@ -72,6 +74,40 @@ pub fn engine_bin(elf: &[u8]) -> Result<(u32, Vec<u8>)> {
     Ok((base, out))
 }
 
+/// `engine.bin` for `profile`'s chip: [`engine_bin`] on the C6. On the S3
+/// the code section is linked at the instruction view, and folds onto the
+/// data view (`EngineRegion::fold`) where the core maps both: the bytes are
+/// laid out from the header at the data view's base, the code at its folded
+/// address, zero between.
+pub fn engine_bin_for(profile: &ChipProfile, elf: &[u8]) -> Result<(u32, Vec<u8>)> {
+    if matches!(profile.engine, EngineRegion::Unified { .. }) {
+        return engine_bin(elf);
+    }
+    let spans = section_spans(elf, &ENGINE_SECTIONS)?;
+    if spans.len() != ENGINE_SECTIONS.len() {
+        bail!("the ELF has no engine sections (was it linked with the generated engine.x?)");
+    }
+    let fold = |a: u32| profile.engine.fold(u64::from(a)) as u32;
+    let base = spans.iter().map(|s| fold(s.addr)).min().unwrap_or(0);
+    let end = spans
+        .iter()
+        .map(|s| fold(s.addr) + s.size)
+        .max()
+        .unwrap_or(base);
+    let mut out = vec![0u8; (end - base) as usize];
+    for s in &spans {
+        let src = elf
+            .get(s.file_offset as usize..(s.file_offset + s.size) as usize)
+            .with_context(|| format!("{} lies outside the file", s.name))?;
+        let at = (fold(s.addr) - base) as usize;
+        if out[at..at + src.len()].iter().any(|b| *b != 0) {
+            bail!("{} overlaps the other engine section once folded", s.name);
+        }
+        out[at..at + src.len()].copy_from_slice(src);
+    }
+    Ok((base, out))
+}
+
 /// A copy of `elf` whose engine sections are `SHT_NOBITS`: what the core's
 /// image is made from.
 pub fn core_elf(elf: &[u8]) -> Result<Vec<u8>> {
@@ -94,17 +130,24 @@ pub fn core_elf(elf: &[u8]) -> Result<Vec<u8>> {
 /// The ESP application image espflash makes of `elf` for the C6, as
 /// `espflash save-image --chip esp32c6 --flash-size 4mb` writes it.
 pub fn app_image(elf: &[u8]) -> Result<Vec<u8>> {
+    app_image_for(&crate::chip_profile::ESP32C6, elf)
+}
+
+/// The ESP application image espflash makes of `elf` for `profile`'s chip
+/// and flash size (`espflash save-image --chip <chip> --flash-size <size>`).
+pub fn app_image_for(profile: &ChipProfile, elf: &[u8]) -> Result<Vec<u8>> {
     let image = ElfFirmwareImage::try_from(elf).map_err(|e| anyhow::anyhow!("{e}"))?;
     let flash_data = FlashData::new(
         None,
         None,
         None,
         None,
-        FlashSettings::new(None, Some(FlashSize::_4Mb), None),
+        FlashSettings::new(None, Some(profile.flash_size), None),
         0,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let built = Chip::Esp32c6
+    let built = profile
+        .espflash_chip
         .into_target()
         .get_flash_image(&image, flash_data, None, XtalFrequency::_40Mhz)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -209,6 +252,28 @@ mod tests {
         assert_eq!(
             bin,
             [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2]
+        );
+    }
+
+    #[test]
+    fn the_s3_engine_folds_its_code_onto_the_data_view() {
+        let elf = tiny_elf(&[
+            (".engine_text", 0x4300_0010, &[2; 4]),
+            (".engine_rodata", 0x3D00_0000, &[1; 8]),
+        ]);
+        let (base, bin) = engine_bin_for(&crate::chip_profile::ESP32S3, &elf).unwrap();
+        assert_eq!(base, 0x3D00_0000);
+        assert_eq!(
+            bin,
+            [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2]
+        );
+        let c6 = tiny_elf(&[
+            (".engine_text", 0x4240_0010, &[2; 4]),
+            (".engine_rodata", 0x4240_0000, &[1; 8]),
+        ]);
+        assert_eq!(
+            engine_bin_for(&crate::chip_profile::ESP32C6, &c6).unwrap(),
+            engine_bin(&c6).unwrap()
         );
     }
 

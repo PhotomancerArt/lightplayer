@@ -61,6 +61,16 @@ const POWER_OFF = (process.env.WALK_POWER_OFF ?? (/^PLAYFUL Choker/.test(PROJECT
 /// came from); the default is the desk's.
 const [VIEW_W, VIEW_H] = (process.env.WALK_VIEWPORT ?? "1440x1100").split("x").map(Number);
 const STEP_DEADLINE_MS = 180_000;
+/// The power-off wait is bounded in the BOARD's time, not the wall's: an
+/// emulated board's clock lags the wall under load (a loaded desk held 180 s
+/// of wall time to under 3 s of board time), and AGENTS.md says never to gate
+/// on host wall-clock time from an emulated run. The board's power-off takes
+/// 2.7-3.5 s of its own time in every run; 10 s is about three times that.
+/// Ticket 2026-10-20-drop-walk-switch-off-flake.
+const POWER_OFF_BOARD_US = 10_000_000;
+/// A wedged run (the board's clock not advancing at all) still ends: this is a
+/// backstop, not the deadline a healthy run is measured against.
+const POWER_OFF_WALL_GUARD_MS = 900_000;
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
@@ -319,12 +329,23 @@ async function main() {
           `window.__lpEmuSerial.bus.holdsFor(${JSON.stringify(BOARD)}).some((h) => h.pad === 0 && !h.level)`,
           { timeoutMs: STEP_DEADLINE_MS, what: "D0 to read off" },
         );
+        // The board's own clock before the cable comes out (`state`'s `us`,
+        // the same read `settleHolds` makes). Both lanes' ports are
+        // `EmulatorPort`s, so the tab's Worker answers it the same way.
+        const boardUs = () => driver.evaluate(
+          `window.__lpEmuSerial.bus.newestPortFor(${JSON.stringify(BOARD)}).emulator.state()
+             .then((s) => (typeof s.us === 'number' ? s.us : null), () => null)`,
+          { awaitPromise: true },
+        );
+        const startUs = await boardUs();
+        if (startUs === null) throw new Error("could not read the board's clock before the cable came out");
         await driver.detach(BOARD);
         // The board's own registry row: the door's `GET /boards` says
         // `stopped`, the tab's Worker `deep-sleep`. Nothing in the page
         // changes when a board sleeps behind a pulled cable, so this one wait
         // asks the registry rather than watching the DOM.
-        const deadline = Date.now() + STEP_DEADLINE_MS;
+        const wallGuard = Date.now() + POWER_OFF_WALL_GUARD_MS;
+        let lastUs = startUs;
         for (;;) {
           const state = await driver.evaluate(
             `(async () => {
@@ -336,8 +357,27 @@ async function main() {
              })()`,
             { awaitPromise: true },
           );
-          if (state === "stopped" || state === "deep-sleep") return `board state: ${state}`;
-          if (Date.now() > deadline) throw new Error(`the board is still ${state} with D0 off and the cable out`);
+          if (state === "stopped" || state === "deep-sleep") {
+            lastUs = (await boardUs()) ?? lastUs;
+            return `board state: ${state}; board time since before detach: >= ${((lastUs - startUs) / 1e6).toFixed(1)} s`;
+          }
+          // A failed read once the board has stopped (the door closes its
+          // control channel) leaves `lastUs` where it was; the registry row
+          // above is what says stopped.
+          lastUs = (await boardUs()) ?? lastUs;
+          const passedUs = lastUs - startUs;
+          if (passedUs > POWER_OFF_BOARD_US) {
+            throw new Error(
+              `the board is still ${state} with D0 off and the cable out ` +
+                `(${(passedUs / 1e6).toFixed(1)} s of board time since before detach, limit ${POWER_OFF_BOARD_US / 1e6} s)`,
+            );
+          }
+          if (Date.now() > wallGuard) {
+            throw new Error(
+              `the board is still ${state} with D0 off and the cable out; wedged: ` +
+                `${POWER_OFF_WALL_GUARD_MS / 1000} s of wall time and only ${(passedUs / 1e6).toFixed(1)} s of board time`,
+            );
+          }
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
       });

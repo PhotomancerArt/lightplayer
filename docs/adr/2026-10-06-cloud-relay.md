@@ -636,6 +636,46 @@ the account's boards.
 The Follow-ups' "draw a board's cloud picture on its card" and M8's "the
 board list" (for online boards) are done by this; the stored list, the
 automatic LAN move and the share link remain.
+(2026-10-21: the automatic LAN move is built, with no change to the relay's
+bytes or `RELAY_PROTO_VERSION`: [studio-network-links, its 2026-10-21
+amendment](2026-10-08-studio-network-links.md).)
+
+## Amendment (2026-10-20): the hub writes the account's board list; `ListBoards` is replaced
+
+Plan `lp2025/2026-10-19-2305-account-board-list`, M2. The decision is
+[2026-10-20-the-account-board-list](2026-10-20-the-account-board-list.md);
+what changes here:
+
+- **The hub returns record writes.** It still never touches the store: as a
+  board registers, reports a new project, leaves, or the relay goes away, it
+  returns `BoardRecordWrite`s (`take_writes`) that the edge applies through
+  the store on the board leg's own task. A board joins the board list of
+  every account it proved.
+- **The cache is written behind.** "The cache: memory only" above no longer
+  holds whole: a board's last picture is written to its accounts' records
+  when it leaves, when the relay goes away, and at most every ten minutes
+  while it is online, so it survives a deploy; `BoardPictures` answers from
+  the record when the process holds none. Its readers stay the accounts the
+  board proved when the picture was taken.
+- **The online cap is 64** (`MAX_BOARDS_PER_ACCOUNT` = `MAX_ACCOUNT_BOARDS`),
+  as is a `BoardPictures` read; it was 16.
+- **Cloud API v7.** `ListBoards` and `BoardList` are gone:
+  `ListAccountBoards` answers the account's records with this hub's presence
+  joined on (`AccountBoard.online` is the `BoardPresence` above).
+- **No relay-protocol change**: the hello, `RELAY_PROTO_VERSION` and the
+  goldens are as they were.
+
+## Amendment (2026-10-22): the S3 dials the relay too (S3 radio M6)
+
+The board half above is no longer the C6's alone: the relay task moved into
+`fw-esp32-radio` (S3 radio M2), and the S3's `wifi` image runs it with its
+own build facts (`fw-esp32s3/src/net/relay_config.rs`: the host, `LP_RELAY_HOST`
+for a desk image, the name and firmware its hello carries). It speaks the
+same relay protocol 2 as the C6, so the hub needs nothing new:
+`RELAY_PROTO_VERSION` and the goldens are as they were. Walked on an
+emulated S3 (`lp-cli/tests/emu_relay_link.rs`'s S3 arm); not yet on
+silicon, which waits for the S3's Wi‑Fi join
+(`docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md`).
 
 ## Consequences
 

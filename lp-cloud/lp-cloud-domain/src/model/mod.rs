@@ -11,6 +11,7 @@
 //! [`member_record::MemberRecord`].
 
 pub mod account_access;
+pub mod board_record;
 pub mod caller;
 pub mod cloud_project;
 pub mod cloud_user;

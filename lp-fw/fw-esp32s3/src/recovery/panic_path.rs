@@ -107,32 +107,40 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// its callers are `main.rs`'s two memory-stats functions, both of which run on
 /// a healthy board.
 pub fn largest_free_block() -> usize {
-    // `free()` bounds the answer from above: no single block can exceed the
-    // sum of every block. Exact to the byte (`largest_fitting`): the gates
-    // compare it with round floors.
-    fw_esp32_common::largest_block::largest_fitting(esp_alloc::HEAP.free(), |size| {
-        if size == 0 {
-            return true;
-        }
-        let Ok(layout) = core::alloc::Layout::from_size_align(size, 4) else {
-            return false;
-        };
-        // SAFETY: `size > 0`, and the pointer is freed with the same layout it
-        // was allocated with, immediately, before anything else runs.
-        //
-        // ⚠️ `black_box` is load-bearing. Rust lets the optimizer delete an
-        // allocation whose result is only freed, and on this chip it did: the
-        // shipped image's probe called nothing but `HEAP.free()` and returned
-        // it as the largest block, every time (RAM research E14, 2026-10-09;
-        // `docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.md`).
-        let ptr = core::hint::black_box(unsafe { alloc::alloc::alloc(layout) });
-        if ptr.is_null() {
-            false
-        } else {
-            unsafe { alloc::alloc::dealloc(ptr, layout) };
-            true
-        }
-    })
+    // On a `psram` image: internal RAM's, never PSRAM's 8 MB (`crate::psram`).
+    #[cfg(all(feature = "psram", not(fw_harness)))]
+    {
+        crate::psram::internal_largest_block()
+    }
+    #[cfg(not(all(feature = "psram", not(fw_harness))))]
+    {
+        // `free()` bounds the answer from above: no single block can exceed the
+        // sum of every block. Exact to the byte (`largest_fitting`): the gates
+        // compare it with round floors.
+        fw_esp32_common::largest_block::largest_fitting(esp_alloc::HEAP.free(), |size| {
+            if size == 0 {
+                return true;
+            }
+            let Ok(layout) = core::alloc::Layout::from_size_align(size, 4) else {
+                return false;
+            };
+            // SAFETY: `size > 0`, and the pointer is freed with the same layout it
+            // was allocated with, immediately, before anything else runs.
+            //
+            // ⚠️ `black_box` is load-bearing. Rust lets the optimizer delete an
+            // allocation whose result is only freed, and on this chip it did: the
+            // shipped image's probe called nothing but `HEAP.free()` and returned
+            // it as the largest block, every time (RAM research E14, 2026-10-09;
+            // `docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.md`).
+            let ptr = core::hint::black_box(unsafe { alloc::alloc::alloc(layout) });
+            if ptr.is_null() {
+                false
+            } else {
+                unsafe { alloc::alloc::dealloc(ptr, layout) };
+                true
+            }
+        })
+    }
 }
 
 /// Report the panic on serial, stage a breadcrumb into the RTC ledger, and

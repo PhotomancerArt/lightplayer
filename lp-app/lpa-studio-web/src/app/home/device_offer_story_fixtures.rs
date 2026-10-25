@@ -582,10 +582,19 @@ pub(crate) fn StoryBoardCard(
     /// Bluetooth on or off, as its access file last said.
     #[props(default)]
     remembered_bluetooth: Option<bool>,
-    /// The account's list says the board is online at lightplayer.app,
-    /// with its picture there.
+    /// The account's list holds the board, online at lightplayer.app or
+    /// not, with its picture there.
     #[props(default)]
     cloud: Option<lpa_studio_core::UiCloudBoard>,
+    /// The account's list holds the board and someone is signed in: core
+    /// publishes Remove from your account, and Forget reads as this
+    /// browser's only.
+    #[props(default)]
+    on_account: bool,
+    /// What lightplayer.app's last answer about the list left to say on
+    /// the card (a full list, a forget that did not go through).
+    #[props(default)]
+    account_note: Option<lpa_studio_core::AccountBoardNote>,
     /// A board this browser never met, known only by the account's list:
     /// core publishes `connect-relay` for it and nothing else.
     #[props(default)]
@@ -681,6 +690,31 @@ pub(crate) fn StoryBoardCard(
     if let Some(extra) = extra_offers {
         tree.append(extra);
     }
+    // The account's list holds it: Forget reads as this browser's only, and
+    // Remove from your account follows it, as the controller publishes them.
+    if on_account {
+        let forget = prefix.clone().child("forget");
+        let mut rebuilt = UiOfferTree::new();
+        rebuilt.place_device(card.id, prefix.clone());
+        for offer in tree.iter() {
+            match offer.path == forget {
+                true => {
+                    rebuilt.publish(lpa_studio_core::forget_on_this_browser_copy(offer.clone()))
+                }
+                false => rebuilt.publish(offer.clone()),
+            }
+        }
+        let key = cloud.as_ref().map_or_else(
+            || lpa_studio_core::BoardKey::parse("10bda3b08e30").expect("a MAC"),
+            |cloud| cloud.key,
+        );
+        rebuilt.publish(lpa_studio_core::forget_from_account_offer(
+            &prefix,
+            key,
+            &card.title,
+        ));
+        tree = rebuilt;
+    }
     let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
     let plays = match plays {
         lpa_studio_core::BoardPlays::Unknown => {
@@ -720,6 +754,7 @@ pub(crate) fn StoryBoardCard(
             remembered_network: remembered_network.as_ref(),
             remembered_bluetooth,
             cloud: cloud.as_ref(),
+            account_note: account_note.as_ref(),
         },
     });
     // A story that opens a part's details (or whose layout question raises

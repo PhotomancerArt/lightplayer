@@ -49,8 +49,8 @@ use crate::{
     ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
     DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
     INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, OfferParamKind, PickedFirmwareFile, StudioController, UiOffer,
-    UpdateLink, UpdateStanding, firmware_file_action,
+    MemoryOwnBuildSource, OfferArgs, OfferParamKind, OwnBuildSource, PickedFirmwareFile,
+    StudioController, UiOffer, UpdateLink, UpdateStanding, firmware_file_action,
 };
 
 /// The model board's region (the sim's own size).
@@ -203,6 +203,57 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
     );
 }
 
+/// A Studio serves several targets' builds: a board is offered its own
+/// target's, wherever that target sits in the list. Holding only the first
+/// served build (the C6's, on lightplayer.app) left an S3 with nothing to
+/// update to over Bluetooth (2026-10-24); here the other target is listed
+/// first, and the board still updates to Y.
+#[test]
+fn a_studio_serving_two_targets_updates_a_board_to_its_own_targets_build() {
+    let mut board = Board::running_x();
+    board.endpoint = "ble:QkxFLWlk".to_string();
+    board.reconnects_itself = true;
+    let mut other = host_build(&w());
+    other.identity.target = "esp32s3-8mb".into();
+    other.identity.chip = "esp32s3".into();
+    other.identity.layout = 2;
+    let source = ServedBuilds(vec![other, host_build(&y())]);
+    let mut bench = Bench::with_source(board, Some(Rc::new(source)));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.run_until("Update offered for the board's own target", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over Bluetooth"));
+}
+
+/// Several targets' builds in memory, as a served Studio holds them.
+struct ServedBuilds(Vec<HostBuild>);
+
+impl OwnBuildSource for ServedBuilds {
+    fn facts(&self) -> Vec<lpa_update::HostBuildFacts> {
+        self.0.iter().map(HostBuild::facts).collect()
+    }
+
+    fn load(
+        &self,
+        target: &str,
+    ) -> crate::app::library::LocalBoxFuture<'static, Result<HostBuild, String>> {
+        let found = self
+            .0
+            .iter()
+            .find(|build| build.facts().identity.target == target)
+            .cloned()
+            .ok_or_else(|| format!("no build for {target}"));
+        Box::pin(core::future::ready(found))
+    }
+}
+
 /// Over Wi‑Fi (OTA M8): the same update over the LAN link's update channel.
 /// Every one of the board's resets closes the socket; the page's session
 /// redials by itself, so the old link departs and a new one is attached,
@@ -249,6 +300,42 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
         0,
         "no Open while the page's own redial was bringing the board back"
     );
+}
+
+/// The Wi‑Fi reconnect line is the board's time away, not the 1 s redial: a
+/// resetting board sends no FIN, so the socket's close comes late, about when
+/// the board is back. The line measures from the last word heard.
+#[test]
+fn a_wifi_reconnect_line_measures_the_time_the_board_was_away() {
+    for silent_secs in [3.0, 6.5] {
+        let mut board = Board::with_catalog(vec![x_late(), y_late()]);
+        board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+        board.reconnects_itself = true;
+        board.silent_socket_secs = Some(silent_secs);
+        board.redial_secs = 1.0;
+        let mut bench = Bench::new(board, Some(y_late()));
+        bench.cache_engine(&x_late());
+        let device = bench.connect_device();
+        bench.press_update(device);
+        bench.run_until_update_ends(device);
+        bench.assert_runs(&y_late());
+
+        let away = silent_secs + 1.0;
+        let times: Vec<f64> = bench
+            .lines
+            .iter()
+            .filter_map(|line| line.split("reconnected in ").nth(1))
+            .map(|tail| tail.trim_end_matches(" s").parse().expect("N.N s"))
+            .collect();
+        assert!(!times.is_empty(), "lines: {:#?}", bench.lines);
+        for took in &times {
+            assert!(
+                (took - away).abs() <= 0.2,
+                "silent {silent_secs} s, away {away} s, but the line said {took} s: {:#?}",
+                bench.lines
+            );
+        }
+    }
 }
 
 /// Through lightplayer.app's relay (OTA M8, PR C): the same update, held to
@@ -473,6 +560,19 @@ fn a_link_drop_mid_core_finishes_on_reconnect_with_no_click() {
         bench.outcome(device) == Some(UpdateOutcomeFacts::BoardDidNotComeBack)
     });
     assert!(bench.said_starting("link dropped during update at "));
+    // The number is the whole update's, as the card says it: a drop in the
+    // core is under 50 %.
+    let dropped = bench
+        .lines
+        .iter()
+        .find_map(|line| line.strip_prefix("link dropped during update at "))
+        .and_then(|rest| rest.strip_suffix('%'))
+        .and_then(|number| number.parse::<u8>().ok())
+        .expect("the drop line names its percent");
+    assert!(
+        dropped < 50,
+        "a drop in the core reads under 50%: {dropped}"
+    );
     let presses = bench.presses;
 
     let starts = bench.update_starts;
@@ -1502,6 +1602,14 @@ struct Board {
     /// The board's LAN link ignores channel 3 (a release from before
     /// updates over Wi‑Fi, W6): its hello still announces the channel.
     ignores_updates: bool,
+    /// A reset leaves the socket looking open: the board sends no FIN, so
+    /// the page hears `onclose` only this many seconds after the board
+    /// stopped talking (`reconnects_itself` boards only).
+    silent_socket_secs: Option<f64>,
+    /// The socket's `onclose`, held back until the bench clock reaches it.
+    pending_close: Option<(f64, String)>,
+    /// How long the page's own redial takes after it hears the close.
+    redial_secs: f64,
 }
 
 impl Board {
@@ -1532,6 +1640,9 @@ impl Board {
             opens_while_dropped: 0,
             ignores_updates: false,
             announces: true,
+            silent_socket_secs: None,
+            pending_close: None,
+            redial_secs: 1.0,
         }
     }
 
@@ -1624,6 +1735,17 @@ impl Board {
             self.events.push_back(LinkEvent::Closed {
                 reason: reason.to_string(),
             });
+        }
+    }
+
+    /// The board stops talking and sends no FIN: its end of the link is
+    /// gone, but the page's socket stays open until `onclose` arrives
+    /// `secs` later (`poll_event` plays it).
+    fn go_silent(&mut self, reason: &str, secs: f64) {
+        if let Some(link) = self.open.take() {
+            let now = self.now_ms();
+            self.rig.link_down(now, link);
+            self.pending_close = Some((self.clock.get() + secs, reason.to_string()));
         }
     }
 
@@ -1728,7 +1850,7 @@ impl Board {
             }
             let lan = self.endpoint.starts_with("lan:");
             let relay = self.endpoint.starts_with("relay:");
-            self.close(match (self.reconnects_itself, lan, relay) {
+            let reason = match (self.reconnects_itself, lan, relay) {
                 (true, true, _) => "wi-fi link lost: the board closed the link (code 1006)",
                 (true, _, true) => {
                     "relay link lost: the board closed the link (code 4410: board-gone)"
@@ -1737,13 +1859,18 @@ impl Board {
                     "bluetooth link lost: the board or the radio ended the connection"
                 }
                 (false, _, _) => "board reset",
-            });
+            };
+            let silent = self.silent_socket_secs.filter(|_| self.reconnects_itself);
+            match silent {
+                Some(secs) => self.go_silent(reason, secs),
+                None => self.close(reason),
+            }
             match self.rig.reboot() {
                 Ok(()) => {}
                 Err(BootFault::PowerCut) => self.power_cut(),
                 Err(e) => panic!("boots after a reset: {e:?}"),
             }
-            if self.reconnects_itself {
+            if self.reconnects_itself && silent.is_none() {
                 self.dropped_at = Some(self.clock.get());
             }
         }
@@ -1804,6 +1931,8 @@ impl Link for RigLink {
     fn submit(&mut self, command: LinkCommand) {
         let mut board = self.board.borrow_mut();
         match command {
+            // The page's socket still looks open: nothing to open.
+            LinkCommand::Open { .. } if board.pending_close.is_some() => {}
             LinkCommand::Open { .. } => {
                 board.opens_asked += 1;
                 if board.dropped_at.is_some() {
@@ -1828,6 +1957,15 @@ impl Link for RigLink {
     fn poll_event(&mut self) -> Option<LinkEvent> {
         let mut board = self.board.borrow_mut();
         let now = board.clock.get();
+        if board
+            .pending_close
+            .as_ref()
+            .is_some_and(|(due, _)| now >= *due)
+        {
+            let (_, reason) = board.pending_close.take().expect("checked");
+            board.events.push_back(LinkEvent::Closed { reason });
+            board.dropped_at = Some(now);
+        }
         if board.open.is_some() && board.engine_running() && now - board.last_heartbeat >= 1.0 {
             board.last_heartbeat = now;
             board
@@ -2185,6 +2323,14 @@ impl Bench {
     /// A Studio holding `own` as its own build (or none), with `board` not
     /// yet granted.
     fn new(board: Board, own: Option<ModelBuild>) -> Self {
+        let source = own.map(|own| {
+            Rc::new(MemoryOwnBuildSource::new(host_build(&own))) as Rc<dyn OwnBuildSource>
+        });
+        Self::with_source(board, source)
+    }
+
+    /// A Studio whose own builds come from `source` (or none).
+    fn with_source(board: Board, source: Option<Rc<dyn OwnBuildSource>>) -> Self {
         let clock = Rc::clone(&board.clock);
         let board = Rc::new(RefCell::new(board));
         let granted = Rc::new(Cell::new(false));
@@ -2225,8 +2371,8 @@ impl Bench {
             board: Rc::clone(&board),
             granted: Rc::clone(&granted),
         }));
-        if let Some(own) = own {
-            controller.set_own_build_source(Rc::new(MemoryOwnBuildSource::new(host_build(&own))));
+        if let Some(source) = source {
+            controller.set_own_build_source(source);
         }
         Self {
             controller,
@@ -2482,7 +2628,7 @@ impl Bench {
             self.controller.note_device_hotplug(
                 crate::app::studio::studio_command::DeviceHotplug::Disconnected,
             );
-        } else if now >= at + 1.0 {
+        } else if now >= at + self.board().redial_secs {
             self.board_mut().dropped_at = None;
             self.granted.set(true);
             self.controller

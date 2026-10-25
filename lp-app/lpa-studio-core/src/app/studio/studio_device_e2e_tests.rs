@@ -167,8 +167,11 @@ fn bench_link(
     fake_device_link(info, device)
 }
 
-/// Your boards on every computer: the account's list (`ListBoards`) joined
-/// onto the roster by MAC, a board never met here connected through
+/// The account's board list (M2): offline account boards, the report on
+/// finding the account's key, Remove from your account.
+mod account_board_list_tests;
+/// Your boards on every computer: the account's list (`ListAccountBoards`)
+/// joined onto the roster by MAC, a board never met here connected through
 /// lightplayer.app, and the rule for live links.
 mod account_boards_tests;
 /// E4: the app agent's device journey over this bench.
@@ -176,6 +179,9 @@ mod agent_device_journey_tests;
 /// The app chat seated on this bench (E4's seat, and the corpus's device
 /// seat).
 pub(crate) mod agent_device_seat;
+/// Connect takes the best road in one press: Wi‑Fi first while the
+/// account's list says the board shares this network, then lightplayer.app.
+mod best_link_tests;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
 /// The board card, built in core, on real boards: its primary pressed by
@@ -194,6 +200,8 @@ mod connected_tests;
 mod home_sections_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
+/// A session through lightplayer.app moves onto Wi‑Fi by itself, and back.
+mod lan_move_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
 /// back on the redialled link with no click.
 mod lan_reset_tests;

@@ -80,6 +80,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let reset = input.offer("reset-board");
     let erase = input.offer("erase");
     let forget = input.offer("forget");
+    let forget_from_account = input.offer(crate::FORGET_FROM_ACCOUNT_VERB);
     // Identifying: the work's words take the name's place ("◌ Hardware
     // identifying"), as on a new board; the model is back once it is done.
     let identifying = work
@@ -97,7 +98,14 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             sections: without_empty(vec![
                 facts("Board", lines),
                 verbs(reset.map(own_words).into_iter().collect()),
-                danger(erase.into_iter().chain(forget).map(own_words).collect()),
+                danger(
+                    erase
+                        .into_iter()
+                        .chain(forget)
+                        .chain(forget_from_account)
+                        .map(own_words)
+                        .collect(),
+                ),
             ]),
             panels: Vec::new(),
             raised: false,
@@ -215,7 +223,7 @@ mod tests {
             .iter()
             .flat_map(|section| section.affordances.iter().map(|a| a.word.as_str()))
             .collect();
-        assert_eq!(verbs, ["Reset", "Factory reset", "Forget"]);
+        assert_eq!(verbs, ["Reset", "Factory reset", "Forget on this browser"]);
         let danger = bar.details.sections.last().unwrap();
         assert_eq!(danger.weight, crate::RichWeight::Danger);
         assert_eq!(

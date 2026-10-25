@@ -238,6 +238,9 @@ belong here.
   of the heap, and the output node's status badge says when it applied.
   Absent = the authored option holds at any scale
   (`docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.md`).
+  The ESP output provider never opens interpolation (it renders each frame
+  once; the ADR's 2026-10-23 amendment), so on ESP boards
+  `interpolationLeds` sheds nothing.
 
 Only `domraem/dom-z-102.json` carries any of these today. Mark derived
 values as derived in `measured`, and replace the provenance — value and

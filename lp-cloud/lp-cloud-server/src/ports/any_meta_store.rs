@@ -1,11 +1,12 @@
 //! Whichever [`MetaStore`] the configuration named.
 
 use lp_cloud_domain::{
-    AccountAccess, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord,
-    StoredEvent,
+    AccountAccess, BoardRecord, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs,
+    SessionRecord, StoredEvent,
 };
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
+use lpc_relay::RelayBoardId;
 
 /// A [`MetaStore`] chosen at runtime.
 ///
@@ -60,6 +61,26 @@ impl MetaStore for AnyMetaStore {
 
     fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess> {
         self.0.account_by_key_salt(key_salt)
+    }
+
+    fn put_board_record(&mut self, record: BoardRecord) {
+        self.0.put_board_record(record);
+    }
+
+    fn board_record(&self, user: PrefixedUid, board: RelayBoardId) -> Option<BoardRecord> {
+        self.0.board_record(user, board)
+    }
+
+    fn board_records_for_user(&self, user: PrefixedUid) -> Vec<BoardRecord> {
+        self.0.board_records_for_user(user)
+    }
+
+    fn board_records_for_board(&self, board: RelayBoardId) -> Vec<BoardRecord> {
+        self.0.board_records_for_board(board)
+    }
+
+    fn delete_board_record(&mut self, user: PrefixedUid, board: RelayBoardId) -> bool {
+        self.0.delete_board_record(user, board)
     }
 
     fn put_session(&mut self, session: SessionRecord) {

@@ -53,6 +53,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "0006_account_access_key_salt_index",
         sql: include_str!("../migrations/0006_account_access_key_salt_index.sql"),
     },
+    Migration {
+        name: "0007_account_boards",
+        sql: include_str!("../migrations/0007_account_boards.sql"),
+    },
 ];
 
 /// Bring a database up to the current schema and report the version it
@@ -163,6 +167,7 @@ mod tests {
             "sidecars",
             "blob_index",
             "account_access",
+            "account_boards",
         ] {
             assert!(table_exists(&conn, table), "missing table {table}");
         }
@@ -375,6 +380,82 @@ mod tests {
         assert!(plan.contains("account_access_key_salt"), "{plan}");
     }
 
+    /// The upgrade path 0007 exists for: a database at 0006 holding
+    /// accounts, account access and a project (the shape production has
+    /// today) gains the empty `account_boards` table and its board index;
+    /// every old row survives byte for byte; and the new table's key and
+    /// foreign key hold.
+    #[test]
+    fn migrating_from_0006_to_0007_adds_an_empty_board_list_and_keeps_every_row() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        assert_eq!(apply(&mut conn, &MIGRATIONS[..6]).unwrap(), 6);
+        for (uid, n) in [("usra", 1u8), ("usrb", 2u8)] {
+            conn.execute(
+                "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
+                 VALUES (?1, ?1, ?1, 'X', 1.0)",
+                [uid],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO account_access (user_uid, key_secret, key_salt, play_password_salt,\n\
+                     edit_password_salt, play_password, edit_password, previous_key_salts, updated_at)\n\
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'friends', NULL, ?6, 4.5)",
+                rusqlite::params![
+                    uid,
+                    vec![n; 32],
+                    vec![n; 16],
+                    vec![n + 10; 16],
+                    vec![n + 20; 16],
+                    vec![n + 30; 16],
+                ],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO projects (uid, owner_uid, access, slug, created_at)\n\
+             VALUES ('prjdome', 'usra', 'view', 'dome', 2.0)",
+            [],
+        )
+        .unwrap();
+        let before = (
+            dump_table(&conn, "users", "uid"),
+            dump_table(&conn, "account_access", "user_uid"),
+            dump_table(&conn, "projects", "uid"),
+        );
+        assert!(!table_exists(&conn, "account_boards"));
+
+        assert_eq!(run_migrations(&mut conn).unwrap(), 7);
+        assert_eq!(schema_version(&conn).unwrap(), 7);
+
+        let after = (
+            dump_table(&conn, "users", "uid"),
+            dump_table(&conn, "account_access", "user_uid"),
+            dump_table(&conn, "projects", "uid"),
+        );
+        assert_eq!(after, before, "every old row survives");
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM account_boards", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "nothing is backfilled");
+        assert!(index_exists(&conn, "account_boards_by_board"));
+
+        let insert = |uid: &str| {
+            conn.execute(
+                "INSERT INTO account_boards (user_uid, board_id, label, joined_at)\n\
+                 VALUES (?1, '10bda3b08e30', 'Lamp', 5.0)",
+                [uid],
+            )
+        };
+        insert("usra").expect("a row for an existing account");
+        insert("usrb").expect("the same board on another account's list");
+        assert!(insert("usra").is_err(), "one row per (account, board)");
+        assert!(
+            insert("usrnobody").is_err(),
+            "a row for a missing account is refused"
+        );
+    }
+
     #[test]
     fn running_an_already_migrated_database_is_a_no_op() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -454,8 +535,13 @@ mod tests {
 
     /// Every account-access row, every column, in key order.
     fn dump_account_access(conn: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
+        dump_table(conn, "account_access", "user_uid")
+    }
+
+    /// Every row of `table`, every column, ordered by `key`.
+    fn dump_table(conn: &Connection, table: &str, key: &str) -> Vec<Vec<rusqlite::types::Value>> {
         let mut statement = conn
-            .prepare("SELECT * FROM account_access ORDER BY user_uid")
+            .prepare(&format!("SELECT * FROM {table} ORDER BY {key}"))
             .unwrap();
         let columns = statement.column_count();
         statement

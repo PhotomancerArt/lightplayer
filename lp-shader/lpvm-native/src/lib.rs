@@ -36,6 +36,7 @@ extern crate alloc;
 pub use log;
 
 pub mod abi;
+pub mod code_publish;
 pub mod codemem_esp32;
 pub mod compile;
 pub mod config;
@@ -75,6 +76,11 @@ pub mod xt_corpus;
 #[cfg(feature = "emu")]
 pub mod rt_emu;
 
+#[cfg(all(
+    feature = "helper-core",
+    any(target_arch = "riscv32", target_arch = "xtensa")
+))]
+pub mod helper_core;
 pub mod isa;
 #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub mod rt_jit;

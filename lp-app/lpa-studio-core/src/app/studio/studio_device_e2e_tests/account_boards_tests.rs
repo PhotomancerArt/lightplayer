@@ -1,6 +1,6 @@
 //! Your boards on every computer (plan
 //! `lp2025/2026-10-19-2300-your-boards-follow-you`, M1), end to end through
-//! the real effects layer: the signed-in account's list (`ListBoards`)
+//! the real effects layer: the signed-in account's list (`ListAccountBoards`)
 //! joined onto the roster by MAC.
 //!
 //! - a board this browser never met is a card in Online boards, its
@@ -18,6 +18,7 @@
 
 use crate::app::access::account_keys::tests::account;
 
+use super::best_link_tests::list as list_on_this_network;
 use super::relay_connect_tests::{BOARD, relay_light_player, unplug, with_relay};
 use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
@@ -87,13 +88,20 @@ fn a_board_never_met_here_is_online_and_connects_through_lightplayer_app() {
         Some(crate::UiPrimary::Offer(primary)) => assert_eq!(primary.offer, connect),
         other => panic!("Connect is the primary, not {other:?}"),
     }
-    // A board never met has no other verbs: nothing about it is known.
+    // A board never met has no other verbs but the list's own: nothing
+    // about it is known, and the account's list holds it.
     let tree = bench.controller.view().offers;
     let verbs: Vec<String> = tree
         .own_verbs_of(tree.device_prefix(entry).unwrap())
         .map(|offer| offer.path.to_string())
         .collect();
-    assert_eq!(verbs, [connect.to_string()]);
+    assert_eq!(
+        verbs,
+        [
+            connect.to_string(),
+            format!("devices/mac-{BOARD}/forget-from-account")
+        ]
+    );
 
     bench
         .press(&connect, OfferArgs::new())
@@ -181,8 +189,9 @@ fn a_remembered_board_moves_to_online_boards_while_the_list_names_it() {
 }
 
 /// The walk's board: met over USB with its Wi‑Fi joined (so this browser
-/// remembers its address, and Connect takes the Wi‑Fi road first), then
-/// unplugged and listed. lightplayer.app's row still offers its own way in.
+/// remembers its address, and Connect takes the Wi‑Fi road first while the
+/// list says it shares this network), then unplugged and listed.
+/// lightplayer.app's row still offers its own way in.
 #[test]
 fn a_remembered_board_with_a_wifi_address_keeps_connect_relay_on_its_row() {
     let device = joined_light_player("dev00000acctbrd05");
@@ -196,7 +205,7 @@ fn a_remembered_board_with_a_wifi_address_keeps_connect_relay_on_its_row() {
         bench.controller.wifi_addresses().get(&key).is_some()
     });
     unplug(&mut bench, &tasks, target);
-    list(&mut bench, &tasks, &[KEY]);
+    list_on_this_network(&mut bench, &tasks, KEY, None, true);
     let relay = bench.device_verb(target, "connect-relay");
     bench.offered(&relay);
     let card = home_card(&bench, target);
@@ -244,15 +253,15 @@ fn signed_out_the_list_keeps_nothing_and_nothing_is_offered() {
 }
 
 /// Sign in: the account's keys reach core.
-fn sign_in(bench: &mut DeviceBench, tasks: &TaskPool) {
+pub(super) fn sign_in(bench: &mut DeviceBench, tasks: &TaskPool) {
     bench
         .controller
         .apply_access_command(crate::AccessCommand::AccountKeys(Some(account(None))));
     bench.step(tasks);
 }
 
-/// The account's list answers with `boards`.
-fn list(bench: &mut DeviceBench, tasks: &TaskPool, boards: &[&str]) {
+/// The account's list answers with `boards`, online.
+pub(super) fn list(bench: &mut DeviceBench, tasks: &TaskPool, boards: &[&str]) {
     bench
         .controller
         .set_account_boards(Some(crate::AccountBoardRows {
@@ -262,13 +271,17 @@ fn list(bench: &mut DeviceBench, tasks: &TaskPool, boards: &[&str]) {
                 .map(|id| crate::AccountBoardRow {
                     id: id.to_string(),
                     label: "Fabric Test".to_string(),
-                    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
-                    lan: None,
-                    same_network: false,
-                    since: 50.0,
-                    relay_proto: 2,
+                    model: None,
                     firmware: Some("2026.10.19-1".to_string()),
                     project: Some("rainbow".to_string()),
+                    last_seen: Some(50.0),
+                    online: Some(crate::AccountBoardPresence {
+                        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+                        lan: None,
+                        same_network: false,
+                        since: 50.0,
+                        relay_proto: 2,
+                    }),
                 })
                 .collect(),
         }));
@@ -281,7 +294,7 @@ fn key() -> lpa_devices::BoardKey {
 }
 
 /// The card the home view publishes for `device`.
-fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard {
+pub(super) fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard {
     bench
         .controller
         .view()

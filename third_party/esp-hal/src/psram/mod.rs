@@ -116,6 +116,20 @@ impl Psram {
         Self { _peri: peri }
     }
 
+    /// LP fork (seventh diff, see README-LP.md): [`Psram::new`] for an
+    /// **octal** part only. It never references the quad-SPI path, so a
+    /// firmware that only ever calls this links none of that path's `#[ram]`
+    /// code (about 1.5 KB of the S3's IRAM). `config.mode` is ignored.
+    #[cfg(esp32s3)]
+    pub fn new_octal(peri: PSRAM<'static>, mut config: PsramConfig) -> Self {
+        if implem::init_psram_octal(&mut config) {
+            let range = map_psram(config);
+
+            unsafe { set_psram_range(range) };
+        }
+        Self { _peri: peri }
+    }
+
     /// Returns the address and size of the available in external memory.
     pub fn raw_parts(&self) -> (*mut u8, usize) {
         let range = psram_range();

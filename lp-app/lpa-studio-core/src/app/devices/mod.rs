@@ -36,11 +36,13 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+pub mod account_board_request;
 pub mod account_boards;
 pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
 pub mod add_device_offers;
+pub mod best_link;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
@@ -117,9 +119,13 @@ pub mod edit_offer;
 pub mod emu_transport;
 pub mod firmware_file_build;
 pub mod firmware_lookup_op;
+pub mod forget_from_account_offer;
+pub mod forget_from_account_op;
 pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
+pub mod lan_move;
+pub mod lan_reach;
 pub mod lan_transport;
 pub mod link_health;
 pub mod new_sim_offer;
@@ -158,14 +164,19 @@ pub mod wifi_connect_op;
 pub mod wifi_connects;
 pub mod wire_conversation;
 
+pub use account_board_request::{
+    AccountBoardAnswer, AccountBoardLink, AccountBoardReport, AccountBoardRequest,
+};
 pub use account_boards::{
-    AccountBoardPicture, AccountBoardRow, AccountBoardRows, AccountBoards, account_board_device,
+    AccountBoardNote, AccountBoardPicture, AccountBoardPresence, AccountBoardRow, AccountBoardRows,
+    AccountBoards, account_board_device,
 };
 pub use activity_ends::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS};
 pub use add_device_offers::{
     USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
     WifiAddressReach, add_device_offers,
 };
+pub use best_link::{BestLinkFacts, LanHint, Road};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_files_memory::{BoardFilesMemory, FRESH_STARTS_STORAGE_KEY};
@@ -289,15 +300,20 @@ pub use firmware_file_build::{
     PickedFirmwareFile, firmware_file_action, read_firmware_files,
 };
 pub use firmware_lookup_op::FirmwareLookupOp;
+pub use forget_from_account_offer::{
+    FORGET_FROM_ACCOUNT_VERB, forget_from_account_offer, forget_on_this_browser_copy,
+};
+pub use forget_from_account_op::{ForgetFromAccountOp, REMOVE_FROM_YOUR_ACCOUNT};
 pub use install_choice::{
     InstallChoice, InstallChoiceInputs, RECENT_CHOICES, index_for, install_choices,
 };
 pub use lan_addresses::{LAN_LINK_PATH, LanFlag, normalize_lan_address, parse_lan_flag};
 pub use lan_link_view::{UiLanLink, lan_link_for_endpoint, lan_link_view};
+pub use lan_reach::LanReach;
 pub use lan_transport::{LanDeviceTransport, LanLinkSource};
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
-pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
+pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource, own_for};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use relay_connect_failure::{
@@ -336,6 +352,6 @@ pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};
 pub use update_host::UpdateHost;
 pub use wifi_address_book::{WIFI_ADDRESSES_STORAGE_KEY, WifiAddress, WifiAddressBook};
 pub use wifi_connect_failure::{WIFI_BLOCKED_WORDS, WIFI_BUSY_WORDS, WifiConnectFailure};
-pub use wifi_connect_offer::connect_wifi_offer;
+pub use wifi_connect_offer::{connect_wifi_first_offer, connect_wifi_offer};
 pub use wifi_connect_op::WifiConnectOp;
 pub use wifi_connects::{UiWifiConnect, WifiConnectTarget, WifiConnects};

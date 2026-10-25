@@ -59,10 +59,17 @@ use crate::{
 
 /// The account's boards on every computer: lightplayer.app's rows joined
 /// onto the roster by MAC.
+mod account_board_requests_flow;
 mod account_boards_flow;
 /// One tab holds a board: the holder's flows (priming, claims, the gate's
 /// claims, the answer to an ask, the sentinels, the facts on the boards).
 mod board_hold_flow;
+/// What the account's list says about a board's own network: the one
+/// reader of a row's address and `same_network`.
+mod lan_hint;
+/// A session through lightplayer.app moves onto Wi‑Fi by itself, and back
+/// (`devices/lan_move.rs` is the machine).
+mod lan_move_flow;
 /// One tab holds a board: Connect on a board another tab holds
 /// (`devices/<board>/take-over`), the asker's side.
 mod take_over_flow;
@@ -76,6 +83,14 @@ const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
 
 /// Who a connect through the relay reaches, as a card's line names it.
 const RELAY_HOST: &str = "lightplayer.app";
+
+/// Why the editor's session could not be put on a link.
+enum LensRebind {
+    /// The board's link is not ready to lend its wire yet (why).
+    NotYet(String),
+    /// There is no editor session to rebind.
+    NoSession,
+}
 
 /// The address a docs page's anonymous sim answers to inside its own
 /// leased controller.
@@ -184,6 +199,20 @@ pub struct StudioController {
     /// The web edge's sink for the boards whose owner chose Start fresh
     /// (the roster's [`crate::BoardFilesMemory`]), kept in this browser.
     on_fresh_starts: Option<Box<dyn Fn(&str)>>,
+    /// Where the account board list's requests go (the web edge's cloud
+    /// calls): `account_board_requests_flow.rs`.
+    #[allow(
+        clippy::type_complexity,
+        reason = "one hook: the request, and the queue its answer comes back on"
+    )]
+    on_account_board_request: Option<
+        Box<
+            dyn Fn(
+                &crate::AccountBoardRequest,
+                Option<crate::app::studio::studio_view_channel::CommandSender>,
+            ),
+        >,
+    >,
     /// The connects over Wi‑Fi someone asked for, while they run and once
     /// they fail.
     wifi_connects: crate::WifiConnects,
@@ -214,8 +243,18 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
-    /// The signed-in account's boards online at lightplayer.app, and their
-    /// pictures, as the web edge last heard them (`ListBoards`,
+    /// What this page's browser lets a socket to the LAN do, reported by
+    /// the web layer (`set_lan_reach`); `Direct` until it does.
+    lan_reach: crate::LanReach,
+    /// The boards whose Connect tries Wi‑Fi first and goes on through
+    /// lightplayer.app if that fails, while the Wi‑Fi try runs and then
+    /// the relay's (`connect_flow.rs`).
+    fall_through: std::collections::BTreeSet<lpa_devices::BoardKey>,
+    /// Each board's move from lightplayer.app onto Wi‑Fi this page load
+    /// (`lan_move_flow.rs`).
+    lan_moves: crate::app::devices::lan_move::LanMoves,
+    /// The signed-in account's board list, online at lightplayer.app or not, and their
+    /// pictures, as the web edge last heard them (`ListAccountBoards`,
     /// `BoardPictures`). In memory only: a board this browser never met is
     /// a roster entry here until it says hello over a link.
     account_boards: crate::AccountBoards,
@@ -545,6 +584,7 @@ impl StudioController {
             wifi_addresses: crate::WifiAddressBook::new(),
             on_wifi_addresses: None,
             on_fresh_starts: None,
+            on_account_board_request: None,
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
@@ -554,6 +594,9 @@ impl StudioController {
             take_overs: crate::TakeOvers::default(),
             sending: std::collections::BTreeMap::new(),
             bluetooth_reach: crate::BluetoothReach::Checking,
+            lan_reach: crate::LanReach::default(),
+            fall_through: std::collections::BTreeSet::new(),
+            lan_moves: Default::default(),
             account_boards: crate::AccountBoards::default(),
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -906,17 +949,13 @@ impl StudioController {
             ));
         };
         let (target, url) = match op {
-            crate::WifiConnectOp::Board { device } => {
+            crate::WifiConnectOp::Board { device, then_relay } => {
                 let Some(key) = self.board_key(device) else {
                     return Err(UiError::UnsupportedAction(
                         "this board has not said who it is yet".to_string(),
                     ));
                 };
-                let Some(url) = self
-                    .wifi_addresses
-                    .get(&key)
-                    .and_then(crate::WifiAddress::url)
-                else {
+                let Some(url) = self.wifi_address_for(key) else {
                     return Err(UiError::UnsupportedAction(
                         "Studio doesn't know where this board is on Wi\u{2011}Fi yet: connect it \
                          over USB once with its Wi\u{2011}Fi on"
@@ -929,6 +968,12 @@ impl StudioController {
                 // One answer per card: what the relay said goes.
                 self.wifi_connects
                     .forget(crate::WifiConnectTarget::Relay(key));
+                // A Connect whose next road is lightplayer.app goes on
+                // there if this fails; a press of this verb alone does not.
+                match then_relay {
+                    true => self.fall_through.insert(key),
+                    false => self.fall_through.remove(&key),
+                };
                 (crate::WifiConnectTarget::Board(key), url)
             }
             crate::WifiConnectOp::Address { url } => (crate::WifiConnectTarget::Address, url),
@@ -969,11 +1014,29 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("wi-fi: {host}: {}", failure.words());
         }
+        // A move onto Wi‑Fi's dial: its answer is the move's, not a card's.
+        if let crate::WifiConnectTarget::Board(board) = target
+            && self.lan_move_dialled(board, result.clone())
+        {
+            return;
+        }
         if let crate::WifiConnectTarget::Board(board) = target {
             self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         }
         let connected = result.is_ok();
         self.wifi_connects.finish(target, host, result);
+        if let crate::WifiConnectTarget::Board(board) = target {
+            match connected {
+                true => {
+                    self.fall_through.remove(&board);
+                }
+                // A Connect that goes on through lightplayer.app: the
+                // relay's answer is the card's, not this one.
+                false => {
+                    self.fall_through_to_relay(board);
+                }
+            }
+        }
         if connected {
             self.device_sweep_pending = true;
             self.run_due_device_sweep();
@@ -1035,6 +1098,7 @@ impl StudioController {
         let connected = result.is_ok();
         self.wifi_connects
             .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
+        self.fall_through_ended(board, !connected);
         if connected {
             self.device_sweep_pending = true;
             self.run_due_device_sweep();
@@ -1091,7 +1155,18 @@ impl StudioController {
         }
     }
 
-    /// The account's boards online at lightplayer.app, as `ListBoards` last
+    /// What this page's browser lets a socket to the LAN do. A platform
+    /// fact the web layer reports once (it alone can read the page's scheme
+    /// and the browser), as it reports Bluetooth's: Connect's first road
+    /// and the move onto Wi‑Fi obey it (`best_link.rs`, `lan_reach.rs`).
+    pub fn set_lan_reach(&mut self, reach: crate::LanReach) {
+        if self.lan_reach != reach {
+            self.lan_reach = reach;
+            self.mark_dirty();
+        }
+    }
+
+    /// The account's board list, as `ListAccountBoards` last
     /// answered; `None` (signed out, or no answer) keeps nothing.
     pub fn set_account_boards(&mut self, rows: Option<crate::AccountBoardRows>) {
         self.account_boards.replace(rows);
@@ -1585,6 +1660,7 @@ impl StudioController {
                 lpa_devices::Action::ResetBoard { device },
             ));
         }
+        self.report_account_sightings();
         self.drive_device_access();
         self.mark_dirty();
     }
@@ -1871,13 +1947,14 @@ impl StudioController {
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
-        if own_now.as_ref() != self.update_build_facts.own() {
+        if own_now.as_slice() != self.update_build_facts.own_builds() {
             self.update_build_facts_mut().set_own(own_now);
         }
         let now = self.device_now();
-        let own = self.update_build_facts.own().cloned();
         let store_latest = self.update_build_facts.store_latest().cloned();
-        let mut target = own.as_ref().map(|own| own.identity.target.clone());
+        // The store is asked about one target at a time: the first board's,
+        // or, with no board, this Studio's first own build's.
+        let mut target = None;
         let mut actions = Vec::new();
         for device in self.devices.roster().devices() {
             let evidence = &device.evidence;
@@ -1900,10 +1977,11 @@ impl StudioController {
             }
             let view = lpa_devices::view::device_view(device, now);
             let derived = auto_start::board_build_facts(facts);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
             let inputs = crate::UpdateStandingInputs {
                 view: &view,
                 facts: Some(facts),
-                own: own.as_ref().or(derived.as_ref()),
+                own: own.or(derived.as_ref()),
                 tier,
                 link,
                 store_latest: store_latest.as_ref(),
@@ -1931,7 +2009,8 @@ impl StudioController {
             {
                 continue;
             }
-            let verdict = auto_start::auto_update_for_board(facts, own.as_ref(), None);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
+            let verdict = auto_start::auto_update_for_board(facts, own, None);
             actions.extend(auto_start::auto_action(
                 &host,
                 pending.device_id(),
@@ -1948,6 +2027,12 @@ impl StudioController {
             }
         }
         self.devices.effects_mut().set_update_watches(watches);
+        let target = target.or_else(|| {
+            self.update_build_facts
+                .own_builds()
+                .first()
+                .map(|own| own.identity.target.clone())
+        });
         if let Some(target) = target {
             self.devices.effects_mut().want_store_latest(&target);
             self.devices.effects_mut().want_store_releases(&target);
@@ -2002,7 +2087,9 @@ impl StudioController {
         let inputs = crate::UpdateStandingInputs {
             view,
             facts,
-            own: self.update_build_facts.own(),
+            own: self
+                .update_build_facts
+                .own_for(facts.and_then(|facts| facts.target.as_deref())),
             tier: link.update_tier(self.access.granted_tier(view.id)),
             link,
             store_latest: self.update_build_facts.store_latest(),
@@ -2049,8 +2136,12 @@ impl StudioController {
         let link_error = match &input {
             crate::DeviceInput::Event(crate::DeviceEvent::Link {
                 link,
-                event: lpa_devices::link::LinkEvent::Error(_),
-            }) => Some(*link),
+                event: lpa_devices::link::LinkEvent::Error(message),
+            }) => {
+                // A moved board's Wi‑Fi link handed to another connection.
+                self.note_lan_move_link_error(*link, message);
+                Some(*link)
+            }
             _ => None,
         };
         for line in self.devices.handle(now, input) {
@@ -2444,9 +2535,11 @@ impl StudioController {
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
         self.hide_accounted_held_links(&mut view);
+        // When this browser last saw each board, before the account's list
+        // joins in: a record seen more recently stands over it.
+        view.last_seen = self.registry_last_seen(&view);
         self.join_account_boards(&mut view);
         view.board_projects = self.board_projects(&view);
-        view.last_seen = self.registry_last_seen(&view);
         view
     }
 
@@ -3774,10 +3867,26 @@ impl StudioController {
         }
         for view in &roster.roster.devices {
             // A board this browser never met has one way in: through
-            // lightplayer.app, whose row is all Studio knows of it.
+            // lightplayer.app, whose row is all Studio knows of it — while
+            // it is online there. Offline everywhere, nothing reaches it.
             if self.is_account_entry(view.id) {
                 let prefix = prefixes[&view.id].clone();
-                if let Some(offer) = self.relay_offer_at(view, &prefix, crate::DeviceFace::Wire) {
+                let online = self
+                    .account_board_key(view.id)
+                    .is_some_and(|key| self.account_boards.online(key));
+                // Over Wi‑Fi first, while the list says it shares this
+                // network (`best_link.rs`).
+                if online
+                    && let Some(offer) = self.wifi_offer_at(view, &prefix, crate::DeviceFace::Wire)
+                {
+                    offers.publish(offer);
+                }
+                if online
+                    && let Some(offer) = self.relay_offer_at(view, &prefix, crate::DeviceFace::Wire)
+                {
+                    offers.publish(offer);
+                }
+                if let Some(offer) = self.forget_from_account_offer_for(view, &prefix) {
                     offers.publish(offer);
                 }
                 offers.place_device(view.id, prefix);
@@ -3803,7 +3912,17 @@ impl StudioController {
                 examples: &sources.examples,
                 update: self.device_update_facts(view),
             };
+            // On a board the account's list holds, Forget reads as this
+            // browser's only, and Remove from your account stands after it.
+            let from_account = self.forget_from_account_offer_for(view, &facts.prefix);
             for offer in crate::device_offers(view, &facts) {
+                let forget = offer.path.last() == Some("forget");
+                match (forget, from_account.is_some()) {
+                    (true, true) => offers.publish(crate::forget_on_this_browser_copy(offer)),
+                    _ => offers.publish(offer),
+                }
+            }
+            if let Some(offer) = from_account {
                 offers.publish(offer);
             }
             if let Some(offer) = self.connect_wifi_offer(view, &facts) {
@@ -3868,19 +3987,35 @@ impl StudioController {
     }
 
     /// `devices/<board>/connect-wifi`: "Connect over Wi‑Fi" on the card of a
-    /// board this browser remembers a Wi‑Fi address for, while nothing
-    /// reaches it (it is offline — unplugged, or its last link went), on a
-    /// page that reaches the LAN. Not on a runtime (a sim or an in-tab emu
-    /// has no radio), and not while another tab of this browser holds the
-    /// board's network slot: Connect is then `take-over`, which asks that
-    /// tab first. Disabled while it is being reached.
+    /// board Studio has a Wi‑Fi address for, while nothing reaches it (it is
+    /// offline — unplugged, or its last link went), on a page that reaches
+    /// the LAN. The address is the one lightplayer.app says the board gave
+    /// while it shares this network, else the one this browser remembers
+    /// (`best_link.rs`); a board known only by the account's list is offered
+    /// it only while Wi‑Fi is its first road. Not on a runtime (a sim or an
+    /// in-tab emu has no radio), and not while another tab of this browser
+    /// holds the board's network slot: Connect is then `take-over`, which
+    /// asks that tab first. Disabled while it is being reached.
     fn connect_wifi_offer(
         &self,
         view: &crate::DeviceView,
         facts: &crate::DeviceOfferFacts<'_>,
     ) -> Option<crate::UiOffer> {
+        self.wifi_offer_at(view, &facts.prefix, facts.face)
+    }
+
+    /// [`Self::connect_wifi_offer`] under `prefix`, for a board of `face`.
+    /// On a board with no Connect of its own (one this browser never met)
+    /// the verb is its Connect: when lightplayer.app is the next road, a try
+    /// that fails goes on there.
+    fn wifi_offer_at(
+        &self,
+        view: &crate::DeviceView,
+        prefix: &crate::OfferPath,
+        face: crate::DeviceFace,
+    ) -> Option<crate::UiOffer> {
         if self.lan_transport.is_none()
-            || facts.face != crate::DeviceFace::Wire
+            || face != crate::DeviceFace::Wire
             || view.status != crate::DeviceStatus::Offline
         {
             return None;
@@ -3889,14 +4024,27 @@ impl StudioController {
         if self.network_slot_held_elsewhere(key) {
             return None;
         }
-        let address = self.wifi_addresses.get(&key)?;
-        Some(crate::connect_wifi_offer(
-            &facts.prefix,
-            view.id,
-            &address.ip,
-            self.wifi_connects
-                .connecting(crate::WifiConnectTarget::Board(key)),
-        ))
+        let roads = self.roads_to(key, false);
+        let first_road = matches!(
+            roads.first(),
+            Some(crate::app::devices::best_link::Road::Wifi { .. })
+        );
+        let remembered = self.wifi_addresses.get(&key).is_some();
+        if !first_road && !remembered {
+            return None;
+        }
+        let url = self.wifi_address_for(key)?;
+        let host = lpa_link::providers::network_link::lan_host(&url);
+        let connecting = self
+            .wifi_connects
+            .connecting(crate::WifiConnectTarget::Board(key));
+        let then_relay = first_road
+            && self.is_account_entry(view.id)
+            && roads.contains(&crate::app::devices::best_link::Road::Relay);
+        Some(match then_relay {
+            true => crate::connect_wifi_first_offer(prefix, view.id, host, connecting),
+            false => crate::connect_wifi_offer(prefix, view.id, host, connecting),
+        })
     }
 
     /// `devices/<board>/connect-relay`: "Connect through lightplayer.app"
@@ -4631,6 +4779,8 @@ impl StudioController {
     {
         self.try_pending_device_lens().await;
         self.try_resume_held_lens().await;
+        // A session through lightplayer.app moves onto Wi‑Fi, and back.
+        self.drive_lan_moves().await;
         if self.lens_hold.is_some() {
             return Ok(None);
         }
@@ -4718,6 +4868,11 @@ impl StudioController {
         if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
             let op = action.into_op::<crate::RelayConnectOp>()?;
             return self.start_relay_connect(op);
+        }
+        if node_id.as_str() == crate::ForgetFromAccountOp::NODE_ID {
+            let op = action.into_op::<crate::ForgetFromAccountOp>()?;
+            self.forget_from_account(op);
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::TakeOverOp::NODE_ID {
             let op = action.into_op::<crate::TakeOverOp>()?;
@@ -7708,26 +7863,15 @@ impl StudioController {
         let Ok(attachment) = self.device_lens_attachment(&uid) else {
             return;
         };
-        let Ok(deadline) = self.device_request_deadline() else {
-            return;
-        };
         let link = attachment.link;
-        let Ok(io) = self.devices.effects_mut().attach_lens_wire(link) else {
-            return;
+        let id = match self.rebind_lens_onto(attachment) {
+            Ok(id) => id,
+            Err(LensRebind::NotYet(_)) => return,
+            Err(LensRebind::NoSession) => {
+                self.lens_hold = None;
+                return;
+            }
         };
-        let protocol = match attachment.transport {
-            crate::LinkTransport::Ble => "ble-nus",
-            crate::LinkTransport::Sim => "browser-worker",
-            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
-        };
-        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
-        let Ok(session) = self.pool.lens_session_mut() else {
-            self.devices.effects_mut().release_lens_wire(link);
-            self.lens_hold = None;
-            return;
-        };
-        let id = session.id();
-        session.rebind_device(attachment, client);
         if let Err(error) = self.read_device_build(id).await {
             // Ready to the fold, but not answering the lens yet: back to
             // waiting, and the next look tries again.
@@ -7758,6 +7902,72 @@ impl StudioController {
             },
         );
         self.mark_dirty();
+    }
+
+    /// Put the editor's session on `attachment`'s link: borrow its wire,
+    /// build a client over it, and rebind the session there (the held
+    /// lens's resume, and the move onto Wi‑Fi). The wire is handed back
+    /// when there is no session to rebind.
+    fn rebind_lens_onto(
+        &mut self,
+        attachment: crate::DeviceLensAttachment,
+    ) -> Result<crate::RuntimeId, LensRebind> {
+        let deadline = self
+            .device_request_deadline()
+            .map_err(|error| LensRebind::NotYet(error.to_string()))?;
+        let link = attachment.link;
+        let io = self
+            .devices
+            .effects_mut()
+            .attach_lens_wire(link)
+            .map_err(LensRebind::NotYet)?;
+        let protocol = match attachment.transport {
+            crate::LinkTransport::Ble => "ble-nus",
+            crate::LinkTransport::Sim => "browser-worker",
+            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+        };
+        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
+        let Ok(session) = self.pool.lens_session_mut() else {
+            self.devices.effects_mut().release_lens_wire(link);
+            return Err(LensRebind::NoSession);
+        };
+        let id = session.id();
+        session.rebind_device(attachment, client);
+        Ok(id)
+    }
+
+    /// Move the editor, open on `from`'s link, onto the link its board is
+    /// on now, in one step: the old client dropped and its wire handed
+    /// back, the session rebound on the new link, and one read to prove the
+    /// new wire answers. The lens is never held here (no "Reconnecting…");
+    /// on `Err` the caller decides.
+    async fn move_lens_onto_current_link(
+        &mut self,
+        from: &crate::DeviceLensAttachment,
+    ) -> Result<(), String> {
+        let attachment = self
+            .device_lens_attachment(&from.uid)
+            .map_err(|error| error.to_string())?;
+        if attachment.link == from.link {
+            return Ok(());
+        }
+        let session = self
+            .pool
+            .lens_session_mut()
+            .map_err(|error| error.to_string())?;
+        drop(session.drop_client());
+        self.devices.effects_mut().release_lens_wire(from.link);
+        let id = self
+            .rebind_lens_onto(attachment)
+            .map_err(|error| match error {
+                LensRebind::NotYet(why) => why,
+                LensRebind::NoSession => "the editor has no session".to_string(),
+            })?;
+        self.read_device_build(id)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.sync_lens_probe_policy();
+        Ok(())
     }
 
     /// Whether the editor is holding on for a board that went away.

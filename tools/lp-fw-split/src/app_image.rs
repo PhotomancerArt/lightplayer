@@ -40,6 +40,22 @@ pub fn assemble(
     region_end: u32,
     build: u32,
 ) -> Result<AppImage> {
+    assemble_in(PAGE, REGION_START, loader, core, engine, region_end, build)
+}
+
+/// [`assemble`] for a layout whose MMU page is `page` and whose region
+/// starts at `region_start` (layout 2: 64 KiB, `factory + 0x1_0000`). The
+/// loader, the progress record and the boot records sit where layout 1 has
+/// them either way.
+pub fn assemble_in(
+    page: u32,
+    region_start: u32,
+    loader: &[u8],
+    core: &[u8],
+    engine: &[u8],
+    region_end: u32,
+    build: u32,
+) -> Result<AppImage> {
     if loader.len() as u32 > LOADER_MAX_LEN {
         bail!(
             "loader is {} B; the progress record starts {LOADER_MAX_LEN} B in",
@@ -48,16 +64,16 @@ pub fn assemble(
     }
     let core_len = core.len() as u32;
     let engine_len = engine.len() as u32;
-    let engine_off = (REGION_START + core_len).div_ceil(PAGE) * PAGE;
+    let engine_off = (region_start + core_len).div_ceil(page) * page;
     // The region ends on a page, and a page is a whole number of sectors,
     // so the engine's padded end fits wherever the engine does.
-    if !region_end.is_multiple_of(PAGE) {
+    if !region_end.is_multiple_of(page) {
         bail!("the region ends at {region_end:#x}, not on a page");
     }
     if engine_off + engine_len > region_end {
         bail!(
-            "core {core_len} B + engine {engine_len} B do not fit the region ({} B at page {PAGE:#x})",
-            region_end - REGION_START
+            "core {core_len} B + engine {engine_len} B do not fit the region ({} B at page {page:#x})",
+            region_end - region_start
         );
     }
     let mut bytes = vec![0xffu8; (engine_off + engine_len - LOADER_OFFSET) as usize];
@@ -68,7 +84,7 @@ pub fn assemble(
     put(LOADER_OFFSET, loader);
     let record = BootRecord {
         seq: 1,
-        core_off: REGION_START,
+        core_off: region_start,
         core_len,
         build,
         trial: false,
@@ -76,13 +92,13 @@ pub fn assemble(
     put(BOOT_RECORD_SECTORS[0], &record.encode());
     // Record sector 1 stays erased (0xFF): a flasher writing this image
     // erases whatever newer record a board held there.
-    put(REGION_START, core);
+    put(region_start, core);
     put(engine_off, engine);
     pad_image_end(&mut bytes, LOADER_OFFSET);
     Ok(AppImage {
         bytes,
         loader_len: loader.len() as u32,
-        core_off: REGION_START,
+        core_off: region_start,
         core_len,
         engine_off,
         engine_len,
@@ -137,6 +153,43 @@ mod tests {
 
     /// The sizes of `76959e7a4`'s packaged image, whose last 254 bytes the
     /// host flasher dropped on the bench C6: `app.bin` ended at `0x2F55FE`.
+    #[test]
+    fn layout_2_puts_the_core_at_its_region_and_the_engine_on_a_64_kib_page() {
+        // The spike's S3 sizes: loader 2,704 B, core 280,656 B, engine
+        // 2,172,645 B, in today's 6 MB `factory`.
+        let img = assemble_in(
+            0x1_0000,
+            0x2_0000,
+            &[1; 2704],
+            &vec![2; 280_656],
+            &vec![3; 2_172_645],
+            0x61_0000,
+            7,
+        )
+        .unwrap();
+        assert_eq!(img.core_off, 0x2_0000);
+        assert_eq!(
+            img.engine_off, 0x7_0000,
+            "the first 64 KiB page after the core"
+        );
+        let at = |off: u32| (off - LOADER_OFFSET) as usize;
+        assert_eq!(img.bytes[at(0x2_0000)], 2);
+        assert!(
+            img.bytes[at(0x2_0000 + 280_656)..at(0x7_0000)]
+                .iter()
+                .all(|b| *b == 0xff)
+        );
+        let slot =
+            BootSlot::decode(&img.bytes[at(BOOT_RECORD_SECTORS[0])..][..BOOT_RECORD_READ_LEN])
+                .unwrap();
+        assert_eq!(slot.record.core_off, 0x2_0000);
+        assert!(image_end_is_aligned(LOADER_OFFSET, img.bytes.len()));
+        assert!(
+            assemble_in(0x1_0000, 0x2_0000, &[1; 4], &[2; 4], &[3; 4], 0x61_8000, 7).is_err(),
+            "a region that does not end on a 64 KiB page"
+        );
+    }
+
     #[test]
     fn the_76959e7a4_sizes_end_on_a_sector() {
         let (core, engine) = (1_161_104usize, 1_824_254usize);

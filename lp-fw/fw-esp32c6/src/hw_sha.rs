@@ -1,7 +1,8 @@
 //! SHA-256 on the C6's SHA accelerator, for a split image's two boot-path
-//! hashes — the core's own SHA-256 (`ota::board_identity`, every boot, after
-//! its first light) and the engine guard (`ota::engine_guard`, the first
-//! boot after a flash) — and, in an `fs-tree` build (split or not), the tree store's record ids
+//! hashes — the core's own SHA-256 (`fw_esp32_common::split_core`'s
+//! `board_identity`, every boot, after its first light) and the engine guard
+//! (its `engine_guard`, the first boot after a flash), as the C6's
+//! `SplitChip::Sha` (`crate::split_core`) — and, in an `fs-tree` build (split or not), the tree store's record ids
 //! ([`StoreSha256`], the store's `ObjectHasher`).
 //!
 //! In software (`sha2` at the image's `opt-level = "z"`) those cost about a
@@ -10,7 +11,7 @@
 //! in a few dozen cycles, so what is left is feeding it — the CPU's sixteen
 //! word writes per block, and the reads that bring the bytes in. On the
 //! bench C6 (2026-10-06) the core takes 157 ms (read through the cache,
-//! `ota::engine_window::ScratchWindow`) and the engine guard 235 ms.
+//! `crate::split_core`'s `engine_window::ScratchWindow`) and the engine guard 235 ms.
 //!
 //! The peripheral is stolen rather than threaded through `core_boot`:
 //! nothing else in this image drives it (the radios' crypto and the access
@@ -91,14 +92,6 @@ impl Drop for BootSha256 {
             HW_BUSY.store(false, Ordering::Release);
         }
     }
-}
-
-/// SHA-256 of `bytes`, on the accelerator when it is free.
-#[cfg(lp_split)]
-pub fn sha256(bytes: &[u8]) -> [u8; 32] {
-    let mut sha = BootSha256::new();
-    sha.update(bytes);
-    sha.finalize()
 }
 
 /// The tree store's hasher: each record id is one [`BootSha256`] over the

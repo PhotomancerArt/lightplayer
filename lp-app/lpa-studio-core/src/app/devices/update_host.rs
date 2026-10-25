@@ -50,7 +50,13 @@
 //! **The backup is pinned** in the engine cache (`set_held`) from the moment
 //! it is held — a cache hit, or the read-back kept — until the activity ends
 //! on the new version; an update that ends anywhere else keeps it pinned,
-//! since the board may still need it.
+//! since the board may still need it. Two ends let it go anyway, because
+//! nothing can restore from it: a run abandoned before the board was touched
+//! (a cancel while backing up, a gap that ran out, a forget — the board still
+//! has its own engine), and a device that has left the roster for good
+//! (`reconcile` sweeps pins whose device is gone). A pin is
+//! recorded before the hold is awaited, so a board finishing meanwhile sees
+//! it, and a device's second, different backup lets the first go.
 //!
 //! **Speak channel 3 only to a board that announced it** (DS9): a leg on a
 //! board whose evidence has no update facts, or a link that does not carry
@@ -236,12 +242,13 @@ impl UpdateHost {
         self.state.borrow_mut().own = source;
     }
 
-    /// This Studio's own build's facts, as its source says them now: a
-    /// source may learn them after it is installed (the bundle's, which
-    /// fetches its manifests), so the controller asks again after folds.
-    pub(crate) fn own_facts(&self) -> Option<lpa_update::HostBuildFacts> {
+    /// This Studio's own builds' facts, one per target, as its source says
+    /// them now: a source may learn them after it is installed (the
+    /// bundle's, which fetches its manifests), so the controller asks again
+    /// after folds.
+    pub(crate) fn own_facts(&self) -> Vec<lpa_update::HostBuildFacts> {
         let own = self.state.borrow().own.clone();
-        own.and_then(|own| own.facts())
+        own.map(|own| own.facts()).unwrap_or_default()
     }
 
     /// The credentials the controller holds for a core-side login: this
@@ -307,7 +314,15 @@ impl UpdateHost {
             .find(|(_, run)| run.last_effect == effect_id)
             .map(|(device, _)| *device);
         if let Some(device) = device {
+            let touched = state.runs.get(&device).is_some_and(|run| run.board_touched);
             state.drop_run(device, None);
+            // The model says an effect is abandoned for a cancel, a gap that
+            // ran out, an eviction or a forget, and not which. Before the
+            // board changed none of them leaves it needing the backup (it
+            // still has its own engine); after, the pin stays (module doc).
+            if !touched && let Some(seams) = state.seams.clone() {
+                state.release_pin(&seams, device);
+            }
         }
     }
 
@@ -448,6 +463,13 @@ struct UpdateRun {
     asked_unanswered_at: Option<u64>,
     /// The board said something on channel 3 during this leg.
     heard_this_leg: bool,
+    /// When the board last said anything on this link (bench/host ms): what
+    /// a reconnect line times the board's time away from. Cleared when a
+    /// leg starts, so a gap is never counted twice.
+    last_heard_ms: Option<u64>,
+    /// The driver reported a stage past backing up: the board has changed,
+    /// so an end without an outcome keeps the backup pinned.
+    board_touched: bool,
 }
 
 enum RunPhase {
@@ -549,6 +571,8 @@ impl HostState {
                     session_reset: false,
                     asked_unanswered_at: None,
                     heard_this_leg: false,
+                    last_heard_ms: None,
+                    board_touched: false,
                 },
             );
             spawn_ticks(&seams, self.me.clone(), device, generation);
@@ -561,6 +585,7 @@ impl HostState {
         run.session_reset = false;
         run.asked_unanswered_at = None;
         run.heard_this_leg = false;
+        run.last_heard_ms = None;
         run.facts = start.facts.facts.clone();
         let replaced = run.leg.replace(Leg {
             link: start.link,
@@ -616,7 +641,7 @@ impl HostState {
                 );
             }
         }
-        if let Some(line) = run.narration.link_down(now) {
+        if let Some(line) = run.narration.link_down(now, run.last_heard_ms) {
             seams.say(device, leg.effect_id, line);
         }
         seams.marker(
@@ -668,6 +693,44 @@ impl HostState {
                 evidence.is_some_and(|e| e.presence.is_open() && e.link() == Some(leg_link));
             if !open_here {
                 self.leg_lost(device, "the board's link closed");
+            }
+        }
+        self.sweep_pins(roster);
+    }
+
+    /// Let go of the pins of devices that are gone for good. A run that
+    /// ended on anything but up to date keeps its pin (module doc), keyed by
+    /// the device; a device the roster no longer holds, as a device or a
+    /// pending link, can never come back to ask for it. One merged into
+    /// another entry hands its pin on.
+    fn sweep_pins(&mut self, roster: &Roster) {
+        let Some(seams) = self.seams.clone() else {
+            return;
+        };
+        let gone: Vec<DeviceId> = self
+            .pins
+            .keys()
+            .copied()
+            .filter(|device| !self.runs.contains_key(device))
+            .filter(|device| {
+                roster.device(*device).is_none()
+                    && !roster.pending().iter().any(|p| p.device_id() == *device)
+            })
+            .collect();
+        for device in gone {
+            let heir = roster
+                .merged_into(device)
+                .filter(|into| roster.device(*into).is_some() && !self.pins.contains_key(into));
+            match (heir, self.pins.remove(&device)) {
+                (Some(into), Some(hex)) => {
+                    self.pins.insert(into, hex);
+                }
+                (_, Some(hex)) => {
+                    self.pins.insert(device, hex);
+                    log::info!("update: {device:?} left the roster; its backup pin goes");
+                    self.release_pin(&seams, device);
+                }
+                (_, None) => {}
             }
         }
     }
@@ -734,14 +797,19 @@ impl HostState {
         let Some(seams) = self.seams.clone() else {
             return;
         };
-        let own = self.own.clone();
-        let own_facts = own.as_ref().and_then(|own| own.facts());
         let me = self.me.clone();
         let Some(run) = self.runs.get_mut(&device) else {
             return;
         };
         let generation = run.generation;
         let facts = run.facts.clone();
+        // This Studio's own build of the board's target: never another
+        // target's.
+        let target = facts.as_ref().and_then(|f| f.target.clone());
+        let own = self.own.clone();
+        let own_facts = own.as_ref().and_then(|own| {
+            super::own_build_source::own_for(&own.facts(), target.as_deref()).cloned()
+        });
         // A custom build picked from files serves an install of its version.
         if let UpdateIntentFacts::Install { version, .. } = &run.intent
             && let Some(file) = self
@@ -766,9 +834,12 @@ impl HostState {
             UpdateIntentFacts::Auto | UpdateIntentFacts::Reinstall => own_facts.is_some(),
         };
         run.phase = RunPhase::Preparing { source: None };
-        if wants_own && let Some(own) = own {
+        if wants_own
+            && let Some(own) = own
+            && let Some(target) = target
+        {
             (seams.spawn)(Box::pin(async move {
-                let loaded = verified_own_build(own.load().await, own_facts.as_ref());
+                let loaded = verified_own_build(own.load(&target).await, own_facts.as_ref());
                 if let Some(cell) = me.upgrade() {
                     cell.borrow_mut()
                         .build_loaded(device, generation, loaded, false);
@@ -976,6 +1047,7 @@ impl HostState {
                 };
                 let stage = stage_facts(stage);
                 run.read_back |= stage == UpdateStageFacts::BackingUp;
+                run.board_touched |= stage != UpdateStageFacts::BackingUp;
                 if let Some(line) = run.narration.progress(now, stage, done, total) {
                     seams.say(device, run.last_effect, line);
                 }
@@ -1352,7 +1424,7 @@ impl HostState {
         }
         run.session_reset = true;
         let effect = run.last_effect;
-        if let Some(line) = run.narration.link_down(now) {
+        if let Some(line) = run.narration.link_down(now, run.last_heard_ms) {
             seams.say(device, effect, line);
         }
     }
@@ -1407,6 +1479,7 @@ impl HostState {
         }
         if let Some(run) = self.runs.get_mut(&device) {
             run.heard_this_leg = true;
+            run.last_heard_ms = Some(now);
             run.asked_unanswered_at = None;
         }
         match self.runs.get_mut(&device).map(|run| &mut run.phase) {
@@ -1569,10 +1642,9 @@ impl HostState {
             return;
         }
         let cache = Rc::clone(&seams.cache);
+        let me = self.me.clone();
         (seams.spawn)(Box::pin(async move {
-            if let Err(error) = cache.set_held(&hex, false).await {
-                log::debug!("engine cache: {hex} not released: {error}");
-            }
+            release_hold(&cache, &hex, &me).await;
         }));
     }
 
@@ -1720,19 +1792,51 @@ fn end_leg_with(
 }
 
 /// Pin `hex` in the cache and remember it as `device`'s backup.
+///
+/// The pin is recorded **before** the hold is awaited: a board finishing
+/// while this hold is in flight must see it, or it would release the engine
+/// this call is about to hold and the cache's one flag would end up off under
+/// a recorded pin. A failed hold takes the record back. A different backup
+/// the device pinned before is let go once this one is held.
 async fn pin(
     cache: &Rc<dyn EngineCache>,
     hex: &str,
     me: &Weak<RefCell<HostState>>,
     device: DeviceId,
 ) {
+    let Some(cell) = me.upgrade() else {
+        return;
+    };
+    let previous = cell.borrow_mut().pins.insert(device, hex.to_string());
     match cache.set_held(hex, true).await {
         Ok(()) => {
-            if let Some(cell) = me.upgrade() {
-                cell.borrow_mut().pins.insert(device, hex.to_string());
+            if let Some(old) = previous.filter(|old| old != hex) {
+                release_hold(cache, &old, me).await;
             }
         }
-        Err(error) => log::warn!("engine cache: backup {hex} not pinned: {error}"),
+        Err(error) => {
+            log::warn!("engine cache: backup {hex} not pinned: {error}");
+            let mut state = cell.borrow_mut();
+            if state.pins.get(&device).is_some_and(|now| now == hex) {
+                match previous {
+                    Some(old) => state.pins.insert(device, old),
+                    None => state.pins.remove(&device),
+                };
+            }
+        }
+    }
+}
+
+/// Clear the cache's hold on `hex` unless some device's pin names it again
+/// by the time this runs: the hold is one flag per engine, not a count.
+async fn release_hold(cache: &Rc<dyn EngineCache>, hex: &str, me: &Weak<RefCell<HostState>>) {
+    if let Some(cell) = me.upgrade()
+        && cell.borrow().pins.values().any(|other| other == hex)
+    {
+        return;
+    }
+    if let Err(error) = cache.set_held(hex, false).await {
+        log::debug!("engine cache: {hex} not released: {error}");
     }
 }
 
@@ -1790,7 +1894,11 @@ mod tests {
     use core::task::{Context, Poll};
     use std::future::Future;
 
-    use lpa_firmware_store::{EngineSource as Source, MemoryEngineCache};
+    use lpa_devices::DeviceRecord;
+    use lpa_firmware_store::{
+        EngineCacheError, EngineCacheIndex, EngineSource as Source, LocalBoxFuture,
+        MemoryEngineCache,
+    };
     use lpc_firmware_release::sha256_hex;
 
     use super::*;
@@ -1842,6 +1950,226 @@ mod tests {
         assert!(!held(), "the last board to finish let it go");
     }
 
+    #[test]
+    fn a_device_pinning_a_second_backup_lets_the_first_go() {
+        let rig = Rig::new(&[b"the first engine", b"the second engine"]);
+        let device = DeviceId(1);
+        rig.host.state.borrow_mut().runs.insert(device, run());
+        rig.pin(device, 0);
+        rig.pin(device, 0);
+        assert!(rig.held(0), "pinning the same backup again keeps it");
+        rig.pin(device, 1);
+        rig.drain();
+        assert!(!rig.held(0), "the older backup was let go");
+        assert!(rig.held(1), "the new backup is the one pinned");
+
+        // Another board on the older engine keeps it when this one moves on.
+        rig.pin(DeviceId(2), 0);
+        rig.pin(device, 0);
+        rig.pin(device, 1);
+        rig.drain();
+        assert!(rig.held(0), "the other board still needs the first engine");
+    }
+
+    #[test]
+    fn an_abandoned_run_lets_its_backup_go_only_while_the_board_is_untouched() {
+        let rig = Rig::new(&[b"one board's own engine", b"another board's own engine"]);
+        for (device, board_touched) in [(DeviceId(1), false), (DeviceId(2), true)] {
+            let mut run = run();
+            (run.board_touched, run.last_effect) = (board_touched, EffectId(device.0));
+            rig.host.state.borrow_mut().runs.insert(device, run);
+            rig.pin(device, device.0 as usize - 1);
+        }
+
+        rig.host.abandon(EffectId(1));
+        rig.drain();
+        assert!(!rig.held(0), "a cancel while backing up needs no backup");
+
+        rig.host.abandon(EffectId(2));
+        rig.drain();
+        assert!(rig.held(1), "a board that was written may still need it");
+    }
+
+    #[test]
+    fn a_kept_backup_goes_when_its_device_leaves_the_roster() {
+        let rig = Rig::new(&[b"the engine of a board that is forgotten"]);
+        let (kept, forgotten) = (DeviceId(1), DeviceId(2));
+        // Both runs ended on something other than up to date: pins kept.
+        rig.pin(kept, 0);
+        rig.pin(forgotten, 0);
+        let mut roster = Roster::new(Default::default());
+        roster.load_records([DeviceRecord::new(kept, Default::default())]);
+        assert!(roster.device(kept).is_some() && roster.device(forgotten).is_none());
+
+        rig.host.reconcile(&roster);
+        rig.drain();
+        assert!(rig.held(0), "the board still in the roster needs it");
+        assert_eq!(rig.host.state.borrow().pins.len(), 1);
+
+        rig.host.reconcile(&Roster::new(Default::default()));
+        rig.drain();
+        assert!(!rig.held(0), "no board is left to restore from it");
+        assert!(rig.host.state.borrow().pins.is_empty());
+    }
+
+    #[test]
+    fn a_board_finishing_while_another_is_still_pinning_does_not_unpin_it() {
+        let rig = Rig::new(&[b"the old engine both boards run"]);
+        let (first, second) = (DeviceId(1), DeviceId(2));
+        for device in [first, second] {
+            rig.host.state.borrow_mut().runs.insert(device, run());
+        }
+        rig.pin(first, 0);
+        rig.drain();
+
+        // The second board's hold is in flight (the cache has not answered).
+        rig.gate.set(false);
+        let me = rig.me();
+        let mut second_pin = Box::pin(pin(&rig.as_cache, &rig.hexes[0], &me, second));
+        let mut cx = Context::from_waker(core::task::Waker::noop());
+        assert!(second_pin.as_mut().poll(&mut cx).is_pending());
+
+        // The first board finishes now: it must see the second's pin.
+        rig.host
+            .state
+            .borrow_mut()
+            .finish(first, UpdateOutcomeFacts::UpToDate, None);
+        rig.drain();
+        assert!(rig.held(0), "the second board's pin was already recorded");
+
+        rig.gate.set(true);
+        block_on(second_pin);
+        assert!(rig.held(0), "and its hold landed on top");
+        rig.host
+            .state
+            .borrow_mut()
+            .finish(second, UpdateOutcomeFacts::UpToDate, None);
+        rig.drain();
+        assert!(!rig.held(0), "the last board to finish let it go");
+    }
+
+    /// A host over an in-memory cache holding some engines, whose `set_held(true)`
+    /// can be made to wait.
+    struct Rig {
+        host: UpdateHost,
+        cache: MemoryEngineCache,
+        as_cache: Rc<dyn EngineCache>,
+        tasks: Rc<RefCell<Vec<DeviceTaskFuture>>>,
+        hexes: Vec<String>,
+        gate: Rc<core::cell::Cell<bool>>,
+    }
+
+    impl Rig {
+        fn new(engines: &[&[u8]]) -> Self {
+            let cache = MemoryEngineCache::new();
+            let mut hexes = Vec::new();
+            for engine in engines {
+                let hex = sha256_hex(engine);
+                let entry =
+                    EngineCacheEntry::new(hex.clone(), engine.len() as u64, Source::Installed, 1.0);
+                block_on(cache.put(entry, engine.to_vec())).expect("cached");
+                hexes.push(hex);
+            }
+            let gate = Rc::new(core::cell::Cell::new(true));
+            let as_cache: Rc<dyn EngineCache> = Rc::new(GatedCache {
+                inner: cache.clone(),
+                gate: Rc::clone(&gate),
+            });
+            let tasks: Rc<RefCell<Vec<DeviceTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+            let host = UpdateHost::new();
+            host.set_seams(UpdateSeams {
+                spawn: Rc::new({
+                    let tasks = Rc::clone(&tasks);
+                    move |task| tasks.borrow_mut().push(task)
+                }),
+                timer: Rc::new(RefCell::new(|_| {
+                    Box::pin(std::future::pending()) as DeviceTimerFuture
+                })),
+                sink: Rc::new(|_| {}),
+                clock: Rc::new(|| 1.0),
+                cache: Rc::clone(&as_cache),
+                store: None,
+            });
+            Self {
+                host,
+                cache,
+                as_cache,
+                tasks,
+                hexes,
+                gate,
+            }
+        }
+
+        fn me(&self) -> Weak<RefCell<HostState>> {
+            Rc::downgrade(&self.host.state)
+        }
+
+        fn pin(&self, device: DeviceId, engine: usize) {
+            block_on(pin(&self.as_cache, &self.hexes[engine], &self.me(), device));
+        }
+
+        fn held(&self, engine: usize) -> bool {
+            block_on(self.cache.index())
+                .get(&self.hexes[engine])
+                .is_some_and(|e| e.held)
+        }
+
+        fn drain(&self) {
+            drain(&self.tasks);
+        }
+    }
+
+    /// The memory cache, with `set_held(.., true)` waiting while `gate` is shut.
+    struct GatedCache {
+        inner: MemoryEngineCache,
+        gate: Rc<core::cell::Cell<bool>>,
+    }
+
+    impl EngineCache for GatedCache {
+        fn put(
+            &self,
+            entry: EngineCacheEntry,
+            bytes: Vec<u8>,
+        ) -> LocalBoxFuture<'_, Result<(), EngineCacheError>> {
+            self.inner.put(entry, bytes)
+        }
+
+        fn get(
+            &self,
+            sha256: &str,
+            now: f64,
+        ) -> LocalBoxFuture<'_, Result<Vec<u8>, EngineCacheError>> {
+            self.inner.get(sha256, now)
+        }
+
+        fn has(&self, sha256: &str) -> LocalBoxFuture<'_, bool> {
+            self.inner.has(sha256)
+        }
+
+        fn index(&self) -> LocalBoxFuture<'_, EngineCacheIndex> {
+            self.inner.index()
+        }
+
+        fn set_held(
+            &self,
+            sha256: &str,
+            held: bool,
+        ) -> LocalBoxFuture<'_, Result<(), EngineCacheError>> {
+            let gate = Rc::clone(&self.gate);
+            let hex = sha256.to_string();
+            Box::pin(async move {
+                if held {
+                    core::future::poll_fn(|_| match gate.get() {
+                        true => Poll::Ready(()),
+                        false => Poll::Pending,
+                    })
+                    .await;
+                }
+                self.inner.set_held(&hex, held).await
+            })
+        }
+    }
+
     fn run() -> UpdateRun {
         UpdateRun {
             generation: 1,
@@ -1860,6 +2188,8 @@ mod tests {
             session_reset: false,
             asked_unanswered_at: None,
             heard_this_leg: false,
+            last_heard_ms: None,
+            board_touched: false,
         }
     }
 

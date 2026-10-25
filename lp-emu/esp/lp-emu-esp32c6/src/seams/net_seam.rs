@@ -93,8 +93,18 @@ impl Esp32C6Machine {
         if let Err(why) = lan.set_pace(id, self.seams.pace) {
             self.seams.strict_error = Some(why);
         }
+        // A client may have connected before the app started this seam.
+        lan.set_host_attached(id, self.usb_client_is_connected());
         self.seams.net_endpoint = Some(index);
         self.seams.net_pumps = lan.driver() != LanDriver::Runner;
+    }
+
+    /// A host came to, or left, the board's USB byte socket: the unset pace
+    /// holds the board to wall time while one is there.
+    pub(crate) fn net_host_attached(&mut self, attached: bool) {
+        if let (Some(lan), Some(_)) = (&self.seams.lan, self.seams.net_endpoint) {
+            lan.set_host_attached(net_endpoint(self.seams.board), attached);
+        }
     }
 
     /// A chip start: the board's station forgets its link and its events.

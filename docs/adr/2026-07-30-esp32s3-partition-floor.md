@@ -115,3 +115,18 @@ part actually exists.
   extends from toolchains to flash layout
 - Sourcing data and the full landscape survey:
   `~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/03-app-layer-on-s3/notes.md`
+
+## Amendment (2026-10-23): the table stays; updates fit inside it
+
+Over-the-air updates came to the S3 as a split image
+([`2026-10-23-the-s3-ships-a-split-image.md`](2026-10-23-the-s3-ships-a-split-image.md)),
+inside this table: the 6 MB `factory` and the 1.5 MB `lpfs` stay where
+they are.
+- The split image needs no second app slot, so the repartition that
+  whole-image A/B would have needed did not happen. A/B would have meant
+  two slots of about 3.5 MB and `lpfs` cut to about 960 KB.
+- Bluetooth is on by default. On main at `06ea6b68a` the image is
+  2,920,448 B. That leaves 3,373,611 B of steady headroom and 4,784,128 B of
+  update headroom in `factory`.
+- `lpfs` now holds the tree store (384 sectors). The S3s flashed before it
+  are reflashed, with no migration: the only one is the bench board.

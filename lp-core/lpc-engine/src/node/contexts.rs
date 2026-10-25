@@ -148,6 +148,12 @@ pub struct TickContext<'r> {
     /// (`EngineServices::output_open_failure`), or `None` — for every
     /// output whose wires all open, and every other node.
     output_open_failure: Option<Rc<str>>,
+    /// The plan state a context over a resolver with none (a test fake)
+    /// uses — see [`crate::frame_plan::PlanHost`]. Boxed on first use: a
+    /// context lives on the stack once per nested dispatch, and the engine's
+    /// resolver always has a state of its own, so in the product this is one
+    /// pointer that stays `None`.
+    fallback_plans: Option<alloc::boxed::Box<crate::frame_plan::FramePlanState>>,
 }
 
 impl<'r> TickContext<'r> {
@@ -211,6 +217,7 @@ impl<'r> TickContext<'r> {
             fault_presentation: FaultPresentation::default(),
             output_smoothing: None,
             output_open_failure: None,
+            fallback_plans: None,
         }
     }
 
@@ -612,6 +619,19 @@ impl<'r> TickContext<'r> {
             .runtime_buffer_mut(id, frame)
             .map_err(|e| NodeError::msg(alloc::format!("runtime buffer mut: {}", e.message)))?;
         write(buffer)
+    }
+}
+
+impl crate::frame_plan::PlanHost for TickContext<'_> {
+    fn plan_state(&mut self) -> &mut crate::frame_plan::FramePlanState {
+        match self.resolver.frame_plans() {
+            Some(state) => state,
+            None => self.fallback_plans.get_or_insert_with(Default::default),
+        }
+    }
+
+    fn plan_owner(&self) -> Option<NodeId> {
+        Some(self.node_id)
     }
 }
 

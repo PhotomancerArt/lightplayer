@@ -1,4 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+// The f32 divide's Xtensa FPU sequence (`builtins/lpir/fdiv_f32.rs`).
+#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
 
 //! Light Player builtins library.
 //!

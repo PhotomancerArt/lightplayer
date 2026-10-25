@@ -144,11 +144,13 @@ connect failed              Studio couldn't connect to this board over USB.
 not answering (it said      This board stopped responding over USB.
   hello, now says nothing)  Retry to reconnect.                                            ↻ Retry
 sim off                     This simulated board is off.                                   ▶ Power on
-online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect
+online at lightplayer.app   its picture from lightplayer.app, no words                      ☁ Connect (≋ Connect while it shares your network)
   (no link here)            (no picture yet, or relay protocol 1: the dark, no words)
 offline, another way        This board isn't plugged in.
   reaches it                Connect over Wi‑Fi to use it.                                  ↔ Connect
 offline                     This board is offline.  It was last seen 2 hours ago.          (none; ↔ Connect by its cable when it can)
+  (on your account too:     the same words, over the last picture lightplayer.app kept,   (none: nothing reaches it)
+   offline everywhere)      dimmed; "last seen" is the newest any computer saw
 disconnected (port closed)  Studio isn't connected to this board.  Connect over USB to use it.   ↔ Connect
 files need newer firmware   This board's files need newer firmware.
                             Update the firmware to read them.                              ▲ Update firmware
@@ -194,7 +196,7 @@ all well                    the live picture, no words                          
 ```
 
 **Online at lightplayer.app** is a board of the signed-in account that the
-account's list (`ListBoards`) says is online, and that no link of this tab
+account's list (`ListAccountBoards`) says is online, and that no link of this tab
 reaches: one this browser knows, or one it never met (set up on a phone,
 say). It is well, so the surface is its picture and no words, the picture
 lightplayer.app last had (`BoardPictures`), drawn one row of lamps per
@@ -227,6 +229,54 @@ bad:  the board set up on a phone shows nowhere on the computer   # Yona, 10-19 
                                                                   #   offered the relay to boards it had met
 ```
 
+**Offline, on your account** is a board on the signed-in account's list
+(`ListAccountBoards`, the account's board list) that is not online at
+lightplayer.app and that no link of this tab reaches: one this browser
+remembers, or one it never met (the list follows the account to every
+computer). It is the offline card: the surface says "This board is offline.
+It was last seen 2 hours ago.", where "last seen" is the newest any link of
+any computer saw it; under it, dimmed, the last picture lightplayer.app kept
+of it (kept across a deploy, written behind by the relay), or the dark when
+there is none. Its rows say their last known values, dimmed: Project and
+Firmware as the board last reported them, Hardware its model when a Studio
+reported one, lightplayer.app `river@example.com · 2 h ago`.
+Nothing reaches it, so there is no Connect; a board it never met offers
+Remove from your account and nothing else. A board this browser remembers
+takes the record's facts only where the record saw it more recently, and
+keeps its own saved picture.
+
+```text
+┌──────────────────────────────────────────┐
+│   ░ ░ ░ ░ ░ ░ ░ ░ ░ ░ ░ ░ ░ ░       ╭────┤   its last picture at lightplayer.app,
+│              ( ↔ )                  │ ⋯  │     dimmed under the notice
+│       This board is offline.        ╰────┤
+│   It was last seen 2 hours ago.          │
+├──────────────────────────────────────────┤
+│ Porch ✎                                  │   no primary: nothing reaches it
+├──────────────────────────────────────────┤
+│ ◆ Project          rocaille             › │   last known, dimmed
+│ ⏚ USB              —                    › │
+│ ≋ Wi‑Fi            —                    › │
+│ ᛒ Bluetooth        —                    › │
+│ ☁ lightplayer.app  river@example.com  2 h ago │   dimmed: when it was last seen
+│ ○ Access           —                    › │
+│ ▲ Firmware         2026.10.17-2         › │   last known, dimmed
+│ ■ Hardware         XIAO ESP32-C6        › │   the model a Studio reported
+└──────────────────────────────────────────┘
+```
+
+As walked on a profile that never met the board (`just walk-wifi-emu
+studio-relay-account`, T10, 2026-10-21), two rows read otherwise than the
+drawing above, which is the remembered board's: the name has no ✎ (a board
+never met here offers no rename; its name is the one the board reports, D5),
+and Access reads `unknown` rather than `—`. USB reads `not connected`, as on
+every card with no cable. A board that never reached lightplayer.app (one
+joined over USB with no Wi‑Fi) has no picture: the dark, under the notice.
+
+```text
+bad:  the board is on the phone's account, and the computer shows nothing while it is unplugged   # M2's reason to be
+```
+
 One update over USB first (a pre-update board) is no notice: the board
 plays and connects, and the Firmware row's own Update carries it.
 
@@ -250,6 +300,60 @@ state word and its own button and loses its orange or red: the surface is
 the one loud place. The primary may repeat that row's button; it says verb
 and object ("Update firmware") where the row says the verb alone
 ("Update"), because the row already names its object (P12).
+
+**Connect takes the best road, in one press.** A board no link of this tab
+reaches has one Connect, and it tries the roads in order: Wi‑Fi on your
+own network, then lightplayer.app, then its cable (a click). The Wi‑Fi
+address is the one lightplayer.app says the board gave, while its list
+says the board shares this computer's network, else the one this browser
+remembers; while the list says the board is on another network, Wi‑Fi is
+skipped. A page whose browser never opens a socket to the LAN (an https
+page outside Chrome) skips it too. The primary's glyph is the first
+road's, not the board's last link: a board online at lightplayer.app that
+shares your network reads `≋ Connect`, not `☁ Connect`.
+
+```text
+┌──────────────────────────────────────────┐
+│     ● ● ● ● ● ● ● ● ● ● ● ● ● ●     ╭────┤
+│     ● ● ● ● ● ● ● ●                 │ ⋯  │   its picture, from lightplayer.app
+├────────────────────────────┬─────────┴────┤
+│ Fabric Test ✎              │ ≋ Connect    │   Wi‑Fi first: it shares your network
+├────────────────────────────┴──────────────┤
+│ ≋ Wi‑Fi            —                    › │   its details: Connect over Wi‑Fi
+│ ☁ lightplayer.app  river@example.com  online │   its details: Connect through lightplayer.app
+└──────────────────────────────────────────┘
+```
+
+While a road runs, the surface says the road in flight, as the connecting
+state already does: "Connecting to this board over Wi‑Fi.", and when Wi‑Fi
+doesn't answer, the same press goes on and the line becomes "Connecting to
+this board through lightplayer.app." There is no new state. The Wi‑Fi
+failure is not shown when lightplayer.app then answers: one line in the
+log says it (`Couldn't reach Fabric Test over Wi‑Fi; trying
+lightplayer.app.`). When both fail, the card shows lightplayer.app's words
+and its Retry. "Connect over Wi‑Fi" or "Connect through lightplayer.app"
+pressed in a row's details is that road alone. A board this tab already
+reaches (USB, Bluetooth, Wi‑Fi or lightplayer.app) has no road: Connect
+opens its session on that link.
+
+```text
+do:   │ Fabric Test                │ ≋ Connect │   # one press: Wi‑Fi, else lightplayer.app
+bad:  │ Fabric Test                │ ☁ Connect │   # on your own network, through the cloud:
+                                                   #   the slow road when the fast one is there
+bad:  Studio couldn't reach this board over Wi‑Fi.   # a second press for what Studio could try itself
+      Make sure this computer is on the same Wi‑Fi, then retry.      ↻ Retry
+```
+
+**A session through lightplayer.app moves onto Wi‑Fi by itself**, once per
+page load, when the list says the board shares your network: the card's
+lightplayer.app row stops saying `connected` and its Wi‑Fi row starts, and
+nothing else changes. The editor stays as it was, with no "Reconnecting…".
+If Wi‑Fi doesn't answer, the board stays on lightplayer.app and the log says
+why in one line; if Wi‑Fi drops later, the board goes back through
+lightplayer.app within about five seconds, the way any dropped link does.
+It never moves while the board is busy (an update, a project being sent).
+Watching a board on its card never opens a session: only Connect and Edit
+do.
 
 ## The row
 
@@ -425,7 +529,13 @@ connect by it."
                                                      #   the details say which): its fix is Wi‑Fi's. not lit
 ☁ lightplayer.app  river@example.com   not added     # the board doesn't hold the account's key
 ☁ lightplayer.app  river@example.com   online        # reachable from any browser signed in to it; with no
-                                                    #   link here, the account's list says it (ListBoards)
+                                                    #   link here, the account's list says it (ListAccountBoards)
+☁ lightplayer.app  river@example.com   2 h ago       # on the account's list, offline everywhere, no link
+                                                    #   here: when any computer last saw it. dimmed
+☁ lightplayer.app  river@example.com   list full     # the board holds the account's key and the account's list
+                                                    #   holds 64 boards: it is not on it. orange; the details
+                                                    #   say "Your account holds 64 boards. Remove one to add
+                                                    #   this one." once, with no button of its own
 ☁ lightplayer.app  river@example.com   connected     # this tab's link
 ☁ lightplayer.app  river@example.com   connecting
 ☁ lightplayer.app  river@example.com   can't reach   # joined, and it didn't answer (or refused it). orange
@@ -450,6 +560,8 @@ bad:  ☁ lightplayer.app  Yona's account     # Yona's phone, 10-19: no Wi‑Fi 
                                             #   "this will work". Name the account by its email, then the state
 bad:  ☁ lightplayer.app  river@example.com   Wi‑Fi not s…    # story, 10-19: at the grid's width the state was cut;
                                                             #   a state beside an email stays short
+bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20: the same cut; the surface says
+                                                            #   "last seen" in words, the row just the age
 ```
 
 ### Access ○: what you can do
@@ -519,7 +631,24 @@ something. The name is renamed in the name bar, not here:
 │            Chip   ESP32-C6                      │
 │            Id     a0:f2:62:87:b4:8c             │
 │ Actions    ↻ Reset                              │
-│ Danger     ✕ Factory reset   ✕ Forget           │   Lasting: arm, then press again
+│ Danger     ✕ Factory reset   ✕ Forget on this browser   ✕ Remove from your account │   Lasting: arm, then press again
+```
+
+Two forgets on a board the account's list holds (D10): **Forget on this
+browser** (`devices/<board>/forget`) drops this browser's memory of it and
+its port grant, and its words add that the board still shows from your
+account on every computer; **Remove from your account**
+(`devices/<board>/forget-from-account`) takes it off the account's list on
+every computer: "Porch leaves your account's list on every computer. The
+board keeps its keys, and it comes back the next time it reaches
+lightplayer.app." Neither removes a key from the board: that is the Access
+row's. Remove from your account is offered only while someone is signed in
+and the list holds the board; pressed, the card leaves the list at once, and
+if lightplayer.app refuses it the board comes back and its lightplayer.app
+row's details say why.
+
+```text
+bad:  ✕ Forget          # on an account board, read as "gone everywhere": it is this browser's only
 ```
 
 Factory reset erases the whole board (firmware, projects, its Wi‑Fi and

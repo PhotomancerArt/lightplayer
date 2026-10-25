@@ -1,7 +1,10 @@
 //! A LAN with a host on it runs at the host's pace.
 //!
 //! A host connected through a port forward ([`super::LanPortForward`]) is a
-//! wall-clock peer: its timers (lp-link's resend timer and tail probe, a TCP
+//! wall-clock peer (so is one attached on the board's USB byte socket, which
+//! holds an unset pace the same way: a board that skips idle time out-waits
+//! its send room before a page reading on wall time drains a frame, and
+//! drops the next one): its timers (lp-link's resend timer and tail probe, a TCP
 //! stack's) count host time, and so does every delay on its side of the
 //! wall. The board's timers count guest time, and an idle board's guest time
 //! runs far ahead of the host's: a `wfi` skips straight to the next timer,

@@ -50,7 +50,6 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -70,6 +69,10 @@ use lpc_hardware::{
 use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::s3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
+use crate::output::ws281x_endpoints::{
+    byte_len_for_byte_count, endpoint_error_to_output_error, gpio_number, has_board_assigned_label,
+    validate_byte_count, ws281x_local_spec,
+};
 
 const DRIVER_ID: &str = "esp32s3-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32-S3 RMT WS281x";
@@ -443,6 +446,10 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
         );
         #[cfg(feature = "frame-dump")]
         frame_dump::log_open(endpoint_id, config.byte_count());
+        // A split image's core lights this strip while an update runs
+        // (`fw_esp32_common::split_core::status_light_note`).
+        #[cfg(lp_split)]
+        fw_esp32_common::split_core::status_light_note::note_open(gpio, config.byte_count() / 3);
 
         Ok(Box::new(Esp32S3RmtWs281xOutput {
             registry: Rc::clone(&self.registry),
@@ -453,6 +460,8 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             byte_count: config.byte_count(),
             #[cfg(feature = "frame-dump")]
             dump: FrameDump::new(),
+            #[cfg(feature = "psram")]
+            staging: crate::psram::InternalBuffer::empty(),
         }))
     }
 }
@@ -475,6 +484,12 @@ struct Esp32S3RmtWs281xOutput {
     /// compile-time rather than a runtime flag.
     #[cfg(feature = "frame-dump")]
     dump: FrameDump,
+    /// A `psram` image's copy of a frame the engine rendered into PSRAM: the
+    /// refill ISR reads its frame from internal RAM only (M10 P4; the PSRAM
+    /// spike measured its margin shrinking from 4/9 to 7/9 of the deadline
+    /// reading PSRAM under load). 31 µs for 620 × 3 B on FS3.
+    #[cfg(feature = "psram")]
+    staging: crate::psram::InternalBuffer,
 }
 
 impl Ws281xOutput for Esp32S3RmtWs281xOutput {
@@ -486,6 +501,25 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
                 actual: data.len(),
             });
         }
+
+        // A frame in PSRAM goes out of an internal copy (see `staging`).
+        #[cfg(feature = "psram")]
+        let data: &[u8] = if crate::psram::in_window(data.as_ptr() as usize) {
+            match self.staging.copy_of(data) {
+                Some(copy) => copy,
+                None => {
+                    return Err(OutputError::Other {
+                        message: format!(
+                            "RMT channel {}: no internal RAM for the frame's {} B copy",
+                            self.channel,
+                            data.len()
+                        ),
+                    });
+                }
+            }
+        } else {
+            data
+        };
 
         // Blocking send: the borrow of `data` provably outlives the
         // transmission because `send_blocking` does not return until the
@@ -520,6 +554,8 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
         // refused is not one of them.
         #[cfg(feature = "frame-dump")]
         self.dump.on_write(data);
+        #[cfg(feature = "ws281x_frame_check")]
+        log_guard_trips(self.channel);
         Ok(())
     }
 
@@ -618,19 +654,6 @@ fn adopt_channel(
     }
 }
 
-fn validate_byte_count(byte_count: u32) -> Result<(), HardwareEndpointError> {
-    if byte_count < 3 {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: "WS281x byte_count must be at least 3".into(),
-        });
-    }
-    Ok(())
-}
-
-fn byte_len_for_byte_count(byte_count: u32) -> usize {
-    ((byte_count / 3) as usize) * 3
-}
-
 fn start_error_to_output_error(channel: u8, error: StartError) -> OutputError {
     match error {
         StartError::Busy => OutputError::Other {
@@ -642,56 +665,26 @@ fn start_error_to_output_error(channel: u8, error: StartError) -> OutputError {
     }
 }
 
-fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
-    match error {
-        HardwareEndpointError::Hardware { error } => OutputError::Hardware { error },
-        other => OutputError::InvalidConfig {
-            reason: other.to_string(),
-        },
+/// `ws281x_frame_check` (never shipped): the RMT's own truncation count, the
+/// guard trips summed over the channels, one line per 250 frames on channel
+/// 0's writes — the number the LCD backend's CAM check is compared against.
+#[cfg(feature = "ws281x_frame_check")]
+fn log_guard_trips(channel: u8) {
+    use core::sync::atomic::{AtomicU32, Ordering};
+    static WRITES: AtomicU32 = AtomicU32::new(0);
+    if channel != 0 {
+        return;
     }
-}
-
-fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
-    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: format!("WS281x endpoint address is not a GPIO: {address}"),
-        });
-    };
-    let gpio = raw
-        .parse::<u8>()
-        .map_err(|_| HardwareEndpointError::UnsupportedConfig {
-            reason: format!("invalid ESP32-S3 GPIO address: {address}"),
-        })?;
-    if !gpio_exists(gpio) {
-        return Err(HardwareEndpointError::UnsupportedConfig {
-            reason: format!("ESP32-S3 has no GPIO {gpio}"),
-        });
+    let n = WRITES.fetch_add(1, Ordering::Relaxed) + 1;
+    if n % 250 != 0 {
+        return;
     }
-    Ok(gpio)
-}
-
-/// Does this chip have GPIO `pin` at all?
-///
-/// The ESP32-S3 numbers **GPIO0-21 and GPIO26-48** — there is no GPIO22-25 and
-/// no GPIO49+. This is not a policy filter (reserving pins is the manifest's
-/// job); it is the physical pin list, and it is checked because
-/// [`AnyPin::steal`] *panics* on a number the chip does not have. A
-/// hand-written `/hardware.json` naming `/gpio/22` must fail the open, not the
-/// boot.
-fn gpio_exists(pin: u8) -> bool {
-    pin <= 21 || (26..=48).contains(&pin)
-}
-
-/// A resource whose display label is still `GPIO<n>` has no board label, and a
-/// pin the board does not name is not one a project should be offered.
-fn has_board_assigned_label(address: &HwAddress, display_label: &str) -> bool {
-    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
-        return false;
-    };
-    !display_label.eq_ignore_ascii_case(&format!("GPIO{raw}"))
-}
-
-fn ws281x_local_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(format!("ws281x:local:{config}"))
-        .expect("manifest display label should form a valid endpoint spec")
+    let (mut frames, mut trips, mut errors) = (0, 0, 0);
+    for ch in 0..TX_CHANNELS as u8 {
+        let stats = DRIVER.stats(ch);
+        frames += stats.frames;
+        trips += stats.guard_trips;
+        errors += stats.errors;
+    }
+    log::info!("[ws281x-check] driver=rmt frames={frames} trips={trips} errors={errors}");
 }
