@@ -1,7 +1,7 @@
 ---
-status: fixed          # board fixed; hw-power-cut.py still cannot tell (below)
+status: fixed          # board fixed 2026-10-23; every oracle demands proof 2026-10-25
 found: 2026-10-23      # live-debugging: the S3 radio/OTA director, FS3 kept its uptime through five cuts
-fixed: lp-board-bench 11eaf25   # PhotomancerArt/lp-board-bench#10, outside this repo
+fixed: lp-board-bench 11eaf25   # PhotomancerArt/lp-board-bench#10, outside this repo; oracle: hw-power-cut.py (this repo)
 area: desk tooling (lp-board-bench `board power-*`), scripts/ota/hw-power-cut.py
 class: oracle-could-not-fail
 related:
@@ -48,7 +48,7 @@ report already said the cut did nothing) and two attempts to wake a wedged
 FS3 (so "a power cycle does not clear the wedge" is unproven). No C6 was cut
 in the window.
 
-**Still open: `scripts/ota/hw-power-cut.py` cannot tell either.** A C6 PASS
+**Was open, closed 2026-10-25: `scripts/ota/hw-power-cut.py` could not tell either.** A C6 PASS
 is "`done: UpToDate`, Y's core, an engine". A board that never lost power
 resumes the update over the re-enumerated link and passes the same way, and
 the script stops only if the board does not come back on the bus. Every run
@@ -59,9 +59,17 @@ run on a changed desk could be. The silicon tests that cut through `board`
 without one, and `scripts/ota/s3-desk-sitting.py cuts` demands POWERON
 (`rst:0x1`) after its first cut.
 
+**Closed 2026-10-25 — the C6 oracle can now fail.** `hw-power-cut.py` takes a
+capture to Y's first heartbeat after every recovery and passes a cut only with
+proof the power went: a heartbeat reading `power-on`, or Y's boot count
+restarted (an update with no cut adds three boots to X's, 2 -> 6 in the P11
+capture). Without it the cut is `NO-CUT-PROOF`: printed loudly, exit 1, never
+a pass. With the S3's runner (#1299) and `s3-desk-sitting.py cuts`, every
+script that cuts a desk board now demands the board's own word.
+
 **Regression coverage** — lp-board-bench's `desk_parsers.test.ts` (the CH
 hub tree fixture `uhubctl-ch-hub-between-twins.txt`: twins paired, ambiguous
-trees refused, `uhubctl -e`). In this repo: none for `hw-power-cut.py`.
+trees refused, `uhubctl -e`). In this repo: `scripts/ota/test_hw_power_cut.py` (`just lint-power-cut-verdict`, in `check-lint`) replays the verdict against captured C6 logs, among them a real update that never lost power, which must not PASS.
 
 **Lesson** — A power cut's proof is the board saying it lost power (a
 power-on reset reason, an uptime that restarted, a boot count), never the
