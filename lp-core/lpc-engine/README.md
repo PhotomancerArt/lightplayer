@@ -103,7 +103,29 @@ What each plan holds and its key:
 |---|---|---|
 | engine | `LaneTopology`: per node, whether it is the default fragments consumer of its bus channel (where unaddressed patch runs and auto-flow land) | structure epoch |
 | engine | output sink configurations, re-read from the defs | structure epoch (checked like a plan in `Check` mode) |
+| output | `OutputFramePlan`: the fragments planned from its producers' placements, their coverage and its status (and the products it was built for) | structure epoch, `output_identity_revision` (a change count), the producers' summed `control_patch_generation` |
+| fixture | `FixtureFramePlan`: the lamp count, the control extent and the full-write control spans | structure epoch, `mapping_version`, the colour order |
 | engine | per dispatch: the recovery-frame name (`RuntimeNodeEntry::recovery_name`, the path rendered once) and the produce call key (the resolver's interned path handle) | the node's path / the epoch's intern table |
+
+**Reads a node makes every frame** keep their query id in a
+`frame_plan::PlannedRead` (tagged with the epoch it was interned in) and
+resolve by id (`TickContext::resolve_planned_static`, `read_planned_accessor`,
+`read_planned_option_or`): the value is still resolved per frame — a bus
+writer stays live, a default is a cache hit — but no key is built and no
+memo searched. The fixture's settings reads and the output's go through it.
+
+**A Direct lane is a work item.** `nodes::fixture::direct_lane_job::DirectLaneJob`
+is the per-frame render once the engine is done deciding: the coordinate
+source and the lamp writer (encoding, power pass, selection, destination),
+plain data with no `Rc`, `RefCell`, resolver or context, because a second
+core will run lanes. Today the shader's sample stream drives its batches;
+its test runs one from a hand-built job and a fake sampler, allocating
+nothing.
+
+Reads through a compiled def view (`reader.get(ctx)`) resolve by an id the
+resolver interns once per epoch per `(node, accessor)`
+(`Resolver::intern_consumed_accessor`) instead of cloning the accessor into
+a key on every read.
 
 The resolver's own share: a bus read nobody provides is cached as a
 `ResolvedRoute::NoBusProvider` decision (it still answers the same error

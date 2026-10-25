@@ -34,6 +34,7 @@ use lp_collection::VecMap;
 use lpc_model::LpValue;
 use lpc_model::NodeId;
 use lpc_model::Revision;
+use lpc_model::SlotAccessor;
 use lpc_model::SlotPath;
 use lpc_model::SlotPathError;
 use lpc_model::WithRevision;
@@ -95,14 +96,30 @@ pub struct Resolver {
     /// again — one of the last per-frame allocation sources after routes and
     /// values stopped being rebuilt. Lives here because it shares the intern
     /// table's lifetime exactly.
-    static_paths: VecMap<(NodeId, &'static str), QueryId>,
+    ///
+    /// Keyed by the literal's address and length ([`static_str_key`]), not its
+    /// text: the lookup runs on every such read, and comparing the text was
+    /// the larger part of it. Two copies of one literal are two entries
+    /// naming the same interned query.
+    static_paths: VecMap<(NodeId, StaticStrKey), QueryId>,
     /// `(scope, channel name)` → the bus query it names.
     ///
     /// The sibling of [`Self::static_paths`] for the well-known channels a
     /// node reads every frame (`bus:time`, above all): building the key
     /// means a `ChannelName(String)` per read, allocated only to be hashed
     /// and dropped.
-    static_bus: VecMap<(Option<ScopeRef>, &'static str), QueryId>,
+    static_bus: VecMap<(Option<ScopeRef>, StaticStrKey), QueryId>,
+    /// `(node, compiled accessor)` → the consumed-slot query it names,
+    /// sorted for an allocation-free lookup by borrowed accessor.
+    ///
+    /// The sibling of [`Self::static_paths`] for reads through a compiled
+    /// def view (`reader.get(ctx)`: a fixture's `render_size` and
+    /// `brightness`, an output's `test_pattern`): building the
+    /// `QueryKey::ConsumedSlotAccessor` cloned the accessor's path and steps
+    /// on every read, only to find the id the table already held. One clone
+    /// per epoch now, at the first read — the intern table's own; this list
+    /// holds only the ids, ordered by the accessor their key carries.
+    static_accessors: Vec<(NodeId, QueryId)>,
     /// The shared handles produced-slot [`crate::dataflow::resolver::Production`]s
     /// carry, one per distinct produced path. Sorted, so lookup is a binary
     /// search over path comparisons and never allocates.
@@ -127,6 +144,7 @@ impl Resolver {
             force_invalidate_per_frame: false,
             static_paths: VecMap::new(),
             static_bus: VecMap::new(),
+            static_accessors: Vec::new(),
             produced_paths: Vec::new(),
         }
     }
@@ -173,27 +191,52 @@ impl Resolver {
         path: &'static str,
     ) -> Result<QueryId, SlotPathError> {
         self.assert_not_batching();
-        if let Some(id) = self.static_paths.get(&(node, path)) {
+        if let Some(id) = self.static_paths.get(&(node, static_str_key(path))) {
             return Ok(*id);
         }
         let slot = SlotPath::parse(path)?;
         let id = self.intern.intern(&QueryKey::ConsumedSlot { node, slot });
-        self.static_paths.insert((node, path), id);
+        self.static_paths.insert((node, static_str_key(path)), id);
         Ok(id)
+    }
+
+    /// Id for `node`'s consumed slot read through `accessor`, cloning the
+    /// accessor into a key at most once per epoch.
+    pub fn intern_consumed_accessor(&mut self, node: NodeId, accessor: &SlotAccessor) -> QueryId {
+        self.assert_not_batching();
+        let intern = &self.intern;
+        let held_accessor = |id: QueryId| match intern.key(id).map(|key| &**key) {
+            Some(QueryKey::ConsumedSlotAccessor { accessor, .. }) => Some(accessor),
+            _ => None,
+        };
+        let found = self.static_accessors.binary_search_by(|(held_node, id)| {
+            (held_node, held_accessor(*id)).cmp(&(&node, Some(accessor)))
+        });
+        match found {
+            Ok(index) => self.static_accessors[index].1,
+            Err(index) => {
+                let id = self.intern.intern(&QueryKey::ConsumedSlotAccessor {
+                    node,
+                    accessor: accessor.clone(),
+                });
+                self.static_accessors.insert(index, (node, id));
+                id
+            }
+        }
     }
 
     /// Id for the bus query on `channel` in `scope`, building the
     /// [`lpc_model::ChannelName`] at most once per epoch.
     pub fn intern_static_bus(&mut self, scope: Option<ScopeRef>, channel: &'static str) -> QueryId {
         self.assert_not_batching();
-        if let Some(id) = self.static_bus.get(&(scope, channel)) {
+        if let Some(id) = self.static_bus.get(&(scope, static_str_key(channel))) {
             return *id;
         }
         let id = self.intern.intern(&QueryKey::Bus {
             scope,
             channel: lpc_model::ChannelName(alloc::string::String::from(channel)),
         });
-        self.static_bus.insert((scope, channel), id);
+        self.static_bus.insert((scope, static_str_key(channel)), id);
         id
     }
 
@@ -277,6 +320,7 @@ impl Resolver {
         self.intern.clear();
         self.static_paths.clear();
         self.static_bus.clear();
+        self.static_accessors.clear();
         // Paths outlive epochs, but a node the change removed should not
         // keep its paths resident; the survivors re-intern on their next
         // produce.
@@ -322,6 +366,14 @@ impl Resolver {
     pub(crate) fn counters_mut(&mut self) -> &mut ResolveFrameCounters {
         &mut self.frame_counters
     }
+}
+
+/// A `&'static str` by identity: its address and length. A literal never
+/// moves or dies, so equal keys always name equal text.
+type StaticStrKey = (usize, usize);
+
+fn static_str_key(text: &'static str) -> StaticStrKey {
+    (text.as_ptr() as usize, text.len())
 }
 
 /// Materialize a direct [`lpc_model::LpValue`] literal to a versioned slot value.
