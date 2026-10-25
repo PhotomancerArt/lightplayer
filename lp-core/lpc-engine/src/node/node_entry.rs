@@ -56,6 +56,13 @@ pub struct RuntimeNodeEntry<N> {
     /// path, not the id). A node's path never changes after creation and its
     /// id is never reused, so this needs no invalidation.
     recovery_name: OnceCell<Rc<str>>,
+
+    /// The channels a module node declares it takes from its host
+    /// (`ModuleDef::inputs`): they list in the host scope — through a
+    /// playlist entry's sink — though nothing there names them
+    /// (modules.md R2, playlists-on-the-bus D5). Empty for every other
+    /// node. Set with the module's bindings.
+    pub declared_inputs: Vec<lpc_model::ChannelName>,
 }
 
 impl<N> RuntimeNodeEntry<N> {
@@ -96,6 +103,7 @@ impl<N> RuntimeNodeEntry<N> {
             project_use,
             def_location,
             recovery_name: OnceCell::new(),
+            declared_inputs: Vec::new(),
         }
     }
 

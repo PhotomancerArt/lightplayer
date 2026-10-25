@@ -54,6 +54,7 @@ copy it made (delete the gallery package to re-seed).
 | `description` | `project.json` | Optional, one sentence, ≤160 characters. Project data (the card face does not show it today). |
 | `kind`, `exports` | `project.json` | Patterns: `"kind": "pattern"`, `"exports": ["effect"]`. Projects: absent. |
 | `provenance` | `effect/module.json` for a pattern; the root `module.json` for a project | `author`, `version`, `license`, `created`. CC0-1.0 unless stated; a pattern's export must state a license or the export lint warns. |
+| `inputs` | `effect/module.json` | The channels the pattern shares with the piece it is placed in: `["palette", "detail"]` when the pattern's palette and its detail mean the same thing in every pattern (Detail's "1× is my chosen size"). Each lists as one control at the playlist's level; a pattern that does not declare one keeps it to itself. Names only: label and range come from the shader's own binding. See `docs/adr/2026-10-20-patterns-declare-their-inputs.md`. |
 
 Sample content in this repository is CC0 unless a module's provenance
 says otherwise; anything that is not CC0 has a row in

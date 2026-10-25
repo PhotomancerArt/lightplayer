@@ -4758,7 +4758,12 @@ impl ProjectController {
         let owner = node.target().node_id;
         let scope = lpc_wire::WireScopeRef::Module { owner };
 
-        let controls = self.scoped_panel_controls(graph, scope, children);
+        let mut controls = self.scoped_panel_controls(graph, scope, children);
+        // The shared band (playlists-on-the-bus D6): the channels the
+        // modules placed here declare as inputs — the playing pattern's
+        // included — as this scope's own controls.
+        let shared = self.declared_input_controls(graph, scope, children, &controls);
+        controls.extend(shared);
 
         // The clock's Speed knob sits in the flat strip with every other
         // one-channel control: its tape, the instrument that once had a
@@ -4769,7 +4774,10 @@ impl ProjectController {
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
         groups.extend(children.iter().filter_map(|child| match &child.face {
-            Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+            Some(crate::UiNodeFace::Module(face)) => Some(without_unheld_inputs(
+                face.panel.clone(),
+                &self.module_declared_inputs(&child.detail),
+            )),
             _ => None,
         }));
         // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
@@ -5668,6 +5676,68 @@ impl ProjectController {
     /// `None` — no group at all — when the playlist has no resolved active
     /// entry, its card is not backed by a controller, or the active entry
     /// publishes nothing: an empty cluster is worse than no cluster.
+    /// The channels the module at `path` declares as inputs
+    /// (`ModuleDef::inputs`), from its def — empty for any other node.
+    fn module_declared_inputs(&self, path: &str) -> Vec<String> {
+        use lpc_model::FromLpValue;
+        ProjectNodeAddress::parse(path)
+            .ok()
+            .and_then(|address| self.node(&address))
+            .and_then(|node| def_slot_value(node, &["inputs", "some"]))
+            .and_then(|value| Vec::<String>::from_lp_value(value).ok())
+            .unwrap_or_default()
+    }
+
+    /// The band's shared controls for `scope` (playlists-on-the-bus D6,
+    /// plan DP10): each channel a module placed here declares as an input
+    /// — a child module, or the playing entry of a playlist here — that is
+    /// not already one of `existing`. Each is the module's own control for
+    /// the channel (its meta, R9), retargeted to `scope`, so a write lands
+    /// where every module that declares it inherits it (R5) and a module's
+    /// own value cuts only that module loose (E4). At rest it shows the
+    /// module's resolved value: its own default, until the band is set.
+    fn declared_input_controls(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        children: &[crate::UiNodeChild],
+        existing: &[crate::UiPanelControlView],
+    ) -> Vec<crate::UiPanelControlView> {
+        let mut placed: Vec<(&str, &crate::UiPanelGroup)> = Vec::new();
+        collect_placed_module_panels(children, &mut placed);
+        let mut shared: Vec<crate::UiPanelControlView> = Vec::new();
+        for (path, panel) in placed {
+            for channel in self.module_declared_inputs(path) {
+                let taken = existing
+                    .iter()
+                    .chain(shared.iter())
+                    .any(|control| control.channel == channel);
+                if taken {
+                    continue;
+                }
+                let Some(own) = panel
+                    .controls
+                    .iter()
+                    .find(|control| control.channel == channel)
+                else {
+                    continue;
+                };
+                let target = crate::UiPanelTarget {
+                    scope,
+                    engaged: self.panel_engaged(graph, &scope, &channel),
+                    channel: channel.clone(),
+                };
+                let (state, source) = self.panel_control_state(graph, scope, &target);
+                let mut control = own.clone();
+                control.control.panel_target = Some(target);
+                control.state = state;
+                control.source = source;
+                shared.push(control);
+            }
+        }
+        shared
+    }
+
     fn playlist_entry_group(
         &self,
         graph: &lpc_wire::WireBindingGraph,
@@ -5696,10 +5766,15 @@ impl ProjectController {
         // is what "this pattern's knobs" means. It keeps its own target, so
         // its reset clears the module's writers — the scope the knobs
         // actually live in.
+        // A shared knob (one the pattern declares as an input) stands in the
+        // band; here it shows only while this pattern holds its own value
+        // (playlists-on-the-bus D14).
         let module_panel = match entry_card.face.as_ref() {
-            Some(crate::UiNodeFace::Module(module)) if !module.panel.is_empty() => {
-                Some(module.panel.clone())
-            }
+            Some(crate::UiNodeFace::Module(module)) => Some(without_unheld_inputs(
+                module.panel.clone(),
+                &self.module_declared_inputs(&entry_card.detail),
+            ))
+            .filter(|panel| !panel.is_empty()),
             _ => None,
         };
         match (controls.is_empty(), module_panel) {
@@ -9693,6 +9768,42 @@ fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
 /// no new plumbing, which is what keeps the provenance footer cheap.
 /// `None` for an unauthored path, a structural slot, or a name the slot
 /// grammar rejects.
+/// The finished panels of the modules placed among `children`: each child
+/// module's, and the playing entry's of each playlist (the playlist face
+/// keeps only that entry's card), descending through other children the
+/// way the playlist groups are collected.
+fn collect_placed_module_panels<'a>(
+    children: &'a [crate::UiNodeChild],
+    out: &mut Vec<(&'a str, &'a crate::UiPanelGroup)>,
+) {
+    for child in children {
+        match &child.face {
+            Some(crate::UiNodeFace::Module(face)) => out.push((&child.detail, &face.panel)),
+            Some(crate::UiNodeFace::Playlist(_)) => {
+                if let Some(entry) = child.children.first()
+                    && let Some(crate::UiNodeFace::Module(face)) = &entry.face
+                {
+                    out.push((&entry.detail, &face.panel));
+                }
+            }
+            _ => collect_placed_module_panels(&child.children, out),
+        }
+    }
+}
+
+/// `group` without its controls on `inputs` — the channels its module
+/// shares through the band — unless the module holds its own value for one
+/// (Engaged), which is what shows that pattern has gone its own way.
+fn without_unheld_inputs(mut group: crate::UiPanelGroup, inputs: &[String]) -> crate::UiPanelGroup {
+    if inputs.is_empty() {
+        return group;
+    }
+    group.controls.retain(|control| {
+        !inputs.contains(&control.channel) || control.state == crate::UiPanelControlState::Engaged
+    });
+    group
+}
+
 fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc_model::LpValue> {
     fn descend<'a>(slots: &'a [SlotController], path: &[&str]) -> Option<&'a SlotController> {
         let (head, rest) = path.split_first()?;

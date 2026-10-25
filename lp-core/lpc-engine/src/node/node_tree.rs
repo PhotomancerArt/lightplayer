@@ -358,8 +358,11 @@ impl<N> RuntimeNodeTree<N> {
     /// The channels listed in `scope` (R3 — a public slot's channel exists
     /// in the slot's scope): a publishing endpoint lists where the write
     /// lands (the owner's inhabited scope, R4), a consuming endpoint where
-    /// its resolution starts (the owner's read scope). Listing only —
-    /// resolution is the scoped-key walk.
+    /// its resolution starts (the owner's read scope), and a module's
+    /// declared input where the module is placed — its host scope, lifted
+    /// out of a playlist entry's sink (R2, playlists-on-the-bus D5). Only a
+    /// LOADED module declares anything, so a dormant entry lists nothing
+    /// (no demand). Listing only — resolution is the scoped-key walk.
     pub fn scope_channels(
         &self,
         scope: crate::node::ScopeRef,
@@ -381,8 +384,40 @@ impl<N> RuntimeNodeTree<N> {
                 }
             }
         }
+        for entry in self.entries() {
+            if entry.declared_inputs.is_empty() || self.input_host_scope(entry.id) != Some(scope) {
+                continue;
+            }
+            for channel in &entry.declared_inputs {
+                if channels.iter().any(|(existing, _)| existing == channel) {
+                    continue;
+                }
+                let kind = lpc_model::well_known_channel(&channel.0)
+                    .map(|known| known.kind)
+                    .or_else(|| {
+                        self.bus_channels()
+                            .find(|(name, _)| *name == channel)
+                            .map(|(_, kind)| kind)
+                    })
+                    .unwrap_or(lpc_model::Kind::Ratio);
+                channels.push((channel.clone(), kind));
+            }
+        }
         channels.sort_by(|(a, _), (b, _)| a.cmp(b));
         channels
+    }
+
+    /// Where a module's declared inputs list: the scope the module node is
+    /// placed in, or — when that is a playlist entry's sink — the
+    /// playlist's own scope (reads go out of a sink; writes never do).
+    pub fn input_host_scope(&self, module: NodeId) -> Option<crate::node::ScopeRef> {
+        // The scope the module is placed in; the root is placed nowhere.
+        let placed = self.get(module)?.scope?;
+        if placed.is_sink() {
+            self.parent_scope(placed)
+        } else {
+            Some(placed)
+        }
     }
 
     /// Providers of `channel` whose write lands in `scope` — the LISTING

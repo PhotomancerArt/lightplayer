@@ -78,7 +78,7 @@ pub use binding::{
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::{
-    ChannelName, PALETTE_CHANNEL, PLAYLIST_CYCLE_CHANNEL, PLAYLIST_ENTRY_CHANNEL,
+    ChannelName, DETAIL_CHANNEL, PALETTE_CHANNEL, PLAYLIST_CYCLE_CHANNEL, PLAYLIST_ENTRY_CHANNEL,
     PLAYLIST_PLAYING_CHANNEL, PLAYLIST_SKIP_CHANNEL, PRIMARY_CONTROL_CHANNEL,
     PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
 };
@@ -173,11 +173,11 @@ pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_
 pub use server::server_config::ServerConfig;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, AssetSlot, AssetSlotValue,
-    ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
-    PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
-    RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, TimeProductSlot, ToLpValue, U32List, U32ListSlot, ValueEditorHint,
-    ValueRootError, VisualProductSlot, Xy, XySlot,
+    ChannelNameList, ChannelNameListSlot, ColorOrderSlot, ColorOrderValue, ControlProductSlot,
+    Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot, Ratio, RatioSlot,
+    RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot, SlotEnumOption,
+    SlotMapValueAccess, SlotValue, SlotValueShape, TimeProductSlot, ToLpValue, U32List,
+    U32ListSlot, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,

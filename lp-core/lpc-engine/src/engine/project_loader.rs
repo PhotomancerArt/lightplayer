@@ -1729,6 +1729,24 @@ fn register_node_bindings(
     if node.kind == NodeKind::Module {
         if let Ok(NodeDef::Module(config)) = projected_node_config(registry, node) {
             let config = config.clone();
+            // A non-root module's declared inputs list in its host scope
+            // (playlists-on-the-bus D5). The root has no host.
+            let inputs: Vec<lpc_model::ChannelName> = config
+                .inputs
+                .data
+                .as_ref()
+                .map(|inputs| {
+                    inputs
+                        .value()
+                        .0
+                        .iter()
+                        .map(|name| lpc_model::ChannelName(name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(entry) = runtime.tree_mut().get_mut(node.id) {
+                entry.declared_inputs = inputs;
+            }
             for (key, entry) in config.bindings.entries().iter() {
                 let name = key.as_str();
                 entry

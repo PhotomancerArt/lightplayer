@@ -22,6 +22,10 @@ pub const PRIMARY_CONTROL_CHANNEL: &str = "control.out";
 /// The scope's palette channel. The one place this name is written.
 pub const PALETTE_CHANNEL: &str = "palette";
 
+/// A pattern's detail (scale): 1× is the size its author chose. Shared
+/// across a piece's patterns that declare it (playlists-on-the-bus D3).
+pub const DETAIL_CHANNEL: &str = "detail";
+
 /// The clock transport's three leaf channels (D21: `clock.*` purpose-first
 /// namespacing, an amendment to the naming norm recorded by the tape-hero
 /// plan's ADR). One record in the model, three wires on the bus — the bus
@@ -98,6 +102,12 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
     // legacy set (Q21): the true ranges live in these doc strings, which is
     // where the picker reads them from, rather than in a kind that would
     // have to be invented per control.
+    WellKnownChannel {
+        name: DETAIL_CHANNEL,
+        kind: Kind::Ratio,
+        doc: "Pattern detail (scale): 1× is the pattern author's chosen size.",
+        carries_product: false,
+    },
     WellKnownChannel {
         name: CLOCK_RATE_CHANNEL,
         kind: Kind::Ratio,
