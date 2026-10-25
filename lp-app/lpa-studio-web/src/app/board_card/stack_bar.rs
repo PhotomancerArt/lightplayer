@@ -11,7 +11,9 @@
 //! ([`aside_style`]). While the row works, the
 //! conic spinner takes the icon's place and the work's words are its state
 //! ([`row_words`]), with the iridescent fill along its foot
-//! ([`WorkFoot`](super::bar_work::WorkFoot)).
+//! ([`WorkFoot`](super::bar_work::WorkFoot)) — unless the card's top says
+//! the same work, which then has the bar and the number (the row is
+//! carried: its verb and its spinner, no fill).
 //!
 //! The icon, kind, name and state are ONE full-width button: the trigger of
 //! the row's details ([`BarDetails`], the merged detail card). The action
@@ -216,14 +218,10 @@ fn bar_line(bar: &UiStackBar) -> Element {
             STATE_CLASS
         }
     );
-    // The spinner stands in the icon's place only for work nothing else on
-    // the card shows; a carried row keeps its icon, still.
-    let spinning = bar
-        .work
-        .as_ref()
-        .is_some_and(|work| work.state == BarWorkState::Running && !work.carried);
+    // The spinner stands in the icon's place while the row works, carried
+    // or not: it ties the row to the work the card's top shows.
     let lead = match bar.work.as_ref().map(|work| &work.state) {
-        Some(BarWorkState::Running) if spinning => rsx! {
+        Some(BarWorkState::Running) => rsx! {
             span { class: "{conic_spinner_class()} ux-board-spinner", aria_hidden: "true" }
         },
         Some(BarWorkState::Done) => rsx! {
@@ -562,11 +560,11 @@ mod tests {
         assert_eq!(row_words(&nameless), ("installing · 30%".to_string(), None));
     }
 
-    /// Work the card's top carries is still on its row: the kind's icon in
-    /// place of the spinner, no fill along the foot, and its words the
-    /// state; work nothing else shows still spins and fills.
+    /// Work the card's top carries keeps its spinner on its row, which ties
+    /// the row to the top, but draws no fill along the foot: the bar is the
+    /// top's (P2). Work nothing else shows spins and fills.
     #[test]
-    fn carried_work_is_still_on_its_row() {
+    fn carried_work_spins_with_no_fill() {
         let mut row = lpa_studio_core::UiStackBar::new(
             lpa_studio_core::BarLayer::Firmware,
             "firmware",
@@ -580,11 +578,11 @@ mod tests {
             carried: true,
             ..running("updating")
         });
-        let still = render_row(row);
-        assert!(!still.contains(conic_spinner_class()), "{still}");
-        assert!(!still.contains("data-work-track"), "{still}");
-        assert!(still.contains(">updating<"), "{still}");
-        assert!(still.contains(">v2026.10.08-9<"), "{still}");
+        let carried = render_row(row);
+        assert!(carried.contains(conic_spinner_class()), "{carried}");
+        assert!(!carried.contains("data-work-track"), "{carried}");
+        assert!(carried.contains(">updating<"), "{carried}");
+        assert!(carried.contains(">v2026.10.08-9<"), "{carried}");
     }
 
     /// A stale row is dimmed and says the same words.

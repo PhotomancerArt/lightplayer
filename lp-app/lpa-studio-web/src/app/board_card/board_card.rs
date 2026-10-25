@@ -320,7 +320,7 @@ mod tests {
         };
         let (card, tree) = card_and_tree(&view);
         // The surface says "Identifying this board.": the row is carried,
-        // still, with no track (P2).
+        // its spinner and no track (P2).
         let html = render_card(card.clone(), tree.clone(), None);
         assert_eq!(attribute_values(&html, "data-bar-work"), vec!["running"]);
         assert!(

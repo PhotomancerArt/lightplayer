@@ -306,9 +306,9 @@ pub(crate) fn carried_layer(input: &BoardCardInput<'_>, state: SurfaceState) -> 
 }
 
 /// Whether the surface, in `state`, says the work of the row at `layer`
-/// with its own bar or spinner: that row is carried and goes still
-/// ([`super::ui_bar_work::UiBarWork::carried_by_surface`]), so one work
-/// moves in one place (P2). A connect is the row of the link it takes.
+/// with its own bar or spinner: that row is carried, its fill and number
+/// the surface's ([`super::ui_bar_work::UiBarWork::carried_by_surface`]),
+/// so one work has one bar (P2). A connect is the row of the link it takes.
 pub(crate) fn carries_work(state: SurfaceState, layer: BarLayer) -> bool {
     use SurfaceState::*;
     match state {

@@ -7,8 +7,8 @@
 //!
 //! While the card's top says the same work (its sentence, its bar and its
 //! number), the row is carried ([`UiBarWork::carried`]): it says the verb
-//! alone ("updating"), still, with no spinner and no fill. One work, one
-//! place that moves (P2).
+//! alone ("updating"), its spinner in the icon's place and no fill. One
+//! work, one bar, one number (P2).
 
 use crate::OfferPath;
 
@@ -35,7 +35,7 @@ pub struct UiBarWork {
     /// Another device's update: the quieter fill.
     pub other_device: bool,
     /// The card's top says this work, with its bar and its number: the row
-    /// says only its verb, and draws no spinner and no fill (P2).
+    /// says only its verb and draws no fill; its spinner stays (P2).
     pub carried: bool,
 }
 
@@ -74,7 +74,7 @@ impl UiBarWork {
 
 impl UiBarWork {
     /// This work as the row says it while the card's top carries it: the
-    /// verb alone ("updating", not "updating · 42%"), still. The percent
+    /// verb alone ("updating", not "updating · 42%"), no fill. The percent
     /// stays, for the top to read; only running work is carried.
     pub fn carried_by_surface(self) -> Self {
         if self.state != BarWorkState::Running {

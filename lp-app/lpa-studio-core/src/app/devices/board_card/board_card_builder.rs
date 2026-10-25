@@ -73,7 +73,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         state_action(input, state).as_ref(),
     );
     let bars = quiet_rows(bars, carried_layer(input, state));
-    let bars = still_rows(bars, state);
+    let bars = carried_rows(bars, state);
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -129,9 +129,9 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
         .collect()
 }
 
-/// A row whose work the surface says goes still: its verb alone, no
-/// spinner and no fill, so one work moves in one place (P2).
-fn still_rows(bars: Vec<UiStackBar>, state: SurfaceState) -> Vec<UiStackBar> {
+/// A row whose work the surface says is carried: its verb alone and its
+/// spinner, no fill and no number, so one work has one bar (P2).
+fn carried_rows(bars: Vec<UiStackBar>, state: SurfaceState) -> Vec<UiStackBar> {
     bars.into_iter()
         .map(|mut bar| {
             if carries_work(state, bar.layer) {
