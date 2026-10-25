@@ -43,7 +43,7 @@ use super::detail_sections::{caution, facts, notice, verbs, without_empty};
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiBarDetails, UiStackBar};
 use crate::app::access::{
     PLAY_ONLY_SENTENCE, UiAccessPanel, UiAccessWait, UiPasswordLine, UiUnlockOffer, open_summary,
 };
@@ -52,8 +52,6 @@ use crate::{RichLine, UiStatusKind};
 
 /// The row's name when Studio cannot tell what this link may do.
 const ACCESS_UNKNOWN: &str = "unknown";
-/// The row's name while the tier is not known yet.
-const NOT_KNOWN_YET: &str = "\u{2014}";
 /// The row's state while the link's hello is read.
 const CHECKING: &str = "checking";
 /// The notice on a board anyone nearby may edit.

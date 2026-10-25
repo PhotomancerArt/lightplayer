@@ -154,13 +154,11 @@ pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
 }
 
 /// The row's name and state, as drawn: at rest the summary and the aside;
-/// while it works, the name stays and the work's words are its state. A
-/// row with no name while it works puts them where the name goes:
-/// "installing · 30%", and a link row whose state the work says
-/// ("connecting").
+/// while it works, the name stays and the work's words are its state. Core
+/// never leaves the name empty (a dash while its value is not known yet:
+/// "USB  —  connecting"), so work's words never take the name's place.
 pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
     match &bar.work {
-        Some(work) if bar.summary.is_empty() => (work.words.clone(), None),
         Some(work) => (
             bar.summary.clone(),
             Some(work.words.clone()).filter(|words| !words.is_empty()),
@@ -534,7 +532,7 @@ mod tests {
     }
 
     /// While a row works its name stays and the work's words are its
-    /// state; a row with no name while it works says them in its place.
+    /// state, a dash's beside it as anyone's (one grammar).
     #[test]
     fn work_keeps_the_name_and_says_its_state() {
         let mut row = lpa_studio_core::UiStackBar::new(
@@ -551,13 +549,12 @@ mod tests {
             )
         );
         let mut link = link_row(None);
-        link.summary = String::new();
+        link.summary = "\u{2014}".to_string();
         link.work = Some(running("connecting"));
-        assert_eq!(row_words(&link), ("connecting".to_string(), None));
-        let mut nameless =
-            lpa_studio_core::UiStackBar::new(lpa_studio_core::BarLayer::Firmware, "firmware", "");
-        nameless.work = Some(running("installing · 30%"));
-        assert_eq!(row_words(&nameless), ("installing · 30%".to_string(), None));
+        assert_eq!(
+            row_words(&link),
+            ("\u{2014}".to_string(), Some("connecting".to_string()))
+        );
     }
 
     /// Work the card's top carries keeps its spinner on its row, which ties

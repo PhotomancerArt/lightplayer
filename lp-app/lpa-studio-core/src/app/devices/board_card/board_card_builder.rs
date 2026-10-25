@@ -33,7 +33,7 @@ use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use super::ui_board_surface::SurfaceState;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
-use super::ui_stack_bar::{BarLayer, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use super::usb_bar::{pending_link_bars, usb_bar};
 use super::wifi_bar::wifi_bar;
@@ -55,6 +55,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     .into_iter()
     .map(with_failure_notice)
     .map(with_work_tone)
+    .map(with_a_name)
     .collect();
     let running_work = bars
         .iter()
@@ -127,6 +128,16 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
             bar
         })
         .collect()
+}
+
+/// A row's name is never empty: a dash while its value is not known yet,
+/// so its work's words are always its state ("USB  —  connecting"), never
+/// the name's place (one grammar, P8).
+fn with_a_name(mut bar: UiStackBar) -> UiStackBar {
+    if bar.summary.is_empty() {
+        bar.summary = NOT_KNOWN_YET.to_string();
+    }
+    bar
 }
 
 /// A row whose work the surface says is carried: its verb alone and its
@@ -246,6 +257,7 @@ pub fn pending_board_card(
                 pending_firmware_bar(pending, board, offers),
                 pending_hardware_bar(pending, board, offers),
             ])
+            .map(with_a_name)
             .collect(),
         panel: None,
     };

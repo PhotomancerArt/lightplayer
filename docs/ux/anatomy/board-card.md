@@ -473,8 +473,8 @@ phone's two), the name is cut at its end and the details hold it whole:
 ⏚ USB              connected                 # this tab reaches it by its cable
 ⏚ USB              not connected             # port closed, unplugged, or reached another way. quiet: normal for a board on a house
 ⏚ USB              not connected     (dim)   # offline; the surface says since when
-◌ USB              connecting
-◌ USB              reconnecting
+◌ USB              —   connecting      # the name is never empty (U4). was: USB connecting, in the name's place
+◌ USB              —   reconnecting
 ⏚ USB              not responding    │ Retry │   # a board that said hello went quiet. orange; quiet while the surface says it
 ⏚ USB              connection failed │ Retry │   # red; quiet while the surface says it
 ⏚ USB              Open in another tab  editor open   # quiet: the surface says it
@@ -601,7 +601,7 @@ bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20:
 ▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating                   # carried: the surface has 42 %. was: updating · 42% and a rainbow fill
 ◌ Firmware  v2026.10.08-9   backing up │ Cancel │
-◌ Firmware  installing                                 # was: Flashing firmware…
+◌ Firmware  —   installing                             # was: installing · 30%, in the name's place; Flashing firmware…
 ▲ Firmware  v2026.10.08-9   crashing     │ Reinstall │   # red; quiet while the surface says it
 ▲ Firmware  v2026.09.30-2   incomplete   │ Install │     # orange; quiet while the surface says it
 ▲ Firmware  v2026.10.08-9   confirmation required │ Review │   # was: Needs your answer
@@ -626,7 +626,7 @@ bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a 
 ■ Hardware  XIAO ESP32-C6
 ■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
 ■ Hardware  unknown                              # was: Board not known
-◌ Hardware  identifying                          # was: chip unknown
+◌ Hardware  —   identifying                      # was: identifying, in the name's place; chip unknown
 ■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the USB row (P2)
 ```
 

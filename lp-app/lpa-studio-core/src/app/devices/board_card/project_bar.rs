@@ -53,7 +53,7 @@ use super::detail_sections::{danger, facts, notice, verbs, without_empty};
 use super::ui_bar_work::BarWorkState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiBarDetails, UiStackBar};
 use crate::app::devices::board_plays::BoardPlays;
 use crate::app::devices::device_push_offer::PUSH_SOURCE_PARAM;
 use crate::core::data_kinds::age_words;
@@ -69,8 +69,6 @@ pub const PROJECT_HIDDEN: &str = "hidden";
 /// The name when Studio cannot read what the board plays: a LightPlayer it
 /// cannot speak to, or a board that has not said and will not.
 pub const PROJECT_UNKNOWN: &str = "not known";
-/// The name while a LightPlayer on a link has not said what it runs.
-const NOT_SAID_YET: &str = "\u{2014}";
 /// The state of a board whose data was lost (O3).
 pub const DATA_LOST: &str = "data lost";
 /// The state of a board given an older version than the project's newest.
@@ -201,7 +199,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                     ) =>
             {
                 waiting = true;
-                (NOT_SAID_YET.to_string(), None, UiStatusKind::Neutral, None)
+                (NOT_KNOWN_YET.to_string(), None, UiStatusKind::Neutral, None)
             }
             BoardPlays::Unknown => (
                 PROJECT_UNKNOWN.to_string(),
