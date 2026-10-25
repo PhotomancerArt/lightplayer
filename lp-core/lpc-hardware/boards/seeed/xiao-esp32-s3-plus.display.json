@@ -24,6 +24,11 @@
     }
   ],
   "usb_bridge": "native-usb-jtag",
+  "notes": [
+    {
+      "text": "Known defect: an LED strip on D6 (GPIO43) flickered with garbled data on the one XIAO ESP32-S3 Plus we tested (2026-10-24; the plain XIAO ESP32-S3 has the same D6 pad and is untested), while D5 and D7–D10 were clean. The cause is not found yet; the chip sends a clean signal at the pad. Wire LED strips to D0–D5 or D7–D10. See docs/defects/2026-10-24-the-s3s-d6-pad-garbles-its-lcd-ws281x-lane.md."
+    }
+  ],
   "default_led_wires": [
     "D10"
   ],
@@ -149,6 +154,10 @@
           {
             "text": "U0_TXD",
             "kind": "uart"
+          },
+          {
+            "text": "LED defect",
+            "kind": "warn"
           }
         ]
       }
