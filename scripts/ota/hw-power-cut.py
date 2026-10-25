@@ -16,8 +16,17 @@
   3. capture again, offering Y, until the host says `done`.
 
 PASS = the recovery ends `UpToDate` and its last core line is Y's build with
-an engine. Also reported: the first boot after the cut, and what the
-recovery served (the resume evidence).
+an engine, AND the board shows it lost power (below). Also reported: the
+first boot after the cut, and what the recovery served (the resume evidence).
+
+A cut that cannot show the power went is its own verdict, `NO-CUT-PROOF`,
+never a PASS: a board that kept its power (a half cut: one USB twin switched)
+leaves the bus, rejoins it and resumes the update exactly like one that lost
+it. The proof is the board's own word (`cut_proof`): a heartbeat reading
+`resetReason: power-on` after the cut, or the boot count restarted. A run
+with any such cut prints it loudly and exits 1
+(docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md;
+`just lint-power-cut-verdict` replays the verdict against captured logs).
 
 The board is resolved by MAC (scripts/emu/board-port.py), never by guessing a
 port. A VIA-style hub is a USB 2 and a USB 3 hub on one chip: VBUS drops only
@@ -31,11 +40,9 @@ replaces --hub/--hub-port (the command is split shell-style and run as is).
 verdict is Y's hello after the recovery (a power-on capture to the hello
 naming Y, `running`), not the `[CORE]` line, which the S3 can lose after a
 reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md),
-and its first heartbeat. An S3 PASS also needs proof that the power really
-went: a heartbeat reading `power-on` after the cut, or Y's boot count
-restarted (`cut_proof`). Without it the cut reads NO-CUT-PROOF. The C6's
-verdict still cannot tell a cut from none
-(docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
+and its first heartbeat; the C6's verdict is the `[CORE]` line, as before.
+Both chips take a fresh capture to Y's first heartbeat after the recovery,
+which carries the boot count the cut's proof reads.
 """
 
 import argparse
@@ -122,6 +129,36 @@ def cut_proof(pre, rec, fin):
     return proof
 
 
+def judge(chip, y_build, pre_text, rec_text, fin_text):
+    """The verdict on one cut, from the board's own words. Pure: no IO.
+
+    Returns (ok, final, extra): ok is True (PASS), False (FAIL) or None (the
+    update converged but nothing shows the power went: NO-CUT-PROOF), `final`
+    is the line the verdict read, `extra` the evidence to report.
+    """
+    pre_hb, fin_hb = heartbeats(pre_text), heartbeats(fin_text)
+    proof = cut_proof(pre_hb, heartbeats(rec_text), fin_hb)
+    extra = {"proof": proof}
+    if chip == "esp32s3":
+        # Y's own word that its engine runs: a fresh capture to its hello.
+        hello = [l for l in fin_text.splitlines() if '"hello":{' in l]
+        hello = hello[-1] if hello else ""
+        ok = ("done: UpToDate" in rec_text and f'"buildId":"{y_build}"' in hello
+              and '"state":"running"' in hello)
+        final = f"hello {y_build} running" if ok else hello[:160]
+        resumed = re.findall(r"\[OTA\] resuming (\w+) at (\d+)", rec_text)
+        extra["resumed"] = [f"{k} at {n}" for k, n in resumed]
+        extra["projects_after"] = fin_hb[0]["projects"] if fin_hb else []
+    else:
+        final = last_core(rec_text)
+        ok = ("done: UpToDate" in rec_text and f"build {y_build}" in final
+              and " engine " in final)
+    if ok and not proof:
+        # A cut that cannot show it cut counts as no cut.
+        ok = None
+    return ok, final, extra
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mac", required=True)
@@ -195,38 +232,16 @@ def main():
         rec_err = out / f"{tag}.rec.err"
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=open(rec_err, "w"))
         text = rec.read_text(errors="replace")
-        final = last_core(text)
         cores = re.findall(r"\[CORE\] core @\S+ \+\d+ \(([a-z ]+)\) build (\S+)", text)
         served = re.findall(r"D \d+ chunk\(s\) / \d+ B; Z \d+ chunk\(s\) / \d+ B",
                             rec_err.read_text(errors="replace"))
-        extra = {}
-        if a.chip == "esp32s3":
-            # Y's own word that its engine runs: a fresh capture to its hello
-            # and its first heartbeat, which carries the boot count the cut's
-            # proof reads.
-            fin = out / f"{tag}.fin.txt"
-            port = port_of(a.mac, wait=20) or port
-            sh(capture(a.lp_cli, port, fin, 60, exit_on='"heartbeat":{'))
-            fin_text = fin.read_text(errors="replace")
-            hello = [l for l in fin_text.splitlines() if '"hello":{' in l]
-            hello = hello[-1] if hello else ""
-            ok = ("done: UpToDate" in text and f'"buildId":"{y_build}"' in hello
-                  and '"state":"running"' in hello)
-            final = (f"hello {y_build} running" if ok else hello[:160])
-            fin_hb = heartbeats(fin_text)
-            proof = cut_proof(heartbeats(pre.read_text(errors="replace")), heartbeats(text), fin_hb)
-            resumed = re.findall(r"\[OTA\] resuming (\w+) at (\d+)", text)
-            extra = {
-                "proof": proof,
-                "resumed": [f"{k} at {n}" for k, n in resumed],
-                "projects_after": fin_hb[0]["projects"] if fin_hb else [],
-            }
-            if ok and not proof:
-                # A cut that cannot show it cut counts as no cut
-                # (docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
-                ok = None
-        else:
-            ok = "done: UpToDate" in text and f"build {y_build}" in final and " engine " in final
+        # Y's first heartbeat after the recovery carries the boot count the
+        # cut's proof reads (the recovery capture ends at `done`, often before one).
+        fin = out / f"{tag}.fin.txt"
+        port = port_of(a.mac, wait=20) or port
+        sh(capture(a.lp_cli, port, fin, 60, exit_on='"heartbeat":{'))
+        fin_text = fin.read_text(errors="replace") if fin.exists() else ""
+        ok, final, extra = judge(a.chip, y_build, pre.read_text(errors="replace"), text, fin_text)
         rows.append({
             "cut": t,
             "verdict": {True: "PASS", False: "FAIL", None: "NO-CUT-PROOF"}[ok],
@@ -238,7 +253,15 @@ def main():
         print(json.dumps(rows[-1]), flush=True)
     (out / "summary.json").write_text(json.dumps(rows, indent=1))
     passed = sum(r["verdict"] == "PASS" for r in rows)
+    unproven = [r["cut"] for r in rows if r["verdict"] == "NO-CUT-PROOF"]
+    if unproven:
+        print(f"!! NO-CUT-PROOF at cut(s) {unproven}: the update converged, but nothing shows "
+              "the board lost power (no power-on reset reason, boot count not restarted). "
+              "These cuts are NOT passes: check the switch cuts BOTH USB twins.",
+              file=sys.stderr, flush=True)
     print(f"pass: {passed} / {len(rows)}")
+    if passed != len(rows):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

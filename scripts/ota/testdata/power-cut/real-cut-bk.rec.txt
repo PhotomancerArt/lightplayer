@@ -1,0 +1,306 @@
+[host-ota] offering b1b1b1b1+0172481a0929 (esp32c6-4mb): core 1214800 B, engine 1828914 B
+[link] up (session 0)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +19436 B, host + GATT +3520 B, heap used 82824 B (slots 2)
+[INFO] fw_esp32c6: [CORE] core @0x18000 +1214800 (proven) build a0a0a0a0+0172481a0929 · loader v1 · region end 0x350000 · page 0x8000 · engine 1828914 B · digest 238b6118
+[INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 1246 ms (1214800 B)
+[INIT] Initializing RMT peripheral at 80MHz...
+[INIT] RMT peripheral initialized
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+[INIT] Creating output provider...
+[INIT] Output provider created
+[INIT] Creating LpServer instance...
+[INIT] LpServer created
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[INFO] fw_esp32_common::boot: Boot: found configured startup project: studio
+[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 212328 B free / 89208 B used (207k / 87k)
+[INFO] lpa_server::project: [mem] project new start: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after root path: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after services: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after core project: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after graphics: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after wrapper: 172k free / 121k used
+[INFO] lpa_server::project_manager: Project loaded: studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 173112 B free / 128424 B used (169k / 125k)
+[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/studio
+[INIT] Creating time provider...
+[INIT] Time provider created
+[INIT] fw-esp32 initialized, starting server loop... proto=38 commit=0172481a0929 dirty=false
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+M!{"id":0,"msg":{"hello":{"proto":38,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.power-button","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","version":"a0a0a0a0","commit":"0172481a0929","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:fe:ff","fs":"mounted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"},"firmware":{"proto":1,"target":"esp32c6-4mb","chip":"esp32c6","version":"a0a0a0a0","buildId":"a0a0a0a0+0172481a0929","wireProto":38,"coreSha256":"3cd545e813c7ad47066f7b9ba163cb89569cdd49343a051cb28db310d1c5993b","coreLen":1214800,"engineSha256":"238b6118ae0f097e5b326b5c3a0fdac216069138503de4034685179095342eb4","engineLen":1828914,"layout":1,"loader":1,"regionLen":3375104,"state":"running","refusedBuild":null,"transfer":null}}}}
+[host-ota] board: a0a0a0a0+0172481a0929 Running
+[host-ota] decided: OfferUpdate { from: "a0a0a0a0+0172481a0929", to: "b1b1b1b1+0172481a0929" }
+[host-ota] engine cache: 238b6118ae0f097e5b326b5c3a0fdac216069138503de4034685179095342eb4 miss
+[host-ota] store: offline (lp-cli has no store client)
+[host-ota] stage BackingUp at 4096/1828914 B
+[link] wire: replies packed (JSON Pack v2, learned)
+[INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 1)
+[INFO] trouble_host::host: [host] using packet pool with MTU 251 capacity 16
+[WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=219
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=219
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[INFO] trouble_host::host: [host] filter accept list size: 12
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 1971 bytes)
+[INFO] lpc_shared::memory: [mem] shader compile before: 103k free / 191k used
+[INFO] lpc_shared::memory: [mem] shader compile after: 97k free / 196k used
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=46ms, lpir_inst_count=198, lpir_func_count=3, lpir_import_count=3, final_inst_count=686, final_code_size=274
+[INFO] trouble_host::host: [host] setting txq to 24, fragmenting at 255
+[INFO] trouble_host::host: [host] configuring host buffers (1 packets of size 255)
+[INFO] trouble_host::host: [host] initialized
+[INFO] trouble_host::host: [host] Device Address A2:F2:62:87:B4:8D
+[INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-studio
+[INFO] fw_esp32_common::server_loop: [perf] frame=120 fps=23 elapsed=5038ms recv=0ms tick=36ms send=0ms total=39ms responses=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":23.818975,"sdev":0,"min":23.818975,"max":23.818975},"frame_count":120,"loaded_projects":[{"handle":1,"path":"/projects/studio"}],"uptime_ms":5038,"memory":{"freeBytes":99168,"usedBytes":202368,"totalBytes":301536,"largestFreeBlock":65526},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":2164,"framesRx":1051,"bytesTx":519218,"bytesRx":12919,"resends":0,"damaged":2,"staleSession":0,"stalePartials":0,"duplicates":2,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}
+[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 29164 B of 54256 B (25092 B headroom)
+[INFO] fw_esp32c6::c_heap: [radio-heap] heartbeat: high-water 35648 B of 49152 B, 35648 B live, 0 B overflowed to main
+[INFO] fw_esp32_common::server_loop: [perf] frame=244 fps=24 elapsed=5039ms recv=0ms tick=36ms send=0ms total=40ms responses=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":24.213556,"sdev":0,"min":24.213556,"max":24.213556},"frame_count":244,"loaded_projects":[{"handle":1,"path":"/projects/studio"}],"uptime_ms":10077,"memory":{"freeBytes":99168,"usedBytes":202368,"totalBytes":301536,"largestFreeBlock":65526},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":4419,"framesRx":2164,"bytesTx":1068924,"bytesRx":26450,"resends":0,"damaged":2,"staleSession":0,"stalePartials":0,"duplicates":2,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}
+[INFO] fw_esp32_common::server_loop: [perf] frame=309 fps=12 elapsed=5006ms recv=0ms tick=36ms send=0ms total=39ms responses=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":20.48664,"sdev":0,"min":20.48664,"max":20.48664},"frame_count":309,"loaded_projects":[{"handle":1,"path":"/projects/studio"}],"uptime_ms":15083,"memory":{"freeBytes":97080,"usedBytes":204456,"totalBytes":301536,"largestFreeBlock":65520},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":5591,"framesRx":2752,"bytesTx":1357331,"bytesRx":33608,"resends":0,"damaged":2,"staleSession":0,"stalePartials":0,"duplicates":4,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}
+[INFO] fw_esp32_common::server_loop: [perf] frame=432 fps=24 elapsed=5017ms recv=0ms tick=35ms send=0ms total=39ms responses=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.492537,"sdev":0,"min":21.492537,"max":21.492537},"frame_count":432,"loaded_projects":[{"handle":1,"path":"/projects/studio"}],"uptime_ms":20100,"memory":{"freeBytes":97080,"usedBytes":204456,"totalBytes":301536,"largestFreeBlock":65520},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":7825,"framesRx":3871,"bytesTx":1904217,"bytesRx":47192,"resends":0,"damaged":2,"staleSession":0,"stalePartials":0,"duplicates":4,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}
+[INFO] fw_esp32c6::ota::update_edge: [OTA] offer b1b1b1b1+0172481a0929 → core (pending): handing over to core-only
+[INFO] fw_esp32c6::ota::update_edge: [OTA] resetting: a core install is pending
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4001974a
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (32) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (80) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (96) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=00010h (    16) map[0m
+[0;32mI (108) esp_image: segment 1: paddr=00010038 vaddr=40850000 size=000e0h (   224) load[0m
+[0;32mI (117) esp_image: segment 2: paddr=00010120 vaddr=42000120 size=00010h (    16) map[0m
+[0;32mI (125) esp_image: segment 3: paddr=00010138 vaddr=408500e0 size=00994h (  2452) load[0m
+[0;32mI (134) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (140) boot: Disabling RNG early entropy source...[0m
+[LOADER] core @0x18000 (proven)
+[INIT] Initializing board...
+[INIT] Board initialized, starting runtime... (main stack 54256 B)
+[RECOVERY] boot: cause=software-reset level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] Runtime started
+[INIT] fw-esp32 starting...
+[INIT] io thread: stack 3072 B, priority 1
+[link] reset (PeerRestarted)
+[link] up (session 1)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INIT] Flash filesystem mounted
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +19436 B, host + GATT +3520 B, heap used 82896 B (slots 2)
+[INFO] fw_esp32c6: [CORE] core @0x18000 +1214800 (proven) build a0a0a0a0+0172481a0929 · loader v1 · region end 0x350000 · page 0x8000 · no engine: no engine header · digest 238b6118
+[WARN] fw_esp32c6::ota::core_only: [OTA] core-only: no engine (no engine header)
+[INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 1243 ms (1214800 B)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: updating
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=24 g=16 b=0 (updating)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only heap free 249508 B
+[host-ota] board: a0a0a0a0+0172481a0929 Updating (Core 0/1214800 B)
+[host-ota] decided: ContinueUpdate { to: "b1b1b1b1+0172481a0929" }
+[host-ota] board: a0a0a0a0+0172481a0929 Updating (Core 0/1214800 B)
+[host-ota] decided: ContinueUpdate { to: "b1b1b1b1+0172481a0929" }
+[host-ota] board: a0a0a0a0+0172481a0929 Updating (Core 0/1214800 B)
+[host-ota] decided: ContinueUpdate { to: "b1b1b1b1+0172481a0929" }
+[INFO] fw_esp32c6::ota::update_edge: [OTA] offer b1b1b1b1+0172481a0929 → core @0x220000
+[host-ota] stage Updating at 0/1214800 B
+[INFO] trouble_host::host: [host] using packet pool with MTU 251 capacity 16
+[INFO] trouble_host::host: [host] filter accept list size: 12
+[INFO] trouble_host::host: [host] setting txq to 24, fragmenting at 255
+[INFO] trouble_host::host: [host] configuring host buffers (1 packets of size 255)
+[INFO] trouble_host::host: [host] initialized
+[INFO] trouble_host::host: [host] Device Address A2:F2:62:87:B4:8D
+[INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-b48c
+[INFO] fw_esp32c6::ota::update_edge: [OTA] core verified, committing
+[INFO] fw_esp32c6::ota::update_edge: [OTA] resetting: the core is in
+[INFO] fw_esp32c6::stack_probe: [stack] core-only: high-water 9496 B of 54256 B (44760 B headroom)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only heap free 210432 B at commit (296 chunks arrived as Z)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: needs-engine
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=24 g=0 b=0 (needs-engine)
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4001974a
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (32) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (80) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (96) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=00010h (    16) map[0m
+[0;32mI (108) esp_image: segment 1: paddr=00010038 vaddr=40850000 size=000e0h (   224) load[0m
+[0;32mI (117) esp_image: segment 2: paddr=00010120 vaddr=42000120 size=00010h (    16) map[0m
+[0;32mI (125) esp_image: segment 3: paddr=00010138 vaddr=408500e0 size=00994h (  2452) load[0m
+[0;32mI (134) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (140) boot: Disabling RNG early entropy source...[0m
+[LOADER] core @0x220000 (trial)
+[INIT] Initializing board...
+[INIT] Board initialized, starting runtime... (main stack 54256 B)
+[RECOVERY] boot: cause=software-reset level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] Runtime started
+[INIT] fw-esp32 starting...
+[INIT] io thread: stack 3072 B, priority 1
+[link] reset (PeerRestarted)
+[link] up (session 2)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INIT] Flash filesystem mounted
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +19436 B, host + GATT +3520 B, heap used 82896 B (slots 2)
+[INFO] fw_esp32c6: [CORE] core @0x220000 +1214800 (trial) build b1b1b1b1+0172481a0929 · loader v1 · region end 0x350000 · page 0x8000 · engine not started (trial) · digest ac5f5fe2
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: on trial, waiting for a host to confirm
+[INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 1243 ms (1214800 B)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: on-trial
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=0 g=0 b=0 (on-trial)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only heap free 249808 B
+[host-ota] board: b1b1b1b1+0172481a0929 OnTrial
+[host-ota] decided: Heal b1b1b1b1+0172481a0929
+[host-ota] board: b1b1b1b1+0172481a0929 NeedsEngine
+[host-ota] decided: Heal b1b1b1b1+0172481a0929
+[host-ota] board: b1b1b1b1+0172481a0929 NeedsEngine
+[host-ota] decided: Heal b1b1b1b1+0172481a0929
+[INFO] fw_esp32c6::ota::boot_state: [OTA] core confirmed
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: needs-engine
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=24 g=0 b=0 (needs-engine)
+[INFO] fw_esp32c6::ota::update_edge: [OTA] offer b1b1b1b1+0172481a0929 → engine @0x18000
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: updating
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=24 g=16 b=0 (updating)
+[INFO] trouble_host::host: [host] using packet pool with MTU 251 capacity 16
+[INFO] trouble_host::host: [host] filter accept list size: 12
+[host-ota] stage Finishing at 4096/1828914 B
+[INFO] trouble_host::host: [host] setting txq to 24, fragmenting at 255
+[INFO] trouble_host::host: [host] configuring host buffers (1 packets of size 255)
+[INFO] trouble_host::host: [host] initialized
+[INFO] trouble_host::host: [host] Device Address A2:F2:62:87:B4:8D
+[INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-b48c
+[INFO] fw_esp32c6::ota::update_edge: [OTA] engine verified, committing
+[INFO] fw_esp32c6::ota::update_edge: [OTA] resetting: the engine is in
+[INFO] fw_esp32c6::stack_probe: [stack] core-only: high-water 9496 B of 54256 B (44760 B headroom)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only heap free 211456 B at commit (446 chunks arrived as Z)
+[INFO] fw_esp32c6::ota::core_only: [OTA] core-only: needs-engine
+[INFO] fw_esp32c6::ota::status_light: [OTA] light: GPIO18 × 7 LEDs r=24 g=0 b=0 (needs-engine)
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4001974a
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (32) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (80) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (96) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=00010h (    16) map[0m
+[0;32mI (108) esp_image: segment 1: paddr=00010038 vaddr=40850000 size=000e0h (   224) load[0m
+[0;32mI (117) esp_image: segment 2: paddr=00010120 vaddr=42000120 size=00010h (    16) map[0m
+[0;32mI (125) esp_image: segment 3: paddr=00010138 vaddr=408500e0 size=00994h (  2452) load[0m
+[0;32mI (134) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (140) boot: Disabling RNG early entropy source...[0m
+[LOADER] core @0x220000 (proven)
+[INIT] Initializing board...
+[INIT] Board initialized, starting runtime... (main stack 54256 B)
+[RECOVERY] boot: cause=software-reset level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] Runtime started
+[INIT] fw-esp32 starting...
+[INIT] io thread: stack 3072 B, priority 1
+[link] reset (PeerRestarted)
+[link] up (session 3)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INIT] Flash filesystem mounted
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +19436 B, host + GATT +3520 B, heap used 82896 B (slots 2)
+[INFO] fw_esp32c6: [CORE] core @0x220000 +1214800 (proven) build b1b1b1b1+0172481a0929 · loader v1 · region end 0x350000 · page 0x8000 · engine 1828914 B · digest ac5f5fe2
+[INFO] fw_esp32c6::ota::board_identity: [OTA] core sha in 1245 ms (1214800 B)
+[INIT] Initializing RMT peripheral at 80MHz...
+[INIT] RMT peripheral initialized
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+[INIT] Creating output provider...
+[INIT] Output provider created
+[INIT] Creating LpServer instance...
+[INIT] LpServer created
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[INFO] fw_esp32_common::boot: Boot: found configured startup project: studio
+[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 212328 B free / 89208 B used (207k / 87k)
+[INFO] lpa_server::project: [mem] project new start: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after root path: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after services: 207k free / 87k used
+[INFO] lpa_server::project: [mem] project new after core project: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after graphics: 172k free / 121k used
+[INFO] lpa_server::project: [mem] project new after wrapper: 172k free / 121k used
+[INFO] lpa_server::project_manager: Project loaded: studio
+[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 173112 B free / 128424 B used (169k / 125k)
+[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/studio
+[INIT] Creating time provider...
+[INIT] Time provider created
+[INIT] fw-esp32 initialized, starting server loop... proto=38 commit=0172481a0929 dirty=false
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+M!{"id":0,"msg":{"hello":{"proto":38,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.power-button","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","version":"b1b1b1b1","commit":"0172481a0929","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:fe:ff","fs":"mounted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"},"firmware":{"proto":1,"target":"esp32c6-4mb","chip":"esp32c6","version":"b1b1b1b1","buildId":"b1b1b1b1+0172481a0929","wireProto":38,"coreSha256":"b41a3dde960cdf209c6a17c9011204e6dd0b590dbf197a27f67ed731b28f509d","coreLen":1214800,"engineSha256":"ac5f5fe244851e7a597b26cc7b1c1b60d898a07cecfcc700d7dce8cd4b716ed8","engineLen":1828914,"layout":1,"loader":1,"regionLen":3375104,"state":"running","refusedBuild":null,"transfer":null}}}}
+[host-ota] board: b1b1b1b1+0172481a0929 Running
+[host-ota] decided: Nothing
+[host-ota] done: UpToDate
