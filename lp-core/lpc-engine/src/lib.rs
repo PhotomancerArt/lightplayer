@@ -25,6 +25,7 @@ pub mod color;
 pub mod dataflow;
 pub mod engine;
 pub mod features;
+pub mod frame_plan;
 pub mod node;
 pub mod nodes;
 pub mod product;
