@@ -38,6 +38,12 @@ pub struct RuntimeNodeTree<N> {
     by_path: VecMap<TreePath, NodeId>,
     by_sibling: VecMap<(NodeId, NodeName), NodeId>,
     binding_index: NodeBindingIndex,
+    /// The channels each module node declares it takes from its host
+    /// (`ModuleDef::inputs`): they list in the host scope — through a
+    /// playlist entry's sink — though nothing there names them (modules.md
+    /// R2, playlists-on-the-bus D5). A side map, so only a module that
+    /// declares something pays for it. Set with the module's bindings.
+    declared_inputs: VecMap<NodeId, Vec<ChannelName>>,
     next_id: u32,
     root: NodeId,
 }
@@ -59,6 +65,7 @@ impl<N> RuntimeNodeTree<N> {
             by_path,
             by_sibling: VecMap::new(),
             binding_index: NodeBindingIndex::default(),
+            declared_inputs: VecMap::new(),
             next_id: 1,
             root: root_id,
         }
@@ -187,6 +194,7 @@ impl<N> RuntimeNodeTree<N> {
         }
 
         // Drop this entry and remove it from the indices
+        self.declared_inputs.remove(&id);
         if let Some(e) = self.nodes.remove(id) {
             self.by_path.remove(&e.path);
             if let Some(name) = e.path.0.last().map(|seg| seg.name.clone()) {
@@ -384,11 +392,11 @@ impl<N> RuntimeNodeTree<N> {
                 }
             }
         }
-        for entry in self.entries() {
-            if entry.declared_inputs.is_empty() || self.input_host_scope(entry.id) != Some(scope) {
+        for (module, inputs) in self.declared_inputs.iter() {
+            if self.input_host_scope(*module) != Some(scope) {
                 continue;
             }
-            for channel in &entry.declared_inputs {
+            for channel in inputs {
                 if channels.iter().any(|(existing, _)| existing == channel) {
                     continue;
                 }
@@ -405,6 +413,15 @@ impl<N> RuntimeNodeTree<N> {
         }
         channels.sort_by(|(a, _), (b, _)| a.cmp(b));
         channels
+    }
+
+    /// Record the channels `module` declares as inputs (none clears it).
+    pub fn set_declared_inputs(&mut self, module: NodeId, inputs: Vec<ChannelName>) {
+        if inputs.is_empty() {
+            self.declared_inputs.remove(&module);
+        } else {
+            self.declared_inputs.insert(module, inputs);
+        }
     }
 
     /// Where a module's declared inputs list: the scope the module node is

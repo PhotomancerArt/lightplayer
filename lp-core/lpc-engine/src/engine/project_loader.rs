@@ -1744,9 +1744,7 @@ fn register_node_bindings(
                         .collect()
                 })
                 .unwrap_or_default();
-            if let Some(entry) = runtime.tree_mut().get_mut(node.id) {
-                entry.declared_inputs = inputs;
-            }
+            runtime.tree_mut().set_declared_inputs(node.id, inputs);
             for (key, entry) in config.bindings.entries().iter() {
                 let name = key.as_str();
                 entry
