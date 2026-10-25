@@ -1947,13 +1947,14 @@ impl StudioController {
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
-        if own_now.as_ref() != self.update_build_facts.own() {
+        if own_now.as_slice() != self.update_build_facts.own_builds() {
             self.update_build_facts_mut().set_own(own_now);
         }
         let now = self.device_now();
-        let own = self.update_build_facts.own().cloned();
         let store_latest = self.update_build_facts.store_latest().cloned();
-        let mut target = own.as_ref().map(|own| own.identity.target.clone());
+        // The store is asked about one target at a time: the first board's,
+        // or, with no board, this Studio's first own build's.
+        let mut target = None;
         let mut actions = Vec::new();
         for device in self.devices.roster().devices() {
             let evidence = &device.evidence;
@@ -1976,10 +1977,11 @@ impl StudioController {
             }
             let view = lpa_devices::view::device_view(device, now);
             let derived = auto_start::board_build_facts(facts);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
             let inputs = crate::UpdateStandingInputs {
                 view: &view,
                 facts: Some(facts),
-                own: own.as_ref().or(derived.as_ref()),
+                own: own.or(derived.as_ref()),
                 tier,
                 link,
                 store_latest: store_latest.as_ref(),
@@ -2007,7 +2009,8 @@ impl StudioController {
             {
                 continue;
             }
-            let verdict = auto_start::auto_update_for_board(facts, own.as_ref(), None);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
+            let verdict = auto_start::auto_update_for_board(facts, own, None);
             actions.extend(auto_start::auto_action(
                 &host,
                 pending.device_id(),
@@ -2024,6 +2027,12 @@ impl StudioController {
             }
         }
         self.devices.effects_mut().set_update_watches(watches);
+        let target = target.or_else(|| {
+            self.update_build_facts
+                .own_builds()
+                .first()
+                .map(|own| own.identity.target.clone())
+        });
         if let Some(target) = target {
             self.devices.effects_mut().want_store_latest(&target);
             self.devices.effects_mut().want_store_releases(&target);
@@ -2078,7 +2087,9 @@ impl StudioController {
         let inputs = crate::UpdateStandingInputs {
             view,
             facts,
-            own: self.update_build_facts.own(),
+            own: self
+                .update_build_facts
+                .own_for(facts.and_then(|facts| facts.target.as_deref())),
             tier: link.update_tier(self.access.granted_tier(view.id)),
             link,
             store_latest: self.update_build_facts.store_latest(),

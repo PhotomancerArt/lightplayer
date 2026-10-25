@@ -1,5 +1,5 @@
 //! What this Studio knows about the builds it could put on a board: its own
-//! build, the firmware store's `latest`, and the store's release index, by
+//! builds (one per target it serves), the firmware store's `latest`, and the store's release index, by
 //! their facts alone (DS5: a card decides without loading a build's bytes).
 //!
 //! The controller owns one [`UpdateBuildFacts`]. It starts empty, and with
@@ -7,7 +7,7 @@
 //! [`UpdateStanding::Nothing`](super::UpdateStanding::Nothing), so the card
 //! keeps today's words and today's USB flash. The update host fills it —
 //! [`UpdateBuildFacts::set_own`] from this Studio's bundled
-//! `ota-manifest.json` at start, [`UpdateBuildFacts::set_store_latest`]
+//! `ota-manifest.json` files at start, [`UpdateBuildFacts::set_store_latest`]
 //! when the firmware store answers its `latest` lookup for a board's
 //! target, [`UpdateBuildFacts::set_store_releases`] when it answers the
 //! release index for that target, [`UpdateBuildFacts::set_store_lookups`]
@@ -63,7 +63,7 @@ impl StoreReleases {
 /// known. See the module docs: empty until the update host fills it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UpdateBuildFacts {
-    own: Option<HostBuildFacts>,
+    own: Vec<HostBuildFacts>,
     store_latest: Option<StoreLatest>,
     store_releases: Option<StoreReleases>,
     store_lookups: StoreLookups,
@@ -71,9 +71,16 @@ pub struct UpdateBuildFacts {
 }
 
 impl UpdateBuildFacts {
-    /// This Studio's own build (read from its `ota-manifest.json`).
-    pub fn own(&self) -> Option<&HostBuildFacts> {
-        self.own.as_ref()
+    /// This Studio's own builds, one per target (each read from its
+    /// `ota-manifest.json`).
+    pub fn own_builds(&self) -> &[HostBuildFacts] {
+        &self.own
+    }
+
+    /// This Studio's own build for a board of `target`
+    /// ([`super::own_for`]).
+    pub fn own_for(&self, target: Option<&str>) -> Option<&HostBuildFacts> {
+        super::own_build_source::own_for(&self.own, target)
     }
 
     /// The store's latest release, once the store has said.
@@ -106,8 +113,8 @@ impl UpdateBuildFacts {
         self.store_lookups = lookups;
     }
 
-    /// Install (or clear) this Studio's own build facts.
-    pub fn set_own(&mut self, own: Option<HostBuildFacts>) {
+    /// Install (or clear, with none) this Studio's own builds' facts.
+    pub fn set_own(&mut self, own: Vec<HostBuildFacts>) {
         self.own = own;
     }
 
@@ -131,14 +138,16 @@ mod tests {
     #[test]
     fn it_starts_empty_and_holds_what_it_is_given() {
         let mut facts = UpdateBuildFacts::default();
-        assert!(facts.own().is_none());
+        assert!(facts.own_builds().is_empty());
         assert!(facts.store_latest().is_none());
 
-        facts.set_own(Some(build("2026.10.05-2")));
+        facts.set_own(vec![build("2026.10.05-2")]);
         facts.set_store_latest(Some(StoreLatest {
             facts: build("2026.10.07-4"),
         }));
-        assert_eq!(facts.own().unwrap().identity.version, "2026.10.05-2");
+        let own = facts.own_for(Some("esp32c6-4mb")).unwrap();
+        assert_eq!(own.identity.version, "2026.10.05-2");
+        assert!(facts.own_for(Some("esp32s3-8mb")).is_none());
         let latest = facts.store_latest().unwrap();
         assert_eq!(latest.version(), "2026.10.07-4");
         assert_eq!(latest.target(), "esp32c6-4mb");
@@ -151,8 +160,8 @@ mod tests {
         facts.set_store_releases(Some(StoreReleases { index }));
         assert_eq!(facts.store_releases().unwrap().target(), "esp32c6-4mb");
 
-        facts.set_own(None);
-        assert!(facts.own().is_none());
+        facts.set_own(Vec::new());
+        assert!(facts.own_for(Some("esp32c6-4mb")).is_none());
     }
 
     fn build(version: &str) -> HostBuildFacts {

@@ -452,9 +452,9 @@ pub fn App() -> Element {
                     as Rc<dyn lpa_firmware_store::FirmwareFetch>,
                 lpa_link::providers::browser_serial_esp32_options::DEFAULT_FIRMWARE_BASE_PATH,
             );
-            // This Studio's own firmware build (OTA M7, DS10): what a board
-            // is offered to update to, read from the bundle's own
-            // `firmware/<target>/` (the same relative base the flasher
+            // This Studio's own firmware builds (OTA M7, DS10), one per
+            // served target: what a board of that target is offered to
+            // update to, read from the bundle's own `firmware/<target>/` (the same relative base the flasher
             // fetches the merged image from). Its facts load in the
             // background; a single-image Studio (the fast local build) has
             // none, and its cards keep today's USB flash.
@@ -466,11 +466,15 @@ pub fn App() -> Element {
             controller.set_own_build_source(Rc::new(own_build.clone()));
             wasm_bindgen_futures::spawn_local(async move {
                 match own_build.read_facts().await {
-                    Ok(facts) => log::info!(
-                        "this Studio's own firmware build: {} ({}), update-capable",
-                        facts.identity.build_id,
-                        facts.identity.target
-                    ),
+                    Ok(builds) => {
+                        for facts in builds {
+                            log::info!(
+                                "this Studio's own firmware build: {} ({}), update-capable",
+                                facts.identity.build_id,
+                                facts.identity.target
+                            );
+                        }
+                    }
                     Err(why) => log::info!("this Studio carries no update-capable build: {why}"),
                 }
             });
