@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
   "recorded": "2026-10-25",
-  "commit": "df0df6b73",
+  "commit": "e0cecd337",
   "modes": {
     "startup": {
       "windows": {
@@ -15,20 +15,20 @@
           "holes_at_close": 3
         },
         "project-load": {
-          "transient": 58047,
-          "retained": 53708,
+          "transient": 58263,
+          "retained": 54316,
           "largest_alloc": 7455,
           "alloc_count": 4007,
-          "alloc_bytes": 200748,
-          "largest_free_at_close": 108088,
-          "holes_at_close": 50
+          "alloc_bytes": 201356,
+          "largest_free_at_close": 107480,
+          "holes_at_close": 47
         },
         "frame": {
-          "transient": 69277,
-          "retained": 56875,
+          "transient": 69845,
+          "retained": 57747,
           "largest_alloc": 5604,
-          "alloc_count": 2708,
-          "alloc_bytes": 175939
+          "alloc_count": 2714,
+          "alloc_bytes": 176723
         },
         "shader-compile": {
           "transient": 20641,
@@ -36,8 +36,8 @@
           "largest_alloc": 5604,
           "alloc_count": 843,
           "alloc_bytes": 88582,
-          "largest_free_at_close": 46304,
-          "holes_at_close": 16
+          "largest_free_at_close": 45152,
+          "holes_at_close": 15
         },
         "shader-link": {
           "transient": 3103,
@@ -45,21 +45,21 @@
           "largest_alloc": 3020,
           "alloc_count": 7,
           "alloc_bytes": 3158,
-          "largest_free_at_close": 46304,
-          "holes_at_close": 38
+          "largest_free_at_close": 45152,
+          "holes_at_close": 36
         }
       }
     },
     "steady-render": {
       "windows": {
         "frame": {
-          "transient": 1943,
+          "transient": 1879,
           "retained": 1176,
           "largest_alloc": 560,
-          "alloc_count": 206,
-          "alloc_bytes": 7435,
-          "largest_free_at_close": 46304,
-          "holes_at_close": 26
+          "alloc_count": 123,
+          "alloc_bytes": 4698,
+          "largest_free_at_close": 45152,
+          "holes_at_close": 25
         }
       }
     }
