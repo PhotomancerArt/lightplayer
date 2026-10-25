@@ -16,7 +16,8 @@
 //! Every case asserts the end state (the build, a valid engine, or the
 //! expected report), that no frozen flash ever lacks a bootable core (the
 //! world checks it at every cut), that a cut mid-piece resumes rather than
-//! restarts, and that the backup the host kept is the old engine.
+//! restarts, and that the backup the host kept is the old engine. A clean
+//! case also asserts that each stage's progress only moves forward.
 
 mod intents;
 mod world;
@@ -258,12 +259,33 @@ fn every_start_access_mode_and_ahead_converges() {
                     };
                     let (out, _) = run(&case, &b);
                     assert_eq!(out.cuts + out.stalls, 0, "{case:?}: {out:?}");
+                    assert_progress_only_moves_forward(&case, &out);
                     n += 1;
                 }
             }
         }
     }
     println!("start × access × mode × ahead: {n} cases converged");
+}
+
+/// Each stage's progress, as the driver reports it, never goes back: the
+/// engine's header chunk, which the board asks for last, is not the engine
+/// starting over (FS3, 2026-10-24: 100 % → 50 % → done on the card).
+fn assert_progress_only_moves_forward(case: &Case, out: &Outcome) {
+    let mut last: Vec<(lpa_update::Stage, u32)> = Vec::new();
+    for &(stage, done, total) in &out.progress {
+        assert!(done <= total, "{case:?}: {stage:?} {done} / {total}");
+        match last.iter_mut().find(|(seen, _)| *seen == stage) {
+            Some((_, before)) => {
+                assert!(
+                    done >= *before,
+                    "{case:?}: {stage:?} went back from {before} to {done} / {total}"
+                );
+                *before = done;
+            }
+            None => last.push((stage, done)),
+        }
+    }
 }
 
 /// Chunks a clean run of `case` serves.
