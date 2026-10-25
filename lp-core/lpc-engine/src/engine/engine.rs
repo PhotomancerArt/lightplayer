@@ -122,8 +122,6 @@ pub struct Engine {
     /// settles: a name registered one tick (or one output) after the fixture
     /// resolved must clear a transient dangling report without a patch edit.
     output_identity_revision: Revision,
-    /// See `EngineResolveHost::identities_swept_epoch`.
-    identities_swept_epoch: Option<u64>,
     /// The most bytes a serialized display layout may occupy in one
     /// project-read answer, declared by the EMBEDDER for its transport
     /// (`Engine::set_display_layout_budget`). `None` = unbounded. Defaults
@@ -205,6 +203,8 @@ struct EngineFramePlans {
     /// The frame plans' mode, frame index and counters, handed to every node
     /// context through the tick's session.
     state: crate::frame_plan::FramePlanState,
+    /// See `EngineResolveHost::identities_swept_epoch`.
+    identities_swept_epoch: Option<u64>,
 }
 
 /// The shape summary [`Engine::assert_structural_changes_were_announced`]
@@ -238,7 +238,6 @@ impl Engine {
             safe_output_clamp_q16: None,
             output_identities: alloc::collections::BTreeMap::new(),
             output_identity_revision: revision,
-            identities_swept_epoch: None,
             display_layout_budget: Some(
                 lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
@@ -1065,7 +1064,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1232,7 +1231,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1281,7 +1280,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1375,7 +1374,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1437,7 +1436,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1484,7 +1483,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1531,7 +1530,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1609,7 +1608,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
-            identities_swept_epoch: &mut self.identities_swept_epoch,
+            identities_swept_epoch: &mut self.frame_plans.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -3695,7 +3694,7 @@ pub(crate) fn resolve_with_engine_host(
         timebases: &mut eng.timebases,
         output_identities: &mut eng.output_identities,
         output_identity_revision: &mut eng.output_identity_revision,
-        identities_swept_epoch: &mut eng.identities_swept_epoch,
+        identities_swept_epoch: &mut eng.frame_plans.identities_swept_epoch,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -3743,7 +3742,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         timebases: &mut eng.timebases,
         output_identities: &mut eng.output_identities,
         output_identity_revision: &mut eng.output_identity_revision,
-        identities_swept_epoch: &mut eng.identities_swept_epoch,
+        identities_swept_epoch: &mut eng.frame_plans.identities_swept_epoch,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
