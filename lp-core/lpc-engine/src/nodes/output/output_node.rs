@@ -419,6 +419,7 @@ impl OutputNode {
     /// that cannot exist in the `OutputDef` shape is a different thing — a
     /// code bug — and it still fails loudly, out of `def_view`, because
     /// compiling the view is exactly that shape check.
+    #[inline(never)]
     fn test_pattern_active(&mut self, ctx: &mut TickContext<'_>) -> Result<bool, NodeError> {
         let Self {
             def_view, reads, ..
@@ -440,6 +441,7 @@ impl OutputNode {
     /// ordinary single-output state, not a fault.
     ///
     /// Updates [`Self::name`], copying the text only when it changed.
+    #[inline(never)]
     fn refresh_authored_name(&mut self, ctx: &mut TickContext<'_>) {
         let production = match ctx.resolve_planned_static(&mut self.reads.name, "name.some") {
             Ok(production) => production,
@@ -476,6 +478,7 @@ impl OutputNode {
     /// The microformat parse is equally forgiving — see [`parse_highlight`].
     ///
     /// Updates [`Self::highlight`], re-parsing only when the text changed.
+    #[inline(never)]
     fn refresh_highlight(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let production = {
             let Self {

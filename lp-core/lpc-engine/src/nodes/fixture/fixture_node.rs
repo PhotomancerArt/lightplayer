@@ -483,6 +483,109 @@ impl FixtureNode {
         self
     }
 
+    /// The settings every frame reads, before the input resolve that runs
+    /// the producers: the planned reads, the selection, the mapping sync and
+    /// the patch. Not inlined: its locals would otherwise sit in `produce`'s
+    /// frame under the whole resolve below it (the C6 main stack).
+    #[inline(never)]
+    fn read_frame_settings(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<FrameSettingsRead, NodeError> {
+        let (render_size, color_order, brightness, gamma_correction) = {
+            let Self {
+                def_view, reads, ..
+            } = self;
+            let def = FixtureDefView::get_or_compile(def_view, ctx.slot_shapes())
+                .map_err(err_ctx("compile fixture def view"))?;
+            (
+                ctx.read_planned_accessor::<Dim2u>(
+                    &mut reads.render_size,
+                    def.render_size().accessor(),
+                )?,
+                ctx.read_planned_accessor::<ColorOrder>(
+                    &mut reads.color_order,
+                    def.color_order().accessor(),
+                )?,
+                ctx.read_planned_option_or(
+                    &mut reads.brightness,
+                    def.brightness().some_accessor(),
+                    lpc_model::Brightness::DEFAULT,
+                )?
+                .as_u8(),
+                ctx.read_planned_option_or(
+                    &mut reads.gamma_correction,
+                    def.gamma_correction().some_accessor(),
+                    true,
+                )?,
+            )
+        };
+        // Read through the option's `some` branch by path: `power` is absent
+        // from every project authored before it existed, and an absent option
+        // comes back as the typed `is_absent_option` error, which
+        // `try_read_def_value` reads as `None` without allocating.
+        //
+        // Absent falls back to the default guard rather than to unlimited — the
+        // fixture most in need of a current limit is the one whose author has
+        // never heard of the setting. Opting out is `budget_ma: 0`.
+        let power: FixturePower =
+            try_read_def_value_planned(ctx, &mut self.reads.power, "power.some")?
+                .unwrap_or_default();
+        let diagnostic_mode =
+            try_read_def_value_planned(ctx, &mut self.reads.diagnostic_mode, "diagnostic_mode")?
+                .unwrap_or(FixtureDiagnosticMode::Off);
+        // The selection text is borrowed from the resolved value and compared
+        // with the held selection; it is copied only when it changed.
+        match try_read_def_production_planned(ctx, &mut self.reads.selection, "selection")? {
+            Some(production) => match production.value_leaf().map(|leaf| leaf.value()) {
+                Some(lpc_model::LpValue::String(text)) => {
+                    FixtureSelection::update_in(&mut self.selection, text.as_str());
+                }
+                _ => {
+                    let selection: Option<alloc::string::String> =
+                        production_value(&production, "selection")?;
+                    FixtureSelection::update_in(
+                        &mut self.selection,
+                        selection.as_deref().unwrap_or_default(),
+                    );
+                }
+            },
+            None => FixtureSelection::update_in(&mut self.selection, ""),
+        }
+        // The two-sided space declaration (vision D3/D14). Absent reads —
+        // a runtime fixture with no def behind it — leave the loaded
+        // declaration standing rather than resetting it, the same rule the
+        // shader node's `space` read follows.
+        if let Some(strip_order_meaningful) = try_read_def_value_planned(
+            ctx,
+            &mut self.reads.strip_order_meaningful,
+            "strip_order_meaningful",
+        )? {
+            self.strip_order_meaningful = strip_order_meaningful;
+        }
+        if let Some(wire_reversed) =
+            try_read_def_value_planned(ctx, &mut self.reads.wire_reversed, "wire_reversed")?
+        {
+            self.wire_reversed = wire_reversed;
+        }
+        if let Some(policy) = try_read_consume_policy(ctx, &mut self.reads.consume) {
+            self.consume_policy = policy;
+        }
+        self.sync_mapping_from_def(ctx)?;
+        // After the mapping settles and before the control product is
+        // published: the output reads this placement in the same tick, right
+        // after the resolve that ran us.
+        self.ensure_patch_resolved(ctx);
+        Ok(FrameSettingsRead {
+            render_size,
+            color_order,
+            brightness,
+            gamma_correction,
+            power,
+            diagnostic_mode,
+        })
+    }
+
     /// This frame's plan for the fixture's mapping, built when its key moved
     /// ([`FixtureFramePlan`]).
     fn planned(&mut self, ctx: &mut TickContext<'_>, color_order: ColorOrder) -> &FixtureFramePlan {
@@ -700,90 +803,14 @@ impl NodeRuntime for FixtureNode {
         _slot: &SlotPath,
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
-        let (render_size, color_order, brightness, gamma_correction) = {
-            let Self {
-                def_view, reads, ..
-            } = self;
-            let def = FixtureDefView::get_or_compile(def_view, ctx.slot_shapes())
-                .map_err(err_ctx("compile fixture def view"))?;
-            (
-                ctx.read_planned_accessor::<Dim2u>(
-                    &mut reads.render_size,
-                    def.render_size().accessor(),
-                )?,
-                ctx.read_planned_accessor::<ColorOrder>(
-                    &mut reads.color_order,
-                    def.color_order().accessor(),
-                )?,
-                ctx.read_planned_option_or(
-                    &mut reads.brightness,
-                    def.brightness().some_accessor(),
-                    lpc_model::Brightness::DEFAULT,
-                )?
-                .as_u8(),
-                ctx.read_planned_option_or(
-                    &mut reads.gamma_correction,
-                    def.gamma_correction().some_accessor(),
-                    true,
-                )?,
-            )
-        };
-        // Read through the option's `some` branch by path: `power` is absent
-        // from every project authored before it existed, and an absent option
-        // comes back as the typed `is_absent_option` error, which
-        // `try_read_def_value` reads as `None` without allocating.
-        //
-        // Absent falls back to the default guard rather than to unlimited — the
-        // fixture most in need of a current limit is the one whose author has
-        // never heard of the setting. Opting out is `budget_ma: 0`.
-        let power: FixturePower =
-            try_read_def_value_planned(ctx, &mut self.reads.power, "power.some")?
-                .unwrap_or_default();
-        let diagnostic_mode =
-            try_read_def_value_planned(ctx, &mut self.reads.diagnostic_mode, "diagnostic_mode")?
-                .unwrap_or(FixtureDiagnosticMode::Off);
-        // The selection text is borrowed from the resolved value and compared
-        // with the held selection; it is copied only when it changed.
-        match try_read_def_production_planned(ctx, &mut self.reads.selection, "selection")? {
-            Some(production) => match production.value_leaf().map(|leaf| leaf.value()) {
-                Some(lpc_model::LpValue::String(text)) => {
-                    FixtureSelection::update_in(&mut self.selection, text.as_str());
-                }
-                _ => {
-                    let selection: Option<alloc::string::String> =
-                        production_value(&production, "selection")?;
-                    FixtureSelection::update_in(
-                        &mut self.selection,
-                        selection.as_deref().unwrap_or_default(),
-                    );
-                }
-            },
-            None => FixtureSelection::update_in(&mut self.selection, ""),
-        }
-        // The two-sided space declaration (vision D3/D14). Absent reads —
-        // a runtime fixture with no def behind it — leave the loaded
-        // declaration standing rather than resetting it, the same rule the
-        // shader node's `space` read follows.
-        if let Some(strip_order_meaningful) = try_read_def_value_planned(
-            ctx,
-            &mut self.reads.strip_order_meaningful,
-            "strip_order_meaningful",
-        )? {
-            self.strip_order_meaningful = strip_order_meaningful;
-        }
-        if let Some(wire_reversed) =
-            try_read_def_value_planned(ctx, &mut self.reads.wire_reversed, "wire_reversed")?
-        {
-            self.wire_reversed = wire_reversed;
-        }
-        if let Some(policy) = try_read_consume_policy(ctx, &mut self.reads.consume) {
-            self.consume_policy = policy;
-        }
-        self.sync_mapping_from_def(ctx)?;
-        // After the mapping settles and before the control product is
-        // published: the output reads this placement in the same tick, right
-        // after the resolve that ran us.
-        self.ensure_patch_resolved(ctx);
+        let FrameSettingsRead {
+            render_size,
+            color_order,
+            brightness,
+            gamma_correction,
+            power,
+            diagnostic_mode,
+        } = self.read_frame_settings(ctx)?;
         let width = render_size.width;
         let height = render_size.height;
 
@@ -1240,6 +1267,16 @@ fn ensure_path_exists_in_fixture_def_shape(
         )));
     }
     Ok(())
+}
+
+/// What [`FixtureNode::read_frame_settings`] hands back to `produce`.
+struct FrameSettingsRead {
+    render_size: Dim2u,
+    color_order: ColorOrder,
+    brightness: u8,
+    gamma_correction: bool,
+    power: FixturePower,
+    diagnostic_mode: FixtureDiagnosticMode,
 }
 
 #[derive(Clone, Copy)]
