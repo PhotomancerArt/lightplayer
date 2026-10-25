@@ -16,16 +16,16 @@
 //! vocabulary grows several times over.
 
 use crate::account_access_info::AccountAccessInfo;
+use crate::account_board::{AccountBoardList, ForgetBoard, ReportBoard};
 use crate::ack::Ack;
 use crate::board_picture::{BoardPictureList, BoardPictures};
-use crate::board_presence::BoardList;
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
 use crate::request::{
     AddMember, ArchiveProject, CloudRequest, GetAccountAccess, GetEvents, GetHeads, GetMe,
-    GetProject, HaveBlobs, ListBoards, ListMyProjects, ListSessions, LoginOptions, PublishProject,
-    PushCommit, RemoveMember, ResetAccountKey, RestoreProject, RevokeSession, SetAccess,
-    SetAccountPassword, UpdateMe, WhoAmI,
+    GetProject, HaveBlobs, ListAccountBoards, ListMyProjects, ListSessions, LoginOptions,
+    PublishProject, PushCommit, RemoveMember, ResetAccountKey, RestoreProject, RevokeSession,
+    SetAccess, SetAccountPassword, UpdateMe, WhoAmI,
 };
 use crate::response::{
     CloudResponse, Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
@@ -282,12 +282,34 @@ impl CloudCallSpec for ResetAccountKey {
     }
 }
 
-impl CloudCallSpec for ListBoards {
-    type Response = BoardList;
+impl CloudCallSpec for ListAccountBoards {
+    type Response = AccountBoardList;
 
-    fn extract(response: CloudResponse) -> Option<BoardList> {
+    fn extract(response: CloudResponse) -> Option<AccountBoardList> {
         match response {
-            CloudResponse::BoardList(list) => Some(list),
+            CloudResponse::AccountBoardList(list) => Some(list),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for ReportBoard {
+    type Response = Ack;
+
+    fn extract(response: CloudResponse) -> Option<Ack> {
+        match response {
+            CloudResponse::Ack(ack) => Some(ack),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for ForgetBoard {
+    type Response = Ack;
+
+    fn extract(response: CloudResponse) -> Option<Ack> {
+        match response {
+            CloudResponse::Ack(ack) => Some(ack),
             _ => None,
         }
     }

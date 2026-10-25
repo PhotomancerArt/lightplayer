@@ -18,6 +18,7 @@
 //! | `rng` | the seeded PRNG's position |
 //! | `hook_calls`, `idle_skips`, `wfi_ends` | observables a test compares |
 //! | `core_quantum` | the per-core window bound. A run's future depends on it — two quanta are two interleavings — so a restore adopts the snapshot's rather than keeping the machine's |
+//! | `psram` | the PSRAM's bytes, with every page the cache holds live written back first — or `None` while nothing has ever written the chip, which is every run whose image never brings PSRAM up |
 //! | `console` | what the console has said. Empty until P05 gives it a producer; carried from the first commit so the determinism test's comparison is unchanged when it stops being empty |
 //!
 //! **Watchpoints are not here**: they live on the bus but are derived from
@@ -69,6 +70,8 @@ pub struct Snapshot {
     /// caught **mid-frame** is state — one restored without its half-shifted
     /// bits would resume a frame that never existed.
     pub pins: crate::machine::PinState,
+    /// The PSRAM's bytes — see the module docs.
+    pub psram: Option<Vec<u8>>,
 }
 
 impl Snapshot {
@@ -92,5 +95,6 @@ impl Snapshot {
         self.regions.iter().map(Vec::len).sum::<usize>()
             + self.periph.iter().map(|(_, b)| b.len()).sum::<usize>()
             + self.console.len()
+            + self.psram.as_ref().map_or(0, Vec::len)
     }
 }

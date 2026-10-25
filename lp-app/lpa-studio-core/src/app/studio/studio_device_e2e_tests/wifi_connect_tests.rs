@@ -86,10 +86,10 @@ impl crate::LanLinkSource for ConnectableLanBoard {
 
 /// The LAN half and what the test reads back from it.
 pub(super) struct LanRig {
-    refuse: Rc<RefCell<Option<String>>>,
-    asked: Rc<RefCell<Vec<String>>>,
+    pub(super) refuse: Rc<RefCell<Option<String>>>,
+    pub(super) asked: Rc<RefCell<Vec<String>>>,
     /// Every stored form of the address book the web edge was handed.
-    stored: Rc<RefCell<Vec<String>>>,
+    pub(super) stored: Rc<RefCell<Vec<String>>>,
 }
 
 /// Install the shipped build's halves beside the bench's USB: a sim half

@@ -92,7 +92,7 @@ impl Registry {
                 serde_json::json!({
                     "id": b.id,
                     "mac": format_mac(&b.mac),
-                    "chip": "esp32c6",
+                    "chip": b.chip,
                     "bytes": format!("/board/{}/bytes", b.id),
                     "control": format!("/board/{}/control", b.id),
                     // Recomputed on every request, not once at power-on: a

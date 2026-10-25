@@ -1925,6 +1925,65 @@ mod tests {
         );
     }
 
+    /// A board moved from one link to another (a relay route the board
+    /// closed when its LAN link took the network slot): the old link's close
+    /// and departure, heard after the move, leave the board on the new one.
+    #[test]
+    fn the_link_a_board_left_closing_or_going_away_leaves_it_on_the_new_one() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "relay:a0f26287b48c"));
+        roster.handle(Millis(10), opened(LinkId(1), "relay:a0f26287b48c"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "a0:f2:62:87:b4:8c"),
+        );
+        roster.handle(Millis(100), attach(LinkId(2), "lan:ws://10.0.0.5/link"));
+        roster.handle(Millis(110), opened(LinkId(2), "lan:ws://10.0.0.5/link"));
+        roster.handle(
+            Millis(120),
+            hello_mac(LinkId(2), &facts, "a0:f2:62:87:b4:8c"),
+        );
+        assert_eq!(roster.devices().len(), 1);
+        assert_eq!(roster.devices()[0].link(), Some(LinkId(2)));
+
+        roster.handle(
+            Millis(200),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Closed {
+                    reason: "closed by request".to_string(),
+                },
+            ),
+        );
+        assert_eq!(
+            roster.devices()[0].link(),
+            Some(LinkId(2)),
+            "after the close"
+        );
+        roster.handle(
+            Millis(210),
+            Input::Event(Event::LinkDetached { link: LinkId(1) }),
+        );
+        let device = &roster.devices()[0];
+        assert_eq!(device.link(), Some(LinkId(2)), "still on the new link");
+        assert!(device.evidence.presence.is_open(), "and open");
+        assert_ne!(
+            crate::view::device_view(device, Millis(220)).status,
+            crate::device::DeviceStatus::Offline
+        );
+
+        // The link it IS on going away still takes it offline.
+        roster.handle(
+            Millis(300),
+            Input::Event(Event::LinkDetached { link: LinkId(2) }),
+        );
+        assert_eq!(
+            crate::view::device_view(&roster.devices()[0], Millis(310)).status,
+            crate::device::DeviceStatus::Offline
+        );
+    }
+
     /// A board's id is its MAC once something has read one, and nothing
     /// before that: a pending link that has not said hello has no key, and
     /// the key it gets is the one the device keeps after it is adopted.

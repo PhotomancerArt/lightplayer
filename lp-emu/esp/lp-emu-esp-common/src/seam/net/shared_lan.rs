@@ -136,6 +136,9 @@ struct BoardPace {
     /// `None`: held only while a host is connected ([`super::lan_pace`]).
     set: Option<Pace>,
     pace: HostPace,
+    /// A host holds the board's USB byte socket: a wall-clock reader of its
+    /// frames, so the unset pace holds the board then, as for a forward.
+    host_attached: bool,
 }
 
 impl SharedLan {
@@ -275,9 +278,31 @@ impl SharedLan {
                 board,
                 set: pace,
                 pace: HostPace::default(),
+                host_attached: false,
             }),
         }
         Ok(())
+    }
+
+    /// Whether a host is attached to board `board` through its USB byte
+    /// socket. Only the unset pace reads it: `realtime` holds the board
+    /// anyway and `max` never does.
+    pub fn set_host_attached(&self, board: EndpointId, attached: bool) {
+        let mut g = self.inner();
+        match g.paces.iter_mut().find(|p| p.board == board) {
+            Some(p) => {
+                if p.host_attached != attached {
+                    p.pace.release();
+                }
+                p.host_attached = attached;
+            }
+            None => g.paces.push(BoardPace {
+                board,
+                set: None,
+                pace: HostPace::default(),
+                host_attached: attached,
+            }),
+        }
     }
 
     /// Board `board`'s pace, as its host set it (`None`: unset).
@@ -472,12 +497,19 @@ impl Shared {
     }
 
     /// Whether board `board` is held to the host's clock now: always at
-    /// `realtime`, never at `max`, and while a host is connected unset.
+    /// `realtime`, never at `max`, and unset while a host is connected
+    /// through a forward or an uplink, or attached on its USB byte socket.
     fn held(&self, board: EndpointId) -> bool {
         match self.pace_set(board) {
             Some(Pace::Realtime) => true,
             Some(Pace::Max) => false,
-            None => self.hosted(),
+            None => {
+                self.hosted()
+                    || self
+                        .paces
+                        .iter()
+                        .any(|p| p.board == board && p.host_attached)
+            }
         }
     }
 
@@ -494,6 +526,7 @@ impl Shared {
                     board,
                     set: None,
                     pace: HostPace::default(),
+                    host_attached: false,
                 });
                 self.paces.len() - 1
             }
@@ -834,6 +867,29 @@ mod tests {
             "a host is there, and nothing waits"
         );
         drop(host);
+    }
+
+    /// A host on the board's USB byte socket holds an unset pace, with no
+    /// forward at all, and lets go when it leaves; `max` stays free.
+    #[test]
+    fn an_attached_byte_socket_host_holds_an_unset_pace() {
+        let (lan, mut board, mut now) = joined_board();
+        pump_and_step(&lan, &mut board, &mut now);
+        assert!(!paced(&lan, board.id()), "unset, nobody attached: free");
+
+        lan.set_host_attached(board.id(), true);
+        pump_and_step(&lan, &mut board, &mut now);
+        assert!(!lan.hosted(), "no forward and no uplink");
+        assert!(paced(&lan, board.id()), "attached: held, unset");
+
+        lan.set_host_attached(board.id(), false);
+        pump_and_step(&lan, &mut board, &mut now);
+        assert!(!paced(&lan, board.id()), "the host left: nothing waits");
+
+        lan.set_pace(board.id(), Some(Pace::Max)).unwrap();
+        lan.set_host_attached(board.id(), true);
+        pump_and_step(&lan, &mut board, &mut now);
+        assert!(!paced(&lan, board.id()), "max is free even when attached");
     }
 
     /// `realtime` holds the board with no host and no forward at all, and

@@ -146,10 +146,20 @@ board and back without reading — the session is sealed end to end.
   `4429` busy.
 - **Presence is memory** (`src/relay/relay_hub.rs`, sans-IO, behind its own
   lock — never the store's). Shutdown closes every leg `1001 going away`, so
-  boards come back within their 2–12 s backoff. `ListBoards` answers the
-  account's online boards with `sameNetwork` (same public address, from
-  `Fly-Client-IP`; always true locally), and each board's `relayProto`,
-  `firmware` and `project` (its name).
+  boards come back within their 2–12 s backoff. `ListAccountBoards` answers
+  the account's board list (the store's records) with this hub's presence
+  joined on for the boards the caller proved: `sameNetwork` (same public
+  address, from `Fly-Client-IP`; always true locally), and each board's
+  `relayProto`, `firmware` and `project` (its name).
+- **The board list is written by the hub's decisions, applied here**
+  (`docs/adr/2026-10-20-the-account-board-list.md`): the hub returns
+  `BoardRecordWrite`s — a board joins every account it proved as it
+  registers, a new project name, its last picture at most every ten minutes
+  while online, and its last sighting and picture when it leaves and when
+  the process goes away — and the board's leg applies them through the
+  store (`apply_relay_writes`), never under the hub's lock. `BoardPictures`
+  answers a board this process holds no picture of from the caller's own
+  record (its readers the accounts the board proved when it was taken).
 - **Two relay protocols** (`lpc_relay::SUPPORTED_RELAY_PROTO_VERSIONS`,
   `[1, 2]`). Fielded cores speak 1, accepted forever and answered as before:
   **a protocol 1 leg is never sent a protocol 2 frame** — every send to a

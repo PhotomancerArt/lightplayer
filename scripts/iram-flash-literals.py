@@ -44,6 +44,7 @@ happens to decode as an `l32r` resolves to nothing and is skipped here.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import shutil
 import subprocess
@@ -113,8 +114,15 @@ def section_headers(objdump: str, elf: str) -> set[str]:
     }
 
 
+def hot_patterns(hook: Path | None) -> list[str]:
+    """The function-symbol globs of a `rwtext_hook.x` (the S3's IRAM hot set)."""
+    if hook is None:
+        return []
+    return re.findall(r"\*\(\.literal\.(\S+) ", hook.read_text())
+
+
 def flash_literals_per_function(
-    objdump: str, elf: str, sections: list[str]
+    objdump: str, elf: str, sections: list[str], skip: list[str] = ()
 ) -> dict[str, int]:
     counts: dict[str, int] = {}
     args = ["-d"] + [f"--section={name}" for name in sections] + [elf]
@@ -122,6 +130,11 @@ def flash_literals_per_function(
     for line in run(objdump, *args).splitlines():
         if header := _FUNC_HEADER.match(line):
             current = header.group("name")
+            # The IRAM hot set is in RAM for speed, not for the ISR rule: it
+            # is engine and allocator code that calls flash freely.
+            if any(fnmatch.fnmatchcase(current, p) for p in skip):
+                current = None
+                continue
             counts.setdefault(current, 0)
             continue
         if current is None:
@@ -213,6 +226,11 @@ def main() -> int:
     )
     parser.add_argument("--objdump", help="default: the chip's xtensa-*-elf-objdump")
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument(
+        "--hot-hook",
+        type=Path,
+        help="a rwtext_hook.x whose functions are in RAM for speed, not the ISR rule: skipped",
+    )
     parser.add_argument("--write-baseline", action="store_true")
     parser.add_argument(
         "--dump",
@@ -247,7 +265,9 @@ def main() -> int:
         dump_annotated(args.objdump, args.elf, sections, args.dump)
         return 0
 
-    counts = flash_literals_per_function(args.objdump, args.elf, sections)
+    counts = flash_literals_per_function(
+        args.objdump, args.elf, sections, hot_patterns(args.hot_hook)
+    )
     table = render(counts)
 
     if args.write_baseline:

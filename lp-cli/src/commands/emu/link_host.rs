@@ -164,6 +164,11 @@ impl S3Board {
     /// the power-on USB host state — attached and draining
     /// (`UsbHost::Attached { draining: true }`) is every caller's default
     /// today; `run_s3`'s `--usb-host` is the one place that overrides it.
+    ///
+    /// Built to reboot on reset, as [`V3Board`] is: since S3 radio M1 a
+    /// Reboot request (the ROM's `software_reset`, `options0.sw_sys_rst`)
+    /// is a reset the machine performs, and a hosted board that ended its
+    /// run on one would leave the host talking to nothing.
     pub fn build(
         builder: lp_emu_esp32s3::machine::Esp32S3Builder,
         usb_host: lp_emu_esp32s3::machine::UsbHost,
@@ -172,9 +177,18 @@ impl S3Board {
         let machine = builder
             .usb_host(usb_host)
             .usb_sj_source(Box::new(source))
+            .reboot_on_reset(true)
             .build()
             .map_err(|e| anyhow::anyhow!("building the S3 machine: {e}"))?;
         Ok(Self { machine, queue })
+    }
+
+    /// A chip start's `SEAM …` lines, as the machine produced them (a
+    /// direct load's at build, a ROM-up boot's once the app runs).
+    pub fn print_seam_lines(&mut self) {
+        for line in self.machine.take_seam_lines() {
+            eprintln!("emu: {line}");
+        }
     }
 }
 
@@ -185,8 +199,14 @@ impl EmuUsbBoard for S3Board {
             stop_cycle: Some(self.machine.cycles() + us * lp_emu_esp32s3::memmap::CYCLES_PER_US),
             ..Default::default()
         };
-        match self.machine.run_until(&stop) {
+        let outcome = self.machine.run_until(&stop);
+        self.print_seam_lines();
+        match outcome {
             Outcome::Deadline { .. } => Ok(()),
+            // `--flash-cut … then=stop`: the run ends on the cut, the flash
+            // as it left it (`finish` writes it back to a `--rom-up-flash`).
+            Outcome::PowerCut { report, .. } => Err(format!("power cut: {report}")),
+            Outcome::Seam { why, .. } => Err(format!("seam: {why}")),
             other => Err(format!("{other:?}")),
         }
     }
@@ -212,11 +232,35 @@ impl EmuUsbBoard for S3Board {
         let m = &mut self.machine;
         m.flush_frames();
         let flash = m.flush_flash();
-        finish_lines(
+        let mut lines = finish_lines(
             m.instructions(),
             (m.bus().unmapped_reads(), m.bus().unmapped_writes()),
             flash,
-        )
+        );
+        if m.reboots() > 0 {
+            lines.push(format!("{} reboot(s)", m.reboots()));
+        }
+        // The block cache's diagnostic: never compared, since a run and its
+        // `--no-block-cache` twin differ in exactly these.
+        lines.extend(m.block_report_lines());
+        // `--flash-cut`: the cut, the power cycles and the in-range census.
+        lines.extend(m.flash_cut_summary());
+        // The seams' counters and each endpoint's wake, when any engaged.
+        // Emulated figures.
+        if m.seams().engaged() {
+            let s = m.seams();
+            lines.push(format!(
+                "seams {} ({}): seam_calls {}, seam_arms {} ({} re-arms), {} chip start(s)",
+                s.request,
+                m.configuration_label(),
+                s.calls,
+                s.arms_planted,
+                s.rearms,
+                s.starts
+            ));
+            lines.extend(m.seam_wake_lines());
+        }
+        lines
     }
 }
 

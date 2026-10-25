@@ -91,6 +91,8 @@ pub(crate) struct CardFixture {
     pub remembered_bluetooth: Option<bool>,
     /// The account's list says the board is online at lightplayer.app.
     pub cloud: Option<crate::UiCloudBoard>,
+    /// What the account's list last left to say on the card.
+    pub account_note: Option<crate::AccountBoardNote>,
     /// More verbs the controller publishes beside the device's own (the
     /// layout verbs).
     pub extra_offers: Vec<UiOffer>,
@@ -140,6 +142,7 @@ impl CardFixture {
             remembered_network: None,
             remembered_bluetooth: None,
             cloud: None,
+            account_note: None,
             extra_offers: Vec::new(),
             hidden: Vec::new(),
             offers: Vec::new(),
@@ -268,6 +271,7 @@ impl CardFixture {
                 remembered_network: self.remembered_network.as_ref(),
                 remembered_bluetooth: self.remembered_bluetooth,
                 cloud: self.cloud.as_ref(),
+                account_note: self.account_note.as_ref(),
             },
             now: self.now,
         }
@@ -539,8 +543,11 @@ pub(crate) fn cloud_board(picture: bool) -> crate::UiCloudBoard {
     crate::UiCloudBoard {
         key: lpa_devices::BoardKey::parse("10bda3b08e30").unwrap(),
         label: "Fabric Test".to_string(),
+        model: None,
         firmware: Some("2026.10.19-1".to_string()),
         project: Some("rainbow".to_string()),
+        online: true,
+        last_seen: Some(1_000.0),
         relay_proto: 2,
         picture: picture
             .then(|| crate::app::devices::cloud_board_picture::cloud_picture_preview(&shown))

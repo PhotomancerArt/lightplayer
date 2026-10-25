@@ -718,7 +718,20 @@ fn a_non_strict_direct_load_now_reaches_nothing_the_machine_does_not_model() {
         0,
         "every block twenty milliseconds of this image touches now answers"
     );
-    assert_eq!(machine.core_instructions(1), 0, "slot 1 still ran nothing");
+    // Since `two-core` (2026-10-24) the image releases core 1 at boot, through
+    // the ROM's APP-CPU path, into its render helper's loop, where it parks
+    // in `waiti` until a batch wakes it: a few thousand instructions, then
+    // nothing.
+    assert_eq!(machine.core1_releases(), 1, "slot 1 released once");
+    assert!(
+        machine.parked(1),
+        "slot 1 parked in waiti, waiting for a job"
+    );
+    assert!(
+        machine.core_instructions(1) < 10_000,
+        "slot 1 only reached its loop: {} instructions",
+        machine.core_instructions(1)
+    );
     println!(
         "SCOUTING RUN: {} instructions, pc {:#010x} ({}), {} console bytes, {} unmapped reads",
         machine.instructions(),

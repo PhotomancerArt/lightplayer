@@ -702,6 +702,19 @@ mod tests {
     }
 
     #[test]
+    fn a_recovery_name_is_the_path_rendered_once() {
+        let mut tree = make_tree();
+        let a = add_test_child(&mut tree, "a");
+        let entry = tree.get(a).unwrap();
+        let first = entry.recovery_name();
+        assert_eq!(
+            &*first,
+            alloc::string::ToString::to_string(&entry.path).as_str()
+        );
+        assert!(alloc::rc::Rc::ptr_eq(&first, &entry.recovery_name()));
+    }
+
+    #[test]
     fn tree_owns_and_indexes_runtime_bindings() {
         let mut tree = make_tree();
         let shader = add_test_child(&mut tree, "shader");

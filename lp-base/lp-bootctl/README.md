@@ -33,6 +33,22 @@ host tool that builds the image is
 [`tools/lp-fw-split`](../../tools/lp-fw-split/README.md); the protocol that
 rewrites them is [`lpc-update`](../../lp-core/lpc-update/README.md).
 
+### Layout 2: the ESP32-S3's
+
+The S3 ships the same split image with the region moved to the next 64 KiB
+page, the only MMU page the S3 has. Everything below `0x18000` is layout 1's
+bytes at layout 1's offsets, so the records, `choose`, the engine header, the
+progress record and the engine digest are the same formats; `0x18000..0x20000`
+is reserved (erased, never written) and the region starts at `0x20000`.
+Layout 2 binds from the first release whose S3 core can install an update.
+
+| Module | What it defines |
+|---|---|
+| `split_layout_2` | layout 2's page, region start and reserved gap; `SplitLayout::layout_2` carries the region's rules |
+| `s3_mmu` | the S3's flash MMU plan: the core's, the engine's (`0x3D00_0000`/`0x4300_0000`) and the loader's scratch entries, and what the loader claims of the MMU forever |
+| `reset_kind` | `ResetKind::from_s3_reason`: the S3's codes in the C6's cold/warm classes, cited to the S3 ROM's own name table |
+| `s3_boot_stage_ram` | the S3 loader's and the IDF bootloader's RAM, which no radio DMA may reach across a warm reset |
+
 ## The boot-control sector
 
 A flash-persisted instruction to the firmware's next boot.

@@ -139,7 +139,8 @@ This prints the image size and headroom, and pre-merge CI fails any PR that
 drops headroom below 64 KB. Since 2026-10-04 it builds the **split image**
 (loader, boot records, core, engine — what the C6 ships) and gates its
 smallest steady-or-update headroom; the four numbers are defined in the
-budget ADR's amendment.
+budget ADR's amendment. The S3 has the same gate on its own split image,
+`just fw-esp32s3-size-check` (its ledger is in `lp-fw/fw-esp32s3/README.md`).
 
 If the binary exceeds available flash:
 
@@ -179,6 +180,16 @@ Do NOT disable the compiler. The compiler is the product.
   reference would enable the dependency itself. See
   `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md` and
   `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+
+- **`psram`** (`fw-esp32s3`, **on by default** since 2026-10-23, policy
+  `all`; a part without 8 MB of octal PSRAM boots as without it) brings the S3R8's 8 MB octal PSRAM up in the core at
+  the fixed MMU window `lp_bootctl::s3_mmu::PSRAM_WINDOW` (entries
+  `0x80..0x100`, so a core links below `0x80`), only on a part whose eFuse
+  says 8 MB, and self-tests it. The engine's heap and JIT code go there
+  (`LP_PSRAM_HEAP`); **the LED frame the RMT ISR reads, ISR code and state,
+  the radio's C heap and DMA, and thread stacks never do**, and the load
+  gates read internal RAM. JIT code in PSRAM runs only once published
+  (`lpvm_native::code_publish`). See `docs/adr/2026-10-22-s3-psram.md`.
 
 > **Gating the crate that *uses* a table does not gate the crate that *holds*
 > it.** `lps-builtin-ids` is linked by every firmware image and is not behind
@@ -330,10 +341,12 @@ the app through the same view model and presses the same actions. See
   still governs it. lp-cli reaches a board through the relay with
   `relay:<board-id>[@<origin>]` (session from `LP_CLOUD_SESSION`, env only)
   and puts its host board there with `lp-cli serve --relay <origin>`. The C6
-  is a relay client **in the core** (`fw-esp32c6/src/net/relay_task.rs` on
+  is a relay client **in the core** (`fw-esp32-radio/src/net/relay_task.rs` on
   `lp-net`, the loop in `fw-esp32-common/src/net/relay/`): it dials only when
   joined, Cloud relay is on and it holds an account key, and
-  `NetworkStatus.relay` says how far it got. The product image always dials
+  `NetworkStatus.relay` says how far it got. The S3's `wifi` image (off by
+  default) runs the same client (S3 radio M6; walked emulated, silicon
+  owed). The product image always dials
   `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
   desk image that dials another host and says so at boot — never a release
   build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
@@ -385,7 +398,11 @@ the app through the same view model and presses the same actions. See
   later unless its handshake proves the holder's own key, which takes the
   slot over. A joined board with Cloud relay on and an account key also dials
   `lightplayer.app:80` by itself (below); it holds no relay memory while it
-  may not dial. See `docs/adr/2026-10-07-c6-wifi-link.md` and
+  may not dial. A relay session moves onto the LAN by itself when browser
+  and board share a network (once per page load, idle only); Connect picks
+  the link already open, then Wi‑Fi, then lightplayer.app, then the cable
+  (`docs/adr/2026-10-08-studio-network-links.md`, 2026-10-21 amendment).
+  See `docs/adr/2026-10-07-c6-wifi-link.md` and
   `docs/adr/2026-10-06-cloud-relay.md` ("Device side"); the emulated LAN
   (`net=lan`) is `docs/adr/2026-10-05-emulator-seams.md` §11.
 - **A push is one transaction** (wire 42). Every project write runs one
@@ -486,7 +503,11 @@ the app through the same view model and presses the same actions. See
 
 A C6 updates itself over USB, Bluetooth, the LAN and the relay: Studio (or
 `lp-cli`) pushes the new build on lp-link channel 3, and the board survives
-a power cut at any point. The invariant (`plan.md` of
+a power cut at any point. **The ESP32-S3 does the same over USB** (its radio
+links follow as their milestones land), from the same split image on its
+own layout: **layout 2**, 64 KiB MMU pages, the region at `factory +
+0x10000`, through the ESP-IDF door only. It is chip 2 and layout 2 in the
+code table. The invariant (`plan.md` of
 `lp2025/2026-10-03-1330-ota-firmware-updates`): **after its one USB visit, no
 interruption leaves a board that only a cable can bring back.** The decisions
 are four ADRs, which cross-link each other:
@@ -497,6 +518,7 @@ are four ADRs, which cross-link each other:
 | The protocol and the core that heals its engine | `docs/adr/2026-10-06-ota-update-protocol.md` (`lpc-update` is the codec and the board's session, `lpa-update` the host side shared by Studio and `lp-cli`, `lp-base/lp-deflate` the decoder) |
 | Releases, the store, the index, the lookup | `docs/adr/2026-10-06-firmware-distribution.md` (`lpc-firmware-release`, `lpa-firmware-store`) |
 | What Studio does with it, on every link | `docs/adr/2026-10-06-studio-updates-over-the-update-channel.md` |
+| The S3's split image: layout 2, its MMU plan and what its loader claims, the Xtensa link | `docs/adr/2026-10-23-the-s3-ships-a-split-image.md` (`lp-fw/fw-esp32s3-loader`, `fw-esp32s3/src/split_core/`; the core's side of an update is `fw-esp32-common`'s `split_core`, shared by both chips) |
 
 - **The core must hold everything an update needs without the engine**
   (login, hashing, inflate, the update light, the radios, the relay), so core
@@ -552,7 +574,10 @@ are four ADRs, which cross-link each other:
   `just test-emu-c6-split-boot` (the boot bookkeeping),
   `just test-emu-c6-ota-lan` (over the LAN, with no cable), and the walks:
   `just walk-ota-emu` (`--tab`, `--ble`, `--lan`, `--relay`) and
-  `just walk-ota-ble-emu`. Silicon: `scripts/ota/hw-power-cut.py` cuts the
+  `just walk-ota-ble-emu`. The S3's: `just test-emu-esp32s3-ota`,
+  `just test-emu-esp32s3-split-scenarios` and `just test-emu-esp32s3-split-boot`,
+  and `scripts/ota/emu-cut-sweep.sh --chip esp32s3` (`OPS=1` cuts torn at
+  each flash operation). Silicon: `scripts/ota/hw-power-cut.py` cuts the
   power of a board behind a switchable hub (lease it first, and cut through
   `board power-cycle`, as the desk rules say); see `scripts/ota/README.md`.
   `lp-cli emu run --ota-offer <dir> --ota-cut-after N` and
@@ -607,20 +632,24 @@ runtime.
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-nor-sim`     | The NOR flash power-cut model: a deterministic sans-IO model of the C6's SPI flash that loses power after any program or erase (torn programs, weak erases), shared by the store testbed and the emulator (`lp-emu/`, MIT) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0, BLE and Wi-Fi links (board, host, Studio, tools; Wi-Fi is the C6's LAN WebSocket and the relay carrying the same link); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
+| `lp-ws281x`      | The WS281x transmitters, chip-free (`lp-fw/`, MIT): the RMT refill state machine (`RmtHw`, bit cursor, guard word, the classic's wire pusher) every RMT backend implements, and `parallel`, lockstep lanes on a byte-wide DMA'd bus (the S3's default WS281x backend over LCD_CAM, feature `lcd-ws281x` — `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumers: `fw-esp32c6`, `fw-esp32s3` (`radio`/`ble`/`wifi`, off by default until walked) | yes (bare metal) |
 | `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace). Two flavours: the factory loader the IDF bootloader starts, and (`--features bootloader`) LightPlayer's own second stage at flash `0x0`, the C6's boot path since 2026-10-17 — every split image must boot through **both** (`lp-emu-esp32c6/tests/split_boot.rs`, `second_stage.rs`; `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`) | yes (bare metal) |
-| `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
+| `lp-fw-split`    | Host tool: the two-pass split link, its verifier and layout, for the C6 and (a chip profile, GNU ld's Xtensa output) the S3 (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`, `2026-10-23-the-s3-ships-a-split-image.md`) | no (host) |
+| `fw-esp32s3-loader` | The S3 split image's RAM-only loader, the C6 loader's job on the S3's machine: layout 2, the S3's MMU, the reset table `ResetKind::from_s3_reason`. Started by the ESP-IDF bootloader only (our own S3 second stage is future work). Its MMU and RAM claims bind every S3 core (`docs/adr/2026-10-23-the-s3-ships-a-split-image.md` §3) | yes (bare metal) |
+| `fw-esp32-common::split_core` | The core's side of an update, shared by both chips and generic over a `SplitChip`: the boot state and marks, the engine choice and guard, core-only, the update session's edge and links. Each chip's own part is `fw-esp32c6/src/split_core/` and `fw-esp32s3/src/split_core/` | yes |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 | `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over its UART0 lp-link with the CH340 cable modelled (hosted in process by `lp-cli emu run --chip esp32v3 --host-link`), and renders a frame that is byte-identical on all three readings. `--uart-faults <spec>` damages UART0's byte stream in 64-byte windows, the C6's `--usb-faults` over a UART (a test switch, off by default). `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the gates that need the link live in `lp-cli/tests/emu_v3_link_gates.rs` and `emu_uart_link.rs` (the fault soak), run by `test-emu-esp32v3-boot`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
-| `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. Boots the shipped `fw-esp32s3` image both ways (direct load, and ROM-up through the mask ROM and the real IDF bootloader), speaks its USB link (lp-link since proto 30) and models the RMT for WS281x output. `just walk-esp32s3-emu`; the link gates are `lp-cli/tests/emu_s3_link_gates.rs`, run by `test-emu-esp32s3-gate`; a heap ratchet at `lp-emu:esp32s3:t1`. **Core 1 is held, not started** — a core-1 move (the link thread's filed follow-up) cannot be emulated until it is | no |
+| `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. Boots the shipped `fw-esp32s3` image both ways (direct load, and ROM-up through the mask ROM and the real IDF bootloader), speaks its USB link (lp-link since proto 30) and models the RMT for WS281x output. `just walk-esp32s3-emu`; the link gates are `lp-cli/tests/emu_s3_link_gates.rs`, run by `test-emu-esp32s3-gate`; a heap ratchet at `lp-emu:esp32s3:t1`. **Core 1 is released through the ROM's own APP-CPU path** when the image starts it (`two-core`, the render helper, on by default since 2026-10-24); its gates are `lp-cli/tests/emu_s3_core1_gates.rs`. `--flash-busy` holds WIP for each program and erase and stops the run (exit 9) when either core touches the flash/PSRAM windows meanwhile: what every flash writer's stall of core 1 is held to | no |
 | `lp-emu-validate` | The validation runner (host) — `lp-emu/`. Payloads, configurations, transcripts and their sidecars, replay, and the **trust table** (`validate.toml`) every claim in the two walk records is graded by. Reached through `lp-cli validate list\|record\|run\|replay` | no |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
@@ -739,7 +768,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32c6 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
@@ -1121,32 +1150,60 @@ lightplayer.app (`relay:<mac>`, the relay's browser leg
 someone is signed in and no USB, Bluetooth or LAN link of the tab reaches
 the board: on a remembered board (it said its MAC over any link; an offline
 one says "The board isn't online." on its tile), and on every board the
-account's list says is online. Signed in, the web edge
-(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListBoards` at load and
-every 30 s while the page is visible, and `BoardPictures` (watching) every
-half second for the cards that draw lightplayer.app's picture; core joins
-the rows onto the roster by MAC (`studio_controller/account_boards_flow.rs`):
-a listed board is in Online boards, and one this browser never met is an
-in-memory entry under `mac-<12 hex>`, never written to `/registry.json`,
-until its hello makes it a remembered board. Offline account boards (a
-stored list) and the automatic move onto the LAN are not built yet (M2 and
-M3 of `lp2025/2026-10-19-2300-your-boards-follow-you`). A relay link presents held keys only — the account's, then
+account's list says is online. **One click takes the best link** (USB, then
+the LAN, then the relay): a board never met here whose list row says it
+shares this network is offered "Connect over Wi‑Fi" first, and a refused
+Wi‑Fi try goes on through lightplayer.app in the same press. **The account keeps a board list** (cloud
+API v7, `docs/adr/2026-10-20-the-account-board-list.md`): one record per
+board in the cloud's store (`account_boards`, migration `0007`), joined when
+the board registers with the relay proving the account and when Studio reads
+a board's access list (USB, or Bluetooth/LAN at edit) and finds the
+account's current key (`ReportBoard`, once per link per connection), left
+only by **Remove from your account** (`devices/<board>/forget-from-account`,
+Lasting; it removes no key); at most 64. A record grants nothing: presence
+and pictures stay gated by the relay's proof. Signed in, the web edge
+(`lpa-studio-web/src/cloud/account_boards.rs`) asks `ListAccountBoards` at
+load and every 30 s while the page is visible, and `BoardPictures`
+(watching) every half second for the cards that draw lightplayer.app's
+picture; core joins the rows onto the roster by MAC
+(`studio_controller/account_boards_flow.rs`): an online board is in Online
+boards, an offline one in Offline boards on every computer (its last
+picture the one the relay wrote behind, dimmed; no Connect), and one this
+browser never met is an in-memory entry under `mac-<12 hex>`, never written
+to `/registry.json`, until its hello makes it a remembered board. The card's
+`forget` reads **Forget on this browser**. **A relay session moves itself
+onto the LAN** when the list says the board shares this network
+(`devices/lan_move.rs`; idle boards only, once per page load, the editor
+rebound in one step with no "Reconnecting…"), and back through
+lightplayer.app 5 s after that Wi‑Fi link drops, unless it closed with 1000
+(another connection took the board's slot;
+`docs/adr/2026-10-08-studio-network-links.md`, 2026-10-21 amendment). A
+relay link presents held keys only — the account's, then
 the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
 stays as a dev shortcut that dials those boards at page load (like `?lan=`);
 there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks
-for nothing). `just walk-wifi-emu studio-relay` walks it on an emulated C6
-through a local `lp-cloud-server`. Locally, serve the Studio bundle from a
+for nothing). Three lanes of `just walk-wifi-emu` walk it on emulated C6s
+through a local `lp-cloud-server`, each under ten minutes: `studio-relay`
+(the relay connect, and a never-met profile seeing an online board),
+`studio-relay-move` (the move onto Wi‑Fi and back, the best link; a
+page-side shim, `scripts/emu/walk-lan-shim.mjs`, stands in for the LAN's
+reachability, so nothing there says how Chrome's Local Network prompt
+behaves) and `studio-relay-account` (a board with no Wi‑Fi joining the
+list over USB, two boards offline on a never-met profile with their last
+facts, Remove from your account). Locally, serve the Studio bundle from a
 `lp-cloud-server` (`LP_CLOUD_STATIC_DIR`, dev login) so the relay is
 same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
 (`LP_CLOUD_SESSION` = the dev login's session); `Dioxus.toml` also forwards
 `/relay` (WebSocket upgrades included) to the `lp-cloud-server` on 2812 — but
 `lp-cli serve` binds 2812 for its own socket, so the two do not share a desk.
 
-Two more dev-only flags tune the device wire for a measurement (read once at
+Three more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
-and `?wire=json` stops the page asking boards to pack their replies, so JSON
+`?card-ble-gap-ms=N` sets the device card picture's gap between reads over a
+Bluetooth link (`DEVICE_CARD_FEED_BLE_INTERVAL`; clamped to 0–2000 ms; USB,
+the LAN and the relay keep theirs), and `?wire=json` stops the page asking boards to pack their replies, so JSON
 and JSON Pack can be compared on one build (`?wire=packed` is the default,
 spelled out). Studio otherwise asks every board
 whose hello offers this build's pack format; what the board answered is one
@@ -1396,7 +1453,8 @@ board-info` loops (both idioms have flashed the wrong board or hung on a
 wedged port before; the resolver probes with per-port timeouts instead):
 
 ```bash
-just hardware-list                  # passive: never opens a port, cannot hang
+just hardware-list                  # passive: never opens a port; may first wait on cargo's build lock or a rebuild
+./target/debug/lp-cli hardware list # the same list, once built: no cargo, no wait
 just hardware-list --probe          # identify chips (resets idle boards)
 just hardware-list --chip esp32s3   # only boards probing as that chip; --json to script
 cargo run -q -p lp-cli -- fwcheck port --chip esp32c6   # resolve exactly one port
@@ -1579,6 +1637,14 @@ The shipped firmware declares a few functions (`lp-base/lp-seam`, MIT,
 asks**. The ROM hook table stays empty; seams are their own exception, with
 their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
 
+The C6 and, since S3 radio M5, the **S3** answer seams (Xtensa: a `movi`
+hint, a windowed call through a volatile pointer, answered at a `break` over
+the `entry` before the window rotates — the ADR's §13; the wake is
+`SYSTEM.cpu_intr_from_cpu_3`). On the S3 the `wifi` image (off by default)
+declares the network seam, so it runs `net=lan` like the C6; an S3 image
+without `wifi` declares none. `just test-emu-esp32s3-wifi` is two S3s on one
+LAN (CI), `just walk-wifi-emu lan --s3` the walk.
+
 - **Two kinds.** A *capability* seam stands in for hardware the emulator
   cannot model: `net=lan` (the network seam, below) ships and is on by
   default; Bluetooth is next. A *performance* seam skips work the emulator
@@ -1611,6 +1677,15 @@ The READMEs: `lp-base/lp-seam/README.md` (the ABI),
 `lp-emu/esp/lp-emu-esp32c6/README.md` ("Emulator seams"),
 `lp-fw/fw-esp32c6/README.md` (the table and its cost on silicon),
 `lp-emu/lp-emu-validate/README.md` ("Composite names").
+
+#### LCD_CAM and GDMA on the S3
+
+`lp-emu-esp32s3` models LCD_CAM's LCD half in i8080 mode and the AHB GDMA's
+OUT channels (M9, the parallel WS281x output): esp-hal's i8080 driver drives
+up to sixteen lanes, and the per-pad WS281x decoders read each one back.
+`just test-emu-esp32s3-lcd` proves five uneven lanes byte-exact. The CAM half
+is unmapped (a strict stop), the bytes transfer, and the timing is ungraded.
+See `lp-emu/esp/lp-emu-esp32s3/README.md`, "LCD_CAM and GDMA".
 
 #### Emulated Wi-Fi
 
@@ -1646,7 +1721,9 @@ unchanged and no seam was added. **`just walk-wifi-emu relay`** is its walk
 words; `lp-cli/tests/emu_relay_link.rs` is its CI cell in `test-emu-serve`):
 the board registers, `relay:<mac>@<origin>` edits it, a `lan:` client with the
 same key takes the slot, another is told busy, a restarted server gets the
-board back, Cloud relay off/on, a reset key is refused. Record:
+board back, Cloud relay off/on, a reset key is refused; `--s3` walks the
+same steps on an emulated S3 (the cell's S3 arm, `just
+test-emu-esp32s3-relay`, under `emu run --chip esp32s3 --link`). Record:
 `docs/reports/2026-10-07-wifi-relay-emulator-walk.md`. **Trust caveat:** it
 proves the board's code and the relay's protocol, never NAT, a real resolver,
 the internet, or the 15 s reconnect (a desk-only measurement; the cell prints

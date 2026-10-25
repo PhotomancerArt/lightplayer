@@ -95,6 +95,36 @@ it wrong is a red CI run on a correct change.
   reference image) read `220468 B free / 105068 B used`; an immediate re-run
   of the one test passed (5.7 s, the reference build cached). Not
   investigated; this branch's own firmware is not in that test.
+- 2026-10-21 (#1237, S3 radio M2) — the same 64 B a third time, the same
+  shape: inside `just test-emu-c6` (`LP_EMU_BUILD_FW=1`, the desk building
+  the pinned reference image under a load average near 100) the first
+  `emu_serve_walk` read `220468 B free / 105068 B used`; the one test re-run
+  alone passed (5.95 s). The failure ends `test-emu-serve` at its first line,
+  so the rest of `test-emu-serve` and all of `test-emu-c6-cli` had not run
+  and needed running on their own. CI's Emulator C6 job passed on the same
+  head. The branch's own firmware is not in that test.
+- 2026-10-21 (#1249, S3 radio M5) — the fourth desk sighting, byte for byte:
+  `just test-emu-c6`'s first `emu_serve_walk` run, which built the pinned
+  reference image, read `220468 B free / 105068 B used`; a re-run of
+  `just test-emu-serve` passed whole (the walk in 5.8 s, cached). Four of
+  four now: the 64 B appear on the run that *builds* the reference image
+  and are gone on the run that reuses it — a lead for whoever takes the open
+  question, not investigated here.
+- 2026-10-22 (#1258, S3 updates M7 P8) — the fifth, byte for byte and the
+  same shape: `just test-emu-c6`'s first `emu_serve_walk` (the run that built
+  the reference image, load average ~155) read `220468 B free / 105068 B
+  used` and ended `test-emu-c6-boot` there; `just test-emu-serve` re-run
+  passed whole, and `test-emu-c6-cli`, which the failure had skipped, was
+  run on its own. Five of five on the building run.
+- 2026-10-22 (#1273, S3 radio M5's second half) — the sixth, byte for byte:
+  `just test-emu-c6`'s first `emu_serve_walk` (building the reference image,
+  load average ~60–110 with an S3 walk running beside it) read `220468 B free /
+  105068 B used`; 592 of the suite's 593 tests passed. `test-emu-serve`,
+  re-run on its own, passed whole (the walk's figure exact, the reference
+  image reused); `test-emu-c6-cli`, which the failure had skipped, was run
+  on its own. The branch's C6 image
+  is byte-identical to main's but for its build stamp, so this test's figure
+  cannot be the branch's. Six of six on the building run.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

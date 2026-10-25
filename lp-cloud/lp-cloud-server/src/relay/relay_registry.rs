@@ -6,10 +6,13 @@
 //! who may reach a board). One `std::sync::Mutex` guards the hub, the
 //! queues and the policy together — never held across an
 //! await, and **never the store lock**: the relay's hot path (every frame)
-//! touches nothing else. The only store calls on the relay's path are the
-//! account lookup at a board's registration and the session lookup when a
-//! browser leg opens, both through `AppState::with_service` before this
-//! lock is taken.
+//! touches nothing else. The store calls on the relay's path are the
+//! account lookup at a board's registration, the session lookup when a
+//! browser leg opens, the stored pictures a `BoardPictures` read falls back
+//! to, and the board-list writes the hub decides ([`BoardRecordWrite`]):
+//! the methods below hand those back, and the caller applies them through
+//! `AppState::with_service` ([`apply_relay_writes`]) after this lock is
+//! released.
 //!
 //! A leg whose queue is full is dropped from the table: its task sees its
 //! queue end and closes with [`RelayCloseCode::Overloaded`]. A slow browser
@@ -21,6 +24,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use lp_cloud_domain::{BoardRecordWrite, StoredPicture, apply_board_record_write};
 use lpc_cloud_api::{BoardPicture, BoardPresence, KnownPicture};
 use lpc_history::PrefixedUid;
 use lpc_relay::{RefuseReason, RelayBoardId, RelayCloseCode, RelayFrame};
@@ -31,6 +35,7 @@ use super::relay_hub::{BoardRegistration, HubAction, LegId, OpenRefusal, RelayHu
 use super::route_admission::{
     Admission, InterimRouteAdmission, RouteAdmissionPolicy, RouteRequest,
 };
+use crate::app_state::AppState;
 use crate::config::RelayPictureSettings;
 
 /// How many messages a leg's queue holds before the leg is dropped as
@@ -151,34 +156,38 @@ impl RelayRegistry {
         }
     }
 
-    /// Put a board online on `leg`, whose queue is `outbox`.
+    /// Put a board online on `leg`, whose queue is `outbox`. The board-list
+    /// writes it brings are handed back, for [`apply_relay_writes`].
     pub fn register_board(
         &self,
         registration: BoardRegistration,
         outbox: mpsc::Sender<LegCommand>,
-    ) -> Result<(), RefuseReason> {
+    ) -> Result<Vec<BoardRecordWrite>, RefuseReason> {
         let mut inner = self.lock();
         let leg = registration.leg;
         let actions = inner.hub.register(registration)?;
         inner.outboxes.insert(leg, outbox);
         inner.apply(actions);
-        Ok(())
+        Ok(inner.hub.take_writes())
     }
 
-    /// A frame from a registered board.
-    pub fn board_message(&self, leg: LegId, frame: RelayFrame) {
+    /// A frame from a registered board, and the board-list writes it brings.
+    pub fn board_message(&self, leg: LegId, frame: RelayFrame) -> Vec<BoardRecordWrite> {
         let now = epoch_seconds();
         let mut inner = self.lock();
         let actions = inner.hub.from_board(leg, frame, now);
         inner.apply(actions);
+        inner.hub.take_writes()
     }
 
-    /// A device leg ended.
-    pub fn board_gone(&self, leg: LegId) {
+    /// A device leg ended, and the board-list writes that brings.
+    pub fn board_gone(&self, leg: LegId) -> Vec<BoardRecordWrite> {
+        let now = epoch_seconds();
         let mut inner = self.lock();
         inner.outboxes.remove(&leg);
-        let actions = inner.hub.board_gone(leg);
+        let actions = inner.hub.board_gone(leg, now);
         inner.apply(actions);
+        inner.hub.take_writes()
     }
 
     /// Put a browser's route to the access decision
@@ -227,23 +236,26 @@ impl RelayRegistry {
         inner.apply(actions);
     }
 
-    /// `ListBoards` for `user`, calling from `ip`.
+    /// The boards `user` proved that are online, for `ListAccountBoards`,
+    /// calling from `ip`.
     pub fn boards_for(&self, user: PrefixedUid, ip: Option<IpAddr>) -> Vec<BoardPresence> {
         self.lock().hub.boards_for(user, ip)
     }
 
     /// `BoardPictures` for `user`: the pictures of the boards asked about
     /// that `user` may read, each of them watched when `watch` (the boards
-    /// told so through their queues).
+    /// told so through their queues). A board this process holds no picture
+    /// of answers from `stored` (`user`'s own records, read by the caller).
     pub fn pictures_for(
         &self,
         user: PrefixedUid,
         asked: &[KnownPicture],
         watch: bool,
+        stored: &HashMap<RelayBoardId, StoredPicture>,
     ) -> Vec<BoardPicture> {
         let now = epoch_seconds();
         let mut inner = self.lock();
-        let (pictures, actions) = inner.hub.pictures_for(user, asked, watch, now);
+        let (pictures, actions) = inner.hub.pictures_for(user, asked, watch, now, stored);
         inner.apply(actions);
         pictures
     }
@@ -254,12 +266,16 @@ impl RelayRegistry {
     }
 
     /// The process is stopping: close every leg "going away", including
-    /// legs still registering (through [`Self::shutdown_signal`]).
-    pub fn going_away(&self) {
+    /// legs still registering (through [`Self::shutdown_signal`]). Hands
+    /// back the last board-list writes (every online board's last sighting
+    /// and newest picture), which the caller applies before the process
+    /// ends.
+    pub fn going_away(&self) -> Vec<BoardRecordWrite> {
         self.shutdown.send_replace(true);
         let mut inner = self.lock();
-        let actions = inner.hub.shutdown();
+        let actions = inner.hub.shutdown(epoch_seconds());
         inner.apply(actions);
+        inner.hub.take_writes()
     }
 
     /// Resolves (changes) when [`Self::going_away`] is called.
@@ -283,6 +299,32 @@ impl RelayRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Apply the hub's board-list writes to the store, in order, in one store
+/// call. An account whose list is full is logged, not joined: the board is
+/// online all the same.
+pub async fn apply_relay_writes(state: &AppState, writes: Vec<BoardRecordWrite>) {
+    if writes.is_empty() {
+        return;
+    }
+    state
+        .with_service(move |core| {
+            for write in writes {
+                let board = match &write {
+                    BoardRecordWrite::Seen { board, .. }
+                    | BoardRecordWrite::Project { board, .. }
+                    | BoardRecordWrite::Picture { board, .. } => *board,
+                };
+                for user in apply_board_record_write(core.service.store_mut(), write) {
+                    log::info!(
+                        "relay: board {board} not added to {user}'s list: it holds {} boards",
+                        lpc_cloud_api::MAX_ACCOUNT_BOARDS
+                    );
+                }
+            }
+        })
+        .await;
 }
 
 impl Inner {

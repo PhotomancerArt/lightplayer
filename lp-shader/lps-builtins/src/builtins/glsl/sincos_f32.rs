@@ -1,12 +1,8 @@
 //! Combined native f32 sine and cosine — the f32 sibling of
 //! [`super::sincos_q32`].
 //!
-//! The Q32 version exists because its `cos` is literally `sin(x + pi/2)` through
-//! the same parabolic approximation, so computing both together saves a fold.
-//! In f32 there is no such sharing to exploit: `libm::sinf` and `libm::cosf`
-//! are separate, and forcing them through one range reduction would be a
-//! hand-rolled approximation nothing has asked for. So this is the two calls,
-//! and the saving is one call boundary rather than one range reduction.
+//! Both come out of one [`crate::f32_math::sincos`] call: one range
+//! reduction, two polynomials. `sin_f32` and `cos_f32` are that call's halves.
 //!
 //! **The results are identical to calling [`super::sin_f32`] and
 //! [`super::cos_f32`] separately**, which is the contract the Q32 sibling also
@@ -18,7 +14,7 @@
 /// `(sin, cos)` for Rust call sites.
 #[inline(always)]
 pub fn lps_sincos_f32_pair(x: f32) -> (f32, f32) {
-    (libm::sinf(x), libm::cosf(x))
+    crate::f32_math::sincos(x)
 }
 
 /// C ABI: writes `(sin, cos)` to out-pointers.

@@ -143,6 +143,8 @@ fn alu_rrr(op: AluRrr, s: u32, t: u32, d: u32, sar: u32) -> u32 {
         AluRrr::Maxu => s.max(t),
         AluRrr::Mul16u => (s & 0xffff).wrapping_mul(t & 0xffff),
         AluRrr::Mul16s => ((s as i16 as i32).wrapping_mul(t as i16 as i32)) as u32,
+        AluRrr::Salt => u32::from((s as i32) < (t as i32)),
+        AluRrr::Saltu => u32::from(s < t),
         AluRrr::Moveqz => {
             if t == 0 {
                 s
@@ -191,5 +193,23 @@ fn alu_rt(op: AluRt, t: u32, sar: u32) -> u32 {
             };
             redundant.saturating_sub(1).min(31)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `salt`/`saltu` write 0 or 1, never the comparison's sign or a mask —
+    /// the S3 radio blob's `_vsnprintf` follows one with `addi -1; neg`.
+    #[test]
+    fn set_ar_if_less_than_is_zero_or_one() {
+        let minus_one = u32::MAX;
+        assert_eq!(alu_rrr(AluRrr::Salt, minus_one, 0, 7, 0), 1);
+        assert_eq!(alu_rrr(AluRrr::Saltu, minus_one, 0, 7, 0), 0);
+        assert_eq!(alu_rrr(AluRrr::Salt, 0, minus_one, 7, 0), 0);
+        assert_eq!(alu_rrr(AluRrr::Saltu, 0, minus_one, 7, 0), 1);
+        assert_eq!(alu_rrr(AluRrr::Salt, 5, 5, 7, 0), 0);
+        assert_eq!(alu_rrr(AluRrr::Saltu, 5, 5, 7, 0), 0);
     }
 }

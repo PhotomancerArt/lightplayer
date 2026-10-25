@@ -274,9 +274,10 @@ impl StudioController {
                 }));
                 Ok(UiNotices::new())
             }
-            Some(NetworkRoad::Wifi) => {
-                self.start_wifi_connect(crate::WifiConnectOp::Board { device })
-            }
+            Some(NetworkRoad::Wifi) => self.start_wifi_connect(crate::WifiConnectOp::Board {
+                device,
+                then_relay: false,
+            }),
             Some(NetworkRoad::Relay) => self.start_relay_connect(crate::RelayConnectOp { device }),
             None => Err(UiError::UnsupportedAction(TAKE_OVER_NO_WAY.to_string())),
         };

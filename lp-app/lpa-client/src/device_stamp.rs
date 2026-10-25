@@ -187,7 +187,7 @@ mod tests {
     const PATH: &str = "/hardware.json";
 
     fn manifest(len: usize) -> Vec<u8> {
-        // Text, like the real manifest: `serialize_smart` sends UTF-8 as a
+        // Text, like the real manifest: a file body sends UTF-8 as a
         // JSON string, so the bytes on the wire are the bytes in the file.
         (0..len).map(|i| b'a' + (i % 26) as u8).collect()
     }

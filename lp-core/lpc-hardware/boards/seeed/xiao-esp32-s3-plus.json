@@ -272,6 +272,62 @@
         "rmt",
         "ws281x-output"
       ]
+    },
+    {
+      "address": "/lcd/ws281x0",
+      "display_label": "LCD WS281x lane 0",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x1",
+      "display_label": "LCD WS281x lane 1",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x2",
+      "display_label": "LCD WS281x lane 2",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x3",
+      "display_label": "LCD WS281x lane 3",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x4",
+      "display_label": "LCD WS281x lane 4",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x5",
+      "display_label": "LCD WS281x lane 5",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x6",
+      "display_label": "LCD WS281x lane 6",
+      "capabilities": [
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/lcd/ws281x7",
+      "display_label": "LCD WS281x lane 7",
+      "capabilities": [
+        "ws281x-output"
+      ]
     }
   ]
 }

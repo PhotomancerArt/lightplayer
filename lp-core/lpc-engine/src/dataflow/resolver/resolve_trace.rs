@@ -136,6 +136,15 @@ impl ResolveTrace {
         }
     }
 
+    /// This trace emptied for the next frame, keeping its buffers' capacity
+    /// (the engine reuses one trace across ticks rather than regrowing its
+    /// active stack every frame).
+    pub fn recycled(self) -> Self {
+        self.active_stack.borrow_mut().clear();
+        self.events.borrow_mut().clear();
+        self
+    }
+
     /// Push `id` onto the active stack, or error if it is already active
     /// (cycle). `query` is only used to describe the cycle.
     pub fn try_push_active(&self, id: QueryId, query: &QueryKey) -> Result<(), ResolveTraceError> {

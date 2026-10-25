@@ -616,10 +616,10 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
         .cloned()
         .expect("the danger section");
     let words: Vec<&str> = danger.affordances.iter().map(|a| a.word.as_str()).collect();
-    assert_eq!(words, ["Factory reset", "Forget"]);
+    assert_eq!(words, ["Factory reset", "Forget on this browser"]);
     assert_eq!(danger.affordances[0].offer, bench.device_verb(id, "erase"));
     let forget = danger.affordances[1].clone();
-    assert_eq!(forget.word, "Forget");
+    assert_eq!(forget.word, "Forget on this browser");
     assert_eq!(forget.offer, bench.device_verb(id, "forget"));
     bench
         .press_lasting(&forget.offer, forget.args.clone())

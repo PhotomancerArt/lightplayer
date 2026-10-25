@@ -159,11 +159,28 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 }
 
 /// **The hello, byte for byte.** Pinned as a whole stream, as
-/// `lp-emu-esp32v3/tests/boot.rs` pins the classic's.
+/// `lp-emu-esp32v3/tests/boot.rs` pins the classic's. Since `ble` joined the
+/// shipped image's default features (2026-10-21, the S3 Bluetooth walk) the
+/// chain carries the radio's heap: the arena cut around the boot stages' RAM
+/// and the blobs' 32 KB region (`fw-esp32s3/src/c_heap.rs`). Since L4's
+/// amendment (2026-10-22) the split loader's RAM sits at the arena's top, so
+/// the arena is one `Internal` piece and a few KB untagged above it. Since
+/// ESP-NOW and PSRAM joined the defaults (2026-10-23) the arena is the Wi-Fi
+/// blob's smaller one (136 KB less PSRAM's 3 KiB, below the boot stages' RAM,
+/// so one piece), the radio region 48 KB, and the core brings PSRAM up and
+/// adds it as the last region. Since the IRAM hot set (2026-10-24,
+/// `fw-esp32s3/hot_iram/`) the arena is 43 KiB smaller again: `.rwtext`
+/// carries ~40 KB of engine code and takes the bytes from the same span.
+/// Since `two-core` (2026-10-24) it is 8 KiB smaller once more: core 1's
+/// stack is a `.bss` static.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
-[INIT] chip=esp32s3 arch=xtensa heap=245760+73744=319504 (dram_seg arena + dram2_seg)
-[INIT] heap regions: 0 .bss+245760 (dram_seg arena), 1 0x3fcdb700+73744 (dram2_seg, bootloader's)
+[INIT] chip=esp32s3 arch=xtensa heap=83968+73744=157712 (dram_seg arena + dram2_seg)
+[INIT] heap region: 0x3fcad3f8+83968 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
+[INIT] heap region: 0x3fca13e0+49152 (radio)
+[INIT] psram: on, 8388608 bytes at 0x3c800000 (MMU entries 0x80..0x100), self-test passed
+[INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
 [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
 [INIT] runtime started
@@ -172,8 +189,8 @@ const HELLO: &str = "\
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 420;
-const HELLO_SHA: &str = "e1ae47e53739229a3c310d03472e089545119f0b8042d2d7013faa4b981aa2c1";
+const HELLO_BYTES: usize = 670;
+const HELLO_SHA: &str = "59add48c59885566e5f82922be5eeed104e8810a775d1864f96df2f95dae4bf5";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();

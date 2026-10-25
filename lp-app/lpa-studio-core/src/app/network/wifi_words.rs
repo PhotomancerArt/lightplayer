@@ -185,6 +185,9 @@ pub mod card {
     pub const ONLINE: &str = "online";
     /// Signed in, and the board doesn't hold the account's key.
     pub const NOT_ADDED: &str = "not added";
+    /// Signed in, the board holds the account's key, and the account's
+    /// list is full: it is not on it (the details say how many it holds).
+    pub const LIST_FULL: &str = "list full";
     /// Signed in, and the board can't reach lightplayer.app without Wi‑Fi:
     /// nothing saved, nothing joined, or its Wi‑Fi off. Short enough to be
     /// shown whole beside the email (a card at the home grid's width cut
@@ -211,6 +214,13 @@ pub mod card {
     /// More than one saved network, none joined.
     pub fn networks(count: usize) -> String {
         format!("{count} networks")
+    }
+    /// An account board offline everywhere: when anything last saw it, a
+    /// reading ("2 h ago"). Just the age: a state beside an email stays
+    /// short (the card at the home grid's width cut "last seen 2 h ago"),
+    /// and the surface says "It was last seen 2 hours ago." in words.
+    pub fn last_seen(age: &str) -> String {
+        age.to_string()
     }
 }
 

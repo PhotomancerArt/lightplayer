@@ -58,6 +58,10 @@ impl crate::RelayLinkSource for DroppableRelayBoard {
     fn connect(&self, _board: &str) -> DeviceTransportFuture<Result<(), String>> {
         Box::pin(core::future::ready(Ok(())))
     }
+
+    fn park(&self, _board: &str) {}
+
+    fn unpark(&self, _board: &str) {}
 }
 
 #[test]

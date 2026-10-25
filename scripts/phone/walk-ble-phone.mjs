@@ -98,7 +98,7 @@ async function main() {
   boardCmd("take", BOARD, "--as", HOLDER, "--for", "the phone Bluetooth walk", "--pid", String(process.pid));
   // Android Chrome's chooser ids ARE the board's Bluetooth address: the base
   // MAC with its top two bits set (a random static address,
-  // `fw-esp32c6/src/ble/advertising.rs`). So the walk picks the leased board
+  // `fw-esp32-radio/src/ble/advertising.rs`). So the walk picks the leased board
   // by its MAC, whatever project name it advertises; `--name` overrides.
   const bleAddress = [(parseInt(macHex.slice(0, 2), 16) | 0xc0).toString(16).padStart(2, "0"), ...mac.split(":").slice(1)]
     .join(":")

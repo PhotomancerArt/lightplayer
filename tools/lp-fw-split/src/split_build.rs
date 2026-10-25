@@ -8,11 +8,12 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::app_image::{self, PAGE};
+use crate::app_image;
+use crate::chip_profile::{ChipProfile, EngineRegion, Isa, SplitChip};
 use crate::core_padding;
 use crate::core_segments;
 use crate::elf_symbol;
-use crate::engine_script::{ENGINE_BASE, EngineRules, pass1_script};
+use crate::engine_script::{ENGINE_BASE, EngineRules, pass1_script_for};
 use crate::merged_image;
 use crate::pass_link;
 use crate::reachability::Split;
@@ -23,9 +24,12 @@ use crate::verify_report::Verification;
 
 /// What to build.
 pub struct BuildOptions {
+    /// The chip, and so the firmware crate, the loader and every
+    /// chip-specific step ([`crate::chip_profile`]).
+    pub chip: SplitChip,
     pub repo: PathBuf,
     pub out: PathBuf,
-    /// Cargo features for fw-esp32c6 (its defaults are always on).
+    /// Cargo features for the firmware (its defaults are always on).
     pub features: String,
     /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries.
     /// [`BuildOptions::new`] sets the build def's
@@ -44,15 +48,29 @@ pub struct BuildOptions {
 }
 
 impl BuildOptions {
+    /// The C6's build, as it has always been: our own door.
     pub fn new(repo: PathBuf, out: PathBuf) -> Self {
-        let partitions = repo.join("lp-fw/fw-esp32c6/partitions.csv");
-        let bootloader = Some(repo.join(crate::merged_image::C6_BOOTLOADER));
+        Self::for_chip(SplitChip::Esp32c6, repo, out)
+    }
+
+    /// `chip`'s build with its profile's defaults: its partition table, its
+    /// IDF bootloader, its default features, and our own door where the chip
+    /// has one (the IDF's otherwise).
+    pub fn for_chip(chip: SplitChip, repo: PathBuf, out: PathBuf) -> Self {
+        let profile = chip.profile();
+        let partitions = repo.join(profile.partitions);
+        let bootloader = profile.idf_bootloader.map(|b| repo.join(b));
         Self {
+            chip,
             repo,
             out,
-            features: "esp32c6,server".into(),
+            features: profile.default_features.into(),
             bootloader,
-            door: Door::Lightplayer,
+            door: if profile.our_bootloader {
+                Door::Lightplayer
+            } else {
+                Door::Idf
+            },
             partitions,
             target: None,
         }
@@ -113,8 +131,15 @@ pub const LAYOUT: u32 = 1;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitReport {
+    /// The chip (absent in reports written before there were profiles: the
+    /// C6).
+    #[serde(default)]
+    pub chip: SplitChip,
     pub layout: u32,
     pub page: u32,
+    /// The region's first byte (absent before profiles: layout 1's).
+    #[serde(default = "layout_1_region_start")]
+    pub region_start: u32,
     pub region_end: u32,
     pub app_version: String,
     /// `"<version>+<commit>"`: the engine header's and the core's.
@@ -138,8 +163,19 @@ pub struct SplitReport {
     pub core_to_engine_edges: usize,
 }
 
+fn layout_1_region_start() -> u32 {
+    lp_bootctl::REGION_START
+}
+
 /// Run the pipeline into `opts.out`.
 pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
+    let profile = opts.chip.profile();
+    if opts.door == Door::Lightplayer && !profile.our_bootloader {
+        bail!(
+            "{} has no second stage of our own: build it through the IDF door (--door idf)",
+            profile.name
+        );
+    }
     let out = &opts.out;
     fs::create_dir_all(out).with_context(|| format!("creating {}", out.display()))?;
     let out = out.canonicalize()?;
@@ -148,42 +184,48 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     let before = TreeState::read(&repo)?;
     // One version for both passes: a dirty tree's dev version carries the
     // time, which would otherwise differ between them.
-    let app_version = lp_app_version::resolve(&repo.join("lp-fw/fw-esp32c6"));
+    let app_version = lp_app_version::resolve(&repo.join(profile.crate_dir));
 
     let pass1_x = out.join("engine-pass1.x");
-    fs::write(&pass1_x, pass1_script())?;
+    fs::write(&pass1_x, pass1_script_for(profile))?;
     eprintln!("==> pass 1 ({}; version {app_version})", opts.features);
     let identity = pass_link::Identity {
         features: &opts.features,
         app_version: &app_version,
         target: opts.target.as_deref(),
     };
-    let p1 = pass_link::link_firmware(&repo, &out, "p1", &pass1_x, &identity)?;
+    let p1 = pass_link::link_firmware_for(profile, &repo, &out, "p1", &pass1_x, &identity)?;
     let p1_elf = fs::read(&p1.elf)?;
     // The shipped image carries the emulator seam table, and it is a core
     // root: refuse a build that lost it rather than ship an image whose
-    // seams no emulator can find.
-    if elf_symbol::find_opt(&p1_elf, SEAM_TABLE_SYMBOL)?.is_none() {
+    // seams no emulator can find. (The S3's has none until Xtensa seams.)
+    if profile.requires_seam_table && elf_symbol::find_opt(&p1_elf, SEAM_TABLE_SYMBOL)?.is_none() {
         bail!(
             "pass 1 linked no `{SEAM_TABLE_SYMBOL}`: the shipped image must carry the seam table"
         );
     }
-    let graph = SectionGraph::load(&p1.elf, &p1.map)?;
+    let graph = SectionGraph::load_for(profile, &p1.elf, &p1.map)?;
     let split = Split::compute(&graph, &core_roots(&graph, &p1_elf)?);
-    let rules = EngineRules::from_split(&graph, &split);
+    let rules = EngineRules::from_split_for(profile, &graph, &split);
     let engine_x = out.join("engine.x");
-    fs::write(&engine_x, rules.script())?;
+    fs::write(&engine_x, rules.script_for(profile))?;
     eprintln!(
         "    engine.x: {} rodata + {} text input sections",
         rules.rodata.len(),
         rules.text.len()
     );
+    if profile.isa == Isa::Xtensa {
+        eprintln!(
+            "    engine.x: {} of the text rules place a literal pool before its code",
+            rules.literal_rules()
+        );
+    }
 
     eprintln!("==> pass 2");
-    let p2 = pass_link::link_firmware(&repo, &out, "p2", &engine_x, &identity)?;
+    let p2 = pass_link::link_firmware_for(profile, &repo, &out, "p2", &engine_x, &identity)?;
     before.check_unchanged(&repo)?;
 
-    let verification = verify(&p2.elf, &p2.map)?;
+    let verification = verify_for(profile, &p2.elf, &p2.map)?;
     fs::write(out.join("verify.txt"), verification.report(25))?;
     eprintln!("{}", verification.verdict_line());
     if !verification.passed() {
@@ -192,14 +234,20 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
             verification.core_in_engine.join(", ")
         );
     }
-    let seams = seam_table_placement(&fs::read(&p2.elf)?)?;
-    eprintln!("{seams}");
+    let p2_bytes = fs::read(&p2.elf)?;
+    if profile.requires_seam_table || elf_symbol::find_opt(&p2_bytes, SEAM_TABLE_SYMBOL)?.is_some()
+    {
+        let seams = seam_table_placement_for(profile, &p2_bytes)?;
+        eprintln!("{seams}");
+    } else {
+        eprintln!("    no seam table (not required on {})", profile.name);
+    }
 
     eprintln!("==> loader");
-    let loader_elf_built = pass_link::build_loader(&repo)?;
+    let loader_elf_built = pass_link::build_loader_for(profile, &repo, false)?;
     let loader_elf = fs::read(&loader_elf_built)?;
     fs::write(out.join("loader.elf"), &loader_elf)?;
-    let loader = split_artifacts::app_image(&loader_elf)?;
+    let loader = split_artifacts::app_image_for(profile, &loader_elf)?;
     fs::write(out.join("loader.bin"), &loader)?;
     let loader_version = lp_bootctl::find_loader_version(&loader);
     if loader_version != lp_bootctl::LOADER_VERSION {
@@ -209,14 +257,21 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         );
     }
 
-    eprintln!("==> bootloader");
-    let bootloader = build_bootloader_image(&repo, &out)?;
+    let bootloader = if profile.our_bootloader {
+        eprintln!("==> bootloader");
+        Some(build_bootloader_image(&repo, &out)?)
+    } else {
+        None
+    };
 
     eprintln!("==> split");
-    let mut p2_elf = fs::read(&p2.elf)?;
-    let (engine_base, mut engine) = split_artifacts::engine_bin(&p2_elf)?;
-    if engine_base != ENGINE_BASE {
-        bail!("the engine starts at {engine_base:#x}, not {ENGINE_BASE:#x}");
+    let mut p2_elf = p2_bytes;
+    let (engine_base, mut engine) = split_artifacts::engine_bin_for(profile, &p2_elf)?;
+    if engine_base != profile.engine.base() {
+        bail!(
+            "the engine starts at {engine_base:#x}, not {:#x}",
+            profile.engine.base()
+        );
     }
     // The engine header: len and CRC filled, checked against the core's own
     // copy of the build id.
@@ -232,15 +287,16 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     if lp_bootctl::engine_digest::decode(slot.get(&p2_elf)) != Some(engine_sha256) {
         bail!("the core's digest slot does not hold engine.bin's SHA-256 after patching");
     }
-    let mut core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
+    let mut core = split_artifacts::app_image_for(profile, &split_artifacts::core_elf(&p2_elf)?)?;
     // espflash's address-0 padding, if a core ever has any, goes to the
     // core's .bss, which the core zeroes before it reads it; the loader would
     // copy it to address 0. (A rodata page crossing used to leave a gap the
     // RAM segments could not fill; with `.text` following rodata there is no
-    // gap — `engine_script::TEXT_FOLLOWS_RODATA`.)
+    // gap — `engine_script::TEXT_FOLLOWS_RODATA`. The S3's esp-hal keeps its
+    // `.rotext_dummy` gap, so its core has some.)
     let bss =
         elf_symbol::value(&p2_elf, BSS_START_SYMBOL)?..elf_symbol::value(&p2_elf, BSS_END_SYMBOL)?;
-    for p in core_padding::aim_padding_at_bss(&mut core, bss.clone())? {
+    for p in core_padding::aim_padding_at_bss_in(&mut core, bss.clone(), profile.segments)? {
         eprintln!(
             "    core.bin: padding segment {} ({} B) aimed at .bss {:#010x} (.bss {:#010x}..{:#010x})",
             p.index, p.len, p.addr, bss.start, bss.end
@@ -248,13 +304,13 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     }
     // Every segment must be one the loader can place: a core it cannot is
     // never written, so nothing downstream can package or ship it.
-    let segments = core_segments::check(&core)?;
+    let segments = core_segments::check_in(&core, profile.segments)?;
     eprintln!(
         "    core.bin: {} segments, every one placeable",
         segments.len()
     );
     for s in &segments {
-        eprintln!("{}", s.line());
+        eprintln!("{}", s.line_in(profile.segments));
     }
     let mark = check_core_tree_mark(&p2_elf, &core)?;
     eprintln!("    core.bin: {mark}");
@@ -268,20 +324,34 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     let region_end = factory_offset + factory_len;
     let build_id_text = build_id_text(&build_id);
     let build = lp_bootctl::build_hash(build_id_text.as_bytes());
-    let app = app_image::assemble(&loader, &core, &engine, region_end, build)?;
+    let app = app_image::assemble_in(
+        profile.page,
+        profile.region_start,
+        &loader,
+        &core,
+        &engine,
+        region_end,
+        build,
+    )?;
     fs::write(out.join("app.bin"), &app.bytes)?;
-    let merged_idf = merged_image::merge(
+    let merged_idf = merged_image::merge_for(
+        profile,
         &loader_elf,
         &app.bytes,
         &opts.partitions,
         opts.bootloader.as_deref(),
     )?;
-    let merged_lp = merged_image::with_bootloader(&merged_idf, &bootloader)?;
     fs::write(out.join("merged-idf.bin"), &merged_idf)?;
-    fs::write(out.join("merged-lp.bin"), &merged_lp)?;
-    let merged = match opts.door {
-        Door::Lightplayer => merged_lp,
-        Door::Idf => merged_idf,
+    let merged = match &bootloader {
+        Some(bootloader) => {
+            let merged_lp = merged_image::with_bootloader(&merged_idf, bootloader)?;
+            fs::write(out.join("merged-lp.bin"), &merged_lp)?;
+            match opts.door {
+                Door::Lightplayer => merged_lp,
+                Door::Idf => merged_idf,
+            }
+        }
+        None => merged_idf,
     };
     fs::write(out.join("merged.bin"), &merged)?;
 
@@ -291,15 +361,17 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         sha256: hex(&Sha256::digest(bytes)),
     };
     let report = SplitReport {
-        layout: LAYOUT,
-        page: PAGE,
+        chip: profile.chip,
+        layout: profile.layout,
+        page: profile.page,
+        region_start: profile.region_start,
         region_end,
         app_version: app_version.clone(),
         build_id: build_id_text,
         loader_version,
         loader: piece(lp_bootctl::LOADER_OFFSET, &loader),
         door: opts.door,
-        bootloader: Some(piece(0, &bootloader)),
+        bootloader: bootloader.as_deref().map(|b| piece(0, b)),
         core: piece(app.core_off, &core),
         engine: piece(app.engine_off, &engine),
         app_bin: piece(lp_bootctl::LOADER_OFFSET, &app.bytes),
@@ -332,8 +404,6 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     );
     Ok(report)
 }
-
-/// Build our second stage and write `bootloader.elf` and `bootloader.bin`
 /// into `out`; the image.
 fn build_bootloader_image(repo: &Path, out: &Path) -> Result<Vec<u8>> {
     let elf = fs::read(pass_link::build_bootloader(repo)?)?;
@@ -378,7 +448,7 @@ pub fn rebuild_bootloader(repo: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verify one link: its graph, its split, the verdict.
+/// Verify one link of the C6: its graph, its split, the verdict.
 pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
     let graph = SectionGraph::load(elf, map)?;
     let bytes = fs::read(elf)?;
@@ -388,6 +458,25 @@ pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
         &graph,
         &split,
         u64::from(ENGINE_BASE),
+        &names,
+    ))
+}
+
+/// Verify one link of `profile`'s chip: [`verify`] on the C6; on the S3 a
+/// core node in either of the engine's views fails it.
+pub fn verify_for(profile: &ChipProfile, elf: &Path, map: &Path) -> Result<Verification> {
+    if profile.chip == SplitChip::Esp32c6 {
+        return verify(elf, map);
+    }
+    let graph = SectionGraph::load_for(profile, elf, map)?;
+    let bytes = fs::read(elf)?;
+    let split = Split::compute(&graph, &core_roots(&graph, &bytes)?);
+    let names = demangled_symbols(&bytes)?;
+    let engine = profile.engine;
+    Ok(Verification::run_with(
+        &graph,
+        &split,
+        &|vma| engine.contains(vma),
         &names,
     ))
 }
@@ -467,14 +556,28 @@ fn roots_at(graph: &SectionGraph, named: &[(&str, u32)]) -> Result<Vec<usize>> {
 /// Where the seam table and every seam function it names were placed: all
 /// of it must be in the core (below the engine region), or the build fails.
 pub fn seam_table_placement(elf: &[u8]) -> Result<String> {
+    seam_table_placement_for(&crate::chip_profile::ESP32C6, elf)
+}
+
+/// [`seam_table_placement`] against `profile`'s engine region.
+pub fn seam_table_placement_for(profile: &ChipProfile, elf: &[u8]) -> Result<String> {
     let table = elf_symbol::find(elf, SEAM_TABLE_SYMBOL)?;
-    let lines = seam_sites_in_core(table.vaddr, table.get(elf))?;
+    let engine = profile.engine;
+    let in_engine = |at: u32| match engine {
+        EngineRegion::Unified { base, .. } => at >= base,
+        EngineRegion::TwoViews { .. } => engine.contains(u64::from(at)),
+    };
+    let lines = seam_sites_in_core(table.vaddr, table.get(elf), &in_engine)?;
     Ok(lines.join("\n"))
 }
 
 /// The table at `vaddr` and its entries, one line each; an error names the
 /// first one at or above [`ENGINE_BASE`].
-fn seam_sites_in_core(vaddr: u32, bytes: &[u8]) -> Result<Vec<String>> {
+fn seam_sites_in_core(
+    vaddr: u32,
+    bytes: &[u8],
+    in_engine: &dyn Fn(u32) -> bool,
+) -> Result<Vec<String>> {
     let view = match lp_seam::table::read(bytes, 0) {
         Ok(lp_seam::table::Read::Match(view)) => view,
         Ok(lp_seam::table::Read::Mismatch { abi }) => {
@@ -483,7 +586,7 @@ fn seam_sites_in_core(vaddr: u32, bytes: &[u8]) -> Result<Vec<String>> {
         Err(e) => bail!("`{SEAM_TABLE_SYMBOL}` is not a seam table: {e:?}"),
     };
     let core = |what: &str, at: u32| -> Result<String> {
-        if at >= ENGINE_BASE {
+        if in_engine(at) {
             bail!("{what} @{at:#010x} is in the engine region: the seam table must be a core root");
         }
         Ok(format!("    {what} @{at:#010x} (core)"))
@@ -579,13 +682,14 @@ mod tests {
 
     #[test]
     fn a_seam_site_in_the_engine_region_fails_the_build() {
+        let c6 = |at: u32| at >= ENGINE_BASE;
         let core_fn = 0x4210_0000u32;
-        let ok = seam_sites_in_core(0x4201_0000, &table(core_fn)).unwrap();
+        let ok = seam_sites_in_core(0x4201_0000, &table(core_fn), &c6).unwrap();
         assert_eq!(ok.len(), 2);
         assert!(ok[1].contains("lp_seam_ws281x_wait_step"), "{ok:?}");
-        let err = seam_sites_in_core(0x4201_0000, &table(ENGINE_BASE + 0x40)).unwrap_err();
+        let err = seam_sites_in_core(0x4201_0000, &table(ENGINE_BASE + 0x40), &c6).unwrap_err();
         assert!(err.to_string().contains("engine region"), "{err}");
-        let err = seam_sites_in_core(ENGINE_BASE, &table(core_fn)).unwrap_err();
+        let err = seam_sites_in_core(ENGINE_BASE, &table(core_fn), &c6).unwrap_err();
         assert!(err.to_string().contains("seam table"), "{err}");
     }
 

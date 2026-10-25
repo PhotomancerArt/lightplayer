@@ -17,10 +17,9 @@ pub enum FsRequest {
     /// Write a file
     Write {
         path: LpPathBuf,
-        #[serde(
-            serialize_with = "serde_base64::serialize_smart",
-            deserialize_with = "serde_base64::deserialize_smart"
-        )]
+        /// The file: text as a JSON string, other bytes as
+        /// `{"base64":"…"}` ([`lpc_model::body_bytes`], wire 44).
+        #[serde(with = "lpc_model::body_bytes")]
         data: Vec<u8>,
     },
     /// Delete a file
@@ -53,10 +52,8 @@ pub enum FsRequest {
     WriteChunk {
         path: LpPathBuf,
         offset: u32,
-        #[serde(
-            serialize_with = "serde_base64::serialize_smart",
-            deserialize_with = "serde_base64::deserialize_smart"
-        )]
+        /// The chunk, as [`FsRequest::Write`]'s `data`.
+        #[serde(with = "lpc_model::body_bytes")]
         data: Vec<u8>,
     },
     /// Canonical package hash (lpc-history `lph1` spec) of the directory at
@@ -101,9 +98,9 @@ pub enum FsRequest {
         offset: u32,
         #[serde(rename = "logicalLen")]
         logical_len: u32,
-        /// Always base64, never the smart text form: a deflate stream is
-        /// binary, and one that happened to be valid UTF-8 would go as text
-        /// the smart reader could take for base64.
+        /// Always a bare base64 string, never the file-body form
+        /// ([`lpc_model::body_bytes`]): a deflate stream is binary, and one
+        /// that happened to be valid UTF-8 would go as text.
         #[serde(
             serialize_with = "serde_base64::serialize",
             deserialize_with = "serde_base64::deserialize"
@@ -132,10 +129,9 @@ pub enum FsResponse {
     /// Response to Read request
     Read {
         path: LpPathBuf,
-        #[serde(
-            serialize_with = "serde_base64::serialize_option_smart",
-            deserialize_with = "serde_base64::deserialize_option_smart"
-        )]
+        /// The file as [`FsRequest::Write`]'s `data`; `null` when it was
+        /// not read.
+        #[serde(with = "lpc_model::body_bytes::option")]
         data: Option<Vec<u8>>,
         error: Option<String>,
     },
@@ -718,7 +714,7 @@ mod tests {
         let request_json = crate::json::to_string(&req).expect("Failed to serialize FsRequest");
 
         // Analysis of what happens:
-        // 1. serialize_smart sees valid UTF-8 bytes: {"uid":"test","name":"Test Project"}
+        // 1. body_bytes sees valid UTF-8 bytes: {"uid":"test","name":"Test Project"}
         // 2. It calls serializer.serialize_str() with that string
         // 3. The JSON serializer MUST escape quotes in string values (JSON spec requirement)
         // 4. So it produces: "{\"uid\":\"test\",\"name\":\"Test Project\"}"
@@ -765,17 +761,13 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_smart_round_trip() {
-        // Test serialize_smart/deserialize_smart directly
-        use crate::serde_base64;
+    fn test_file_body_round_trip() {
+        // Test lpc_model::body_bytes directly
         use serde::{Deserialize, Serialize};
 
         #[derive(Serialize, Deserialize)]
         struct Test {
-            #[serde(
-                serialize_with = "serde_base64::serialize_smart",
-                deserialize_with = "serde_base64::deserialize_smart"
-            )]
+            #[serde(with = "lpc_model::body_bytes")]
             data: Vec<u8>,
         }
 

@@ -34,17 +34,13 @@ pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    deserializer.deserialize_str(Base64Visitor { smart: false })
+    deserializer.deserialize_str(Base64Visitor)
 }
 
 /// Decodes the string it is handed (borrowed when the deserializer can lend
 /// it, as `serde_json::from_str` does for a string with no escapes), with no
 /// copy of the text.
-struct Base64Visitor {
-    /// [`deserialize_smart`]'s rule: text that is not base64 of non-UTF-8
-    /// bytes is the bytes of the text itself.
-    smart: bool,
-}
+struct Base64Visitor;
 
 impl<'de> serde::de::Visitor<'de> for Base64Visitor {
     type Value = Vec<u8>;
@@ -55,36 +51,9 @@ impl<'de> serde::de::Visitor<'de> for Base64Visitor {
 
     fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Vec<u8>, E> {
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(s);
-        if !self.smart {
-            return decoded.map_err(E::custom);
-        }
-        if let Ok(decoded_bytes) = decoded {
-            match core::str::from_utf8(&decoded_bytes) {
-                Err(_) => return Ok(decoded_bytes),
-                Ok(decoded_text) if decoded_text == s => return Ok(decoded_bytes),
-                Ok(_) => {}
-            }
-        }
-        Ok(s.as_bytes().to_vec())
-    }
-
-    fn visit_string<E: serde::de::Error>(self, s: String) -> Result<Vec<u8>, E> {
-        if self.smart {
-            use base64::Engine;
-            // An owned string the deserializer had to build anyway: keep it
-            // as the bytes when it is not a base64 blob.
-            match base64::engine::general_purpose::STANDARD.decode(&s) {
-                Ok(decoded_bytes) => match core::str::from_utf8(&decoded_bytes) {
-                    Err(_) => Ok(decoded_bytes),
-                    Ok(decoded_text) if decoded_text == s => Ok(decoded_bytes),
-                    Ok(_) => Ok(s.into_bytes()),
-                },
-                Err(_) => Ok(s.into_bytes()),
-            }
-        } else {
-            self.visit_str(&s)
-        }
+        base64::engine::general_purpose::STANDARD
+            .decode(s)
+            .map_err(E::custom)
     }
 }
 
@@ -112,64 +81,6 @@ where
             .decode(s)
             .map(Some)
             .map_err(serde::de::Error::custom),
-        None => Ok(None),
-    }
-}
-
-/// Serialize UTF-8 text as a JSON string; arbitrary bytes as base64.
-pub fn serialize_smart<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match core::str::from_utf8(bytes) {
-        Ok(text) => serializer.serialize_str(text),
-        Err(_) => serialize_blob(bytes, serializer),
-    }
-}
-
-/// Deserialize smart string: plain UTF-8 or base64 binary (see original
-/// `lpc-model` logic). Decoded without a copy of the text, as
-/// [`deserialize`] is.
-pub fn deserialize_smart<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_str(Base64Visitor { smart: true })
-}
-
-/// Smart serialize `Option<Vec<u8>>`.
-pub fn serialize_option_smart<S>(bytes: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match bytes {
-        Some(bytes) => serialize_smart(bytes, serializer),
-        None => serializer.serialize_none(),
-    }
-}
-
-/// Smart deserialize `Option<Vec<u8>>`.
-pub fn deserialize_option_smart<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    use base64::Engine;
-    use serde::Deserialize;
-    let opt: Option<String> = Option::deserialize(deserializer)?;
-    match opt {
-        Some(s) => {
-            if let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(&s) {
-                if core::str::from_utf8(&decoded_bytes).is_err() {
-                    return Ok(Some(decoded_bytes));
-                }
-                if let Ok(decoded_text) = core::str::from_utf8(&decoded_bytes) {
-                    if decoded_text == s {
-                        return Ok(Some(decoded_bytes));
-                    }
-                }
-            }
-            Ok(Some(s.into_bytes()))
-        }
         None => Ok(None),
     }
 }
@@ -265,7 +176,7 @@ mod tests {
 
     /// Not UTF-8; its base64 carries `+`, `/` and one `=`.
     const BINARY: [u8; 5] = [0xfb, 0xef, 0xbe, 0xef, 0xff];
-    /// UTF-8 text a `serialize_smart` field writes as a plain string.
+    /// UTF-8 text a file body writes as a plain string.
     const TEXT: &[u8] = b"void main() {}\n";
 
     /// `value` serializes to exactly `expected` on serde_json, and on
@@ -412,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn file_chunk_smart_text_and_binary() {
+    fn file_chunk_bodies_are_text_or_a_base64_object() {
         let text = FileChunk {
             path: "/shader.glsl".as_path_buf(),
             kind: FileChangeKind::Upsert,
@@ -433,17 +344,20 @@ mod tests {
         };
         assert_json(
             &binary,
-            r#"{"path":"/blob.bin","kind":"upsert","offset":8,"total":13,"data":"++++7/8="}"#,
+            r#"{"path":"/blob.bin","kind":"upsert","offset":8,"total":13,"data":{"base64":"++++7/8="}}"#,
         );
     }
 
     #[test]
-    fn fs_api_smart_fields() {
+    fn fs_api_file_bodies_are_text_or_a_base64_object() {
         let write = FsRequest::Write {
             path: "/a.bin".as_path_buf(),
             data: BINARY.to_vec(),
         };
-        assert_json(&write, r#"{"write":{"path":"/a.bin","data":"++++7/8="}}"#);
+        assert_json(
+            &write,
+            r#"{"write":{"path":"/a.bin","data":{"base64":"++++7/8="}}}"#,
+        );
         let write_text = FsRequest::Write {
             path: "/a.glsl".as_path_buf(),
             data: TEXT.to_vec(),
@@ -459,7 +373,7 @@ mod tests {
         };
         assert_json(
             &chunk,
-            r#"{"writeChunk":{"path":"/a.bin","offset":5,"data":"++++7/8="}}"#,
+            r#"{"writeChunk":{"path":"/a.bin","offset":5,"data":{"base64":"++++7/8="}}}"#,
         );
         let read = FsResponse::Read {
             path: "/a.bin".as_path_buf(),
@@ -468,7 +382,7 @@ mod tests {
         };
         assert_json(
             &read,
-            r#"{"read":{"path":"/a.bin","data":"++++7/8=","error":null}}"#,
+            r#"{"read":{"path":"/a.bin","data":{"base64":"++++7/8="},"error":null}}"#,
         );
         let read_text = FsResponse::Read {
             path: "/a.glsl".as_path_buf(),
@@ -487,6 +401,128 @@ mod tests {
         assert_json(
             &missing,
             r#"{"read":{"path":"/gone","data":null,"error":"not found"}}"#,
+        );
+    }
+
+    /// Every message that carries a file body, with `bytes` as the body:
+    /// write, chunked write, a read's answer, a changes page's chunk.
+    fn file_messages(bytes: &[u8]) -> [(&'static str, String); 4] {
+        let path = || "/f".as_path_buf();
+        [
+            (
+                "Write",
+                crate::json::to_string(&FsRequest::Write {
+                    path: path(),
+                    data: bytes.to_vec(),
+                })
+                .unwrap(),
+            ),
+            (
+                "WriteChunk",
+                crate::json::to_string(&FsRequest::WriteChunk {
+                    path: path(),
+                    offset: 0,
+                    data: bytes.to_vec(),
+                })
+                .unwrap(),
+            ),
+            (
+                "Read",
+                crate::json::to_string(&FsResponse::Read {
+                    path: path(),
+                    data: Some(bytes.to_vec()),
+                    error: None,
+                })
+                .unwrap(),
+            ),
+            (
+                "FileChunk",
+                crate::json::to_string(&FileChunk {
+                    path: path(),
+                    kind: FileChangeKind::Upsert,
+                    offset: 0,
+                    total: bytes.len() as u32,
+                    data: bytes.to_vec(),
+                })
+                .unwrap(),
+            ),
+        ]
+    }
+
+    /// The body `json` (one of [`file_messages`]) carries, read by `name`'s
+    /// type from a `&str` and from a `&[u8]`, which must agree.
+    fn body_read_back(name: &str, json: &str) -> Vec<u8> {
+        fn both<T: serde::de::DeserializeOwned>(
+            json: &str,
+            data: impl Fn(T) -> Vec<u8>,
+        ) -> Vec<u8> {
+            let from_str = data(crate::json::from_str::<T>(json).unwrap());
+            let from_slice = data(crate::json::from_slice::<T>(json.as_bytes()).unwrap());
+            assert_eq!(from_str, from_slice, "{json}");
+            from_str
+        }
+        match name {
+            "Write" => both::<FsRequest>(json, |request| match request {
+                FsRequest::Write { data, .. } => data,
+                other => panic!("{other:?}"),
+            }),
+            "WriteChunk" => both::<FsRequest>(json, |request| match request {
+                FsRequest::WriteChunk { data, .. } => data,
+                other => panic!("{other:?}"),
+            }),
+            "Read" => both::<FsResponse>(json, |response| match response {
+                FsResponse::Read { data, .. } => data.expect("a body"),
+                other => panic!("{other:?}"),
+            }),
+            "FileChunk" => both::<FileChunk>(json, |chunk| chunk.data),
+            other => panic!("{other}"),
+        }
+    }
+
+    /// The ticket's defect: text that happens to spell base64 (`abcd` is
+    /// valid base64 of three non-UTF-8 bytes) used to come back as those
+    /// bytes. A string is now always the text itself.
+    #[test]
+    fn text_that_spells_base64_stays_text_in_every_file_message() {
+        for text in ["abcd", "1234", "++++7/8=", "AQID", "////", "QUJD"] {
+            for (name, json) in file_messages(text.as_bytes()) {
+                assert!(
+                    json.contains(&alloc::format!(r#""data":"{text}""#)),
+                    "{name}: {json}"
+                );
+                assert_eq!(body_read_back(name, &json), text.as_bytes(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn binary_and_empty_bodies_round_trip_in_every_file_message() {
+        let every_byte: Vec<u8> = (0..=255u8).collect();
+        for body in [
+            &BINARY[..],
+            &[0xff][..],
+            &every_byte[..],
+            &[0u8, 159, 146, 150][..],
+        ] {
+            for (name, json) in file_messages(body) {
+                assert!(json.contains(r#""data":{"base64":""#), "{name}: {json}");
+                assert_eq!(body_read_back(name, &json), body, "{name}");
+            }
+        }
+        for (name, json) in file_messages(b"") {
+            assert!(json.contains(r#""data":"""#), "{name}: {json}");
+            assert_eq!(body_read_back(name, &json), b"", "{name}");
+        }
+    }
+
+    /// The old ambiguous form is gone, not tolerated: a bare base64 string
+    /// is text, and an array of numbers is no body.
+    #[test]
+    fn a_bare_base64_string_is_text_not_binary() {
+        let json = r#"{"write":{"path":"/a.bin","data":"++++7/8="}}"#;
+        assert_eq!(body_read_back("Write", json), b"++++7/8=");
+        assert!(
+            crate::json::from_str::<FsRequest>(r#"{"write":{"path":"/a","data":[1,2]}}"#).is_err()
         );
     }
 

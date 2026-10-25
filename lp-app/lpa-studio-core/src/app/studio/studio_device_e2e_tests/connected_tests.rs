@@ -1285,7 +1285,7 @@ fn a_failed_connect_says_so_on_the_card_in_plain_words() {
 // ---------------------------------------------------------------------
 
 /// Step the bench and run the refresh tick's held-lens look, until `ready`.
-fn tick_until(
+pub(super) fn tick_until(
     bench: &mut DeviceBench,
     tasks: &TaskPool,
     what: &str,

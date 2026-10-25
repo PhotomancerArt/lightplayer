@@ -12,7 +12,9 @@
 //! - [`Pace::Max`]: as fast as the host can go. Never paced, even with a host
 //!   connected through a port forward.
 //! - **Unset** (`None`, every existing run): realtime while a host is
-//!   connected through a port forward, otherwise as fast as it goes
+//!   connected through a port forward or an uplink, or attached on the
+//!   board's USB byte socket (a page or tool reading its frames on wall
+//!   time), otherwise as fast as it goes
 //!   (`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`).
 //!
 //! The mechanism is the LAN's ([`super::lan_host_pace`], [`super::SharedLan`]):

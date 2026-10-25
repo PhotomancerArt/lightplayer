@@ -15,7 +15,8 @@
 //! meant. P04 added the peripheral flags (`--efuse-mac`, `--efuse-rev`);
 //! P05 the link's; P06 the flash, cache and ROM-console ones (`--boot-mode`,
 //! `--flash`, `--flash-copy`, `--merged`, `--flash-len`, `--cache-off-fetch`,
-//! `--uart0`, `--strap`); P07 the pads'.
+//! `--uart0`, `--strap`); P07 the pads'; lane P (S3 radio roadmap) the
+//! PSRAM's (`--psram-len`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -70,6 +71,11 @@ OPTIONS:
                             --chip esp32s3 --merge` writes. Sets --flash-len
                             to the file's length unless told otherwise
     --flash-len <bytes>     the chip's size [8388608, the S3 board's 8 MB]
+    --psram-len <size>      the octal PSRAM on CS1: 2mb, 4mb, 8mb, 16mb,
+                            32mb, a byte count, or 0/none for a board
+                            without. An image that never brings PSRAM up
+                            runs exactly as it does with none [8mb, the
+                            XIAO ESP32-S3's]
     --cache-off-fetch stop|permit
                             D4. `stop` (the default, and every gate run's)
                             refuses a fetch or read through a flash window
@@ -115,6 +121,13 @@ OPTIONS:
                             direct load and the ROM-up boot touch is
                             modelled through P06; a strict run of the shipped
                             image reaches the server loop with unmapped=0
+    --flash-busy            the flash-busy model: WIP held for each program's
+                            and erase's busy time, and a window access by
+                            either core meanwhile stops the run (exit 9)
+    --no-block-cache        do not pre-decode blocks of instructions. Slower,
+                            and otherwise identical in every byte, count and
+                            frame: the identity oracle a speed change is
+                            checked against (scripts/emu/s3-oracle.sh)
     --efuse-mac <aa:bb:cc:dd:ee:ff>
                             the MAC the eFuse block answers. ⚠️ The default
                             is the PAC's zero, NOT a plausible board: no S3
@@ -192,6 +205,25 @@ OPTIONS:
                             into GPIO.strap and the ROM reads it; under
                             direct the load is replayed and the strap is
                             recorded only
+    --flash-cut <spec>      cut the power at the Nth program/erase in lpfs:
+                            <n>:<model>:<seed>[,range=<off>+<len>]
+                            [,then=stop|power-cycle] (the C6's spec; the
+                            range defaults to the chip's own lpfs row). The
+                            run ends on the cut (exit 8), or power-cycles
+                            and runs on. A test switch; the label gains
+                            +flash-cut. Pair with --flash <file> to keep
+                            the torn chip
+    --seams <atoms|none>    engage emulator seams, STRICT: atoms
+                            `<seam>=<impl>` joined by `+` (`net=lan`), or
+                            `none`. A seam that cannot engage on this image is
+                            a hard error (exits 64). The run's label gains
+                            the atoms, and each chip start prints `SEAM <atom>
+                            engaged (…)`. With neither flag the capability
+                            defaults (`net=lan`) are asked for SOFTLY. ADR
+                            docs/adr/2026-10-05-emulator-seams.md
+    --seams-prefer <atoms>  the same, SOFT: engage what the image allows,
+                            else print `SEAM none engaged: <why>` and run on
+    --seams-info <image>    print a flash image's seam tables and exit
     --seed <n>              the machine's PRNG seed [0]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
@@ -207,6 +239,9 @@ EXIT CODES (a cross-machine contract — one table for all three machines):
       this machine: one core runs and ONE table serves both buses, so there
       is no second table to diverge from. Reserved across the family, never
       emitted here, and there is no --app-mmu-divergence flag to reserve
+    8 a --flash-cut power cut ended the run (the C6's is 6, which is this
+      chip's cache-off fetch)
+   64 a usage error, a build error, or a --seams seam that cannot engage
 ";
 
 fn main() -> ExitCode {
@@ -229,10 +264,16 @@ struct Args {
     boot_mode: BootMode,
     flash: Option<FlashBacking>,
     flash_len: Option<u32>,
+    psram_len: Option<u32>,
     cache_off: CacheOffPolicy,
     uart0: UsbSjSink,
     strap: Option<u32>,
     strict: bool,
+    /// `--no-block-cache`. The cache is ON by default, so the flag is held as
+    /// its negative.
+    no_block_cache: bool,
+    /// `--flash-busy`: the flash-busy model ([`Esp32S3Builder::flash_busy`]).
+    flash_busy: bool,
     core_quantum: Option<u64>,
     cpenable_reset: Option<u32>,
     time_grade: TimeGrade,
@@ -251,6 +292,11 @@ struct Args {
     usb_script: Vec<PathBuf>,
     control: Option<String>,
     reboot_on_reset: bool,
+    flash_cut: Option<lp_emu_esp_common::engine::flash_cut_spec::FlashCutSpec>,
+    /// `--seams` / `--seams-prefer`, folded into one request at parse time.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// `--seams-info <image>`.
+    seams_info: Option<PathBuf>,
     seed: u64,
     efuse: EfuseIdentity,
     hooks: bool,
@@ -274,6 +320,11 @@ fn run() -> Result<ExitCode, String> {
         print_map();
         return Ok(ExitCode::SUCCESS);
     }
+    if let Some(path) = &args.seams_info {
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("{}", lp_emu_esp32s3::seams::seams_info(&bytes));
+        return Ok(ExitCode::SUCCESS);
+    }
     if args.elf.is_none() && !args.hooks && args.boot_mode == BootMode::Direct {
         return Err(
             "--elf is required under --boot-mode direct: this machine direct-loads an \
@@ -293,6 +344,8 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32S3Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .block_cache(!args.no_block_cache)
+        .flash_busy(args.flash_busy)
         .boot_mode(args.boot_mode)
         .cache_off_fetch(args.cache_off)
         .uart0(args.uart0.clone())
@@ -328,9 +381,16 @@ fn run() -> Result<ExitCode, String> {
         }
         builder = builder.flash(backing);
     }
+    if let Some(len) = args.psram_len {
+        builder = builder.psram_len(len);
+    }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
     }
+    if let Some(spec) = args.flash_cut.clone() {
+        builder = builder.flash_cut(spec);
+    }
+    builder = builder.seams(args.seams.clone());
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
     }
@@ -384,6 +444,7 @@ fn run() -> Result<ExitCode, String> {
     }
 
     print_build_report(&machine);
+    print_seam_lines(&mut machine);
 
     let timeout = args.timeout.unwrap_or(Duration::from_millis(100));
     let stop = StopCondition {
@@ -401,6 +462,8 @@ fn run() -> Result<ExitCode, String> {
     // rather than inventing a reset gap.
     machine.flush_frames();
     print_outcome(&mut machine, &outcome);
+    print_seam_lines(&mut machine);
+    print_seam_report(&machine);
     print_run_summary(&machine);
     print_pin_report(&machine);
     print_refill_lag(&machine);
@@ -525,6 +588,9 @@ fn print_run_summary(machine: &Machine) {
             machine.strap()
         );
     }
+    for line in machine.flash_cut_summary() {
+        println!("{line}");
+    }
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!(
@@ -536,6 +602,9 @@ fn print_run_summary(machine: &Machine) {
             chip.command_census(),
             machine.cache_fills(),
         );
+    }
+    if let Some(line) = machine.psram_summary() {
+        println!("{line}");
     }
     if !machine.uart0().is_empty() {
         println!("uart0: {} bytes on the wire", machine.uart0().len());
@@ -554,6 +623,11 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+    // On stderr, beside the run but out of the transcript: these are the
+    // lines a run and its `--no-block-cache` twin must differ in.
+    for line in machine.block_report_lines() {
+        eprintln!("{line}");
+    }
 }
 
 /// The whole map, and the alias mirror beside it.
@@ -753,8 +827,35 @@ fn print_build_report(machine: &Machine) {
         machine.cpenable_reset(),
         machine.strict_unsupported(),
     );
-    println!("time grade: t1 ({})", machine.time_grade().configuration());
+    println!("time grade: t1 ({})", machine.configuration_label());
     for line in machine.core_report() {
+        println!("{line}");
+    }
+}
+
+/// A chip start's `SEAM …` lines, as they come.
+fn print_seam_lines(machine: &mut Machine) {
+    for line in machine.take_seam_lines() {
+        println!("{line}");
+    }
+}
+
+/// The seam counters, when anything engaged. Emulated figures.
+fn print_seam_report(machine: &Machine) {
+    if !machine.seams().engaged() {
+        return;
+    }
+    let s = machine.seams();
+    println!(
+        "seams {} ({}): seam_calls {}, seam_arms {} ({} re-arms), {} chip start(s)",
+        s.request,
+        machine.configuration_label(),
+        s.calls,
+        s.arms_planted,
+        s.rearms,
+        s.starts
+    );
+    for line in machine.seam_wake_lines() {
         println!("{line}");
     }
 }
@@ -819,6 +920,26 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
             pc, access, cycle, ..
         } => {
             println!("{}", machine.cache_off_message(*cycle, *pc, access));
+        }
+        Outcome::FlashBusyFetch {
+            core,
+            pc,
+            addr,
+            fetch,
+            busy_until,
+            cycle,
+            ..
+        } => {
+            println!(
+                "{}",
+                machine.flash_busy_message(*cycle, *core, *pc, *addr, *fetch, *busy_until)
+            );
+        }
+        Outcome::PowerCut { report, .. } => {
+            println!("POWER CUT cycle={cycle} ({micros} us emulated): {report}");
+        }
+        Outcome::Seam { why, .. } => {
+            println!("SEAM ERROR at cycle {cycle} ({micros} us emulated): {why}");
         }
         Outcome::Fault {
             core, pc, fault, ..
@@ -910,6 +1031,8 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--map" => args.map = true,
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
+            "--no-block-cache" => args.no_block_cache = true,
+            "--flash-busy" => args.flash_busy = true,
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
             "--boot-mode" => {
@@ -929,6 +1052,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .unwrap_or_else(|| v.parse())
                     .map_err(|_| format!("--flash-len {v}: not a byte count"))?;
                 args.flash_len = Some(n);
+            }
+            "--psram-len" => {
+                let v = value()?;
+                args.psram_len = Some(
+                    lp_emu_esp32s3::psram::parse_size(&v)
+                        .map_err(|e| format!("--psram-len: {e}"))?,
+                );
             }
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--uart0" => args.uart0 = parse_usb_sj(&value()?, "--uart0", true)?,
@@ -1017,6 +1147,28 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.control = Some(parse_control(&text)?);
             }
             "--reboot-on-reset" => args.reboot_on_reset = true,
+            "--flash-cut" => {
+                let text = value()?;
+                args.flash_cut = Some(
+                    lp_emu_esp_common::engine::flash_cut_spec::FlashCutSpec::parse(&text)
+                        .map_err(|e| format!("--flash-cut {e}"))?,
+                );
+            }
+            "--seams" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(&value()?, lp_emu_esp_common::seam::Strength::Strict)
+                    .map_err(|e| format!("--seams: {e}"))?;
+            }
+            "--seams-prefer" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(&value()?, lp_emu_esp_common::seam::Strength::Soft)
+                    .map_err(|e| format!("--seams-prefer: {e}"))?;
+            }
+            "--seams-info" => args.seams_info = Some(PathBuf::from(value()?)),
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;
@@ -1226,8 +1378,12 @@ mod tests {
             "0x8".into(),
             "--flash-len".into(),
             "0x800000".into(),
+            "--psram-len".into(),
+            "2mb".into(),
         ])
         .unwrap();
+        assert_eq!(a.psram_len, Some(2 << 20));
+        assert!(parse(vec!["--psram-len".into(), "3mb".into()]).is_err());
         assert_eq!(a.boot_mode, BootMode::RomUp);
         assert_eq!(a.flash, Some(FlashBacking::Copy(PathBuf::from("chip.bin"))));
         assert_eq!(a.cache_off, CacheOffPolicy::Permit);

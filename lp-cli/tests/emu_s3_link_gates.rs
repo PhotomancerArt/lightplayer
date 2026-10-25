@@ -16,6 +16,12 @@
 //! which `just test-emu-esp32s3-boot` builds and exports before it runs
 //! this. Numbers printed are `lp-emu:esp32s3:t1`.
 
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+
 use lp_cli::commands::emu::link_host::{EmuLinkHost, S3Board};
 use lp_emu_esp_figures::Figures;
 use lp_emu_esp32s3::flash::FlashBacking;
@@ -76,6 +82,14 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         "no hello on the link:\n{}",
         host.console().join("\n")
     );
+    // ESP-NOW is a default feature since 2026-10-23: the hello says the board
+    // has a radio and the service, as its manifest does
+    // (docs/defects/2026-10-23-the-s3-espnow-image-gave-the-server-no-radio-service.md).
+    let hello = hello.unwrap_or_default();
+    assert!(
+        hello.contains("\"radio\":true") && hello.contains("\"svc.radio-espnow\""),
+        "the hello says the radio: {hello}"
+    );
     const ID: u64 = 1;
     host.send(&ClientMessage {
         id: ID,
@@ -115,20 +129,37 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     let stack = find("[stack] heartbeat: high-water ");
     let mem = find("[MEM] free=");
     let jit = find("[JIT] used=");
-    assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
+    // The probe logs a `[stack]` line only when the mark grows: once at the
+    // first ledger, and again at the second when the stop-all's own path
+    // went deeper than everything before it (since the S3's split door,
+    // boot is no longer the deepest path).
+    assert!(
+        matches!(stack.len(), 1 | 2),
+        "one [stack] line per ledger that raised the mark:\n{text}"
+    );
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
     // `[stack] heartbeat: high-water <used> B of <total> B (<headroom> B headroom)`
-    let words: Vec<&str> = stack[0].split_whitespace().collect();
-    let used: u32 = words[3].parse().expect("high-water bytes");
-    assert_eq!(&words[4..6], &["B", "of"], "{}", stack[0]);
-    let total: u32 = words[6].parse().expect("the stack's total");
-    let headroom: u32 = words[8]
-        .trim_start_matches('(')
-        .parse()
-        .expect("headroom bytes");
-    assert_eq!(used + headroom, total, "{}", stack[0]);
-    assert!(used > 0 && used < total, "{}", stack[0]);
+    let parse = |line: &str| -> (u32, u32) {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let used: u32 = words[3].parse().expect("high-water bytes");
+        assert_eq!(&words[4..6], &["B", "of"], "{line}");
+        let total: u32 = words[6].parse().expect("the stack's total");
+        let headroom: u32 = words[8]
+            .trim_start_matches('(')
+            .parse()
+            .expect("headroom bytes");
+        assert_eq!(used + headroom, total, "{line}");
+        assert!(used > 0 && used < total, "{line}");
+        (used, total)
+    };
+    let marks: Vec<(u32, u32)> = stack.iter().map(|l| parse(l)).collect();
+    let total = marks[0].1;
+    assert!(marks.iter().all(|(_, t)| *t == total), "{stack:?}");
+    assert!(
+        marks.windows(2).all(|w| w[1].0 > w[0].0),
+        "a later line only when the mark grew: {stack:?}"
+    );
     let mut figures = Figures::new(
         "esp32s3",
         "emu_s3_link_gates::the_ledger_triple_is_elicited_by_a_stop_all_over_the_link",
@@ -154,10 +185,13 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         );
     }
     // The one boot line P04b's note fixes: the `.bss` arena (HEAP_SIZE =
-    // 240 * 1024) plus `dram2_seg` (73,744 B, RAM research E14), a two-region
-    // sum where the classic prints a four-region one.
+    // 136 * 1024 less PSRAM's 3 KiB, `espnow` and `psram` being default
+    // features since 2026-10-23, less the IRAM hot set's 43 KiB and core
+    // 1's 8 KiB stack since 2026-10-24) plus `dram2_seg` (73,744 B, RAM research
+    // E14), a two-region sum where the classic prints a four-region one.
+    // PSRAM's region is the internal heap's figure's business, not this line's.
     assert!(
-        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=245760+73744=319504"),
+        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=83968+73744=157712"),
         "HEAP_SIZE + dram2_seg: {text}"
     );
     assert!(
@@ -171,7 +205,12 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     println!(
         "LEDGER TRIPLE (lp-emu:esp32s3:t1), elicited by a stop-all over the link:\n  {}\n  {}\n  \
          {}\nhost link {} frames out / {} in, {} resent",
-        stack[0], mem[1], jit[1], counters.frames_tx, counters.frames_rx, counters.resends
+        stack[stack.len() - 1],
+        mem[1],
+        jit[1],
+        counters.frames_tx,
+        counters.frames_rx,
+        counters.resends
     );
 }
 
@@ -275,4 +314,374 @@ fn the_boot_text_and_the_link_thread_share_the_in_endpoint_cleanly() {
          0 resets",
         counters.frames_tx, counters.frames_rx, counters.resends
     );
+}
+
+/// **A requested reboot reboots** (S3 radio M1): a `Reboot` over the link is
+/// answered, then the firmware's `reset_now` → `esp_hal::system::software_reset`
+/// → the ROM's `software_reset` writes `RTC_CNTL.options0.sw_sys_rst`, and the
+/// machine performs it — before M1 the write was dropped and the guest spun
+/// after it for ever.
+///
+/// What the second boot must show is what silicon gives: `reset_state`
+/// reads `CoreSw` (3), which the firmware's recovery maps to
+/// `cause=software-reset`, and RTC memory survived — the recovery ledger in
+/// RTC fast memory says the first boot completed (`prior_boot_complete=true`
+/// after a boot that served frames) and counts the reboot as a clean one
+/// (`level=green`).
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF and LP_EMU_ESP32S3_MERGED; run through `just test-emu-esp32s3-boot`"]
+fn a_requested_reboot_reboots_with_the_software_reset_cause() {
+    let (elf, merged) = match (
+        test_support::fw_esp32s3_image(),
+        test_support::merged_chip_image(),
+    ) {
+        (Ok(elf), Ok(merged)) => (elf, merged),
+        (Err(reason), _) | (_, Err(reason)) => {
+            test_support::skip_notice(
+                "a_requested_reboot_reboots_with_the_software_reset_cause",
+                &reason,
+            );
+            return;
+        }
+    };
+    let builder = Esp32S3Builder::new()
+        .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
+        .strict(true);
+    let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+        .expect("the shipped image direct-loads");
+    let mut host = EmuLinkHost::new(board, 0x5E55_0303, true);
+
+    let hello = host.wait_for_line("\"hello\":{", GATE_US).expect("the run");
+    assert!(
+        hello.is_some(),
+        "no hello on the link:\n{}",
+        host.console().join("\n")
+    );
+    let first_boot = host.console().len();
+    host.send(&ClientMessage {
+        id: 7,
+        msg: ClientRequest::Reboot,
+    })
+    .expect("the link takes the request");
+    let restarted = host
+        .wait_for_line("[link] reset (PeerRestarted)", GATE_US)
+        .expect("the reboot");
+    assert!(
+        restarted.is_some(),
+        "the host never saw the board restart:\n{}",
+        host.console().join("\n")
+    );
+    let second = host
+        .wait_for_line("[RECOVERY] boot: cause=", GATE_US)
+        .expect("the second boot");
+    let text = host.console()[first_boot..].join("\n");
+    assert!(second.is_some(), "no second boot:\n{text}");
+    assert_eq!(host.board.machine.reboots(), 1, "one software reboot");
+    assert!(
+        host.board.machine.first_strict_violation().is_none(),
+        "a strict refusal: {:?}",
+        host.board.machine.first_strict_violation()
+    );
+    assert!(
+        text.contains("[REBOOT] client requested a restart"),
+        "the request reached the server:\n{text}"
+    );
+    assert!(
+        text.contains(
+            "[RECOVERY] boot: cause=software-reset level=green safe_mode=false \
+             prior_boot_complete=true"
+        ),
+        "the second boot reads CoreSw and finds the first boot's ledger in RTC memory:\n{text}"
+    );
+    let hello_again = host.wait_for_line("\"hello\":{", GATE_US).expect("the run");
+    assert!(hello_again.is_some(), "no hello after the reboot:\n{text}");
+}
+
+/// **The radio costs the render nothing it can see** (S3 radio M1, AC1):
+/// `projects/test/shader-oracle` pushed over the link to the shipped image
+/// and to the radio probe image (`radio_boot_probe`: Wi‑Fi and BTDM started
+/// beside the same boot) lights pad 9 — `D10` on the XIAO ESP32-S3 Plus
+/// profile both images fall back to — with the **same frame**, byte for
+/// byte, for ten whole frames. The radio image boots strict with nothing
+/// unmapped on the way.
+///
+/// `shader-oracle` is clock-free, so its lit frame is one frame and the
+/// first whole lit frame on each side is the comparison. Frames are the
+/// machine's own decode of the pad (`lp-emu:esp32s3:t1`), not silicon.
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED, LP_EMU_ESP32S3_RADIO_ELF and LP_EMU_ESP32S3_RADIO_MERGED; run through `just test-emu-esp32s3-boot`"]
+fn the_radio_image_renders_the_shipped_images_frame() {
+    const TEST: &str = "the_radio_image_renders_the_shipped_images_frame";
+    let images = (|| {
+        Ok::<_, String>((
+            test_support::fw_esp32s3_image()?,
+            test_support::merged_chip_image()?,
+            test_support::radio_image()?,
+            test_support::radio_merged_image()?,
+        ))
+    })();
+    let (elf, merged, radio_elf, radio_merged) = match images {
+        Ok(images) => images,
+        Err(reason) => {
+            test_support::skip_notice(TEST, &reason);
+            return;
+        }
+    };
+    let shipped = oracle_render("shipped", &elf, &merged);
+    let radio = oracle_render("radio", &radio_elf, &radio_merged);
+    for line in [
+        "[RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]",
+        "[RADIO] wifi scan done: 0 access points",
+    ] {
+        assert!(
+            radio.console.contains(line),
+            "the radio image started its radio: no `{line}`"
+        );
+    }
+    assert!(
+        !shipped.console.contains("[RADIO]"),
+        "the shipped image starts no radio"
+    );
+    assert_eq!(
+        hex(&radio.first_lit),
+        hex(&shipped.first_lit),
+        "the radio image's first lit frame on pad {ORACLE_PAD} is the shipped image's"
+    );
+    println!(
+        "ORACLE FRAME (lp-emu:esp32s3:t1) on pad {ORACLE_PAD}, {} bytes, identical: {}\n  \
+         shipped: {} frames, {} whole lit, by {} us\n  radio:   {} frames, {} whole lit, \
+         by {} us",
+        shipped.first_lit.len(),
+        hex(&shipped.first_lit),
+        shipped.frames,
+        shipped.whole_lit,
+        shipped.at_us,
+        radio.frames,
+        radio.whole_lit,
+        radio.at_us
+    );
+}
+
+/// **The shipped image renders the same frame with PSRAM and without it**
+/// (M10; PSRAM on by default since 2026-10-23): the shipped app with PSRAM
+/// brought up in the core, the engine's heap and its JIT code in PSRAM
+/// (`LP_PSRAM_HEAP=all`) and its frames copied out to internal RAM for the
+/// RMT, against the same feature set built WITHOUT `psram` on the same chip
+/// and the same project — and the shipped image on a board WITHOUT PSRAM,
+/// which must fall back to the image without it. Same first lit frame, all
+/// three. Frames are the machine's decode (`lp-emu:esp32s3:t1`), not
+/// silicon; PSRAM's timing is modeled and ungraded.
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF, LP_EMU_ESP32S3_MERGED and LP_EMU_ESP32S3_NO_PSRAM_ELF; run through `just test-emu-esp32s3-psram`"]
+fn the_shipped_image_renders_the_same_frame_with_and_without_psram() {
+    const TEST: &str = "the_shipped_image_renders_the_same_frame_with_and_without_psram";
+    let images = (|| {
+        Ok::<_, String>((
+            test_support::fw_esp32s3_image()?,
+            test_support::merged_chip_image()?,
+            test_support::no_psram_image()?,
+        ))
+    })();
+    let (elf, merged, no_psram_elf) = match images {
+        Ok(images) => images,
+        Err(reason) => {
+            test_support::skip_notice(TEST, &reason);
+            return;
+        }
+    };
+    let shipped = oracle_render_with("shipped", &elf, &merged, None);
+    let plain = oracle_render_with("no psram feature", &no_psram_elf, &merged, None);
+    let without = oracle_render_with("shipped, no chip", &elf, &merged, Some(0));
+    for line in [
+        "[INIT] psram: on, 8388608 bytes at 0x3c800000",
+        "[INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)",
+    ] {
+        assert!(
+            shipped.console.contains(line),
+            "shipped: no `{line}`:\n{}",
+            shipped.console
+        );
+    }
+    assert!(
+        without
+            .console
+            .contains("[INIT] psram: off: the eFuse says this part has no 8 MB PSRAM"),
+        "shipped, no chip: the fallback line:\n{}",
+        without.console
+    );
+    assert_eq!(
+        hex(&shipped.first_lit),
+        hex(&plain.first_lit),
+        "the shipped image's first lit frame on pad {ORACLE_PAD} is the image without psram's"
+    );
+    assert_eq!(
+        hex(&without.first_lit),
+        hex(&plain.first_lit),
+        "with no PSRAM the shipped image's first lit frame is the image without psram's"
+    );
+    println!(
+        "ORACLE FRAME (lp-emu:esp32s3:t1) on pad {ORACLE_PAD}, {} bytes, identical x3: {}\n  \
+         shipped:  {} frames, {} whole lit, by {} us\n  no psram: {} frames, {} whole lit, by {} us\n  \
+         no chip:  {} frames, {} whole lit, by {} us",
+        plain.first_lit.len(),
+        hex(&plain.first_lit),
+        shipped.frames,
+        shipped.whole_lit,
+        shipped.at_us,
+        plain.frames,
+        plain.whole_lit,
+        plain.at_us,
+        without.frames,
+        without.whole_lit,
+        without.at_us
+    );
+}
+
+/// `D10` on the XIAO ESP32-S3 Plus profile (`scripts/emu/m4-walk.sh`'s S3
+/// arm, `LP_WALK_PAD` 9).
+const ORACLE_PAD: u8 = 9;
+
+/// The most either image may take to boot, take the deploy, compile and
+/// light [`LIT_FRAMES`] whole frames. A ceiling, not a duration: the run
+/// stops as soon as it has its frames (checked every [`ORACLE_STEP_US`]),
+/// because rendering past them proves nothing more and costs the S3's CI
+/// job minutes it does not have (`docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md`).
+const ORACLE_US: u64 = 6_000_000;
+
+/// How often the run stops to count lit frames.
+const ORACLE_STEP_US: u64 = 100_000;
+
+/// Whole lit frames each side must reach.
+const LIT_FRAMES: usize = 10;
+
+struct OracleRender {
+    console: String,
+    /// Emulated microseconds at which the run had its frames.
+    at_us: u64,
+    first_lit: Vec<u8>,
+    frames: usize,
+    whole_lit: usize,
+}
+
+fn oracle_render(tag: &str, elf: &Path, merged: &Path) -> OracleRender {
+    oracle_render_with(tag, elf, merged, None)
+}
+
+/// [`oracle_render`] on a board with `psram_len` bytes of PSRAM (`None`: the
+/// machine's default).
+fn oracle_render_with(
+    tag: &str,
+    elf: &Path,
+    merged: &Path,
+    psram_len: Option<u32>,
+) -> OracleRender {
+    let mut builder = Esp32S3Builder::new()
+        .app(AppSource::Path(elf.to_path_buf()))
+        .flash(FlashBacking::Copy(merged.to_path_buf()))
+        .strict(true);
+    if let Some(len) = psram_len {
+        builder = builder.psram_len(len);
+    }
+    let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+        .unwrap_or_else(|e| panic!("{tag}: the image direct-loads: {e}"));
+    let mut host = EmuLinkHost::new(board, 0x5E55_0304, true);
+    deploy(&mut host, &repo_root().join("projects/test/shader-oracle"));
+    let lit_so_far = |m: &lp_emu_esp32s3::machine::Machine| {
+        m.frames(ORACLE_PAD)
+            .iter()
+            .filter(|f| f.is_complete() && f.wire.iter().any(|b| *b != 0))
+            .count()
+    };
+    while host.board.machine.micros() < ORACLE_US && lit_so_far(&host.board.machine) < LIT_FRAMES {
+        let next = host.board.machine.micros() + ORACLE_STEP_US;
+        host.run_until(next, None)
+            .unwrap_or_else(|e| panic!("{tag}: the run stops only at its deadline: {e}"));
+    }
+    let console = host.console().join("\n");
+    let at_us = host.board.machine.micros();
+    let m = &mut host.board.machine;
+    m.flush_frames();
+    assert!(
+        m.first_strict_violation().is_none(),
+        "{tag}: a strict refusal: {:?}",
+        m.first_strict_violation()
+    );
+    assert_eq!(
+        m.bus().unmapped_reads() + m.bus().unmapped_writes(),
+        0,
+        "{tag}: unmapped"
+    );
+    assert_eq!(host.link_errors, 0, "{tag}: {console}");
+    assert!(!console.contains("PANIC"), "{tag}: a panic:\n{console}");
+    let frames = host.board.machine.frames(ORACLE_PAD);
+    let bit_errors: u64 = frames.iter().map(|f| f.error_count).sum();
+    assert_eq!(bit_errors, 0, "{tag}: bit errors on pad {ORACLE_PAD}");
+    let lit: Vec<&lp_emu_esp_common::strip::ws281x::Frame> = frames
+        .iter()
+        .filter(|f| f.is_complete() && f.wire.iter().any(|b| *b != 0))
+        .collect();
+    assert!(
+        lit.len() >= LIT_FRAMES,
+        "{tag}: at least {LIT_FRAMES} whole lit frames on pad {ORACLE_PAD} by {ORACLE_US} us, \
+         got {} of {}:\n{console}",
+        lit.len(),
+        frames.len()
+    );
+    OracleRender {
+        first_lit: lit[0].wire.clone(),
+        frames: frames.len(),
+        whole_lit: lit.len(),
+        at_us,
+        console,
+    }
+}
+
+/// Wait for the board's hello, then deploy `dir` over the link as `lp-cli
+/// upload` deploys it (the classic's gate's helper, on this chip's board).
+fn deploy(host: &mut EmuLinkHost<S3Board>, dir: &Path) {
+    let hello = host
+        .wait_for_line("\"hello\":{", GATE_US)
+        .expect("the boot");
+    assert!(hello.is_some(), "no hello:\n{}", host.console().join("\n"));
+    let (uid, _) = lp_cli::commands::dev::validation::validate_local_project(&dir.to_path_buf())
+        .unwrap_or_else(|e| panic!("{} validates: {e:#}", dir.display()));
+    let files =
+        lp_cli::commands::dev::collect_project_deploy_files(&lpfs::LpFsStd::new(dir.to_path_buf()))
+            .expect("the project's files");
+    host.set_queue_messages(true);
+    {
+        let mut client = lpa_client::LpClient::new(&mut *host);
+        block_on(client.deploy_project_files(&uid, files))
+            .unwrap_or_else(|e| panic!("the deploy failed: {e}"));
+    }
+    host.set_queue_messages(false);
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("lp-cli sits under the repo root")
+        .to_path_buf()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Drive a future whose every await completes synchronously (the host steps
+/// the board inside `receive`): tests are edges, and a null waker is enough.
+fn block_on<F: Future>(future: F) -> F::Output {
+    struct Noop;
+    impl Wake for Noop {
+        fn wake(self: Arc<Self>) {}
+    }
+    let waker = Waker::from(Arc::new(Noop));
+    let mut context = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+    }
 }

@@ -1,7 +1,7 @@
 //! The main thread's answer to the relay (relay protocol 2): the picture
 //! when one is asked for, and the project's facts when they change. One
 //! function, [`serve_relay`], that the C6's frame hook
-//! (`fw-esp32c6/src/net/relay_probes.rs`) and the host harness's server
+//! (`fw-esp32-radio/src/net/relay_probes.rs`) and the host harness's server
 //! loop both call, between ticks, after the link upkeep.
 //!
 //! **Why it is here, on the engine side.** The relay task runs in the C6's

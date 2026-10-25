@@ -22,8 +22,6 @@ use lpc_shared::output::{
 use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
 
 use super::power_gate::{PowerGateController, is_all_black};
-const FRAME_INTERVAL_US: u64 = 16_667;
-const MID_FRAME_US: u64 = 8_333;
 
 /// Ports reserved up front in [`Esp32OutputProvider::ports`].
 ///
@@ -82,8 +80,15 @@ struct PortState {
 }
 
 /// The smoothing tier the board's total open lamps select against its
-/// manifest's measured limits (`HwSoftLimits::interpolation_leds` /
-/// `dithering_leds`).
+/// manifest's measured limits (`HwSoftLimits::dithering_leds`).
+///
+/// Interpolation is never opened here, at any scale: this provider renders
+/// each frame once, when the engine writes it, so there is no moment between
+/// two frames to interpolate at. Opened anyway, the pipeline put the PREVIOUS
+/// frame on the wire every frame — `write_frame` twice and `tick` at mid-frame
+/// left its blend factor at 0 — and paid two copies and 12 B/lamp for it
+/// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.md`).
+/// So `HwSoftLimits::interpolation_leds` has nothing to shed on these boards.
 ///
 /// A function of the OPEN SET, not of open order: every open and close
 /// recomputes the total and rebuilds any port whose pipeline disagrees
@@ -96,8 +101,6 @@ struct PortState {
 struct SmoothingTier {
     /// Lamps open across the whole board when the tier was selected.
     total_lamps: u32,
-    /// `Some(limit)` when `total_lamps > limit` for the interpolation record.
-    interpolation_off_above: Option<u32>,
     /// `Some(limit)` when `total_lamps > limit` for the dithering record.
     dithering_off_above: Option<u32>,
 }
@@ -111,17 +114,16 @@ impl SmoothingTier {
         };
         Self {
             total_lamps,
-            interpolation_off_above: exceeded(limits.and_then(|l| l.interpolation_leds.as_ref())),
             dithering_off_above: exceeded(limits.and_then(|l| l.dithering_leds.as_ref())),
         }
     }
 
     /// The options a port runs with under this tier: the authored ones with
-    /// each exceeded feature turned OFF. Never turns a feature on.
+    /// interpolation off (see the type's docs) and an exceeded dithering
+    /// turned OFF. Never turns a feature on.
     fn apply(&self, authored: &DisplayPipelineOptions) -> DisplayPipelineOptions {
         DisplayPipelineOptions {
-            interpolation_enabled: authored.interpolation_enabled
-                && self.interpolation_off_above.is_none(),
+            interpolation_enabled: false,
             dithering_enabled: authored.dithering_enabled && self.dithering_off_above.is_none(),
             ..authored.clone()
         }
@@ -133,9 +135,8 @@ impl SmoothingTier {
     fn notice(&self, authored: &DisplayPipelineOptions) -> Option<OutputPortSmoothing> {
         let notice = OutputPortSmoothing {
             total_lamps: self.total_lamps,
-            interpolation_off_above: self
-                .interpolation_off_above
-                .filter(|_| authored.interpolation_enabled),
+            // Never "reduced": this provider never opens it (the type's docs).
+            interpolation_off_above: None,
             dithering_off_above: self
                 .dithering_off_above
                 .filter(|_| authored.dithering_enabled),
@@ -246,12 +247,9 @@ impl Esp32OutputProvider {
                     port.tier = tier;
                     log::info!(
                         "Esp32OutputProvider: handle={handle_id} ({num_leds} lamps) re-tiered: \
-                         interpolation={} dithering={} (board total {} lamps; limits \
-                         interpolation>{:?} dithering>{:?})",
-                        port.pipeline.options().interpolation_enabled,
+                         dithering={} (board total {} lamps; limit dithering>{:?})",
                         port.pipeline.options().dithering_enabled,
                         tier.total_lamps,
-                        tier.interpolation_off_above,
                         tier.dithering_off_above,
                     );
                 }
@@ -319,12 +317,10 @@ impl OutputProvider for Esp32OutputProvider {
         if let Some(reduced) = tier.notice(&options) {
             log::info!(
                 "Esp32OutputProvider::open: endpoint={endpoint} ({num_leds} lamps) opens with \
-                 interpolation={} dithering={}: the board's {} open lamps exceed its measured \
-                 limits (interpolation>{:?} dithering>{:?})",
-                pipeline.options().interpolation_enabled,
+                 dithering={}: the board's {} open lamps exceed its measured limit \
+                 (dithering>{:?})",
                 pipeline.options().dithering_enabled,
                 reduced.total_lamps,
-                reduced.interpolation_off_above,
                 reduced.dithering_off_above,
             );
         }
@@ -472,15 +468,17 @@ impl OutputProvider for Esp32OutputProvider {
         // this allocates and a steady-state write allocates nothing at all.
         port.frame.resize(num_leds * 3, 0);
 
+        // One write, one render of it: with interpolation off the pipeline
+        // holds a single frame buffer, and the tick renders exactly what was
+        // just written (see `SmoothingTier`).
         port.pipeline.write_frame(0, data);
-        port.pipeline.write_frame(FRAME_INTERVAL_US, data);
         let PortState {
             output,
             pipeline,
             frame,
             ..
         } = port;
-        pipeline.tick(MID_FRAME_US, frame);
+        pipeline.tick(0, frame);
 
         // Start the transmission and return without waiting for it. Handles
         // written back to back in one flush therefore transmit concurrently —
@@ -598,7 +596,7 @@ impl OutputProvider for Esp32OutputProvider {
                     if port.gate_mask & expired == 0 {
                         continue;
                     }
-                    if let Err(error) = port.output.wait_complete() {
+                    if let Err(error) = port.output.wait_drained() {
                         log::warn!(
                             "Esp32OutputProvider::flush: handle={handle_id} did not drain before \
                              power-gate deassert: {error}"
@@ -627,10 +625,12 @@ fn blank_port(port: &mut PortState) -> Result<(), OutputError> {
     port.frame.clear();
     port.frame.resize(((port.byte_count / 3) * 3) as usize, 0);
     // SAFETY: `frame` is this port's own storage and is not touched again
-    // until the `wait_complete` below has returned, so the transmitter never
+    // until the `wait_drained` below has returned, so the transmitter never
     // reads freed or changing bytes.
     unsafe { port.output.start(&port.frame) }?;
-    port.output.wait_complete()
+    // Drained, not merely released: the black frame must be on the strip
+    // before the port is dropped (and, on a gated board, its rail may fall).
+    port.output.wait_drained()
 }
 
 fn capped_byte_count_for_len(data_len: usize) -> (u32, bool) {
@@ -789,29 +789,30 @@ mod tests {
     }
 
     /// No record on the manifest = never degraded, at any scale: the
-    /// single-RMT board carries none, and 1024 lamps keep both features.
+    /// single-RMT board carries none, and 1024 lamps keep dithering.
+    /// Interpolation is never opened by this provider (`SmoothingTier`).
     #[test]
     fn a_board_without_smoothing_limits_never_degrades() {
         let provider = provider();
         let handle = open_ws281x(&provider, WS281X_MAX_LEDS_PER_PORT as u32 * 3);
-        assert_eq!(smoothing_of(&provider, handle), (true, true));
+        assert_eq!(smoothing_of(&provider, handle), (false, true));
         assert_eq!(provider.port_smoothing(handle), None);
     }
 
-    /// "It's fine at 100 LEDs": under both limits the authored options
-    /// hold and nothing is reported.
+    /// "It's fine at 100 LEDs": under both limits the authored dithering
+    /// holds and nothing is reported.
     #[test]
     fn under_both_limits_the_authored_smoothing_holds() {
         let provider = tiered_provider();
         let handle = open_quad(&provider, "D10", 100, None);
-        assert_eq!(smoothing_of(&provider, handle), (true, true));
+        assert_eq!(smoothing_of(&provider, handle), (false, true));
         assert_eq!(provider.port_smoothing(handle), None);
     }
 
-    /// Zook-shaped: 4 × 375 = 1500 lamps exceed both records, so every
-    /// port — the ones opened before the crossing included — runs with
-    /// interpolation and dithering off, and each reports the board total
-    /// and the limits it crossed.
+    /// Zook-shaped: 4 × 375 = 1500 lamps exceed the dithering record, so
+    /// every port — the ones opened before the crossing included — runs with
+    /// dithering off, and each reports the board total and the limit it
+    /// crossed. Interpolation is never opened, so never reported as lost.
     #[test]
     fn zook_shaped_totals_turn_both_features_off_on_every_port() {
         let provider = tiered_provider();
@@ -825,7 +826,7 @@ mod tests {
                 provider.port_smoothing(*handle),
                 Some(OutputPortSmoothing {
                     total_lamps: 1500,
-                    interpolation_off_above: Some(500),
+                    interpolation_off_above: None,
                     dithering_off_above: Some(1000),
                 })
             );
@@ -838,31 +839,32 @@ mod tests {
     }
 
     /// The crossing re-tiers the ports already open: the first port keeps
-    /// both features at 300 lamps, loses interpolation when a second port
-    /// takes the board to 600, keeps dithering until a third takes it past
-    /// 1000.
+    /// dithering at 300 lamps and at 600 (the interpolation record's 500
+    /// sheds nothing: it is never opened), and loses it when a third port
+    /// takes the board past 1000.
     #[test]
     fn a_later_open_that_crosses_a_limit_re_tiers_the_earlier_ports() {
         let provider = tiered_provider();
         let first = open_quad(&provider, "D10", 300, None);
-        assert_eq!(smoothing_of(&provider, first), (true, true));
+        assert_eq!(smoothing_of(&provider, first), (false, true));
 
         let second = open_quad(&provider, "D9", 300, None);
         assert_eq!(smoothing_of(&provider, first), (false, true));
         assert_eq!(smoothing_of(&provider, second), (false, true));
-        assert_eq!(
-            provider.port_smoothing(first),
-            Some(OutputPortSmoothing {
-                total_lamps: 600,
-                interpolation_off_above: Some(500),
-                dithering_off_above: None,
-            })
-        );
+        assert_eq!(provider.port_smoothing(first), None);
 
         let third = open_quad(&provider, "D8", 500, None);
         for handle in [first, second, third] {
             assert_eq!(smoothing_of(&provider, handle), (false, false));
         }
+        assert_eq!(
+            provider.port_smoothing(first),
+            Some(OutputPortSmoothing {
+                total_lamps: 1100,
+                interpolation_off_above: None,
+                dithering_off_above: Some(1000),
+            })
+        );
     }
 
     /// The tier is a function of the open set: closing the port that took
@@ -871,12 +873,12 @@ mod tests {
     #[test]
     fn closing_below_a_limit_restores_the_feature() {
         let provider = tiered_provider();
-        let first = open_quad(&provider, "D10", 300, None);
-        let second = open_quad(&provider, "D9", 300, None);
-        assert_eq!(smoothing_of(&provider, first), (false, true));
+        let first = open_quad(&provider, "D10", 600, None);
+        let second = open_quad(&provider, "D9", 600, None);
+        assert_eq!(smoothing_of(&provider, first), (false, false));
 
         provider.close(second).expect("close");
-        assert_eq!(smoothing_of(&provider, first), (true, true));
+        assert_eq!(smoothing_of(&provider, first), (false, true));
         assert_eq!(provider.port_smoothing(first), None);
     }
 
@@ -899,22 +901,22 @@ mod tests {
     }
 
     /// The provider only ever turns a feature OFF: a port authored with
-    /// interpolation off stays off below the limit, is not "reduced" above
-    /// it (the notice names only what the author wanted and lost), and does
-    /// not come back on when the total drops.
+    /// dithering off stays off below the limit, is not "reduced" above it
+    /// (the notice names only what the author wanted and lost), and does not
+    /// come back on when the total drops.
     #[test]
     fn an_author_disabled_feature_is_never_turned_on_and_never_reported() {
         let provider = tiered_provider();
         let authored = DisplayPipelineOptions {
-            interpolation_enabled: false,
+            dithering_enabled: false,
             ..DisplayPipelineOptions::default()
         };
         let quiet = open_quad(&provider, "D10", 300, Some(authored));
-        assert_eq!(smoothing_of(&provider, quiet), (false, true));
+        assert_eq!(smoothing_of(&provider, quiet), (false, false));
         assert_eq!(provider.port_smoothing(quiet), None);
 
-        let loud = open_quad(&provider, "D9", 300, None);
-        assert_eq!(smoothing_of(&provider, quiet), (false, true));
+        let loud = open_quad(&provider, "D9", 800, None);
+        assert_eq!(smoothing_of(&provider, quiet), (false, false));
         assert_eq!(
             provider.port_smoothing(quiet),
             None,
@@ -923,7 +925,27 @@ mod tests {
         assert!(provider.port_smoothing(loud).is_some());
 
         provider.close(loud).expect("close");
-        assert_eq!(smoothing_of(&provider, quiet), (false, true));
+        assert_eq!(smoothing_of(&provider, quiet), (false, false));
+    }
+
+    /// The frame on the wire is the frame just written, with interpolation
+    /// authored on (the default). It used to be the previous one: two
+    /// `write_frame`s and a mid-frame `tick` left the blend at 0
+    /// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.md`).
+    #[test]
+    fn the_wire_carries_the_frame_just_written() {
+        let provider = provider();
+        let handle = open_ws281x(&provider, 4 * 3);
+        provider.write(handle, &[0u16; 4 * 3]).expect("dark frame");
+        provider
+            .write(handle, &[u16::MAX; 4 * 3])
+            .expect("lit frame");
+        let ports = provider.ports.borrow();
+        let frame = &ports.get(&handle.as_i32()).expect("open port").frame;
+        assert!(
+            frame.iter().all(|&byte| byte > 0),
+            "the lit frame, not the dark one before it: {frame:?}"
+        );
     }
 
     /// 375 and 1024 lamps both sit at or under the cap: `open` must grant
@@ -1443,6 +1465,11 @@ mod power_gate_tests {
         }
 
         unsafe fn start(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+            // An early-releasing transmitter waits out its own previous frame
+            // before the next goes on the wire, as the LCD bus's kick does.
+            if self.in_flight {
+                self.wait_drained()?;
+            }
             let at_us = self.clock.peek();
             let mut log = self.log.borrow_mut();
             log.events.push(Event::Start { at_us });
@@ -1451,7 +1478,17 @@ mod power_gate_tests {
             Ok(())
         }
 
+        /// A background-safe probe behaves like the S3's LCD_CAM output: the
+        /// bytes are released at once and the wire stays busy until
+        /// `wait_drained`. Any other probe drains here.
         fn wait_complete(&mut self) -> Result<(), OutputError> {
+            if self.background_safe {
+                return Ok(());
+            }
+            self.wait_drained()
+        }
+
+        fn wait_drained(&mut self) -> Result<(), OutputError> {
             if self.in_flight {
                 self.log.borrow_mut().in_flight -= 1;
                 self.in_flight = false;

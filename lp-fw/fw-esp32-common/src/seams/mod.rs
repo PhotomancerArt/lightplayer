@@ -6,11 +6,9 @@
 //! emulator finds the table a chip crate instantiates with [`seam_table!`]
 //! by scanning the flash image, and arms a seam only when a run asked for it.
 //!
-//! RISC-V only (`target_arch = "riscv32"`): the generated seam functions are
-//! RV32 assembly, and the Xtensa firmwares that also build this crate get
-//! their seams in the roadmap's M7. Host unit tests build it too (`lp-seam` is
-//! a dev-dependency), where every call shim runs its silicon body and no seam
-//! function or table entry exists.
+//! RISC-V and Xtensa (S3 radio M5; `lp_seam::seam_fn!` generates both). Host
+//! unit tests build it too (`lp-seam` is a dev-dependency), where every call
+//! shim runs its silicon body and no seam function or table entry exists.
 //!
 //! - [`ws281x_wait_step`]: the LED performance seam;
 //! - [`net`]: the network seam's nine calls and its engaged byte;

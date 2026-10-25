@@ -11,7 +11,10 @@
 //! and excluded from host builds: a `#[cfg(test)]` module there would never
 //! run. See `docs/adr/2026-07-30-boot-control-sector.md`.
 
-use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, RECORD_LEN};
+use lp_bootctl::{
+    BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, LAYOUT_2_REGION_START, RECORD_LEN,
+    REGION_START, SplitLayout,
+};
 
 const C6_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32c6/partitions.csv");
 const S3_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32s3/partitions.csv");
@@ -132,6 +135,29 @@ fn no_partitions_overlap_and_each_board_fits_its_flash() {
             "{board}: layout exceeds its {flash_size:#x} flash floor"
         );
     }
+}
+
+/// Each board's `factory` lays out as its split layout: the C6's as layout 1
+/// on its 32 KiB page, the S3's as layout 2 — the region ending where `lpfs`
+/// begins.
+#[test]
+fn each_boards_factory_lays_out_as_its_split_layout() {
+    let c6 = partition(C6_PARTITIONS, "factory").expect("the C6 has factory");
+    let one = SplitLayout::from_factory(c6.offset, c6.size, 0x8000)
+        .expect("the C6's factory is layout 1");
+    assert_eq!(one.region_start, REGION_START);
+    assert_eq!(
+        one.region_end,
+        partition(C6_PARTITIONS, "lpfs").unwrap().offset
+    );
+
+    let s3 = partition(S3_PARTITIONS, "factory").expect("the S3 has factory");
+    let two = SplitLayout::layout_2(s3.offset, s3.size).expect("the S3's factory is layout 2");
+    assert_eq!(two.region_start, LAYOUT_2_REGION_START);
+    assert_eq!(
+        two.region_end,
+        partition(S3_PARTITIONS, "lpfs").unwrap().offset
+    );
 }
 
 fn csv_for(board: &str) -> &'static str {

@@ -37,6 +37,7 @@ fn main() {
 
     emit_build_provenance();
     emit_partition_facts();
+    emit_relay_host();
 
     // Harness builds: any `test_*` feature selects a hardware harness
     // entrypoint instead of the app. Collapsed to a single cfg so app-only
@@ -48,7 +49,49 @@ fn main() {
     // them. That tracking has to sit in the crate where the macro expands, not
     // in the crate that turns the feature on.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    // Split-link builds (`LP_SPLIT_LINK`, set by tools/lp-fw-split for both
+    // passes), as fw-esp32c6's build.rs has them: the core reaches the engine
+    // only through its header. An env var rather than a feature: both passes
+    // must see the same code, and a feature would change every crate's
+    // fingerprint.
+    println!("cargo::rustc-check-cfg=cfg(lp_split)");
+    println!("cargo:rerun-if-env-changed=LP_SPLIT_LINK");
+    if std::env::var_os("LP_SPLIT_LINK").is_some() {
+        println!("cargo::rustc-cfg=lp_split");
+    }
+    // The product's radio (`radio`, `ble`, `espnow`, `wifi`) unless the radio boot probe is
+    // built: the probe starts esp-radio's Wi-Fi and the BTDM controller
+    // itself, and since `ble` is a default feature an image that adds the
+    // probe would otherwise start the controller twice. So a probe image is
+    // the shipped boot with the probe's radio in place of Bluetooth's, and
+    // the source gates on these two cfgs, never on the features.
+    println!("cargo::rustc-check-cfg=cfg(s3_radio)");
+    println!("cargo::rustc-check-cfg=cfg(s3_ble)");
+    println!("cargo::rustc-check-cfg=cfg(s3_espnow)");
+    println!("cargo::rustc-check-cfg=cfg(s3_wifi)");
+    let probe = std::env::var_os("CARGO_FEATURE_RADIO_BOOT_PROBE").is_some();
+    if std::env::var_os("CARGO_FEATURE_RADIO").is_some() && !probe {
+        println!("cargo::rustc-cfg=s3_radio");
+    }
+    if std::env::var_os("CARGO_FEATURE_BLE").is_some() && !probe {
+        println!("cargo::rustc-cfg=s3_ble");
+    }
+    if std::env::var_os("CARGO_FEATURE_ESPNOW").is_some() && !probe {
+        println!("cargo::rustc-cfg=s3_espnow");
+    }
+    if std::env::var_os("CARGO_FEATURE_WIFI").is_some() && !probe {
+        println!("cargo::rustc-cfg=s3_wifi");
+    }
+    // Core 1 as the render helper (`two-core`, a default): not in a
+    // `pc-sampler` image, whose sampler is core 1, and not in a harness.
+    println!("cargo::rustc-check-cfg=cfg(s3_two_core)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
+    if std::env::var_os("CARGO_FEATURE_TWO_CORE").is_some()
+        && std::env::var_os("CARGO_FEATURE_PC_SAMPLER").is_none()
+        && !harness
+    {
+        println!("cargo::rustc-cfg=s3_two_core");
+    }
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }
@@ -69,8 +112,10 @@ fn emit_build_provenance() {
     lp_app_version::emit();
     lp_app_version::emit_target();
     emit_git_head_watches();
-    let commit =
-        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    // A figure build is stamped with a fixed commit, as with a fixed version
+    // (`lp_app_version::FIGURE_COMMIT`): the commit's bytes move the image's
+    // layout.
+    let commit = lp_app_version::commit();
     // A figure build is stamped clean, as it is stamped with a fixed version
     // (`lp_app_version::figure_build`): the tree's state must not reach the
     // image whose memory figures are recorded.
@@ -276,4 +321,38 @@ fn parse_partition_size(s: &str) -> u64 {
     } else {
         s.parse().expect("partition size")
     }
+}
+
+/// The cloud relay's device-leg address (Wi-Fi relay plan RD14): the
+/// product image always dials `lightplayer.app:80`; a **desk** image built
+/// with `LP_RELAY_HOST=<host>[:port]` dials that instead (a local
+/// `lp-cloud-server`), and says so in its boot banner. A malformed value
+/// fails the build rather than ship an image that dials nowhere.
+fn emit_relay_host() {
+    println!("cargo:rerun-if-env-changed=LP_RELAY_HOST");
+    let given = std::env::var("LP_RELAY_HOST")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let (host, port, overridden) = match &given {
+        None => ("lightplayer.app".to_string(), 80u16, false),
+        Some(value) => {
+            let value = value.trim();
+            match value.rsplit_once(':') {
+                Some((host, port)) => {
+                    let port: u16 = port.parse().unwrap_or_else(|_| {
+                        panic!("LP_RELAY_HOST={value}: '{port}' is not a port")
+                    });
+                    (host.to_string(), port, true)
+                }
+                None => (value.to_string(), 80, true),
+            }
+        }
+    };
+    assert!(
+        !host.is_empty() && !host.contains('/'),
+        "LP_RELAY_HOST takes host[:port], not a URL"
+    );
+    println!("cargo:rustc-env=LP_RELAY_HOST_NAME={host}");
+    println!("cargo:rustc-env=LP_RELAY_HOST_PORT={port}");
+    println!("cargo:rustc-env=LP_RELAY_HOST_OVERRIDDEN={overridden}");
 }

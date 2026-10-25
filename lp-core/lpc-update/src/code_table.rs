@@ -22,6 +22,11 @@ pub const CHUNK: u32 = 4096;
 /// word, [`chip_name`].
 pub const CHIP_ESP32C6: u16 = 1;
 
+/// The chip code of the ESP32-S3 (word `"esp32s3"`), ruled at the S3
+/// updates plan's approval (2026-10-21, `lp2025/2026-10-20-2335-s3-radio-and-ota`
+/// M7, L1).
+pub const CHIP_ESP32S3: u16 = 2;
+
 /// Layout 1: the split image's offsets inside the `factory` partition (the
 /// split image, M2):
 ///
@@ -34,6 +39,22 @@ pub const CHIP_ESP32C6: u16 = 1;
 ///
 /// An install needs the offer's layout **equal** to the board's.
 pub const LAYOUT_1: u16 = 1;
+
+/// Layout 2: the split image on a chip whose MMU page is 64 KiB (the
+/// ESP32-S3), inside `factory`; ruled with [`CHIP_ESP32S3`] (M7, L2, L3):
+///
+/// | `factory` + | Contents |
+/// |---|---|
+/// | `0x0000` | the loader, at most [`LAYOUT_1_LOADER_MAX_LEN`] bytes |
+/// | `0x5000` | the update-progress record ([`LAYOUT_1_PROGRESS_OFFSET`]) |
+/// | `0x6000`, `0x7000` | boot records 0 and 1 |
+/// | `0x8000` | reserved to `0x1_0000`: erased, never written |
+/// | `0x1_0000` → end | the core, then the engine, each on a 64 KiB page; the end is the partition table's |
+///
+/// Everything below `0x8000` is layout 1's bytes at layout 1's offsets (the
+/// records, the marks and the progress record unchanged); only the region's
+/// start and its page differ. A layout names offsets, not a chip.
+pub const LAYOUT_2: u16 = 2;
 
 /// Layout 1's room for the loader: the split image's
 /// [`lp_bootctl::LOADER_MAX_LEN`] (`0x5000`), referenced, never copied.
@@ -64,7 +85,7 @@ pub const LOADER_1: u16 = 1;
 pub const ENCODING_1: u8 = 1;
 
 /// Every chip this table names: `(code, word)`.
-const CHIPS: &[(u16, &str)] = &[(CHIP_ESP32C6, "esp32c6")];
+const CHIPS: &[(u16, &str)] = &[(CHIP_ESP32C6, "esp32c6"), (CHIP_ESP32S3, "esp32s3")];
 
 /// The offer's chip code for a chip word, if this table knows it.
 #[must_use]
@@ -83,7 +104,7 @@ pub fn chip_name(code: u16) -> Option<&'static str> {
 /// Whether this table knows `layout`.
 #[must_use]
 pub const fn layout_known(layout: u16) -> bool {
-    layout == LAYOUT_1
+    matches!(layout, LAYOUT_1 | LAYOUT_2)
 }
 
 #[cfg(test)]
@@ -95,7 +116,9 @@ mod tests {
         assert_eq!(PROTO_V1, 1);
         assert_eq!(CHUNK, 4096);
         assert_eq!(CHIP_ESP32C6, 1);
+        assert_eq!(CHIP_ESP32S3, 2);
         assert_eq!(LAYOUT_1, 1);
+        assert_eq!(LAYOUT_2, 2);
         assert_eq!((LOADER_NONE, LOADER_1), (0, 1));
         assert_eq!(ENCODING_1, 1);
         assert_eq!(LAYOUT_1_LOADER_MAX_LEN, 0x5000);
@@ -113,9 +136,12 @@ mod tests {
     fn chips_map_both_ways() {
         assert_eq!(chip_code("esp32c6"), Some(1));
         assert_eq!(chip_name(1), Some("esp32c6"));
+        assert_eq!(chip_code("esp32s3"), Some(2));
+        assert_eq!(chip_name(2), Some("esp32s3"));
         assert_eq!(chip_code("esp32"), None);
         assert_eq!(chip_name(0), None);
-        assert!(layout_known(1));
-        assert!(!layout_known(0) && !layout_known(2));
+        assert_eq!(chip_name(3), None);
+        assert!(layout_known(1) && layout_known(2));
+        assert!(!layout_known(0) && !layout_known(3));
     }
 }

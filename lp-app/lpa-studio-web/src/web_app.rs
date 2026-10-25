@@ -361,6 +361,10 @@ pub fn App() -> Element {
             controller.load_fresh_starts(&json);
         }
         controller.set_on_fresh_starts(crate::settings_io::store_fresh_starts);
+        // The account's board list: core asks, this edge makes the cloud
+        // call and hands the answer back on core's own queue.
+        controller
+            .set_on_account_board_request(crate::cloud::account_boards::send_account_board_request);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -448,9 +452,9 @@ pub fn App() -> Element {
                     as Rc<dyn lpa_firmware_store::FirmwareFetch>,
                 lpa_link::providers::browser_serial_esp32_options::DEFAULT_FIRMWARE_BASE_PATH,
             );
-            // This Studio's own firmware build (OTA M7, DS10): what a board
-            // is offered to update to, read from the bundle's own
-            // `firmware/<target>/` (the same relative base the flasher
+            // This Studio's own firmware builds (OTA M7, DS10), one per
+            // served target: what a board of that target is offered to
+            // update to, read from the bundle's own `firmware/<target>/` (the same relative base the flasher
             // fetches the merged image from). Its facts load in the
             // background; a single-image Studio (the fast local build) has
             // none, and its cards keep today's USB flash.
@@ -462,11 +466,15 @@ pub fn App() -> Element {
             controller.set_own_build_source(Rc::new(own_build.clone()));
             wasm_bindgen_futures::spawn_local(async move {
                 match own_build.read_facts().await {
-                    Ok(facts) => log::info!(
-                        "this Studio's own firmware build: {} ({}), update-capable",
-                        facts.identity.build_id,
-                        facts.identity.target
-                    ),
+                    Ok(builds) => {
+                        for facts in builds {
+                            log::info!(
+                                "this Studio's own firmware build: {} ({}), update-capable",
+                                facts.identity.build_id,
+                                facts.identity.target
+                            );
+                        }
+                    }
                     Err(why) => log::info!("this Studio carries no update-capable build: {why}"),
                 }
             });
@@ -521,6 +529,20 @@ pub fn App() -> Element {
                         secure_page,
                     )),
                 )));
+                // What this browser lets a socket to the LAN do, for the
+                // choices core makes by itself (Connect's first road, the
+                // move onto Wi‑Fi): two facts read here, decided in core
+                // (`LanReach::of_page`). Chromium is the one with
+                // `navigator.userAgentData`; no user-agent string is read.
+                let chromium = web_sys::window().is_some_and(|window| {
+                    js_sys::Reflect::has(&window.navigator(), &"userAgentData".into())
+                        .unwrap_or(false)
+                });
+                let lan_reach = lpa_studio_core::LanReach::of_page(secure_page, chromium);
+                log::info!(
+                    "Wi\u{2011}Fi reach: {lan_reach:?} (https: {secure_page}, Chromium: {chromium})"
+                );
+                controller.set_lan_reach(lan_reach);
                 // Boards through lightplayer.app's relay (the network
                 // transport's P05; on for everyone, no flag, since PR C):
                 // in every browser with a WebSocket, iPhone included. A

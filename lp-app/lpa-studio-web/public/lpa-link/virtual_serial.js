@@ -502,7 +502,19 @@ class VirtualSerial extends EventTarget {
   async detach(boardId) {
     const port = this.requireLivePort(boardId);
     await this.settleHolds(boardId);
-    await port.emulator.detach();
+    try {
+      await port.emulator.detach();
+    } catch (error) {
+      // The control channel closed or stopped answering under the verb (the
+      // door closes it when a board stops): the board is as good as unplugged,
+      // so the port still dies below and the door's client is not left open.
+      // The door's own `err` reply is NOT that: the cable is still in, so it
+      // propagates with the port untouched.
+      if (!error?.channelLost) {
+        throw error;
+      }
+      console.warn(`[emu] ${boardId}: detach lost its control channel; unplugging anyway:`, error);
+    }
     port.unplug("The emulated board was detached.");
     this.dispatchEvent(new CustomEvent("disconnect", { detail: { port } }));
     return port;

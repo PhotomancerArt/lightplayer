@@ -1,5 +1,6 @@
 //! Where a split-link image's pieces live inside the one app partition,
-//! `factory` (layout 1).
+//! `factory`: layout 1 (the C6's), and the shape layout 2 shares with it
+//! (the S3's, [`crate::split_layout_2`]).
 //!
 //! ```text
 //! factory +0x0000  (0x10000)  loader image          (what the IDF bootloader boots)
@@ -34,6 +35,18 @@
 //! (destroying the engine, which is erased first anyway), so a core can grow
 //! until `old core + new core` no longer fit the region. The engine's room is
 //! whatever the current core leaves.
+//!
+//! # Layout 2
+//!
+//! [`SplitLayout`] carries its region's start, so one type describes both
+//! layouts: [`SplitLayout::from_factory`] is layout 1 (the region at
+//! [`REGION_START`]), [`SplitLayout::layout_2`] is layout 2 (the region at
+//! [`crate::LAYOUT_2_REGION_START`] on 64 KiB pages). Everything below
+//! [`REGION_START`] is the same bytes at the same offsets in both, and every
+//! rule above (the low and high ends, the engine's room, the next core)
+//! reads the region's start from the value, never from a constant.
+
+use crate::split_layout_2::{LAYOUT_2_PAGE, LAYOUT_2_REGION_START};
 
 /// Where the IDF bootloader finds the loader: the app partition's start.
 pub const LOADER_OFFSET: u32 = 0x1_0000;
@@ -60,6 +73,10 @@ const MIN_PAGE: u32 = 0x1000;
 /// The region and the MMU page it must respect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SplitLayout {
+    /// The region's first byte, and the low end's core offset:
+    /// [`REGION_START`] in layout 1, [`crate::LAYOUT_2_REGION_START`] in
+    /// layout 2.
+    pub region_start: u32,
     pub region_end: u32,
     pub page: u32,
 }
@@ -98,7 +115,33 @@ impl SplitLayout {
         if region_end < REGION_START.checked_add(page)? {
             return None;
         }
-        Some(Self { region_end, page })
+        Some(Self {
+            region_start: REGION_START,
+            region_end,
+            page,
+        })
+    }
+
+    /// Layout 2 inside a `factory` partition at `offset`, `len` bytes long:
+    /// the region at [`crate::LAYOUT_2_REGION_START`], on the S3's only MMU
+    /// page ([`crate::LAYOUT_2_PAGE`], 64 KiB). `None` when `factory` does
+    /// not start where the bootloader finds the loader, does not end on a
+    /// page (an app partition always does), or cannot hold one page of
+    /// region.
+    pub fn layout_2(offset: u32, len: u32) -> Option<Self> {
+        let page = LAYOUT_2_PAGE;
+        let region_end = offset.checked_add(len)?;
+        if offset != LOADER_OFFSET || region_end % page != 0 {
+            return None;
+        }
+        if region_end < LAYOUT_2_REGION_START.checked_add(page)? {
+            return None;
+        }
+        Some(Self {
+            region_start: LAYOUT_2_REGION_START,
+            region_end,
+            page,
+        })
     }
 
     fn up(&self, x: u32) -> u32 {
@@ -111,7 +154,7 @@ impl SplitLayout {
 
     /// The core sits at the low end of the region.
     pub fn core_is_low(&self, core_off: u32) -> bool {
-        core_off == REGION_START
+        core_off == self.region_start
     }
 
     /// The most the engine may occupy for a core at `core_off`/`core_len`:
@@ -125,7 +168,7 @@ impl SplitLayout {
             }
         } else {
             Extent {
-                start: REGION_START,
+                start: self.region_start,
                 end: core_off,
             }
         }
@@ -138,14 +181,14 @@ impl SplitLayout {
             let at = self.down(self.region_end.checked_sub(new_len)?);
             (at >= self.up(core_off + core_len)).then_some(at)
         } else {
-            (REGION_START + new_len <= core_off).then_some(REGION_START)
+            (self.region_start + new_len <= core_off).then_some(self.region_start)
         }
     }
 
     /// Whether an extent starts on a page boundary inside the region.
     pub fn fits(&self, start: u32, len: u32) -> bool {
         start % self.page == 0
-            && start >= REGION_START
+            && start >= self.region_start
             && start
                 .checked_add(len)
                 .is_some_and(|end| end <= self.region_end)

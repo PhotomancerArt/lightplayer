@@ -1,22 +1,15 @@
 //! The Wi-Fi station and the network on `lp-net` (feature `wifi`; Wi-Fi
-//! roadmap M6). The chip-free half — the join policy, the scan answer, the
-//! seam boundary — is `fw_esp32_common::net`.
+//! roadmap M6). The network itself — the station, the IP stack, the LAN
+//! endpoint, mDNS, the relay's device leg, the thread they run on — is
+//! `fw_esp32_radio::net` (re-exported here by module, so the boot path reads
+//! as before); the chip-free half under it is `fw_esp32_common::net`. What
+//! stays here is this chip's: the thread's facts and hooks ([`net_chip`]),
+//! the relay's build-time address ([`relay_config`]), and the stack
+//! diagnostic.
 
-pub mod c6_station;
-pub mod esp_frame_device;
-pub mod esp_station;
-pub mod lan_endpoint_task;
-pub mod mdns_task;
-pub mod net_address;
-pub mod net_bringup;
-pub mod net_heartbeat;
-pub mod net_thread;
+pub mod net_chip;
 #[cfg(feature = "net_thread_stack_diag")]
 pub mod net_thread_stack_diag;
-pub mod relay_probes;
-pub mod relay_task;
-pub mod station_probes;
-pub mod station_task;
-pub mod tcp_byte_stream;
+pub mod relay_config;
 
-pub use station_probes::uses_wifi;
+pub use fw_esp32_radio::net::{net_heartbeat, net_thread, relay_probes, station_probes};

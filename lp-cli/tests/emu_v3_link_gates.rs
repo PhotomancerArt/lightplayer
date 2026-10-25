@@ -1171,8 +1171,27 @@ fn every_wire_matches_the_guests_own_summary_line(r: &mut FiveWireRun) {
     let wires: Vec<u32> = per_wire.iter().map(|(_, crc, _)| *crc).collect();
     let carried = r.frames.iter().map(|(_, f)| f.len()).max().unwrap_or(0);
     let claimed = reported(r, &wires, carried);
-    for (pad, frames) in &r.frames {
-        let decoded = frames.len();
+    // The fifth wire waits for one of four RMT slots, so the frame the guest
+    // just reported can still be on its way to that pad when the run is cut:
+    // run on until every pad has carried it (or one runs a whole report
+    // period past it, which the bound below then reports), and judge the
+    // pads as they are then rather than at the cut.
+    while FIVE_PADS
+        .iter()
+        .any(|p| r.host.board.machine.frames(*p).len() < claimed)
+        && FIVE_PADS
+            .iter()
+            .all(|p| r.host.board.machine.frames(*p).len() < claimed + REPORT_EVERY_FRAMES)
+    {
+        r.host
+            .step()
+            .expect("the run past the deadline, waiting for a frame in flight");
+    }
+    let live: Vec<(u8, usize)> = FIVE_PADS
+        .iter()
+        .map(|p| (*p, r.host.board.machine.frames(*p).len()))
+        .collect();
+    for (pad, decoded) in live {
         println!(
             "five_wires (lp-emu:esp32v3:t1): gpio{pad}: the guest's last report was frame \
              {claimed}, the pad carried {decoded}"

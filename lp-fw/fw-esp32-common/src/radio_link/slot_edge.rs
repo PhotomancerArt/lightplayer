@@ -6,7 +6,7 @@
 //! device leg). Each edge waits on its own doorbell and its own close
 //! request, so the two never share a waker — an embassy `Signal` holds one,
 //! and two tasks waiting on it wake each other forever (the spin
-//! `fw-esp32c6/src/net/net_address.rs` records) — and a close addressed to
+//! `fw-esp32-radio/src/net/net_address.rs` records) — and a close addressed to
 //! the edge that held a link never reaches the edge that took it over.
 
 /// See the module doc.

@@ -161,7 +161,22 @@ impl HardwareSystem {
         spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
-        match find_endpoint(&self.button_drivers, |endpoint| endpoint.spec() == spec) {
+        // The first available match across drivers, else the first match —
+        // `find_endpoint`'s rule, through each driver's by-spec lookup.
+        let mut first_match: Option<(usize, HwEndpointId)> = None;
+        for (index, driver) in self.button_drivers.iter().enumerate() {
+            let Some(endpoint) = driver.find_endpoint_by_spec(spec) else {
+                continue;
+            };
+            if endpoint.is_available() {
+                first_match = Some((index, endpoint.id().clone()));
+                break;
+            }
+            if first_match.is_none() {
+                first_match = Some((index, endpoint.id().clone()));
+            }
+        }
+        match first_match {
             Some((driver, endpoint_id)) => self.button_drivers[driver].open(&endpoint_id, config),
             None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Button,
@@ -700,6 +715,25 @@ mod tests {
 
     /// The walk stops at the first available match, so a driver that streams
     /// its endpoints never builds the ones after it.
+    #[test]
+    fn a_by_spec_lookup_finds_what_a_filter_over_every_endpoint_finds() {
+        let driver = VirtualButtonDriver::new(Rc::new(HwRegistry::new(
+            HwManifest::virtual_single_rmt_gpio_board(),
+        )));
+        for endpoint in driver.endpoints() {
+            assert_eq!(
+                driver.find_endpoint_by_spec(endpoint.spec()),
+                driver.find_endpoint(&|e| e.spec() == endpoint.spec()),
+            );
+        }
+        let missing =
+            crate::HwEndpointSpec::parse(alloc::string::String::from("button:local:NOPE")).unwrap();
+        assert_eq!(driver.find_endpoint_by_spec(&missing), None);
+        let other_kind =
+            crate::HwEndpointSpec::parse(alloc::string::String::from("radio:local:D0")).unwrap();
+        assert_eq!(driver.find_endpoint_by_spec(&other_kind), None);
+    }
+
     #[test]
     fn preferred_endpoint_stops_at_the_first_available_match() {
         let driver = VirtualButtonDriver::new(Rc::new(HwRegistry::new(

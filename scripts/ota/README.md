@@ -1,14 +1,17 @@
 # scripts/ota — over-the-air update rigs
 
-Drivers for the C6's over-the-air updates (`docs/adr/2026-10-06-ota-update-protocol.md`).
-Each script's header is its full usage.
+Drivers for over-the-air updates (`docs/adr/2026-10-06-ota-update-protocol.md`),
+the C6's and, with `--chip esp32s3`, the S3's (S3 updates plan, M7 P10). Each
+script's header is its full usage. Without `--chip` every script runs the
+C6's commands as it always did.
 
 | Script | What |
 |---|---|
-| `build-image.sh <out> <version> [features]` | One split image of this tree, packaged with its OTA files (`ota-manifest.json`, `core.z`, `engine.z`) into `<out>/ota`, plus `merged.bin`, `core.bin`, `engine.bin`, `split.json`. The scenario images (`just test-emu-c6-ota`) and the walk's `--after-update` are built with it |
-| `emu-cut-sweep.sh <x> <y> <out> <cut>...` | Power cuts on the emulated C6 (`lp-cli emu run --rom-up-flash … --ota-cut-after N`), then a recovery run per cut; the scenario test U3/U4 is the gated form |
-| `make-engine-less.sh <MAC> [--dry-run]` | Leaves one real C6 without its engine: reads the boot records over USB, finds the engine header where the active core puts it, and erases that one sector, so the board boots core-only and the next host restores it. Resolved by MAC, refused while someone else holds it on the desk's `board` lease. The iPhone walk's step 3 (`docs/reports/2026-10-06-ota-iphone-walk.md`) |
-| `hw-power-cut.py` | Real power cuts on a C6 behind a switchable hub (`uhubctl`, both twins of a VIA hub), board resolved by MAC. Flashes X before every cut. A desk sitting: back the board up first and restore it after |
+| `build-image.sh [--chip …] <out> <version> [features]` | One split image of this tree, packaged with its OTA files (`ota-manifest.json`, `core.z`, `engine.z`) into `<out>/ota`, plus `merged.bin`, `core.bin`, `engine.bin`, `split.json`. The scenario images (`just test-emu-c6-ota`, `just test-emu-esp32s3-ota`) and the walk's `--after-update` are built with it. The S3 has one door (the ESP-IDF bootloader): its `merged.bin` is that door, and there is no `merged-lp.bin` |
+| `emu-cut-sweep.sh [--chip …] <x> <y> <out> <cut>...` | Power cuts on the emulated board (`lp-cli emu run --rom-up-flash … --ota-cut-after N`), then a recovery run per cut; the scenario tests U3/U4 are the gated form. `OPS=1` cuts at the Nth program or erase anywhere in `factory` instead, torn (`--flash-cut N:calibrated:1,range=<factory>,then=stop`). The S3's verdict reads the newest hello after the last boot, not the `[CORE]` line (`docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md`) |
+| `make-engine-less.sh [--chip …] <MAC> [--dry-run]` | Leaves one real C6 without its engine: reads the boot records over USB, finds the engine header where the active core puts it, and erases that one sector, so the board boots core-only and the next host restores it. Resolved by MAC, refused while someone else holds it on the desk's `board` lease. The iPhone walk's step 3 (`docs/reports/2026-10-06-ota-iphone-walk.md`) |
+| `s3-desk-sitting.py usb\|cuts --as <holder> --images <dir> --out <dir> [--dry-run]` | The S3's update desk sitting on FS3 (M7 P11). `usb` runs on any port: known-good, X's boot transcript, a push, X → Y, the boot records, a heal, X → Y-dies, an RTS reset, known-good again. `cuts` first proves the port really cuts FS3's power: the MAC must leave the bus, and the boot after must read POWERON (`rst:0x1`). Leaving the bus alone proves nothing, because a cut of one USB twin does that too. Then real cuts through `board power-cycle`. Writes one console per step and `summary.md` |
+| `hw-power-cut.py` | Real power cuts on a C6 behind a switchable hub (`uhubctl`, both twins of a VIA hub), board resolved by MAC. Flashes X before every cut. A desk sitting: back the board up first and restore it after. **Its PASS does not prove a cut happened:** a board that kept its power resumes and converges the same way. Check the board's `resetReason: power-on` or a fresh `[CORE]` line after each cut (`docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md`) |
 
 `lp-cli emu run --host-link --ota-offer <dir>` and `lp-cli link capture
 <port> --ota-offer <dir>` are the hosts underneath (`lp-fw/builds/README.md`);

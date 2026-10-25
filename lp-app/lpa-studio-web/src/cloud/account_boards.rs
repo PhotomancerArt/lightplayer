@@ -1,15 +1,19 @@
-//! The signed-in account's boards online at lightplayer.app, from the
-//! cloud into Studio core: your boards on every computer (plan
-//! `lp2025/2026-10-19-2300-your-boards-follow-you`, M1).
+//! The signed-in account's board list, from the cloud into Studio core and
+//! back: your boards on every computer (roadmap
+//! `lp2025/2026-10-19-2300-your-boards-follow-you`, M1 and M2).
 //!
 //! Studio core does not know the cloud. This bridge follows the session
 //! and, signed in (a guest counts as signed out, as for the account's keys):
 //!
-//! - asks `ListBoards` at once, then every 30 s while the page is visible
-//!   (D4), and hands the answer to core as
-//!   [`StudioCommand::AccountBoards`], stamped with this page's clock. An
-//!   answer that does not come is `None`: core keeps nothing. Signing out
-//!   hands in `None` and stops the asking.
+//! - asks `ListAccountBoards` at once, then every 30 s while the page is
+//!   visible (D4), and hands every board on the list to core as
+//!   [`StudioCommand::AccountBoards`], online or not, stamped with this
+//!   page's clock. An answer that does not come is `None`: core keeps
+//!   nothing. Signing out hands in `None` and stops the asking.
+//! - makes the calls core asks for ([`send_account_board_request`]):
+//!   `ReportBoard` when a board here holds the account's key, `ForgetBoard`
+//!   for Remove from your account; hands each answer back as
+//!   [`StudioCommand::AccountBoardAnswered`], then reads the list again.
 //! - asks `BoardPictures`, watching, for the boards whose cards draw
 //!   lightplayer.app's picture (the home page's
 //!   `DeviceRosterView::cloud_picture_asks`: listed boards no link of this
@@ -26,10 +30,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    AccountBoardPicture, AccountBoardRow, AccountBoardRows, CloudPictureAsk, StudioCommand,
-    UiStudioView,
+    AccountBoardAnswer, AccountBoardLink, AccountBoardPicture, AccountBoardPresence,
+    AccountBoardReport, AccountBoardRequest, AccountBoardRow, AccountBoardRows, CloudPictureAsk,
+    StudioCommand, UiStudioView,
 };
-use lpc_cloud_api::{BoardList, BoardPicture, BoardPictureList, BoardPresence, KnownPicture};
+use lpc_cloud_api::{
+    AccountBoard, AccountBoardList, BoardPicture, BoardPictureList, BoardPresence, CloudError,
+    KnownPicture, ReportBoard, SeenOn,
+};
 
 use crate::cloud::CloudSession;
 
@@ -72,7 +80,7 @@ fn start_asking(
 ) {
     use gloo_timers::future::TimeoutFuture;
     use lpc_cloud_api::BoardPictures;
-    use lpc_cloud_api::request::ListBoards;
+    use lpc_cloud_api::request::ListAccountBoards;
 
     use crate::cloud::FetchCloudPort;
 
@@ -88,7 +96,8 @@ fn start_asking(
                 return;
             }
             if page_visible() {
-                let answer = lpa_cloud_client::call(&FetchCloudPort::new(), ListBoards).await;
+                let answer =
+                    lpa_cloud_client::call(&FetchCloudPort::new(), ListAccountBoards).await;
                 if !list_current() {
                     return;
                 }
@@ -165,25 +174,133 @@ pub fn picture_asks(view: &UiStudioView) -> Vec<CloudPictureAsk> {
         .unwrap_or_default()
 }
 
-/// `ListBoards`' answer as core's rows, stamped `at`.
-pub fn account_board_rows(list: BoardList, at: f64) -> AccountBoardRows {
+/// `ListAccountBoards`' answer as core's rows, stamped `at`: every board on
+/// the list, online at lightplayer.app now or not.
+pub fn account_board_rows(list: AccountBoardList, at: f64) -> AccountBoardRows {
     AccountBoardRows {
         at,
         boards: list.boards.into_iter().map(account_board_row).collect(),
     }
 }
 
-fn account_board_row(board: BoardPresence) -> AccountBoardRow {
+fn account_board_row(board: AccountBoard) -> AccountBoardRow {
+    // Online, the presence is the newest word on the board's facts.
+    let (firmware, project) = match &board.online {
+        Some(online) => (
+            online.firmware.clone().or(board.firmware),
+            online.project.clone().or(board.project),
+        ),
+        None => (board.firmware, board.project),
+    };
     AccountBoardRow {
         id: board.id,
-        label: board.label,
-        wire_proto: board.wire_proto,
-        lan: board.lan,
-        same_network: board.same_network,
-        since: board.since,
-        relay_proto: board.relay_proto,
-        firmware: board.firmware.filter(|firmware| !firmware.is_empty()),
-        project: board.project,
+        label: board
+            .online
+            .as_ref()
+            .map_or(board.label, |online| online.label.clone()),
+        model: board.model,
+        firmware: firmware.filter(|firmware| !firmware.is_empty()),
+        project,
+        last_seen: board.seen.last_seen(),
+        online: board.online.map(account_board_presence),
+    }
+}
+
+fn account_board_presence(presence: BoardPresence) -> AccountBoardPresence {
+    AccountBoardPresence {
+        wire_proto: presence.wire_proto,
+        lan: presence.lan,
+        same_network: presence.same_network,
+        since: presence.since,
+        relay_proto: presence.relay_proto,
+    }
+}
+
+/// Make the call core asked for, hand its answer back on `tx`, then read
+/// the list again so every card says what lightplayer.app now holds. Host
+/// builds never ask the cloud.
+pub fn send_account_board_request(
+    request: &AccountBoardRequest,
+    tx: Option<lpa_studio_core::app::studio::studio_view_channel::CommandSender>,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use crate::cloud::FetchCloudPort;
+        use lpc_cloud_api::ForgetBoard;
+        use lpc_cloud_api::request::ListAccountBoards;
+
+        let Some(tx) = tx else {
+            return;
+        };
+        let request = request.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let port = FetchCloudPort::new();
+            let answer = match &request {
+                AccountBoardRequest::Report(report) => {
+                    lpa_cloud_client::call(&port, report_board(report))
+                        .await
+                        .map(|_| ())
+                }
+                AccountBoardRequest::Forget { id } => {
+                    lpa_cloud_client::call(&port, ForgetBoard { id: id.clone() })
+                        .await
+                        .map(|_| ())
+                }
+            };
+            tx.send(StudioCommand::AccountBoardAnswered(account_board_answer(
+                request, answer,
+            )));
+            if let Ok(list) = lpa_cloud_client::call(&port, ListAccountBoards).await {
+                tx.send(StudioCommand::AccountBoards(Some(account_board_rows(
+                    list,
+                    crate::web_app::now_secs(),
+                ))));
+            }
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (request, tx);
+    }
+}
+
+/// Core's report as the cloud's `ReportBoard`.
+pub fn report_board(report: &AccountBoardReport) -> ReportBoard {
+    ReportBoard {
+        id: report.id.clone(),
+        label: report.label.clone(),
+        model: report.model.clone(),
+        firmware: report.firmware.clone(),
+        project: report.project.clone(),
+        seen_on: match report.seen_on {
+            AccountBoardLink::Usb => SeenOn::Usb,
+            AccountBoardLink::Ble => SeenOn::Ble,
+            AccountBoardLink::Lan => SeenOn::Lan,
+        },
+    }
+}
+
+/// The cloud's answer to `request`, as core reads it.
+pub fn account_board_answer(
+    request: AccountBoardRequest,
+    answer: Result<(), lpa_cloud_client::SyncError>,
+) -> AccountBoardAnswer {
+    match (answer, request) {
+        (Ok(()), AccountBoardRequest::Report(report)) => {
+            AccountBoardAnswer::Reported { id: report.id }
+        }
+        (Ok(()), AccountBoardRequest::Forget { id }) => AccountBoardAnswer::Forgotten { id },
+        (
+            Err(lpa_cloud_client::SyncError::Cloud(CloudError::BoardListFull { max })),
+            AccountBoardRequest::Report(report),
+        ) => AccountBoardAnswer::ListFull { id: report.id, max },
+        (Err(error), request) => AccountBoardAnswer::Failed {
+            request,
+            error: match error {
+                lpa_cloud_client::SyncError::Transport(_) => "it didn't answer.".to_string(),
+                error => error.to_string(),
+            },
+        },
     }
 }
 
@@ -218,29 +335,96 @@ mod tests {
 
     #[test]
     fn a_list_becomes_core_rows_stamped_with_the_pages_clock() {
+        let presence = BoardPresence {
+            id: "10bda3b08e30".to_string(),
+            label: "Fabric Test".to_string(),
+            wire_proto: 42,
+            lan: Some("192.168.4.20:80".to_string()),
+            same_network: true,
+            since: 5.0,
+            relay_proto: 2,
+            firmware: Some(String::new()),
+            project: Some("rainbow".to_string()),
+        };
         let rows = account_board_rows(
-            BoardList {
-                boards: vec![BoardPresence {
-                    id: "10bda3b08e30".to_string(),
-                    label: "Fabric Test".to_string(),
-                    wire_proto: 42,
-                    lan: Some("192.168.4.20:80".to_string()),
-                    same_network: true,
-                    since: 5.0,
-                    relay_proto: 2,
-                    firmware: Some(String::new()),
-                    project: Some("rainbow".to_string()),
-                }],
+            AccountBoardList {
+                boards: vec![
+                    AccountBoard {
+                        id: presence.id.clone(),
+                        label: "Old name".to_string(),
+                        model: None,
+                        firmware: None,
+                        project: None,
+                        joined_at: 1.0,
+                        seen: lpc_cloud_api::BoardSeen {
+                            relay: Some(5.0),
+                            ..Default::default()
+                        },
+                        online: Some(presence),
+                    },
+                    AccountBoard {
+                        id: "020000000001".to_string(),
+                        label: "Porch".to_string(),
+                        model: Some("seeed-xiao-esp32c6".to_string()),
+                        firmware: Some("2026.10.01-1".to_string()),
+                        project: Some("rocaille".to_string()),
+                        joined_at: 1.0,
+                        seen: lpc_cloud_api::BoardSeen {
+                            usb: Some(3.0),
+                            ble: Some(4.0),
+                            ..Default::default()
+                        },
+                        online: None,
+                    },
+                ],
             },
             9.0,
         );
         assert_eq!(rows.at, 9.0);
         let row = &rows.boards[0];
         assert_eq!(row.id, "10bda3b08e30");
-        assert_eq!(row.label, "Fabric Test");
+        assert_eq!(row.label, "Fabric Test", "online: the board's word now");
         assert_eq!(row.firmware, None, "an empty version is no version");
         assert_eq!(row.project.as_deref(), Some("rainbow"));
-        assert!(row.same_network);
+        assert!(row.online.as_ref().unwrap().same_network);
+        let offline = &rows.boards[1];
+        assert_eq!(offline.label, "Porch");
+        assert_eq!(offline.model.as_deref(), Some("seeed-xiao-esp32c6"));
+        assert_eq!(offline.last_seen, Some(4.0), "the newest sighting");
+        assert_eq!(offline.online, None);
+    }
+
+    #[test]
+    fn a_report_goes_out_as_report_board_and_a_full_list_comes_back_by_name() {
+        let report = AccountBoardReport {
+            id: "10bda3b08e30".to_string(),
+            label: "lp-8e30".to_string(),
+            model: Some("seeed-xiao-esp32c6".to_string()),
+            firmware: None,
+            project: None,
+            seen_on: AccountBoardLink::Ble,
+        };
+        assert_eq!(report_board(&report).seen_on, SeenOn::Ble);
+        let full = account_board_answer(
+            AccountBoardRequest::Report(report.clone()),
+            Err(lpa_cloud_client::SyncError::Cloud(
+                CloudError::BoardListFull { max: 64 },
+            )),
+        );
+        assert_eq!(
+            full,
+            AccountBoardAnswer::ListFull {
+                id: report.id.clone(),
+                max: 64
+            }
+        );
+        let forgot = account_board_answer(
+            AccountBoardRequest::Forget {
+                id: report.id.clone(),
+            },
+            Ok(()),
+        );
+        assert_eq!(forgot, AccountBoardAnswer::Forgotten { id: report.id });
     }
 
     #[test]

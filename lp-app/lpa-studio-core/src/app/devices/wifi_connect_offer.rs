@@ -14,7 +14,7 @@ use super::wifi_connect_op::WifiConnectOp;
 use crate::{OfferPath, UiOffer};
 
 /// The verb under `prefix` (`devices/<board>`), for `device` whose
-/// remembered address is `ip`; disabled while it is being reached
+/// Wi‑Fi address is `ip`; disabled while it is being reached
 /// (`connecting`). Routine: it only opens a socket.
 pub fn connect_wifi_offer(
     prefix: &OfferPath,
@@ -22,9 +22,38 @@ pub fn connect_wifi_offer(
     ip: &str,
     connecting: bool,
 ) -> UiOffer {
-    let action = WifiConnectOp::action_for(WifiConnectOp::Board { device }).with_summary(format!(
+    let action = WifiConnectOp::action_for(WifiConnectOp::Board {
+        device,
+        then_relay: false,
+    })
+    .with_summary(format!(
         "Reach this board on your network, at {ip} (the address it last gave)."
     ));
+    wifi_offer(prefix, action, connecting)
+}
+
+/// The same verb on a board that has no Connect of its own (one this
+/// browser never met, known by the account's list): it is the board's
+/// Connect, so a try that fails goes on through lightplayer.app in the same
+/// press.
+pub fn connect_wifi_first_offer(
+    prefix: &OfferPath,
+    device: DeviceId,
+    ip: &str,
+    connecting: bool,
+) -> UiOffer {
+    let action = WifiConnectOp::action_for(WifiConnectOp::Board {
+        device,
+        then_relay: true,
+    })
+    .with_summary(format!(
+        "Reach this board on your network, at {ip}; if it doesn't answer there, \
+         through lightplayer.app."
+    ));
+    wifi_offer(prefix, action, connecting)
+}
+
+fn wifi_offer(prefix: &OfferPath, action: crate::UiAction, connecting: bool) -> UiOffer {
     UiOffer::new(
         prefix.clone().child("connect-wifi"),
         "wifi",
@@ -56,6 +85,25 @@ mod tests {
             crate::ActionEnablement::Disabled {
                 reason: WIFI_CONNECTING.to_string()
             }
+        );
+    }
+
+    #[test]
+    fn a_boards_first_road_says_it_goes_on_through_lightplayer_app() {
+        let prefix = OfferPath::devices().child("mac-a0f26287b48e");
+        let offer = connect_wifi_first_offer(&prefix, DeviceId(3), "192.168.1.40:80", false);
+        assert_eq!(
+            offer.path.to_string(),
+            "devices/mac-a0f26287b48e/connect-wifi"
+        );
+        assert!(offer.summary().contains("192.168.1.40:80"));
+        assert!(offer.summary().contains("lightplayer.app"));
+        assert_eq!(
+            offer.action.op_as::<WifiConnectOp>(),
+            Some(&WifiConnectOp::Board {
+                device: DeviceId(3),
+                then_relay: true
+            })
         );
     }
 }

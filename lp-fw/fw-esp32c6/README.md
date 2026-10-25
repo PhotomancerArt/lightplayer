@@ -15,6 +15,8 @@ compile/execute path to solve build, size, or `no_std` issues.
 - `lp-server` hosting on device.
 - LED output through the shared `lp-ws281x` RMT driver (see below).
 - Root-owned hardware capabilities such as buttons and ESP-NOW radio support.
+- The radio's chip facts: the BLE controller configuration, the RF-switch
+  quirk, `lp-net`'s stack and priority, the radio's C heap.
 - Firmware check and test harness modes behind feature flags.
 
 Chip-generic firmware logic (server loop, transport, logger, boot, output
@@ -23,7 +25,17 @@ this crate keeps only what is genuinely ESP32-C6: board init, RMT register
 code, USB-Serial-JTAG, the recovery backend and abort-tier panic path, and
 the hardware test harnesses (see
 `docs/adr/2026-07-29-per-chip-fw-toolchains.md` for the seam rules).
-Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
+The radio glue — the ESP-NOW driver and the radio's bring-up, the BLE link,
+and the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay) —
+lives in `fw-esp32-radio` since plan `lp2025/2026-10-20-2335-s3-radio-and-ota`
+M2, shared with the chips to come. This crate passes it the chip's facts
+(`src/net/net_chip.rs`, `src/ble/mod.rs`) and re-exports its modules where the
+boot path names them (`src/net/mod.rs`, `src/hardware/mod.rs`); see
+`lp-fw/fw-esp32-radio/README.md`. The split image's update board side —
+the boot records' marks, the engine guard, core-only, the update session —
+lives in `fw-esp32-common`'s `split_core` since M7 P7 of the same plan; what
+names the C6 there (its flash MMU, ROM flash calls, SHA accelerator, reset,
+watchdog and the RMT update light) is `src/split_core/` (`C6Split`). Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
 belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.
 
 ## WS281x output
@@ -112,7 +124,8 @@ add` or Studio) joins it by itself. Once joined it serves the secure lp-link
 at `ws://<board>/link` (port 80), and answers mDNS for `lp-xxxx.local` and
 DNS-SD for `_lightplayer._tcp`. The IP stack (embassy-net/smoltcp, DNS on),
 the station, the LAN endpoint, the relay task and mDNS run on their own
-thread, `lp-net` (`src/net/`, 8 KB stack), all started from `core_boot`, so a
+thread, `lp-net` (`fw-esp32-radio`'s `net`; its 8 KB stack and priority are
+this chip's, `src/net/net_chip.rs`), all started from `core_boot`, so a
 core-only board has them too. The radio's C heap stays in `HEAP_RADIO`.
 ESP-NOW (the Radio node) is off while the board uses Wi-Fi. Decisions and
 measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`.
@@ -122,12 +135,13 @@ on the LAN link too (`fw-esp32-common`'s `radio_link::core_only_links`): it
 answers the link's key from the device store itself, so the key decides
 who may flash, and a LAN link opened in update mode advertises a window of
 8. A trial core with a saved network that hears from no host for three
-minutes gives the board back to its last good core (`src/ota/core_only.rs`).
+minutes gives the board back to its last good core
+(`fw-esp32-common/src/split_core/core_only.rs`).
 `lp-cli link capture lan:<board> --ota-offer <dir>` drives an update over
 it; `just test-emu-c6-ota-lan` walks it on the emulated LAN with no cable.
 See `docs/adr/2026-10-06-ota-update-protocol.md` (amendment of 2026-10-07).
 
-**The relay task** (`src/net/relay_task.rs`; the loop is
+**The relay task** (`fw-esp32-radio/src/net/relay_task.rs`; the loop is
 `fw-esp32-common/src/net/relay/`) dials `lightplayer.app:80` when the station
 has an address, Cloud relay is on and the board holds an account key
 (`lpc_relay::RelayClient::may_dial`), registers, and carries a browser's
@@ -142,10 +156,11 @@ idle|watched|off` (there is no line on a state change: a 688 B line crossed
 a flash page, see the budget ADR's ledger). The board speaks relay protocol
 2: its hello carries the build's version, and it sends the relay its
 project's name and, when asked, a picture of its lamps (the frame hook
-makes it, `src/net/relay_probes.rs`). Costs and what is not yet measured on silicon:
+makes it, `fw-esp32-radio/src/net/relay_probes.rs`). Costs and what is not yet measured on silicon:
 `docs/adr/2026-10-06-cloud-relay.md` ("Device side").
 
-`LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`) makes a **desk
+`LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`, read by
+`src/net/relay_config.rs`) makes a **desk
 image** that dials that host instead and prints `[INIT] desk image: the relay
 is …` at boot. The product image always dials `lightplayer.app:80`; do not
 release a desk image.
@@ -276,8 +291,8 @@ the store, because they all go through `base_fs`. The table is
   partition that does not fit the window, sends every read back to the ROM
   calls (`[FS] lpfs is read by ROM calls: …` at boot for the latter).
 - **Hasher:** `src/hw_sha.rs` (`StoreSha256`): the SHA accelerator, or
-  software `sha2` while a boot hash holds it. Moved out of `ota/` because an
-  unsplit build has no `ota/`.
+  software `sha2` while a boot hash holds it. Outside `src/split_core/`
+  because an unsplit build has none.
 - **Boot words** (`fw_esp32_common::tree_fs`; D2):
   - `[FS] tree store mounted (<n> sectors, <free> free, root <seq>)` — `fs: mounted`;
   - `[FS] tree store formatted (…)` — a partition with no store and no

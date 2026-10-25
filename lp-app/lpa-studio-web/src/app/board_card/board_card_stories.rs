@@ -1237,14 +1237,14 @@ fn board_card_firmware_layout_refused() -> Element {
 }
 
 #[story(
-    description = "The Hardware row's details: the model, the chip, the board's id, Reset, and apart Factory reset and Forget. No name field: the board is renamed in its name bar (board_card_rename_in_place)."
+    description = "The Hardware row's details: the model, the chip, the board's id, Reset, and apart Factory reset and Forget on this browser. No name field: the board is renamed in its name bar (board_card_rename_in_place)."
 )]
 fn board_card_hardware_details() -> Element {
     details_open(BarLayer::Hardware)
 }
 
 #[story(
-    description = "Forget, armed in place inside the open hardware details: the danger zone's row reads \"Confirm Forget\" in the error tint with its quiet drain — two clicks, the way every Lasting verb arms. Nothing else on the card dims (the old card-wide marking is gone)."
+    description = "Forget on this browser, armed in place inside the open hardware details: the danger zone's row reads \"Confirm Forget\" in the error tint with its quiet drain — two clicks, the way every Lasting verb arms. Nothing else on the card dims (the old card-wide marking is gone)."
 )]
 fn board_card_hardware_details_forget_armed() -> Element {
     let forget = story_board_prefix(porch().id).child("forget");

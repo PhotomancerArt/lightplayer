@@ -98,17 +98,24 @@ mod tests {
         assert_eq!(raw.core.sha256, build.core.sha256);
     }
 
+    /// The staged names are `<target>.<file>` for whatever target the
+    /// manifest names — nothing here is the C6's (the S3's `esp32s3-8mb`
+    /// is read the same way, M7 P5): the prefix comes from the manifest in
+    /// the directory, not from a chip this module knows.
     #[test]
     fn a_release_staging_directory_is_read_by_its_asset_names() {
         let fx = crate::commands::firmware::ota_fixture::Fixture::new("abc1234");
         fx.write().unwrap().expect("OTA files written");
+        let (packaged, _) = load_offer(&fx.ota_dir(), false).unwrap();
+        let target = packaged.target.clone();
         let staged = tempfile::tempdir().unwrap();
         for entry in std::fs::read_dir(fx.ota_dir()).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_str().unwrap().to_string();
-            std::fs::copy(&path, staged.path().join(format!("esp32c6-4mb.{name}"))).unwrap();
+            std::fs::copy(&path, staged.path().join(format!("{target}.{name}"))).unwrap();
         }
-        let (manifest, _) = load_offer(staged.path(), false).unwrap();
-        assert_eq!(manifest.target, "esp32c6-4mb");
+        let (manifest, build) = load_offer(staged.path(), false).unwrap();
+        assert_eq!(manifest.target, target);
+        assert_eq!(build.core.bytes, fx.core);
     }
 }

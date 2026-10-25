@@ -189,6 +189,32 @@ padding on top: RAM research L2 (`lp2025/2026-10-09-1203-ram-research`,
 Re-apply on a re-sync with `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`;
 `lp-fw-split`'s `both_passes_take_the_text_gap_out…` test fails if it is lost.
 
+## The seventh diff: the S3's PSRAM maps at an entry the caller names
+
+`psram::PsramConfig` (S3) gains `mmu_start_entry: Option<u32>`, and
+`map_psram` (`src/psram/esp32s3.rs`) uses it as the first MMU entry when it is
+`Some`. `None` — the `Default` — is upstream's scan, unchanged: one past the
+highest mapped entry, skipping the last.
+
+Why: the S3 split image's table holds the engine, `lpfs` and the core's
+scratch at entries `0x100..0x200` (`lp_bootctl::s3_mmu`), so upstream's "one
+past the highest" leaves no room for 8 MiB at all, and on a plain image it
+lands wherever the image happens to end (`0x13`, `0x2B` in the PSRAM spike).
+LightPlayer maps PSRAM at a fixed window, `s3_mmu::PSRAM_WINDOW` (entries
+`0x80..0x100`), on every S3 image (M10 of the S3 radio roadmap).
+
+Two smaller hunks ride the same diff, both for the IRAM the S3's PSRAM init
+costs (its `#[ram]` code comes out of the main stack's share of `dram_seg`):
+
+- `Psram::new_octal` (`src/psram/mod.rs`) and `init_psram_octal`: the octal
+  path alone. `Psram::new` matches on `PsramConfig::mode` at run time, so it
+  links the quad-SPI path's `#[ram]` code even when the mode is octal; a
+  firmware that calls only `new_octal` does not.
+- `print_psram_info` is `#[inline(never)]`, so its eleven `info!` lines stay
+  in flash rather than being inlined into the `#[ram]` octal init.
+
+Re-apply on a re-sync with `grep -n 'LP fork (seventh diff' src/psram/*.rs`.
+
 ## Nothing else
 
 No other linker-script edits, no feature changes.
@@ -218,4 +244,5 @@ too — `grep -n INT_ENA_LOCK src/usb_serial_jtag.rs` finds it here):
   line in `build.rs` — `grep -n 'linker-scripts' build.rs`;
 * the fifth diff, if it is still wanted — `grep -n 'LP fork (fifth diff'
   ld/sections/*.x` and the `place_*` entries in `esp_config.yml`;
-* the sixth diff — `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`.
+* the sixth diff — `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`;
+* the seventh diff — `grep -n 'LP fork (seventh diff' src/psram/*.rs`.

@@ -17,6 +17,11 @@
 //!    closes. A protocol 2 board's `PictureRate` goes through the leg's
 //!    queue, so it reaches the board after `Registered`.
 //!
+//! The board joins its accounts' board lists as it registers, and the hub's
+//! later writes for it (a project change, its picture written behind, its
+//! leaving) are applied in order by this leg's own task: none waits on the
+//! frame that brought it.
+//!
 //! These steps are relay protocol 1's, and every protocol speaks them
 //! unchanged.
 
@@ -37,7 +42,7 @@ use lpc_relay::{
 use super::client_address::ClientAddress;
 use super::leg_pump::{close, next_binary, pump_leg};
 use super::relay_hub::BoardRegistration;
-use super::relay_registry::{LegHandle, RelayRegistry};
+use super::relay_registry::{LegHandle, RelayRegistry, apply_relay_writes};
 use crate::app_state::AppState;
 
 /// How long each registration step may take.
@@ -60,6 +65,7 @@ pub async fn get_device_leg(
 
 async fn run_device_leg(state: AppState, ip: Option<IpAddr>, mut socket: WebSocket) {
     let relay = Arc::clone(state.relay());
+    let relay_for_frames = Arc::clone(&relay);
     let mut handle = relay.open_leg();
     let mut shutdown = relay.shutdown_signal();
     let registered = tokio::select! {
@@ -75,21 +81,31 @@ async fn run_device_leg(state: AppState, ip: Option<IpAddr>, mut socket: WebSock
     log::info!("relay: board {board} online");
     let started = std::time::Instant::now();
     let leg = handle.leg;
-    let (end, traffic) =
-        pump_leg(
-            &mut socket,
-            &mut handle.inbox,
-            &mut shutdown,
-            |bytes| match RelayFrame::decode(bytes) {
-                Ok(frame) => {
-                    relay.board_message(leg, frame);
-                    Ok(())
+    // The hub's writes for this board, applied in order beside the pump:
+    // the pump's frame handler cannot wait on the store.
+    let (writes_tx, mut writes_rx) = tokio::sync::mpsc::unbounded_channel();
+    let pump = pump_leg(
+        &mut socket,
+        &mut handle.inbox,
+        &mut shutdown,
+        move |bytes| match RelayFrame::decode(bytes) {
+            Ok(frame) => {
+                let writes = relay_for_frames.board_message(leg, frame);
+                if !writes.is_empty() {
+                    let _ = writes_tx.send(writes);
                 }
-                Err(_) => Err(RelayCloseCode::PolicyViolation),
-            },
-        )
-        .await;
-    relay.board_gone(leg);
+                Ok(())
+            }
+            Err(_) => Err(RelayCloseCode::PolicyViolation),
+        },
+    );
+    let writer = async {
+        while let Some(writes) = writes_rx.recv().await {
+            apply_relay_writes(&state, writes).await;
+        }
+    };
+    let ((end, traffic), ()) = tokio::join!(pump, writer);
+    apply_relay_writes(&state, relay.board_gone(leg)).await;
     log::info!(
         "relay: board {board} offline ({end}) after {}s, {} B in, {} B out",
         started.elapsed().as_secs(),
@@ -164,9 +180,12 @@ async fn register(
         firmware,
         project: None,
     };
-    if let Err(reason) = relay.register_board(registration, handle.take_outbox()) {
-        refuse(socket, reason).await;
-        return None;
+    match relay.register_board(registration, handle.take_outbox()) {
+        Ok(writes) => apply_relay_writes(state, writes).await,
+        Err(reason) => {
+            refuse(socket, reason).await;
+            return None;
+        }
     }
     send(
         socket,

@@ -1,6 +1,7 @@
-//! [`UiCloudBoard`]: a board online at lightplayer.app, as its card reads
-//! it — the account's row for it (`ListBoards`) and its last picture
-//! (`BoardPictures`). Joined by the controller onto the roster view
+//! [`UiCloudBoard`]: a board on the signed-in account's list, as its card
+//! reads it — the account's row for it (`ListAccountBoards`), online at
+//! lightplayer.app now or not, and its last picture (`BoardPictures`).
+//! Joined by the controller onto the roster view
 //! (`DeviceRosterView::cloud_boards`), by MAC, for a board this browser
 //! knows and for one it never met alike ([`super::account_boards`]).
 
@@ -17,13 +18,21 @@ pub const ONLINE_AT_LIGHTPLAYER_APP: &str = "Online at lightplayer.app";
 pub struct UiCloudBoard {
     /// The board's MAC: its relay id.
     pub key: BoardKey,
-    /// The board's name, as it reported it to lightplayer.app.
+    /// The board's name, as it last reported it.
     pub label: String,
-    /// The firmware version from its hello (relay protocol 2).
+    /// Its catalog model (a board id), once a Studio reported one.
+    pub model: Option<String>,
+    /// The firmware version last reported.
     pub firmware: Option<String>,
-    /// The project it plays, by name (relay protocol 2).
+    /// The project it plays, by name, as it last reported it.
     pub project: Option<String>,
-    /// The relay protocol it speaks: 1 sends no picture.
+    /// Online at lightplayer.app now. Offline, the card is an offline
+    /// board's: its facts and its picture the last known, dimmed.
+    pub online: bool,
+    /// When any link last saw it, epoch seconds.
+    pub last_seen: Option<f64>,
+    /// The relay protocol it speaks while online (1 sends no picture); 0
+    /// while it is offline.
     pub relay_proto: u16,
     /// Its last picture, drawable; `None` before one arrives, and always on
     /// relay protocol 1 (the card says nothing about that).

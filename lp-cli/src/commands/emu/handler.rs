@@ -108,7 +108,7 @@ pub(super) fn apply_image(
 }
 
 /// A merged image's length, which must be a whole flash part.
-fn whole_part_len(merged: &Path) -> Result<u32> {
+pub(super) fn whole_part_len(merged: &Path) -> Result<u32> {
     let len = std::fs::metadata(merged)
         .with_context(|| format!("reading {}", merged.display()))?
         .len();
@@ -141,14 +141,18 @@ fn run(args: RunArgs) -> Result<()> {
         return Ok(());
     }
     let seams = seam_request(args.seams.as_deref(), args.seams_prefer.as_deref())?;
-    if args.chip != EmuChip::Esp32C6 && (args.lan.is_some() || args.seam_trace.is_some()) {
-        bail!("--lan and --seam-trace are the C6's: Xtensa seams are the roadmap's M7");
+    // Since S3 radio M5 the S3 answers seams too (the Xtensa seam ABI); the
+    // classic does not.
+    if args.chip == EmuChip::Esp32V3 && (args.lan.is_some() || args.seam_trace.is_some()) {
+        bail!("--lan and --seam-trace are the C6's and the S3's: the classic answers no seam");
     }
-    if args.chip != EmuChip::Esp32C6 && args.pace.is_some() {
-        bail!("--pace is the C6's: a pace is held at its network seam's LAN pump");
+    if args.chip == EmuChip::Esp32V3 && args.pace.is_some() {
+        bail!("--pace is the C6's and the S3's: a pace is held at the network seam's LAN pump");
     }
-    if args.chip != EmuChip::Esp32C6 && args.flash_cut.is_some() {
-        bail!("--flash-cut is the C6's: only its flash chip arms a power cut yet");
+    // The C6 and, since S3 radio M7 P5, the S3: both chips' flash runs on
+    // the common NOR engine that arms a cut. The classic's does not yet.
+    if args.chip == EmuChip::Esp32V3 && args.flash_cut.is_some() {
+        bail!("--flash-cut is the C6's and the S3's: the classic's flash arms no power cut yet");
     }
     let flash_cut = args
         .flash_cut
@@ -156,16 +160,28 @@ fn run(args: RunArgs) -> Result<()> {
         .map(lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::parse)
         .transpose()
         .map_err(|e| anyhow::anyhow!("--flash-cut: {e}"))?;
-    if args.chip != EmuChip::Esp32C6 && (args.seams.is_some() || args.seams_prefer.is_some()) {
-        bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
+    if args.chip == EmuChip::Esp32V3 && (args.seams.is_some() || args.seams_prefer.is_some()) {
+        bail!("--seams / --seams-prefer are the C6's and the S3's: the classic answers no seam");
     }
-    if args.chip != EmuChip::Esp32C6
+    if args.chip == EmuChip::Esp32V3
         && (args.ota.ota_offer.is_some() || args.rom_up_flash.is_some())
     {
-        bail!("--ota-offer and --rom-up-flash are the C6's: only its image is split");
+        bail!(
+            "--ota-offer and --rom-up-flash are the C6's and the S3's: the classic has no \
+             update path yet"
+        );
+    }
+    if args.psram.is_some() && args.chip != EmuChip::Esp32S3 {
+        bail!("--psram is the S3's: this chip's machine models no PSRAM");
+    }
+    if args.flash_busy && args.chip != EmuChip::Esp32S3 {
+        bail!("--flash-busy is the S3's here");
+    }
+    if args.no_block_cache && args.chip != EmuChip::Esp32S3 {
+        bail!("--no-block-cache is an S3 flag here; the classic's own binary has its twin");
     }
     if args.chip == EmuChip::Esp32S3 {
-        return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
+        return super::run_s3::run_s3(&args, seams, parse_duration_us(&args.timeout)?);
     }
     if args.chip == EmuChip::Esp32V3 {
         return super::run_v3::run_v3(&args, parse_duration_us(&args.timeout)?);
@@ -534,17 +550,17 @@ fn usb_host_at_power_on(args: &RunArgs) -> UsbHost {
 
 /// A trace block filter no peripheral is called: `--seam-trace` keeps the
 /// seams' note lines and none of the bus's.
-const SEAM_TRACE_ONLY: &str = "(seam notes only)";
+pub(super) const SEAM_TRACE_ONLY: &str = "(seam notes only)";
 
 /// A trace sink that writes only the lines naming a seam (` SEAM `), each
 /// as soon as it is whole.
-struct SeamLines<W: std::io::Write> {
+pub(super) struct SeamLines<W: std::io::Write> {
     out: W,
     line: Vec<u8>,
 }
 
 impl<W: std::io::Write> SeamLines<W> {
-    fn new(out: W) -> Self {
+    pub(super) fn new(out: W) -> Self {
         Self {
             out,
             line: Vec::new(),
@@ -572,16 +588,25 @@ impl<W: std::io::Write> std::io::Write for SeamLines<W> {
 }
 
 /// `emu run`'s one board on its `--lan`: participant 0, endpoint `0/net`.
-const RUN_BOARD: ParticipantId = ParticipantId(0);
+pub(super) const RUN_BOARD: ParticipantId = ParticipantId(0);
 
 /// `--lan`: forward a loopback port to the board's LAN endpoint and say
 /// where, as one line naming `lan:127.0.0.1:<port>` (what `lp-cli … lan:`
 /// connects to). Nothing without `--lan`: the seam's own lines say the rest.
 fn announce_lan(machine: &Esp32C6Machine, lan: Option<&(SharedLan, LanFixture)>) -> Result<()> {
+    announce_lan_for(machine.net_endpoint_id(), lan)
+}
+
+/// [`announce_lan`] for a board named by its network endpoint — either
+/// chip's.
+pub(super) fn announce_lan_for(
+    endpoint: lp_emu_esp_common::seam::EndpointId,
+    lan: Option<&(SharedLan, LanFixture)>,
+) -> Result<()> {
     let Some((shared, fixture)) = lan else {
         return Ok(());
     };
-    let at = forward_to_board(shared, machine.net_endpoint_id())
+    let at = forward_to_board(shared, endpoint)
         .with_context(|| format!("--lan {}", fixture.path.display()))?;
     eprintln!(
         "emu: board on LAN {} ({}) · forward {} → board :{BOARD_LAN_PORT}",
@@ -759,13 +784,22 @@ mod tests {
     }
 
     #[test]
-    fn a_pace_is_the_c6s_alone() {
-        for chip in ["esp32s3", "esp32v3"] {
-            let args = Cli::try_parse_from(["run", "--elf", "fw", "--chip", chip, "--pace", "max"])
-                .expect("parses")
-                .run;
+    fn the_classic_answers_no_seam() {
+        // A pace, a LAN and a seam request are the C6's and, since S3 radio
+        // M5, the S3's: the classic refuses each by name.
+        for flags in [
+            &["--pace", "max"][..],
+            &["--lan", "fixture.toml"][..],
+            &["--seams", "net=lan"][..],
+        ] {
+            let mut argv = vec!["run", "--elf", "fw", "--chip", "esp32v3"];
+            argv.extend_from_slice(flags);
+            let args = Cli::try_parse_from(argv).expect("parses").run;
             let err = run(args).unwrap_err();
-            assert!(format!("{err:#}").contains("--pace is the C6's"), "{err:#}");
+            assert!(
+                format!("{err:#}").contains("the C6's and the S3's"),
+                "{flags:?}: {err:#}"
+            );
         }
     }
 

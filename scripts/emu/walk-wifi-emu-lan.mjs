@@ -29,6 +29,11 @@
 //   W10 `lp-cli link rtt lan:<fwd a>` → request p50/p90 in FRAMES (run
 //       before W9, so the board it measures has not just been reset)
 //
+// `--s3` (S3 radio M5) runs the same steps on two emulated ESP32-S3s,
+// `s3-a` and `s3-b` (`emu serve --chip esp32s3`), booting `fw-esp32s3
+// --features wifi` ROM-up from the merged chip `just test-emu-esp32s3-wifi`
+// writes. Its report goes to target/walk-wifi-emu/lan-s3/.
+//
 // THE BOARD'S WORDS DECIDE EVERY STEP (AGENTS.md: "wait for the board's
 // words, not Studio's"). Three sources, none of which the page can satisfy:
 //
@@ -106,7 +111,14 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 
 export const LAN = "home";
-const BOARDS = ["c6-a", "c6-b"];
+/// `--s3`: the boards are emulated ESP32-S3s (`emu serve --chip esp32s3`; S3
+/// radio M5) running `fw-esp32s3 --features wifi` ROM-up from its merged
+/// chip, which `just test-emu-esp32s3-wifi` writes (`LP_WALK_S3_MERGED`
+/// names another). The steps, the fixture and the words are the C6's.
+const S3 = process.argv.slice(2).includes("--s3");
+const S3_WIFI_MERGED =
+  process.env.LP_WALK_S3_MERGED ?? path.join(ROOT, "target/lp-emu-esp32s3/merged-wifi.bin");
+const BOARDS = S3 ? ["s3-a", "s3-b"] : ["c6-a", "c6-b"];
 const [A, B] = BOARDS;
 
 /// TEST VALUES ONLY: committed, printed, and named in the emulator's output.
@@ -185,14 +197,19 @@ export const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
 
 function usage() {
   return (
-    "usage: node scripts/emu/walk-wifi-emu.mjs lan [--out <dir>] [--keep-open] [--dry-run] [--skip W10,…]\n" +
-    "       node scripts/emu/walk-wifi-emu-lan.mjs [--out <dir>] [--keep-open] [--dry-run]"
+    "usage: node scripts/emu/walk-wifi-emu.mjs lan [--s3] [--out <dir>] [--keep-open] [--dry-run] [--skip W10,…]\n" +
+    "       node scripts/emu/walk-wifi-emu-lan.mjs [--s3] [--out <dir>] [--keep-open] [--dry-run]"
   );
 }
 
 export function parseArgs(argv) {
   const rest = argv[0] === "lan" ? argv.slice(1) : argv;
-  const options = { out: path.join(ROOT, "target/walk-wifi-emu/lan"), keepOpen: false, dryRun: false, skip: [] };
+  const options = {
+    out: path.join(ROOT, S3 ? "target/walk-wifi-emu/lan-s3" : "target/walk-wifi-emu/lan"),
+    keepOpen: false,
+    dryRun: false,
+    skip: [],
+  };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === "--out") {
@@ -200,6 +217,8 @@ export function parseArgs(argv) {
       if (!value) throw new Error(`--out needs a directory\n${usage()}`);
       options.out = path.resolve(value);
     } else if (arg === "--keep-open") options.keepOpen = true;
+    // Read at module load (`S3`), since the boards' names are constants.
+    else if (arg === "--s3") options.s3 = true;
     else if (arg === "--dry-run") options.dryRun = true;
     // `--skip W10`: leave named steps out (W10's `link rtt` alone can run
     // past a session's 10-minute command cap). A skipped step is reported
@@ -226,7 +245,9 @@ export function prerequisites() {
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, RELEASE_BUNDLE)],
     ["the packaged firmware (just studio-firmware-package-served)", path.join(ROOT, SERVED_FIRMWARE)],
-    ["the packaged merged C6 image (just studio-firmware-package-served)", path.join(ROOT, PACKAGED_C6_MERGED)],
+    S3
+      ? ["the S3's merged Wi‑Fi image (just test-emu-esp32s3-wifi)", S3_WIFI_MERGED]
+      : ["the packaged merged C6 image (just studio-firmware-package-served)", path.join(ROOT, PACKAGED_C6_MERGED)],
     ["the Radio project", path.join(ROOT, RADIO_PROJECT)],
   ].map(([what, at]) => ({ what, at, present: existsSync(at) }));
 }
@@ -239,8 +260,8 @@ export function prerequisites() {
 /// its own by default (`02:4c:50:00:00:<seat>`).
 export function doorSpec(fixturePath) {
   return {
-    boards: BOARDS.map((id) => `${id}={merged},kind=rom-up,lan=${LAN}`),
-    extraArgs: ["--lan", `${LAN}=${fixturePath}`],
+    boards: BOARDS.map((id) => `${id}=${S3 ? S3_WIFI_MERGED : "{merged}"},kind=rom-up,lan=${LAN}`),
+    extraArgs: [...(S3 ? ["--chip", "esp32s3"] : []), "--lan", `${LAN}=${fixturePath}`],
   };
 }
 
@@ -384,7 +405,7 @@ export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /// the firmware logs the lines this walk keys on from code above the frame
 /// device, so the seam and the radio print the same words:
 /// `[wifi] trying <ssid>` and `[wifi] address a.b.c.d`
-/// (`fw-esp32c6/src/net/station_task.rs`), `[lan] link <id> from <peer>:
+/// (`fw-esp32-radio/src/net/station_task.rs`), `[lan] link <id> from <peer>:
 /// secure session opening (…)` and `[lan] link <id>: closed (…)`
 /// (`lan_endpoint_task.rs`; the id is a `LinkId`'s Display, `link1`, not a
 /// bare number), and `Project loaded: <name>` (`lpa-server`'s

@@ -325,23 +325,25 @@ impl EngineServices {
     /// nearly every call — must not allocate. The comparison walks the authored
     /// ports in key order against the wires already registered, borrowing
     /// each endpoint; only a genuine change pays for a copy of one.
+    ///
+    /// Returns whether anything changed.
     pub fn update_output_sink_config(
         &mut self,
         buffer_id: RuntimeBufferId,
         node: NodeId,
         config: &OutputDef,
-    ) {
+    ) -> bool {
         let display_options = display_options_from_output_config(config);
         let Some(existing) = self.output_sinks.get(&buffer_id) else {
             self.register_output_sink(buffer_id, node, config);
-            return;
+            return true;
         };
         // The display pipeline is built at open time, so a change to it
         // reopens every wire; the wires themselves are compared one by one.
         let options_unchanged = output_options_eq(&existing.display_options, &display_options);
         if options_unchanged && existing.node == node && wires_match_config(&existing.wires, config)
         {
-            return;
+            return false;
         }
 
         let mut set = self
@@ -352,6 +354,7 @@ impl EngineServices {
         set.display_options = display_options;
         self.reconcile_wires(&mut set, config, !options_unchanged);
         self.output_sinks.insert(buffer_id, set);
+        true
     }
 
     pub fn unregister_output_sink(&mut self, buffer_id: RuntimeBufferId) {

@@ -4,8 +4,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
+use lpc_relay::RelayBoardId;
 
 use crate::model::account_access::AccountAccess;
+use crate::model::board_record::BoardRecord;
 use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
 use crate::model::member_record::MemberRecord;
@@ -13,9 +15,9 @@ use crate::model::project_refs::ProjectRefs;
 use crate::model::session_record::SessionRecord;
 use crate::model::stored_event::StoredEvent;
 
-/// Everything the service remembers: users, their device access, sessions,
-/// projects, membership, head refs, sidecars, the per-project event log, and
-/// the blob index.
+/// Everything the service remembers: users, their device access, their
+/// board lists, sessions, projects, membership, head refs, sidecars, the
+/// per-project event log, and the blob index.
 ///
 /// # Why one trait
 ///
@@ -81,6 +83,28 @@ pub trait MetaStore {
     /// so two accounts never share one; were it to happen, either may be
     /// answered.
     fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess>;
+
+    // ---- board list --------------------------------------------------
+
+    /// Insert or replace one board on one account's list, keyed by
+    /// `(record.user, record.board)` (the account's row must already
+    /// exist). The store holds what it is given: the list's cap
+    /// ([`MAX_ACCOUNT_BOARDS`](crate::MAX_ACCOUNT_BOARDS)) and how facts
+    /// merge are the domain's rules, applied before this is called.
+    fn put_board_record(&mut self, record: BoardRecord);
+
+    /// One board on one account's list, if it is there.
+    fn board_record(&self, user: PrefixedUid, board: RelayBoardId) -> Option<BoardRecord>;
+
+    /// Every board on an account's list, by `joined_at`, then board id.
+    fn board_records_for_user(&self, user: PrefixedUid) -> Vec<BoardRecord>;
+
+    /// Every account's record of one board, by account uid — what the
+    /// relay writes through when a board it knows comes or goes.
+    fn board_records_for_board(&self, board: RelayBoardId) -> Vec<BoardRecord>;
+
+    /// Take a board off an account's list. Returns whether it was there.
+    fn delete_board_record(&mut self, user: PrefixedUid, board: RelayBoardId) -> bool;
 
     // ---- sessions ----------------------------------------------------
 
