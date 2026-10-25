@@ -153,6 +153,13 @@ pub trait TickResolver {
         None
     }
 
+    /// Which panel write supplies a consumed slot's value. See
+    /// [`crate::dataflow::resolver::ResolveHost::consumed_slot_panel_write`].
+    fn consumed_slot_panel_write(&self, node: NodeId, slot: &SlotPath) -> Option<u64> {
+        let _ = (node, slot);
+        None
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -365,6 +372,10 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         slot: &SlotPath,
     ) -> Option<(ScopeRef, ChannelName)> {
         self.host.consumed_slot_bus_provenance(node, slot)
+    }
+
+    fn consumed_slot_panel_write(&self, node: NodeId, slot: &SlotPath) -> Option<u64> {
+        self.host.consumed_slot_panel_write(node, slot)
     }
 
     fn render_control(

@@ -40,6 +40,14 @@ pub const PLAYLIST_CYCLE_CHANNEL: &str = "playlist.cycle";
 /// A playlist's skipped entry keys (`PlaylistDef::skip`), one whole list.
 pub const PLAYLIST_SKIP_CHANNEL: &str = "playlist.skip";
 
+/// The playlist's picked entry: the entry key it rests on and the cycle
+/// starts from. Consumed by `PlaylistDef::idle_entry`; a panel write holds
+/// and persists, Clear returns the authored entry.
+pub const PLAYLIST_ENTRY_CHANNEL: &str = "playlist.entry";
+
+/// The entry key playing now, produced by the playlist (read-only).
+pub const PLAYLIST_PLAYING_CHANNEL: &str = "playlist.playing";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +128,18 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: PLAYLIST_SKIP_CHANNEL,
         kind: Kind::Choice,
         doc: "Playlist entry keys switched off in the cycle (one whole list).",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PLAYLIST_ENTRY_CHANNEL,
+        kind: Kind::Choice,
+        doc: "The playlist's picked entry key: where it rests and where the cycle starts; a panel write holds and persists.",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PLAYLIST_PLAYING_CHANNEL,
+        kind: Kind::Choice,
+        doc: "The entry key the playlist is playing now (read-only).",
         carries_product: false,
     },
     WellKnownChannel {

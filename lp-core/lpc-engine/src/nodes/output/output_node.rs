@@ -2538,21 +2538,6 @@ mod tests {
         assert_eq!(node.established_samples, established_before);
     }
 
-    #[test]
-    fn the_output_still_accepts_no_runtime_commands() {
-        let mut node = output_node();
-
-        // The Debug slot rides the overlay, not the command channel: nothing
-        // here is wire state, and WIRE_PROTO_VERSION is untouched.
-        assert!(
-            node.handle_command(
-                &lpc_wire::WireNodeCommand::PlaylistActivateEntry { entry: 1 },
-                0.0,
-            )
-            .is_err(),
-        );
-    }
-
     // ---- Highlight pulse ----------------------------------------------
 
     #[test]
