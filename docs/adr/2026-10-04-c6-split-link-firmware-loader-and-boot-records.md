@@ -409,3 +409,22 @@ The rule is `lpc_update::board::TrialDeadline` (`TRIAL_HOST_DEADLINE_MS`),
 host-tested there; the emulated proof is `lp-cli/tests/emu_ota_lan.rs`'s
 L8 (the host gone at the core's commit; the trial rolls back, refuses Y,
 and heals over the LAN).
+
+## Amendment (2026-10-23): layout 2, the S3's, beside layout 1
+
+The ESP32-S3 ships a split image too
+([`2026-10-23-the-s3-ships-a-split-image.md`](2026-10-23-the-s3-ships-a-split-image.md)).
+Its MMU has only 64 KiB pages, and layout 1's region start (`+0x8000`) is
+not on one, so the S3 has **layout 2**:
+- the loader, the progress record and both boot records at layout 1's
+  offsets;
+- `+0x8000..+0x10000` reserved (erased, never written);
+- the region from `factory + 0x10000` on 64 KiB pages.
+
+Nothing of layout 1 changed. The C6's boot records, marks, boot choice,
+engine header, engine digest and progress record are the same code on both
+chips (`lp-bootctl`). `lp-fw-split` gained a chip profile, and the C6's
+output was checked byte-identical with and without it. The core's side of
+an update moved into `fw-esp32-common`'s `split_core`, generic over a
+`SplitChip`, and the C6's update scenarios ran unchanged on both doors after
+the move.

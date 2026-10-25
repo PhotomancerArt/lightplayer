@@ -1,0 +1,66 @@
+ESP-ROM:esp32s3-20210327
+oad:0x3fce3818,len:0x16f8
+load:0x403c9700,len:0x4
+oad:0x403c9704,len:0xc00
+load:0x403cc700,len:0x2eb0
+entry 0x403c9908
+[0;32mI (267) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (268) boot: compile time Jun  7 2023 08:07:32[0m
+[0;32mI (272) boot: Multicore bootloader[0m
+[0;32mI (284) boot: chip revision: v0.0[0m
+[0;32mI (296) boot.esp32s3: Boot SPI Speed : 40MHz[0m
+[0;32mI (311) boot.esp32s3: SPI Mode       : DIO[0m
+[0;32mI (325) boot.esp32s3: SPI Flash Size : 8MB[0m
+[0;32mI (340) boot: Enabling RNG early entropy source...[0m
+[0;32mI (356) boot: Partition Table:[0m
+[0;32mI (367) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (389) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (412) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (435) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (457) boot:  3 factory          factory app      00 00 00010000 00600000[0m
+[0;32mI (480) boot:  4 lpfs             Unknown data     01 82 00610000 00180000[0m
+[0;32mI (503) boot: End of partition table[0m
+[0;32mI (516) esp_image: segment 0: paddr=00010020 vaddr=3c000020 size=00100h (   256) map[0m
+[0;32mI (541) esp_image: segment 1: paddr=00010128 vaddr=3fc97d78 size=00010h (    16) load[0m
+[0;32mI (566) esp_image: segment 2: paddr=00010140 vaddr=3c000140 size=5f5d4h (390612) map[0m
+[0;32mI (617) esp_image: segment 3: paddr=0006f71c vaddr=3fc97d88 size=008fch (  2300) load[0m
+[0;32mI (618) esp_image: segment 4: paddr=00070020 vaddr=42060020 size=2549c4h (2443716) map[0m
+[0;32mI (806) esp_image: segment 5: paddr=002c49ec vaddr=3fc98684 size=02340h (  9024) load[0m
+[0;32mI (807) esp_image: segment 6: paddr=002c6d34 vaddr=40378000 size=0fd78h ( 64888) load[0m
+[0;32mI (832) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (842) boot: Disabling RNG early entropy source...[0m
+[0;31mE (858) boot: Image contains multiple DROM segments. Only the last one will be mapped.[0m
+[INIT] fw-esp32s3 boot
+[INIT] chip=esp32s3 arch=xtensa heap=163840+73744=237584 (dram_seg arena + dram2_seg)
+[INIT] heap regions: 0 .bss+163840 (dram_seg arena), 1 0x3fcdb700+73744 (dram2_seg, bootloader's)
+[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] runtime started
+[RADIO] stage=start heap_free=237528 heap_used=52
+[RADIO] stage=wifi_new heap_free=190924 heap_used=46656
+[RADIO] stage=station_started heap_free=190924 heap_used=46656
+[RADIO] stage=ble_new heap_free=155200 heap_used=82380
+[RADIO] stage=ble_hci_reset_sent heap_free=155160 heap_used=82420
+[RADIO] stage=answers_task_spawned heap_free=155160 heap_used=82420
+[INIT] io thread: stack 4096 B, priority 1, core 0
+[link] up (session 0)
+[INIT] flash filesystem mounted
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=start heap_free=237528 heap_used=52
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=wifi_new heap_free=190924 heap_used=46656
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=station_started heap_free=190924 heap_used=46656
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=ble_new heap_free=155200 heap_used=82380
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=ble_hci_reset_sent heap_free=155160 heap_used=82420
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] stage=answers_task_spawned heap_free=155160 heap_used=82420
+[WARN] fw_esp32_common::lp_fs: [FS] Mount failed (filesystem corrupt), formatting partition...
+[INFO] fw_esp32_common::lp_fs: [FS] Formatted and mounted fresh filesystem
+[INFO] fw_esp32s3: [fw-esp32s3] hardware manifest: seeed/xiao-esp32-s3-plus (XIAO ESP32-S3 Plus)
+[INFO] fw_esp32s3::output::rmt::esp32s3_rmt_ws281x_driver: Esp32S3RmtWs281xDriver: 4 WS281x channels for 4 declared (plan=Some([1, 1, 1, 1]) ch0_window_words=48 ch0_half_words=24)
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+[INIT] fw-esp32 initialized, starting server loop... proto=44 commit=e5d8eeebe7f4 dirty=false
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+M!{"id":0,"msg":{"hello":{"proto":44,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.radio","node.shader","node.texture","svc.button","gfx.lpvm","shader.f32"],"package":"fw-esp32s3","version":"e5d8eeebe","commit":"e5d8eeebe7f4","dirty":false,"profile":"release-esp32s3"},"hardware":{"radio":false,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-s3-plus","baseMac":"00:00:00:00:00:00","chipRevision":"0.0","fs":"formatted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"}}}}
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]
+[INFO] fw_esp32s3::radio_boot_probe: [RADIO] ble HCI event: [04, 0e, 04, 05, 03, 0c, 00]
+[RADIO] wifi scan done: 0 access points

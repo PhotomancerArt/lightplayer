@@ -770,3 +770,33 @@ hours), and neither is an exit path on its own.
   Testing, which never exits this way. If a desk run logs the accepted line,
   that is one more teardown exit for this log; *why* Chrome's teardown
   watchdog expires is still unidentified.
+
+- 2026-10-21 — **the deploy smoke's retry was not enough: two hangs in a
+  row.** "Deploy Cloud Service" run 39638916954 on 967088c53 (#1242, a
+  comments-only change) failed at "Smoke-check web artifact": `Browser DOM
+  smoke: Chrome hung (error.code=ETIMEDOUT … elapsedMs=20007); retrying
+  once …`, then the retry hung too (`stdout: 0 chars … error.code=ETIMEDOUT
+  elapsedMs=20078; the first attempt also hung`), stderr only dbus noise. A
+  re-run of the failed job (attempt 2) passed with no hang and deployed. This
+  is the "two hangs in a row" the 2026-10-20 note says earns the deploy smoke
+  an entry of its own; not filed here.
+
+- 2026-10-23 — **`oxipng` hit its 180 s bound on a PR with no Studio
+  change.** "Validate story baselines" on #1279 (the S3's LED driver default;
+  no `lpa-studio-*` file touched), run 39949806106 attempt 1: all 2,519
+  stories captured, then `optimizing PNGs (oxipng) — 2519/2519 captured`
+  repeated past `[+19:00]` and `Error: oxipng did not exit within 180000 ms —
+  killed.` (`studio-story-pngs.mjs:1814`, from `optimizePngs`). The job said
+  so plainly ("a pipeline failure, not story drift"). A re-run of the failed
+  job passed. The bound the 2026-08-05 entry added did its job (a loud kill,
+  not a wedge); whether 180 s is now too tight for a full 2,519-story capture
+  on a loaded runner is the open question.
+- 2026-10-24 — **`oxipng` hit its 180 s bound again on a PR with no Studio
+  change**, the second time in two days. "Validate story baselines" on #1291
+  (an S3 firmware desk probe and a defect entry; no `lpa-studio-*` file),
+  run 40138424523 attempt 1: all 2,519 stories captured, `optimizing PNGs
+  (oxipng) — 2519/2519 captured` from `[+14:00]` to `[+17:00]`, then
+  `Error: oxipng did not exit within 180000 ms — killed.` Re-ran the failed
+  job. Twice in two days on the full capture makes the 2026-10-23 question
+  (is 180 s too tight for 2,519 stories on a loaded runner) a recurring
+  burden, not a one-off.

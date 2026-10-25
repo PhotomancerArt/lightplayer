@@ -149,7 +149,8 @@ in the change that stopped observing it.
 ## When CI hands back the patch
 
 Every job that checks figures — `Emulator C6 (x64)`, `Emulator ESP32v3 (x64)`,
-`Emulator ESP32-S3 (x64)`, `Heap budget (esp32c6 chip)`, and the engine ratchet
+`Emulator ESP32-S3 (x64)`, `Emulator ESP32-S3 seams and heap (x64)` (the S3's
+heap ratchet), `Heap budget (esp32c6 chip)`, and the engine ratchet
 in `Validate (x64)` — tees its figure checks' output, and when one of them
 fails it runs one more step, `Figure moves — bless what failed, diff the
 records` (`scripts/ci/figures-patch.py`):
@@ -167,7 +168,7 @@ records` (`scripts/ci/figures-patch.py`):
    `target/lp-emu-esp32{v3,s3}/images.env`. No firmware is rebuilt; a heap
    re-baseline rebuilds incrementally, as its ratchet just did. A failed heap
    ratchet is re-baselined and then **checked again**. The C6 ratchet's image
-   is a figure build (`LP_FIGURE_BUILD=1`: version `0000000`, stamped clean),
+   is a figure build (`LP_FIGURE_BUILD=1`: version `0000000`, commit `000000000000`, stamped clean),
    so the re-check's rebuild, on the tree the re-baseline just wrote, is the
    same bytes; before 2026-10-10 it was stamped `<sha>-dirty-<time>` and
    could never pass ([heap-budget-gate.md](heap-budget-gate.md), "The second

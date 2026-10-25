@@ -129,4 +129,47 @@ mod tests {
         assert_eq!(BoardView::from_hello_firmware(None), BoardView::absent());
         assert!(!BoardView::from_hello_firmware(None).can_update_over_link());
     }
+
+    /// An S3 (chip 2) that announces layout 2 can be updated by this host.
+    #[test]
+    fn an_s3_on_layout_2_can_update_over_a_link() {
+        let s3 = BoardView::from_manifest(board("esp32s3", 2));
+        assert!(s3.can_update_over_link());
+    }
+
+    /// Why an S3 announcing layout 2 is safe in front of a Studio that
+    /// predates the S3's codes: such a host knows neither the chip nor the
+    /// layout, and a chip or a layout its table does not know reads as a
+    /// board that needs USB — it never offers it an update. This host stands
+    /// in for that one with a chip and a layout no table has.
+    #[test]
+    fn a_chip_or_a_layout_the_table_does_not_know_needs_usb() {
+        let unknown_chip = BoardView::from_manifest(board("esp32p4", 1));
+        assert!(!unknown_chip.can_update_over_link());
+        let unknown_layout = BoardView::from_manifest(board("esp32c6", 3));
+        assert!(!unknown_layout.can_update_over_link());
+        let no_layout = BoardView::from_manifest(board("esp32s3", 0));
+        assert!(!no_layout.can_update_over_link());
+    }
+
+    fn board(chip: &str, layout: u16) -> BoardManifest {
+        BoardManifest {
+            proto: 1,
+            target: alloc::format!("{chip}-test"),
+            chip: chip.into(),
+            version: "2026.10.21-1".into(),
+            build_id: "2026.10.21-1+abc123456789".into(),
+            wire_proto: 44,
+            core_sha256: "11".repeat(32),
+            core_len: 280_000,
+            engine_sha256: "22".repeat(32),
+            engine_len: Some(2_170_000),
+            layout,
+            loader: 1,
+            region_len: 6_225_920,
+            state: BoardState::Running,
+            refused_build: None,
+            transfer: None,
+        }
+    }
 }

@@ -23,6 +23,13 @@
 //! — meteor's new ticks 0–2 are its old ticks 1–3, and fluid's solver starts
 //! one frame sooner. No other tick moved.
 //!
+//! **And one more, 2026-10-23: fluid only, on purpose.** The fluid solver
+//! now takes one velocity pass and red-black, over-relaxed pressure passes
+//! instead of ten plain passes per solve, a look change Yona judged side by
+//! side and accepted (S3 fluid spike). Only `fluid` was re-captured; every
+//! other example's digests are unchanged. The solver's own bits are pinned
+//! by `nodes::fluid::solver::tests::output_is_pinned_bit_for_bit`.
+//!
 //! Digest, not raw bytes, because zook-dome alone publishes thousands of
 //! lamps; the byte length and the first samples ride along so a failure still
 //! says something human ("length changed", "the head is dark now") before
@@ -177,10 +184,10 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/fluid.show/output.output",
             &[
-                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
-                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
-                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
-                (1446, 0x3fd4eb25414e2228, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xe156c6ddf22bc947, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xe156c6ddf22bc947, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xe156c6ddf22bc947, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xa7cba13baa3c42d9, [0, 0, 0, 0, 0, 0]),
             ],
         )],
     },

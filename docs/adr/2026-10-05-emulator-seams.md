@@ -1,7 +1,8 @@
 # ADR: Emulator seams — what a host answer may claim
 
 - **Status:** Accepted (2026-10-06); amended 2026-10-06 (§11, §12 — PR #993,
-  Wi-Fi M6)
+  Wi-Fi M6); amended 2026-10-21 (§13 — Xtensa seams, S3 radio M5); amended
+  2026-10-22 (§13 — the S3's Wi‑Fi image declares the network seam)
 - **Date:** 2026-10-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -198,6 +199,11 @@ extern "C"`, exported, and holds a unique non-`pure` hint
 reaches it only from an `asm!` `call` with the arguments bound to `a0..a7`
 and `clobber_abi("C")`, so LTO cannot drop the argument set-up or fold the
 result (M0's K1 finding).
+
+*(amended 2026-10-21, §13): that is the RISC-V form. On Xtensa the hint is a
+`movi` and the shim is an ordinary windowed call through a volatile function
+pointer; the rule — generated, never hand-written, cannot be deleted, folded
+or internalised — is the same.*
 
 ### 10. The review rule
 
@@ -409,6 +415,73 @@ can take a pace too; and decide the end-user default (pattern viewing
 probably wants `realtime` by default on Devices-page and `?emu=` boards —
 Yona's call, at planning).
 
+### 13. Xtensa seams (2026-10-21, S3 radio M5)
+
+**Amendment.** The seam ABI runs on Xtensa (the ESP32-S3) as well as RISC-V.
+What it took, and what it decided:
+
+- **The seam function's hint is `movi <scratch>, <hint>`** (`seam_fn!`'s
+  Xtensa arm), into a register the compiler picks; hints are `0..=0x7FF`, so
+  they fit `movi`'s twelve signed bits, and the compiler may emit `movi.n`
+  for a small one. LLVM schedules it freely among the body's first
+  instructions (the release `test_echo` puts two `xor`s ahead of it), so the
+  emulator's check is: the first instruction is an `entry`, and the hint
+  follows within 64 bytes.
+- **The call shim is an ordinary windowed `callx8`** through a `static`
+  function pointer read with `read_volatile`. The compiler cannot see the
+  target, so it must keep the call, set up the arguments (the caller's
+  `a10..`) and read the result (`a10`). **No hand-written windowed `asm!`**
+  was the deciding constraint: a `callx8` in `asm!` would have to describe
+  the window rotation to the register allocator, which `asm!` cannot, and a
+  hand-written `entry`/`retw` sequence would be the one piece of the ABI the
+  compiler did not own.
+- **The emulator answers before the window rotates.** It plants `break 1, 15`
+  (three bytes) over the function's `entry` (three bytes), so nothing of a
+  displaced instruction is left behind. At the `break`, with
+  `n = PS.CALLINC` (2 after a `callx8`): the return address is `a(4n)`, the
+  arguments are `a(4n+2)..`, the result goes to `a(4n+2)`, and the return is
+  the return address's low 30 bits under the current pc's top two. Skipping
+  `entry` and `retw` together leaves `WindowBase` and `WindowStart` exactly
+  as the caller had them, so no window overflow or underflow can be owed.
+  The `test_seam_abi` harness proves it under `release-esp32s3`'s LTO +
+  `opt-level = "z"` with a value kept live across every call.
+- **The wake on the S3 is `SYSTEM.cpu_intr_from_cpu_3`** (source 82,
+  `lp_seam::wake::WAKE_SOURCE_ESP32S3`): the S3 keeps its software
+  interrupts in `SYSTEM`, not in an `INTPRI`. Same line number, same
+  priority, same protocol and pacing. `fw-esp32s3`'s handler clears the line
+  first and then swaps the word, as the C6's does.
+- **`SEAM_ABI_ID` did not move.** It hashes the `declare!` invocation, and no
+  declaration changed — only the macro that emits each arch's function and
+  shim. An arch is a way to call a seam, not a seam. A C6 image and an S3
+  image built from the same declarations carry the same identity, and an
+  emulator of either chip engages either's table on that match.
+- **The emulator half is the C6's, file for file** (`lp-emu-esp32s3`'s
+  `src/seams/`), over the same chip-neutral `lp_emu_esp_common::seam`: a
+  chip start re-scans, waits until core 0 first runs from the IROM window,
+  picks the live table through the live cache MMU (so a split image's two
+  tables are told apart the same way, §6), arms, re-arms after every fill
+  and restore, and answers on whichever core reached the site. `net=lan` is
+  the same soft capability default. `led=fast` cannot engage on the S3: no
+  S3 image declares its seam.
+- ~~**The shipped S3 image declares no seam yet.** It has no network stack until
+  the S3 radio roadmap's M4; a table naming calls the image never makes
+  would let an emulator say `net=lan` engaged on a board with no network.
+  Only the `test_seam_abi` harness carries a table today.~~ *(amended
+  2026-10-22, S3 radio M5's second half): the S3's **`wifi` image** declares
+  the network seam, all nine calls, in a table of its own
+  (`fw-esp32s3/src/seams/mod.rs`; the harness keeps its own), and
+  `fw-esp32-radio`'s network bring-up takes the seam arm on Xtensa as on
+  RISC-V (`net_bringup`, with `NetChip::bind_seam_wake` binding the S3's
+  wake handler). An S3 image without `wifi` still declares none, for the
+  reason above. On riscv32 the bring-up's cfg is the same as before, so the
+  C6 compiles the same code. Two emulated S3s share a virtual LAN in CI
+  (`lp-cli/tests/emu_s3_lan_pair.rs`, `just test-emu-esp32s3-wifi`: two
+  leases, each board's name answered on the segment, the same frame log
+  twice) and in the walk (`just walk-wifi-emu lan --s3`,
+  docs/reports/2026-10-22-s3-wifi-emulator-walk.md). The walk found the
+  image's heap, not the LAN, short with an ordinary project loaded
+  (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md).*
+
 ## Consequences
 
 - One firmware still runs everywhere. On silicon the LED seam is one call,
@@ -531,7 +604,10 @@ and a whole `lp-cli link rtt` session's resends fell from 42 to 2.
   Bluetooth — this follow-up is now just the Bluetooth seam itself, reusing
   that handler and adding its own consumer, not building the wake.*
 - ~~The network seam, inside Wi-Fi M6.~~ *(amended 2026-10-06): shipped, §11.*
-- Xtensa seams (roadmap M7): a windowed-ABI return.
+- ~~Xtensa seams (roadmap M7): a windowed-ABI return.~~ *(amended
+  2026-10-21): shipped, §13. The S3's shipped image declares the network
+  seam once it has a network stack (S3 radio M4), and the two-board LAN walk
+  on emulated S3s follows it.* *(amended 2026-10-22): both done, §13.*
 - Retake the end-user bench row in a quiet window and on the phone; the
   numbers above are provisional.
 - **Generalise the pace axis to every host** (filed 2026-10-06 from PR #993,

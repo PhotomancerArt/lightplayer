@@ -86,7 +86,16 @@ pub fn package_split(repo_root: &Path, def: &BuildDef) -> Result<SplitPackage> {
     check_core_carries_engine_digest(&core, &engine)?;
     // The split tool refuses to write such a core; this holds the bytes being
     // shipped to the same rule, independently.
-    lp_fw_split::core_segments::check(&core).context("core.bin")?;
+    lp_fw_split::core_segments::check_in(&core, report.chip.profile().segments)
+        .context("core.bin")?;
+    if def.split_chip() != Some(report.chip) {
+        bail!(
+            "split.json is a {} build, but build def `{}` is chip `{}`",
+            report.chip.name(),
+            def.id,
+            def.chip.name
+        );
+    }
 
     let parts_dir = parts_dir(repo_root, &def.id);
     std::fs::create_dir_all(&parts_dir)

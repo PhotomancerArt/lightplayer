@@ -24,7 +24,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Emit build provenance for the wire hello (`ServerHello.fw`):
-/// `LP_BUILD_COMMIT` (short git commit or "unknown"), `LP_BUILD_DIRTY`
+/// `LP_BUILD_COMMIT` (short git commit or "unknown", fixed in a figure
+/// build — `lp_app_version::commit`), `LP_BUILD_DIRTY`
 /// ("true"/"false", false when git is absent so vendored builds still
 /// compile), `LP_BUILD_PROFILE` (the cargo profile directory name,
 /// e.g. "release-esp32", falling back to the coarse `PROFILE` env), and
@@ -38,8 +39,10 @@ fn emit_build_provenance() {
     lp_app_version::emit();
     lp_app_version::emit_target();
     emit_git_head_watches();
-    let commit =
-        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    // A figure build is stamped with a fixed commit, as with a fixed version
+    // (`lp_app_version::FIGURE_COMMIT`): the commit's bytes move the image's
+    // layout, and the first-light ratchet reads its time off that layout.
+    let commit = lp_app_version::commit();
     // A figure build is stamped clean, as it is stamped with a fixed version
     // (`lp_app_version::figure_build`): the tree's state must not reach the
     // image whose memory figures are recorded.

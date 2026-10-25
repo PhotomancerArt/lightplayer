@@ -72,6 +72,10 @@ features = ["nightly"]
 
 [features]
 alloc-hooks = []
+# LP fork (third diff, see README-LP.md): PSRAM-first placement for Rust's
+# default allocations above a size threshold, a `Reserved` capability, a
+# sixth region, and allocation/free figures that exclude a capability.
+external-first = []
 compat = []
 default = [
     "compat",

@@ -27,14 +27,15 @@
 //! next load with no store buffer and no cache-coherence window in between,
 //! so cross-core visibility is *stronger* than the part's, on purpose.
 //!
-//! # Slot 1 is held, and nothing in this milestone releases it
+//! # Slot 1: held at reset, released through the ROM's own path
 //!
-//! Q4: two slots, slot 1 **permanently held**. That is not a simplification,
-//! it is what this firmware does. `fw-esp32s3` calls no `start_app_core`, and
-//! `ets_set_appcpu_boot_addr` is linker-provided but **unreferenced**
-//! (`m6/notes.md` §2.4). The 12 `INTERRUPT_CORE1` accesses the census found
-//! are esp-hal's per-core-*generic* code — `interrupt::mapped_to_raw` and
-//! friends indexing a table by `raw_core()` — not a second core starting.
+//! M6's Q4 held slot 1 for good, because `fw-esp32s3` started no second
+//! core. Since `two-core` (2026-10-24) it does: core 1 is the render helper
+//! (`fw-esp32s3/src/core1.rs`), and [`Machine::sync_core1_reset`] releases
+//! slot 1 the way the silicon does — at the mask ROM's reset vector, from
+//! whose code the APP CPU's own path reaches the address the guest wrote
+//! (the core-1 spike's §4). An image that never clears `reseting` with the
+//! clock gate open is unchanged by any of this.
 //!
 //! [`Machine::core_stalled`] is the OR of three inputs:
 //!
@@ -50,17 +51,9 @@
 //!   cpu_control.rs:55-77`) — [`crate::periph::rtc_cntl::StallKey`], P04's
 //!   third input, published by the RTC_CNTL view and read here.
 //!
-//! ⚠️ **This machine does not implement a core-1 release, and the classic's
-//! must not be copied.** DD53's model — core 1 begins at `appcpu_ctrl_d`'s
-//! address with no ROM code run — is the classic's *finding*, pinned on
-//! classic silicon by a canary (`lp-emu-esp32v3/src/machine.rs`'s module
-//! docs). The S3's registers are different ones and no equivalent
-//! measurement exists. So the **hold** is modelled, faithfully and with the
-//! register cited, and the release is left unimplemented and said to be. A
-//! guest that wrote `start_core1`'s sequence would clear the hold's inputs
-//! and this machine would notice — see [`Machine::core_stalled`] — and there
-//! is deliberately nothing behind that to put a core anywhere, because
-//! "where" is a measurement nobody has made.
+//! The classic's release (DD53: core 1 begins at `appcpu_ctrl_d`'s address
+//! with no ROM code run) is the classic's *finding* and is not copied: here
+//! nothing chooses where a released core starts, the ROM's bytes do.
 //!
 //! # Why the ROM comes before everything
 //!
@@ -110,15 +103,19 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
+use lp_emu_esp_common::engine::flash_cut_spec::{AfterCut, FLASH_CUT_MARKER, FlashCutSpec};
 use lp_emu_esp_common::host::ByteSink;
 use lp_emu_esp_common::pins::{PadId, RouteSource};
 use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
-use lp_emu_esp_common::{ByteLog, ByteSource, ElfImage, MachineRequest, SocBus, Strap};
+use lp_emu_esp_common::{
+    ByteLog, ByteSource, ElfImage, MachineRequest, ResetSource, SocBus, Strap,
+};
 
 use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, Which};
 use crate::control::{ControlCommand, ControlReply, HostReport};
-use crate::flash::{FlashBacking, FlashHandle, FlashImage};
+use crate::flash::{FlashBacking, FlashHandle, FlashImage, LPFS_LEN, LPFS_OFFSET};
 use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT};
+use crate::periph::spi1::Spi1;
 use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
 use crate::periph::{FlashSet, HostStreams};
 
@@ -157,7 +154,8 @@ const STRICT_SLICE_CYCLES: u64 = 1_024;
 /// scheduling.
 pub const CORE_QUANTUM_DEFAULT: u64 = 256;
 
-/// The number of cores the S3 has. Both are constructed; slot 1 is held.
+/// The number of cores the S3 has. Both are constructed; slot 1 is held at
+/// reset until the guest releases it ([`Machine::sync_core1_reset`]).
 pub const CORES: usize = 2;
 
 /// The order the S3's peripheral blocks are registered in. See the module
@@ -276,6 +274,26 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "APB_SARADC",
     "SENS",
     "RNG",
+    // ---- S3 radio M1: the esp-radio blobs' windows (`periph::radio_stub`),
+    // appended for the index contract's reason. Met only by an image that
+    // starts the radio (`fw-esp32s3 --features radio_boot_probe`), from
+    // `esp_radio::wifi::new`'s PHY init on; the shipped image reaches none.
+    "PBUS",
+    "I2C_MST_HI",
+    "BT",
+    "RF_CTRL",
+    "NRX_HI",
+    "BLE_RW",
+    "WIFI_MAC",
+    "WIFI_PWR",
+    "BTDM_WAKE",
+    // ---- M9: the parallel LED path (`periph::gdma`, `periph::lcd_cam`),
+    // appended for the same reason. Met only by an image that drives WS281x
+    // lanes from LCD_CAM; LCD_CAM is two windows around its unmapped CAM
+    // registers.
+    "DMA",
+    "LCD_CAM_CLOCK",
+    "LCD_CAM",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -752,6 +770,39 @@ pub enum Outcome {
         symbol: Option<String>,
         access: CacheOffAccess,
     },
+    /// **The flash-busy model** ([`Esp32S3Builder::flash_busy`]): a core
+    /// reached through the flash/PSRAM windows while `SPI1` was programming
+    /// or erasing the flash. On silicon both go over the MSPI bus the write
+    /// holds, and a refill during an erase hung FS3 (PSRAM spike, 2026-10-22):
+    /// every flash writer must stall core 1 first, and core 0 runs from IRAM
+    /// with interrupts masked. Exit code 9.
+    FlashBusyFetch {
+        cycle: Cycles,
+        /// The core that made the access.
+        core: usize,
+        /// The instruction that made it: exact, one instruction a window
+        /// while the watch is armed.
+        pc: u32,
+        symbol: Option<String>,
+        /// The window address, and whether it was a fetch (else a read).
+        addr: u32,
+        fetch: bool,
+        /// The guest cycle the program or erase finishes at.
+        busy_until: Cycles,
+    },
+    /// A `--flash-cut` plan fired: the supply went in the middle of the
+    /// program or erase `report` names, the chip tore it, and the run stops
+    /// with the flash as the cut left it (`then=power-cycle` runs on instead
+    /// and never returns this). Exit code **8** — the C6's power cut exits 6,
+    /// which on this chip (and the classic) is the cache-off fetch.
+    PowerCut {
+        cycle: Cycles,
+        report: lp_emu_esp_common::engine::flash_cut::FlashCutReport,
+    },
+    /// A strict emulator seam request (`--seams`) cannot engage on the image
+    /// this chip start runs: no live table, or an entry missing. Judged once
+    /// the app runs, so after the build. Exit code 64, the C6's.
+    Seam { cycle: Cycles, why: String },
 }
 
 impl Outcome {
@@ -760,12 +811,13 @@ impl Outcome {
     /// **A cross-machine contract**, so a script that drives all three
     /// machines reads one table: 0 deadline or `--exit-on`, 2 fault or a
     /// reset the machine could not perform, 3 strict-bus refusal, 4 wall
-    /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence.
+    /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence, 8 power
+    /// cut, 9 flash-busy access (this chip's, [`Outcome::FlashBusyFetch`]).
     ///
     /// **7 cannot arise here**, and saying so is cheaper than leaving a
     /// reader to wonder: it is a flash-MMU divergence between two cores'
-    /// tables (the classic's ruling R4), and **one core runs on this chip
-    /// with one table** — `Cache_Ibus_MMU_Set` and `Cache_Dbus_MMU_Set`
+    /// tables (the classic's ruling R4), and **both cores share one table**
+    /// on this chip — `Cache_Ibus_MMU_Set` and `Cache_Dbus_MMU_Set`
     /// write the same `0x600C_5000` array — so there is no second table to
     /// diverge from. The code stays reserved across the family and this
     /// machine never emits it; there is no `--app-mmu-divergence` flag to
@@ -778,6 +830,9 @@ impl Outcome {
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
             Outcome::CacheOffFetch { .. } => 6,
+            Outcome::PowerCut { .. } => 8,
+            Outcome::FlashBusyFetch { .. } => 9,
+            Outcome::Seam { .. } => 64,
         }
     }
 
@@ -789,6 +844,9 @@ impl Outcome {
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::ExitMatched { cycle }
             | Outcome::CacheOffFetch { cycle, .. }
+            | Outcome::FlashBusyFetch { cycle, .. }
+            | Outcome::PowerCut { cycle, .. }
+            | Outcome::Seam { cycle, .. }
             | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -841,6 +899,8 @@ pub enum BuildError {
     UndeclaredPeripheral {
         name: String,
     },
+    /// A strict emulator seam request that cannot engage (`--seams`).
+    Seam(String),
 }
 
 impl fmt::Display for BuildError {
@@ -862,6 +922,7 @@ impl fmt::Display for BuildError {
                 "peripheral `{name}` is not in PERIPHERAL_REGISTRATION_ORDER — add it in the \
                  place the boot meets it, not at the end"
             ),
+            BuildError::Seam(why) => write!(f, "{why}"),
         }
     }
 }
@@ -1094,6 +1155,9 @@ pub struct Esp32S3Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: Option<bool>,
+    /// `--no-block-cache`, held as its positive. On by default.
+    block_cache: bool,
+    flash_busy: bool,
     boot_frame: Option<BootFrame>,
     cpenable_reset: Option<u32>,
     core_quantum: Option<u64>,
@@ -1112,9 +1176,27 @@ pub struct Esp32S3Builder {
     control: Option<String>,
     usb_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
+    flash_cut: Option<FlashCutSpec>,
+    // ---- emulator seams (S3 radio M5) ----
+    /// Emulator seams to engage (`--seams`, `--seams-prefer`). The capability
+    /// defaults (`net=lan`, softly) unless asked otherwise.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// The wake's pacing knobs.
+    seam_pacing: lp_emu_esp_common::seam::PacerConfig,
+    /// The virtual LAN the network seam answers from, and this board's name
+    /// on it ([`Esp32S3Builder::lan`]); `None` gives an engaged board an empty
+    /// LAN of its own.
+    lan: Option<(
+        lp_emu_esp_common::seam::net::SharedLan,
+        lp_emu_esp_common::ParticipantId,
+    )>,
+    /// The run's pace ([`Esp32S3Builder::pace`]); `None` is the unset pace.
+    pace: Option<lp_emu_esp_common::seam::net::Pace>,
     // ---- the flash, the cache and the ROM's console (M6 P06) ----
     flash_backing: FlashBacking,
     flash_len: u32,
+    /// The PSRAM's size ([`Esp32S3Builder::psram_len`]).
+    psram_len: u32,
     cache_off: CacheOffPolicy,
     uart0: UsbSjSink,
     uart0_source: Option<Box<dyn ByteSource>>,
@@ -1137,6 +1219,8 @@ impl Default for Esp32S3Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_unsupported: None,
+            block_cache: true,
+            flash_busy: false,
             boot_frame: None,
             cpenable_reset: None,
             core_quantum: None,
@@ -1154,8 +1238,14 @@ impl Default for Esp32S3Builder {
             control: None,
             usb_script: Vec::new(),
             reboot_on_reset: false,
+            flash_cut: None,
+            seams: lp_emu_esp_common::seam::SeamRequest::default(),
+            seam_pacing: lp_emu_esp_common::seam::PacerConfig::default(),
+            lan: None,
+            pace: None,
             flash_backing: FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            psram_len: crate::psram::DEFAULT_PSRAM_LEN,
             cache_off: CacheOffPolicy::default(),
             uart0: UsbSjSink::default(),
             uart0_source: None,
@@ -1191,6 +1281,7 @@ impl fmt::Debug for Esp32S3Builder {
             .field("reboot_on_reset", &self.reboot_on_reset)
             .field("flash_backing", &self.flash_backing)
             .field("flash_len", &self.flash_len)
+            .field("psram_len", &self.psram_len)
             .field("cache_off", &self.cache_off)
             .field("uart0", &self.uart0)
             .field("strap_word", &format_args!("{:#x}", self.strap_word))
@@ -1250,6 +1341,16 @@ impl Esp32S3Builder {
         self
     }
 
+    /// The octal PSRAM on `CS1` ([`crate::psram`]): one of
+    /// [`crate::psram::DENSITIES`]' sizes, or `0` for a board without. The
+    /// default is [`crate::psram::DEFAULT_PSRAM_LEN`], the canonical XIAO
+    /// ESP32-S3's 8 MiB; an image that never brings PSRAM up runs exactly as
+    /// it does with none (`tests/psram_boot.rs` holds that).
+    pub fn psram_len(mut self, bytes: u32) -> Self {
+        self.psram_len = bytes;
+        self
+    }
+
     /// `--cache-off-fetch` (D4). The default is [`CacheOffPolicy::Stop`],
     /// and that is what every gate run uses.
     pub fn cache_off_fetch(mut self, policy: CacheOffPolicy) -> Self {
@@ -1306,6 +1407,37 @@ impl Esp32S3Builder {
     /// silently. On by default, as on the classic (DD16).
     pub fn strict_unsupported(mut self, on: bool) -> Self {
         self.strict_unsupported = Some(on);
+        self
+    }
+
+    /// Pre-decode blocks of instructions, or do not (`--no-block-cache`).
+    ///
+    /// **On by default**, and off is the identity oracle: the same binary
+    /// with the cache off must print an identical everything — the same
+    /// UART0 and USB bytes, the same `run:` line, the same frames
+    /// (`scripts/emu/s3-oracle.sh`). The classic's twin, and for the same
+    /// reason there is no `rom-up` exclusion: this chip's invalidation
+    /// contract is the store address (XD3), which catches the mask ROM's and
+    /// the bootloader's copies as it catches the JIT's.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
+        self
+    }
+
+    /// **The flash-busy model**, off by default (a run without it is the
+    /// machine as it was, byte for byte): `SPI1` holds WIP for a program's
+    /// or an erase's busy time, so the ROM's own poll loop spins through it,
+    /// and while it does any access through the flash/PSRAM windows by
+    /// **either** core stops the run ([`Outcome::FlashBusyFetch`]). The
+    /// check a two-core image's flash writers are held to: every one must
+    /// stall core 1 first.
+    ///
+    /// The busy times are CX1's part ([`NorTiming::CX1`](lp_emu_esp_common::engine::nor_timing::NorTiming::CX1),
+    /// a C6's): there is no S3 measurement, so they are an estimate here, and
+    /// nothing gates on them. What the model proves is the overlap, not the
+    /// duration.
+    pub fn flash_busy(mut self, on: bool) -> Self {
+        self.flash_busy = on;
         self
     }
 
@@ -1438,6 +1570,23 @@ impl Esp32S3Builder {
         self
     }
 
+    /// Cut the power at the Nth program or erase command inside `lpfs`
+    /// (`--flash-cut <spec>`) — a test switch, off by default, the C6's
+    /// (`lp_emu_esp_common::engine::flash_cut_spec`). The range is the
+    /// spec's, or the chip's own `lpfs` row as the build finds it
+    /// ([`lpfs_range`]), and the count runs from power-on. When the cut fires
+    /// the run ends with [`Outcome::PowerCut`], or, with `then=power-cycle`,
+    /// the machine is power-cycled ([`Machine::power_cycle`]: back to the
+    /// power-on snapshot, the flash as the cut left it) and runs on, the plan
+    /// spent. The run's label gains `+flash-cut`
+    /// ([`Machine::configuration_label`]). A machine with a plan keeps a
+    /// power-on snapshot whatever [`reboot_on_reset`](Self::reboot_on_reset)
+    /// says.
+    pub fn flash_cut(mut self, spec: FlashCutSpec) -> Self {
+        self.flash_cut = Some(spec);
+        self
+    }
+
     /// Where decoded WS281x frames go. They are always also kept in memory
     /// for [`Machine::frames`].
     pub fn dump_frames(mut self, sink: FrameSink) -> Self {
@@ -1463,6 +1612,62 @@ impl Esp32S3Builder {
     /// 24-frame run holds hundreds of thousands of pulses.
     pub fn rmt_logs(mut self, keep: bool) -> Self {
         self.rmt_logs = keep;
+        self
+    }
+
+    /// Engage these emulator seams (`--seams net=lan`, `--seams-prefer …`;
+    /// `lp_emu_esp_common::seam::SeamRequest`). A strict seam that no table
+    /// in flash could satisfy fails the build; one that cannot engage once
+    /// the app runs ends the run with [`Outcome::Seam`]. A soft one prints
+    /// `SEAM none engaged: …` and the run goes on. The default request is the
+    /// capability defaults (`net=lan`, softly); only an empty one (`none`)
+    /// scans nothing.
+    pub fn seams(mut self, request: lp_emu_esp_common::seam::SeamRequest) -> Self {
+        self.seams = request;
+        self
+    }
+
+    /// Put this board on `lan` as `board` (`<board>/net`,
+    /// `lp_emu_esp_common::seam::net::net_endpoint`), its station MAC the
+    /// eFuse MAC ([`Self::efuse`]). When the request wants `net=lan`, the
+    /// board is **attached at build** — before the guest boots — so a host can
+    /// call [`SharedLan::forward`] and print the board's `lan:` address at
+    /// once; a MAC another board on the LAN already has fails the build. The
+    /// attachment survives every reboot and power cycle.
+    ///
+    /// Who drives the LAN is the LAN's ([`LanDriver`]): a self-driven or
+    /// wall-clock one is pumped by the machine itself (the S3 has no lockstep
+    /// runner, so a runner's LAN carries nothing for it). Without this an
+    /// engaged board gets an empty LAN of its own: nothing in range.
+    ///
+    /// [`SharedLan::forward`]: lp_emu_esp_common::seam::net::SharedLan::forward
+    /// [`LanDriver`]: lp_emu_esp_common::seam::net::LanDriver
+    pub fn lan(
+        mut self,
+        lan: lp_emu_esp_common::seam::net::SharedLan,
+        board: lp_emu_esp_common::ParticipantId,
+    ) -> Self {
+        self.lan = Some((lan, board));
+        self
+    }
+
+    /// The run's pace (`lp_emu_esp_common::seam::net::lan_pace`): `realtime`
+    /// holds the board's guest clock to wall time for the whole run, `max`
+    /// never does; unset (the default) holds it only while a host is
+    /// connected through one of its LAN's forwards. Applied at the board's
+    /// LAN pump, so `realtime` needs the network seam engaged on a LAN its
+    /// boards drive themselves: a run that does not ask for `net=lan`, or
+    /// whose LAN is a runner's, fails to build, and a chip start where the
+    /// seam does not engage ends the run ([`Outcome::Seam`]). A set pace is
+    /// in the configuration label (`…@pace=realtime`).
+    pub fn pace(mut self, pace: lp_emu_esp_common::seam::net::Pace) -> Self {
+        self.pace = Some(pace);
+        self
+    }
+
+    /// The wake's pacing knobs (`lp_emu_esp_common::seam::PacerConfig`).
+    pub fn seam_pacing(mut self, pacing: lp_emu_esp_common::seam::PacerConfig) -> Self {
+        self.seam_pacing = pacing;
         self
     }
 
@@ -1615,6 +1820,9 @@ impl Esp32S3Builder {
             FlashImage::open(self.flash_backing, self.flash_len)
                 .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
         ));
+        let psram = crate::psram::Psram::new(self.psram_len)
+            .map_err(BuildError::Io)?
+            .handle();
         let cache = S3Cache::handle();
         cache
             .lock()
@@ -1622,6 +1830,7 @@ impl Esp32S3Builder {
             .set_policy(self.cache_off);
         let flash_set = FlashSet {
             flash: flash.clone(),
+            psram: psram.clone(),
             cache: cache.clone(),
             strap: self.strap_word,
             seed: self.seed,
@@ -1662,6 +1871,16 @@ impl Esp32S3Builder {
         let usb_index = bus.peripheral_index("USB_DEVICE");
         let gpio_index = bus.peripheral_index("GPIO");
         let rmt_index = bus.peripheral_index("RMT");
+        let gdma_index = bus.peripheral_index("DMA");
+        let lcd_index = bus.peripheral_index("LCD_CAM");
+        let spi1_index = bus.peripheral_index("SPI1");
+        if self.flash_busy
+            && let Some(index) = spi1_index
+        {
+            bus.with_peripheral::<Spi1, _>(index, |spi, _| {
+                spi.set_nor_timing(Some(lp_emu_esp_common::engine::nor_timing::NorTiming::CX1))
+            });
+        }
 
         // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
         // where the C6's has it clear, so the fabric is told what the
@@ -1726,7 +1945,12 @@ impl Esp32S3Builder {
         // otherwise would have nowhere for P04's SYSTEM view to write, and
         // nothing for a snapshot to carry.
         let harts: Vec<XtHart<SocBus>> = (0..CORES)
-            .map(|core| fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset))
+            .map(|core| {
+                let mut hart =
+                    fresh_hart(core, self.time_grade, strict_unsupported, cpenable_reset);
+                hart.set_block_cache(self.block_cache);
+                hart
+            })
             .collect();
 
         let mut machine = Machine {
@@ -1735,6 +1959,7 @@ impl Esp32S3Builder {
             // Slot 1 is held by the machine as well as by the chip's own
             // reset state, and nothing in M6 P03 clears either.
             stalled: [false, true],
+            core1_releases: 0,
             core_1_control,
             stall_key,
             reset_cause: self.reset_cause,
@@ -1763,17 +1988,23 @@ impl Esp32S3Builder {
             usb_sj_drain: self.usb_sj_drain,
             usb_client_connected: false,
             usb_index,
+            flash_busy_spi1: if self.flash_busy { spi1_index } else { None },
             control,
             script: self.usb_script.into(),
             control_lines: 0,
             next_host_poll: 0,
             reboot_on_reset: self.reboot_on_reset,
+            flash_cut_then: AfterCut::Stop,
+            power_cycle_requested: false,
+            flash_cut_armed: false,
+            power_cycles: 0,
             reboots: 0,
             strap: Strap::App,
             power_on: None,
             boot_mode: self.boot_mode,
             cache,
             flash,
+            psram,
             cache_fills: 0,
             staging: FlashStaging::default(),
             cache_watch: false,
@@ -1784,6 +2015,9 @@ impl Esp32S3Builder {
             gpio_index,
             strap_word: self.strap_word,
             rmt_index,
+            gdma_index,
+            lcd_index,
+            dma_violation: None,
             pins: PinObserver {
                 strip: self.strip,
                 cpu_hz: memmap::CPU_HZ,
@@ -1793,6 +2027,13 @@ impl Esp32S3Builder {
                 pin_log: pin_log_sink,
                 pin_log_lines: 0,
                 pin_log_capped: false,
+            },
+            seams: crate::seams::SeamState {
+                pacer_config: self.seam_pacing,
+                board: self.lan.as_ref().map(|(_, b)| *b).unwrap_or_default(),
+                lan: self.lan.as_ref().map(|(l, _)| l.clone()),
+                pace: self.pace,
+                ..crate::seams::SeamState::new(self.seams.clone())
             },
         };
 
@@ -1810,18 +2051,84 @@ impl Esp32S3Builder {
             BootMode::Direct | BootMode::RomUp => {}
         }
 
+        // The power cut, armed now so its count runs from power-on, over the
+        // range the chip's own table names (a blank chip falls back to the
+        // shipped `lpfs` row).
+        if let Some(spec) = &self.flash_cut {
+            let mut flash = machine.flash.lock().expect("flash poisoned");
+            let plan = spec.plan_in(lpfs_range(flash.bytes()));
+            flash.arm_flash_cut(plan);
+            drop(flash);
+            machine.flash_cut_then = spec.then;
+            machine.flash_cut_armed = true;
+        }
+
         // Guest time is zero and everything is placed: the one moment a
         // peripheral may schedule something before the guest touches it.
         machine.bus.start_peripherals();
 
         // The state a reboot goes back to, taken only when one was asked
         // for: a snapshot costs a copy of every region.
-        if self.reboot_on_reset {
+        // A flash-cut plan is a power cut waiting to happen: keep the
+        // snapshot a power cycle restores, whether or not resets are
+        // performed.
+        if self.reboot_on_reset || machine.flash_cut_armed {
             machine.power_on = Some(machine.snapshot());
         }
 
+        // Emulator seams: the build is the first chip start. After the
+        // power-on snapshot, so a reboot restores an unpatched window and
+        // resolves again. A direct load is already running the app, so it
+        // resolves and arms now; a ROM-up boot waits for the app. With none
+        // asked for: nothing at all.
+        //
+        // A board a host put on a LAN is attached now, before the guest
+        // boots, when it wants the network seam: its lease is reserved and a
+        // host can forward to it at once.
+        let wants_net = machine
+            .seams
+            .request
+            .wanted()
+            .iter()
+            .any(|(i, _)| i.answer == lp_emu_esp_common::seam::SeamAnswer::Net);
+        if let Some((lan, board)) = &self.lan
+            && wants_net
+        {
+            let id = lp_emu_esp_common::seam::net::net_endpoint(*board);
+            lan.attach(id, machine.efuse().mac)
+                .map_err(|why| BuildError::Seam(format!("net=lan: {why}")))?;
+            lan.set_pace(id, self.pace).map_err(BuildError::Seam)?;
+        }
+        // A `realtime` pace is held at the LAN pump: with no network seam
+        // asked for there is no LAN to hold it, and the run would go unpaced
+        // under a label that says otherwise.
+        if self.pace == Some(lp_emu_esp_common::seam::net::Pace::Realtime) && !wants_net {
+            return Err(BuildError::Seam(
+                crate::seams::net_seam::realtime_needs_a_lan(
+                    "this run does not ask for the network seam (`net=lan`)",
+                ),
+            ));
+        }
+        machine.seams_on_chip_start().map_err(BuildError::Seam)?;
+        machine.seams_start_if_app_running();
+        if let Some(why) = machine.seams.strict_error.take() {
+            return Err(BuildError::Seam(why));
+        }
+        machine.drain_code_writes();
+
         Ok(machine)
     }
+}
+
+/// The `lpfs` partition as `chip`'s own table says, or the shipped table's
+/// row ([`LPFS_OFFSET`]`+`[`LPFS_LEN`]) when no table parses or none is
+/// called `lpfs` — a `--flash-cut` plan's default range on this chip.
+pub fn lpfs_range(chip: &[u8]) -> core::ops::Range<u32> {
+    crate::image::partitions(chip)
+        .into_iter()
+        .find(|p| p.label == "lpfs")
+        .map(|p| p.offset..p.offset.saturating_add(p.len))
+        .unwrap_or(LPFS_OFFSET..LPFS_OFFSET + LPFS_LEN)
 }
 
 /// `_ResetVector`'s offset from the mask ROM's base. The vendored ROM ELF's
@@ -1876,11 +2183,13 @@ fn fresh_hart(
 
 /// The ESP32-S3 machine.
 pub struct Machine {
-    bus: SocBus,
-    /// **Two** slots: the S3 is dual-core. Slot 1 is held — see the module
+    pub(crate) bus: SocBus,
+    /// **Two** slots: the S3 is dual-core. Slot 1 is held at reset — see the module
     /// docs.
     pub harts: Vec<XtHart<SocBus>>,
     stalled: [bool; CORES],
+    /// Times slot 1 came out of reset ([`Machine::sync_core1_reset`]).
+    core1_releases: u64,
     /// `SYSTEM.core_1_control_0`, shared with the `SYSTEM` view.
     core_1_control: CoreOneHandle,
     /// RTC_CNTL's two-register stall key, published by its view.
@@ -1932,6 +2241,8 @@ pub struct Machine {
     usb_client_connected: bool,
     /// `USB_DEVICE`'s peripheral index, the control channel's target.
     usb_index: Option<usize>,
+    /// `SPI1`'s index when the flash-busy model is on ([`Esp32S3Builder::flash_busy`]).
+    flash_busy_spi1: Option<usize>,
     control: Option<ControlChannel>,
     /// Scripted control commands still to apply, in file order.
     script: std::collections::VecDeque<(Cycles, ControlCommand)>,
@@ -1941,6 +2252,16 @@ pub struct Machine {
     next_host_poll: Cycles,
     reboot_on_reset: bool,
     reboots: u64,
+    /// What the run loop does when a flash power cut fires
+    /// ([`Esp32S3Builder::flash_cut`]).
+    flash_cut_then: AfterCut,
+    /// The control channel asked for a power cycle; the run loop performs it.
+    power_cycle_requested: bool,
+    /// Was a flash-cut plan armed on this machine? What puts `+flash-cut`
+    /// in the label, for the whole run.
+    flash_cut_armed: bool,
+    /// How many power cycles a `then=power-cycle` cut performed.
+    power_cycles: u64,
     /// The strapping the last reboot used.
     strap: Strap,
     /// The state a reboot goes back to. `None` unless
@@ -1953,6 +2274,9 @@ pub struct Machine {
     cache: CacheHandle,
     /// The flash chip, shared with SPI1 and read by the cache fill.
     flash: FlashHandle,
+    /// The PSRAM on `CS1`, shared with SPI1 (its mode registers) and read
+    /// and written by the cache fill (its pages).
+    psram: crate::psram::PsramHandle,
     /// How many entries the fill has copied out of the chip.
     cache_fills: u64,
     /// What a direct load staged in the chip; empty on a ROM-up machine.
@@ -1972,10 +2296,22 @@ pub struct Machine {
     /// The other block that watches the pads: the RMT's own logs and
     /// refill telemetry are read through it (M6 P07).
     rmt_index: Option<usize>,
+    /// M9: the AHB GDMA, whose OUT chains the machine walks between windows
+    /// ([`Machine::service_gdma`]), and LCD_CAM's LCD window, which consumes
+    /// them.
+    gdma_index: Option<usize>,
+    lcd_index: Option<usize>,
+    /// A GDMA descriptor or buffer outside internal RAM under `--strict-bus`:
+    /// the run ends on it as on any strict refusal.
+    dma_violation: Option<StrictViolation>,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
     strap_word: u32,
+    /// Emulator seams: what was asked for, this chip start's resolution, the
+    /// arm sites and their counters. Empty on a run that asked for none
+    /// (`--seams none`). See [`crate::seams`].
+    pub(crate) seams: crate::seams::SeamState,
 }
 
 impl Machine {
@@ -2043,7 +2379,7 @@ impl Machine {
     /// the emulator's so D4's watch does not arm on them ([`crate::cache`]).
     fn refill_now(&mut self) -> u64 {
         self.set_host_access(true);
-        let filled = cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        let filled = cache::fill(&mut self.bus, &self.flash, &self.psram, &self.cache) as u64;
         self.set_host_access(false);
         filled
     }
@@ -2072,7 +2408,26 @@ impl Machine {
         if !self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
             return;
         }
-        self.cache_fills += self.refill_now();
+        let filled = self.refill_now();
+        self.cache_fills += filled;
+        // A fill can erase a seam's patch (or map the page a site waits
+        // for). Only after a fill, and only with a seam engaged: seam-off
+        // runs pay nothing, seam-on runs pay per fill, not per slice.
+        if filled > 0 && self.seams.engaged() {
+            self.arm_seams();
+        }
+    }
+
+    /// Hand every code write the bus recorded to both harts, so neither runs
+    /// a block decoded from bytes that have since changed.
+    fn drain_code_writes(&mut self) {
+        if self.bus.code_writes_pending() {
+            for (lo, hi) in self.bus.take_code_writes() {
+                for hart in &mut self.harts {
+                    hart.invalidate_block_range(lo, hi);
+                }
+            }
+        }
     }
 
     fn set_host_access(&mut self, on: bool) {
@@ -2085,6 +2440,50 @@ impl Machine {
     /// The flash chip, for a test and for the run report.
     pub fn flash(&self) -> &FlashHandle {
         &self.flash
+    }
+
+    /// The PSRAM, for a test and for the run report.
+    pub fn psram(&self) -> &crate::psram::PsramHandle {
+        &self.psram
+    }
+
+    /// The run report's `psram:` line, or `None` when the image never reached
+    /// the chip — a run that does not touch PSRAM reports what it always did.
+    pub fn psram_summary(&self) -> Option<String> {
+        let chip = self.psram.lock().expect("psram poisoned");
+        let c = chip.census();
+        if !c.touched() {
+            return None;
+        }
+        let mapped = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .psram_pages()
+            .len();
+        Some(format!(
+            "psram: {} ({} MiB, octal); {} register reads, {} writes, {} refused; {} pages \
+             filled, {} written back, {} mapped now",
+            chip.len(),
+            chip.len() >> 20,
+            c.register_reads,
+            c.register_writes,
+            c.refused,
+            c.pages_filled,
+            c.pages_written_back,
+            mapped
+        ))
+    }
+
+    /// The PSRAM's bytes as the guest sees them now: the chip, with every
+    /// page the cache holds live written back into it first.
+    pub fn psram_contents(&self) -> Option<Vec<u8>> {
+        cache::write_back_psram(&self.bus, &self.psram, &self.cache);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .contents()
+            .map(<[u8]>::to_vec)
     }
 
     /// Write the flash image back if its backing says to.
@@ -2214,14 +2613,70 @@ impl Machine {
     /// The offence the watch recorded during the window just run, as an
     /// outcome. `pc` is the instruction that made the access — the window
     /// was one instruction long, which is what makes that exact.
-    fn take_cache_off_fetch(&mut self, pc: u32) -> Option<Outcome> {
-        let access = self.cache.lock().expect("cache poisoned").take_offence()?;
+    fn take_cache_off_fetch(&mut self, core: usize, pc: u32) -> Option<Outcome> {
+        let mut cache = self.cache.lock().expect("cache poisoned");
+        if let Some(busy) = cache.take_busy_offence() {
+            drop(cache);
+            return Some(Outcome::FlashBusyFetch {
+                cycle: self.harts[core].cycle_count(),
+                core,
+                pc,
+                symbol: self.symbolize(pc),
+                addr: busy.addr,
+                fetch: busy.fetch,
+                busy_until: busy.busy_until,
+            });
+        }
+        let access = cache.take_offence()?;
+        drop(cache);
         Some(Outcome::CacheOffFetch {
-            cycle: self.harts[0].cycle_count(),
+            cycle: self.harts[core].cycle_count(),
             pc,
             symbol: self.symbolize(pc),
             access,
         })
+    }
+
+    /// The flash-busy model: tell the watch whether `SPI1` is mid-program or
+    /// mid-erase at `now`. A run without the model asks nothing.
+    fn sync_flash_busy(&mut self, now: Cycles) {
+        let Some(index) = self.flash_busy_spi1 else {
+            return;
+        };
+        let until = self
+            .bus
+            .with_peripheral::<Spi1, _>(index, |spi, _| spi.busy_until())
+            .unwrap_or(0);
+        let busy = (now < until).then_some(until);
+        self.cache
+            .lock()
+            .expect("cache poisoned")
+            .set_flash_busy(busy);
+    }
+
+    /// What the flash-busy stop says.
+    pub fn flash_busy_message(
+        &self,
+        cycle: Cycles,
+        core: usize,
+        pc: u32,
+        addr: u32,
+        fetch: bool,
+        busy_until: Cycles,
+    ) -> String {
+        let symbol = match self.symbolize(pc) {
+            Some(name) => format!(" ({name})"),
+            None => String::new(),
+        };
+        let what = if fetch { "fetch" } else { "read" };
+        format!(
+            "FLASH-BUSY ACCESS  core={core}  cycle={cycle}\n  \
+             pc={pc:#010x}{symbol}  {what} through the window at {addr:#010x}\n  \
+             while SPI1 is programming or erasing the flash (busy until cycle {busy_until})\n\n  \
+             On silicon the MSPI bus is the write's: a cache refill now returns garbage\n  \
+             or hangs the chip. Every flash writer must stall core 1 first, and core 0\n  \
+             must run from IRAM with interrupts masked. This emulator refuses instead."
+        )
     }
 
     /// What D4's stop says, and what it does not claim. Written for a reader
@@ -2402,6 +2857,110 @@ impl Machine {
         self.reboots
     }
 
+    /// Take the supply away and put it back: the whole power-on snapshot
+    /// restored — RTC memory and `reset_state`'s power-on code included —
+    /// with the flash chip as it stands, because the chip is not in the
+    /// snapshot. What a `then=power-cycle` cut performs. On this machine it
+    /// is [`reboot`](Self::reboot) into the run's own strap (a reboot here
+    /// already restores every block; there is no HP/LP split to choose
+    /// between, unlike the C6's), counted apart from the resets.
+    ///
+    /// `false` when the machine keeps no power-on snapshot.
+    pub fn power_cycle(&mut self) -> bool {
+        if !self.reboot(Strap::App) {
+            return false;
+        }
+        // The supply is back: a flash a power cut latched off takes commands
+        // again, its cells (weak bits included) as the cut left them — as
+        // the C6's restart does. Without it every program and erase after
+        // the cycle was dropped, and the second boot read a chip it could not
+        // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
+        self.flash.lock().expect("flash poisoned").restore_power();
+        // The PSRAM is volatile: what `reboot` kept across the reset (a
+        // reset does not take the chip's supply away) is gone, and its mode
+        // registers are back at their reset.
+        self.psram.lock().expect("psram poisoned").power_off();
+        // `reboot` counted a reset; this was a power cycle.
+        self.reboots -= 1;
+        self.power_cycles += 1;
+        true
+    }
+
+    /// How many power cycles a `then=power-cycle` cut performed.
+    pub fn power_cycles(&self) -> u64 {
+        self.power_cycles
+    }
+
+    /// Was a flash-cut plan armed on this machine (what puts `+flash-cut`
+    /// in its label)?
+    pub fn flash_cut_armed(&self) -> bool {
+        self.flash_cut_armed
+    }
+
+    /// The last flash power cut that fired on this machine.
+    pub fn last_flash_cut(&self) -> Option<lp_emu_esp_common::engine::flash_cut::FlashCutReport> {
+        self.flash
+            .lock()
+            .expect("flash poisoned")
+            .last_flash_cut()
+            .copied()
+    }
+
+    /// The run's configuration name: the time grade's, then one
+    /// `+<seam>=<impl>` atom per engaged seam, then `+flash-cut` when a flash
+    /// power-cut plan was armed (the C6's spelling, [`FLASH_CUT_MARKER`],
+    /// which `lp-emu-validate` refuses to record), then `@pace=<mode>` when
+    /// the run's pace was set. Exactly the grade's name when none applies.
+    pub fn configuration_label(&self) -> String {
+        let suffix = if self.flash_cut_armed {
+            FLASH_CUT_MARKER
+        } else {
+            ""
+        };
+        self.seams.label(self.time_grade.configuration(), suffix)
+    }
+
+    /// The flash-cut run's summary lines, for a host to print at exit: the
+    /// cut (or that the plan never fired, and how far it counted), the
+    /// power cycles it performed, and the in-range op census. Empty when no
+    /// plan was armed. The C6's lines, word for word.
+    pub fn flash_cut_summary(&self) -> Vec<String> {
+        if !self.flash_cut_armed {
+            return Vec::new();
+        }
+        let flash = self.flash.lock().expect("flash poisoned");
+        let mut lines = Vec::new();
+        let cutter = flash.flash_cutter();
+        match (cutter.armed(), flash.last_flash_cut()) {
+            (Some(plan), _) => lines.push(format!(
+                "flash-cut: armed at op {} ({}), not reached — {} in-range op(s) counted",
+                plan.at,
+                plan.tear.name(),
+                cutter.seen()
+            )),
+            (None, Some(report)) => lines.push(report.to_string()),
+            (None, None) => {}
+        }
+        if self.power_cycles > 0 {
+            lines.push(format!(
+                "flash-cut: {} power cycle(s) after the cut",
+                self.power_cycles
+            ));
+        }
+        if let Some(census) = flash.flash_op_census() {
+            lines.push(census.to_string());
+        }
+        let weak = flash.weak_bits();
+        if !weak.is_empty() {
+            lines.push(format!(
+                "flash-cut: {} weak bit(s) in {} sector(s), in this process only",
+                weak.count(),
+                weak.sectors().len()
+            ));
+        }
+        lines
+    }
+
     /// The strapping the chip was started with, or the one the last reboot
     /// used.
     pub fn strap(&self) -> Strap {
@@ -2479,13 +3038,62 @@ impl Machine {
         self.stall_key.stalled(core)
     }
 
+    /// Core 1 in and out of reset, at a window boundary.
+    ///
+    /// `SYSTEM.core_1_control_0.reseting` puts slot 1 in reset. When it is
+    /// clear with the clock gate open, slot 1 comes out of reset **at the
+    /// mask ROM's reset vector** in the architectural reset state: a fresh
+    /// hart, `PRID` `0xABAB`. Where it goes from there is the ROM's own code:
+    /// `_ResetHandler` (`0x4000_0454`) takes the APP CPU's fast boot only if
+    /// `SYSTEM.core_1_control_1` bit 31 is set, and otherwise `_start` skips
+    /// the `.bss` clear for `PRID` `0xABAB` and `main` (`0x4004_3a2c`) spins
+    /// on `core_1_control_1` (`0x600C_0004`, which `ets_set_appcpu_boot_addr`
+    /// writes) and `callx8`s the address. So nothing here chooses where a
+    /// released core starts: the reset vector is the architecture's, and the
+    /// rest is ROM bytes this machine already executes (core-1 spike,
+    /// 2026-10-23, §4).
+    ///
+    /// A guest that never clears `reseting` with the gate open (every
+    /// single-core image) never takes either branch: its run is unchanged.
+    fn sync_core1_reset(&mut self, now: Cycles) {
+        let control = self.core_1_control();
+        if control.reseting {
+            // Held in reset (the power-on state, or a later pulse): the next
+            // release starts from the reset vector again.
+            self.stalled[1] = true;
+            return;
+        }
+        if self.stalled[1] && control.clkgate_en {
+            let mut hart = fresh_hart(
+                1,
+                self.time_grade,
+                self.strict_unsupported,
+                self.cpenable_reset,
+            );
+            hart.set_block_cache(self.block_cache());
+            // ⚠️ Silicon's CCOUNT on core 1 starts at 0 out of reset; this
+            // machine's per-hart counter is its clock, so core 1 joins at
+            // `now`. Nothing in the firmware reads core 1's CCOUNT as an
+            // absolute.
+            hart.advance_to_cycle(now);
+            self.harts[1] = hart;
+            self.stalled[1] = false;
+            self.core1_releases += 1;
+        }
+    }
+
+    /// How many times slot 1 has come out of reset this run.
+    pub fn core1_releases(&self) -> u64 {
+        self.core1_releases
+    }
+
     /// Which inputs hold `core` right now, by name, in the order
     /// [`core_stalled`](Self::core_stalled) consults them. Empty for a
     /// running core.
     pub fn stall_inputs(&self, core: usize) -> Vec<&'static str> {
         let mut held = Vec::new();
         if self.stalled.get(core).copied().unwrap_or(true) {
-            held.push("machine (M6 releases no core; there is no S3 measurement of where a released core starts)");
+            held.push("machine (slot 1 in reset: SYSTEM.core_1_control_0.reseting never cleared with the clock gate open)");
         }
         if core == 1 {
             let c = self.core_1_control();
@@ -2555,6 +3163,59 @@ impl Machine {
     /// to be taken? Such a core is given no window and costs nothing.
     pub fn parked(&self, core: usize) -> bool {
         !self.core_stalled(core) && self.harts.get(core).is_some_and(XtHart::is_waiti)
+    }
+
+    /// Whether the harts pre-decode blocks
+    /// ([`Esp32S3Builder::block_cache`]). `false` is `--no-block-cache`.
+    pub fn block_cache(&self) -> bool {
+        self.harts.first().is_some_and(XtHart::block_cache)
+    }
+
+    /// One `blocks:` line per core: what the block cache did, the window
+    /// hoist's split, and the `isync` count — the classic binary's report,
+    /// for the same diagnostic job. **Never part of a compared transcript**:
+    /// a cache hit is not architectural state, so these are exactly the
+    /// lines that differ between a run and its `--no-block-cache` twin.
+    pub fn block_report_lines(&self) -> Vec<String> {
+        (0..CORES)
+            .map(|core| {
+                let hart = &self.harts[core];
+                let isync = hart.isync_count();
+                match hart.block_stats() {
+                    Some(stats) => {
+                        let hoist = hart.window_hoist_stats();
+                        format!(
+                            "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) \
+                             slots={} mean={:.2} flushes={} capacity_flushes={} range={} \
+                             (dropping {} entries) collisions={}; window hoisted={} \
+                             slotwise={} ({:.2}% hoisted); {isync} isync",
+                            stats.decodes,
+                            stats.hits,
+                            stats.hit_rate() * 100.0,
+                            stats.decodes + stats.hits,
+                            stats.slots_run,
+                            stats.mean_block_len(),
+                            stats.flushes,
+                            stats.capacity_flushes,
+                            stats.range_invalidations,
+                            stats.range_entries_dropped,
+                            stats.collisions,
+                            hoist.hoisted,
+                            hoist.slotwise,
+                            hoist.hoisted_share() * 100.0,
+                        )
+                    }
+                    None => format!(
+                        "blocks: core{core} no cache ({}); {isync} isync",
+                        if self.block_cache() {
+                            "never needed one"
+                        } else {
+                            "--no-block-cache"
+                        },
+                    ),
+                }
+            })
+            .collect()
     }
 
     /// Instructions retired by `core` alone.
@@ -2848,6 +3509,22 @@ impl Machine {
         hit
     }
 
+    /// Does the flash chip hold an image header at offset 0 (the second
+    /// stage the mask ROM loads)? `false` on a blank chip.
+    pub fn has_image_at_reset_vector(&self) -> bool {
+        self.flash()
+            .lock()
+            .ok()
+            .and_then(|flash| flash.peek(0, 1).map(|head| head[0]))
+            .is_some_and(|head| head == crate::image::IMAGE_MAGIC)
+    }
+
+    /// Whether a byte client holds the USB link's socket now (the edge the
+    /// coupling last saw), for the network seam's unset pace.
+    pub(crate) fn usb_client_is_connected(&self) -> bool {
+        self.usb_client_connected
+    }
+
     /// Read a word of guest memory from the host side. Marked as the
     /// emulator's own access, so D4's watch never arms on it.
     pub fn peek_word(&mut self, address: u32) -> Option<u32> {
@@ -2870,6 +3547,52 @@ impl Machine {
         self.set_host_access(false);
         self.bus.set_pc(saved);
         ok
+    }
+
+    /// `len` bytes of guest memory at `address`, read word by word through
+    /// [`peek_word`](Self::peek_word)'s decode; `None` if any word refused.
+    pub(crate) fn peek_bytes(&mut self, address: u32, len: usize) -> Option<Vec<u8>> {
+        let mut out = Vec::with_capacity(len);
+        let mut at = address;
+        while out.len() < len {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let word = self.peek_word(word_at)?.to_le_bytes();
+            let take = (4 - lane).min(len - out.len());
+            out.extend_from_slice(&word[lane..lane + take]);
+            at = at.checked_add(take as u32)?;
+        }
+        Some(out)
+    }
+
+    /// Write `bytes` at `address` through [`poke_word`](Self::poke_word)'s
+    /// decode, merging partial words with what is there. `false` if any word
+    /// refused (what came before it is written). A seam answer's only way
+    /// into guest memory.
+    pub(crate) fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
+        let mut at = address;
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let take = rest.len().min(4 - lane);
+            let mut word = if lane == 0 && take == 4 {
+                0
+            } else {
+                match self.peek_word(word_at) {
+                    Some(w) => w,
+                    None => return false,
+                }
+            }
+            .to_le_bytes();
+            word[lane..lane + take].copy_from_slice(&rest[..take]);
+            if !self.poke_word(word_at, u32::from_le_bytes(word)) {
+                return false;
+            }
+            at += take as u32;
+            rest = &rest[take..];
+        }
+        true
     }
 
     /// The word at a symbol, for `--probe <cycle>:<symbol>`.
@@ -2937,6 +3660,21 @@ impl Machine {
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
             }
+            // The network seam's LAN, when this machine drives it itself:
+            // what the guest gave goes out, what arrived comes in, before the
+            // wake looks. One `bool` on every other run.
+            if self.seams.net_pumps {
+                self.net_pump(now);
+            }
+            // An engaged capability seam's wake, before the window: a raise
+            // reaches the cores now, not after a window (or an idle skip)
+            // that could not see it. Never on a seam-off run.
+            if self.seam_wake_armed() && self.seam_wake_tick(now) {
+                self.feed_cores(now);
+            }
+            if let Some(at) = self.seam_wake_deadline() {
+                deadline = deadline.min(at.max(now + 1));
+            }
             // The window. The quantum is the *upper* bound on one core's
             // window; every bound above still applies.
             let window = deadline.saturating_sub(now).max(1).min(self.core_quantum);
@@ -2945,6 +3683,9 @@ impl Machine {
             // then core 1, each opening at `now`. A held core's counter does
             // not move.
             for core in 0..CORES {
+                if core == 1 {
+                    self.sync_core1_reset(now);
+                }
                 if self.core_stalled(core) || self.harts[core].is_waiti() {
                     continue;
                 }
@@ -2957,6 +3698,7 @@ impl Machine {
                 // and the `EXTMEM` view asks for a boundary the moment an
                 // enable bit moves — so the window between "the cache went
                 // off" and "the check is on" is zero instructions.
+                self.sync_flash_busy(now);
                 self.sync_cache_watch();
                 let budget = if self.cache_watch {
                     // `MemoryCost` sees the address and not the pc, so while
@@ -2973,7 +3715,12 @@ impl Machine {
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);
 
-                if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                // Only the watch records an offence, so a window it did not
+                // run under has none to take — and this skips a lock per
+                // window on every run that is not in a cache-off span.
+                if self.cache_watch
+                    && let Some(outcome) = self.take_cache_off_fetch(core, issuing_pc)
+                {
                     return outcome;
                 }
 
@@ -3001,7 +3748,7 @@ impl Machine {
                         self.harts[core].poll_interrupts();
                     }
                     SliceEnd::Ebreak { pc } => {
-                        if !self.serve_breakpoint(core, pc) {
+                        if !self.serve_breakpoint(core, pc) && !self.serve_seam(core, pc) {
                             self.harts[core].deliver_breakpoint(pc);
                         }
                     }
@@ -3027,6 +3774,12 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // M9: an `outlink_start` in the window asked for this boundary;
+            // its chain is read out of RAM now, and LCD_CAM's frame starts.
+            self.service_gdma();
+            if let Some(violation) = self.dma_violation.take() {
+                return Outcome::StrictBus { violation };
+            }
             // The pads: whatever the window put on the wire, in cycle order,
             // and before the feed — a pad whose edge latches a GPIO
             // interrupt must reach the matrix in this same iteration.
@@ -3035,6 +3788,18 @@ impl Machine {
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
             self.service_host(at);
+            // Seams: a chip start waits for the app to run from the flash
+            // window, then resolves and arms. One `bool` on a seam-off run.
+            if self.seams.waiting_for_app {
+                self.seams_start_if_app_running();
+                self.drain_code_writes();
+            }
+            if let Some(why) = self.seams.strict_error.take() {
+                return Outcome::Seam {
+                    cycle: self.cycles(),
+                    why,
+                };
+            }
             self.feed_cores(at);
 
             // The deterministic idle skip: only when **every** running core is
@@ -3055,10 +3820,14 @@ impl Machine {
                 // …and anything the host's side is due to do, for the same
                 // reason the slice is bounded by it.
                 let host = self.next_host_service(at);
+                // …and the seams' next look: a wake the pacer would allow,
+                // or the LAN's next due cycle, so a guest in `waiti` never
+                // sleeps through a join landing or a frame arriving.
+                let seam = self.seam_wake_deadline();
                 let timers = (0..CORES)
                     .filter(|c| !self.core_stalled(*c))
                     .filter_map(|c| self.harts[c].next_timer_cycle());
-                let wake = [event, bytes, host]
+                let wake = [event, bytes, host, seam]
                     .into_iter()
                     .flatten()
                     .chain(timers)
@@ -3119,12 +3888,56 @@ impl Machine {
                     pc,
                 };
             }
+            // The control channel's `power-cycle`: performed here, at the
+            // loop's boundary, with the budget rebased as a reset's is.
+            if std::mem::take(&mut self.power_cycle_requested) {
+                let remaining = stop
+                    .stop_cycle
+                    .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                if self.power_cycle() {
+                    log::info!("machine: host power-cycle (control channel)");
+                    if let Some(remaining) = remaining {
+                        stop_cycle = self.cycles().saturating_add(remaining);
+                    }
+                    matched = 0;
+                    continue;
+                }
+                log::warn!("machine: host power-cycle refused: no power-on snapshot");
+            }
             // A peripheral asked for a reset — the RWDT's stage 0 expired, or
             // the link's control channel asked for one. Reported by default;
             // `--reboot-on-reset` performs it instead.
+            let request = self.bus.take_request();
+            // A flash power cut: the chip tore a command and has no supply.
+            // `then=stop` (the default) ends the run here; `power-cycle`
+            // restores the supply — the machine back to power-on, the flash
+            // as the cut left it, the plan spent — and runs on, with the
+            // budget rebased onto the new clock as a reset's is.
+            if let Some(MachineRequest::PowerCut { report }) = request {
+                if self.flash_cut_then == AfterCut::PowerCycle {
+                    let remaining = stop
+                        .stop_cycle
+                        .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                    if self.power_cycle() {
+                        log::info!("machine: {report} — power-cycled, running on");
+                        if let Some(remaining) = remaining {
+                            stop_cycle = self.cycles().saturating_add(remaining);
+                        }
+                        matched = 0;
+                        continue;
+                    }
+                }
+                return Outcome::PowerCut {
+                    cycle: report.cycle,
+                    report,
+                };
+            }
             if let Some(MachineRequest::Reset {
-                source, at, strap, ..
-            }) = self.bus.take_request()
+                source,
+                at,
+                strap,
+                cause,
+            }) = request
             {
                 // ⚠️ `stop_cycle` is an **absolute** guest cycle and a reboot
                 // moves what zero means. Read what is LEFT of the budget while
@@ -3136,7 +3949,7 @@ impl Machine {
                 let remaining = stop
                     .stop_cycle
                     .map(|_| stop_cycle.saturating_sub(self.cycles()));
-                if self.reboot_on_reset && self.reboot(strap) {
+                if self.reboot_on_reset && self.reboot_for(strap, cause) {
                     log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
                     if let Some(remaining) = remaining {
                         stop_cycle = self.cycles().saturating_add(remaining);
@@ -3192,6 +4005,136 @@ impl Machine {
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
         }
+    }
+
+    /// M9: walk every GDMA OUT chain started since the last boundary, out of
+    /// internal RAM, and hand the bytes to the channel; then let LCD_CAM start
+    /// a frame that was waiting for them. See [`crate::periph::gdma`] for why
+    /// the walk is the machine's. One `Option` test when no image has started
+    /// a channel.
+    fn service_gdma(&mut self) {
+        let Some(gi) = self.gdma_index else {
+            return;
+        };
+        let starts = self
+            .bus
+            .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, _| g.take_starts())
+            .unwrap_or_default();
+        if starts.is_empty() {
+            return;
+        }
+        for req in starts {
+            let result = self.walk_out_chain(&req);
+            if let Err(fault) = &result
+                && fault.outside_ram
+                && self.bus.strict()
+            {
+                self.dma_violation.get_or_insert(StrictViolation {
+                    cycle: req.at,
+                    pc: self.harts[0].pc(),
+                    address: fault.address,
+                    width: lp_emu_esp_common::Width::Word,
+                    access: lp_emu_esp_common::Access::Read,
+                    in_mmio_window: false,
+                    grade: None,
+                });
+            }
+            self.bus
+                .with_peripheral::<crate::periph::gdma::Gdma, _>(gi, |g, cx| {
+                    g.loaded(&req, result, cx)
+                });
+        }
+        if let Some(li) = self.lcd_index {
+            self.bus
+                .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, cx| l.data_ready(cx));
+        }
+    }
+
+    /// Read one OUT chain the way the S3's GDMA does: descriptor by
+    /// descriptor from `req.first`, each one's `length` bytes from its
+    /// buffer, until `suc_eof` or a null `next`. A descriptor or buffer
+    /// outside internal RAM, or (with `out_check_owner`) a descriptor the CPU
+    /// still owns, is a fault. With `out_auto_wrback` each descriptor is
+    /// handed back to the CPU (its `owner` bit cleared) once read.
+    fn walk_out_chain(
+        &mut self,
+        req: &crate::periph::gdma::StartRequest,
+    ) -> Result<crate::periph::gdma::Chain, crate::periph::gdma::WalkFault> {
+        use crate::periph::gdma::{
+            Chain, DESC_OWNER, Descriptor, INTERNAL_RAM, MAX_DESCRIPTORS, WalkFault,
+        };
+        let outside = |address: u32, what: &str| WalkFault {
+            address,
+            outside_ram: true,
+            why: format!("{what} at {address:#010x} is outside internal RAM"),
+        };
+        let mut bytes = Vec::new();
+        let (mut addr, mut last, mut before_last) = (req.first, 0u32, 0u32);
+        for n in 0..MAX_DESCRIPTORS {
+            if !INTERNAL_RAM.contains(&addr) || !INTERNAL_RAM.contains(&(addr + 11)) {
+                return Err(outside(addr, "a descriptor"));
+            }
+            let mut words = [0u32; 3];
+            for (k, w) in words.iter_mut().enumerate() {
+                *w = self
+                    .peek_word(addr + 4 * k as u32)
+                    .ok_or_else(|| outside(addr, "a descriptor"))?;
+            }
+            let d = Descriptor::parse(addr, words);
+            if req.check_owner && !d.owner_dma {
+                return Err(WalkFault {
+                    address: addr,
+                    outside_ram: false,
+                    why: "the CPU owns the descriptor (out_check_owner)".into(),
+                });
+            }
+            if d.length > 0 {
+                let end = d.buffer.wrapping_add(d.length - 1);
+                if !INTERNAL_RAM.contains(&d.buffer) || !INTERNAL_RAM.contains(&end) {
+                    return Err(outside(d.buffer, "a buffer"));
+                }
+                let data = self
+                    .peek_bytes(d.buffer, d.length as usize)
+                    .ok_or_else(|| outside(d.buffer, "a buffer"))?;
+                bytes.extend_from_slice(&data);
+            }
+            if req.auto_wrback {
+                self.poke_word(addr, words[0] & !DESC_OWNER);
+            }
+            before_last = last;
+            last = addr;
+            if d.suc_eof || d.next == 0 {
+                return Ok(Chain {
+                    bytes,
+                    last,
+                    before_last,
+                    descriptors: n + 1,
+                });
+            }
+            addr = d.next;
+        }
+        log::warn!(
+            "GDMA: OUT channel {}: the chain from {:#010x} did not end in {MAX_DESCRIPTORS} \
+             descriptors (a ring?); its first {MAX_DESCRIPTORS} are sent",
+            req.ch,
+            req.first
+        );
+        Ok(Chain {
+            bytes,
+            last,
+            before_last,
+            descriptors: MAX_DESCRIPTORS,
+        })
+    }
+
+    /// How many frames LCD_CAM has shifted out completely (M9).
+    pub fn lcd_frames(&mut self) -> u64 {
+        self.lcd_index
+            .and_then(|li| {
+                self.bus
+                    .with_peripheral::<crate::periph::lcd_cam::Lcd, _>(li, |l, _| l.frames())
+            })
+            .unwrap_or(0)
     }
 
     /// The pads, at a slice boundary: the routing the window changed, then
@@ -3399,6 +4342,8 @@ impl Machine {
             && connected != self.usb_client_connected
         {
             self.usb_client_connected = connected;
+            // A byte-socket client reads on wall time: it holds an unset pace.
+            self.net_host_attached(connected);
             if self.usb_sj_drain == UsbSjDrain::Auto {
                 let command = if connected {
                     ControlCommand::Open
@@ -3474,6 +4419,15 @@ impl Machine {
     /// has no `chip_rst`, so there is no such reply here and the difference
     /// is the README's.
     fn apply_control(&mut self, command: &ControlCommand, now: Cycles) -> ControlReply {
+        // Not the USB block's: a hand on the plug. Left for the run loop,
+        // which performs it at its next boundary and rebases the budget.
+        if matches!(command, ControlCommand::PowerCycle) {
+            self.power_cycle_requested = true;
+            return ControlReply::Ok {
+                verb: "power-cycle",
+                cycle: now,
+            };
+        }
         let Some(index) = self.usb_index else {
             return ControlReply::Err("no USB_DEVICE block in this machine".to_string());
         };
@@ -3557,6 +4511,10 @@ impl Machine {
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),
                 ),
+                // Handled above: the supply is not this block's.
+                ControlCommand::PowerCycle => {
+                    Err("unreachable: `power-cycle` never reaches USB_DEVICE".to_string())
+                }
             });
 
         match outcome {
@@ -3603,7 +4561,16 @@ impl Machine {
             self.usb_sj_tried_log.bytes(),
             self.uart0_log.bytes(),
         );
-        self.restore(&power_on);
+        // A reset does not take the PSRAM's supply away, so its bytes (and
+        // its mode registers, which are not in the snapshot) survive it —
+        // IDF's `EXT_RAM_NOINIT_ATTR` exists because they do. The power-on
+        // snapshot carries the chip as it was at power on; keep today's.
+        let psram = self.psram_contents();
+        self.restore_state(&power_on);
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(psram.as_deref());
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
         self.uart0_log.replace(&uart0);
@@ -3639,6 +4606,77 @@ impl Machine {
             .is_some_and(|tcp| tcp.client_connected());
         self.usb_client_connected = client && usb_host.draining();
         self.reboots += 1;
+        // Emulator seams resolve on every chip start: re-scan the flash as it
+        // is NOW (an update may have rewritten it), forget the old sites, and
+        // wait for the app again. A strict request that can no longer engage
+        // ends the run at the next boundary.
+        if let Err(why) = self.seams_on_chip_start() {
+            self.seams.strict_error = Some(why);
+        }
+        self.seams_start_if_app_running();
+        self.drain_code_writes();
+        true
+    }
+
+    /// Reboot for a reset of kind `cause`: [`reboot`](Self::reboot), with
+    /// what that kind of reset leaves alone on silicon put back.
+    ///
+    /// **A software system reset** (`RTC_CNTL.options0.sw_sys_rst`, the
+    /// ROM's `software_reset`, the firmware's requested reboot) resets the
+    /// digital core and leaves the RTC domain's memory powered, so **RTC
+    /// fast and slow memory keep their bytes** — the firmware's recovery
+    /// ledger lives in RTC fast memory on that promise (`fw-esp32s3`'s
+    /// `esp32s3_recovery_backend`, `#[ram(rtc_fast, persistent)]`), and
+    /// ESP-IDF's `RTC_NOINIT` data survives `esp_restart` the same way — and
+    /// `reset_state` reads `CoreSw` (3) in both halves
+    /// ([`crate::periph::rtc_cntl::SW_SYS_RESET_CODE`]), not the snapshot's
+    /// power-on code. Everything else goes back to power-on, the RNG's state
+    /// included (the classic's `software_reboot` rule, and its reason).
+    ///
+    /// **A host's chip reset** (the USB-Serial-JTAG bridge's, a DTR/RTS
+    /// dance or the `reset` control verb) is the same with `reset_state`
+    /// reading `CoreUsbUart` (0x15,
+    /// [`crate::periph::rtc_cntl::USB_UART_CHIP_RESET_CODE`]), which the
+    /// split core's boot bookkeeping counts as cold (`lp-bootctl`'s
+    /// `ResetKind::from_s3_reason`; the S3 updates plan's P10, scenario S4b).
+    ///
+    /// Every other cause is [`reboot`](Self::reboot) unchanged: a watchdog
+    /// still comes back reading power-on with RTC memory cleared, which is
+    /// **not** what silicon does (the README's "What is still not
+    /// modelled").
+    pub fn reboot_for(&mut self, strap: Strap, cause: ResetSource) -> bool {
+        let (code, word) = match cause {
+            ResetSource::Software => (crate::periph::rtc_cntl::SW_SYS_RESET_CODE, "CoreSw"),
+            ResetSource::ChipReset => (
+                crate::periph::rtc_cntl::USB_UART_CHIP_RESET_CODE,
+                "CoreUsbUart",
+            ),
+            _ => return self.reboot(strap),
+        };
+        let base = self.bus.guest_arena_base();
+        let span = |addr: u32, len: u32| {
+            let at = (addr - base) as usize;
+            at..at + len as usize
+        };
+        let fast = span(memmap::RTC_FAST_BASE, memmap::RTC_FAST_LEN);
+        let slow = span(memmap::RTC_SLOW_BASE, memmap::RTC_SLOW_LEN);
+        let kept_fast = self.bus.guest_arena()[fast.clone()].to_vec();
+        let kept_slow = self.bus.guest_arena()[slow.clone()].to_vec();
+        if !self.reboot(strap) {
+            return false;
+        }
+        self.bus.guest_arena_mut()[fast].copy_from_slice(&kept_fast);
+        self.bus.guest_arena_mut()[slow].copy_from_slice(&kept_slow);
+        if let Some(index) = self.bus.peripheral_index("RTC_CNTL") {
+            self.bus
+                .with_peripheral::<crate::periph::rtc_cntl::RtcCntl, _>(index, |r, _| {
+                    r.set_reset_cause_code(code)
+                });
+        }
+        log::info!(
+            "machine: {cause:?} — reboot {} with RTC memory kept and reset_state {word}",
+            self.reboots
+        );
         true
     }
 
@@ -3709,12 +4747,22 @@ impl Machine {
             console: self.usb_sj_log.bytes(),
             uart0: self.uart0_log.bytes(),
             pins: self.pins.state.clone(),
+            psram: self.psram_contents(),
         }
     }
 
     /// Put the machine back exactly where [`snapshot`](Self::snapshot) took
-    /// it.
+    /// it, and re-arm the seams over the restored window (which may hold a
+    /// patch, or not).
     pub fn restore(&mut self, snap: &Snapshot) {
+        self.restore_state(snap);
+        self.arm_seams();
+        self.drain_code_writes();
+    }
+
+    /// [`restore`](Self::restore) without the re-arm: a reboot resolves the
+    /// seams afresh instead.
+    fn restore_state(&mut self, snap: &Snapshot) {
         self.harts = snap.harts.clone();
         self.stalled = snap.stalled;
         *self.core_1_control.lock().expect("core_1_control poisoned") = snap.core_1_control;
@@ -3736,11 +4784,38 @@ impl Machine {
         // epoch came back with `restore_scalars`, and leaving the observer's
         // stale forces one re-read of the routing at the next boundary.
         self.pins.state = snap.pins.clone();
+        // The PSRAM's bytes, and every window page closed to stores: the fill
+        // that the restored (all-dirty) table asks for re-opens the ones it
+        // maps to PSRAM, from these bytes — which the snapshot took with the
+        // live pages written back, so they agree with the restored windows.
+        self.bus.clear_store_through();
+        self.psram
+            .lock()
+            .expect("psram poisoned")
+            .restore_contents(snap.psram.as_deref());
         // The restore put the peripherals' blobs back, the MMU table with
         // them (it rides in `EXTMEM`'s), and marked every entry dirty; the
         // watch is re-armed from the restored enable bits at the next window.
         self.cache_watch = false;
         self.bus.set_memory_cost(None);
+        // A restored table that maps PSRAM is filled NOW, before the guest
+        // runs another instruction: the restored window bytes are already
+        // right (the regions carry them), but a PSRAM page takes no store
+        // until the fill opens it, and the next slice would otherwise fault
+        // on the first one. A table with no PSRAM entry — every power-on
+        // table a reboot restores, every image that never maps PSRAM — keeps
+        // the fill at the next boundary, exactly as before.
+        let maps_psram = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entries()
+            .iter()
+            .any(|e| matches!(cache::Target::of(*e), cache::Target::Psram(_)));
+        if maps_psram {
+            self.refill_cache();
+        }
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.

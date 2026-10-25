@@ -1167,15 +1167,55 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --release --features ws281x_telemetry -- --no-deps -D warnings
     # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
     # stack diagnostic, and the app WITHOUT the thread (the link task back on
     # the main executor, no messages-first). Both are cfg'd out of the
     # defaults, so nothing else here compiles them.
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: --features lcd-ws281x"
+    cargo clippy --release --features lcd-ws281x -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_ws281x"
+    cargo clippy --release --features test_lcd_ws281x -- --no-deps -D warnings
+    echo "clippy: --features test_lcd_backend"
+    cargo clippy --release --features test_lcd_backend -- --no-deps -D warnings
+    echo "clippy: --features ws281x_frame_check"
+    cargo clippy --release --features ws281x_frame_check -- --no-deps -D warnings
+    echo "clippy: --features ws281x_overlap_ab"
+    cargo clippy --release --features ws281x_overlap_ab -- --no-deps -D warnings
+    echo "clippy: --features ws281x_pad_probe"
+    cargo clippy --release --features ws281x_pad_probe -- --no-deps -D warnings
+    echo "clippy: the RMT image (no lcd-ws281x), with its frame check"
+    cargo clippy --release --no-default-features --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,espnow,psram,ws281x_frame_check -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
     cargo clippy --release --no-default-features \
         --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
+    # The radio (S3 radio M3, M4): each tier over the shared crate (ESP-NOW,
+    # then BLE, then the network), and the M1 radio probe (scaffolding, the
+    # emulator's radio image). The two start
+    # the same controller, so they are separate passes. Then the shared radio
+    # crate itself on this chip's target, at each tier this chip builds it
+    # (`clippy-fw-esp32c6` lints it on the C6's): `--no-deps` above never
+    # reaches a dependency.
+    for feat in espnow wifi; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
+    echo "clippy: --features radio_boot_probe"
+    cargo clippy --release --features radio_boot_probe -- --no-deps -D warnings
+    # PSRAM (M10) is on by default, so every pass above compiles it; this one
+    # is the shipped feature set without it, the shape a board without PSRAM
+    # boots as.
+    echo "clippy: psram OFF"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,espnow \
+        -- --no-deps -D warnings
+    for features in esp32s3,radio esp32s3,ble esp32s3,wifi; do
+      echo "clippy: fw-esp32-radio --features $features"
+      cargo clippy -p fw-esp32-radio --release --features "$features" -- --no-deps -D warnings
+    done
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
@@ -1186,7 +1226,7 @@ clippy-fw-esp32s3:
     # payload, so a lint failure here is the first place a drift between the
     # two crates shows up without a board or a machine.
     for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance \
-                test_button test_shader_compile_incremental; do
+                test_button test_shader_compile_incremental test_psram; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -1246,6 +1286,7 @@ iram-flash-literals-esp32s3 *args:
       export PATH="$GCC_BIN:$PATH"
     fi
     python3 scripts/iram-flash-literals.py {{ fw_esp32s3_elf }} --chip esp32s3 \
+        --hot-hook lp-fw/fw-esp32s3/rwtext_hook.x \
         --baseline lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt {{ args }}
 
 # The ISR-in-RAM guard for fw-esp32c6: which lookup tables a RAM-resident
@@ -1522,7 +1563,9 @@ _s3-payload-features payload:
       # product build, which is why it has no `test_*` feature at all.
       boot-idle)             echo "esp32s3,server,float-f32" ;;
       shader-compile-stress) echo "esp32s3,test_shader_compile_incremental" ;;
-      *) echo "unknown S3 payload '{{ payload }}' (boot-idle, shader-compile-stress)" >&2; exit 2 ;;
+      # S3 radio M1: the shipped boot with esp-radio started beside it.
+      radio-boot)            echo "esp32s3,server,float-f32,radio_boot_probe" ;;
+      *) echo "unknown S3 payload '{{ payload }}' (boot-idle, shader-compile-stress, radio-boot)" >&2; exit 2 ;;
     esac
 
 # payload name -> the line a run stops on. Mirrors the `esp32s3` ARMS in
@@ -1537,6 +1580,7 @@ _s3-payload-sentinel payload:
     case "{{ payload }}" in
       boot-idle)             echo "[JIT] used=" ;;
       shader-compile-stress) echo "[inc-shader-compile] === DONE ===" ;;
+      radio-boot)            echo "[RADIO] wifi scan done" ;;
       *) echo "unknown S3 payload '{{ payload }}'" >&2; exit 2 ;;
     esac
 
@@ -2377,7 +2421,7 @@ fw-manifest-check-esp32c6:
     node scripts/extract-fw-manifest.mjs target/fw-split/shipped/p2.elf --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
 
 fw-manifest-check-esp32s3:
-    node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
+    node scripts/extract-fw-manifest.mjs target/fw-split/esp32s3-shipped/p2.elf --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
 
 fw-manifest-check-esp32v3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
@@ -2399,13 +2443,133 @@ fw-manifest-check-emu: build-fw-emu
 # removed the pressure the C6 still lives under — the check exists so Xtensa
 # code density stays a tracked number, not so anyone has to fight for space.
 # Do not tighten the margin to manufacture pressure.
-fw-esp32s3-size-check margin="65536": build-fw-esp32s3
+# The S3's split image (M7 P4, layout 2; `lp-fw-split build --chip esp32s3`):
+# two passes, the verifier, the loader (lp-fw/fw-esp32s3-loader), app.bin and
+# an 8 MiB merged.bin behind espflash's bundled IDF bootloader (the S3's only
+# door). The default is the shipped image as the build def packages it.
+fw-esp32s3-split features="":
     #!/usr/bin/env bash
     set -euo pipefail
-    # The partition is read from the `factory` row of
-    # lp-fw/fw-esp32s3/partitions.csv.
-    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} lp-fw/fw-esp32s3/partitions.csv {{ margin }} \
-        "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+    if [[ -z "{{ features }}" ]]; then
+        cargo run -q -p lp-fw-split --release -- build --chip esp32s3 \
+            --out target/fw-split/esp32s3-shipped \
+            --features esp32s3,server,float-f32 --target esp32s3-8mb
+    else
+        slug="$(echo "{{ features }}" | tr ',' '_')"
+        cargo run -q -p lp-fw-split --release -- build --chip esp32s3 \
+            --out "target/fw-split/esp32s3-${slug}" --features "{{ features }}"
+    fi
+
+# Fail when the S3's split image gets too close to the room it has: the
+# `factory` row of lp-fw/fw-esp32s3/partitions.csv (6 MB), layout 2. Like the
+# C6's (`fw-esp32c6-size-check`): it builds the split image, runs the
+# verifier (0 core nodes in the engine region, or the build fails), and
+# `lp-fw-split headroom` reports image, steady (core low and high) and update
+# headroom; the GATE is the smallest of the steady and update ones against
+# `margin`. `unsplit=1` also builds the plain image and prints the deltas.
+fw-esp32s3-size-check margin="65536" unsplit="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fw-esp32s3-split
+    out=target/fw-split/esp32s3-shipped
+    verdict="$(head -1 "${out}/verify.txt")"
+    echo "${verdict}"
+    # The shader compiler lands in the engine: the evidence, by crate.
+    compiler="$(grep -E ' (lps_glsl|lpvm_native|lpc_engine)$' "${out}/verify.txt" | head -3 | sed 's/^ *//' | paste -sd ',' - || true)"
+    echo "in the engine (bytes, crate): ${compiler}"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        { echo "#### esp32s3 split image"; echo "- \`${verdict}\`"; echo "- in the engine: \`${compiler}\`"; } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" \
+        --partitions lp-fw/fw-esp32s3/partitions.csv --margin {{ margin }}
+    # The IRAM hot set is still applied, within the arena's reservation, and
+    # not stale (lp-fw/fw-esp32s3/hot_iram/README.md).
+    just s3-hot-iram-check "${out}/p2.elf"
+    if [ -n "{{ unsplit }}" ]; then
+        just build-fw-esp32s3
+        img="$(mktemp)"
+        trap 'rm -f "${img}"' EXIT
+        espflash save-image --chip esp32s3 --flash-size {{ s3_flash_size }} {{ fw_esp32s3_elf }} "${img}" >/dev/null
+        mono="$(wc -c < "${img}" | tr -d ' ')"
+        core="$(wc -c < "${out}/core.bin" | tr -d ' ')"
+        engine="$(wc -c < "${out}/engine.bin" | tr -d ' ')"
+        app="$(wc -c < "${out}/app.bin" | tr -d ' ')"
+        echo "monolithic image ${mono} B; split core ${core} B + engine ${engine} B; app.bin ${app} B"
+        echo "code delta (core + engine − monolithic): $(( core + engine - mono )) B"
+        echo "image delta (app.bin − monolithic): $(( app - mono )) B"
+    fi
+
+# The S3's IRAM hot set (lp-fw/fw-esp32s3/hot_iram/README.md): fails when a
+# hook pattern places a function anywhere but IRAM, when the hot set outgrows
+# the arena's reservation (`HOT_IRAM_BYTES`), or when functions it names have
+# vanished from the image carrying more than 10 % of its samples. Reads a
+# linked image: the split build's `p2.elf` (as `fw-esp32s3-size-check` passes
+# it) or a plain build's ELF (the default).
+s3-hot-iram-check elf=fw_esp32s3_elf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/s3-hot-iram.py check "{{ elf }}"
+
+# Rewrite lp-fw/fw-esp32s3/rwtext_hook.x from the committed profile
+# (lp-fw/fw-esp32s3/hot_iram/profile.tsv): greedy by samples per byte under
+# `budget`. The same profile always writes the same hook. Run it when
+# `s3-hot-iram-check` says the hot set went stale; take a new profile on FS3
+# when the engine's shape has moved (the README's runbook).
+s3-hot-iram-gen budget="40960":
+    python3 scripts/s3-hot-iram.py gen --budget {{ budget }}
+
+# The S3 split image's boot gate (`lp-cli/tests/emu_s3_split_boot.rs`): the
+# packaged image from the reset vector through the IDF door to the engine's
+# hello, the same with the core high and the engine low, and a pushed project
+# rendered. Builds the split image unless `LP_EMU_S3_SPLIT` names one.
+test-emu-esp32s3-split-boot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${LP_EMU_S3_SPLIT:-}" ]]; then
+        just fw-esp32s3-split
+        export LP_EMU_S3_SPLIT="{{ justfile_directory() }}/target/fw-split/esp32s3-shipped"
+    fi
+    cargo test -p lp-cli --release --test emu_s3_split_boot -- --include-ignored --nocapture --test-threads=1
+
+# The S3 split image's boot bookkeeping, scenario by scenario
+# (`lp-cli/tests/emu_s3_split_scenarios.rs`, the C6's
+# `test-emu-c6-split-boot` twin; S3 updates plan M7 P10): four split builds
+# (x, y, y-dies, y-hangs) unless `scenarios` names a directory of them. One
+# door: the S3 boots through the ESP-IDF bootloader only. Not in CI (as the C6's).
+test-emu-esp32s3-split-scenarios scenarios="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/s3-split-scenarios
+        split() { APP_VERSION="$1" cargo run -q -p lp-fw-split --release -- build --chip esp32s3 --target esp32s3-8mb --out "$out/$2" --features "$3"; }
+        split x-test x esp32s3,server,float-f32
+        split y-test y esp32s3,server,float-f32
+        split y-test y-dies esp32s3,server,float-f32,fixture-trial-dies
+        split y-test y-hangs esp32s3,server,float-f32,fixture-trial-hangs
+    fi
+    LP_S3_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_s3_split_scenarios -- --include-ignored --nocapture --test-threads=1
+
+# The S3's over-the-air updates, scenario by scenario (`lp-cli/tests/emu_s3_ota.rs`,
+# the C6's `test-emu-c6-ota` twin; S3 updates plan M7 P10): four
+# `scripts/ota/build-image.sh --chip esp32s3` images unless `scenarios` names a
+# directory of them. One door, as above. Not in CI (as the C6's).
+test-emu-esp32s3-ota scenarios="" filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/s3-ota-scenarios
+        scripts/ota/build-image.sh --chip esp32s3 "$out/x" a0a0a0a0
+        scripts/ota/build-image.sh --chip esp32s3 "$out/y" b1b1b1b1
+        scripts/ota/build-image.sh --chip esp32s3 "$out/y-dies" c1c1c1c1 esp32s3,server,float-f32,fixture-trial-dies
+        scripts/ota/build-image.sh --chip esp32s3 "$out/x-untrusted" a0a0a0a0 esp32s3,server,float-f32,fixture-usb-untrusted
+    fi
+    LP_S3_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_s3_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
 # partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
@@ -2795,15 +2959,19 @@ fmt-check:
 # is already absent from `default-members` — which is why every fw-* crate is
 # named below, and why `lp-xt-fp-harness` (esp-println, bare-metal target) joins
 # them. It is covered by `clippy-fw-esp32s3` and `clippy-fw-esp32v3`, which
-# compile it for its real target.
+# compile it for its real target. `fw-esp32-radio` (esp-hal, esp-radio) is
+# linted on the C6's target by `clippy-fw-esp32c6`.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
     # fw-esp32-common's usb_link/uart_link modules are behind non-default
     # features (`clippy-host`'s `--workspace` only lints its defaults), the
     # same gap `test-rust-features` closes below for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features fs-tree --all-targets -- --no-deps -D warnings
+    # The split image's update board side (`split-core`, which the C6 turns
+    # on), with `wifi` so its radio and LAN arms are linted too.
+    cargo clippy -p fw-esp32-common --features split-core,wifi --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
@@ -2891,6 +3059,16 @@ clippy-fw-esp32c6: install-rv32-target
         --features esp32c6,heap_peak_diag -- --no-deps -D warnings
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,memory_fs -- --no-deps -D warnings
+    # The radio glue the C6 links (`lp-fw/fw-esp32-radio`): `--no-deps` above
+    # never lints it, so it gets its own passes, one per feature tier the C6
+    # builds it at (the ESP-NOW harnesses at `radio`, the BLE harnesses at
+    # `ble`, the app at `wifi`), plus the two desk-only BLE features. On the
+    # C6's target, from this directory (build-std and the toolchain are here).
+    for features in esp32c6,radio esp32c6,ble esp32c6,wifi esp32c6,wifi,desk_ble_params,desk_ble_fault; do
+        echo "clippy: fw-esp32-radio --features $features"
+        cargo clippy -p fw-esp32-radio --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --features "$features" -- --no-deps -D warnings
+    done
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader
@@ -3099,6 +3277,9 @@ test-rust-features:
     # The tree store as the board's filesystem (`fs-tree`, the C6's since the
     # cutover): the mount verdict, the alignment shim and the update guard.
     cargo test -p fw-esp32-common --features fs-tree
+    # The split image's update board side (`split-core`): the write fence
+    # and the boot state, over a host chip (`split_core::test_chip`).
+    cargo test -p fw-esp32-common --features split-core --lib split_core
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.
@@ -3620,8 +3801,8 @@ test-emu-layout-migration:
 # with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
 # Max) and a few minutes of
 # scenarios. Run it when you touch `lp-bootctl`'s records or `choose`, the
-# loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32c6/src/ota/` or the boot
-# mount. `scenarios=<dir>` reuses images already built there.
+# loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32-common/src/split_core/`
+# (or the C6's `src/split_core/`) or the boot mount. `scenarios=<dir>` reuses images already built there.
 test-emu-c6-split-boot scenarios="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3667,7 +3848,7 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
 # `fixture-trial-dies`, X with `fixture-usb-untrusted`; ~2 min each on an
 # M2 Max) and ~20 min of scenarios (the cut sweeps recover in
 # `LP_OTA_THREADS` threads, default 6). Run it when you touch `lpc-update`,
-# `lpa-update`, `fw-esp32c6/src/ota/`, channel 3 or `lp-bootctl`.
+# `lpa-update`, `fw-esp32-common/src/split_core/`, channel 3 or `lp-bootctl`.
 # `scenarios=<dir>` reuses images already built there; `filter=u03` runs one.
 test-emu-c6-ota scenarios="" filter="": install-rv32-target
     #!/usr/bin/env bash
@@ -3701,6 +3882,20 @@ test-emu-c6-ota-lan images="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y" b1b1b1b1
     fi
     LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
+# The S3's twin (the S3 updates plan's P12b): the same scenarios on an
+# emulated ESP32-S3, X and Y built for `esp32s3-8mb` with `wifi` (the station
+# and its LAN link are not in the S3's default image yet). Not CI either.
+test-emu-esp32s3-ota-lan images="" filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ images }}"
+    if [[ -z "$out" ]]; then
+        out=target/ota-lan-s3
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/x" a0a0a0a0 esp32s3,server,wifi
+        LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "$out/y" b1b1b1b1 esp32s3,server,wifi
+    fi
+    LP_OTA_LAN_CHIP=esp32s3 LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
 # lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
 # ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
@@ -4173,6 +4368,17 @@ test-emu-esp32s3:
 # which, since P06, is every test in `tests/boot_idle.rs` and most of
 # `tests/rom_up_boot.rs`.
 #
+# **The radio image** (S3 radio M1): `fw-esp32s3 --features radio_boot_probe`
+# — the shipped boot with esp-radio's Wi-Fi and BTDM started beside it — is
+# built and merged too (`LP_EMU_ESP32S3_RADIO_ELF` / `_RADIO_MERGED`), for
+# `tests/radio_boot.rs` (it boots both ways with nothing unmapped) and
+# `emu_s3_link_gates.rs` (it renders the shipped image's frame). One more
+# firmware build: the probe is built FIRST and copied out, so the shipped
+# image is what the target path holds when the recipe ends.
+#
+# The seam ABI harness is NOT here: `test-emu-esp32s3-seams` builds it and
+# runs the seam tests, in a CI job of its own (this one is near its budget).
+#
 # With `LP_CI_IMAGES` set (`just fetch-ci-images`), the ELF and the merged chip
 # are CI's own and nothing is built; see `test-emu-esp32v3-boot`, which also
 # explains the `images.env` this writes.
@@ -4187,13 +4393,27 @@ test-emu-esp32s3-boot:
       # The S3's gates that need a link host since wire proto 30 (lp-cli's:
       # a link host is a product crate, which the lp-emu fence keeps out).
       cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      # Core 1, the render helper (`two-core`): released, woken, halted
+      # cleanly on a stall, a fault or an allocation; every flash writer
+      # stalls it (the flash-busy model).
+      cargo test -p lp-cli --release --test emu_s3_core1_gates -- --include-ignored --nocapture || status=$?
+      # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
+      cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
       exit "$status"
     fi
-    just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
     out={{ justfile_directory() }}/target/lp-emu-esp32s3
     merged="$out/merged.bin"
     mkdir -p "$out"
+    # The radio probe first (S3 radio M1: `radio_boot_probe`, the shipped
+    # boot with esp-radio's Wi-Fi and BTDM started beside it), the shipped
+    # image second, each copied out of the shared target path the moment it
+    # is built — the one-path trap above, now with two images.
+    just build-fw-esp32s3 radio_boot_probe
+    radio="$out/fw-esp32s3-radio.elf"
+    cp "$built" "$radio"
+    export LP_EMU_ESP32S3_RADIO_ELF="$radio"
+    just build-fw-esp32s3
     shipped="$out/fw-esp32s3-shipped.elf"
     cp "$built" "$shipped"
     export LP_EMU_ESP32S3_ELF="$shipped"
@@ -4202,7 +4422,12 @@ test-emu-esp32s3-boot:
           --partition-table lp-fw/fw-esp32s3/partitions.csv \
           --flash-size {{ s3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32S3_MERGED="$merged"
-      echo "images: shipped=$shipped merged=$merged"
+      radio_merged="$out/merged-radio.bin"
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$radio" "$radio_merged"
+      export LP_EMU_ESP32S3_RADIO_MERGED="$radio_merged"
+      echo "images: shipped=$shipped merged=$merged radio=$radio radio_merged=$radio_merged"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
       echo "image: shipped=$shipped"
@@ -4214,7 +4439,167 @@ test-emu-esp32s3-boot:
     # The S3's gates that need a link host since wire proto 30 (lp-cli's:
     # a link host is a product crate, which the lp-emu fence keeps out).
     cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    # Core 1, the render helper (`two-core`): released, woken, halted
+    # cleanly on a stall, a fault or an allocation; every flash writer
+    # stalls it (the flash-busy model).
+    cargo test -p lp-cli --release --test emu_s3_core1_gates -- --include-ignored --nocapture || status=$?
+    # The update host's plumbing on the S3 (M7 P5): lp-cli's own S3 door.
+    cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
     exit "$status"
+
+# The S3's emulator seams (S3 radio M5; docs/adr/2026-10-05-emulator-seams.md
+# §13): `fw-esp32s3 --features test_seam_abi` — a harness image that never
+# ships — built, copied out of the shared target path, and run by
+# `lp-emu-esp32s3`'s `tests/seam_*` with the dev-only `test-seams`
+# implementations (no shipped binary has them): the Xtensa seam ABI through
+# the release build's LTO, `net=lan` engaged by default, and the wake. One
+# firmware build and a few seconds of emulation; the `Emulator ESP32-S3
+# seams and heap (x64)` job runs this and the S3's heap ratchet, apart from
+# the S3 gate's job, which runs near its time budget.
+test-emu-esp32s3-seams:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_seam_abi
+    seam_abi="$out/fw-esp32s3-seam-abi.elf"
+    cp "$built" "$seam_abi"
+    export LP_EMU_ESP32S3_SEAM_ABI_ELF="$seam_abi"
+    cargo test -p lp-emu-esp32s3 --features test-seams --test 'seam_*' -- --include-ignored --nocapture
+
+# The S3's octal PSRAM in the emulator (lane P of the S3 radio roadmap):
+# `fw-esp32s3 --features test_psram` — a probe that never ships — built,
+# copied out of the shared target path, merged for its ROM-up boot, and run
+# by `lp-emu-esp32s3/tests/psram_boot.rs`: esp-hal brings the chip up, the
+# probe writes and reads all 8 MiB and runs code out of it, both ways, and
+# every line matches FS3's capture, and the shipped image (PSRAM on by
+# default since 2026-10-23) brings PSRAM up on a part that has it and falls
+# back on one that does not (direct and ROM-up) — here, not in the S3 gate,
+# which is at its time budget.
+#
+# M10 adds lp-cli's oracle gate over the link: the shipped image renders
+# `shader-oracle`'s first lit frame byte for byte as the same feature set
+# built WITHOUT `psram` does, with PSRAM and on a board without it. Three
+# firmware builds (the probe, the image without `psram`, then the shipped
+# image last, so the shared target path ends holding the shipped one) and a
+# few minutes of emulation (release).
+test-emu-esp32s3-psram:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_psram
+    probe="$out/fw-esp32s3-psram.elf"
+    cp "$built" "$probe"
+    export LP_EMU_ESP32S3_PSRAM_ELF="$probe"
+    if command -v espflash >/dev/null 2>&1; then
+      merged="$out/merged-psram.bin"
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$probe" "$merged"
+      export LP_EMU_ESP32S3_PSRAM_MERGED="$merged"
+    else
+      echo "espflash is not on PATH: the ROM-up PSRAM test will SKIP" >&2
+    fi
+    # The shipped feature set without `psram`: what a board without PSRAM
+    # behaves as. `build-fw-esp32s3` only adds features, so built here.
+    (
+      GCC_BIN="$(just _xt-gcc-dir)"
+      if [[ -n "$GCC_BIN" ]]; then export PATH="$GCC_BIN:$PATH"; fi
+      cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --no-default-features \
+          --features esp32s3,server,float-f32,json-pack,io-thread,heap-dram2,ble,espnow
+    )
+    no_psram="$out/fw-esp32s3-no-psram.elf"
+    cp "$built" "$no_psram"
+    export LP_EMU_ESP32S3_NO_PSRAM_ELF="$no_psram"
+    just build-fw-esp32s3
+    shipped="$out/fw-esp32s3-shipped.elf"
+    cp "$built" "$shipped"
+    export LP_EMU_ESP32S3_ELF="$shipped"
+    if command -v espflash >/dev/null 2>&1; then
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$shipped" "$out/merged.bin"
+      export LP_EMU_ESP32S3_MERGED="$out/merged.bin"
+    fi
+    cargo test -p lp-emu-esp32s3 --release --test psram_boot -- --include-ignored --nocapture
+    cargo test -p lp-cli --release --test emu_s3_link_gates the_shipped_image_renders_the_same_frame -- --include-ignored --nocapture
+
+# The S3's LCD_CAM + GDMA models (M9, the parallel WS281x output):
+# `fw-esp32s3 --features test_lcd_lanes` — a harness image that never ships —
+# sends five uneven lanes through esp-hal's i8080 driver and GDMA, and
+# `tests/lcd_cam_lanes.rs` checks every lane decodes byte-exact off its pad.
+# One firmware build and a few milliseconds of emulation; the `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it beside the seam harness.
+test-emu-esp32s3-lcd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 test_lcd_lanes
+    lanes="$out/fw-esp32s3-lcd-lanes.elf"
+    cp "$built" "$lanes"
+    export LP_EMU_ESP32S3_LCD_LANES_ELF="$lanes"
+    # The product backend (`lcd-ws281x`'s driver) on the same models.
+    just build-fw-esp32s3 test_lcd_backend
+    backend="$out/fw-esp32s3-lcd-backend.elf"
+    cp "$built" "$backend"
+    export LP_EMU_ESP32S3_LCD_BACKEND_ELF="$backend"
+    cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
+
+# Emulated Wi‑Fi on the S3 (S3 radio M5, the second half): `fw-esp32s3
+# --features wifi` (off by default) built, copied out of the shared target
+# path and merged, then `lp-cli/tests/emu_s3_lan_pair.rs`: two boards, each
+# joined alone over its USB link, then both on one runner-driven LAN — two
+# leases, each board's `lp-xxxx.local` answered on the segment, the same
+# frame log twice. Its figures are `lp-emu:esp32s3:t1+net=lan`. The `Emulator
+# ESP32-S3 seams and heap (x64)` job runs it.
+test-emu-esp32s3-wifi:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-emu-esp32s3-wifi
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    export LP_EMU_ESP32S3_WIFI_ELF="$out/fw-esp32s3-wifi.elf"
+    export LP_EMU_ESP32S3_WIFI_MERGED="$out/merged-wifi.bin"
+    cargo test -p lp-cli --test emu_s3_lan_pair -- --include-ignored --nocapture
+
+# The cloud relay on an emulated S3 (S3 radio M6): `lp-cli/tests/
+# emu_relay_link.rs`'s S3 arm — the C6's relay walk, step for step, on
+# `fw-esp32s3 --features wifi` booted ROM-up under `lp-cli emu run --chip
+# esp32s3 --link --lan`, dialing `lightplayer.app` through the LAN's uplink to
+# an in-process `lp-cloud-server`: registers, edited through
+# `relay:<mac>@<origin>`, a `lan:` client with the same key takes the slot,
+# another is told busy, a deploy, Cloud relay off and on, a reset key
+# refused. Its figures are `lp-emu:esp32s3:t1+net=lan`; times are wall time
+# and never a gate. `just walk-wifi-emu relay --s3` runs it and reads the
+# board's words for each step.
+test-emu-esp32s3-relay:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-emu-esp32s3-wifi
+    export LP_EMU_ESP32S3_WIFI_MERGED={{ justfile_directory() }}/target/lp-emu-esp32s3/merged-wifi.bin
+    cargo test -p lp-cli --test emu_relay_link -- --include-ignored --nocapture --exact \
+        an_emulated_s3_reaches_lightplayer_app_through_the_lans_uplink
+
+# `fw-esp32s3 --features wifi`, copied out of the shared target path to
+# target/lp-emu-esp32s3/fw-esp32s3-wifi.elf and merged into
+# target/lp-emu-esp32s3/merged-wifi.bin (its partition table and an empty
+# `lpfs`): the image the S3's Wi‑Fi cells and walks boot.
+build-emu-esp32s3-wifi:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    just build-fw-esp32s3 wifi
+    wifi="$out/fw-esp32s3-wifi.elf"
+    cp "$built" "$wifi"
+    espflash save-image --chip esp32s3 --merge \
+        --partition-table lp-fw/fw-esp32s3/partitions.csv \
+        --flash-size {{ s3_flash_size }} "$wifi" "$out/merged-wifi.bin"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
@@ -4738,6 +5123,19 @@ flash-tears-sim-unaligned cuts="300" seed="1":
 bench-emu-esp32v3 *args:
     scripts/emu/bench-esp32v3.sh {{ args }}
 
+#   just bench-emu-esp32s3
+#   just bench-emu-esp32s3 --rows render-basic --runs 3
+#   scripts/emu/bench-esp32s3.sh --bin <saved-dir> --no-build   # the A/B half
+#
+# Over CI's images (`just fetch-ci-images`, then `export LP_CI_IMAGES=…`).
+# Three rows: boot-idle, and render-basic / render-620 with Bluetooth on,
+# whose figure is the steady state between 1 s and 4 s emulated;
+# `render-basic` is the row to quote. An ORACLE, never a gate:
+# `scripts/emu/s3-oracle.sh` is the identity check a speed change answers to.
+# The ESP32-S3 machine's speed probe (bench-emu-esp32v3's twin)
+bench-emu-esp32s3 *args:
+    scripts/emu/bench-esp32s3.sh {{ args }}
+
 # PGO recipe for the C6 machine binary (D4): instrumented build, one training
 # run of each reference image, merge, optimized rebuild, then the probe on
 # the result. Opt-in — never a default build or CI step, and the target is
@@ -5247,7 +5645,10 @@ walk-two-tabs-emu *args:
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
 # docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
-# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+# out W10's `link rtt`, which alone outlives a 10-minute command cap. `lan
+# --s3` walks the same steps on two emulated S3s booting `fw-esp32s3
+# --features wifi` (after `just test-emu-esp32s3-wifi`, which writes its
+# merged chip; S3 radio M5).
 #
 # `relay` (Wi‑Fi relay plan P9, scripts/emu/walk-wifi-emu-relay.mjs) is
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
@@ -5294,6 +5695,24 @@ walk-two-tabs-emu *args:
 # lightplayer.app (T5, your boards follow you M1). Needs `cargo build -p
 # lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
 # studio-firmware-package-esp32c6`. Not CI.
+#
+# `studio-relay-move` (best link, M3; the same script and board): T1, then
+# the move — a session through lightplayer.app onto Wi‑Fi with the editor
+# open and no "Reconnecting…" (T6), back through lightplayer.app 5 s after
+# Wi‑Fi drops, and not after a 1000 (T7), and Connect over Wi‑Fi first on a
+# board never met, falling through to lightplayer.app when Wi‑Fi is refused
+# (T8). A page-side shim (`scripts/emu/walk-lan-shim.mjs`) stands in for
+# the LAN's reachability: a loopback http page never sees Chrome's Local
+# Network prompt. Same prerequisites. Not CI.
+#
+# `studio-relay-account` (your boards follow you, M4; the same script, plus
+# `c6-b` with no network): T1, then the account's list — `c6-b` gets the
+# account's key over USB and joins the list, never the relay (T9); the
+# door stops (the power) and a never-met profile shows both boards under
+# Offline boards with their last facts (T10); Remove from your account, two
+# clicks, takes `c6-b` off on every computer (T11). The cloud's own
+# `ListAccountBoards` answers are the words once the boards are off. Same
+# prerequisites. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
@@ -5330,6 +5749,10 @@ walk-drop-emu *args:
 # for lightplayer.app's relay: the board's leg through the virtual LAN's
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
+# `--s3` (S3 updates P12) walks emulated ESP32-S3 boards (`emu serve --chip
+# esp32s3`, layout 2) on the door's and `?ble=emu`'s lanes
+# (`just walk-ota-ble-emu --s3`) and over Wi-Fi (`--s3 --lan`, X and Y built
+# here with `wifi`, which the S3's default image does not carry yet).
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
 # image directory (not built here): the crossing walk's X built at the last
@@ -5340,6 +5763,38 @@ walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
+    # `--s3` (the S3 updates plan's P12): emulated S3 boards, X and Y built
+    # for `esp32s3-8mb` (the door and `?ble=emu` lanes; no single image).
+    if [[ " {{ args }} " == *" --s3 "* && " {{ args }} " == *" --lan "* ]]; then
+        # Over Wi-Fi: X and Y both with `wifi` (Y's trial core must reach
+        # the LAN to be confirmed there), Y staged as this Studio's firmware.
+        images=target/walk-ota-emu/images-s3-lan
+        if [[ ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0 esp32s3,server,wifi
+        fi
+        if [[ ! -f "${images}/y/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/y" b1b1b1b1 esp32s3,server,wifi
+        fi
+        rm -rf "${images}/y-packages" "${images}/y-parts"
+        mkdir -p "${images}/y-packages" "${images}/y-parts"
+        cp -R "${images}/y/package" "${images}/y-packages/esp32s3-8mb"
+        cp -R "${images}/y/ota" "${images}/y-parts/esp32s3-8mb"
+        just studio-web-story-build
+        WALK_OTA_X="${WALK_OTA_X:-${images}/x}" WALK_Y_PACKAGES="$PWD/${images}/y-packages" \
+            WALK_Y_PARTS="$PWD/${images}/y-parts" node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
+    if [[ " {{ args }} " == *" --s3 "* ]]; then
+        images=target/walk-ota-emu/images-s3
+        if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+            LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+        fi
+        # Y last: build-image.sh writes the parts directory the bundle copies.
+        just studio-firmware-package-esp32s3
+        just studio-web-story-build
+        node scripts/emu/walk-ota-emu.mjs {{ args }}
+        exit 0
+    fi
     images=target/walk-ota-emu/images
     if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0

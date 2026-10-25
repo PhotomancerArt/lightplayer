@@ -1,0 +1,30 @@
+[package]
+name = "fw-esp32s3-loader"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "The ESP32-S3 split-image loader: maps the core a boot record names, loads its RAM segments, jumps"
+publish = false
+
+# Standalone, as fw-esp32c6-loader: a bare-metal Xtensa binary on the `esp`
+# toolchain, built from this directory (its `.cargo/config.toml` carries the
+# target, build-std and flags; `build.rs` writes the linker script's memory
+# from lp-bootctl). Excluded from the root workspace so host builds and the
+# workspace clippy never see it.
+[workspace]
+
+[dependencies]
+# The boot-record format, layout 2, the MMU plan and the boot-stage RAM: one
+# definition, shared with the core and lp-fw-split.
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
+
+[build-dependencies]
+# The loader's RAM, for the linker script (`build.rs`): never re-typed.
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = 1

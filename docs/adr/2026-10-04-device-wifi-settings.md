@@ -335,3 +335,17 @@ said what it lets happen.
 untouched: `cloudRelay` is read, not changed. The set of requests, and each
 request's tier, are as above. A relay state is RAM only (never persisted),
 and the network file still reads back no password.
+
+## Amendment (2026-10-22): the S3's Wi‑Fi image is a relay client too (S3 radio M6)
+
+`fw-esp32s3 --features wifi` (off by default) runs the C6's relay client
+(`fw_esp32_radio::net::relay_task`, the loop in
+`fw-esp32-common/src/net/relay/`), on the same rules: it dials only when
+joined, Cloud relay is on and the board holds an account key, and
+`NetworkStatus.relay` reports the states above. An S3 image without `wifi`
+(the shipped default today) and the classic still say `off`. Walked on the
+emulator (`lp-cli/tests/emu_relay_link.rs`'s S3 arm, `just walk-wifi-emu
+relay --s3`, `lp-emu:esp32s3:t1+net=lan`); not yet on silicon, where the
+S3's Wi‑Fi join is an open defect
+(`docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md`). No
+wire, file or relay-protocol change.

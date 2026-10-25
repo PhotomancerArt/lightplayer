@@ -14,7 +14,6 @@
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::string::String;
 use lp_collection::VecMap;
 
 use lpc_hardware::{ButtonActive, ButtonConfig, ButtonEventKind, ButtonInput, ButtonPull};
@@ -296,19 +295,20 @@ impl PowerButtonNode {
         error: &lpc_hardware::HardwareEndpointError,
         now_ms: u64,
     ) -> Option<NodeError> {
-        let message = format!("open power button {}: {error}", config.endpoint);
         let previous = self.open_failure.take().filter(|f| f.key.matches(config));
         let backoff_ms = previous.as_ref().map_or(OPEN_RETRY_INITIAL_MS, |f| {
             f.backoff_ms.saturating_mul(2).min(OPEN_RETRY_MAX_MS)
         });
-        let repeat = previous.is_some_and(|f| f.message == message);
+        // Compared as values, so a retry that fails the same way formats
+        // nothing: a board whose button is missing retries forever.
+        let repeat = previous.is_some_and(|f| f.error == *error);
         self.open_failure = Some(OpenFailure {
             key: OpenedPowerButton::of(config),
-            message: message.clone(),
+            error: error.clone(),
             backoff_ms,
             retry_at_ms: now_ms.saturating_add(backoff_ms),
         });
-        (!repeat).then(|| NodeError::msg(message))
+        (!repeat).then(|| NodeError::msg(format!("open power button {}: {error}", config.endpoint)))
     }
 
     fn next_now_ms(&mut self, ctx: &TickContext<'_>) -> u64 {
@@ -366,8 +366,8 @@ impl OpenedPowerButton {
 struct OpenFailure {
     /// What was being opened.
     key: OpenedPowerButton,
-    /// The error text last raised for it.
-    message: String,
+    /// The error last raised for it.
+    error: lpc_hardware::HardwareEndpointError,
     /// How long this failure waits before the next attempt.
     backoff_ms: u64,
     /// The first `now_ms` at which the next attempt is made.

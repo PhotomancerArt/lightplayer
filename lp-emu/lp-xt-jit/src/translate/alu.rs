@@ -374,6 +374,16 @@ impl Emitter<'_> {
                 });
                 self.i(I::Select);
             }
+            // `rd = s < t`, signed / unsigned: wasm's comparisons are 0/1.
+            AluRrr::Salt | AluRrr::Saltu => {
+                self.get(rs);
+                self.get(rt);
+                self.i(if op == AluRrr::Salt {
+                    I::I32LtS
+                } else {
+                    I::I32LtU
+                });
+            }
             // `rd = cond(t) ? s : rd`.
             AluRrr::Moveqz | AluRrr::Movnez | AluRrr::Movltz | AluRrr::Movgez => {
                 self.get(rs);

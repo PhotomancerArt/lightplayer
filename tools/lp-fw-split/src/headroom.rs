@@ -23,7 +23,9 @@
 //!
 //! The gate is the smallest of the steady and update headrooms.
 
-use lp_bootctl::{LOADER_OFFSET, REGION_START, SplitLayout};
+use lp_bootctl::{LOADER_OFFSET, SplitLayout};
+
+use crate::chip_profile::SplitChip;
 
 use crate::split_build::SplitReport;
 
@@ -43,20 +45,27 @@ pub struct Headroom {
     pub steady_low: i64,
     pub steady_high: i64,
     pub update: i64,
-    pub legacy_overlap: i64,
+    /// The C6's only: no S3 was ever fielded on littlefs at a fixed offset.
+    pub legacy_overlap: Option<i64>,
+    /// Bytes the core may grow before it crosses into its next MMU page —
+    /// the cliff: a crossing costs a whole page of update headroom at once.
+    pub core_to_next_page: u32,
+    pub page: u32,
 }
 
 impl Headroom {
     /// The numbers for a split image in a `factory` of `factory_len` bytes.
     pub fn of(report: &SplitReport, factory_len: u32) -> Self {
         let layout = SplitLayout {
+            region_start: report.region_start,
             region_end: LOADER_OFFSET + factory_len,
             page: report.page,
         };
+        let c6 = report.chip == SplitChip::Esp32c6;
         let page = i64::from(report.page);
         let up = |x: i64| (x + page - 1) / page * page;
         let down = |x: i64| x / page * page;
-        let region_start = i64::from(REGION_START);
+        let region_start = i64::from(report.region_start);
         let region_end = i64::from(layout.region_end);
         let core = i64::from(report.core.size_bytes);
         let engine = i64::from(report.engine.size_bytes);
@@ -70,8 +79,11 @@ impl Headroom {
             steady_low: region_end - low_core_end - engine,
             steady_high: (high_core_at - region_start) - engine,
             update: high_core_at - low_core_end,
-            legacy_overlap: i64::from(LEGACY_LPFS_OFFSET)
-                - (i64::from(LOADER_OFFSET) + i64::from(app_bin_len)),
+            core_to_next_page: (report.page - report.core.size_bytes % report.page) % report.page,
+            page: report.page,
+            legacy_overlap: c6.then(|| {
+                i64::from(LEGACY_LPFS_OFFSET) - (i64::from(LOADER_OFFSET) + i64::from(app_bin_len))
+            }),
         }
     }
 
@@ -82,7 +94,7 @@ impl Headroom {
 
     /// The report, one number per line.
     pub fn lines(&self) -> Vec<String> {
-        vec![
+        let mut lines = vec![
             format!(
                 "split image: app.bin {} B / factory {} B — image headroom {} B",
                 self.app_bin_len, self.factory_len, self.image
@@ -100,10 +112,17 @@ impl Headroom {
                 self.update
             ),
             format!(
-                "legacy overlap: {} B before app.bin reaches the old lpfs at {LEGACY_LPFS_OFFSET:#x}",
-                self.legacy_overlap
+                "core: {} B to its next {} KiB page",
+                self.core_to_next_page,
+                self.page / 1024
             ),
-        ]
+        ];
+        if let Some(overlap) = self.legacy_overlap {
+            lines.push(format!(
+                "legacy overlap: {overlap} B before app.bin reaches the old lpfs at {LEGACY_LPFS_OFFSET:#x}"
+            ));
+        }
+        lines
     }
 }
 
@@ -111,6 +130,7 @@ impl Headroom {
 mod tests {
     use super::*;
     use crate::split_build::{Piece, SplitReport};
+    use lp_bootctl::REGION_START;
 
     fn report(core: u32, engine: u32) -> SplitReport {
         let piece = |offset, size_bytes| Piece {
@@ -120,8 +140,10 @@ mod tests {
         };
         let engine_off = (REGION_START + core).div_ceil(0x8000) * 0x8000;
         SplitReport {
+            chip: SplitChip::Esp32c6,
             layout: 1,
             page: 0x8000,
+            region_start: REGION_START,
             region_end: 0x35_0000,
             app_version: String::new(),
             build_id: String::new(),
@@ -152,6 +174,28 @@ mod tests {
         assert_eq!(h.update, high - engine_off);
         assert_eq!(h.image, 0x34_0000 - (engine_off + 1_824_152 - 0x1_0000));
         assert_eq!(h.gated(), h.steady_low.min(h.steady_high).min(h.update));
+    }
+
+    #[test]
+    fn the_s3_counts_from_its_own_region_and_has_no_legacy_overlap() {
+        // The spike's S3 image in today's 6 MB `factory`.
+        let mut r = report(280_656, 2_172_645);
+        r.chip = SplitChip::Esp32s3;
+        r.layout = 2;
+        r.page = 0x1_0000;
+        r.region_start = 0x2_0000;
+        r.region_end = 0x61_0000;
+        r.core.offset = 0x2_0000;
+        r.engine.offset = 0x7_0000;
+        r.app_bin.size_bytes = 0x7_0000 + 2_172_645 - 0x1_0000;
+        let h = Headroom::of(&r, 0x60_0000);
+        assert_eq!(h.steady_low, 0x61_0000 - 0x7_0000 - 2_172_645);
+        let high = (0x61_0000i64 - 280_656) / 0x1_0000 * 0x1_0000;
+        assert_eq!(h.steady_high, high - 0x2_0000 - 2_172_645);
+        assert_eq!(h.update, high - 0x7_0000);
+        assert_eq!(h.legacy_overlap, None);
+        assert_eq!(h.core_to_next_page, 0x5_0000 - 280_656);
+        assert!(!h.lines().iter().any(|l| l.contains("legacy")));
     }
 
     #[test]

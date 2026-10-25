@@ -13,9 +13,10 @@ LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
 > chip-agnostic `Esp32OutputProvider` this crate's RMT driver plugs into
 > (below) all come from `fw-esp32-common`.
 
-Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, littlefs
-storage, GLSL compiled to Xtensa machine code by the on-device JIT, and real
-WS281x output on 4 concurrent RMT channels (below) — plus the hardware
+Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, the tree
+store on `lpfs`, GLSL compiled to Xtensa machine code by the on-device JIT, and real
+WS281x output on up to 8 lanes from LCD_CAM (or 4 RMT channels without
+`lcd-ws281x`; below) — plus the hardware
 harnesses (clocks, heap, and serial logging far enough to print the `[INIT]`
 marker family, a JIT corpus runner, and the RMT loopback self-test). The
 server and storage stacks landed as the app-layer milestone of
@@ -194,7 +195,43 @@ the milestone gate that first has a use for the button; this harness exists so
 the driver cannot rot uncompiled — see
 `docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
 
+### `test_seam_abi` (emulator only)
+
+```bash
+just build-fw-esp32s3 test_seam_abi   # `just test-emu-esp32s3-seams` builds and runs it
+```
+
+The Xtensa emulator-seam ABI under the real `release-esp32s3` build (S3
+radio M5; `docs/adr/2026-10-05-emulator-seams.md` §13). It calls
+`test_echo(1, 2, 4)`, drains `test_take`, and — when the network seam's
+engaged byte reads 1 — `net_mac` and `net_link`, each through the shim
+`lp_seam::seam_fn!` generates for Xtensa, with a value kept live across every
+call; then, with the take engaged, it binds the S3's wake handler
+(`seams::seam_wake_handler`, `SYSTEM.cpu_intr_from_cpu_3`) and sleeps in
+`waiti`, draining the take on every wake. It is the only image with a seam
+table (`src/seams/`); the shipped image declares none until it has a network
+stack. On silicon it prints `echo=7`, `take engaged=false`,
+`net engaged=false` and idles. The emulator's side is
+`lp-emu/esp/lp-emu-esp32s3/tests/seam_abi_harness.rs`.
+
+### `test_lcd_lanes` (emulator first)
+
+```bash
+just build-fw-esp32s3 test_lcd_lanes   # `just test-emu-esp32s3-lcd` builds and runs it
+```
+
+Five uneven WS281x lanes (12, 9, 7, 5 and 3 LEDs on GPIO1–5, the XIAO's
+D0–D4) out of LCD_CAM's i8080 mode at 2.5 MHz, fed by GDMA from one
+internal-RAM buffer, sent twice. It encodes its own frame (three 400 ns slots
+per WS281x bit) so that it tests the emulator's LCD_CAM and GDMA models
+(`lp-emu/esp/lp-emu-esp32s3/tests/lcd_cam_lanes.rs`, every lane byte-exact)
+and not the product's encoder. On silicon it drives the same pads (nothing
+need be attached) and prints `[LCD-LANES] frame N sent …` and `done`.
+
 ## Output
+
+The shipped driver is LCD_CAM's (next section, `lcd-ws281x`); this one is
+what an image without that feature registers.
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
 channels at once**, over `lp-fw/lp-ws281x` — the portable transmitter whose
@@ -221,6 +258,37 @@ under the registry lease that grants exclusive use of that GPIO.
 Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
 another colour order is the fixture node's `color_order`, above this boundary —
 the driver stays GRB, exactly like the C6's.
+
+### LCD_CAM output (feature `lcd-ws281x`, the default)
+
+`src/output/lcd/` drives **up to eight lanes** from LCD_CAM in i8080 mode,
+fed by GDMA. It is the shipped image's WS281x driver since 2026-10-22 (Yona's
+ruling, S3 radio roadmap M9; `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+The RMT driver above is what an image built without `lcd-ws281x` registers;
+the `test_loopback` harness and a core-only split image's status light keep
+using the RMT. `ws281x_frame_check` (never shipped) makes either driver
+report its truncation on the log: the LCD's CAM half decodes every frame off
+the pads, the RMT counts its guard trips (`[ws281x-check] driver=…`).
+
+| | |
+|---|---|
+| Lanes | the manifest's `/lcd/ws281xK` resources (K < 8); the XIAO S3 Plus declares 8 |
+| Endpoints | the RMT driver's: one per board-labelled pad (`ws281x:local:D3`), shared in `src/output/ws281x_endpoints.rs`, so a project opens on either |
+| Wire | 2.5 MHz bus, three 400 ns slots a bit (T0H 400, T1H 800, period 1200 ns), GRB, 300 µs latch inside the buffer |
+| Lockstep | every lane clocks out together; a frame lasts as long as the longest lane, short lanes are held low |
+| CPU | the encode only (`lp_ws281x::parallel`), once per frame; no interrupt, no refill deadline, so a frame survives radio interrupts, masked critical sections and flash writes (`background_tx_safe() = true`) |
+| RAM | two frame buffers in **internal RAM, by capability** (`alloc_caps(Internal)`: never `dram2_seg`, never PSRAM), 72 B per LED of the longest lane + 750 B each: 9,678 B per buffer at 5 × 124, 36,750 B at 8 × 500. Sized by what is open; an open that cannot get them fails with a sentence |
+| Pins | refused at open: GPIO19/20 (USB-Serial-JTAG), GPIO26–32 (flash), GPIO33–37 (octal PSRAM) |
+| Image | +4,676 B flash, −2,616 B internal RAM against the RMT image (2026-10-22) |
+| Encode | 651 µs at 5 × 124, 3,564 µs at 8 × 500 (FS3, 240 MHz); up to 5.5 ms when the radio pre-empts it |
+| RAM | before PSRAM (2026-10-22) the Bluetooth image's `Internal`-tagged heap was nearly full once a project loaded: a 2 × 310-LED project could not get one 23,070 B buffer (FS3), while the same project played on the RMT. PSRAM, on by default since 2026-10-23, moves Rust's heap out of internal RAM and frees the room. Two buffers when they fit, one when only one does |
+
+The silicon evidence and the harness are the LED-channels spike's:
+`test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
+same pads as a CPU-free logic analyzer; build it without `ble`,
+`--no-default-features --features esp32s3,test_lcd_ws281x`, or its 8 × 500 case
+runs out of the radio image's arena). The same check on the product image,
+beside Bluetooth and the server, is `ws281x_frame_check` (above).
 
 ## Input
 
@@ -249,6 +317,115 @@ fails to compile — 70 × E0716 from the `Slotted` derive's const-promotion of 
 temporary — so an MSRV error here means `espup update`, not a code problem.
 The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
 the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
+
+### The split image (what ships)
+
+What Studio flashes, CI gates and a release ships is the **split image**
+(`lp-fw/builds/esp32s3-8mb.json`, `"split": true`; layout 2), the C6's
+shape on this chip — one link cut by reachability into a **core** and an
+**engine**, a RAM-only loader at `factory + 0`, two boot records:
+
+```bash
+just fw-esp32s3-split          # target/fw-split/esp32s3-shipped: core.bin, engine.bin, app.bin, merged.bin, split.json
+just fw-esp32s3-size-check     # the split headroom gate (64 KB), and the core's distance to its next 64 KiB page
+just test-emu-esp32s3-split-boot   # ROM-up through the IDF door to the engine's hello; core high; a project rendered
+```
+
+```text
+0x000000  IDF bootloader       espflash 3.3.0's bundled one (the S3's only door)
+0x008000  partition table      factory 0x10000+0x600000, lpfs 0x610000+0x180000
+0x010000  loader               lp-fw/fw-esp32s3-loader, RAM-only (≤ 0x5000 B)
+0x015000  progress record      ┐
+0x016000  boot record 0        │ layout 1's offsets (lp_bootctl)
+0x017000  boot record 1        ┘
+0x018000  reserved             erased, never written (the price of the 64 KiB page)
+0x020000  core                 an ESP image the loader starts
+ page↑    engine               its header first; MMU entries 0x100.., both views
+  …       free to factory's end (read from the flashed table)
+```
+
+- **The door.** `main.rs` cuts the boot into `core_boot` and
+  `lp_engine_entry`. A plain build (`just build-fw-esp32s3`, the dev image)
+  calls the door directly; a split build (`LP_SPLIT_LINK=1`, the `lp_split`
+  cfg) reaches it only through the engine header's `entry`
+  (`src/split.rs`), so everything only the door reaches — the server, the
+  node graph, the on-device GLSL compiler — links into the engine.
+- **Everything a board needs to stay reachable lives in `core_boot`**: the
+  link, the filesystem, and every radio's bring-up. A board whose engine is
+  missing runs core-only: its link up, its watchdog fed, and the update
+  channel served on USB and on every Bluetooth link (below).
+- **The engine's two views.** The S3's one MMU table serves both buses at one
+  index, so the core maps the engine's flash pages once at entry `0x100`: its
+  header and rodata read at `0x3D00_0000`, its code fetched at `0x4300_xxxx`
+  (`lp_bootctl::s3_mmu`). The core reads the engine header through the
+  cache, the boot records through esp-storage's low-level ROM calls (after
+  `FlashStorage::new`, never before), and `factory`'s end from the flashed
+  table.
+- **Updates over the air** (the S3 updates plan's M7 P8): the image announces
+  `ota: {layout: 2}` (chip 2, layout 2 in `lpc-update`'s code table), and the
+  board side is the C6's, shared — `fw_esp32_common::split_core`, over this
+  chip's `S3Split` (`src/split_core/`): its MMU (the engine at entries
+  `0x100..`, the core's own hash through its scratch entries `0x1E0..0x200`,
+  never the `lpfs` window), the ROM flash calls behind the shared write fence,
+  the SHA accelerator (software while a boot hash holds it), the S3 reset
+  table (`ResetKind::from_s3_reason`) and the RMT update light (never USB
+  19/20, the flash and PSRAM pads 26–37). The boot is the C6's:
+  `split_core::begin` marks a trial **attempted** as `mount_filesystem` reads
+  the partition table, before the mount and before Bluetooth; `split::split_boot`
+  marks it **started**; the first boot after a USB flash hashes the engine once
+  (the engine guard); a host link coming up **confirms** a trial; a board with
+  no engine it may enter, an engine that keeps crashing, or a core on trial
+  runs **core-only**, serving the update session on USB and on each Bluetooth
+  link (the radio links decide `Update` mode there). The running engine's
+  USB transport and its link mux hand channel 3 to the same session.
+  Bluetooth carries channel 3 through the C6's shared code; its walk on
+  silicon is P12's.
+- **Octal flash takes no update** (Q7): an eFuse that says octal flash makes
+  `S3Split::updates_off` say so — `[OTA] updates off: octal flash: …` at
+  boot, layout 0 in the hello's manifest, nothing written (not a mark, not a
+  record), and the engine run as a plain image.
+- Test images only, never in a build def: `fixture-trial-dies`,
+  `fixture-trial-hangs`, `fixture-usb-untrusted` (the C6's).
+- **The flash ledger** is below, under "The split image's flash ledger".
+
+How the split is built (GNU ld's quirks on Xtensa, the literal pools, the two
+views) is `tools/lp-fw-split/README.md`; the loader is
+`lp-fw/fw-esp32s3-loader/README.md`.
+
+### The split image's flash ledger
+
+`just fw-esp32s3-size-check` (default features, `lp-fw-split build --chip
+esp32s3`). CI fails a PR whose smallest steady-or-update headroom drops below
+64 KB. Watch the core's distance to its next 64 KiB page too: crossing it
+moves the engine's start a page.
+
+| When (commit) | What changed | core | engine | `app.bin` | steady headroom | update headroom | core to its next page |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-10-21 (`a4be3adc8`) | the split image, no radio, littlefs | 281,584 | 2,171,869 | 2,568,192 | 3,726,371 | — | 46,096 |
+| 2026-10-21 (`fcbcfe20e`) | the tree store replaces littlefs (+21,840 B monolithic; the store mounts in the core) | 310,432 | 2,166,869 | 2,564,096 | 3,731,371 | — | 17,248 |
+| 2026-10-22 (`ccfa116b0`) | Bluetooth on by default — **and a core swollen with engine code** (below) | 1,325,216 | 1,463,385 | 2,908,160 | 3,386,279 | — | — |
+| 2026-10-22 (#1256) | `lp-fw-split` decodes the blobs' branch targets | 646,176 | 2,141,633 | 2,863,104 | 3,428,927 | — | 9,184 |
+| 2026-10-23 (`06ea6b68a`) | the update board side (core-only, the session, the SHA, the light) | 717,680 | 2,131,413 | 2,920,448 | 3,373,611 | 4,784,128 | 3,216 |
+| 2026-10-24 (`1973c140c` + #1286) | before the IRAM hot set: Bluetooth, PSRAM, ESP-NOW, LCD_CAM by default | 1,042,336 | 2,126,801 | 3,244,032 | 3,050,543 | 4,128,768 | 6,240 |
+| 2026-10-24 (#1286) | the IRAM hot set: ~40 KB of engine code rides in the core's RAM segment (below) | 1,080,960 | 2,088,945 | 3,268,608 | 3,022,863 | 3,997,696 | 33,152 |
+
+The monolithic image at `06ea6b68a` is 2,788,640 B. The split costs 60,453 B
+of code: the door, and literals no longer shared across the two regions.
+
+**The swollen core, and its cause.** The radio blobs (GNU-assembled C)
+keep a relocation on every branch, against `.text` with a stale addend.
+Read as `S + A`, it pointed at the literal pools at `.text`'s start, and
+those pools pulled `lpc_engine`, `lpc_model` and `lpc_wire` into the core.
+`lp-fw-split why` showed the chain: `core_boot` → `btdm_controller_init`
+→ a `.literal` section of an engine closure. `lp-fw-split` now decodes a
+branch's target from the instruction (#1256; its README's Xtensa list,
+item 5). If a core grows by hundreds of KB, ask `why` before blaming the
+code.
+
+**The IRAM hot set in the core.** Since #1286 the core carries ~38 KB of
+engine code in its RAM segment: the hot set's engine functions, which
+`lp-fw-split` keeps engine by reachability (they are not roots), linked into
+`.rwtext`. See [The IRAM hot set](#the-iram-hot-set) below.
 
 ### Release profile
 
@@ -374,6 +551,154 @@ rather than out of a reserved code region — so that residency is already
 inside `[MEM]`'s `used`. See `esp32_memory_stats` in `src/main.rs` and
 `src/stack_probe.rs`.
 
+## The IRAM hot set
+
+The ~40 KB of flash functions core 0 spends its frame in (the engine's
+per-lane graph walk, the allocator, the hottest builtins) are linked into
+`.rwtext`, internal SRAM, instead of streaming through the 32 KB instruction
+cache from flash. On FS3 that took 620 / 1,488 / 2,048 LEDs from 32.0 / 14.6 /
+11.1 to 41.2 / 20.6 / 15.8 fps (2026-10-24). The list (`rwtext_hook.x`) is
+generated from a committed silicon profile (`hot_iram/profile.tsv`) and
+checked by `just s3-hot-iram-check` in `just fw-esp32s3-size-check`; how it
+is measured and kept current is [`hot_iram/README.md`](hot_iram/README.md),
+the decision `docs/adr/2026-10-24-s3-hot-code-in-iram.md`.
+
+It costs the arena 43 KiB (`HOT_IRAM_BYTES`): internal free at boot went from
+187,580 to 143,548 B on FS3, the tagged arena is 92,160 B, and the largest
+free block is `dram2_seg`'s 73,744 B. Rust's own allocations are in PSRAM.
+
+## Two cores (feature `two-core`, on by default)
+
+Core 1 renders the upper half of every render-samples batch
+(`src/core1.rs`, `lpvm_native::helper_core`). It parks in `waiti` between
+jobs and is woken by `FROM_CPU_INTR2`. Every flash writer stalls it
+(`FlashStorage::multicore_auto_park`, `core1::with_core1_parked` around the
+split image's raw ROM calls). It may never allocate: the global allocator
+is `src/guarded_heap.rs`, which halts core 1 instead. A panic, an exception
+or a forbidden allocation on core 1 halts core 1 alone, and core 0 renders on
+after a 2 s join timeout (`[core1] stopped: …`). On FS3 it took 620 / 1,488 /
+2,048 LEDs from 41.1 / 20.6 / 15.8 to 50.9 / 26.7 / 20.7 fps (2026-10-24).
+The decision is `docs/adr/2026-10-24-s3-second-core-renders.md`; the
+emulator's gates are `lp-cli/tests/emu_s3_core1_gates.rs`. Core 1's stack
+costs the arena 8 KiB. A `pc-sampler` image (core 1 as the PC sampler)
+builds without it.
+
+## The radio: Bluetooth, ESP-NOW and Wi-Fi (features `ble`, `espnow`, `wifi`)
+
+The C6's radio, on this chip (S3 radio plan, M3 and M4,
+`lp2025/2026-10-20-2335-s3-radio-and-ota`), from the shared crate
+`lp-fw/fw-esp32-radio`, the C6's feature tiers:
+
+- **`radio`**: esp-radio and the radio blobs' C heap; it starts nothing on
+  its own.
+- **`espnow`**: the radio's one bring-up (`esp_radio::wifi::new`, the Wi-Fi
+  blob) and the ESP-NOW driver (the Radio node), with the C6's Wi-Fi rule (while the board
+  is set to use Wi-Fi, a Radio node says why it is off and the rest runs).
+  The image adds `/radio/0` to the hardware manifest itself
+  (`HwManifest::with_resource`; the board profile leaves it out for the
+  radio-less image) and says `svc.radio-espnow`.
+- **`ble`**: the BLE link — lp-link over a Nordic-UART GATT service, one
+  untrusted link per connection into the link mux. The controller is BTDM,
+  not the C6's NPL, so its configuration is this chip's
+  (`src/ble/ble_controller_config.rs`): three activities — the two link slots
+  plus the advertiser that offers the second one (BTDM counts every
+  advertising set and connection against `max_connections`; the C6's NPL
+  counts connections only:
+  docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md)
+  — and the controller task on core 0. Logins draw their nonce from the
+  hardware RNG (`fill_random`), as on the C6.
+- **`wifi`**: the station, the IP stack, the secure LAN link at
+  `ws://<board>/link`, mDNS `lp-xxxx.local` and the relay's device leg, on
+  `lp-net` (12 KB, priority 1, pinned to core 0: `src/net/net_chip.rs`). The
+  relay's address is a build fact (`LP_RELAY_HOST`, `src/net/relay_config.rs`).
+  The relay client is the C6's (`fw_esp32_radio::net::relay_task`): it dials
+  only when joined, Cloud relay is on and the board holds an account key.
+  Emulated, `just test-emu-esp32s3-relay` (`lp-cli/tests/emu_relay_link.rs`'s
+  S3 arm) and `just walk-wifi-emu relay --s3` walk it: registered, edited as
+  `relay:<mac>@<origin>`, taken over on the LAN, busy, a deploy, Cloud relay
+  off and on, a reset key refused. It uploads no project there: before PSRAM
+  (M10) the image cannot compile `projects/test/basic` with a relay session
+  open (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md).
+  On silicon it is owed until the join defect is fixed
+  (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+
+All of it comes up in `core_boot`, after the filesystem, in the C6's order
+(the radio, then BLE, then `lp-net`), so a core-only board keeps its radio.
+BLE follows the C6's rule: **on unless the device store (`/.lp/access.json`)
+turns it off** — a fresh board starts it. The radios' interrupts (priority 1,
+CPU0) sit under the link thread's priority-1 lock (`src/io_thread.rs`). On a
+split image the radio links serve the engine once `split_boot` enters it; a
+core-only S3 serves nothing over the air yet (updates are the updates plan's).
+
+**`ble` is on by default** since its desk walk passed on FS3
+(`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
+BTDM controller unless the device store turns Bluetooth off, emulated ones
+included (they advertise to nobody, as an emulated C6 does). **`espnow` is on
+by default** since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up
+costs about 37 KB of internal heap, which PSRAM's heap gives back (the radio
+memory ADR's 2026-10-23 amendment). **`wifi` is off by default**
+until its desk walk passes:
+build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
+esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
+--features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
+probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
+`s3_espnow`, `s3_wifi` are the features minus the probe, and the source gates
+on those).
+
+**Memory** is `docs/adr/2026-10-21-s3-radio-memory.md`: the radio blobs' own
+C heap (`src/c_heap.rs`; 32 KB on a Bluetooth image, 48 KB with the Wi-Fi
+blob up), the arena cut around the boot stages' RAM and
+`dram2_seg` untagged — no radio block may land where a boot stage runs after a
+warm reset, and every block is checked as it is handed out — the Wi-Fi IRAM
+classes in flash, a 168 KB arena on a Bluetooth image and 136 KB with the
+Wi-Fi blob up, a ~52–54 KB main stack. With both radios up
+and no project the heap is 262,160 B in total and ~131 KB free (emulated),
+against 319,504 / 287,940 without a radio. A radio image prints its regions at
+boot (`[INIT] heap region: …`) and the radio region's high water at the
+heartbeat (`[radio-heap] …`).
+
+On FS3 with an antenna, Mac Chrome as the central (2026-10-21, the Bluetooth
+walk record, a `ble` image without M4's ESP-NOW): `[ble] up: controller +33400
+B, host + GATT +3520 B`; connected, the radio region's high water is 26,084 of
+32,768 B (0 B overflowed to main) and the main stack's 29,312 of 54,296 B.
+Frame rate on `/projects/studio` (Peach (1D)): 37 fps radio off, 35–36
+advertising, 32 connected and editing, inside the radio frame-rate budget.
+
+## PSRAM (feature `psram`, on by default)
+
+The S3R8's 8 MB of octal PSRAM, brought up in the core (`src/psram.rs`) and
+given to the engine's heap. On by default since 2026-10-23, with every Rust
+allocation going there first (`all`): Yona's ruling on the walk's numbers
+(`docs/reports/2026-10-22-s3-psram-walk.md`, `docs/adr/2026-10-22-s3-psram.md`).
+
+```bash
+just build-fw-esp32s3                               # the default: PSRAM first for every Rust allocation
+LP_PSRAM_HEAP=split:1024 just build-fw-esp32s3      # …only for 1 KB and up
+LP_PSRAM_HEAP=off just build-fw-esp32s3             # up and tested, not in the heap
+just test-emu-esp32s3-psram                         # the emulator's proof
+```
+
+- **The window:** MMU entries `0x80..0x100` (`lp_bootctl::s3_mmu::PSRAM_WINDOW`;
+  data `0x3C80_0000`, code `0x4280_0000`), on the plain and the split image
+  alike. The core links below `0x80`; `lp-fw-split` refuses one that does not.
+- **When it is up:** only on a part whose eFuse `PSRAM_CAP` says 8 MB, in octal
+  mode, after a boot self-test (a compare-and-swap and a sampled pattern, a
+  few ms). Otherwise the board boots as without the feature; one
+  `[INIT] psram:` line says which.
+- **The heap:** PSRAM is an `External` region after every internal one;
+  `LP_PSRAM_HEAP` (`all`, `split:<bytes>`, `last`, `off`) says where Rust's
+  default allocations go. `[MEM]`, the heartbeat and the load gates read
+  internal RAM; `[PSRAM] free= used= largest_free=` follows the ledger.
+- **What never lives there:** the frame the RMT ISR reads (the output copies a
+  PSRAM frame into an internal buffer first), ISR code and state, the radio's
+  C heap and DMA buffers (the radio's region is `Internal | Reserved`), thread
+  stacks; nor the LCD_CAM backend's frame buffers (`Internal` by capability,
+  asserted at every allocation).
+- **JIT code** in PSRAM is published (D-cache written back, I-cache
+  invalidated) through `lpvm_native::code_publish` before it runs.
+- **Cost on the default arena:** 3 KiB, so the main stack keeps its share
+  after the init's 2,572 B of IRAM.
+
 ## How this differs from fw-esp32c6
 
 Per the per-chip-toolchains ADR, the recovery strategy is **per chip** and does
@@ -407,7 +732,48 @@ does not yet exist would boot-loop the board every 8 s.
 ## The app layer
 
 The default build is the LightPlayer app: `LpServer` over USB-Serial-JTAG,
-littlefs on the `lpfs` partition, and abort-tier recovery.
+the tree store on the `lpfs` partition, and abort-tier recovery.
+
+### The filesystem: the tree store on `lpfs`
+
+`lpfs` (1.5 MB at `0x610000`, 384 sectors of 4 KiB) holds the tree store
+(`lp-tree-store`, the `fs-tree` feature, which `server` implies), as on the
+C6 since its 2026-10 cutover; littlefs is gone from the image. The C6 is the
+model, and the differences are only the chip's:
+
+- **Reads go through the flash cache.** `src/tree_flash.rs` maps the
+  partition at layout 2's `lpfs` window (`lp_bootctl::s3_mmu::LPFS_WINDOW`,
+  MMU entries `0x1C0..0x1E0`, `0x3DC0_0000`, up to 2 MiB — the loader's
+  scratch, unmapped before it jumps) and the store reads it as memory. After
+  every program and erase the written range is dropped from the cache with
+  the mask ROM's `Cache_Invalidate_Addr`; if the ROM ever refuses, reads fall
+  back to ROM calls for the rest of the boot. Writes go through
+  `fw_esp32_common::aligned_nor_flash` over esp-storage, as on the C6.
+- **Records are hashed in software** (`lp_tree_store::SoftSha256`), not with
+  the S3's SHA accelerator.
+- **Octal flash is refused.** A part whose eFuse says octal flash serves the
+  memory filesystem and says so (`[FS] octal flash: …`); the store has only
+  been read on quad parts.
+
+What it cost (`just fw-esp32s3-size-check`, against `main` at `05f3ab150`
+with littlefs): the monolithic image grew 21,840 B (2,431,712 →
+2,453,552 B). In the split image the core grew 28,848 B (the store mounts in
+`core_boot`) and the engine shrank 5,000 B; the core now sits 17,248 B below
+its next 64 KiB page (46,096 B before).
+
+**A littlefs `lpfs` is held, never formatted.** A board that still has
+littlefs files (the S3s flashed before M7 P9) boots with `fs: legacy_held`
+and an in-memory filesystem: its files are untouched. There is no migration
+(the S3 updates plan's ruling L7: the only S3 is the bench one). To adopt the
+tree store, erase `lpfs` over USB (lease the board first; `board take`
+prints its port) and re-push the projects:
+
+```bash
+espflash erase-region --port <port> 0x610000 0x180000
+```
+
+The next boot finds blank flash, formats the store (`[FS] tree store
+formatted (384 sectors, …)`) and serves it.
 
 ### The link IO thread
 

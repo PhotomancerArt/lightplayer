@@ -420,6 +420,11 @@ do:   │ This board doesn't respond.                      │   # a new board t
 bad:  │ This board stopped responding over USB.          │   # lightplayer.app 10-18, a first-time user:
       │ New device                               │ Retry │   #   "'board not responding' is sort of a 'duh,
                                                            #   I'm trying to program it'"
+
+do:   │ Fabric Test                       │ ≋ Connect │   # on your own network: Wi‑Fi first, and
+                                                           #   lightplayer.app in the same press if not
+bad:  │ Fabric Test                       │ ☁ Connect │   # through the cloud from the next room
+                                                           #   (your boards follow you, 10-20)
 ```
 
 app: `lpa-studio-core/…/board_card/primary_action.rs`

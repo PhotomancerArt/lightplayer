@@ -90,6 +90,10 @@ impl crate::RelayLinkSource for ConnectableRelayBoard {
         };
         Box::pin(core::future::ready(answer))
     }
+
+    fn park(&self, _board: &str) {}
+
+    fn unpark(&self, _board: &str) {}
 }
 
 /// The relay half and what the test reads back from it.

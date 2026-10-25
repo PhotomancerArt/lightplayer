@@ -62,14 +62,16 @@ fn the_link_path_is_slash_link() {
 }
 
 /// The board listens on 80 and advertises 80. Both constants live in the
-/// bare-metal `fw-esp32c6` crate, which this host crate cannot depend on,
+/// bare-metal `fw-esp32-radio` crate (moved there from `fw-esp32c6`, plan
+/// `lp2025/2026-10-20-2335-s3-radio-and-ota` M2), which this host crate
+/// cannot depend on,
 /// and the harness binds an ephemeral port, so this pins the two source
 /// declarations (the listener's and the mDNS record's) instead of a running
 /// socket. A change that moves the port edits one of these lines and fails
 /// here, naming the fact.
 #[test]
 fn the_link_port_is_80() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fw-esp32c6/src/net");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fw-esp32-radio/src/net");
     for file in ["lan_endpoint_task.rs", "mdns_task.rs"] {
         let path = root.join(file);
         let source = std::fs::read_to_string(&path)

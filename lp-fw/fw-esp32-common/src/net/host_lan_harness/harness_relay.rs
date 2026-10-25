@@ -1,5 +1,5 @@
 //! The harness board on the cloud relay: the std twin of the C6's relay
-//! task (`fw-esp32c6/src/net/relay_task.rs`). The board's own relay driver
+//! task (`fw-esp32-radio/src/net/relay_task.rs`). The board's own relay driver
 //! and device-leg loop (`net::relay`) over a std socket; its routes land on
 //! the same network slot the harness's LAN endpoint uses, so the two share
 //! one session exactly as on a C6. Its pictures and project facts (relay

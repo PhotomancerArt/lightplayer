@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Real power cuts during a real X -> Y over-the-air update, on a C6 behind a
-switchable USB hub.
+"""Real power cuts during a real X -> Y over-the-air update, on a C6 (or, with
+`--chip esp32s3`, an S3) behind a switchable USB hub.
 
     scripts/ota/hw-power-cut.py --mac A0:F2:62:87:B4:8C \\
         --hub 1-1.2,1-2.2 --hub-port 4 \\
@@ -26,6 +26,11 @@ when BOTH twins' ports are off, so --hub takes both. Needs uhubctl.
 On the desk, cut through the lease tool instead of uhubctl:
 `--power-cycle-cmd 'board power-cycle fixture-c6 --as "<who>" --off-secs 2'`
 replaces --hub/--hub-port (the command is split shell-style and run as is).
+
+`--chip esp32s3` (S3 updates plan, M7 P11): espflash talks to an S3, and the
+verdict is Y's hello after the recovery (a power-on capture to the hello
+naming Y, `running`), not the `[CORE]` line, which the S3 can lose after a
+reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md).
 """
 
 import argparse
@@ -89,6 +94,7 @@ def main():
     ap.add_argument("--off-secs", type=float, default=2.0)
     ap.add_argument("--recover-secs", type=int, default=180)
     ap.add_argument("--no-z", action="store_true", help="offer raw chunks only")
+    ap.add_argument("--chip", default="esp32c6", choices=["esp32c6", "esp32s3"])
     a = ap.parse_args()
     if not a.power_cycle_cmd and (not a.hub or a.hub_port is None):
         ap.error("give --hub and --hub-port, or --power-cycle-cmd")
@@ -104,7 +110,7 @@ def main():
         if not port:
             print(f"{tag}: board {a.mac} not on the bus — stopping", flush=True)
             break
-        r = sh(["espflash", "write-bin", "--chip", "esp32c6", "--port", port, "0x0", str(image)])
+        r = sh(["espflash", "write-bin", "--chip", a.chip, "--port", port, "0x0", str(image)])
         if r.returncode != 0:
             print(f"{tag}: flashing X failed: {r.stderr[-300:]}", flush=True)
             break
@@ -150,13 +156,23 @@ def main():
         cores = re.findall(r"\[CORE\] core @\S+ \+\d+ \(([a-z ]+)\) build (\S+)", text)
         served = re.findall(r"D \d+ chunk\(s\) / \d+ B; Z \d+ chunk\(s\) / \d+ B",
                             rec_err.read_text(errors="replace"))
-        ok = "done: UpToDate" in text and f"build {y_build}" in final and " engine " in final
+        if a.chip == "esp32s3":
+            # Y's own word that its engine runs: a fresh capture to its hello.
+            fin = out / f"{tag}.fin.txt"
+            port = port_of(a.mac, wait=20) or port
+            sh(capture(a.lp_cli, port, fin, 60, exit_on=f'"buildId":"{y_build}"'))
+            hello = [l for l in fin.read_text(errors="replace").splitlines() if '"hello":{' in l]
+            final = hello[-1][:200] if hello else ""
+            ok = ("done: UpToDate" in text and f'"buildId":"{y_build}"' in final
+                  and '"state":"running"' in final)
+        else:
+            ok = "done: UpToDate" in text and f"build {y_build}" in final and " engine " in final
         rows.append({
             "cut": t,
             "verdict": "PASS" if ok else "FAIL",
             "first_boot_after": " ".join(cores[0]) if cores else "?",
             "recovery_served": served[-1] if served else "?",
-            "final": final[final.find("[CORE]"):][:160],
+            "final": final[max(final.find("[CORE]"), 0):][:160],
         })
         print(json.dumps(rows[-1]), flush=True)
     (out / "summary.json").write_text(json.dumps(rows, indent=1))

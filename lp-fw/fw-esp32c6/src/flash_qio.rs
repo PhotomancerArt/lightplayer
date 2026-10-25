@@ -11,7 +11,7 @@
 //!
 //! [`enter`] runs once, right after esp-storage's `FlashStorage::new` (whose
 //! own `RDID` size probe must come before any ROM flash access — the rule in
-//! `ota/mod.rs`, from two XIAOs) and before the boot records, the mount and
+//! `fw_esp32_common::split_core`, from two XIAOs) and before the boot records, the mount and
 //! the project load:
 //!
 //! 1. **Read the part, write nothing.** `RDID` and status register 2 (command
@@ -45,49 +45,26 @@
 //!
 //! [`switch_to_qio`] is all of it that runs with the cache suspended, from
 //! RAM (~330 B). It calls only mask-ROM code, its helpers are
-//! `#[inline(always)]`, and nothing in it reads `.rodata` — checked with
-//! `rust-nm` and `objdump` on the linked image, not trusted to the
-//! attribute.
+//! `#[inline(always)]` (the registers, the saved set and the checks are
+//! `fw_esp32_common::flash_read_mode`'s, shared with the S3), and nothing in
+//! it reads `.rodata` — checked with `rust-nm` and `objdump` on the linked
+//! image, not trusted to the attribute.
 
 use core::mem::MaybeUninit;
-use core::ptr::{read_volatile, write_volatile};
 
 use fw_esp32_common::flash_qio::qio_ready;
+use fw_esp32_common::flash_read_mode::{
+    CHECK_AT, CHECK_WORDS, FREAD_DIO, FREAD_QIO, Mspi, NOT_SET_AFTER, ROM_MODE_QIO, SWITCH_ON,
+    SavedReadMode, fold_differ,
+};
 
-/// `SPI_MEM` 0, the cache's flash controller.
-const SPI0: usize = 0x6000_2000;
-/// `SPI_MEM` 1, the one the ROM's flash routines (and esp-storage) drive.
-const SPI1: usize = 0x6000_3000;
-// Register offsets, the same in both blocks (C6 TRM, "SPI0/1 Register
-// Summary").
-const CMD: usize = 0x00;
-const CTRL: usize = 0x08;
-const USER: usize = 0x18;
-const USER1: usize = 0x1c;
-const USER2: usize = 0x20;
-/// SPI0: `SPI_MEM_RD_STATUS`, whose `WB_MODE` field is the QIO mode byte.
-const RD_STATUS: usize = 0x2c;
-/// SPI0: `SPI_MEM_CACHE_FCTRL`.
-const FCTRL: usize = 0x3c;
-const W0: usize = 0x58;
-
-/// `SPI_MEM_CMD.SPI_MEM_FLASH_RDID`.
-const CMD_RDID: u32 = 1 << 28;
-/// `SPI_MEM_CTRL.SPI_MEM_FREAD_DIO` / `SPI_MEM_FREAD_QIO`.
-const FREAD_DIO: u32 = 1 << 23;
-const FREAD_QIO: u32 = 1 << 24;
-/// `SPIMasterReadModeCnfig`'s mode argument (the ROM's read-mode enum: QIO,
-/// QOUT, DIO, DOUT, FASTRD, SLOWRD).
-const ROM_MODE_QIO: u32 = 0;
-/// Where the read-back check reads: the start of the flash, which holds a
-/// bootloader image under every door (never erased, never all ones).
-const CHECK_AT: u32 = 0;
-const CHECK_WORDS: usize = 8;
-
-/// [`switch_to_qio`]'s answers.
-const QIO_ON: u8 = 0;
-const NOT_QIO_AFTER: u8 = 1;
-const READ_BACK_DIFFERED: u8 = 2;
+/// The C6's flash controllers: `SPI_MEM` 0 (the cache's) at `0x6000_2000`,
+/// `SPI_MEM` 1 (the one the ROM's flash routines and esp-storage drive) at
+/// `0x6000_3000`.
+const MSPI: Mspi = Mspi {
+    spi0: 0x6000_2000,
+    spi1: 0x6000_3000,
+};
 
 unsafe extern "C" {
     fn Cache_Suspend_ICache() -> u32;
@@ -100,7 +77,7 @@ unsafe extern "C" {
 
 /// Choose the read mode, once, and say which in one line.
 pub fn enter() {
-    let ctrl = rd(SPI0 + CTRL);
+    let ctrl = MSPI.spi0_ctrl();
     if ctrl & FREAD_QIO != 0 {
         log::info!("[flash] QIO, set before the core");
         return;
@@ -113,11 +90,11 @@ pub fn enter() {
     let why = match qio_ready(jedec, sr2) {
         Err(why) => why.words(),
         Ok(()) => match critical_section::with(|_| switch_to_qio()) {
-            QIO_ON => {
+            SWITCH_ON => {
                 log::info!("[flash] QIO (jedec {jedec:06x}, sr2 {sr2:02x})");
                 return;
             }
-            NOT_QIO_AFTER => "the controller did not read back as QIO",
+            NOT_SET_AFTER => "the controller did not read back as QIO",
             _ => "the QIO read-back differed",
         },
     };
@@ -128,9 +105,7 @@ pub fn enter() {
 /// off — the way esp-storage's own `RDID` size probe runs on every boot. Two
 /// reads; neither changes anything in the part.
 fn read_part() -> (u32, u32) {
-    wr(SPI1 + CMD, CMD_RDID);
-    while rd(SPI1 + CMD) & CMD_RDID != 0 {}
-    let jedec = rd(SPI1 + W0) & 0x00ff_ffff;
+    let jedec = MSPI.rdid();
     let mut sr2 = 0;
     if unsafe { esp_rom_spiflash_read_user_cmd(&mut sr2, 0x35) } != 0 {
         sr2 = 0;
@@ -144,7 +119,7 @@ fn read_part() -> (u32, u32) {
 fn switch_to_qio() -> u8 {
     unsafe {
         let autoload = Cache_Suspend_ICache();
-        let saved = Saved::take();
+        let saved = SavedReadMode::take(MSPI);
         // Not zeroed (that is a `memset` call): the ROM fills both, and a
         // failed read counts as a difference.
         let mut dio = MaybeUninit::<[u32; CHECK_WORDS]>::uninit();
@@ -154,79 +129,12 @@ fn switch_to_qio() -> u8 {
         SPIMasterReadModeCnfig(ROM_MODE_QIO);
         esp_rom_spiflash_select_qio_pins(0, 0);
         differ |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
-        let (dio, qio) = (dio.assume_init_ref(), qio.assume_init_ref());
-        let mut i = 0;
-        while i < CHECK_WORDS {
-            differ |= dio[i] ^ qio[i];
-            i += 1;
-        }
-
-        let user1 = rd(SPI0 + USER1);
-        let verdict = if rd(SPI0 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
-            || rd(SPI1 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
-            || rd(SPI0 + USER2) & 0xffff != 0xeb
-            || user1 >> 26 != 31
-            || user1 & 0x3f != (saved.spi0_user1 & 0x3f) + 2
-        {
-            NOT_QIO_AFTER
-        } else if differ != 0 {
-            READ_BACK_DIFFERED
-        } else {
-            QIO_ON
-        };
-        if verdict != QIO_ON {
-            saved.put_back();
+        let differ = fold_differ(dio.assume_init_ref(), qio.assume_init_ref(), differ);
+        let v = MSPI.qio_verdict(&saved, differ);
+        if v != SWITCH_ON {
+            saved.put_back(MSPI);
         }
         Cache_Resume_ICache(autoload);
-        verdict
+        v
     }
-}
-
-/// The registers `SPIMasterReadModeCnfig` writes, as they were. Spelled out
-/// rather than a table: a table would be `.rodata`, in flash, and these run
-/// with the cache suspended.
-struct Saved {
-    spi0_ctrl: u32,
-    spi0_user: u32,
-    spi0_user1: u32,
-    spi0_user2: u32,
-    spi0_rd_status: u32,
-    spi0_fctrl: u32,
-    spi1_ctrl: u32,
-}
-
-impl Saved {
-    #[inline(always)]
-    fn take() -> Self {
-        Saved {
-            spi0_ctrl: rd(SPI0 + CTRL),
-            spi0_user: rd(SPI0 + USER),
-            spi0_user1: rd(SPI0 + USER1),
-            spi0_user2: rd(SPI0 + USER2),
-            spi0_rd_status: rd(SPI0 + RD_STATUS),
-            spi0_fctrl: rd(SPI0 + FCTRL),
-            spi1_ctrl: rd(SPI1 + CTRL),
-        }
-    }
-
-    #[inline(always)]
-    fn put_back(&self) {
-        wr(SPI0 + CTRL, self.spi0_ctrl);
-        wr(SPI0 + USER, self.spi0_user);
-        wr(SPI0 + USER1, self.spi0_user1);
-        wr(SPI0 + USER2, self.spi0_user2);
-        wr(SPI0 + RD_STATUS, self.spi0_rd_status);
-        wr(SPI0 + FCTRL, self.spi0_fctrl);
-        wr(SPI1 + CTRL, self.spi1_ctrl);
-    }
-}
-
-#[inline(always)]
-fn rd(addr: usize) -> u32 {
-    unsafe { read_volatile(addr as *const u32) }
-}
-
-#[inline(always)]
-fn wr(addr: usize, value: u32) {
-    unsafe { write_volatile(addr as *mut u32, value) }
 }

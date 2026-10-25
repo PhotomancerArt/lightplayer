@@ -2,7 +2,9 @@
 // esp-rs/esp-hal:
 //   esp-metadata-generated-0.4.0/src/_generated_esp32s3.rs:4801-4804
 //   (`OutputSignal::RMT_SIG_0 = 81` … `RMT_SIG_3 = 84`), :4761
-//   (`OutputSignal::U0TXD = 12`), :4923 (`OutputSignal::GPIO = 256`)
+//   (`OutputSignal::U0TXD = 12`), :4923 (`OutputSignal::GPIO = 256`),
+//   :4846-4868 (`OutputSignal::LCD_CS = 132`, `LCD_DATA_0..15 = 133..=148`,
+//   `LCD_DC = 153`, `LCD_PCLK = 154`; M9's parallel LED output)
 // and its **input** twin, read independently and deliberately kept apart:
 //   esp-metadata-generated-0.4.0/src/_generated_esp32s3.rs:4628-4631
 //   (`InputSignal::RMT_SIG_0 = 81` … `RMT_SIG_3 = 84`), :4573
@@ -45,6 +47,25 @@ pub static OUTPUT_SIGNALS: &[(u16, &str)] = &[
     (82, "RMT_SIG_1"),
     (83, "RMT_SIG_2"),
     (84, "RMT_SIG_3"),
+    (132, "LCD_CS"),
+    (133, "LCD_DATA_0"),
+    (134, "LCD_DATA_1"),
+    (135, "LCD_DATA_2"),
+    (136, "LCD_DATA_3"),
+    (137, "LCD_DATA_4"),
+    (138, "LCD_DATA_5"),
+    (139, "LCD_DATA_6"),
+    (140, "LCD_DATA_7"),
+    (141, "LCD_DATA_8"),
+    (142, "LCD_DATA_9"),
+    (143, "LCD_DATA_10"),
+    (144, "LCD_DATA_11"),
+    (145, "LCD_DATA_12"),
+    (146, "LCD_DATA_13"),
+    (147, "LCD_DATA_14"),
+    (148, "LCD_DATA_15"),
+    (153, "LCD_DC"),
+    (154, "LCD_PCLK"),
     (256, "GPIO_OUT"),
 ];
 
@@ -73,6 +94,12 @@ pub const OUT_SEL_GPIO: u16 = 256;
 /// `RMT_SIG_0 + ch`, which is what [`crate::periph::rmt`] drives onto the
 /// fabric.
 pub const RMT_SIG_0: u16 = 81;
+
+/// `OutputSignal::LCD_DATA_0` — **133**; `LCD_DATA_n` is `133 + n` through
+/// `LCD_DATA_15 = 148` (`esp-metadata-generated-0.4.0/src/_generated_esp32s3.rs`,
+/// the `OutputSignal` enum, beside `LCD_CS = 132`, `LCD_DC = 153` and
+/// `LCD_PCLK = 154`). What [`crate::periph::lcd_cam`] drives.
+pub const LCD_DATA_0: u16 = 133;
 
 /// `func_in_sel_cfg[s]` signal numbers this crate can name, `(number, name)`,
 /// sorted by number — the **input** half of the matrix.

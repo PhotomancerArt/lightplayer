@@ -60,6 +60,10 @@ members = [
     "tools/lp-store-bench",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
+    # NOT in default-members (like the two above): the radio glue the chip
+    # crates share depends on esp-hal/esp-radio, which build only for a chip
+    # target. `just clippy-fw-esp32c6` lints it on the C6's target.
+    "lp-fw/fw-esp32-radio",
     # NOT in default-members (like the two above): a cross-target Xtensa crate
     # that only `just build-fw-esp32v3` / `just clippy-fw-esp32v3` build, under
     # its own `esp` toolchain.
@@ -145,7 +149,8 @@ members = [
 # emulation family but is a member of THAT workspace, not this one
 # (see lp-emu/README.md). fw-esp32c6-loader is a standalone bare-metal
 # RV32 crate with its own `[workspace]`, built from its own directory.
-exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader", "lp-base/lp-tree-store/size-probe"]
+# fw-esp32s3-loader is its Xtensa twin, the same way.
+exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader", "lp-fw/fw-esp32s3-loader", "lp-base/lp-tree-store/size-probe"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
@@ -442,6 +447,11 @@ panic = "abort"
 [profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
+
+# The radio glue the C6 links (`lp-fw/fw-esp32-radio`, moved out of
+# fw-esp32c6): the same debug info, so a crash in it still symbolicates.
+[profile.release-esp32.package.fw-esp32-radio]
+debug = 1
 
 [profile.release-esp32.package.esp-radio]
 opt-level = "s"

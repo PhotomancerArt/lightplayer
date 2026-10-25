@@ -96,6 +96,15 @@ pub enum AluRrr {
     Movnez,
     Movltz,
     Movgez,
+    /// `salt` / `saltu` — "set AR if less than": `rd = rs < rt` as 0 or 1,
+    /// signed / unsigned. RST2 `op2 = 7` / `6`. An LX7 instruction: the
+    /// ESP32-S3's core has it and its GCC emits it (the esp-radio blobs'
+    /// `_vsnprintf` does), the classic's LX6 does not — its assembler
+    /// refuses the mnemonic. Nothing in this decoder is gated per core, so
+    /// on the classic the word decodes rather than faulting; no classic
+    /// toolchain can produce it.
+    Salt,
+    Saltu,
 }
 
 /// Two-register ops written `op rd, rt` (`RRR`, `op0 = 0`).

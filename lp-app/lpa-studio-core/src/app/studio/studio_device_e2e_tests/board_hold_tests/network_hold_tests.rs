@@ -904,6 +904,10 @@ impl crate::RelayLinkSource for DeskNetSource {
     fn connect(&self, _board: &str) -> DeviceTransportFuture<Result<(), String>> {
         self.reach()
     }
+
+    fn park(&self, _board: &str) {}
+
+    fn unpark(&self, _board: &str) {}
 }
 
 /// A conversation nobody answers: the push hangs until it is evicted.

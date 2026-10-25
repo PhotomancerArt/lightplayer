@@ -77,6 +77,11 @@ pub struct PsramConfig {
     pub flash_frequency: FlashFreq,
     /// Frequency of PSRAM memory
     pub ram_frequency: SpiRamFreq,
+    /// LP fork (seventh diff, see README-LP.md): the first MMU entry to map
+    /// PSRAM at. `None` is upstream's choice, one past the highest mapped
+    /// entry; `Some(n)` maps it at entry `n` (the data bus's
+    /// `0x3C00_0000 + n × 64 KiB`), which the caller has kept free.
+    pub mmu_start_entry: Option<u32>,
 }
 
 /// Initialize PSRAM to be used for data.
@@ -102,6 +107,16 @@ pub(crate) fn init_psram(config: &mut PsramConfig) -> bool {
         );
     }
 
+    success
+}
+
+/// LP fork (seventh diff): the octal path alone, for `Psram::new_octal`.
+#[procmacros::ram]
+pub(crate) fn init_psram_octal(config: &mut PsramConfig) -> bool {
+    let success = octal_spi_impl::psram_init(config);
+    if !success {
+        warn!("Failed to configure octal PSRAM.");
+    }
     success
 }
 
@@ -149,12 +164,17 @@ pub(crate) fn map_psram(config: PsramConfig) -> Range<usize> {
     let mmu_table_ptr = DR_REG_MMU_TABLE as *const u32;
     let mut mapped_pages = 0;
 
-    // the bootloader is using the last page to access flash internally
-    // (e.g. to read the app descriptor) so we just skip that
-    for i in (0..(FLASH_MMU_TABLE_SIZE - 1)).rev() {
-        if unsafe { mmu_table_ptr.add(i).read_volatile() } != MMU_INVALID {
-            mapped_pages = (i + 1) as u32;
-            break;
+    // LP fork (seventh diff): a caller-chosen entry, or upstream's scan.
+    if let Some(entry) = config.mmu_start_entry {
+        mapped_pages = entry;
+    } else {
+        // the bootloader is using the last page to access flash internally
+        // (e.g. to read the app descriptor) so we just skip that
+        for i in (0..(FLASH_MMU_TABLE_SIZE - 1)).rev() {
+            if unsafe { mmu_table_ptr.add(i).read_volatile() } != MMU_INVALID {
+                mapped_pages = (i + 1) as u32;
+                break;
+            }
         }
     }
     let start = EXTMEM_ORIGIN as u32 + (MMU_PAGE_SIZE * mapped_pages);
@@ -1493,6 +1513,10 @@ pub(crate) mod octal_spi_impl {
         // CONFIG_SPIRAM_ECC_ENABLE not yet supported
     }
 
+    // LP fork (seventh diff): kept out of line, so its formatting stays in
+    // flash instead of being inlined into the `#[ram]` init (~1 KB of IRAM);
+    // the init already calls `log` in flash from IRAM.
+    #[inline(never)]
     fn print_psram_info(reg_val: &OpiPsramModeReg) {
         info!(
             "vendor id    : {:02x} ({})",

@@ -1,9 +1,11 @@
 //! Native f32 `cos` — the f32 sibling of [`super::cos_q32`].
 //!
-//! **Implementation:** `libm::cosf`. `libm` is a `no_std` workspace
-//! dependency and is the same code the `interp.f32` conformance oracle reaches
-//! through `StdMathHandler`, so the builtin and the oracle agree by
-//! construction rather than by tuning.
+//! **Implementation:** [`crate::f32_math::sincos`], single precision
+//! throughout, so the LX7's FPU runs it. `libm::cosf` (what this was, and what
+//! the `interp.f32` conformance oracle still reaches through
+//! `StdMathHandler`) computes its kernel in `f64`, which on the ESP32-S3 is
+//! software: the fps spike measured Float mode 4.9× slower than Q32 for it.
+//! The two agree within the band below, not bit for bit.
 //!
 //! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor, against the f64 reference. That is f32 round-off, not a
@@ -21,7 +23,7 @@
 /// GLSL `cos(x)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_cos_f32(x: f32) -> f32 {
-    libm::cosf(x)
+    crate::f32_math::sincos(x).1
 }
 
 #[cfg(test)]

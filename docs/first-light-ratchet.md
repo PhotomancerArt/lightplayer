@@ -38,6 +38,14 @@ exist), and `t4` charges for where code lands in flash and cache: at
 `just first-light-check` shows a direction, never a value to record. Bless
 with the number CI printed.
 
+The image is a **figure build** (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`):
+its version, commit and dirty flag are fixed, so only the firmware's sources
+reach its layout (the app descriptor's build time still differs, in a
+fixed-width field that moves nothing). Until 2026-10-21 the commit stayed real, and on a PR that is
+GitHub's merge commit, new on every push: its string moved the core's merged
+`.rodata`, and the same firmware read 386 or 391 ms by the commit alone
+([the defect](defects/2026-10-21-first-light-flipped-with-the-commit.md)).
+
 It runs where the C6's pinned figures run (the `emu_c6` filter or the C6
 firmware's crate closure), on its own files, and on every main push.
 

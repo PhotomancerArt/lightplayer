@@ -140,7 +140,7 @@ function panelText() {
 function args() {
   const lane = process.argv[2];
   if (lane !== "usb" && lane !== "ble") {
-    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|relay-p1|studio-lan|studio-lan-reset|studio-relay> (lan, studio-lan, studio-lan-reset, studio-relay: [--out <dir>] [--keep-open] [--dry-run])");
+    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|relay-p1|studio-lan|studio-lan-reset|studio-relay|studio-relay-move|studio-relay-account> (lan, studio-lan, studio-lan-reset, studio-relay, studio-relay-move, studio-relay-account: [--out <dir>] [--keep-open] [--dry-run])");
     process.exit(2);
   }
   return { lane, out: path.join(ROOT, "target/walk-wifi-emu", lane) };
@@ -531,5 +531,5 @@ else if (process.argv[2] === "studio-lan") await import("./walk-wifi-emu-studio-
 else if (process.argv[2] === "studio-lan-reset") await import("./walk-wifi-emu-studio-lan-reset.mjs");
 // `studio-relay` (network-transport plan, PR C): Studio with no flag
 // reaching a board through a local relay, by "Connect through lightplayer.app".
-else if (process.argv[2] === "studio-relay") await import("./walk-wifi-emu-studio-relay.mjs");
+else if (["studio-relay", "studio-relay-move", "studio-relay-account"].includes(process.argv[2])) await import("./walk-wifi-emu-studio-relay.mjs");
 else await main();

@@ -477,6 +477,12 @@ pub mod periph {
     /// `0x6003_507C`, the word `bootloader_fill_random` reads for the
     /// image-hash salt. A seeded generator (P06, ruling R4).
     pub const RNG: u32 = 0x6003_4F6C;
+    /// `esp32s3-0.35.2/src/lib.rs:668`. The AHB GDMA: five channels, each
+    /// an IN and an OUT half, `0xC0` apart (M9: [`crate::periph::gdma`]).
+    pub const DMA: u32 = 0x6003_F000;
+    /// `esp32s3-0.35.2/src/lib.rs:821`. LCD_CAM: the LCD half (i8080 TX) is
+    /// modelled, the CAM half is not (M9: [`crate::periph::lcd_cam`]).
+    pub const LCD_CAM: u32 = 0x6004_1000;
 }
 
 /// `SYSTEM.core_1_control_0`'s address — the register that holds core 1 on

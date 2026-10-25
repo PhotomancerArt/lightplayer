@@ -8,6 +8,13 @@ use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 /// Fixed-point modulus: mod(x, y) = x - y * floor(x / y)
 ///
 /// Uses div builtin for division and mul builtin for multiplication.
+///
+/// Kept out of line: inlined, it brings `__divdi3` into each of
+/// `psrdnoise2_q32`'s six call sites, and that function is in the S3's IRAM
+/// hot set (`lp-fw/fw-esp32s3/rwtext_hook.x`), where 1,355 B more comes out of
+/// the main stack. LLVM made that choice by itself once on an unrelated
+/// change (2026-10-24); this keeps it from making it again.
+#[inline(never)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_mod_q32(x: i32, y: i32) -> i32 {
     // Compute x / y using div builtin

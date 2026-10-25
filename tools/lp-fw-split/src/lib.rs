@@ -19,19 +19,24 @@
 
 pub mod app_image;
 pub mod bootloader_image;
+pub mod chip_profile;
 pub mod core_padding;
 pub mod core_segments;
 pub mod elf_symbol;
 pub mod engine_script;
+pub mod gnu_map;
 pub mod headroom;
 pub mod image_end;
+pub mod literal_pools;
 pub mod merged_image;
 pub mod pass_link;
 pub mod reachability;
 pub mod section_graph;
+pub mod segment_rules;
 pub mod split_artifacts;
 pub mod split_build;
 pub mod tree_guard;
 pub mod verify_report;
+pub mod xtensa_targets;
 
 pub use split_build::{BuildOptions, Door, SplitReport, build, verify};

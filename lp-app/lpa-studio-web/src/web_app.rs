@@ -525,6 +525,20 @@ pub fn App() -> Element {
                         secure_page,
                     )),
                 )));
+                // What this browser lets a socket to the LAN do, for the
+                // choices core makes by itself (Connect's first road, the
+                // move onto Wi‑Fi): two facts read here, decided in core
+                // (`LanReach::of_page`). Chromium is the one with
+                // `navigator.userAgentData`; no user-agent string is read.
+                let chromium = web_sys::window().is_some_and(|window| {
+                    js_sys::Reflect::has(&window.navigator(), &"userAgentData".into())
+                        .unwrap_or(false)
+                });
+                let lan_reach = lpa_studio_core::LanReach::of_page(secure_page, chromium);
+                log::info!(
+                    "Wi\u{2011}Fi reach: {lan_reach:?} (https: {secure_page}, Chromium: {chromium})"
+                );
+                controller.set_lan_reach(lan_reach);
                 // Boards through lightplayer.app's relay (the network
                 // transport's P05; on for everyone, no flag, since PR C):
                 // in every browser with a WebSocket, iPhone included. A

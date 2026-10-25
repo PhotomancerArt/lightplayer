@@ -82,6 +82,7 @@ extern crate std;
 pub mod blocks;
 pub mod driver;
 pub mod hw;
+pub mod parallel;
 pub mod pulse;
 pub mod pusher;
 pub mod state;

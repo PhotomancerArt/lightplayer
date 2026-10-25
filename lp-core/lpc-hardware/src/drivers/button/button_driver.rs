@@ -99,6 +99,14 @@ pub trait ButtonDriver: HwDriver {
         crate::preferred_endpoint(self.endpoints(), matches)
     }
 
+    /// The endpoint whose spec is `spec`, by [`Self::find_endpoint`]'s
+    /// preference. A node that cannot open its button asks this on every
+    /// retry, so a driver whose endpoints are costly to build overrides it to
+    /// build only the match.
+    fn find_endpoint_by_spec(&self, spec: &crate::HwEndpointSpec) -> Option<HwEndpoint> {
+        self.find_endpoint(&|endpoint| endpoint.spec() == spec)
+    }
+
     /// Open one endpoint and claim the underlying input resource.
     fn open(
         &self,

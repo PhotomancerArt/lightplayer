@@ -1,0 +1,4 @@
+# Xtensa: Espressif's fork (the rustup `esp` channel), as fw-esp32s3.
+[toolchain]
+channel = "esp"
+components = ["rust-src"]

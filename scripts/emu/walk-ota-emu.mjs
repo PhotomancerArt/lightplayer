@@ -159,7 +159,17 @@
 // itself (no dev server): `just studio-web-story-build`, the images and a
 // debug lp-cli first — `just walk-ota-emu` builds what is missing.
 //
-//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab | --ble | --lan | --relay] [--steps update,cut-core,...]
+//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--s3] [--tab | --ble | --lan | --relay] [--steps update,cut-core,...]
+//
+// `--s3` walks emulated ESP32-S3 boards (`emu serve --chip esp32s3`, target
+// `esp32s3-8mb`, layout 2; the S3 updates plan's P12) instead of C6s: its X
+// is images-s3/x (`LP_OTA_TARGET=esp32s3-8mb scripts/ota/build-image.sh`),
+// Y the bundle's `esp32s3-8mb` package. The door, `?ble=emu` and `--lan`
+// lanes; not `--tab` (the tab host is the C6's wasm), not the steps that need
+// the pre-update single image, and not the relay lane yet (the S3's relay is
+// its M6). `--s3 --lan` needs X and Y with `wifi` (not in the S3's default
+// image yet): `just walk-ota-emu --s3 --lan` builds both and points
+// `WALK_OTA_X`, `WALK_Y_PACKAGES` and `WALK_Y_PARTS` at them.
 //
 // `WALK_OTA_X=<dir>` boards X from another image directory than images/x
 // (its merged.bin, split.json and ota/ota-manifest.json, as build-image.sh
@@ -210,6 +220,14 @@ const ARGS = process.argv.slice(2);
 const TAB = ARGS.includes("--tab");
 /// Studio reaches the door's boards over `?ble=emu` (M7 P12).
 const BLE = ARGS.includes("--ble");
+/// The boards are emulated ESP32-S3s (`emu serve --chip esp32s3`, P12).
+const S3 = ARGS.includes("--s3");
+/// The build def Y and X are packaged as, and the chip's words for the
+/// report.
+const TARGET = S3 ? "esp32s3-8mb" : "esp32c6-4mb";
+const CHIP = S3 ? "esp32s3" : "esp32c6";
+/// The chip's whole flash part: what a seeded chip file is padded to.
+const FLASH_BYTES = (S3 ? 8 : 4) * 1024 * 1024;
 /// Studio reaches the door's boards over their Wi‑Fi (`?lan=`, OTA M8).
 const LAN_LANE = ARGS.includes("--lan");
 /// Studio reaches them through a local relay (`?relay=`, OTA M8 PR C).
@@ -262,6 +280,13 @@ if (TAB && BLE) {
   console.error("walk-ota-emu: --ble walks the door's boards; it does not combine with --tab");
   process.exit(2);
 }
+if (S3 && (TAB || RELAY_LANE || STEPS.includes("needs-usb") || RELEASE_STEPS)) {
+  console.error(
+    "walk-ota-emu: --s3 walks the door's, ?ble=emu's and --lan's boards (not --tab or --relay), " +
+      "and not needs-usb or the release steps (no S3 single image or releases are built for it)",
+  );
+  process.exit(2);
+}
 for (const name of STEPS) {
   if (!BLE && name === "phantom-core") {
     console.error("walk-ota-emu: phantom-core is a Bluetooth step (--ble)");
@@ -269,7 +294,7 @@ for (const name of STEPS) {
   }
 }
 
-const IMAGES = path.join(ROOT, "target/walk-ota-emu/images");
+const IMAGES = path.join(ROOT, S3 ? "target/walk-ota-emu/images-s3" : "target/walk-ota-emu/images");
 /// X: images/x, or `WALK_OTA_X` (the header says what for).
 const X = process.env.WALK_OTA_X ? path.resolve(ROOT, process.env.WALK_OTA_X) : path.join(IMAGES, "x");
 /// X at a release version, for `store-backup` (built by hand, see the header).
@@ -292,7 +317,12 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 
 /// Waits. Every one is the page's or the board's, never a sleep: these are
 /// only how long the walk lets one stage take before it calls it failed.
-const STEP_MS = 180_000;
+/// `WALK_STEP_MS` raises it for a slow board: an emulated S3 runs ~40×
+/// slower than real time with Bluetooth and a project on, so its first
+/// heartbeat — what the card learns a project from after an update's last
+/// reboot — is minutes of wall time away
+/// (docs/debt/emulated-s3-runs-forty-times-slower-than-real-time.md).
+const STEP_MS = Number(process.env.WALK_STEP_MS ?? 180_000);
 /// A board booting ROM-up and joining the virtual LAN (a deadline, not a
 /// measurement).
 const JOIN_MS = 300_000;
@@ -364,8 +394,10 @@ async function main() {
   for (const [what, at] of [
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, "target/dx/lpa-studio-web/release/web/public")],
     [`X's split image (scripts/ota/build-image.sh ${path.relative(ROOT, X)} a0a0a0a0)`, path.join(X, "merged.bin")],
-    ["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")],
-    ["Y, this Studio's split package (lp-cli firmware package esp32c6-4mb)", path.join(PACKAGES, "esp32c6-4mb/manifest.json")],
+    ...(S3
+      ? []
+      : [["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")]]),
+    [`Y, this Studio's split package (lp-cli firmware package ${TARGET})`, path.join(PACKAGES, `${TARGET}/manifest.json`)],
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
     ...(RELEASE_STEPS
       ? [
@@ -392,7 +424,7 @@ async function main() {
   // files beside its manifest.json).
   const stagedY = path.join(out, "firmware-y");
   stageFirmware(stagedY, PACKAGES, PARTS);
-  const y = JSON.parse(readFileSync(path.join(stagedY, "esp32c6-4mb/ota-manifest.json"), "utf8"));
+  const y = JSON.parse(readFileSync(path.join(stagedY, `${TARGET}/ota-manifest.json`), "utf8"));
   const x = JSON.parse(readFileSync(path.join(X, "ota/ota-manifest.json"), "utf8"));
   const xSplit = JSON.parse(readFileSync(path.join(X, "split.json"), "utf8"));
   // X as a fielded board: its first boot done (`lpfs` formatted and
@@ -404,7 +436,7 @@ async function main() {
   const xChip = path.join(chips, "x.bin");
   seedChip(path.join(X, "merged.bin"), xChip);
   const monoChip = path.join(chips, "mono.bin");
-  seedChip(path.join(MONO, "package/fw-esp32c6-merged.bin"), monoChip, "4s");
+  if (!S3) seedChip(path.join(MONO, "package/fw-esp32c6-merged.bin"), monoChip, "4s");
   const xEngineLess = path.join(chips, "x-engine-less.bin");
   {
     const bytes = readFileSync(xChip);
@@ -544,7 +576,7 @@ async function main() {
     console.log("  ⚠️  ?ble=emu proves the transport, the card and the reconnects — not access (the");
     console.log("     emulated board answers at the edit tier), and no number here is a Bluetooth number.");
   }
-  console.log(`  this tree       ${head} (lp-emu ${lpEmu}, lp-emu:esp32c6:t1${ON_LAN ? "+net=lan" : ""})`);
+  console.log(`  this tree       ${head} (lp-emu ${lpEmu}, lp-emu:${CHIP}:t1${ON_LAN ? "+net=lan" : ""})`);
   console.log(`  X (the boards)  ${x.version}+${x.commit.slice(0, 12)}`);
   console.log(`  Y (this Studio) ${y.version}+${y.commit.slice(0, 12)}`);
   console.log(`  Studio          http://127.0.0.1:${studioPort}/ (the release bundle, served by this walk)`);
@@ -554,7 +586,7 @@ async function main() {
   const report = {
     tree: head,
     lpEmu,
-    configuration: ON_LAN ? "lp-emu:esp32c6:t1+net=lan" : "lp-emu:esp32c6:t1",
+    configuration: ON_LAN ? `lp-emu:${CHIP}:t1+net=lan` : `lp-emu:${CHIP}:t1`,
     backing: TAB ? "tab" : "door",
     link: BLE
       ? "?ble=emu (the polyfill over the door's USB link; not a radio)"
@@ -940,7 +972,7 @@ async function main() {
       consoleDir: path.join(out, "console", id),
       logFile: path.join(out, `serve-${id}.log`),
       fresh: true,
-      extraArgs: ON_LAN ? ["--lan", `${LAN}=${fixturePath}`] : [],
+      extraArgs: [...(S3 ? ["--chip", "esp32s3"] : []), ...(ON_LAN ? ["--lan", `${LAN}=${fixturePath}`] : [])],
     });
     if (ON_LAN) {
       // The board's forward: what Studio dials for it on the host.
@@ -2215,7 +2247,7 @@ async function main() {
   for (const s of report.steps) {
     console.log(`  ${s.skipped ? "–" : s.ok ? "✓" : "✗"} ${s.name.padEnd(22)} ${s.skipped ?? s.summary ?? s.error ?? ""}`);
   }
-  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : LAN_LANE ? "+net=lan: emulated times, not a radio's" : RELAY_LANE ? "+net=lan through a local relay: emulated times, not the internet's" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
+  console.log(`\n  lp-emu ${lpEmu} (lp-emu:${CHIP}:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : LAN_LANE ? "+net=lan: emulated times, not a radio's" : RELAY_LANE ? "+net=lan through a local relay: emulated times, not the internet's" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
 
   await driver.close();
   if (hold) await releaseConsole(hold);
@@ -2260,12 +2292,12 @@ function seedChip(image, chip, emulated = "60s", requests = []) {
   // emulated boot, and the chip never changes for the same image.
   if (existsSync(chip) && statSync(chip).mtimeMs > statSync(image).mtimeMs) return;
   const bytes = readFileSync(image);
-  const whole = Buffer.alloc(4 * 1024 * 1024, 0xff);
+  const whole = Buffer.alloc(FLASH_BYTES, 0xff);
   bytes.copy(whole, 0);
   writeFileSync(chip, whole);
   execFileSync(
     LP_CLI,
-    ["emu", "run", "--rom-up-flash", chip, "--host-link", "--timeout", emulated, "--exit-on", "status light: GPIO",
+    ["emu", "run", ...(S3 ? ["--chip", "esp32s3"] : []), "--rom-up-flash", chip, "--host-link", "--timeout", emulated, "--exit-on", "status light: GPIO",
       "--upload", "projects/test/shader-oracle",
       // A stamped identity, as Studio's flash leaves every board it
       // provisions: a board that mounts with none reads as one that lost

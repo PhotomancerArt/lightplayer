@@ -2,7 +2,10 @@
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
+use alloc::rc::Rc;
+use alloc::string::ToString;
 use alloc::vec::Vec;
+use core::cell::OnceCell;
 use lpc_model::{NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath, WithRevision};
 use lpc_wire::{NodeRuntimeStatus, WireChildKind};
 
@@ -47,6 +50,12 @@ pub struct RuntimeNodeEntry<N> {
 
     /// Effective authored definition backing this runtime node.
     pub def_location: Option<NodeDefLocation>,
+
+    /// [`Self::path`] rendered once, for the recovery frame every render,
+    /// produce and consume of this node enters (crash blame keys on the
+    /// path, not the id). A node's path never changes after creation and its
+    /// id is never reused, so this needs no invalidation.
+    recovery_name: OnceCell<Rc<str>>,
 }
 
 impl<N> RuntimeNodeEntry<N> {
@@ -86,7 +95,17 @@ impl<N> RuntimeNodeEntry<N> {
             introduces_scope: false,
             project_use,
             def_location,
+            recovery_name: OnceCell::new(),
         }
+    }
+
+    /// This node's recovery-frame name: its path, rendered on first use and
+    /// kept (the per-frame engine walk used to format a `String` for every
+    /// node it entered).
+    pub fn recovery_name(&self) -> Rc<str> {
+        self.recovery_name
+            .get_or_init(|| self.path.to_string().into())
+            .clone()
     }
 
     pub fn set_project_identity(

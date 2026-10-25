@@ -489,6 +489,8 @@ fn rrr_mnem(op: AluRrr) -> &'static str {
         AluRrr::Maxu => "maxu",
         AluRrr::Mul16u => "mul16u",
         AluRrr::Mul16s => "mul16s",
+        AluRrr::Salt => "salt",
+        AluRrr::Saltu => "saltu",
         AluRrr::Moveqz => "moveqz",
         AluRrr::Movnez => "movnez",
         AluRrr::Movltz => "movltz",

@@ -14,10 +14,15 @@ esp32c6 = [
     "esp-bootloader-esp-idf/esp32c6",
     "esp-rtos/esp32c6",
     "esp-hal/esp32c6",
+    "fw-esp32-radio?/esp32c6",
 ]
 server = [
     "fs-tree",
     "fw-esp32-common/server",
+    # The split image's update board side (`src/split_core/` is the C6's
+    # chip for it). Only `LP_SPLIT_LINK` builds call it; a plain build links
+    # none of it.
+    "fw-esp32-common/split-core",
     "lpc-hardware",
     "lpc-model",
     "lpc-wire",
@@ -33,7 +38,9 @@ radio = [
     "esp-radio/esp32c6",
     "esp-rtos/esp-alloc",
     "esp-rtos/esp-radio",
-]  # Root-owned ESP-NOW radio capability
+    "dep:fw-esp32-radio",
+    "fw-esp32-radio/radio",
+]  # Root-owned ESP-NOW radio capability (its driver: `fw-esp32-radio`)
 # The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.md):
 # the wire over a Nordic-UART GATT service, one untrusted link per connection.
 # In the default image, but INERT until the device store (`/.lp/access.json`)
@@ -54,6 +61,7 @@ ble = [
     "dep:embassy-sync-07",
     "dep:embedded-io-07",
     "fw-esp32-common/radio-link",
+    "fw-esp32-radio/ble",
 ]
 naga = ["lpa-server/naga"]
 # The USB link task on a preemptive esp-rtos thread of its own (priority 1,
@@ -83,6 +91,7 @@ wifi = [
     "dep:embassy-net",
     "dep:smoltcp",
     "dep:lpc-relay",
+    "fw-esp32-radio/wifi",
 ]
 # `lp-net`'s stack high-water, painted at thread start and logged as
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
@@ -195,13 +204,13 @@ desk_espnow_meter = ["radio"]
 # BLE M4 round 3's connection-parameter experiment (Run K) — OFF by default,
 # never shipped: the requested interval / latency / timeout (and an
 # active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
-# `src/ble/conn_params.rs`, `desk`.
-desk_ble_params = ["ble"]
+# `fw-esp32-radio/src/ble/conn_params.rs`, `desk`.
+desk_ble_params = ["ble", "fw-esp32-radio/desk_ble_params"]
 # The BLE host-runner recovery drill — OFF by default, never shipped: an ATT
 # write carrying `LP-DESK-FORCE-BLE-HOST-RESTART` fails the host's read the way
 # an unparseable packet does, so a desk board can prove that a runner restart
-# closes its links and advertises again. See `src/ble/hci_transport.rs`.
-desk_ble_fault = ["ble"]
+# closes its links and advertises again. See `fw-esp32-radio/src/ble/hci_transport.rs`.
+desk_ble_fault = ["ble", "fw-esp32-radio/desk_ble_fault"]
 # LP SRAM above the recovery region (15,360 B in this image) as the heap's
 # last region, untagged so only Rust's global allocator reaches it, after
 # main, dram2_seg and the radio region (`src/board/esp32c6/lp_sram_heap.rs`).
@@ -214,7 +223,7 @@ heap_map_diag = ["lpc-shared"]
 # by default, never shipped: the tree store's RAM figures (plan
 # `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D5). It owns
 # esp-alloc's hooks, so not with `heap_map_diag`. The wire is unchanged.
-heap_peak_diag = ["esp-alloc/alloc-hooks"]
+heap_peak_diag = ["esp-alloc/alloc-hooks", "esp-alloc/internal-heap-stats"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
@@ -369,7 +378,7 @@ test_ble_coex = ["test_ble", "esp-radio/coex"]
 # See `src/tests/comms_lab/mod.rs`. Never shipped.
 #
 # `lpc-shared` for `recovery/panic_path.rs`, as `test_rmt` (M5 P1, DD37).
-test_comms_lab = ["dep:lp-link", "lpc-shared"]
+test_comms_lab = ["dep:lp-link", "lpc-shared", "esp-alloc/internal-heap-stats"]
 # The same with the BLE NUS pipe beside USB (datagram framing, one frame per
 # notification / write).
 test_comms_lab_ble = ["test_comms_lab", "ble"]
@@ -463,7 +472,11 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md)
 # that is not the reclaimed bootloader segment
 # (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
-esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
+# No `internal-heap-stats`: it keeps a lifetime `max_usage` and two running
+# totals by walking every region's `used()` on every allocation (~210
+# instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads
+# them. The diagnostics that do turn it back on.
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator"] }
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }
@@ -486,6 +499,10 @@ fw-core = { path = "../fw-core", default-features = false }
 # `usb-link`: the host link on lp-link (plan `lp-link-usb-cutover`). Always
 # on: a harness that never spawns the link task links none of it.
 fw-esp32-common = { path = "../fw-esp32-common", features = ["usb-link"] }
+# The radio glue (ESP-NOW driver, BLE link, the network on `lp-net`), shared
+# with the other chips; this crate injects its chip facts (`src/net/net_chip.rs`,
+# `src/ble/mod.rs`). Its features follow `radio`, `ble` and `wifi` here.
+fw-esp32-radio = { path = "../fw-esp32-radio", optional = true }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab
@@ -558,7 +575,8 @@ lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 # The over-the-air update session (protocol v1) the split image's core runs,
-# in core-only and as the running engine's channel-3 hook (`src/ota/`).
+# in core-only and as the running engine's channel-3 hook
+# (`fw_esp32_common::split_core`, over this crate's `src/split_core/`).
 lpc-update = { path = "../../lp-core/lpc-update" }
 lpc-access = { path = "../../lp-core/lpc-access" }
 # The cloud relay's protocol and client (`wifi`; Wi-Fi relay plan P8): the

@@ -60,6 +60,8 @@ fn rrr_fields(op: AluRrr) -> (u32, u32) {
         AluRrr::Movnez => (3, 9),
         AluRrr::Movltz => (3, 0xa),
         AluRrr::Movgez => (3, 0xb),
+        AluRrr::Saltu => (2, 6),
+        AluRrr::Salt => (2, 7),
     }
 }
 

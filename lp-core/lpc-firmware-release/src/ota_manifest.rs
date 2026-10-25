@@ -371,6 +371,22 @@ pub(crate) mod tests {
         }
     }
 
+    /// An S3 release is format 1 as it is: `chip` is a word and
+    /// `requires.layout` an integer, so layout 2 needs no new shape.
+    #[test]
+    fn an_s3_manifest_on_layout_2_is_format_1() {
+        let mut m = sample();
+        m.target = "esp32s3-8mb".into();
+        m.chip = "esp32s3".into();
+        m.requires.layout = 2;
+        m.package.image.file = "fw-esp32s3-merged.bin".into();
+        m.package.image.length = 8_388_608;
+        m.validate().unwrap();
+        let back = OtaManifest::parse_valid(&m.to_json_bytes()).unwrap();
+        assert_eq!(back, m);
+        assert_eq!((back.format, back.requires.layout), (1, 2));
+    }
+
     #[test]
     fn the_sample_validates_and_round_trips() {
         let m = sample();

@@ -53,7 +53,7 @@ pub struct AccountBoardPresence {
     /// (`192.168.4.20:80`), unchecked.
     pub lan: Option<String>,
     /// The caller and the board reach lightplayer.app from the same public
-    /// address: a session may try the LAN (the automatic move is M3's).
+    /// address: a session may try the LAN (read in `lan_hint.rs` only).
     pub same_network: bool,
     /// When the board registered, epoch seconds.
     pub since: f64,

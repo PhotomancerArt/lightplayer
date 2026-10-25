@@ -18,6 +18,7 @@
 
 use crate::app::access::account_keys::tests::account;
 
+use super::best_link_tests::list as list_on_this_network;
 use super::relay_connect_tests::{BOARD, relay_light_player, unplug, with_relay};
 use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
@@ -188,8 +189,9 @@ fn a_remembered_board_moves_to_online_boards_while_the_list_names_it() {
 }
 
 /// The walk's board: met over USB with its Wi‑Fi joined (so this browser
-/// remembers its address, and Connect takes the Wi‑Fi road first), then
-/// unplugged and listed. lightplayer.app's row still offers its own way in.
+/// remembers its address, and Connect takes the Wi‑Fi road first while the
+/// list says it shares this network), then unplugged and listed.
+/// lightplayer.app's row still offers its own way in.
 #[test]
 fn a_remembered_board_with_a_wifi_address_keeps_connect_relay_on_its_row() {
     let device = joined_light_player("dev00000acctbrd05");
@@ -203,7 +205,7 @@ fn a_remembered_board_with_a_wifi_address_keeps_connect_relay_on_its_row() {
         bench.controller.wifi_addresses().get(&key).is_some()
     });
     unplug(&mut bench, &tasks, target);
-    list(&mut bench, &tasks, &[KEY]);
+    list_on_this_network(&mut bench, &tasks, KEY, None, true);
     let relay = bench.device_verb(target, "connect-relay");
     bench.offered(&relay);
     let card = home_card(&bench, target);

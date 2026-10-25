@@ -74,6 +74,7 @@ use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
 use lp_ws281x::{ChannelTiming, ColorOrder};
 
 use crate::control::{ControlCommand, ControlReply, HostReport, PadReport};
+use crate::flash_cut_spec::FlashCutPlan;
 use crate::intmatrix::Esp32C6IntMatrix;
 use crate::loader::{self, EfuseIdentity, LoadError, PlacedAppSegment, ResetCause};
 use crate::memmap;

@@ -160,6 +160,18 @@ impl RelayLinkSource for BrowserRelaySource {
         Ok(Box::new(WsClientIo::new(wire, tap)))
     }
 
+    fn park(&self, board: &str) {
+        if let Some(wire) = self.wires.borrow().get(board) {
+            ws::park(wire.session());
+        }
+    }
+
+    fn unpark(&self, board: &str) {
+        if let Some(wire) = self.wires.borrow().get(board) {
+            ws::unpark(wire.session());
+        }
+    }
+
     fn connect(&self, board: &str) -> DeviceTransportFuture<Result<(), String>> {
         let opened = self.open(board);
         let board = board.to_string();

@@ -1575,6 +1575,15 @@ impl EngineResolveHost<'_> {
     /// exactly as every output did before scatter existed — that identity
     /// is what keeps single-output projects byte-stable (A1).
     fn is_default_fragments_consumer(&self, consumer: NodeId) -> bool {
+        // Every output asks this every frame, and the answer rebuilds static
+        // binding topology (several Vecs, path clones). It moves only with a
+        // structural change, which clears the tree's cache.
+        self.tree.default_fragments_consumer_cached(consumer, || {
+            self.is_default_fragments_consumer_uncached(consumer)
+        })
+    }
+
+    fn is_default_fragments_consumer_uncached(&self, consumer: NodeId) -> bool {
         use crate::dataflow::resolver::ResolveHost as _;
         let bindings = self
             .tree
@@ -3317,10 +3326,10 @@ fn restore_node_after_failed_render(
 /// Display/identity name for a node's recovery frame: its stable tree path.
 /// The path (not the numeric id) keys crash blame, so it must survive
 /// project reloads and reboots.
-fn recovery_frame_name<N>(tree: &RuntimeNodeTree<N>, node_id: NodeId) -> alloc::string::String {
+fn recovery_frame_name<N>(tree: &RuntimeNodeTree<N>, node_id: NodeId) -> alloc::rc::Rc<str> {
     tree.get(node_id)
-        .map(|entry| entry.path.to_string())
-        .unwrap_or_default()
+        .map(RuntimeNodeEntry::recovery_name)
+        .unwrap_or_else(|| "".into())
 }
 
 fn set_entry_status_if_changed<N>(
