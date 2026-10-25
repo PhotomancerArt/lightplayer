@@ -175,15 +175,57 @@ on small-dome) and is not taken here.
 
 ## Consequences
 
-<!-- P6 fills in: emulated per-lane instructions and allocations before/after
-     (lp-emu commit), heap-budget figures, C6 flash and stack, FS3 per-lane
-     coefficient and fps at 620 / 1,488 / 2,048, C6 silicon fps. -->
+Measured 2026-10-24 (planning `lp2025/2026-10-24-0208-engine-frame-plan`,
+P6). A lane is a fixture and the output it feeds.
 
-- Expected: per-lane graph work goes from ~90 k instructions to a few
-  thousand; steady per-lane allocations to ~0; ~0.5 KB resident per lane;
-  first frame after an edit costs what every frame costs today.
-- The C6 gains on the same code; its heap pays ~0.5 KB per lane resident and
-  loses the per-frame transients.
+| | before (main 9e9c20d3f) | after (PRs A + B) |
+|---|---:|---:|
+| **FS3 per lane** (frame time, `lanes-8x128` − `lanes-2x512`, ÷ 6) | 1.393 ms | **0.286 ms** |
+| FS3 fps 2×512 / 8×128 / 6×248 / 8×256 / skirt-620 | 41.1 / 30.6 / 28.3 / 21.9 / 53.6 | 44.6 / 41.4 / 34.5 / 27.3 / 59.3 |
+| C6 fps (CX1) basic / basic-4n | 40.6 / 16.0 | 42.3 / 16.9 |
+| emulated per lane (`scripts/perf/per-lane-cost.sh`, lp-emu esp32-c6 model, lp-emu 2352e4c4e) | 69,326 cycles, 46 allocs | 38,643 cycles, 6 allocs |
+| host per lane, real nodes (`steady_frame_allocations_do_not_scale_with_lanes`) | 45 allocs | 5 allocs |
+| C6 image: core / engine (local `fw-esp32c6-size-check`) | 1,448,144 / 1,852,000 B | 1,448,224 / 1,857,110 B (+80 / +5,110) |
+| C6 main stack, meteor / choker load / idle (`emu_stack_peak`, t1) | 35,800 / 33,868 / 13,440 B | 32,632 / 33,868 / 13,440 B |
+| C6 first light (t4) | 363 ms | 362 ms |
+
+Silicon: FS3 (XIAO ESP32-S3 Plus, D8:3B:DA:47:29:70), plain `fw-esp32s3`
+images, two-core default; CX1 (ESP32-C6, 14:C1:9F:E6:54:90), split images.
+On FS3 the after-image runs with the IRAM hot set **re-profiled on the new
+engine** (`lp-fw/fw-esp32s3/hot_iram/`): with the hot set profiled on the
+old code the same build measured 1.141 ms per lane, because the new engine
+functions ran from flash. A restructured engine path needs a re-profile, as
+the hot-set README says.
+
+- **The emulator underprices this walk.** Emulated per lane fell 44 %;
+  silicon fell 79 %. The per-lane walk on the S3 was fetch- and
+  PSRAM-bound, and allocation and pointer chasing cost more there than the
+  cycle model says.
+- **RAM.** Steady frames allocate less on every engine record (basic
+  132 → 77, meteor 553 → 498 per frame; steady `frame.retained` unchanged).
+  The kept plans and read slots cost ~0.5 KB per lane, resident, at load.
+- **AC4 (−85 % emulated) is not met: −44 %.** Recovery frames are ~13 k of
+  the remaining 38.6 k cycles, but even without them the rest fell ~55 %:
+  the emulated cycle model prices this walk differently from silicon, where
+  the bar was met.
+- **What remains per lane** (emulated): the crash-recovery frames each
+  dispatch enters (~13 k cycles of the 38.6 k; `lp_recovery`, in the core
+  image), the output input's fragment merge, and per-dispatch overhead.
+- **Found by the checker along the way:** every output swept its own
+  identity as dead mid-consume, so `output_identity_revision` moved every
+  frame and every patched fixture re-resolved its patch per frame; the
+  revision was a frame stamp (two outputs in one frame collided) — a change
+  counter now; a bus read with no provider re-walked the providers every
+  frame — a cached decision now.
+- **The stack.** A first cut put plan state where the C6 main stack paid for
+  it several times (state in every nested context, fields of the
+  by-value-moved `Engine` and `Resolver`); it broke the stack gate's 12 KiB
+  margin and was fixed by boxing the engine's plan state, borrowing the
+  resolver in place and keeping the per-frame reads out of the deep frames,
+  which left the deepest project 3 KB *below* main.
+- Not taken here: the shader's uniforms by slot (the plan's P5; fixed per
+  shader, not per lane, and its engine bytes would pass the C6 budget's bar
+  on top of this) — a follow-up.
 
 ## Alternatives considered
 
