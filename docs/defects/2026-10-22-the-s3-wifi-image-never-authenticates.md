@@ -76,3 +76,35 @@ It says nothing about candidates 1 and 2: the radio's transmit, and the
 station configuration `EspStation` hands esp-radio, are exactly what the
 seam replaces. The silicon failure is therefore at or below `EspStation`:
 the configuration, the blob or the radio.
+
+**2026-10-25, the cause: too much transmit power (FS3 sitting, s3-wifi-push)** —
+On current main (PSRAM the heap, Skirt 620 five loaded and rendering), the
+`wifi` image still never joined: 0 of 13 at ~1 m (−38…−44 dBm), 0 of 13
+with FS3 20–30 cm from the access point (−13…−18 dBm). The blob's TX power
+ceiling read back as 80 quarter dBm, so it was already transmitting at
+20 dBm. With `WifiController::set_max_tx_power(60)` (15 dBm) before the
+join, FS3 joined **10 of 10, each on the first attempt, in 714–828 ms**,
+close range, project rendering; the earlier 8.5 dBm sitting (E) failed at
+~1 m. The failures at 20 dBm were "disassociated due to inactivity" and
+"authentication expired", with the AP's BSSID heard every time: the board
+reached the AP and its frames were not understood. Distance never mattered.
+
+What the board is: Seeed's XIAO ESP32-S3 Plus schematic
+(`XIAO_ESP32S3_Plus_V1.1_SCH_260115.pdf`, files.seeedstudio.com) has **no
+RF switch and no antenna GPIO** (U.FL → 1.2 pF / 3.3 nH / 1.8 pF → LNA_IN;
+nothing for firmware to drive, unlike the XIAO C6's GPIO3/GPIO14). Its
+revision table says V1.1 (2025-07-24) changed "R5 0R → L5 24nH, C7, C8
+10pF → 12pF": a series inductor on XTAL_P and the 40 MHz crystal's load
+capacitors. Measured from the heartbeat's `uptime_ms` against the host
+clock over ~10 min, FS3's crystal runs **+13.5 ppm** against the Mac while
+two desk C6s read −6.8 and −10.8 ppm — FS3 is ~22 ppm fast of them, the
+direction a too-small load capacitance pulls it. FS3's revision is not yet
+known. A V1.0 board's crystal (and its unfiltered XTAL_P harmonics) is the
+likely reason its 20 dBm signal is unusable where a cleaner, lower-power one
+is fine; the plain XIAO S3 arriving next is the check on whether other S3
+boards need the cap.
+
+**Fix**: the S3's `NetChip` caps the station's TX power at 15 dBm
+(`fw-esp32s3/src/net/net_chip.rs`, `MAX_TX_POWER_QDBM`), applied before
+every join; the C6 keeps the blob's 20 dBm. The station's log now names more
+disconnect reasons and says whether the AP was heard.

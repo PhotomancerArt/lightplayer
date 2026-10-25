@@ -26,11 +26,25 @@ const DISCONNECT_LIMIT: Duration = Duration::from_secs(3);
 /// the boot: dropping it stops Wi-Fi and ESP-NOW.
 pub struct EspStation {
     controller: WifiController<'static>,
+    /// The chip's TX power cap, applied before every join
+    /// (`NetChip::max_tx_power_qdbm`).
+    max_tx_power_qdbm: Option<i8>,
 }
 
 impl EspStation {
-    pub fn new(controller: WifiController<'static>) -> Self {
-        Self { controller }
+    pub fn new(controller: WifiController<'static>, max_tx_power_qdbm: Option<i8>) -> Self {
+        if let Some(qdbm) = max_tx_power_qdbm {
+            // Integer formatting: the C6 links no float formatter.
+            log::info!(
+                "[wifi] TX power capped at {}.{:02} dBm",
+                qdbm / 4,
+                (qdbm % 4) * 25
+            );
+        }
+        Self {
+            controller,
+            max_tx_power_qdbm,
+        }
     }
 
     /// Put the radio back on ESP-NOW's channel, after a scan or a leave
@@ -96,6 +110,11 @@ impl StationControl for EspStation {
             log::warn!("[wifi] station config refused: {}", error_words(&error));
             return ConnectOutcome::Ended;
         }
+        if let Some(qdbm) = self.max_tx_power_qdbm
+            && self.controller.set_max_tx_power(qdbm).is_err()
+        {
+            log::warn!("[wifi] the TX power cap ({qdbm} quarter dBm) was refused");
+        }
         match select(self.controller.connect_async(), Timer::after(CONNECT_LIMIT)).await {
             Either::First(Ok(_)) => {
                 // Power save off while joined (plan MD9): `minimum` stalled
@@ -112,9 +131,15 @@ impl StationControl for EspStation {
             Either::First(Err(WifiError::Disconnected(info))) => {
                 let outcome = outcome_of(info.reason);
                 log::info!(
-                    "[wifi] attempt ended: {} ({})",
+                    "[wifi] attempt ended: {} ({}) bssid {} rssi {}",
                     reason_words(info.reason),
-                    outcome_words(outcome)
+                    outcome_words(outcome),
+                    if info.bssid == [0; 6] {
+                        "none"
+                    } else {
+                        "heard"
+                    },
+                    info.rssi
                 );
                 outcome
             }
@@ -210,6 +235,22 @@ fn reason_words(reason: DisconnectReason) -> &'static str {
         DisconnectReason::AuthenticationExpired => "authentication expired",
         DisconnectReason::AssociationLeave => "association leave",
         DisconnectReason::StationLeaving => "station leaving",
+        DisconnectReason::Unspecified => "unspecified",
+        DisconnectReason::AuthenticationLeave => "authentication leave",
+        DisconnectReason::DisassociatedDueToInactivity => "disassociated due to inactivity",
+        DisconnectReason::Class2FrameFromNonAuthenticatedStation => {
+            "class 2 frame from a station not authenticated"
+        }
+        DisconnectReason::Class3FrameFromNonAssociatedStation => {
+            "class 3 frame from a station not associated"
+        }
+        DisconnectReason::Timeout => "timeout",
+        DisconnectReason::MissingAcks => "missing acks",
+        DisconnectReason::TransmissionLinkEstablishmentFailed => {
+            "transmission link establishment failed"
+        }
+        DisconnectReason::PeerInitiated => "peer initiated",
+        DisconnectReason::AccessPointInitiatedDisassociation => "access point disassociated",
         _ => "other reason",
     }
 }
