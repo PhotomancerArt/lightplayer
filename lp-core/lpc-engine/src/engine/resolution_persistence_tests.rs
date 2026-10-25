@@ -394,13 +394,13 @@ fn a_steady_frame_builds_no_plan() {
         .set_plan_mode(crate::frame_plan::PlanMode::Replay);
     harness.tick(16).expect("tick");
     harness.tick(16).expect("tick");
-    let steady = *harness.engine.resolver().frame_plan_counters();
+    let steady = *harness.engine.frame_plan_counters();
     assert_eq!(steady.structural_work(), 0, "{steady:?}");
     assert!(steady.replays > 0, "the lane plan replays: {steady:?}");
 
     harness.engine.add_demand_root(harness.node("src"));
     harness.tick(16).expect("tick");
-    let after_edit = *harness.engine.resolver().frame_plan_counters();
+    let after_edit = *harness.engine.frame_plan_counters();
     assert_eq!(after_edit.builds, 1, "{after_edit:?}");
     assert!(after_edit.default_fragments_reads > 0, "{after_edit:?}");
 }

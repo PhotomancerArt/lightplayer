@@ -75,7 +75,7 @@ rebuilds the plan and compares, and a difference names the owner, the plan
 type and the first differing line of their `Debug` forms. `clear()` drops a
 plan (memory pressure: plans are rebuildable state, dropped on `High`).
 
-**Modes** (`Engine::set_plan_mode`, held by the resolver):
+**Modes** (`Engine::set_plan_mode`):
 
 | mode | where | what |
 |---|---|---|
@@ -86,7 +86,7 @@ plan (memory pressure: plans are rebuildable state, dropped on `High`).
 
 Allocation and counter tests that price the product set `Replay`.
 
-**Counters:** `Resolver::frame_plan_counters()` (`builds`, `replays`, `checks`,
+**Counters:** `Engine::frame_plan_counters()` (`builds`, `replays`, `checks`,
 `check_mismatches`, `default_fragments_reads`), reset per frame like
 `ResolveFrameCounters`. A steady frame has `structural_work() == 0` on both.
 A check's own rebuild is not counted as work.

@@ -90,7 +90,7 @@ impl<K: PartialEq + Debug, T: PartialEq + Debug> PlanSlot<K, T> {
         host.plan_state().counters.replays += 1;
         #[cfg(debug_assertions)]
         if let PlanMode::Check { every, strict } = mode
-            && host.plan_state().frame % u64::from(every.max(1)) == 0
+            && host.plan_state().frame % every.max(1) == 0
         {
             // A check is invisible to every other counter: what the rebuild
             // itself counted (plans built inside it, topology derived) is not
@@ -280,7 +280,7 @@ mod tests {
             every: 4,
             strict: true,
         });
-        for frame in 1..=8u64 {
+        for frame in 1..=8u32 {
             host.frame = frame;
             slot.get_or_build(1u64, &mut host, |_| Plan {
                 name: "a",

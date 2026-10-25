@@ -13,7 +13,7 @@ pub struct FramePlanState {
     pub mode: PlanMode,
     /// Frames begun since the engine was made; [`PlanMode::Check`] compares
     /// on multiples of its `every`.
-    pub frame: u64,
+    pub frame: u32,
     pub counters: FramePlanCounters,
 }
 

@@ -39,8 +39,6 @@ use lpc_model::SlotPathError;
 use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
 
-use crate::frame_plan::{FramePlanCounters, FramePlanState, PlanMode};
-
 /// Resolution work performed during one frame.
 ///
 /// These exist to make "did the frame re-resolve the graph from cold?" a
@@ -115,10 +113,6 @@ pub struct Resolver {
     /// and every publish, once per produced slot per frame. Interning the
     /// handle makes that a pointer copy too.
     produced_paths: Vec<Rc<SlotPath>>,
-    /// The frame plans' mode, frame index and counters
-    /// ([`crate::frame_plan`]). Here because the resolver is what every node
-    /// context reaches through, and it already has the frame's lifetime.
-    frame_plans: FramePlanState,
 }
 
 impl Resolver {
@@ -134,7 +128,6 @@ impl Resolver {
             static_paths: VecMap::new(),
             static_bus: VecMap::new(),
             produced_paths: Vec::new(),
-            frame_plans: FramePlanState::default(),
         }
     }
 
@@ -224,7 +217,6 @@ impl Resolver {
     /// Start a new frame: per-frame resolved values are discarded.
     pub fn begin_frame(&mut self) {
         self.frame_counters = ResolveFrameCounters::default();
-        self.frame_plans.begin_frame();
         if self.force_invalidate_per_frame {
             self.invalidate_structure();
             return;
@@ -329,26 +321,6 @@ impl Resolver {
 
     pub(crate) fn counters_mut(&mut self) -> &mut ResolveFrameCounters {
         &mut self.frame_counters
-    }
-
-    /// Frame-plan work done for the current frame; resets with the frame,
-    /// like [`Self::frame_counters`].
-    pub fn frame_plan_counters(&self) -> &FramePlanCounters {
-        &self.frame_plans.counters
-    }
-
-    /// How frame plans are used ([`PlanMode`]). Kept across frames and
-    /// structural invalidations.
-    pub fn plan_mode(&self) -> PlanMode {
-        self.frame_plans.mode
-    }
-
-    pub fn set_plan_mode(&mut self, mode: PlanMode) {
-        self.frame_plans.mode = mode;
-    }
-
-    pub(crate) fn frame_plans_mut(&mut self) -> &mut FramePlanState {
-        &mut self.frame_plans
     }
 }
 

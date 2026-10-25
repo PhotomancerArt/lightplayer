@@ -228,7 +228,7 @@ impl Session {
             // plan and re-derive no structure (AC2).
             if frame_in_step + 1 == frames && frames > 1 {
                 let engine = self.lanes[0].rt.engine();
-                let plans = *engine.resolver().frame_plan_counters();
+                let plans = *engine.frame_plan_counters();
                 let resolution = *engine.resolver().frame_counters();
                 if plans.structural_work() != 0 || resolution.structural_work() != 0 {
                     self.failures.push(format!(

@@ -166,20 +166,11 @@ pub struct Engine {
     /// unless the host injected a source — always, on a device — and boxed
     /// so that costs the engine one pointer.
     pub(super) probe_read_backs: Option<alloc::boxed::Box<super::probe_read_backs::ProbeReadBacks>>,
-    /// The engine's lane plan: which output is the default for its bus
-    /// channel, derived once per structure epoch ([`LaneTopology`]). Lent to
-    /// the tick's resolve host for the walk and put back after it.
-    lane_topology: PlanSlot<u64, LaneTopology>,
-    /// The structure epoch the output sinks were last reconfigured at
-    /// ([`Self::refresh_output_sink_configs`]): an output's authored
-    /// configuration changes only through an edit, and every edit moves the
-    /// epoch.
-    sink_configs_epoch: Option<u64>,
-    /// The tick's per-frame scratch, kept across ticks so its capacity is
-    /// not regrown every frame: the set of producers already ticked, and the
-    /// resolve trace (its active stack).
-    producers_ticked_scratch: VecSet<NodeId>,
-    resolve_trace_scratch: Option<ResolveTrace>,
+    /// The engine's own frame plans and the tick's kept scratch
+    /// ([`EngineFramePlans`]). Boxed: the engine is moved by value while a
+    /// project loads, so every byte held inline is paid on the stack several
+    /// times over (and once per bucket of the server's project table).
+    frame_plans: alloc::boxed::Box<EngineFramePlans>,
     /// Bumped by every [`Self::attach_runtime_node`], so the structural
     /// fingerprint sees a runtime replaced in place.
     #[cfg(debug_assertions)]
@@ -189,6 +180,28 @@ pub struct Engine {
     /// rather than by someone noticing a stale value on a device.
     #[cfg(debug_assertions)]
     last_structural_check: Option<(StructuralFingerprint, u64)>,
+}
+
+/// The engine's frame-plan state ([`Engine::frame_plans`]).
+#[derive(Default)]
+struct EngineFramePlans {
+    /// Which output is the default for its bus channel, derived once per
+    /// structure epoch ([`LaneTopology`]). Borrowed by the tick's resolve
+    /// host for the walk.
+    lane_topology: PlanSlot<u64, LaneTopology>,
+    /// The structure epoch the output sinks were last reconfigured at
+    /// ([`Engine::refresh_output_sink_configs`]): an output's authored
+    /// configuration changes only through an edit, and every edit moves the
+    /// epoch.
+    sink_configs_epoch: Option<u64>,
+    /// The tick's per-frame scratch, kept across ticks so its capacity is
+    /// not regrown every frame: the set of producers already ticked, and the
+    /// resolve trace (its active stack).
+    producers_ticked: VecSet<NodeId>,
+    resolve_trace: Option<ResolveTrace>,
+    /// The frame plans' mode, frame index and counters, handed to every node
+    /// context through the tick's session.
+    state: crate::frame_plan::FramePlanState,
 }
 
 /// The shape summary [`Engine::assert_structural_changes_were_announced`]
@@ -234,10 +247,7 @@ impl Engine {
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
             probe_read_backs: None,
-            lane_topology: PlanSlot::new(),
-            sink_configs_epoch: None,
-            producers_ticked_scratch: VecSet::new(),
-            resolve_trace_scratch: None,
+            frame_plans: alloc::boxed::Box::default(),
             #[cfg(debug_assertions)]
             attach_revision: 0,
             #[cfg(debug_assertions)]
@@ -361,7 +371,18 @@ impl Engine {
     /// build). The differential's lever, like
     /// [`Resolver::set_force_invalidate_per_frame`].
     pub fn set_plan_mode(&mut self, mode: PlanMode) {
-        self.resolver.set_plan_mode(mode);
+        self.frame_plans.state.mode = mode;
+    }
+
+    /// How frame plans are used ([`PlanMode`]).
+    pub fn plan_mode(&self) -> PlanMode {
+        self.frame_plans.state.mode
+    }
+
+    /// Frame-plan work done in the last tick (resets when the next begins),
+    /// like [`Resolver::frame_counters`].
+    pub fn frame_plan_counters(&self) -> &crate::frame_plan::FramePlanCounters {
+        &self.frame_plans.state.counters
     }
 
     pub(crate) fn remove_runtime_subtree(
@@ -894,7 +915,7 @@ impl Engine {
     ) -> Result<(), EngineError> {
         // The engine's own plans are rebuildable state too.
         if level >= crate::node::PressureLevel::High {
-            self.lane_topology.clear();
+            self.frame_plans.lane_topology.clear();
         }
         let revision = self.revision;
         for entry in self.tree.entries_mut() {
@@ -917,12 +938,12 @@ impl Engine {
     /// changed.
     fn refresh_output_sink_configs(&mut self, registry: &ProjectRegistry) {
         let epoch = self.resolver.structure_epoch();
-        if self.sink_configs_epoch == Some(epoch) {
+        if self.frame_plans.sink_configs_epoch == Some(epoch) {
             // Every edit to an output's def moves the epoch. Checked builds
             // prove it now and then: the refresh must find nothing to change.
             #[cfg(debug_assertions)]
-            if let PlanMode::Check { every, strict } = self.resolver.plan_mode()
-                && self.resolver_frame_index() % u64::from(every.max(1)) == 0
+            if let PlanMode::Check { every, strict } = self.frame_plans.state.mode
+                && self.resolver_frame_index() % every.max(1) == 0
             {
                 let changed = self.refresh_output_sink_configs_now(registry);
                 if changed > 0 {
@@ -940,12 +961,12 @@ impl Engine {
             return;
         }
         self.refresh_output_sink_configs_now(registry);
-        self.sink_configs_epoch = Some(epoch);
+        self.frame_plans.sink_configs_epoch = Some(epoch);
     }
 
     #[cfg(debug_assertions)]
-    fn resolver_frame_index(&mut self) -> u64 {
-        self.resolver.frame_plans_mut().frame
+    fn resolver_frame_index(&mut self) -> u32 {
+        self.frame_plans.state.frame
     }
 
     /// Reconfigure every output sink from its def; returns how many changed.
@@ -978,6 +999,7 @@ impl Engine {
         #[cfg(debug_assertions)]
         self.assert_structural_changes_were_announced();
         self.resolver.begin_frame();
+        self.frame_plans.state.begin_frame();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
         self.frame_time =
@@ -1014,14 +1036,19 @@ impl Engine {
             }
         }
 
-        let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
-        let trace = match self.resolve_trace_scratch.take() {
+        // Borrowed in place: the session and the host borrow disjoint parts of
+        // the engine. (Moving the resolver out onto this frame put a whole
+        // `Resolver` on the stack under every node the walk runs.)
+        let resolver = &mut self.resolver;
+        let trace = match self.frame_plans.resolve_trace.take() {
             Some(trace) => trace.recycled(),
             None => ResolveTrace::new(ResolveLogLevel::Off),
         };
-        let mut session = EngineSession::new(self.revision, &mut resolver, trace);
+        let mut session = EngineSession::new(self.revision, resolver, trace)
+            .with_frame_plans(&mut self.frame_plans.state);
 
-        let mut producers_ticked = core::mem::take(&mut self.producers_ticked_scratch);
+        let mut producers_ticked = core::mem::take(&mut self.frame_plans.producers_ticked);
+        let lane_topology = &mut self.frame_plans.lane_topology;
         producers_ticked.clear();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
@@ -1046,23 +1073,23 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: core::mem::take(&mut self.lane_topology),
+            lane_topology: None,
         };
         // The lane plan, before the walk asks it anything: the epoch cannot
-        // move mid-walk.
-        {
-            let mut slot = core::mem::take(&mut host.lane_topology);
-            let epoch = session.structure_epoch();
-            slot.get_or_build(epoch, session.frame_plans_mut(), |plans| {
-                let topology =
-                    LaneTopology::build(host.tree.entries().map(|entry| entry.id), |id| {
-                        host.is_default_fragments_consumer_uncached(id)
-                    });
-                plans.counters.default_fragments_reads += host.tree.len() as u32;
-                topology
+        // move mid-walk. The host borrows it rather than holding it: the host
+        // lives on the stack under every node the walk runs.
+        let epoch = session.structure_epoch();
+        let plans = session
+            .frame_plans_mut()
+            .expect("the tick's session carries the engine's plan state");
+        let topology = lane_topology.get_or_build(epoch, plans, |plans| {
+            let topology = LaneTopology::build(host.tree.entries().map(|entry| entry.id), |id| {
+                host.is_default_fragments_consumer_uncached(id)
             });
-            host.lane_topology = slot;
-        }
+            plans.counters.default_fragments_reads += host.tree.len() as u32;
+            topology
+        });
+        host.lane_topology = Some(topology);
 
         // Every demand root gets its turn: one output failing must not take
         // its siblings dark for the frame (they would keep a stale buffer on
@@ -1077,9 +1104,8 @@ impl Engine {
             }
         }
 
-        self.lane_topology = core::mem::take(&mut host.lane_topology);
-        self.resolve_trace_scratch = Some(session.into_trace());
-        self.producers_ticked_scratch = producers_ticked;
+        self.frame_plans.resolve_trace = Some(session.into_trace());
+        self.frame_plans.producers_ticked = producers_ticked;
 
         // End-of-tick timebase maintenance, deliberately OUTSIDE the `?`
         // path above: a node erroring mid-walk must not stall the store's
@@ -1143,7 +1169,6 @@ impl Engine {
         }
         self.project_fault_fingerprint = fingerprint;
 
-        self.resolver = resolver;
         walk
     }
 
@@ -1214,7 +1239,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         // Render-scoped OOM attribution, same rationale as [`Self::tick`].
         lpc_shared::backtrace::set_oom_context("engine: render texture product");
@@ -1262,7 +1287,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         host.visual_node_space(product)
     }
@@ -1355,7 +1380,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
@@ -1416,7 +1441,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         host.render_node_control(product, request, target)
     }
@@ -1462,7 +1487,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
@@ -1508,7 +1533,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         host.render_node_control_probe(product, request, target, want_display_layout)
     }
@@ -1585,7 +1610,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: PlanSlot::new(),
+            lane_topology: None,
         };
         f(&mut host)
     }
@@ -1659,9 +1684,9 @@ struct EngineResolveHost<'a> {
     /// builds. See [`FaultTickView`].
     fault: FaultTickView,
     /// The engine's lane plan, lent for the walk ([`Engine::lane_topology`]).
-    /// Empty on the hosts built outside the tick (probes, texture renders),
+    /// `None` on the hosts built outside the tick (probes, texture renders),
     /// which derive the answer fresh.
-    lane_topology: PlanSlot<u64, LaneTopology>,
+    lane_topology: Option<&'a LaneTopology>,
 }
 
 impl EngineResolveHost<'_> {
@@ -1680,7 +1705,6 @@ impl EngineResolveHost<'_> {
         // binding topology (several Vecs, path clones): the tick's lane plan
         // holds every node's answer for the epoch.
         self.lane_topology
-            .get()
             .and_then(|topology| topology.is_default_fragments_consumer(consumer))
             .unwrap_or_else(|| self.is_default_fragments_consumer_uncached(consumer))
     }
@@ -3627,7 +3651,7 @@ pub(crate) fn resolve_with_engine_host(
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
-        lane_topology: PlanSlot::new(),
+        lane_topology: None,
     };
     let result = session
         .resolve(&mut host, &key)
@@ -3674,7 +3698,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
-        lane_topology: PlanSlot::new(),
+        lane_topology: None,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {
         session

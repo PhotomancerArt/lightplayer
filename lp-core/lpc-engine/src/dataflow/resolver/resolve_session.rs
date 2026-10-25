@@ -29,6 +29,9 @@ pub struct EngineSession<'a> {
     revision: Revision,
     resolver: &'a mut Resolver,
     trace: ResolveTrace,
+    /// The engine's frame-plan state for this frame, when the session is a
+    /// tick's ([`Self::with_frame_plans`]).
+    plans: Option<&'a mut crate::frame_plan::FramePlanState>,
 }
 
 /// Transitional alias while resolver tests and call sites still use the older
@@ -41,7 +44,15 @@ impl<'a> EngineSession<'a> {
             revision: frame_id,
             resolver,
             trace,
+            plans: None,
         }
+    }
+
+    /// This session, carrying the engine's frame-plan state to every node
+    /// context it serves.
+    pub fn with_frame_plans(mut self, plans: &'a mut crate::frame_plan::FramePlanState) -> Self {
+        self.plans = Some(plans);
+        self
     }
 
     pub fn revision(&self) -> Revision {
@@ -127,9 +138,10 @@ impl<'a> EngineSession<'a> {
         self.resolver.structure_epoch()
     }
 
-    /// The frame plans' state — see [`Resolver::frame_plan_counters`].
-    pub fn frame_plans_mut(&mut self) -> &mut crate::frame_plan::FramePlanState {
-        self.resolver.frame_plans_mut()
+    /// The frame plans' state, on a tick's session — see
+    /// [`crate::Engine::frame_plan_counters`].
+    pub fn frame_plans_mut(&mut self) -> Option<&mut crate::frame_plan::FramePlanState> {
+        self.plans.as_deref_mut()
     }
 
     /// Resolve an already-interned query, fetching its key from the intern

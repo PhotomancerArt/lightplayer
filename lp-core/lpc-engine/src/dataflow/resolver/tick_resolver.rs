@@ -257,7 +257,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     }
 
     fn frame_plans(&mut self) -> Option<&mut crate::frame_plan::FramePlanState> {
-        Some(self.session.frame_plans_mut())
+        self.session.frame_plans_mut()
     }
 
     fn publish_produced_slot(
