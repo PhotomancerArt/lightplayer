@@ -304,6 +304,11 @@ genuinely fits none of these, and define it here in one line.
   boundary on the answer (a log's end, a blank tail, a CRC that passed),
   but the medium can answer differently on the next read (a weak flash
   bit), so a later read undoes the boundary and takes what was built on it.
+- **`oracle-could-not-fail`** — a check passes on a sign that both the
+  outcome it means to prove and its failure produce (a board leaving and
+  rejoining USB, for a power cut that only dropped the data line), so a
+  broken setup reads as a pass. The fix shape is to check the effect itself
+  (a power-on reset reason, a fresh boot), not its side effect.
 
 ## Index
 

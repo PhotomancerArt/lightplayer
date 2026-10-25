@@ -51,6 +51,16 @@ switched hub `1-1.3.1.3` port 3 and the board kept running (uptime unbroken), so
 the desk's switch for FS3 does not reach its VBUS (a `board` registry matter,
 outside this repo).
 
+> **2026-10-24 note.** The cause is now known, and it was `board`, not the
+> hub: on this tree `board power-*` switched only the USB 2 half of FS3's
+> hub port and left VBUS up through the USB 3 half
+> (`docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md`,
+> fixed in lp-board-bench#10). The walk's claims stand as written: the reset
+> here was a requested reboot and no power cut was claimed. A real power cut
+> on FS3 is possible now and still owed (the S3 updates plan's P11 `cuts`
+> sitting). The audit is
+> `lp2025/2026-10-20-2335-s3-radio-and-ota/power-cut-audit.md`.
+
 One page console line during the reboot: `project sync failed: transport
 error: … bluetooth link lost: a write failed`. It is the drop itself; no
 request's timeout reached the page.
@@ -122,6 +132,6 @@ project loaded and two links open had about 200 KB in use and 60 KB free
 
 ## What the walk does not cover
 
-Phones (Bluefy, Android); range; a power cut (the desk's switch does not reach
-FS3, above); BLE beside Wi‑Fi (M4's walk); updates over Bluetooth (not on the
+Phones (Bluefy, Android); range; a power cut (`board` did not cut FS3's
+VBUS then; see the note above); BLE beside Wi‑Fi (M4's walk); updates over Bluetooth (not on the
 S3 yet).
