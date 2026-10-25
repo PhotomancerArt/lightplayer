@@ -63,7 +63,7 @@ use lpc_shared::output::OutputPortSmoothing;
 
 use super::output_frame_plan::{OutputFramePlan, OutputPlanKey};
 use crate::engine::FaultPresentation;
-use crate::frame_plan::PlanSlot;
+use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PatchedRun,
     PressureLevel, TickContext, ensure_scratch_len, err_ctx,
@@ -354,6 +354,17 @@ pub struct OutputNode {
     /// microformat is parsed once per change, not once per frame.
     highlight_text: Option<String>,
     highlight: Highlight,
+    /// The per-frame reads, each planned to its interned query id.
+    reads: OutputReads,
+}
+
+/// [`OutputNode`]'s per-frame reads ([`PlannedRead`]).
+#[derive(Clone, Copy, Debug, Default)]
+struct OutputReads {
+    name: PlannedRead,
+    test_pattern: PlannedRead,
+    highlight: PlannedRead,
+    input: PlannedRead,
 }
 
 impl OutputNode {
@@ -381,6 +392,7 @@ impl OutputNode {
             name: None,
             highlight_text: None,
             highlight: Highlight::default(),
+            reads: OutputReads::default(),
         }
     }
 
@@ -406,8 +418,12 @@ impl OutputNode {
     /// code bug — and it still fails loudly, out of `def_view`, because
     /// compiling the view is exactly that shape check.
     fn test_pattern_active(&mut self, ctx: &mut TickContext<'_>) -> Result<bool, NodeError> {
-        let reader = self.def_view(ctx)?.test_pattern();
-        match reader.get(ctx) {
+        let Self {
+            def_view, reads, ..
+        } = self;
+        let def = OutputDefView::get_or_compile(def_view, ctx.slot_shapes())
+            .map_err(err_ctx("compile output def view"))?;
+        match ctx.read_planned_accessor(&mut reads.test_pattern, def.test_pattern().accessor()) {
             Ok(active) => Ok(active),
             Err(error) => {
                 log::debug!("[output] test_pattern unavailable: {error}");
@@ -423,7 +439,7 @@ impl OutputNode {
     ///
     /// Updates [`Self::name`], copying the text only when it changed.
     fn refresh_authored_name(&mut self, ctx: &mut TickContext<'_>) {
-        let production = match ctx.resolve_static_consumed("name.some") {
+        let production = match ctx.resolve_planned_static(&mut self.reads.name, "name.some") {
             Ok(production) => production,
             Err(error) => {
                 log::debug!("[output] name unavailable: {}", error.message);
@@ -459,8 +475,15 @@ impl OutputNode {
     ///
     /// Updates [`Self::highlight`], re-parsing only when the text changed.
     fn refresh_highlight(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let accessor = self.def_view(ctx)?.highlight().accessor();
-        let production = match ctx.resolve_consumed_accessor(accessor) {
+        let production = {
+            let Self {
+                def_view, reads, ..
+            } = self;
+            let def = OutputDefView::get_or_compile(def_view, ctx.slot_shapes())
+                .map_err(err_ctx("compile output def view"))?;
+            ctx.resolve_planned_accessor(&mut reads.highlight, def.highlight().accessor())
+        };
+        let production = match production {
             Ok(production) => production,
             Err(error) => {
                 log::debug!("[output] highlight unavailable: {}", error.message);
@@ -559,7 +582,7 @@ impl OutputNode {
         samples: &mut Vec<u16>,
     ) -> Result<(), NodeError> {
         let prod = ctx
-            .resolve_static_consumed("input")
+            .resolve_planned_static(&mut self.reads.input, "input")
             .map_err(|e| NodeError::msg(format!("resolve output input: {}", e.message)))?;
 
         let mut products = core::mem::take(&mut self.products_scratch);

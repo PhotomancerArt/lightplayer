@@ -11,6 +11,7 @@ use crate::dataflow::resolver::{
 };
 use crate::dataflow::timebase::PhasorKey;
 use crate::engine::{ButtonService, FaultPresentation, PowerService, RadioService};
+use crate::frame_plan::PlannedRead;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -522,6 +523,90 @@ impl<'r> TickContext<'r> {
     /// of the names): a frame plan's key.
     pub fn output_identity_revision(&self) -> Revision {
         self.resolver.output_identity_revision()
+    }
+
+    /// [`Self::resolve_static_consumed`] through a [`PlannedRead`]: the query
+    /// id is interned once per epoch and kept by the caller, so the read is
+    /// a resolve by id — no key built, no memo searched.
+    pub fn resolve_planned_static(
+        &mut self,
+        read: &mut PlannedRead,
+        path: &'static str,
+    ) -> Result<Production, ResolveError> {
+        let epoch = self.structure_epoch();
+        let node = self.node_id;
+        if let Some(id) = read.id_for(epoch) {
+            return self.resolver.resolve_query_id(id);
+        }
+        match self.resolver.intern_static_consumed_id(node, path) {
+            Some(id) => {
+                read.plan(epoch, id);
+                self.resolver.resolve_query_id(id)
+            }
+            None => self.resolver.resolve_static_consumed(node, path),
+        }
+    }
+
+    /// [`Self::resolve_consumed_accessor`] through a [`PlannedRead`].
+    pub fn resolve_planned_accessor(
+        &mut self,
+        read: &mut PlannedRead,
+        accessor: &SlotAccessor,
+    ) -> Result<Production, ResolveError> {
+        let epoch = self.structure_epoch();
+        let node = self.node_id;
+        if let Some(id) = read.id_for(epoch) {
+            return self.resolver.resolve_query_id(id);
+        }
+        match self.resolver.intern_consumed_accessor_id(node, accessor) {
+            Some(id) => {
+                read.plan(epoch, id);
+                self.resolver.resolve_query_id(id)
+            }
+            None => self.resolver.resolve_consumed_accessor(node, accessor),
+        }
+    }
+
+    /// A typed value read through a compiled accessor and a [`PlannedRead`]:
+    /// [`Self::resolve_consumed_slot_accessor_value`] without the key.
+    pub fn read_planned_accessor<T: FromLpValue>(
+        &mut self,
+        read: &mut PlannedRead,
+        accessor: &SlotAccessor,
+    ) -> Result<T, NodeError> {
+        let production = self.resolve_planned_accessor(read, accessor).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "resolve consumed slot {}: {e:?}",
+                accessor.path()
+            ))
+        })?;
+        let value = production
+            .value_leaf()
+            .ok_or_else(|| NodeError::msg("resolved slot is not a value"))?;
+        T::from_lp_value(value.value()).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {} has incompatible value: {e}",
+                accessor.path()
+            ))
+        })
+    }
+
+    /// An option slot's value read through its `some` accessor and a
+    /// [`PlannedRead`], with the default when the option holds nothing —
+    /// `SlotOptionReader::get_or` without the key.
+    pub fn read_planned_option_or<T: FromLpValue>(
+        &mut self,
+        read: &mut PlannedRead,
+        some_accessor: &SlotAccessor,
+        default: T,
+    ) -> Result<T, NodeError> {
+        match self.read_planned_accessor(read, some_accessor) {
+            Ok(value) => Ok(value),
+            Err(err) if <Self as lpc_model::SlotReadContext>::is_optional_none_error(&err) => {
+                Ok(default)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Resolve one of this node's consumed slots through a compiled accessor

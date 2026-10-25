@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use crate::dataflow::resolver::QueryId;
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::ResolveError;
@@ -45,6 +46,34 @@ pub trait TickResolver {
             scope,
             channel: ChannelName(alloc::string::String::from(channel)),
         })
+    }
+
+    /// The interned id of `node`'s consumed slot at a constant path, for a
+    /// caller that keeps it ([`crate::frame_plan::PlannedRead`]). `None` on
+    /// a test fake, whose callers fall back to the keyed reads.
+    fn intern_static_consumed_id(&mut self, node: NodeId, path: &'static str) -> Option<QueryId> {
+        let _ = (node, path);
+        None
+    }
+
+    /// The interned id of `node`'s consumed slot read through `accessor`;
+    /// `None` on a test fake.
+    fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Option<QueryId> {
+        let _ = (node, accessor);
+        None
+    }
+
+    /// Resolve a query by an id interned THIS epoch. Only reachable with an
+    /// id one of the `intern_*_id` methods returned, so a fake never sees it.
+    fn resolve_query_id(&mut self, id: QueryId) -> Result<Production, ResolveError> {
+        let _ = id;
+        Err(ResolveError::new(alloc::string::String::from(
+            "this resolver interns no query ids",
+        )))
     }
 
     /// Resolve one of `node`'s consumed slots through a compiled accessor,
@@ -283,6 +312,24 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<Production, ResolveError> {
         self.session
             .resolve_consumed_accessor(self.host, node, accessor)
+            .map_err(ResolveError::from)
+    }
+
+    fn intern_static_consumed_id(&mut self, node: NodeId, path: &'static str) -> Option<QueryId> {
+        self.session.intern_static_consumed_id(node, path)
+    }
+
+    fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Option<QueryId> {
+        Some(self.session.intern_consumed_accessor_id(node, accessor))
+    }
+
+    fn resolve_query_id(&mut self, id: QueryId) -> Result<Production, ResolveError> {
+        self.session
+            .resolve_query_id(self.host, id)
             .map_err(ResolveError::from)
     }
 

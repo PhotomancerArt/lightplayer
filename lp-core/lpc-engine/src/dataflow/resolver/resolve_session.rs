@@ -109,6 +109,36 @@ impl<'a> EngineSession<'a> {
         self.resolve_id(host, id)
     }
 
+    /// The id of `node`'s consumed slot at a constant path, interned this
+    /// epoch; `None` for a path that does not parse (the keyed read reports
+    /// it).
+    pub fn intern_static_consumed_id(
+        &mut self,
+        node: NodeId,
+        path: &'static str,
+    ) -> Option<QueryId> {
+        self.resolver.intern_static_consumed(node, path).ok()
+    }
+
+    /// The id of `node`'s consumed slot read through `accessor`, interned
+    /// this epoch.
+    pub fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> QueryId {
+        self.resolver.intern_consumed_accessor(node, accessor)
+    }
+
+    /// Resolve a query by an id interned this epoch.
+    pub fn resolve_query_id<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        id: QueryId,
+    ) -> Result<Production, SessionResolveError> {
+        self.resolve_id(host, id)
+    }
+
     /// Resolve `node`'s consumed slot through a compiled `accessor`, without
     /// rebuilding the key each read ([`Resolver::intern_consumed_accessor`]).
     pub fn resolve_consumed_accessor<H: ResolveHost + ?Sized>(

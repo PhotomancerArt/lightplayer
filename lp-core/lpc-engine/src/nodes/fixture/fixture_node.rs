@@ -15,7 +15,9 @@ use lpc_model::{
 };
 use lps_q32::q32::{Q32, ToQ32};
 
+use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::nodes::fixture::direct_channels::DirectChannels;
+use crate::nodes::fixture::fixture_frame_plan::{FixtureFramePlan, FixturePlanKey, FixtureReads};
 use crate::nodes::fixture::fixture_selection::{FixtureSelection, SelectionAt};
 use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
@@ -220,6 +222,12 @@ pub struct FixtureNode {
     /// The authored consumer policy for a 1D source landing on a 2D
     /// request, translated from `FixtureDef::consume`.
     consume_policy: ConsumerPolicy,
+    /// What the mapping says about this fixture's lamps, planned once per
+    /// mapping ([`FixtureFramePlan`]). Rebuildable: dropped under memory
+    /// pressure.
+    frame_plan: PlanSlot<FixturePlanKey, FixtureFramePlan>,
+    /// The per-frame settings reads, each planned to its query id.
+    reads: FixtureReads,
 }
 
 impl FixtureNode {
@@ -262,6 +270,8 @@ impl FixtureNode {
             strip_order_meaningful: true,
             wire_reversed: false,
             consume_policy: ConsumerPolicy::AUTO,
+            frame_plan: PlanSlot::new(),
+            reads: FixtureReads::default(),
         }
     }
 
@@ -472,9 +482,18 @@ impl FixtureNode {
         self
     }
 
-    fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
-        FixtureDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
-            .map_err(err_ctx("compile fixture def view"))
+    /// This frame's plan for the fixture's mapping, built when its key moved
+    /// ([`FixtureFramePlan`]).
+    fn planned(&mut self, ctx: &mut TickContext<'_>, color_order: ColorOrder) -> &FixtureFramePlan {
+        let key = (ctx.structure_epoch(), self.mapping_version, color_order);
+        let Self {
+            frame_plan,
+            mapping,
+            ..
+        } = self;
+        frame_plan.get_or_build(key, ctx, |_| {
+            build_fixture_plan(mapping.as_mapping_ref(), color_order)
+        })
     }
 
     fn ensure_texture_area_mapping(
@@ -681,14 +700,31 @@ impl NodeRuntime for FixtureNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         let (render_size, color_order, brightness, gamma_correction) = {
-            let def = self.def_view(ctx)?;
+            let Self {
+                def_view, reads, ..
+            } = self;
+            let def = FixtureDefView::get_or_compile(def_view, ctx.slot_shapes())
+                .map_err(err_ctx("compile fixture def view"))?;
             (
-                def.render_size().get::<_, Dim2u>(ctx)?,
-                def.color_order().get::<_, ColorOrder>(ctx)?,
-                def.brightness()
-                    .get_or(ctx, lpc_model::Brightness::DEFAULT)?
-                    .as_u8(),
-                def.gamma_correction().get_or(ctx, true)?,
+                ctx.read_planned_accessor::<Dim2u>(
+                    &mut reads.render_size,
+                    def.render_size().accessor(),
+                )?,
+                ctx.read_planned_accessor::<ColorOrder>(
+                    &mut reads.color_order,
+                    def.color_order().accessor(),
+                )?,
+                ctx.read_planned_option_or(
+                    &mut reads.brightness,
+                    def.brightness().some_accessor(),
+                    lpc_model::Brightness::DEFAULT,
+                )?
+                .as_u8(),
+                ctx.read_planned_option_or(
+                    &mut reads.gamma_correction,
+                    def.gamma_correction().some_accessor(),
+                    true,
+                )?,
             )
         };
         // Read through the option's `some` branch by path: `power` is absent
@@ -699,25 +735,47 @@ impl NodeRuntime for FixtureNode {
         // Absent falls back to the default guard rather than to unlimited — the
         // fixture most in need of a current limit is the one whose author has
         // never heard of the setting. Opting out is `budget_ma: 0`.
-        let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
+        let power: FixturePower =
+            try_read_def_value_planned(ctx, &mut self.reads.power, "power.some")?
+                .unwrap_or_default();
         let diagnostic_mode =
-            try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
-        let selection: Option<alloc::string::String> = try_read_def_value(ctx, "selection")?;
-        FixtureSelection::update_in(
-            &mut self.selection,
-            selection.as_deref().unwrap_or_default(),
-        );
+            try_read_def_value_planned(ctx, &mut self.reads.diagnostic_mode, "diagnostic_mode")?
+                .unwrap_or(FixtureDiagnosticMode::Off);
+        // The selection text is borrowed from the resolved value and compared
+        // with the held selection; it is copied only when it changed.
+        match try_read_def_production_planned(ctx, &mut self.reads.selection, "selection")? {
+            Some(production) => match production.value_leaf().map(|leaf| leaf.value()) {
+                Some(lpc_model::LpValue::String(text)) => {
+                    FixtureSelection::update_in(&mut self.selection, text.as_str());
+                }
+                _ => {
+                    let selection: Option<alloc::string::String> =
+                        production_value(&production, "selection")?;
+                    FixtureSelection::update_in(
+                        &mut self.selection,
+                        selection.as_deref().unwrap_or_default(),
+                    );
+                }
+            },
+            None => FixtureSelection::update_in(&mut self.selection, ""),
+        }
         // The two-sided space declaration (vision D3/D14). Absent reads —
         // a runtime fixture with no def behind it — leave the loaded
         // declaration standing rather than resetting it, the same rule the
         // shader node's `space` read follows.
-        if let Some(strip_order_meaningful) = try_read_def_value(ctx, "strip_order_meaningful")? {
+        if let Some(strip_order_meaningful) = try_read_def_value_planned(
+            ctx,
+            &mut self.reads.strip_order_meaningful,
+            "strip_order_meaningful",
+        )? {
             self.strip_order_meaningful = strip_order_meaningful;
         }
-        if let Some(wire_reversed) = try_read_def_value(ctx, "wire_reversed")? {
+        if let Some(wire_reversed) =
+            try_read_def_value_planned(ctx, &mut self.reads.wire_reversed, "wire_reversed")?
+        {
             self.wire_reversed = wire_reversed;
         }
-        if let Some(policy) = try_read_consume_policy(ctx) {
+        if let Some(policy) = try_read_consume_policy(ctx, &mut self.reads.consume) {
             self.consume_policy = policy;
         }
         self.sync_mapping_from_def(ctx)?;
@@ -736,7 +794,7 @@ impl NodeRuntime for FixtureNode {
             // stays viewable/editable, with the cause surfaced as runtime
             // status. A resolved input carrying the wrong shape keeps
             // failing loudly — that is authored misconfiguration.
-            match ctx.resolve_static_consumed(FIXTURE_INPUT_PATH) {
+            match ctx.resolve_planned_static(&mut self.reads.input, FIXTURE_INPUT_PATH) {
                 Ok(prod) => {
                     let visual_product = match prod
                         .value_leaf()
@@ -791,14 +849,10 @@ impl NodeRuntime for FixtureNode {
             wire_reversed: self.wire_reversed,
             consume_policy: self.consume_policy,
         });
-        self.state.output.set_with_version(
-            ver,
-            ControlProduct::new(
-                ctx.node_id(),
-                0,
-                fixture_control_extent(self.mapping.as_mapping_ref()),
-            ),
-        );
+        let control_extent = self.planned(ctx, color_order).control_extent;
+        self.state
+            .output
+            .set_with_version(ver, ControlProduct::new(ctx.node_id(), 0, control_extent));
         // Published from the last completed render, so these trail the frame
         // they describe by one — the same trail the scale itself carries.
         self.state
@@ -825,10 +879,14 @@ impl NodeRuntime for FixtureNode {
 
     fn handle_memory_pressure(
         &mut self,
-        _level: PressureLevel,
+        level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Nothing droppable here, deliberately. This handler used to clear
+        // The frame plan is rebuildable state (frame-plan ADR, D8).
+        if level >= PressureLevel::High {
+            self.frame_plan.clear();
+        }
+        // Nothing else droppable here, deliberately. This handler used to clear
         // `precomputed` / `direct_channels` / `sample_points` /
         // `sample_target` / `render_target` at `High` (the #303 compile
         // window). Measurement on 2026-08-04 showed the drop frees nothing at
@@ -1012,8 +1070,17 @@ fn sync_mapping_config_from_def(
 /// The authored `consume` policy (`FixtureDef::consume`), translated into
 /// the runtime vocabulary. `None` when the declaration does not resolve at
 /// all (a runtime fixture with no def) — the loaded policy then stands.
-fn try_read_consume_policy(ctx: &mut TickContext<'_>) -> Option<ConsumerPolicy> {
-    match try_read_def_enum_variant(ctx, "consume")?.as_str() {
+fn try_read_consume_policy(
+    ctx: &mut TickContext<'_>,
+    read: &mut PlannedRead,
+) -> Option<ConsumerPolicy> {
+    // The variant is compared where it lies: copying its name every frame to
+    // match on it was the read's only allocation.
+    let production = ctx.resolve_planned_static(read, "consume").ok()?;
+    let lpc_model::SlotData::Enum(declaration) = production.data() else {
+        return None;
+    };
+    match declaration.variant.as_str() {
         // `Auto` IS the defaults-only policy — the model says so in as many
         // words, so there is no third state to carry into the engine.
         "Auto" => Some(ConsumerPolicy::AUTO),
@@ -1073,6 +1140,44 @@ fn try_read_def_enum_variant(
     Some(alloc::string::String::from(declaration.variant.as_str()))
 }
 
+/// [`try_read_def_value`] through a [`PlannedRead`]: the query id is kept by
+/// the caller, so a steady frame resolves by id.
+fn try_read_def_value_planned<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    read: &mut PlannedRead,
+    path: &'static str,
+) -> Result<Option<T>, NodeError> {
+    match try_read_def_production_planned(ctx, read, path)? {
+        Some(production) => production_value(&production, path),
+        None => Ok(None),
+    }
+}
+
+/// The production behind an authored def path, through a [`PlannedRead`],
+/// with [`try_read_def_value`]'s reading of the failures: an absent option
+/// or an unavailable path is `None`, a path that cannot exist in the
+/// fixture's def shape is an error.
+fn try_read_def_production_planned(
+    ctx: &mut TickContext<'_>,
+    read: &mut PlannedRead,
+    path: &'static str,
+) -> Result<Option<crate::dataflow::resolver::Production>, NodeError> {
+    match ctx.resolve_planned_static(read, path) {
+        Ok(production) => Ok(Some(production)),
+        Err(e) if e.is_absent_option() => Ok(None),
+        Err(e) => {
+            let slot = SlotPath::parse(path).map_err(|e| {
+                NodeError::msg(alloc::format!(
+                    "invalid authored fixture path {path:?}: {e}"
+                ))
+            })?;
+            ensure_path_exists_in_fixture_def_shape(ctx.slot_shapes(), &slot)?;
+            log::debug!("[fixture] def path {path} unavailable: {}", e.message);
+            Ok(None)
+        }
+    }
+}
+
 fn try_read_def_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
     path: &'static str,
@@ -1096,6 +1201,19 @@ fn try_read_def_value<T: lpc_model::FromLpValue>(
             return Ok(None);
         }
     };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved fixture path is not a value"))?;
+    T::from_lp_value(value.value())
+        .map(Some)
+        .map_err(|e| NodeError::msg(alloc::format!("fixture path {path:?}: {e}")))
+}
+
+/// A resolved def production's value, with [`try_read_def_value`]'s errors.
+fn production_value<T: lpc_model::FromLpValue>(
+    production: &crate::dataflow::resolver::Production,
+    path: &'static str,
+) -> Result<Option<T>, NodeError> {
     let value = production
         .value_leaf()
         .ok_or_else(|| NodeError::msg("resolved fixture path is not a value"))?;
@@ -1239,7 +1357,10 @@ impl FixtureNode {
         let dt_ms = previous_seconds
             .map(|previous| ((now_seconds - previous).max(0.0) * 1000.0) as u32)
             .unwrap_or(0);
-        let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
+        let lamp_count = match self.frame_plan.get() {
+            Some(plan) => plan.lamp_channel_count,
+            None => fixture_lamp_channel_count(self.mapping.as_mapping_ref()),
+        };
         let estimate = power_limit::estimate_ma(
             preset_for(power.lamp_type).model,
             lamp_count,
@@ -1314,6 +1435,7 @@ impl FixtureNode {
             return render_direct_fixture_control(
                 &mut self.sample_batch,
                 self.mapping.as_mapping_ref(),
+                self.frame_plan.get(),
                 channels,
                 visual_product,
                 request,
@@ -1787,6 +1909,7 @@ fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) ->
 fn render_direct_fixture_control(
     sample_batch: &mut Option<SampleBatch>,
     mapping: MappingRef<'_>,
+    plan: Option<&FixtureFramePlan>,
     channels: &DirectChannels,
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
@@ -1831,8 +1954,20 @@ fn render_direct_fixture_control(
         VisualSpace::TwoD => (settings.width, settings.height),
     };
 
-    target.clear();
+    // Identity channels write every lamp in order from the first, so a render
+    // that fills the whole target needs no zero-fill first: the tail it does
+    // not reach (a short stream, a batch that traps) is zeroed after, which
+    // leaves exactly the bytes clear-then-write did.
+    let writes_in_order_to_the_end = matches!(channels, DirectChannels::Identity(n)
+        if (*n as usize).saturating_mul(3) == expected_samples)
+        && target.product_len() == expected_samples;
+    if !writes_in_order_to_the_end {
+        target.clear();
+    }
     if count == 0 {
+        if writes_in_order_to_the_end {
+            target.clear();
+        }
         return Ok(ControlLayout {
             spans: fixture_control_spans(mapping, settings.color_order, 0),
         });
@@ -1847,7 +1982,15 @@ fn render_direct_fixture_control(
             .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?;
         count.min(graphics.sample_batch_capacity()).max(1)
     };
-    let batch = ensure_sample_batch(sample_batch, capacity, ctx)?;
+    let batch = match ensure_sample_batch(sample_batch, capacity, ctx) {
+        Ok(batch) => batch,
+        Err(error) => {
+            if writes_in_order_to_the_end {
+                target.clear();
+            }
+            return Err(error);
+        }
+    };
     let mut fill = match space {
         VisualSpace::TwoD => DirectCoordFill::TwoD {
             centers: lpc_model::nodes::fixture::mapping_centers(mapping),
@@ -1863,7 +2006,8 @@ fn render_direct_fixture_control(
     // One match on the channel encoding, then a stream monomorphized on that
     // form's iterator — the identity case walks `0..n` with no per-lamp
     // branch and no list to read.
-    let written_samples = match channels {
+    let mut written_samples = 0usize;
+    let streamed = match channels {
         DirectChannels::Identity(count) => stream_direct_lamps(
             0..*count,
             &mut fill,
@@ -1878,7 +2022,8 @@ fn render_direct_fixture_control(
             scope,
             ctx,
             selection,
-        )?,
+            &mut written_samples,
+        ),
         DirectChannels::Explicit(list) => stream_direct_lamps(
             list.iter().copied(),
             &mut fill,
@@ -1893,12 +2038,25 @@ fn render_direct_fixture_control(
             scope,
             ctx,
             selection,
-        )?,
+            &mut written_samples,
+        ),
     };
+    if writes_in_order_to_the_end {
+        target.clear_product_from(written_samples);
+    }
+    streamed?;
 
-    Ok(ControlLayout {
-        spans: fixture_control_spans(mapping, settings.color_order, written_samples as u32),
-    })
+    let written = written_samples as u32;
+    let spans = match plan {
+        Some(plan)
+            if plan.color_order == settings.color_order
+                && plan.lamp_channel_count.saturating_mul(3) == written =>
+        {
+            plan.full_spans.clone()
+        }
+        _ => fixture_control_spans(mapping, settings.color_order, written),
+    };
+    Ok(ControlLayout { spans })
 }
 
 /// Sample the visual through the window and encode each batch's lamps into
@@ -1918,9 +2076,9 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
     scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
     selection: SelectionAt<'_>,
-) -> Result<usize, NodeError> {
+    written_samples: &mut usize,
+) -> Result<(), NodeError> {
     let time_seconds = ctx.time_seconds();
-    let mut written_samples = 0usize;
     let mut fill_batch = |coords: &mut [i32]| fill.fill(coords);
     let mut consume = |sampled: &[u16]| -> Result<(), NodeError> {
         write_direct_lamps(
@@ -1930,7 +2088,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
             expected_samples,
             settings,
             power,
-            &mut written_samples,
+            written_samples,
             selection,
         );
         Ok(())
@@ -1952,7 +2110,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
             scope,
         },
     )?;
-    Ok(written_samples)
+    Ok(())
 }
 
 /// Encode one batch of sampled lamps into their channels' three control
@@ -2447,6 +2605,22 @@ fn ordered_rgb_u16(color_order: ColorOrder, r: u16, g: u16, b: u16) -> [u16; 3] 
         ColorOrder::Gbr => [g, b, r],
         ColorOrder::Brg => [b, r, g],
         ColorOrder::Bgr => [b, g, r],
+    }
+}
+
+/// The fixture's [`FixtureFramePlan`] for `mapping`, its spans reported in
+/// `color_order`.
+fn build_fixture_plan(mapping: MappingRef<'_>, color_order: ColorOrder) -> FixtureFramePlan {
+    let lamp_channel_count = fixture_lamp_channel_count(mapping);
+    FixtureFramePlan {
+        lamp_channel_count,
+        control_extent: ControlExtent::new(1, lamp_channel_count.saturating_mul(3)),
+        full_spans: fixture_control_spans(
+            mapping,
+            color_order,
+            lamp_channel_count.saturating_mul(3),
+        ),
+        color_order,
     }
 }
 
