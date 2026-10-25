@@ -11,8 +11,9 @@
 //! inside the module (children expanded as sibling cards), the artist sees
 //! the module face as a card in the workspace, and the end user sees the
 //! root module's face alone (play mode, `/sim|device/<key>/play`). A
-//! connected board's card draws a pick of that panel at card size
-//! ([`CompactPanel`]), with the same controls. The
+//! connected board's card draws that panel whole at card size
+//! ([`CompactPanel`]), laid out by shape ([`PanelCell`], [`PanelStrip`]),
+//! with the same widgets. The
 //! sidebar bus pane is gone: bus-as-controls lives on the face, and
 //! bus-as-writers/readers in the wiring drawer.
 //!
@@ -25,7 +26,15 @@ mod compact_panel;
 mod module_face;
 mod module_panel;
 mod module_panel_control;
+mod panel_cell;
+mod panel_corners;
 mod panel_gesture;
+mod panel_label;
+mod panel_label_trigger;
+mod panel_readout;
+mod panel_state_look;
+mod panel_story_look;
+mod panel_strip;
 mod pattern_picker;
 mod play_mode;
 
@@ -50,6 +59,10 @@ pub use compact_panel::CompactPanel;
 pub use module_face::{ExportFindingRow, ModuleFace};
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;
+pub(crate) use panel_cell::PanelCell;
 pub use panel_gesture::{PanelGesture, panel_gesture_actions};
+#[cfg(feature = "stories")]
+pub(crate) use panel_story_look::PanelStoryLook;
+pub(crate) use panel_strip::PanelStrip;
 pub use pattern_picker::PatternPicker;
 pub use play_mode::PlayModeSurface;

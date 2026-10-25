@@ -729,3 +729,31 @@ new-board defaults for lightplayer.app and Bluetooth, and account settings.
 This change leaves the seams: no "Remember…" switch yet, and a row's
 account mark (`UiBarMark`) is drawn only once a store says a value came
 from the account.
+
+## Amendment 2026-10-20: the card's panel lays out by shape and the bus
+
+Plan `lp2025/2026-10-19-2255-board-card-panel-layout`; the decision is
+`2026-10-20-panel-controls-lay-out-by-shape-and-the-bus.md`. In the
+2026-10-19 amendment ("the connected card holds the whole panel"), three
+lines are replaced; the rest stands (every control on the card, no cap, the
+card growing once, the ⋯'s panel settings, Edit at the foot, the play page
+an address):
+
+- **"the root's own controls with the master (the `brightness` channel,
+  whatever its widget) leading"** — nothing leads by name. The root's own
+  controls sit on a tinted band with no word; each nested group sits under
+  its own line and a heading of its node's kind icon and its name. Inside
+  each, the strips (a fader, a palette), then the block (the Pattern
+  instrument), then the cells (a knob, the Speed knob, a toggle), each run
+  in the bus registry's order, then the walk's.
+- **"Knobs and toggles fill rows … a palette, a fader or the Pattern
+  instrument takes a row of its own; a nested group's controls sit under a
+  quiet heading"** — a strip is a line of its own with its label and value
+  above a track the card's width; cells fill a grid, three to a line on a
+  300 px card; light lines run between every two controls, edge to edge.
+  The whole cell is the control's target, with its let go (↺) and details
+  (ⓘ) as 24 px circles in its top corners, and a tap opens its details.
+- **"On the panel, brightness is a knob"** — brightness is a fader on the
+  panel again (`2026-08-03-panel-visibility-is-derived.md`, its 2026-10-20
+  amendment). The clock is still one Speed knob.
+

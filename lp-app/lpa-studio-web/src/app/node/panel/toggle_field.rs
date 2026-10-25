@@ -5,6 +5,12 @@
 //! its violet ring on the pill regardless of on/off. Click dispatches the
 //! flipped value — a panel write when the control targets a bus channel,
 //! a slot edit otherwise.
+//!
+//! **As a panel cell** (the connected board card's, `module/panel_cell.rs`)
+//! the toggle takes a `body` — the cell's label and value — inside its own
+//! button, so the button is the whole cell and a press anywhere in it flips
+//! the switch. Its tap is its flip, so the cell reaches its details by its
+//! corner ⓘ alone.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
@@ -36,6 +42,15 @@ pub fn ToggleField(
     #[props(default = None)]
     panel_target: Option<UiPanelTarget>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// What a panel cell draws with the switch (its label and its value),
+    /// inside the switch's own button, which then fills the cell. `None` =
+    /// the pill alone, as every other surface draws it.
+    #[props(default)]
+    body: Option<Element>,
+    /// The button's own layout when it carries a `body` (the cell's column
+    /// and padding).
+    #[props(default)]
+    surface_class: &'static str,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
@@ -43,10 +58,29 @@ pub fn ToggleField(
     let pill_class = toggle_pill_class(shown, bound, engaged, disabled);
     let thumb_class = toggle_thumb_class(shown);
     let invalid_title = state.invalid.clone().unwrap_or_default();
+    // In a cell, the button is the whole cell and the pill a picture in it.
+    let (button_class, pill) = match body {
+        Some(_) => (
+            toggle_surface_class(surface_class, disabled),
+            rsx! {
+                span { class: "tw:flex tw:h-[46px] tw:flex-none tw:items-center",
+                    span { class: "{pill_class}",
+                        span { class: "{thumb_class}" }
+                    }
+                }
+            },
+        ),
+        None => (
+            pill_class,
+            rsx! {
+                span { class: "{thumb_class}" }
+            },
+        ),
+    };
 
     rsx! {
         button {
-            class: "{pill_class}",
+            class: "{button_class}",
             r#type: "button",
             role: "switch",
             aria_checked: "{shown}",
@@ -63,9 +97,21 @@ pub fn ToggleField(
                         .call(panel_or_slot_action(&panel_target, address, LpValue::Bool(flip)));
                 }
             },
-            span { class: "{thumb_class}" }
+            {pill}
+            {body}
         }
     }
+}
+
+/// The switch's button as a whole cell: the cell's layout, no chrome of its
+/// own, a pointer and a tap that never waits for a double-tap zoom.
+fn toggle_surface_class(surface_class: &str, disabled: bool) -> String {
+    let cursor = if disabled { "" } else { " tw:cursor-pointer" };
+    format!(
+        "ux-panel-surface {surface_class} tw:appearance-none tw:border-0 tw:bg-transparent \
+         tw:text-inherit tw:touch-manipulation tw:outline-none tw:focus-visible:outline \
+         tw:focus-visible:outline-1 tw:-outline-offset-1 tw:focus-visible:outline-border-strong{cursor}"
+    )
 }
 
 /// Pill chrome: good-green surface strictly for the ON state; bound rings

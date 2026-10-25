@@ -17,6 +17,7 @@
 //! studio-controller decoration pass, exactly like the shader face's agent
 //! chat. See [`UiOutputFace`].
 
+mod panel_order;
 mod ui_clock_face;
 mod ui_fixture_face;
 mod ui_fixture_power;
@@ -26,6 +27,7 @@ mod ui_output_face;
 mod ui_panel_control;
 mod ui_panel_control_view;
 mod ui_panel_group;
+mod ui_panel_shape;
 mod ui_panel_widget;
 mod ui_panel_wire;
 mod ui_patch_bay;
@@ -35,6 +37,7 @@ mod ui_playlist_face;
 mod ui_shader_face;
 mod ui_space_section;
 
+pub use panel_order::{panel_order_key, sort_panel_controls};
 pub use ui_clock_face::{
     UiClockFace, UiClockTransport, UiPhasorReading, UiTimebaseState, phasor_rate_display,
 };
@@ -48,6 +51,7 @@ pub use ui_output_face::{
 pub use ui_panel_control::{UiPanelControl, UiPanelEmit, UiPanelTarget};
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
 pub use ui_panel_group::UiPanelGroup;
+pub use ui_panel_shape::UiPanelShape;
 pub use ui_panel_widget::UiPanelWidget;
 pub use ui_panel_wire::{UiPanelWire, UiPanelWireRole};
 pub use ui_patch_bay::{UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchPort};

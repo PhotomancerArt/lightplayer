@@ -212,3 +212,16 @@ frame seq 2, got 0`) and unchanged. With the walk's board held to wall time
 (above) the editor opens, and the firmware no longer resets on a slow host.
 `2026-10-20-drop-walk-switch-off-flake` is a separate cause and stays its own
 ticket.
+
+**Seen again 2026-10-20, by hand** (the board card's panel layout, PR
+#1206, `just studio-dev-emu` on a loaded desk, a dev wasm build in the
+built-in browser, `lp-emu:esp32c6:t1`, firmware from `842cb45a3`, before
+the firmware fix above reached the branch). After PLAYFUL was pushed to `c6-a`
+over `?emu=ws://…`, Connect held the card at "This board is open in the
+editor." with `expected project read frame seq N, got 0` repeating in the
+console; once it recovered after Done and Connect, once it never did. The
+same page with `&emu-tty=none` (the Mac serial model off) opened the panel
+within ten seconds and every hand check that followed ran clean. `studio-dev-emu`
+starts its door without `pace=realtime`, so a person at the dev server meets
+this where the walks no longer do: `&emu-tty=none` is the desk workaround
+until the door's boards are paced too.

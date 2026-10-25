@@ -60,6 +60,7 @@ pub mod status_corner;
 pub mod ui_bar_work;
 pub mod ui_board_card;
 pub mod ui_board_panel;
+pub mod ui_board_panel_heading;
 pub mod ui_board_picture;
 pub mod ui_board_surface;
 pub mod ui_card_action;
@@ -80,7 +81,7 @@ pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
 pub use board_links::{BoardLinks, account_words};
-pub use board_panel_picks::{MASTER_CHANNEL, board_panel_picks};
+pub use board_panel_picks::board_panel_picks;
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
 pub use cloud_bar::{NOTHING_GOES_SENTENCE, SIGN_IN_SENTENCE};
 pub use firmware_bar::{
@@ -101,6 +102,7 @@ pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_c
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
 pub use ui_board_panel::{UiBoardPanel, UiBoardPanelSection, UiCardControl};
+pub use ui_board_panel_heading::UiBoardPanelHeading;
 pub use ui_board_picture::{PictureSource, UiBoardPicture};
 pub use ui_board_surface::{
     SurfacePicture, SurfaceProgress, SurfaceState, UiBoardSurface, UiSurfaceNotice,

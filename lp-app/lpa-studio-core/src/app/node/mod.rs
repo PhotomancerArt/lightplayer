@@ -41,12 +41,12 @@ pub use face::{
     UiClockFace, UiClockTransport, UiExportsGroup, UiFixtureFace, UiFixturePatch, UiFixturePower,
     UiLedBudget, UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputFace,
     UiOutputPin, UiOutputPortRow, UiPanelControl, UiPanelControlState, UiPanelControlView,
-    UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole,
-    UiPatchBay, UiPatchCell, UiPatchPort, UiPatternEntryState, UiPatternPicker,
+    UiPanelEmit, UiPanelGroup, UiPanelShape, UiPanelTarget, UiPanelWidget, UiPanelWire,
+    UiPanelWireRole, UiPatchBay, UiPatchCell, UiPatchPort, UiPatternEntryState, UiPatternPicker,
     UiPatternPickerEntry, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiShaderFace,
     UiShapePresets, UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceMismatch,
     UiSpaceModifiers, UiSpaceSection, UiSpaceSide, UiTimebaseState, UiWireDirectionRow,
-    UiWireStatus, phasor_rate_display,
+    UiWireStatus, panel_order_key, phasor_rate_display, sort_panel_controls,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};

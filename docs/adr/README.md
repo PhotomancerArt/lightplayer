@@ -244,6 +244,8 @@ holds the full context.
 | Pictures and project names cross the relay's device leg unsealed (Yona, 2026-10-08); only the uid and package hash are protected, as keyed tags | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A chip affords TLS on the device leg, or a privacy need for what a board shows: seal them in a later relay protocol |
 | The relay's last picture of a board lives in the hub's memory and is lost at every deploy | `2026-10-06-cloud-relay` (2026-10-09 amendment) | M7's board list (new persisted cloud data, with its own migration) |
 | No `LabelChanged` relay frame: the hub's board name goes stale until the board registers again | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A renamed board's stale name shows up on cloud cards, unless M7 makes the account own the name |
+| The play page and the editor's Panel section still draw the walk's order with `ModulePanelControl`; only the connected board card lays out by shape and the bus | `2026-10-20-panel-controls-lay-out-by-shape-and-the-bus` | Their own plans adopt `PanelCell`, `PanelStrip` and `sort_panel_controls` |
+| The playlist zone on a panel (where the Pattern instrument sits, what the playing pattern's group holds, shared Detail and Palette) keeps today's two playlist groups | `2026-10-20-panel-controls-lay-out-by-shape-and-the-bus` | The playlist-bus vision is written and settled |
 
 ## Relationship To Shared Planning
 

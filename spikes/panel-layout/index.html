@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Panel layout — every surface</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Studio's palette, from lpa-studio-web/src/style.css :root (2026-10-19),
+   by way of spikes/board-card. Throwaway: production never imports
+   spikes/. Design record for the panel-layout question raised on PR #1196
+   (plan lp2025/2026-10-19-0826-card-panel-pass), ahead of any plan.
+   Round 1: commit d6d7c56b8. Round 2: this file.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e; --track:#0e0e14;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e; --panel-bd:#3a3a4c;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
+  --heading:#e9e9ef;
+
+  /* round 2: the light lines between controls, a step under a group's own line */
+  --line:#262633;
+  --band:#1e1e2b;
+  --hover:rgba(255,255,255,.04);
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+  --eng-bg:#292213;          --eng-bd:#8a6f35;          --eng-tx:#e8c56b;
+  --glass-bg:rgba(12,12,20,.62); --glass-edge:rgba(255,255,255,.12);
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:28px 32px 200px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:1040px; }
+p.hint b, p.sub b, .cnotes b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:52px 0 6px; scroll-margin-top:110px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+h2 a { color:inherit; text-decoration:none; } h2 a:hover { text-decoration:underline; }
+h3.sub2 { font-size:11px; letter-spacing:.08em; color:var(--shell-dim); text-transform:uppercase; margin:26px 0 8px; font-weight:700; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:1040px; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+.toc { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11.5px; margin:10px 0 0; }
+.toc a { color:var(--shell-mut); text-decoration:none; } .toc a:hover { color:var(--shell-tx); text-decoration:underline; }
+.decided { border:1px solid var(--shell-bd); border-radius:8px; padding:9px 14px; margin:12px 0 0; font-size:12px; color:var(--shell-mut); max-width:1040px; }
+.decided b { color:var(--shell-tx); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:10px 14px; flex-wrap:wrap; align-items:center; padding:9px 14px; margin-top:14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:80; background:rgba(11,12,14,.95); backdrop-filter:blur(8px); }
+.controls.local { position:static; margin:0 0 14px; }
+.controls .grp { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+.controls .k { color:var(--shell-dim); margin-right:3px; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:2px 9px; font-size:11.5px; }
+.controls button:hover { background:#1e2126; }
+.controls button.on { border-color:#7be0b2; color:#7be0b2; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.dataline { font-size:11.5px; color:var(--shell-dim); margin:8px 2px 0; max-width:1240px; min-height:17px; }
+.dataline b { color:var(--shell-mut); }
+
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:20px; font-size:12.5px; color:var(--shell-mut); max-width:1060px; }
+.lean b { color:#7be0b2; }
+.lean ol { margin:6px 0 0; padding-left:22px; } .lean li { margin:7px 0; }
+.lean li::marker { color:#7be0b2; font-weight:700; }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:12px 2px 0; line-height:1.6; max-width:1240px; }
+.cnotes p { margin:3px 0; }
+.legend { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:12px; color:var(--shell-mut); max-width:1080px; margin:6px 0 12px; }
+.legend .L { font:800 11px var(--mono); color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:4px; padding:0 6px; height:18px; display:inline-grid; place-items:center; }
+.legend b { color:var(--shell-tx); font-weight:600; }
+.rejected { border:1px dashed var(--shell-bd-strong); border-radius:8px; padding:8px 12px; font-size:11.5px; color:var(--shell-dim); max-width:1080px; margin:0 0 14px; }
+.rejected b { color:var(--shell-mut); }
+.codebox { border:1px solid var(--shell-bd); border-radius:8px; background:#0c0d10; padding:12px 14px; font:11.5px/1.6 var(--mono); color:#c9c9d2; white-space:pre; overflow:auto; }
+.codebox .hl { color:#7be0b2; } .codebox .cm { color:#6f6d66; } .codebox .del { color:#ff9a9a; text-decoration:line-through; }
+
+/* ---- the matrix ------------------------------------------------------ */
+.row { display:flex; flex-wrap:wrap; gap:26px 22px; align-items:flex-start; }
+.col { display:grid; gap:8px; align-content:start; }
+.col.hide { display:none; }
+.clabel { display:flex; align-items:baseline; gap:8px; font-size:12px; color:var(--shell-mut); max-width:var(--w,300px); }
+.clabel .L { font:800 11px var(--mono); color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:4px; padding:0 6px; flex:none; }
+.clabel b { color:var(--shell-tx); font-weight:600; }
+.clabel span { color:var(--shell-dim); font-size:11px; }
+.cnote { font-size:11px; color:var(--shell-dim); max-width:var(--w,300px); line-height:1.5; }
+
+/* =====================================================================
+   Studio pieces
+   ===================================================================== */
+.app { font-family:var(--font); color:var(--tx); }
+
+/* ---- the board card ---------------------------------------------------- */
+.bcard { width:var(--w); background:var(--panel); border:1px solid var(--bd); border-radius:8px; font-size:11.5px; color:var(--muted); position:relative; overflow:hidden; }
+.pic { position:relative; height:138px; overflow:hidden; background:#07080a; }
+.bcard.nar .pic { height:108px; }
+.pic canvas, .banner canvas, .mprev canvas { position:absolute; inset:0; width:100%; height:100%; display:block; filter:blur(.4px) saturate(1.15); }
+.corner { position:absolute; top:6px; right:6px; z-index:3; width:28px; height:22px; border-radius:6px; display:grid; place-items:center;
+  background:var(--glass-bg); border:1px solid var(--glass-edge); color:var(--muted); font:700 12px/1 var(--font); letter-spacing:.06em; }
+.nbar { display:grid; grid-template-columns:minmax(0,1fr) auto; height:50px; border-top:1px solid var(--bd); }
+.nbar .nm { align-self:center; padding:0 12px; font-size:13px; font-weight:650; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nbar .prim { display:flex; align-items:center; gap:6px; padding:0 12px; border-left:1px solid var(--bd); color:var(--strong); font-weight:600; font-size:12px; white-space:nowrap; }
+.foot { display:flex; height:28px; border-top:1px solid var(--bd); }
+.foot .sp { flex:1; }
+.foot .fb { display:flex; align-items:center; gap:5px; padding:0 11px; border-left:1px solid var(--bd); color:var(--muted); font-weight:600; font-size:11.5px; }
+.cpanel .sec { border-top:1px solid var(--bd); padding:8px 8px 10px; display:grid; gap:6px; min-width:0; }
+
+/* ---- group headings ---------------------------------------------------- */
+.ghead { display:flex; align-items:center; gap:8px; padding:0 2px; min-width:0; }
+.ghead span { font:700 9.6px/1 var(--font); text-transform:uppercase; letter-spacing:.12em; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.ghead span em { font-style:normal; color:var(--faint); }
+.ghead .ic { flex:none; width:12px; height:12px; color:var(--subtle); }
+.ghead i { flex:1; min-width:16px; height:1px; background:var(--bd-mut); }
+.ghead.held span { color:var(--eng-tx); }
+
+/* ---- the grid ------------------------------------------------------- */
+.gwrap { min-width:0; }
+.grid { display:grid; gap:8px 4px; min-width:0; }
+.gi { display:flex; justify-content:center; min-width:0; border-radius:4px; }
+.gi.span { grid-column:1 / -1; display:block; padding:0 2px; }
+
+/* round 2: light lines, edge to edge; the group's own line stays a step stronger */
+.lined .sec { padding:0; gap:0; }
+.lined .ghead { padding:8px 10px 3px; }
+.lined .ghead i { display:none; }
+.lined .gwrap { overflow:hidden; }
+.lined .grid { gap:0; margin:0 -1px -1px 0; }
+.lined .gi { border-radius:0; box-shadow:inset -1px 0 0 var(--line), inset 0 -1px 0 var(--line); padding:10px 4px 9px; }
+.lined .gi.span { padding:9px 12px 11px; }
+
+/* round 2: the whole cell is the hit area */
+.hot { cursor:ns-resize; touch-action:none; transition:background .08s; }
+.hot.k-toggle, .hot.k-pal { cursor:pointer; }
+.hot.k-strip { cursor:ew-resize; }
+.hot:hover { background:var(--hover); }
+.hot:hover .knob svg .kbody { stroke:var(--bd-strong); }
+.hot.drag { background:rgba(255,255,255,.06); }
+
+/* ---- controls -------------------------------------------------------- */
+.ctl { min-width:0; }
+.ctl .lbl { display:inline-flex; align-items:center; gap:3px; max-width:100%; min-width:0; font:700 9.5px/1.15 var(--font); text-transform:uppercase; letter-spacing:.1em; color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ctl .val { font:500 10.5px/1 var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); min-width:4.5ch; text-align:center; white-space:nowrap; }
+.ctl.s-following .lbl, .ctl.s-following .val { color:var(--st-bound-tx); }
+.ctl.s-engaged .lbl, .ctl.s-engaged .val { color:var(--eng-tx); }
+.rst { font-style:normal; cursor:pointer; opacity:.8; font-size:10px; }
+.rst:hover { opacity:1; }
+
+.ctl.cell { display:flex; flex-direction:column; align-items:center; gap:3px; width:100%; }
+.knob { display:inline-flex; border-radius:50%; }
+.knob[data-drag] { cursor:ns-resize; touch-action:none; }
+.knob svg { display:block; }
+.tgl { position:relative; width:32px; height:18px; border-radius:999px; border:1px solid var(--bd-strong); background:var(--track); margin:14px 0 10px; flex:none; }
+.tgl[data-act] { cursor:pointer; }
+.tgl::after { content:""; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--subtle); transition:left .12s; }
+.tgl.on { border-color:var(--st-good-bd); background:var(--st-good-bg); }
+.tgl.on::after { left:16px; background:var(--st-good-tx); }
+.s-engaged .tgl { border-color:var(--eng-bd); }
+.s-engaged .tgl.on { background:var(--eng-bg); } .s-engaged .tgl.on::after { background:var(--eng-tx); }
+
+/* a strip, round 2: its label and value above, the track the whole width (Yona) */
+.ctl.strip.fader { display:grid; gap:2px; width:100%; }
+.sh { display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0; }
+.sh .val { text-align:right; }
+/* Today's card fader: label · track · value on one line (#1196) */
+.ctl.inline.fader { display:grid; grid-template-columns:fit-content(38%) minmax(0,1fr) auto; align-items:center; gap:8px; width:100%; min-height:26px; }
+/* Today's play/editor fader: a fixed 184 px footprint, label above */
+.ctl.stack.fader { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; width:184px; align-items:center; }
+.ctl.stack.fader .lbl { grid-column:1 / -1; }
+.ftrack { position:relative; height:22px; min-width:30px; }
+.ftrack[data-drag] { cursor:ew-resize; touch-action:none; }
+.ftrack .slot { position:absolute; left:0; right:0; top:50%; height:7px; transform:translateY(-50%); border-radius:999px; border:1px solid var(--bd-strong); background:var(--bg); box-shadow:inset 0 1px 2px rgba(0,0,0,.35); overflow:hidden; }
+.ftrack .fill { position:absolute; inset:0 auto 0 0; border-radius:999px; background:var(--muted); }
+.ftrack .grip { position:absolute; top:50%; width:10px; height:18px; border-radius:4px; transform:translate(-50%,-50%); background:var(--heading); border:1px solid var(--bd-strong); box-shadow:0 1px 3px rgba(0,0,0,.5); }
+.s-following .ftrack .fill, .s-following .vtrack .fill { background:var(--st-bound-tx); }
+.s-engaged .ftrack .fill, .s-engaged .vtrack .fill { background:var(--eng-tx); } .s-engaged .ftrack .slot, .s-engaged .vtrack .slot { border-color:var(--eng-bd); }
+
+/* a vertical fader: channel strips only */
+.ctl.vf { display:flex; flex-direction:column; align-items:center; gap:4px; width:100%; }
+.vtrack { position:relative; width:26px; height:104px; }
+.vtrack .slot { position:absolute; top:0; bottom:0; left:50%; width:7px; transform:translateX(-50%); border-radius:999px; border:1px solid var(--bd-strong); background:var(--bg); overflow:hidden; }
+.vtrack .fill { position:absolute; inset:auto 0 0 0; border-radius:999px; background:var(--muted); }
+.vtrack .grip { position:absolute; left:50%; width:20px; height:10px; border-radius:4px; transform:translate(-50%,50%); background:var(--heading); border:1px solid var(--bd-strong); box-shadow:0 1px 3px rgba(0,0,0,.5); }
+
+.ctl.pal { display:grid; gap:4px; width:100%; }
+.ctl.stack.pal { width:184px; }
+.pband { position:relative; display:flex; height:20px; border-radius:4px; border:1px solid var(--bd-strong); overflow:hidden; padding-right:18px; background:var(--raised); }
+.pband span { flex:1; min-width:0; }
+.pband span + span { border-left:1px solid rgba(0,0,0,.55); }
+.pband .chev { position:absolute; right:0; top:0; bottom:0; width:18px; display:grid; place-items:center; color:var(--muted); font-size:9px; background:var(--raised); border-left:1px solid var(--bd-strong); flex:none; }
+.s-engaged .pband { border-color:var(--eng-bd); }
+
+/* the Pattern instrument */
+.picker { display:grid; gap:7px; width:100%; min-width:0; }
+.pk-top { display:flex; align-items:center; gap:6px; min-width:0; }
+.pk-now { flex:1; min-width:0; text-align:center; font-size:13px; font-weight:650; color:var(--st-live-tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.blk { appearance:none; display:inline-flex; align-items:center; justify-content:center; height:28px; min-width:28px; padding:0 7px; border-radius:3px;
+  border:1px solid var(--bd-strong); background:var(--raised); color:var(--strong); font:500 11px var(--mono); cursor:pointer; flex:none; }
+.blk:hover { border-color:var(--muted); }
+.blk.sm { height:22px; min-width:30px; font-size:10px; padding:0 5px; }
+.blk.ro { cursor:default; background:transparent; border-color:var(--bd-mut); color:var(--muted); }
+.blk.off { border-style:dashed; color:var(--dim); background:transparent; }
+.pk-cyc { display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; }
+.pk-cyc .tgl { margin:0; }
+.pk-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:3px 10px; max-height:150px; overflow:auto; padding-right:2px; }
+.pk-list.tall { max-height:none; }
+.pk-row { display:flex; align-items:center; gap:6px; min-width:0; padding:2px 0 2px 6px; border-left:2px solid transparent; }
+.pk-row.live { border-left-color:var(--st-live-tx); }
+.pk-row .pn { flex:1; min-width:0; font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pk-row.live .pn { color:var(--st-live-tx); font-weight:650; }
+.pk-row.skip .pn { color:var(--faint); text-decoration:line-through dashed; }
+
+/* ---- Today's play/editor panel (ModulePanel) ------------------------------ */
+.mpanel { display:grid; gap:12px; padding:12px 16px; min-width:0; }
+.mchrome { display:flex; justify-content:flex-end; align-items:center; gap:6px; font-size:10.5px; color:var(--subtle); }
+.mchrome .tgl { margin:0; transform:scale(.85); }
+.fwrap { display:flex; flex-wrap:wrap; align-items:flex-start; gap:16px; min-width:0; }
+.fwrap.play { gap:24px; }
+.fwrap > .fcell { min-width:64px; flex:none; }
+.fwrap.play > .fcell { min-width:76px; }
+.fwrap > .fblock { flex-basis:100%; min-width:0; }
+.fgroups { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; min-width:0; }
+fieldset.fs { margin:0; min-width:0; flex:1 1 220px; border:1px solid var(--bd-mut); border-radius:2px; padding:0 12px 8px; }
+fieldset.fs.play { flex-basis:240px; padding-bottom:12px; }
+fieldset.fs legend { padding:0 6px; height:20px; display:flex; align-items:center; gap:5px; font:700 9.9px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--subtle); }
+fieldset.fs legend i { font-style:normal; opacity:.5; font-size:9px; }
+
+/* ---- the play page (phone + desktop) -------------------------------------- */
+.phone { width:390px; height:760px; border:1px solid var(--shell-bd-strong); border-radius:32px; overflow:hidden; background:var(--bg); position:relative; box-shadow:0 0 0 6px #111318; }
+.phone .scr { position:absolute; inset:0; overflow:auto; padding-top:30px; }
+.phone .status { position:absolute; top:0; left:0; right:0; height:30px; background:var(--bg); z-index:4; }
+.phone .notch { position:absolute; top:8px; left:50%; transform:translateX(-50%); width:110px; height:22px; border-radius:12px; background:#000; z-index:5; }
+.phead { display:flex; align-items:baseline; gap:8px; padding:12px 16px; border-bottom:1px solid var(--bd-strong); min-width:0; }
+.phead h3 { margin:0; font-size:18px; font-weight:650; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.phead .tag { margin-left:auto; font:700 9.6px var(--font); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); flex:none; }
+.banner { position:relative; height:64px; border-bottom:1px solid var(--bd-strong); background:#07080a; overflow:hidden; }
+.desk .banner { height:84px; }
+.ppanel { padding:14px 16px 20px; display:grid; gap:14px; min-width:0; }
+.ppanel .sec { display:grid; gap:8px; min-width:0; }
+.ppanel .grid { gap:14px 6px; }
+.ppanel.lined, .epanel.lined { padding:0; gap:0; }
+.ppanel.lined .sec, .epanel.lined .sec { border-top:1px solid var(--bd); }
+.ppanel.lined > .sec:first-child, .epanel.lined > .sec:first-child, .ppanel.lined > .capA > .sec:first-child { border-top:0; }
+.desk { width:1040px; border:1px solid var(--shell-bd); border-radius:10px; overflow:hidden; background:var(--bg); }
+.desk .ppanel { padding:16px 20px 24px; }
+.desk .ppanel.lined { padding:0; }
+.capA { max-width:640px; margin:0 auto; width:100%; display:grid; gap:14px; min-width:0; }
+.lined .capA { gap:0; border-left:1px solid var(--bd); border-right:1px solid var(--bd); }
+
+/* ---- B: shared lines ------------------------------------------------- */
+.bflow { display:flex; flex-wrap:wrap; gap:12px 22px; align-items:flex-start; min-width:0; }
+.bgrp { flex:1 1 auto; min-width:0; display:grid; gap:6px; }
+.bgrp.root { flex-basis:100%; }
+.bline { display:flex; flex-wrap:wrap; gap:10px 6px; align-items:center; min-width:0; }
+.bi { min-width:0; display:flex; justify-content:center; border-radius:4px; }
+.bi.s, .bi.m { display:block; }
+.bi.m { flex:1 1 100%; }
+.lined .bflow { gap:0; }
+.lined .bgrp { gap:0; border-top:1px solid var(--bd); }
+.lined .bline { gap:0; align-items:stretch; }
+.lined .bi { border-radius:0; box-shadow:inset -1px 0 0 var(--line), inset 0 -1px 0 var(--line); padding:9px 6px; }
+.lined .bgrp.root { border-top:0; }
+
+/* ---- C: group tiles -------------------------------------------------- */
+.ccols { column-gap:22px; min-width:0; }
+.tile { break-inside:avoid; display:grid; gap:6px; margin:0 0 14px; min-width:0; }
+.tile.span { column-span:all; }
+.lined .ccols { column-gap:0; column-rule:1px solid var(--bd); }
+.lined .tile { margin:0; gap:0; }
+.lined .tile .sec { border-top:1px solid var(--bd); }
+
+/* ---- the editor ------------------------------------------------------ */
+.canvas { width:var(--w); padding:18px; border:1px solid var(--shell-bd); border-radius:10px;
+  background:radial-gradient(circle at 1px 1px, #22222e 1px, transparent 1.4px) 0 0/16px 16px, #0b0b10; }
+.mcard { width:100%; border:1px solid var(--bd); border-radius:8px; background:var(--surface); overflow:hidden; }
+.mhead { display:flex; align-items:center; gap:8px; height:36px; padding:0 12px; border-bottom:1px solid var(--bd-mut); }
+.mhead .mi { width:16px; height:16px; color:var(--muted); flex:none; }
+.mhead b { font-size:13px; color:var(--strong); font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mhead .kind { font-size:11px; color:var(--subtle); }
+.mhead .chip { margin-left:auto; display:inline-flex; align-items:center; gap:5px; height:19px; padding:0 7px; border-radius:999px; border:1px solid var(--st-good-bd); background:var(--st-good-bg); color:var(--st-good-tx); font:700 10px var(--font); }
+.mhead .chip i { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.mprev { position:relative; height:96px; background:#07080a; border-bottom:1px solid var(--bd-mut); }
+.msec { display:flex; align-items:center; gap:10px; height:30px; padding:0 12px 0 10px; background:var(--panel); border-bottom:1px solid var(--bd-mut); }
+.msec .t { display:inline-flex; align-items:center; gap:6px; font:700 10px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--subtle); flex:none; }
+.msec .r { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--subtle); flex:none; }
+.msec .r .tgl { margin:0; transform:scale(.85); }
+.epanel { padding:12px 14px 14px; display:grid; gap:12px; min-width:0; }
+.epanel .sec { display:grid; gap:8px; min-width:0; }
+
+/* ---- global and specific (round 2) -------------------------------------- */
+.gband { background:var(--band); }
+.cpanel .gband > .sec:first-child { border-top:1px solid var(--bd); }
+.phone .gband.stick { position:sticky; top:0; z-index:3; border-bottom:1px solid var(--bd-strong); box-shadow:0 8px 18px rgba(0,0,0,.45); }
+.deskband { display:grid; grid-template-columns:300px minmax(0,1fr); align-items:start; }
+.deskband > .gband { position:sticky; top:0; border-right:1px solid var(--bd); align-self:stretch; }
+.segs { display:flex; border:1px solid var(--bd-strong); border-radius:3px; overflow:hidden; min-width:0; }
+.segs button { appearance:none; flex:1 1 0; min-width:0; border:0; background:transparent; color:var(--muted); font:600 11px var(--font); padding:6px 4px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.segs button + button { border-left:1px solid var(--bd-strong); }
+.segs button.on { background:var(--raised-strong); color:var(--strong); }
+.segrow { padding:9px 10px; border-top:1px solid var(--bd); }
+.ppanel .segrow, .epanel .segrow { padding:9px 0; border-top:0; }
+.ppanel.lined .segrow { padding:9px 12px; border-top:1px solid var(--bd); }
+.strips { display:flex; flex-wrap:wrap; min-width:0; }
+.chs { flex:1 1 var(--chw,90px); min-width:var(--chw,90px); display:flex; flex-direction:column; min-width:0; border-left:1px solid var(--bd); }
+.chs:first-child { border-left:0; }
+.chs .chead { padding:8px 6px 4px; text-align:center; font:700 9.6px/1.2 var(--font); text-transform:uppercase; letter-spacing:.12em; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-bottom:1px solid var(--line); }
+.chs .chead.glob { color:var(--muted); background:var(--band); }
+.chs .cbody { display:grid; align-content:start; flex:1; }
+.chs .cbody > .gi { box-shadow:inset 0 -1px 0 var(--line); padding:9px 4px 8px; border-radius:0; }
+.chs .cbody > .gi.span { padding:8px 8px 10px; }
+.chs .cfoot { display:flex; justify-content:center; gap:2px; border-top:1px solid var(--line); margin-top:auto; }
+.chs .cfoot > .gi { flex:1; padding:8px 2px 10px; border-radius:0; }
+.chs.glob { background:var(--band); }
+.cpanel .strips, .ppanel .strips { border-top:1px solid var(--bd); }
+.ppanel .strips { border-bottom:1px solid var(--bd); }
+
+/* ---- §1 shapes ------------------------------------------------------- */
+.shapes { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:18px; max-width:1180px; }
+.shape { border:1px solid var(--shell-bd); border-radius:10px; padding:14px; background:#0f1014; display:grid; gap:10px; align-content:start; }
+.shape h3 { margin:0; font-size:13px; color:var(--shell-tx); }
+.shape h3 small { font-weight:500; color:var(--shell-dim); font-size:11.5px; margin-left:6px; }
+.shape p { margin:0; font-size:11.5px; color:var(--shell-dim); line-height:1.5; }
+.shape .demo { background:var(--panel); border:1px solid var(--bd); border-radius:8px; overflow:hidden; }
+
+/* ---- authored order ---------------------------------------------- */
+.auth { display:grid; grid-template-columns:minmax(300px, 380px) minmax(320px, 460px) minmax(260px, 1fr); gap:22px; align-items:start; max-width:1260px; }
+.opts { display:grid; gap:10px; font-size:12px; color:var(--shell-mut); }
+.opt { border:1px solid var(--shell-bd); border-radius:8px; padding:10px 12px; background:#0f1014; }
+.opt b { color:var(--shell-tx); }
+.opt.pick { border-color:#365545; }
+.opt .tag { display:block; margin-bottom:3px; font:700 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); }
+.opt.pick .tag { color:#7be0b2; }
+.quietbtn { display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px; border-radius:5px; border:1px solid var(--bd); background:var(--raised); color:var(--muted); font-size:11px; font-weight:600; }
+.quietbtn.on { border-color:var(--st-live-bd); color:var(--st-live-tx); background:var(--st-live-bg); }
+.arr .gi { position:relative; }
+.arr .gi::before { content:"⋮⋮"; position:absolute; left:4px; top:4px; font-size:9px; letter-spacing:-2px; color:var(--faint); }
+.arr .gi.dragme { outline:1px dashed var(--st-live-tx); outline-offset:-2px; background:rgba(83,198,242,.05); }
+</style>
+</head>
+<body>
+
+<h1>Panel layout — round 2</h1>
+<p class="hint"><b>Round 1 settled two things.</b> Every control is one of three shapes: a <b>cell</b> (knob, Speed, toggle), a <b>strip</b> (fader, palette) or a <b>block</b> (the Pattern instrument). And brightness is a fader, first, <i>but not as a special case</i> (Yona: "the bus should handle this?"). <b>This round</b> asks how the bus puts brightness first (§2), how a complex project separates its global controls from the ones that belong to one zone or one pattern (§3), and tries Yona's three changes to the look: a strip's label above its track, light lines between controls, and the whole cell as the hit area, with a hover.</p>
+<p class="hint">Everything is live. Drag anywhere in a cell (up and down for a knob, sideways for a strip); touching a control holds it, gold, as in Studio, and ↺ lets go. Press a toggle's cell, or the Pattern instrument. A control is one control: the same knob moves in every column. <code>?data=smalldome&amp;lines=off</code> opens the page in a state.</p>
+<div class="toc">
+  <a href="#shapes">1 · The shapes</a><a href="#order">2 · Brightness first, from the bus</a><a href="#global">3 · Global and specific</a><a href="#card">4 · The card, 300 px</a><a href="#narrow">5 · The card, 178 px</a>
+  <a href="#phone">6 · Play page, phone</a><a href="#editor">7 · The editor</a><a href="#desktop">8 · Play page, desktop</a><a href="#authored">9 · Authored order</a><a href="#gate">10 · Leans and questions</a>
+</div>
+
+<div class="controls" id="controls">
+  <div class="grp"><span class="k">Panel</span>
+    <button data-set="data=playful">PLAYFUL choker</button><button data-set="data=smalldome">small-dome</button><button data-set="data=piece">PLAYFUL tryout</button><button data-set="data=aurora">Aurora · 15</button><button data-set="data=porch">Porch lamp</button><button data-set="data=tiny">One knob</button>
+  </div>
+  <div class="grp" data-when="piece"><span class="k">Patterns</span><button data-set="patterns=13">13</button><button data-set="patterns=25">25</button></div>
+  <span class="sep"></span>
+  <div class="grp"><span class="k">Order in a group</span><button data-set="order=rows">strips → cells</button><button data-set="order=cells">cells → strips</button><button data-set="order=panel">panel order</button></div>
+  <div class="grp"><span class="k">Lines</span><button data-set="lines=on">on</button><button data-set="lines=off">off</button></div>
+  <div class="grp"><span class="k">Card cells</span><button data-set="cardCells=3">3 a line</button><button data-set="cardCells=4">4 a line</button></div>
+  <span class="sep"></span>
+  <div class="grp"><span class="k">State</span><button data-set="held=0">as authored</button><button data-set="held=1">one held</button></div>
+  <div class="grp"><span class="k">Names</span><button data-set="labels=real">real</button><button data-set="labels=long">long</button></div>
+  <span class="sep"></span>
+  <div class="grp"><span class="k">Show</span><button data-show="T">0</button><button data-show="A">A</button><button data-show="B">B</button><button data-show="C">C</button></div>
+</div>
+<div class="dataline" id="dataline"></div>
+
+<!-- ================================================================= -->
+<h2 id="shapes"><a href="#shapes"><span class="n">1</span>The shapes (settled)</a></h2>
+<p class="sub">Drawn in round 2's look. A strip carries its label and value <b>above</b> the track, as the palette always did, so the track is the whole width whatever the label says. Light lines divide the controls, and every cell is its own hit area: hover one.</p>
+<div class="shapes app" id="shapesRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="order"><a href="#order"><span class="n">2</span>Brightness first, from the bus</a></h2>
+<p class="sub">The bus already says what brightness is. Its registry of well-known channels (<code>lpc-model/src/bus/well_known.rs</code>) lists <code>brightness</code> as <i>"Master output brightness (0-1); fixtures consume it by default"</i>, and the fixture's slot is default-bound to it with <code>panel = "show"</code>. The special case is only in the panel code: the card's <code>MASTER_CHANNEL</code> hoist, and #1196's knob on panels. Drop both, and rank by the registry instead.</p>
+<div class="row app" style="align-items:stretch">
+  <div class="codebox" style="max-width:640px"><span class="cm">// A group's order, with nothing named in the panel code.</span>
+<span class="cm">// 1. its strips, then its blocks, then its cells   (the shape)</span>
+<span class="cm">// 2. inside each run, the bus registry's order      (well_known.rs)</span>
+<span class="cm">//      brightness · palette · clock.rate · …, then everything else</span>
+<span class="cm">// 3. then the walk's order                          (as today)</span>
+<span class="del">pub const MASTER_CHANNEL: &amp;str = "brightness";</span>     <span class="cm">// board_panel_picks.rs</span>
+<span class="del">fixture.panel_brightness()</span>                       <span class="cm">// #1196's knob on panels</span>
+<span class="hl">rank(channel) = WELL_KNOWN_CHANNELS.position(channel)</span>
+</div>
+  <div class="cnote" style="--w:520px;font-size:11.5px;align-self:center">Brightness is a strip, and the registry ranks it before the palette, so it leads <b>every group that has one</b>: the root's, or a zone's own. The clock's Speed leads the cells the same way. Nothing in the card, the play page or the editor knows the word "brightness". And the fixture card and the panel draw one widget again, a fader.<br><br>Try <b>small-dome</b> (a real catalog project). Its dome and its doors each have their own fixture, so each has its own brightness, and nothing at the root has one. Today's card hoists the <b>dome's</b> brightness to the front with no heading, so it reads as the whole project's. Ranked by the bus, each zone's brightness leads its own zone.</div>
+</div>
+<div class="row app" id="orderRow" style="margin-top:18px"></div>
+<div class="cnotes">
+  <p><b>Today</b>: panel order (the walk's: files and slots in sorted order), with the card pulling the first brightness it finds to the front, even a nested one.</p>
+  <p><b>Strips → cells, by the bus</b>: no exception anywhere. The strips stack at the top in the registry's order (brightness, then palette), then the knobs. With labels above and lines between, the stack reads as a set of bars rather than a list.</p>
+  <p><b>Cells → strips, by the bus</b>: the knobs come first, so brightness lands under them unless the registry also marks it as a "lead". That's one more fact in the bus, but it's still an exception.</p>
+  <p><b>Dense</b>: panel order with later cells pulled into holes. Where a knob lands still can't be predicted.</p>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="global"><a href="#global"><span class="n">3</span>Global and specific: complex projects</a></h2>
+<p class="sub">The bus already draws the line, as <b>scopes</b>. The root scope is global: what stays put across everything (the multi-pattern vision's shared knobs: Speed, Brightness, Palette, Detail). A nested module is a zone (small-dome's dome and doors, Aurora's effects). The playing pattern is its own scope, and its knobs come and go with it (at most two). A zone's control with no writer of its own follows the global one (violet: Aurora's plasma speed), until someone touches it. What's open is how to <b>show</b> that. Four ways, on three real projects.</p>
+<div class="controls local" id="gcontrols">
+  <div class="grp"><span class="k">Project</span><button data-set="gdata=smalldome">small-dome · two zones, a brightness each</button><button data-set="gdata=piece">PLAYFUL tryout · 13 patterns</button><button data-set="gdata=aurora">Aurora · four effects</button></div>
+</div>
+<div class="legend">
+  <span class="L">G1</span><span><b>Headings.</b> Round 1's A: the global controls have no heading, and each zone sits under its name. "Global" is only implied, by being first and unnamed.</span>
+  <span class="L">G2</span><span><b>Global band.</b> The global controls sit on a band of their own, named for what they reach ("Everything", or "All patterns" on a playlist). On a phone the band stays pinned while the zones scroll under it, and on a desktop it's a column beside them. Zone headings say what they are: "Scanner · this pattern".</span>
+  <span class="L">G3</span><span><b>One zone at a time.</b> The global controls, then a switch between the zones, and only one zone's controls. On a playlist the Pattern instrument is already that switch. It's compact, but it hides controls: "a panel you have to unfold before you can play it is not a control panel".</span>
+  <span class="L">G4</span><span><b>Channel strips.</b> A mixer: one column per zone, the global column first, knobs above and faders at the foot (vertical). Each zone's brightness stands at the foot of its own column.</span>
+</div>
+<h3 class="sub2">The card at 300 px</h3>
+<div class="row app" id="gCardRow"></div>
+<h3 class="sub2">The play page on a phone</h3>
+<div class="row app" id="gPhoneRow"></div>
+<h3 class="sub2">The play page on a desktop: G2 and G4</h3>
+<div class="col app" id="gDeskCol" style="gap:30px"></div>
+<div class="cnotes">
+  <p><b>G1</b> is enough for the choker and fine for the tryout. On small-dome, though, two "Brightness" faders differ only by the heading above them, and the root's lone Speed knob doesn't say it reaches both zones.</p>
+  <p><b>G2</b> says the reach once, as a place: the band. Pinned on a phone, the master stays in thumb reach while a long panel scrolls, which round 1's D wanted, but here it comes from the rule rather than a special case. It costs one tint, not a box.</p>
+  <p><b>G3</b> fits Aurora on a card in half the height, but three zones are always hidden, and a held control in a hidden zone has nowhere to show its gold.</p>
+  <p><b>G4</b> is the strongest picture on a desktop and for small-dome. On a card, Aurora's five columns wrap into a second row of columns, and on a playlist the instrument has to sit outside the strips (the vision's D15 puts it between them).</p>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="card"><a href="#card"><span class="n">4</span>The connected card at 300 px</a></h2>
+<p class="sub">Round 1's layout systems, redrawn in round 2's look (strips → cells by the bus, labels above, lines, the whole cell to hit). <b>C isn't drawn on the card or on a phone</b>: a tile is the surface's whole width there, so C is A. The <b>Order</b> and <b>Lines</b> switches apply here.</p>
+<div class="legend">
+  <span class="L">0</span><span><b>Today</b>, as PR #1196 draws it: panel order, brightness a knob pulled to the front, label · track · value on one line, the knob alone the hit area.</span>
+  <span class="L">A</span><span><b>One column, by shape.</b> Every group under the quiet heading on every surface, with no boxes. On a desktop the column stops at 640 px.</span>
+  <span class="L">B</span><span><b>Shared lines.</b> A strip stretches and shares a line with whatever sits before it, and groups sit side by side when there's room.</span>
+  <span class="L">C</span><span><b>Group tiles.</b> Each group a tile three knobs wide, the tiles flowing into columns as the surface widens.</span>
+</div>
+<div class="rejected"><b>Dropped after round 1: D, the master in the frame</b> (the picture's foot, a thumb bar, the header). It's a special case on every surface, which (b) rules out, and on the card it lays a control over the live picture (P18). G2's pinned band gives a phone what D wanted, by the rule.</div>
+<div class="row app" id="cardRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="narrow"><a href="#narrow"><span class="n">5</span>The card at 178 px: a phone's two-up grid</a></h2>
+<p class="sub">Three cells to a line at 50 px each. Long names get cut here first (switch <b>Names → long</b>). C is A here.</p>
+<div class="row app" id="narrowRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="phone"><a href="#phone"><span class="n">6</span>The play page on a phone</a></h2>
+<p class="sub"><code>/p/…/play</code> at 390 px (an iPhone 13 Pro). Each phone scrolls on its own. C is A here.</p>
+<div class="row app" id="phoneRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="editor"><a href="#editor"><span class="n">7</span>The editor's panel</a></h2>
+<p class="sub">The editor has no panel dock (its docks are Tree, Device, Outputs and Props). Its panel is the <b>Panel</b> section of the root module's card on the canvas, drawn here at about 460 px. Today's boxes sit inside that card: a box in a box (P9).</p>
+<div class="row app" id="editorRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="desktop"><a href="#desktop"><span class="n">8</span>The play page on a desktop</a></h2>
+<p class="sub">1040 px, one concept per frame.</p>
+<div class="col app" id="deskCol" style="gap:30px"></div>
+
+<!-- ================================================================= -->
+<h2 id="authored"><a href="#authored"><span class="n">9</span>Authored order</a></h2>
+<p class="sub">Unchanged from round 1, and still open. With the shape and the bus's rank, the default only has to order the controls <i>within</i> a run, and the walk's order does that. An authored order is a change to the project format, so it's Yona's call.</p>
+<div class="auth app" id="authRow"></div>
+
+<!-- ================================================================= -->
+<h2 id="gate"><a href="#gate"><span class="n">10</span>Leans and questions</a></h2>
+<div class="lean">
+  <b>Lean: one rule from the bus, with the global controls on a band.</b> A group is its strips, then its blocks, then its cells, ranked by the bus's registry. The root's controls sit on a band named for their reach, pinned on a phone and a column on a desktop (G2). Zones go under headings that say what they are, as tiles where the surface is wide (C). Every control is drawn with its label above, light lines between, and the whole cell to hit.
+  <ol type="A">
+    <li><b>Brightness first, from the bus:</b> strips before cells, ranked by the registry's order, and nothing named "brightness" in panel code. This deletes <code>MASTER_CHANNEL</code> and #1196's panel knob, so the fixture card and the panel use one fader again. <i>Lean: yes. It also fixes small-dome, where today's card puts the dome's brightness first as if it were the project's.</i></li>
+    <li><b>Global and specific: G2</b>, the global band, named for its reach, pinned on a phone and a column on a desktop, with zones under headings that say what they are ("Dome", "Scanner · this pattern"). <i>Lean: G2. G1 doesn't say which brightness is which. G3 hides zones and their held gold. G4 is lovely on a desktop and breaks on a card.</i></li>
+    <li><b>Light lines between controls:</b> edge to edge (P10), a step lighter than a group's own line. <i>Lean: yes. They make the panel read as a panel, and the strips stop looking like a list.</i></li>
+    <li><b>The whole cell is the hit area, with a hover:</b> drag anywhere in a knob's cell, press anywhere in a toggle's. A strip drags from anywhere too; pressing its track still jumps. In Studio today the label opens the control's details, so: <i>Lean: a press without a drag opens the details, and a toggle's details go to its ⓘ. Your call.</i></li>
+    <li><b>Shared lines (B): drop it?</b> With labels above, a shared line puts a strip's header beside a knob's dial at a different height, and a palette's width changes from card to card. <i>Lean: drop it.</i></li>
+    <li><b>Authored order: still not yet?</b> <i>Lean: not yet (§9).</i></li>
+    <li><b>Order of work:</b> #1196 takes the bus rank and the fader (small, core-only). The look (labels above, lines, the whole cell) and the band go in one plan across the card, the play page and the editor. <i>Lean: yes.</i></li>
+  </ol>
+  <p style="margin:10px 0 0">Pass looks like a yes, no or change on A–G, plus a G-letter if it isn't G2.</p>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Data: real panels, as core hands them over (UiPanelGroup: controls,
+   nested groups). Order is the walk's.
+   ===================================================================== */
+const PLAYFUL_SET = [
+  '#2b0a3d #7a1f6e #e0468c #ff8f5a #ffd98a #ff8f5a #e0468c #7a1f6e #2b0a3d',
+  '#03123d #0a4f8a #12a5c9 #7ef0e0 #b8ffd6 #7ef0e0 #12a5c9 #0a4f8a #03123d',
+  '#ff3d7f #ffb3d9 #9d4dff #4dd2ff #ffffff #4dd2ff #9d4dff #ffb3d9 #ff3d7f',
+  '#062a12 #0f6b3a #3ddc84 #b8ff7a #fff6a8 #b8ff7a #3ddc84 #0f6b3a #062a12',
+  '#2a0500 #7a1a00 #ff4d00 #ffb300 #fff1a8 #ffb300 #ff4d00 #7a1a00 #2a0500',
+].map(s => s.split(' '));
+const AURORA_SET = [['#020a1c', '#06304a', '#0f7f86', '#3ddc84', '#b8ffd6', '#7a5cff', '#2a1458', '#020a1c']];
+const PORCH_SET = [PLAYFUL_SET[4], ['#1a0612', '#6b1440', '#ff6a3d', '#ffc56b', '#fff0c2', '#ffc56b', '#ff6a3d', '#6b1440']];
+const DOME_SET = [['#020414', '#0b1d4a', '#1f4fa0', '#7aa8ff', '#ffd9a8', '#ff9a4a', '#3a1206', '#020414']];
+
+const K = (ch, label, v, min, max, o = {}) => ({ ch, label, kind: 'knob', v, min, max, ...o });
+const STEP = (ch, label, v, min, max, step) => ({ ch, label, kind: 'stepped', v, min, max, step });
+const PERIOD = (ch, label, v) => ({ ch, label, kind: 'period', v, min: .5, max: 60 });
+const SPEED = (v = 1) => ({ ch: 'clock.rate', label: 'Speed', kind: 'speed', v, min: .25, max: 8 });
+const BRI = v => ({ ch: 'brightness', label: 'Brightness', kind: 'bright', v, min: 0, max: 255 });
+const TOG = (ch, label, v) => ({ ch, label, kind: 'toggle', v });
+const FAD = (ch, label, v, min, max) => ({ ch, label, kind: 'fader', v, min, max });
+const PAL = (ch, label, set, step) => ({ ch, label, kind: 'palette', set, step });
+const PICK = () => ({ ch: 'playlist.cycle', label: 'Pattern', kind: 'picker' });
+
+/* The tryout's real playlist (catalog/projects/playful-choker-tryout): 25
+   entries, the thirteen patterns and twelve second copies, and each pattern's
+   own knobs from its shader's bus bindings (detail and palette are shared). */
+const PATTERNS = ['Noise soft', 'Aurora', 'Twinkle', 'Scanner', 'Fireflies', 'Color wipe', 'Heartbeat', 'Noise hard', 'Ripples', 'Spiral', 'Veins', 'Radial gradient', 'Linear gradient'];
+const PATTERNS_25 = [...PATTERNS, ...PATTERNS.slice(0, 12).map(n => n + ' 2')];
+const PATTERN_KNOBS = {
+  'Noise soft': [], 'Aurora': [], 'Heartbeat': [],
+  'Twinkle': [K('density', 'Density', .5, 0, 1)],
+  'Scanner': [K('width', 'Width', 2.5, .5, 12), K('tail', 'Tail', .45, .05, 1)],
+  'Fireflies': [STEP('count', 'Count', 5, 1, 12, 1)],
+  'Color wipe': [K('angle', 'Angle', 0, 0, 360)],
+  'Noise hard': [STEP('steps', 'Steps', 4, 2, 8, 1)],
+  'Ripples': [K('rate', 'Rate', 3, 1, 6)],
+  'Spiral': [STEP('arms', 'Arms', 3, 1, 8, 1)],
+  'Veins': [K('thickness', 'Thickness', 1.3, .5, 4)],
+  'Radial gradient': [K('repeat', 'Repeat', 2, .5, 8)],
+  'Linear gradient': [K('angle', 'Angle', 20, 0, 360), K('repeat', 'Repeat', 1, .5, 6)],
+};
+
+const DATA = {
+  playful: {
+    title: 'PLAYFUL choker', set: PLAYFUL_SET, hold: 'scale',
+    note: 'The board\'s real order: the walk visits <code>clock</code>, <code>fixture</code>, <code>shader</code> (sorted), and the shader\'s <code>palette</code> before its <code>scale</code>.',
+    root: [SPEED(1), BRI(51), PAL('palette', 'Palette', PLAYFUL_SET, '16 s'), K('scale', 'Scale', 1, .25, 4)],
+    groups: [],
+  },
+  smalldome: {
+    title: 'small-dome', set: DOME_SET, hold: 'warmth', holdScope: '/doors',
+    note: '<code>catalog/projects/small-dome</code>: the clock at the root, and two modules, the dome (sky: Bands) and the doors (warm: Warmth), each with its own fixture and so its own brightness. Both shaders\' phase reads <code>bus:speed</code>. Nothing at the root has a brightness. <b>Today\'s card pulls the dome\'s to the front.</b>',
+    root: [SPEED(1)],
+    groups: [
+      { label: 'Dome', kind: 'module', controls: [BRI(255), K('bands', 'Bands', 3, 1, 8), PERIOD('speed', 'Phase', 24)] },
+      { label: 'Doors', kind: 'module', controls: [BRI(255), PERIOD('speed', 'Phase', 24), K('warmth', 'Warmth', .8, .2, 1)] },
+    ],
+  },
+  piece: {
+    title: 'PLAYFUL tryout', set: PLAYFUL_SET, hold: 'detail', picker: true,
+    note: '<code>catalog/projects/playful-choker-tryout</code>: the shared controls (the multi-pattern vision\'s D15: Speed, Brightness, Detail, Palette), the Pattern instrument, then the playing pattern\'s own knobs (none for Aurora or Heartbeat, two for Scanner). The cycle is the playlist\'s own: 30 s.',
+    root: [SPEED(1), BRI(51), K('detail', 'Detail', 1, .25, 4), PAL('palette', 'Palette', PLAYFUL_SET, '16 s')],
+    groups: [
+      { label: 'Pattern', kind: 'block', controls: [PICK()] },
+      { label: '@playing', kind: 'pattern' },
+    ],
+  },
+  aurora: {
+    title: 'Aurora Sign', set: AURORA_SET, hold: 'hue',
+    note: 'Fifteen controls (<code>card_many_controls_panel</code>): the root\'s six, among them a stepped palette knob, a toggle and a level fader, then four effects. The plasmas\' Speed follows the root\'s (violet) until someone touches it.',
+    root: [BRI(200), K('speed', 'Speed', .62, 0, 1, { state: 'following' }), K('hue', 'Hue', .41, 0, 1, { state: 'following' }), STEP('palette_n', 'Palette', 2, 1, 4, 1), TOG('mirror', 'Mirror', false), FAD('level', 'Level', 180, 0, 255)],
+    groups: [
+      { label: 'plasma 1', kind: 'module', controls: [K('speed', 'Speed', .62, 0, 1, { state: 'following' }), K('hue', 'Hue', .32, 0, 1)] },
+      { label: 'plasma 2', kind: 'module', controls: [K('speed', 'Speed', .62, 0, 1, { state: 'following' }), K('hue', 'Hue', .32, 0, 1)] },
+      { label: 'fire', kind: 'module', controls: [K('heat', 'Heat', .5, 0, 1), K('sparks', 'Sparks', .5, 0, 1), K('wind', 'Wind', .5, 0, 1)] },
+      { label: 'noise party', kind: 'module', controls: [K('scale', 'Scale', .5, 0, 1), K('drift', 'Drift', .5, 0, 1)] },
+    ],
+  },
+  porch: {
+    title: 'Porch lamp', set: PORCH_SET, hold: 'sparkle',
+    note: 'Made up, in a real walk\'s order: the clock, the fixture, then the shader\'s slots sorted (<code>glow</code>, <code>hue</code>, <code>palette</code>, <code>sparkle</code>, <code>strobe</code>, <code>width</code>). It has two strips between knobs, the worst case for panel order.',
+    root: [SPEED(1), BRI(184), FAD('glow', 'Glow', .6, 0, 1), K('hue', 'Hue', .08, 0, 1), PAL('palette', 'Palette', PORCH_SET, '30 s'), K('sparkle', 'Sparkle', .3, 0, 1), TOG('strobe', 'Strobe', false), K('width', 'Width', .5, 0, 1)],
+    groups: [],
+  },
+  tiny: {
+    title: 'Aurora Sign', set: AURORA_SET, hold: 'speed',
+    note: 'One knob and no brightness (<code>card_few_controls_panel</code>). Nothing here should look broken.',
+    root: [K('speed', 'Speed', .62, 0, 1, { state: 'following' })],
+    groups: [],
+  },
+};
+
+/* The bus registry's order (WELL_KNOWN_CHANNELS, picker display order). */
+const REGISTRY = ['time', 'trigger', 'brightness', 'palette', 'clock.rate', 'clock.play_state', 'clock.scrub', 'playlist.cycle', 'playlist.skip'];
+const rank = c => { const i = REGISTRY.indexOf(c.ch); return i < 0 ? 999 : i; };
+
+/* =====================================================================
+   State
+   ===================================================================== */
+const S = { data: 'playful', gdata: 'smalldome', patterns: 13, order: 'rows', lines: 'on', cardCells: 3, held: '0', labels: 'real', show: { T: 1, A: 1, B: 1, C: 1 } };
+const VAL = {};            // key → value
+const HELD = new Set();    // keys a gesture holds
+const REG = {};            // key → { dk, c }
+const PICKS = { piece: { active: 3, cycle: true, step: 30, skip: new Set() }, shapes: { active: 3, cycle: true, step: 30, skip: new Set([6]) } };
+const ZONE = {};           // G3's chosen zone, per project
+
+const names = () => S.patterns === 25 ? PATTERNS_25 : PATTERNS;
+const playingName = dk => names()[Math.min(PICKS[dk].active, names().length - 1)];
+const keyOf = (dk, scope, c) => `${dk}|${scope}|${c.ch}`;
+function val(k, c) { return k in VAL ? VAL[k] : c.v; }
+function stateOf(k, c, dk) {
+  const d = DATA[dk] || {};
+  if (HELD.has(k)) return 'engaged';
+  if (S.held === '1' && c.ch === d.hold && k.split('|')[1] === (d.holdScope || '/')) return 'engaged';
+  return c.state || 'default';
+}
+function labelOf(dk, c) {
+  if (S.labels !== 'long' || !DATA[dk]) return c.label;
+  return { scale: 'Scale of the field', heat: 'Heat of the embers', detail: 'Detail level', sparkle: 'Sparkle amount', warmth: 'Warmth of the doors', width: 'Width of the beam', speed: 'Speed of the drift' }[c.ch] || c.label;
+}
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+/* The groups, depth first, with the playing pattern's knobs resolved. */
+function groups(dk) {
+  const d = DATA[dk], out = [];
+  d.groups.forEach((g, gi) => {
+    if (g.label === '@playing') {
+      const name = playingName(dk), list = PATTERN_KNOBS[name.replace(/ 2$/, '')] || [];
+      if (list.length) out.push({ label: name, scope: '/' + name, controls: list, kind: 'pattern' });
+      return;
+    }
+    let label = g.label;
+    if (S.labels === 'long' && gi === d.groups.length - 1 && g.kind === 'module') label = 'ripple interference cascade';
+    out.push({ label, scope: '/' + g.label, controls: g.controls, kind: g.kind, block: g.kind === 'block' });
+  });
+  return out;
+}
+
+/* =====================================================================
+   Values
+   ===================================================================== */
+const speedFrac = r => { const l = Math.log2(Math.max(.25, Math.min(8, r))); return l < 0 ? .5 + l / 4 : .5 + l / 6; };
+const fracSpeed = f => f < .5 ? Math.pow(2, (f - .5) * 4) : Math.pow(2, (f - .5) * 6);
+const SPEED_TICKS = [0, .25, .5, 2 / 3, 5 / 6, 1];
+function speedWords(r) {
+  if (Math.abs(r - .25) < .01) return '¼×';
+  if (Math.abs(r - .5) < .01) return '½×';
+  if (Math.abs(r - Math.round(r)) < .02) return Math.round(r) + '×';
+  return (Math.round(r * 10) / 10) + '×';
+}
+function frac(c, v) {
+  if (c.kind === 'speed') return speedFrac(v);
+  if (c.kind === 'period') return 1 - Math.log(v / c.min) / Math.log(c.max / c.min); // slower = less
+  return (v - c.min) / (c.max - c.min);
+}
+function fromFrac(c, f) {
+  if (c.kind === 'speed') return fracSpeed(f);
+  if (c.kind === 'period') return c.min * Math.pow(c.max / c.min, 1 - f);
+  let v = c.min + f * (c.max - c.min);
+  if (c.step) v = c.min + Math.round((v - c.min) / c.step) * c.step;
+  return v;
+}
+function fmt(c, v) {
+  switch (c.kind) {
+    case 'bright': return Math.round(v / 255 * 100) + '%';
+    case 'speed': return speedWords(v);
+    case 'period': return (v < 10 ? v.toFixed(1) : Math.round(v)) + ' s';
+    case 'stepped': return String(Math.round(v));
+    case 'toggle': return v ? 'on' : 'off';
+    case 'fader': return c.max > 1 ? String(Math.round(v)) : v.toFixed(2);
+    default: return c.max >= 100 ? Math.round(v) + '°' : v.toFixed(2);
+  }
+}
+/* mw: how brightness is drawn — 'knob' only in Today (#1196) */
+function shape(c, mw = 'fader') {
+  if (c.kind === 'picker') return 'block';
+  if (c.kind === 'palette' || c.kind === 'fader') return 'strip';
+  if (c.kind === 'bright') return mw === 'knob' ? 'cell' : 'strip';
+  return 'cell';
+}
+
+/* =====================================================================
+   Widgets
+   ===================================================================== */
+const ARC = 'M10.56 37.44 A19 19 0 1 1 37.44 37.44';
+function polar(f, r) { const a = (-135 + f * 270) * Math.PI / 180; return [24 + r * Math.sin(a), 24 - r * Math.cos(a)]; }
+function knobSVG(c, v, st) {
+  const f = Math.max(0, Math.min(1, frac(c, v)));
+  const stroke = st === 'engaged' ? 'var(--eng-tx)' : st === 'following' ? 'var(--st-bound-tx)' : 'var(--strong)';
+  const body = st === 'engaged' ? 'var(--eng-bd)' : 'var(--bd)';
+  let arcs = '';
+  if (c.kind === 'stepped') {
+    const n = Math.round((c.max - c.min) / c.step), len = 100 / n, gap = Math.min(2.6, Math.max(.9, len * .22));
+    for (let i = 0; i < n; i++) {
+      const lit = f >= (i + 1) / n - 1e-4;
+      arcs += `<path d="${ARC}" pathLength="100" fill="none" stroke="${lit ? stroke : 'var(--bd-strong)'}" stroke-width="2.5" stroke-linecap="butt" stroke-dasharray="${(len - gap).toFixed(3)} 100" stroke-dashoffset="${(-(i * len + gap / 2)).toFixed(3)}"/>`;
+    }
+  } else {
+    const ticks = (c.kind === 'speed' ? SPEED_TICKS : [0, .25, .5, .75, 1]).map(t => {
+      const [x1, y1] = polar(t, 17.5), [x2, y2] = polar(t, 21);
+      return `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
+    }).join('');
+    arcs = `<path d="${ARC}" pathLength="100" fill="none" stroke="var(--bd-strong)" stroke-width="2.5" stroke-linecap="round"/>`
+      + `<path d="${ARC}" pathLength="100" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${(f * 100).toFixed(2)} 100"/>`
+      + `<g stroke="var(--subtle)" stroke-width="1" opacity=".5">${ticks}</g>`;
+  }
+  return `<svg width="46" height="46" viewBox="0 0 48 48"><defs><radialGradient id="kb" cx="35%" cy="30%" r="80%"><stop offset="0%" stop-color="#252532"/><stop offset="100%" stop-color="#1d1d28"/></radialGradient></defs>${arcs}`
+    + `<circle class="kbody" cx="24" cy="24" r="12.5" fill="url(#kb)" stroke="${body}"/>`
+    + `<line x1="24" y1="19" x2="24" y2="12.5" stroke="${stroke}" stroke-width="2" stroke-linecap="round" transform="rotate(${(-135 + f * 270).toFixed(1)} 24 24)"/></svg>`;
+}
+const pct = f => (Math.max(0, Math.min(1, f)) * 100).toFixed(1);
+function trackHTML(k, f, hit) {
+  return `<span class="ftrack" ${hit ? `data-drag="strip" data-k="${esc(k)}"` : ''}><span class="slot"><span class="fill" style="width:${pct(f)}%"></span></span><span class="grip" style="left:${pct(f)}%"></span></span>`;
+}
+function vtrackHTML(f) {
+  return `<span class="vtrack"><span class="slot"><span class="fill" style="height:${pct(f)}%"></span></span><span class="grip" style="bottom:${pct(f)}%"></span></span>`;
+}
+function bandHTML(set) {
+  return `<div class="pband">${set.map(stops => `<span style="background:linear-gradient(90deg,${stops.join(',')})"></span>`).join('')}<span class="chev">▾</span></div>`;
+}
+
+/* One control.
+   mode: cell | strip (round 2: label above) | inline (Today's card) | stack (Today's play) | vf (vertical)
+   x.whole: the hit area is the wrapper (round 2), so nothing inside carries one. */
+function ctl(dk, scope, c, mode, x = {}) {
+  if (c.kind === 'picker') return pickerHTML(dk, x);
+  const k = keyOf(dk, scope, c); REG[k] = { dk, c };
+  const v = val(k, c), st = stateOf(k, c, dk), lab = labelOf(dk, c), own = !x.whole;
+  const rst = st === 'engaged' ? `<i class="rst" data-act="release" data-k="${esc(k)}" title="Let go">↺</i>` : '';
+  const lbl = `<span class="lbl" title="${esc(lab)}">${esc(lab)}${rst}</span>`;
+  if (c.kind === 'palette') {
+    return `<div class="ctl pal ${mode === 'stack' ? 'stack' : 'strip'} s-${st}"><div class="sh ph">${lbl}<span class="val">↻ ${c.set.length} · ${c.step}</span></div>${bandHTML(c.set)}</div>`;
+  }
+  const valH = `<span class="val">${fmt(c, v)}</span>`;
+  if (mode === 'vf') return `<div class="ctl vf s-${st}">${lbl}${valH}${vtrackHTML(frac(c, v))}</div>`;
+  if (mode !== 'cell' && (c.kind === 'fader' || c.kind === 'bright')) {
+    if (mode === 'strip') return `<div class="ctl fader strip s-${st}"><div class="sh">${lbl}${valH}</div>${trackHTML(k, frac(c, v), own)}</div>`;
+    return `<div class="ctl fader ${mode} s-${st}">${lbl}${trackHTML(k, frac(c, v), own)}${valH}</div>`;
+  }
+  if (c.kind === 'toggle') {
+    return `<div class="ctl cell s-${st}"><span class="tgl ${v ? 'on' : ''}" ${own ? `data-act="toggle" data-k="${esc(k)}"` : ''}></span>${lbl}${valH}</div>`;
+  }
+  return `<div class="ctl cell s-${st}"><span class="knob" ${own ? `data-drag="knob" data-k="${esc(k)}"` : ''}>${knobSVG(c, v, st)}</span>${lbl}${valH}</div>`;
+}
+
+/* The wrapper a layout places: a grid cell, a line item, a strip's slot.
+   With o.whole it is the control's hit area (round 2). */
+function item(dk, scope, c, o, wrap = 'gi', extra = '') {
+  const sh = shape(c, o.mw), mode = o.mode || (sh === 'cell' ? 'cell' : (o.inline ? 'inline' : 'strip'));
+  const k = keyOf(dk, scope, c);
+  let attrs = '', cls = [wrap, sh !== 'cell' && !o.mode ? 'span' : '', extra].filter(Boolean).join(' ');
+  if (o.whole && c.kind !== 'picker') {
+    if (c.kind === 'toggle') { attrs = `data-act="toggle" data-k="${esc(k)}"`; cls += ' hot k-toggle'; }
+    else if (c.kind === 'palette') cls += ' hot k-pal';
+    else if (mode === 'vf') { attrs = `data-drag="vfader" data-k="${esc(k)}"`; cls += ' hot k-vf'; }
+    else if (mode !== 'cell') { attrs = `data-drag="strip" data-k="${esc(k)}"`; cls += ' hot k-strip'; }
+    else { attrs = `data-drag="knob" data-k="${esc(k)}"`; cls += ' hot k-knob'; }
+  }
+  return `<div class="${cls}" ${attrs}>${ctl(dk, scope, c, mode, { whole: o.whole, tall: o.tall })}</div>`;
+}
+
+function pickerHTML(dk, x) {
+  const p = PICKS[dk], ns = names();
+  const list = ns.map((n, i) => {
+    const skip = p.skip.has(i);
+    return `<div class="pk-row ${i === p.active ? 'live' : ''} ${skip ? 'skip' : ''}"><span class="pn" data-act="play" data-dk="${dk}" data-i="${i}" title="${esc(n)}">${esc(n)}</span><button class="blk sm ${skip ? 'off' : ''}" data-act="skip" data-dk="${dk}" data-i="${i}">${skip ? 'off' : 'on'}</button></div>`;
+  }).join('');
+  const cyc = p.cycle ? `<button class="blk sm" data-act="step" data-dk="${dk}" data-d="-1">−</button><span class="blk sm ro">${p.step} s</span><button class="blk sm" data-act="step" data-dk="${dk}" data-d="1">+</button>` : '';
+  return `<div class="ctl picker"><div class="pk-top"><button class="blk" data-act="prev" data-dk="${dk}">‹</button><span class="pk-now">${esc(ns[p.active])}</span><button class="blk" data-act="next" data-dk="${dk}">›</button></div>`
+    + `<div class="pk-cyc"><span class="lbl" style="font:700 9.5px var(--font);letter-spacing:.1em;color:var(--subtle)">CYCLE</span><span class="tgl ${p.cycle ? 'on' : ''}" data-act="cycle" data-dk="${dk}"></span>${cyc}</div>`
+    + `<div class="pk-list ${x.tall ? 'tall' : ''}" data-scroll="pk-${dk}">${list}</div></div>`;
+}
+
+/* headings: plain (round 1), or naming reach and kind (G2) */
+const ICONS = {
+  glob: '<svg class="ic" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4.6"/><circle cx="6" cy="6" r="1.6" fill="currentColor"/></svg>',
+  module: '<svg class="ic" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6 1.5 10.5 3.8 6 6.1 1.5 3.8Z"/><path d="M1.5 6.2 6 8.5l4.5-2.3"/></svg>',
+  pattern: '<svg class="ic" viewBox="0 0 12 12" fill="currentColor"><path d="M3.5 2.2v7.6L9.6 6Z"/></svg>',
+  block: '<svg class="ic" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.6" y="2" width="8.8" height="2.2" rx=".5"/><rect x="1.6" y="5" width="8.8" height="2.2" rx=".5"/><rect x="1.6" y="8" width="8.8" height="2.2" rx=".5"/></svg>',
+};
+function ghead(label, held, x = {}) {
+  const icon = x.icon ? ICONS[x.icon] : '';
+  const more = x.more ? ` <em>· ${esc(x.more)}</em>` : '';
+  return `<div class="ghead ${held ? 'held' : ''}">${icon}<span title="${esc(label)}">${esc(label)}${more}</span><i></i></div>`;
+}
+const heldIn = (dk, scope, list) => list.some(c => c.kind !== 'picker' && stateOf(keyOf(dk, scope, c), c, dk) === 'engaged');
+
+/* =====================================================================
+   Ordering: by shape, then the bus registry's rank, then the walk's order.
+   ===================================================================== */
+function arrange(list, rule, mw) {
+  if (rule === 'panel' || rule === 'dense') return list.slice();
+  const by = s => list.filter(c => shape(c, mw) === s).map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(p => p[0]);
+  return rule === 'rows' ? [...by('strip'), ...by('block'), ...by('cell')] : [...by('cell'), ...by('strip'), ...by('block')];
+}
+
+/* =====================================================================
+   Layout systems
+   ===================================================================== */
+/* One section as a grid; o.lead puts [control, scope] first (Today's hoist). */
+function gridSection(dk, heading, scope, list, o) {
+  const pairs = arrange(list, o.rule, o.mw).map(c => [c, scope]);
+  if (o.lead) pairs.unshift(o.lead);
+  if (!pairs.length) return '';
+  const cells = pairs.map(([c, sc]) => item(dk, sc, c, o)).join('');
+  const head = heading == null ? '' : (typeof heading === 'string' ? ghead(heading, heldIn(dk, scope, list)) : heading.html);
+  return `<div class="sec">${head}<div class="gwrap"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(${o.cell}px,1fr));${o.rule === 'dense' ? 'grid-auto-flow:row dense;' : ''}">${cells}</div></div></div>`;
+}
+const opts = (cell, x = {}) => ({ rule: S.order, mw: 'fader', cell, whole: true, ...x });
+
+/* A — one column, every group a headed section */
+function bodyA(dk, o) {
+  let h = gridSection(dk, null, '/', DATA[dk].root, o);
+  for (const g of groups(dk)) h += gridSection(dk, g.label, g.scope, g.controls, o);
+  return h;
+}
+
+/* 0 — Today's card: panel order, the first brightness (depth first) pulled to the front, as a knob */
+function bodyTodayCard(dk, cell) {
+  const d = DATA[dk], gs = groups(dk);
+  let master = d.root.find(c => c.kind === 'bright'), mscope = '/';
+  if (!master) for (const g of gs) { const m = g.controls.find(c => c.kind === 'bright'); if (m) { master = m; mscope = g.scope; break; } }
+  const o = { rule: 'panel', mw: 'knob', cell, whole: false, inline: true, lead: master ? [master, mscope] : null };
+  let h = gridSection(dk, null, '/', d.root.filter(c => c !== master), o);
+  for (const g of gs) h += gridSection(dk, g.label, g.scope, g.controls.filter(c => c !== master), { ...o, lead: null });
+  return h;
+}
+/* 0 — Today's ModulePanel (play page, editor): flex-wrap in panel order, groups as boxes */
+function bodyTodayModule(dk, play) {
+  const d = DATA[dk];
+  const one = (scope, c) => {
+    const sh = shape(c, 'knob');
+    if (sh === 'block') return `<div class="fblock">${ctl(dk, scope, c, 'strip', { tall: !play })}</div>`;
+    if (sh === 'strip') return `<div>${ctl(dk, scope, c, 'stack')}</div>`;
+    return `<div class="fcell">${ctl(dk, scope, c, 'cell')}</div>`;
+  };
+  let h = `<div class="mchrome">Auto-save <span class="tgl on"></span></div>`;
+  h += `<div class="fwrap ${play ? 'play' : ''}">${d.root.map(c => one('/', c)).join('')}</div>`;
+  const gs = groups(dk);
+  if (gs.length) h += `<div class="fgroups">${gs.map(g => `<fieldset class="fs ${play ? 'play' : ''}"><legend>${esc(g.label)} <i>ⓘ</i></legend><div class="fwrap ${play ? 'play' : ''}">${g.controls.map(c => one(g.scope, c)).join('')}</div></fieldset>`).join('')}</div>`;
+  return `<div class="mpanel">${h}</div>`;
+}
+
+/* B — shared lines: everything flows */
+function bodyB(dk, P) {
+  const o = opts(P.cell);
+  const one = (scope, c) => {
+    const sh = shape(c);
+    if (sh === 'cell') return item(dk, scope, c, o, 'bi c', '').replace('class="bi c', `style="flex:0 0 ${P.cell}px;width:${P.cell}px" class="bi c`);
+    if (sh === 'block') return item(dk, scope, c, o, 'bi m');
+    const min = c.kind === 'palette' ? P.pal : P.fader;
+    return item(dk, scope, c, o, 'bi s').replace('class="bi s', `style="flex:1 1 ${min}px;min-width:min(${min}px,100%);max-width:${P.max}px" class="bi s`);
+  };
+  const grp = (heading, scope, list, root) => {
+    const items = arrange(list, S.order, 'fader');
+    if (!items.length) return '';
+    const block = items.some(c => c.kind === 'picker');
+    return `<div class="bgrp ${root || block ? 'root' : ''}">${heading ? ghead(heading, heldIn(dk, scope, list)) : ''}<div class="bline">${items.map(c => one(scope, c)).join('')}</div></div>`;
+  };
+  let h = grp(null, '/', DATA[dk].root, true);
+  for (const g of groups(dk)) h += grp(g.label, g.scope, g.controls, false);
+  return `<div class="bflow">${h}</div>`;
+}
+
+/* C — group tiles in columns */
+function bodyC(dk, P) {
+  const o = opts(P.cell, { tall: P.tall });
+  const tile = (heading, scope, list, span) => { const inner = gridSection(dk, heading, scope, list, o); return inner ? `<div class="tile ${span ? 'span' : ''}">${inner}</div>` : ''; };
+  let h = tile(null, '/', DATA[dk].root, false);
+  for (const g of groups(dk)) h += tile(g.label, g.scope, g.controls, g.block);
+  return `<div class="ccols" style="column-width:${P.col}px">${h}</div>`;
+}
+
+/* =====================================================================
+   Global and specific (§3)
+   ===================================================================== */
+const globWord = dk => DATA[dk].picker ? 'All patterns' : 'Everything';
+function zoneHead(dk, g) {
+  const held = heldIn(dk, g.scope, g.controls);
+  if (g.block) return ghead('Pattern', false, { icon: 'block' });
+  if (g.kind === 'pattern') return ghead(g.label, held, { icon: 'pattern', more: 'this pattern' });
+  return ghead(g.label, held, { icon: 'module' });
+}
+/* G1 is A */
+function G1(dk, P) { return bodyA(dk, opts(P.cell, { tall: P.tall })); }
+/* G2: the global band */
+function G2(dk, P, surf) {
+  const o = opts(P.cell, { tall: P.tall });
+  const band = gridSection(dk, { html: ghead(globWord(dk), heldIn(dk, '/', DATA[dk].root), { icon: 'glob' }) }, '/', DATA[dk].root, o);
+  let zones = '';
+  for (const g of groups(dk)) zones += gridSection(dk, { html: zoneHead(dk, g) }, g.scope, g.controls, o);
+  if (surf === 'desk') {
+    const zo = { ...o };
+    let tiles = '';
+    for (const g of groups(dk)) { const inner = gridSection(dk, { html: zoneHead(dk, g) }, g.scope, g.controls, zo); if (inner) tiles += `<div class="tile ${g.block ? 'span' : ''}">${inner}</div>`; }
+    return `<div class="deskband"><div class="gband">${band}</div><div class="ccols" style="column-width:${P.col}px">${tiles}</div></div>`;
+  }
+  return `<div class="gband ${surf === 'phone' ? 'stick' : ''}">${band}</div>${zones}`;
+}
+/* G3: one zone at a time */
+function G3(dk, P) {
+  const o = opts(P.cell, { tall: P.tall });
+  let h = gridSection(dk, null, '/', DATA[dk].root, o);
+  const gs = groups(dk), zones = gs.filter(g => !g.block);
+  for (const g of gs.filter(g => g.block)) h += gridSection(dk, g.label, g.scope, g.controls, o);
+  if (zones.length > 1 && !DATA[dk].picker) {
+    const z = Math.min(ZONE[dk] || 0, zones.length - 1);
+    h += `<div class="segrow"><div class="segs">${zones.map((g, i) => `<button class="${i === z ? 'on' : ''}" data-act="zone" data-dk="${dk}" data-i="${i}" title="${esc(g.label)}">${esc(g.label)}${heldIn(dk, g.scope, g.controls) ? ' •' : ''}</button>`).join('')}</div></div>`;
+    h += gridSection(dk, null, zones[z].scope, zones[z].controls, o).replace('<div class="sec">', '<div class="sec" style="border-top:0">');
+  } else {
+    for (const g of zones) h += gridSection(dk, g.label, g.scope, g.controls, o);
+  }
+  return h;
+}
+/* G4: channel strips */
+function G4(dk, P) {
+  const o = opts(P.cell, { whole: true });
+  const gs = groups(dk);
+  const column = (title, scope, list, glob) => {
+    const items = arrange(list, 'cells', 'fader');
+    const faders = items.filter(c => c.kind === 'fader' || c.kind === 'bright');
+    const rest = items.filter(c => !faders.includes(c) && c.kind !== 'picker');
+    return `<div class="chs ${glob ? 'glob' : ''}" style="--chw:${P.chw}px"><div class="chead ${glob ? 'glob' : ''}" title="${esc(title)}">${esc(title)}</div>`
+      + `<div class="cbody">${rest.map(c => item(dk, scope, c, o)).join('')}</div>`
+      + (faders.length ? `<div class="cfoot">${faders.map(c => item(dk, scope, c, { ...o, mode: 'vf' })).join('')}</div>` : '') + `</div>`;
+  };
+  let blocks = '';
+  for (const g of gs.filter(g => g.block)) blocks += gridSection(dk, { html: ghead('Pattern', false, { icon: 'block' }) }, g.scope, g.controls, opts(P.cell, { tall: P.tall }));
+  let cols = column(globWord(dk), '/', DATA[dk].root, true);
+  for (const g of gs.filter(g => !g.block)) cols += column(g.kind === 'pattern' ? g.label + ' · this pattern' : g.label, g.scope, g.controls, false);
+  return `${blocks}<div class="strips">${cols}</div>`;
+}
+const GCONCEPTS = [['G1', 'Headings', 'round 1\'s A', G1], ['G2', 'Global band', 'named for its reach', G2], ['G3', 'One zone at a time', 'a switch', G3], ['G4', 'Channel strips', 'a mixer', G4]];
+
+/* =====================================================================
+   Surfaces
+   ===================================================================== */
+const SURF = {
+  card:   { w: 300, cell: () => S.cardCells === 4 ? 64 : 80, b: { cell: 72, fader: 120, pal: 110, max: 999 }, chw: 88 },
+  narrow: { w: 178, cell: () => 50, b: { cell: 50, fader: 120, pal: 110, max: 999 }, chw: 56 },
+  phone:  { w: 390, cell: () => 76, b: { cell: 80, fader: 150, pal: 140, max: 999 }, chw: 96 },
+  editor: { w: 460, cell: () => 66, b: { cell: 70, fader: 150, pal: 140, max: 420 }, c: { col: 186, cell: 56 } },
+  desk:   { w: 1040, cell: () => 84, b: { cell: 84, fader: 180, pal: 170, max: 420 }, c: { col: 230, cell: 68 }, chw: 120 },
+};
+const linedCls = () => S.lines === 'on' ? 'lined' : '';
+const picture = dk => `<canvas class="pic" data-dk="${dk}" width="64" height="30"></canvas>`;
+
+function cardChrome(dk, w, body, nar, lined) {
+  return `<div class="bcard ${nar ? 'nar' : ''}" style="--w:${w}px"><div class="pic">${picture(dk)}<span class="corner">⋯</span></div>`
+    + `<div class="nbar"><span class="nm">${esc(DATA[dk].title)}</span><span class="prim">✓ Done</span></div>`
+    + `<div class="cpanel ${lined}">${body || '<div class="sec"><span style="color:var(--subtle)">This project has no controls.</span></div>'}</div><div class="foot"><span class="sp"></span><span class="fb">✎ Edit</span></div></div>`;
+}
+function cardHTML(dk, concept, surf) {
+  const nar = surf === 'narrow', W = SURF[surf].w, cell = SURF[surf].cell();
+  if (concept === 'T') return cardChrome(dk, W, bodyTodayCard(dk, cell), nar, '');
+  if (concept === 'A') return cardChrome(dk, W, bodyA(dk, opts(cell)), nar, linedCls());
+  if (concept === 'B') return cardChrome(dk, W, `<div class="sec" style="padding:${S.lines === 'on' ? '0' : '8px'}">${bodyB(dk, SURF[surf].b)}</div>`, nar, linedCls());
+  return '';
+}
+function phoneChrome(dk, body, lined) {
+  return `<div class="phone"><span class="status"></span><span class="notch"></span><div class="scr" data-scroll="ph"><div class="phead"><h3>${esc(DATA[dk].title)}</h3><span class="tag">play</span></div>`
+    + `<div class="banner">${picture(dk)}</div><div class="ppanel ${lined}">${body}</div></div></div>`;
+}
+function phoneHTML(dk, concept) {
+  const P = SURF.phone, cell = P.cell();
+  if (concept === 'T') return phoneChrome(dk, bodyTodayModule(dk, true), '').replace('<div class="ppanel ">', '<div>');
+  if (concept === 'A') return phoneChrome(dk, bodyA(dk, opts(cell)), linedCls());
+  if (concept === 'B') return phoneChrome(dk, bodyB(dk, P.b), linedCls());
+  return '';
+}
+function editorHTML(dk, concept) {
+  const P = SURF.editor, cell = P.cell();
+  let body = '', head = `<span class="r">Auto-save <span class="tgl on"></span></span>`;
+  if (concept === 'T') { body = bodyTodayModule(dk, false); head = ''; }
+  if (concept === 'A') body = `<div class="epanel ${linedCls()}">${bodyA(dk, opts(cell))}</div>`;
+  if (concept === 'B') body = `<div class="epanel ${linedCls()}">${bodyB(dk, P.b)}</div>`;
+  if (concept === 'C') body = `<div class="epanel ${linedCls()}">${bodyC(dk, { col: P.c.col, cell: P.c.cell, tall: true })}</div>`;
+  const icon = `<svg class="mi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2 14 5 8 8 2 5Z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/></svg>`;
+  return `<div class="canvas" style="--w:${P.w + 30}px"><div class="mcard"><div class="mhead">${icon}<b>${esc(DATA[dk].title)}</b><span class="kind">Module</span><span class="chip"><i></i>Running</span></div>`
+    + `<div class="mprev">${picture(dk)}</div><div class="msec"><span class="t">▶ Panel</span>${head}</div>${body}</div></div>`;
+}
+function deskChrome(dk, body, lined) {
+  return `<div class="desk"><div class="phead"><h3>${esc(DATA[dk].title)}</h3><span class="tag">play</span></div><div class="banner">${picture(dk)}</div><div class="ppanel ${lined}">${body}</div></div>`;
+}
+function deskHTML(dk, concept) {
+  const P = SURF.desk, cell = P.cell();
+  if (concept === 'T') return deskChrome(dk, bodyTodayModule(dk, true), '').replace('<div class="ppanel ">', '<div>');
+  if (concept === 'A') return deskChrome(dk, `<div class="capA">${bodyA(dk, opts(cell))}</div>`, linedCls());
+  if (concept === 'B') return deskChrome(dk, bodyB(dk, P.b), linedCls());
+  return deskChrome(dk, bodyC(dk, { col: P.c.col, cell: P.c.cell, tall: true }), linedCls());
+}
+
+/* =====================================================================
+   §1 shapes, §9 authored
+   ===================================================================== */
+function shapesHTML() {
+  const dk = 'shapes', p = DATA.playful.root;
+  const o = opts(80, { rule: 'panel' });
+  const demo = (list, cell = 80) => `<div class="demo cpanel ${linedCls()}">${gridSection(dk, null, '/', list, { ...o, cell })}</div>`;
+  const tog = TOG('mirror', 'Mirror', true), step = STEP('palette', 'Palette', 2, 1, 4, 1), fad = FAD('level', 'Level', 180, 0, 255);
+  return `
+  <div class="shape"><h3>Cell <small>one unit · fixed width · many to a line</small></h3>
+    ${demo([p[3], p[0], step, tog, K('hue', 'Hue', .41, 0, 1, { state: 'following' }), STEP('arms', 'Arms', 3, 1, 8, 1)])}
+    <p>A knob, the clock's Speed knob (1× at the top), a stepped knob, a toggle. Later: a tap button, a single colour. The whole cell is the control: drag anywhere in it, and hover shows which one you're on.</p></div>
+  <div class="shape"><h3>Strip <small>the line's width · one to a line</small></h3>
+    ${demo([p[1], fad, p[2]], 280)}
+    <p>A fader and a palette, each with its label and value <b>above</b>: the track is always the line's whole width, however long the label is (Yona). Drag anywhere along the strip; press the track to jump. Later: a choice of a few named options.</p></div>
+  <div class="shape"><h3>Block <small>its own instrument · full width</small></h3>
+    ${demo([PICK()], 280)}
+    <p>The Pattern instrument: prev, now playing, next; the cycle; every pattern with its on/off. Later: an XY pad. A block always lives in a group of its own, so the panel only places it.</p></div>`;
+}
+
+function authHTML() {
+  const dk = 'piece';
+  const o = opts(66, { rule: 'rows', tall: true });
+  const gs = groups(dk);
+  let body = gridSection(dk, null, '/', DATA[dk].root, o).replace('<div class="gi hot k-knob"', '<div class="gi hot k-knob dragme"');
+  for (const g of gs) body += gridSection(dk, g.label, g.scope, g.controls, o);
+  const editor = `<div class="canvas" style="--w:100%;width:auto"><div class="mcard"><div class="mhead"><b>${esc(DATA[dk].title)}</b><span class="kind">Module</span><span class="chip"><i></i>Running</span></div>`
+    + `<div class="msec"><span class="t">▶ Panel</span><span class="r"><span class="quietbtn on">⇅ Arrange</span><span class="quietbtn">Default order</span></span></div>`
+    + `<div class="epanel arr ${linedCls()}">${body}</div></div></div>`;
+  return `
+  <div><div class="codebox"><span class="cm">// module.json: the order an author asked for.
+// Channels by name; a nested module by its node.
+// Anything unlisted follows the derived order.</span>
+{
+  "kind": "Module",
+  "nodes": { … },
+  <span class="hl">"panel": [
+    "brightness",
+    "detail",
+    "clock.rate",
+    "palette"
+  ]</span>
+}</div>
+  <p class="cnote" style="--w:380px;margin-top:8px">Order only, never lines: the shape rule still decides what shares a line at each width, so an author can't build a layout that breaks on a phone.</p></div>
+  <div>${editor}<p class="cnote" style="--w:460px;margin-top:8px">Arrange mode in the editor's panel: drag a control within its run (cells among cells). It writes the <code>panel</code> list, and <b>Default order</b> clears it.</p></div>
+  <div class="opts">
+    <div class="opt pick"><span class="tag">lean, now</span><b>No authoring yet.</b> The shape and the bus's rank do the work, and inside a run the walk's order stays.</div>
+    <div class="opt"><span class="tag">when asked</span><b>An ordered list on the module</b> (left), by hand or by Arrange (middle). Additive, but it is a project-format change: Lasting, Yona's call.</div>
+    <div class="opt"><span class="tag">no</span><b>Authored lines:</b> right at one width, wrong at the others.</div>
+    <div class="opt"><span class="tag">no</span><b>A weight on each binding:</b> spread across files, with no one place showing the whole order.</div>
+  </div>`;
+}
+
+/* =====================================================================
+   Render
+   ===================================================================== */
+const CONCEPTS = [['T', '0', 'Today', 'as #1196 draws it'], ['A', 'A', 'One column', 'by shape'], ['B', 'B', 'Shared lines', 'everything flows'], ['C', 'C', 'Group tiles', 'tiles when wide']];
+const RULES = [['today', 'Today', 'panel order, a name hoisted'], ['rows', 'Strips → cells', 'ranked by the bus · lean'], ['cells', 'Cells → strips', 'ranked by the bus'], ['dense', 'Dense', 'panel order, holes filled']];
+
+function col(id, lab, sub, inner, w) {
+  return `<div class="col ${S.show[id] === 0 ? 'hide' : ''}" style="--w:${w}px"><div class="clabel"><span class="L">${lab}</span><b>${sub[0]}</b><span>${sub[1]}</span></div>${inner}</div>`;
+}
+
+function render() {
+  const dk = S.data;
+  const scrolls = {};
+  document.querySelectorAll('[data-scroll]').forEach((el, i) => { scrolls[el.dataset.scroll + '@' + i] = el.scrollTop; });
+
+  document.querySelectorAll('[data-set]').forEach(b => { const [k, v] = b.dataset.set.split('='); b.classList.toggle('on', String(S[k]) === v); });
+  document.querySelectorAll('#controls [data-show]').forEach(b => b.classList.toggle('on', S.show[b.dataset.show] !== 0));
+  document.querySelectorAll('[data-when]').forEach(el => { el.style.display = (DATA[S.data].picker || DATA[S.gdata].picker) ? '' : 'none'; });
+  document.getElementById('dataline').innerHTML = `<b>${esc(DATA[dk].title)}</b> · ${DATA[dk].note}`;
+
+  document.getElementById('shapesRow').innerHTML = shapesHTML();
+
+  // §2
+  document.getElementById('orderRow').innerHTML = RULES.map(([rule, name, sub]) => {
+    const cell = SURF.card.cell();
+    const card = rule === 'today' ? cardChrome(dk, 300, bodyTodayCard(dk, cell), false, '') : cardChrome(dk, 300, bodyA(dk, opts(cell, { rule })), false, linedCls());
+    return `<div class="col" style="--w:300px"><div class="clabel"><b>${name}</b><span>${sub}</span></div>${card}</div>`;
+  }).join('');
+
+  // §3
+  const gk = S.gdata;
+  document.getElementById('gCardRow').innerHTML = GCONCEPTS.map(([id, name, sub, fn]) => {
+    const P = { cell: SURF.card.cell(), chw: SURF.card.chw };
+    return col(id, id, [name, sub], cardChrome(gk, 300, fn(gk, P, 'card'), false, linedCls()), 300);
+  }).join('');
+  document.getElementById('gPhoneRow').innerHTML = GCONCEPTS.map(([id, name, sub, fn]) => {
+    const P = { cell: SURF.phone.cell(), chw: SURF.phone.chw };
+    return col(id, id, [name, sub], phoneChrome(gk, fn(gk, P, 'phone'), linedCls()), 390);
+  }).join('');
+  document.getElementById('gDeskCol').innerHTML = GCONCEPTS.filter(([id]) => id === 'G2' || id === 'G4').map(([id, name, sub, fn]) => {
+    const P = { cell: SURF.desk.c.cell, col: SURF.desk.c.col, chw: SURF.desk.chw, tall: true };
+    return col(id, id, [name, sub], deskChrome(gk, fn(gk, P, 'desk'), linedCls()), 1040);
+  }).join('');
+
+  // §4–§8
+  const notC = CONCEPTS.filter(([id]) => id !== 'C');
+  document.getElementById('cardRow').innerHTML = notC.map(([id, lab, name, sub]) => col(id, lab, [name, sub], cardHTML(dk, id, 'card'), 300)).join('');
+  document.getElementById('narrowRow').innerHTML = notC.map(([id, lab, name, sub]) => col(id, lab, [name, sub], cardHTML(dk, id, 'narrow'), 178)).join('');
+  document.getElementById('phoneRow').innerHTML = notC.map(([id, lab, name, sub]) => col(id, lab, [name, sub], phoneHTML(dk, id), 390)).join('');
+  document.getElementById('editorRow').innerHTML = CONCEPTS.map(([id, lab, name, sub]) => col(id, lab, [name, sub], editorHTML(dk, id), 490)).join('');
+  document.getElementById('deskCol').innerHTML = CONCEPTS.map(([id, lab, name, sub]) => col(id, lab, [name, sub], deskHTML(dk, id), 1040)).join('');
+
+  document.getElementById('authRow').innerHTML = authHTML();
+
+  document.querySelectorAll('[data-scroll]').forEach((el, i) => { const k = el.dataset.scroll + '@' + i; if (k in scrolls) el.scrollTop = scrolls[k]; });
+}
+
+let pending = false;
+function invalidate() { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); }); } }
+
+/* =====================================================================
+   Gestures: knob = vertical drag; strip = sideways (press the track to
+   jump); vfader = vertical (press the track to jump).
+   ===================================================================== */
+let drag = null;
+addEventListener('pointerdown', e => {
+  const t = e.target.closest('[data-drag]');
+  if (!t || e.target.closest('[data-act]')) return;
+  const k = t.dataset.k, r = REG[k];
+  if (!r) return;
+  e.preventDefault();
+  const track = t.matches('.ftrack, .vtrack') ? t : t.querySelector('.ftrack, .vtrack');
+  const onTrack = !!e.target.closest('.ftrack, .vtrack');
+  drag = { k, c: r.c, type: t.dataset.drag, x: e.clientX, y: e.clientY, f: frac(r.c, val(k, r.c)), rect: track ? track.getBoundingClientRect() : null, abs: onTrack };
+  t.classList.add('drag');
+  if (drag.abs) move(e);
+});
+function setF(f) { VAL[drag.k] = fromFrac(drag.c, Math.max(0, Math.min(1, f))); HELD.add(drag.k); invalidate(); }
+function move(e) {
+  const { type, rect } = drag;
+  if (type === 'strip') return setF(drag.abs ? (e.clientX - rect.left) / rect.width : drag.f + (e.clientX - drag.x) / rect.width);
+  if (type === 'vfader') return setF(drag.abs ? (rect.bottom - e.clientY) / rect.height : drag.f + (drag.y - e.clientY) / rect.height);
+  let f = drag.f + (drag.y - e.clientY) / 160;
+  if (drag.c.kind === 'speed') for (const t of SPEED_TICKS) if (Math.abs(f - t) < .025) f = t;
+  setF(f);
+}
+addEventListener('pointermove', e => { if (drag) move(e); });
+addEventListener('pointerup', () => { drag = null; });
+addEventListener('pointercancel', () => { drag = null; });
+addEventListener('dblclick', e => {
+  const t = e.target.closest('[data-drag]');
+  const r = t && REG[t.dataset.k];
+  if (r && r.c.kind === 'speed') { VAL[t.dataset.k] = 1; HELD.add(t.dataset.k); invalidate(); }
+});
+
+addEventListener('click', e => {
+  const set = e.target.closest('[data-set]');
+  if (set) { const [k, v] = set.dataset.set.split('='); S[k] = (k === 'patterns' || k === 'cardCells') ? Number(v) : v; if (k === 'patterns') PICKS.piece.active = Math.min(PICKS.piece.active, names().length - 1); return render(); }
+  const show = e.target.closest('[data-show]');
+  if (show) { const id = show.dataset.show; S.show[id] = S.show[id] === 0 ? 1 : 0; return render(); }
+  const a = e.target.closest('[data-act]');
+  if (!a) return;
+  const act = a.dataset.act;
+  if (act === 'release') { e.stopPropagation(); delete VAL[a.dataset.k]; HELD.delete(a.dataset.k); if (S.held === '1') S.held = '0'; return render(); }
+  if (act === 'toggle') { const r = REG[a.dataset.k]; VAL[a.dataset.k] = !val(a.dataset.k, r.c); HELD.add(a.dataset.k); return render(); }
+  if (act === 'zone') { ZONE[a.dataset.dk] = Number(a.dataset.i); return render(); }
+  const p = PICKS[a.dataset.dk];
+  if (!p) return;
+  const n = names().length;
+  const nextFrom = (i, d) => { for (let s = 1; s <= n; s++) { const j = (i + d * s + n) % n; if (!p.skip.has(j)) return j; } return i; };
+  if (act === 'play') p.active = Number(a.dataset.i);
+  if (act === 'next') p.active = nextFrom(p.active, 1);
+  if (act === 'prev') p.active = nextFrom(p.active, -1);
+  if (act === 'cycle') p.cycle = !p.cycle;
+  if (act === 'step') { const L = [10, 20, 30, 45, 60, 90, 120]; const i = L.indexOf(p.step); p.step = L[Math.max(0, Math.min(L.length - 1, i + Number(a.dataset.d)))]; }
+  if (act === 'skip') { const i = Number(a.dataset.i); p.skip.has(i) ? p.skip.delete(i) : p.skip.add(i); }
+  render();
+});
+
+/* =====================================================================
+   The board's light: every picture reads its panel's brightness, speed
+   and scale (the same values the controls move).
+   ===================================================================== */
+function hex(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+const LUT = {};
+function lut(stops) {
+  const id = stops.join();
+  if (LUT[id]) return LUT[id];
+  const cs = stops.map(hex), out = [];
+  for (let i = 0; i < 64; i++) {
+    const t = i / 63 * (cs.length - 1), a = Math.floor(t), b = Math.min(cs.length - 1, a + 1), f = t - a;
+    out.push(cs[a].map((v, j) => v + (cs[b][j] - v) * f));
+  }
+  return (LUT[id] = out);
+}
+function liveOf(dk, ch, dflt) {
+  const c = DATA[dk].root.find(x => x.ch === ch);
+  return c ? val(keyOf(dk, '/', c), c) : dflt;
+}
+let T0 = performance.now(); const phase = {};
+function paint(now) {
+  const dt = Math.min(.1, (now - T0) / 1000); T0 = now;
+  const done = {};
+  for (const cv of document.querySelectorAll('canvas[data-dk]')) {
+    const dk = cv.dataset.dk, d = DATA[dk];
+    if (!d) continue;
+    if (!done[dk]) {
+      const rate = liveOf(dk, 'clock.rate', null) ?? (liveOf(dk, 'speed', .62) * 1.6);
+      phase[dk] = (phase[dk] || 0) + dt * rate;
+      done[dk] = true;
+    }
+    const t = phase[dk];
+    const bri = Math.max(.08, Math.sqrt(liveOf(dk, 'brightness', 230) / 255));
+    const sc = liveOf(dk, 'scale', 1);
+    const L = lut(d.set[Math.floor(t / 16) % d.set.length]);
+    const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+    const img = ctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      const n = .5 + .25 * Math.sin(u * 7 * sc + t * .9 + Math.sin(v * 3.1 + t * .4) * 1.4) + .25 * Math.sin(u * 3.3 * sc - t * .5 + v * 2.2);
+      const c = L[Math.max(0, Math.min(63, Math.round(n * 63)))];
+      const o = (y * W + x) * 4;
+      img.data[o] = c[0] * bri; img.data[o + 1] = c[1] * bri; img.data[o + 2] = c[2] * bri; img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  requestAnimationFrame(paint);
+}
+
+/* ?data=smalldome&lines=off … opens the page in that state. */
+for (const [k, v] of new URLSearchParams(location.search)) {
+  if (k in S && k !== 'show') S[k] = (k === 'patterns' || k === 'cardCells') ? Number(v) : v;
+}
+render();
+requestAnimationFrame(paint);
+</script>
+</body>
+</html>

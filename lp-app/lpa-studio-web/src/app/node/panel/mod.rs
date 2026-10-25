@@ -18,6 +18,7 @@ mod palette_editor;
 mod palette_swatch_field;
 mod panel_control;
 mod panel_emit;
+mod panel_tap;
 mod speed_knob;
 mod toggle_field;
 

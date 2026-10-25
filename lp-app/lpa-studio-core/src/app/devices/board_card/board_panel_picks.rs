@@ -4,52 +4,38 @@
 //!
 //! In order:
 //!
-//! 1. **The root's own controls, the master leading**: the master is the
-//!    control on the [`MASTER_CHANNEL`] channel, whatever its widget — from
-//!    the root's own controls first, else the first nested group (depth
-//!    first) that has one — pulled to the front of the card.
-//! 2. **Then each nested group's controls** (an effect's, the Pattern
-//!    instrument's), depth first, each under its group's name.
+//! 1. **The root's own controls**, one section with no heading: the web
+//!    draws it as the band.
+//! 2. **Then each nested group's controls** (a child module's, the Pattern
+//!    instrument's), depth first, each section under its group's name and
+//!    kind.
+//!
+//! Inside every section the controls are in the shape's order, then the
+//! bus's, then the walk's ([`crate::sort_panel_controls`]): strips, blocks,
+//! then cells, each run by `WELL_KNOWN_CHANNELS`' order, and the panel's
+//! own order breaks every tie. Nothing is pulled forward by name, and a
+//! group's brightness stays in its group (a dome's is the dome's, not the
+//! project's).
 //!
 //! There is no cap and nothing is left over: no "more", no link to a page
 //! holding the rest. The panel-wide reset and the auto-save switch are not
 //! controls; the card's ⋯ menu holds them
 //! ([`crate::UiDetailPanel::PanelSettings`]).
 
-use crate::{UiPanelControlView, UiPanelGroup};
+use crate::{UiPanelControlView, UiPanelGroup, sort_panel_controls};
 
 use super::ui_board_panel::{UiBoardPanel, UiBoardPanelSection, UiCardControl};
-
-/// The channel of the card's master control, the one that leads.
-pub const MASTER_CHANNEL: &str = "brightness";
+use super::ui_board_panel_heading::UiBoardPanelHeading;
 
 /// The card's panel from `root` (the project's root panel), with the root
 /// module's `auto_save` riding along unchanged. Its `edit` is the card
 /// builder's to fill, and its `auto_save` the builder's to withhold below
 /// the edit tier.
 pub fn board_panel_picks(root: &UiPanelGroup, auto_save: Option<bool>) -> UiBoardPanel {
-    let master = master_of(root);
-    let is_master =
-        |view: &UiPanelControlView| master.is_some_and(|(_, it)| std::ptr::eq(it, view));
-    let mut lead: Vec<UiCardControl> = master
-        .map(|(scope, view)| card_control(scope, view))
-        .into_iter()
-        .collect();
-    lead.extend(
-        root.controls
-            .iter()
-            .filter(|view| !is_master(view))
-            .map(|view| card_control(&root.scope, view)),
-    );
     let mut sections: Vec<UiBoardPanelSection> = Vec::new();
-    if !lead.is_empty() {
-        sections.push(UiBoardPanelSection {
-            heading: None,
-            controls: lead,
-        });
-    }
+    sections.extend(section_of(root, None));
     for nested in &root.groups {
-        group_sections(nested, &is_master, &mut sections);
+        group_sections(nested, &mut sections);
     }
     UiBoardPanel {
         target: root.target,
@@ -59,41 +45,32 @@ pub fn board_panel_picks(root: &UiPanelGroup, auto_save: Option<bool>) -> UiBoar
     }
 }
 
-/// A nested group's controls under its name, then its own groups', depth
-/// first. A group left with nothing (its only control the master, now
-/// leading) has no section.
-fn group_sections(
-    group: &UiPanelGroup,
-    is_master: &impl Fn(&UiPanelControlView) -> bool,
-    out: &mut Vec<UiBoardPanelSection>,
-) {
-    let controls: Vec<UiCardControl> = group
-        .controls
-        .iter()
-        .filter(|view| !is_master(view))
-        .map(|view| card_control(&group.scope, view))
-        .collect();
-    if !controls.is_empty() {
-        out.push(UiBoardPanelSection {
-            heading: Some(group.label.clone()),
-            controls,
-        });
-    }
+/// A nested group's controls under its name and kind, then its own groups',
+/// depth first. A group with no controls of its own has no section.
+fn group_sections(group: &UiPanelGroup, out: &mut Vec<UiBoardPanelSection>) {
+    let heading = UiBoardPanelHeading {
+        name: group.label.clone(),
+        kind: group.kind.clone(),
+    };
+    out.extend(section_of(group, Some(heading)));
     for nested in &group.groups {
-        group_sections(nested, is_master, out);
+        group_sections(nested, out);
     }
 }
 
-/// The master and the scope it lives in: the first control on the
-/// [`MASTER_CHANNEL`], the group's own controls before its nested groups',
-/// depth first.
-fn master_of(group: &UiPanelGroup) -> Option<(&str, &UiPanelControlView)> {
-    group
-        .controls
-        .iter()
-        .find(|view| view.channel == MASTER_CHANNEL)
-        .map(|view| (group.scope.as_str(), view))
-        .or_else(|| group.groups.iter().find_map(master_of))
+/// One group's own controls as a section, in panel order; `None` for a
+/// group that holds none.
+fn section_of(
+    group: &UiPanelGroup,
+    heading: Option<UiBoardPanelHeading>,
+) -> Option<UiBoardPanelSection> {
+    let mut views: Vec<&UiPanelControlView> = group.controls.iter().collect();
+    sort_panel_controls(&mut views);
+    let controls: Vec<UiCardControl> = views
+        .into_iter()
+        .map(|view| card_control(&group.scope, view))
+        .collect();
+    (!controls.is_empty()).then_some(UiBoardPanelSection { heading, controls })
 }
 
 fn card_control(scope: &str, view: &UiPanelControlView) -> UiCardControl {
@@ -111,111 +88,120 @@ mod tests {
         UiPatternPicker, UiSlotFieldState, UiSlotValue,
     };
 
+    /// Nothing is hoisted: a nested group's brightness stays in its group,
+    /// first there. The root's band keeps what the root holds.
     #[test]
-    fn the_master_leads_from_the_root() {
-        let root = UiPanelGroup::new("Porch", "/").with_controls(vec![
-            control("speed", knob()),
-            control(MASTER_CHANNEL, knob()),
-            control("sparkle", UiPanelWidget::Toggle),
-        ]);
+    fn nothing_is_hoisted_a_groups_brightness_stays_in_its_group() {
+        let root = UiPanelGroup::new("Porch", "/")
+            .with_controls(vec![control("clock.rate", UiPanelWidget::Speed)])
+            .with_groups(vec![
+                UiPanelGroup::new("Dome", "/dome")
+                    .with_kind("Module")
+                    .with_controls(vec![
+                        control("bands", knob()),
+                        control("brightness", fader()),
+                    ]),
+            ]);
         let panel = board_panel_picks(&root, Some(true));
-        assert_eq!(channels(&panel), [MASTER_CHANNEL, "speed", "sparkle"]);
-        assert_eq!(scopes(&panel), ["/", "/", "/"]);
-        assert_eq!(headings(&panel), [None]);
+        assert_eq!(channels(&panel), ["clock.rate", "brightness", "bands"]);
+        assert_eq!(scopes(&panel), ["/", "/dome", "/dome"]);
+        assert_eq!(
+            sections(&panel),
+            [vec!["clock.rate"], vec!["brightness", "bands"]]
+        );
         assert_eq!(panel.auto_save, Some(true), "rides along");
         assert_eq!(panel.edit, None, "the builder's");
     }
 
+    /// The root's section is the band, with no heading; each nested one is
+    /// its group's name and kind.
     #[test]
-    fn the_master_leads_from_a_nested_group_with_its_scope() {
+    fn the_root_has_no_heading_and_each_nested_group_its_name_and_kind() {
         let root = UiPanelGroup::new("Porch", "/")
-            .with_controls(vec![control("speed", knob())])
+            .with_kind("Module")
+            .with_controls(vec![control("a", knob())])
             .with_groups(vec![
                 UiPanelGroup::new("plasma", "/plasma-1")
-                    .with_controls(vec![control("hue", knob())]),
-                UiPanelGroup::new("fixture", "/fixture-1")
-                    .with_controls(vec![control(MASTER_CHANNEL, knob())]),
+                    .with_kind("Module")
+                    .with_controls(vec![control("b", knob())])
+                    .with_groups(vec![
+                        UiPanelGroup::new("noise", "/plasma-1/noise")
+                            .with_kind("Shader")
+                            .with_controls(vec![control("c", knob())]),
+                    ]),
+                UiPanelGroup::new("Pattern", "/playlist")
+                    .with_kind("Playlist")
+                    .with_controls(vec![control("d", knob())]),
             ]);
         let panel = board_panel_picks(&root, None);
-        assert_eq!(channels(&panel), [MASTER_CHANNEL, "speed", "hue"]);
-        assert_eq!(scopes(&panel), ["/fixture-1", "/", "/plasma-1"]);
         assert_eq!(
             headings(&panel),
-            [None, Some("plasma")],
-            "the fixture's group held only the master, now leading"
+            [
+                None,
+                Some(("plasma", "Module")),
+                Some(("noise", "Shader")),
+                Some(("Pattern", "Playlist"))
+            ]
         );
     }
 
-    /// The master is the brightness channel, whatever its widget: a knob on
-    /// a panel since the card panel pass, a fader on an older one.
-    #[test]
-    fn a_brightness_knob_or_fader_is_the_master() {
-        for widget in [knob(), fader()] {
-            let root = UiPanelGroup::new("Porch", "/").with_controls(vec![
-                control("level", fader()),
-                control(MASTER_CHANNEL, widget.clone()),
-            ]);
-            let panel = board_panel_picks(&root, None);
-            assert_eq!(channels(&panel), [MASTER_CHANNEL, "level"], "{widget:?}");
-        }
-    }
-
-    #[test]
-    fn with_no_master_the_panel_keeps_its_order() {
-        let root = UiPanelGroup::new("Porch", "/").with_controls(vec![
-            control("level", fader()),
-            control("speed", knob()),
-            control("sparkle", UiPanelWidget::Toggle),
-        ]);
-        let panel = board_panel_picks(&root, None);
-        assert_eq!(channels(&panel), ["level", "speed", "sparkle"]);
-    }
-
     /// No cap and nothing left over: every control on a big panel, the
-    /// root's first, then each group's under its name, depth first.
+    /// root's first, then each group's under its heading, depth first, and
+    /// every section in shape-then-bus order.
     #[test]
-    fn every_control_in_panel_order_under_its_groups_heading() {
+    fn every_section_is_in_shape_then_bus_order() {
         let root = UiPanelGroup::new("Porch", "/")
             .with_controls(vec![
-                control(MASTER_CHANNEL, knob()),
+                control("clock.rate", UiPanelWidget::Speed),
                 control("a", knob()),
                 control("palette", UiPanelWidget::PaletteSwatch),
+                control("brightness", fader()),
             ])
             .with_groups(vec![
                 UiPanelGroup::new("plasma", "/plasma-1")
                     .with_controls(vec![
                         control("c", UiPanelWidget::Toggle),
                         control("d", knob()),
+                        control("e", fader()),
                     ])
                     .with_groups(vec![
                         UiPanelGroup::new("noise", "/plasma-1/noise")
-                            .with_controls(vec![control("e", fader())]),
+                            .with_controls(vec![control("f", knob()), control("e", fader())]),
                     ]),
-                UiPanelGroup::new("Pattern", "/playlist").with_controls(vec![control(
-                    "pattern",
-                    UiPanelWidget::PatternPicker { picker: picker() },
-                )]),
+                UiPanelGroup::new("Pattern", "/playlist").with_controls(vec![
+                    control("pattern", UiPanelWidget::PatternPicker { picker: picker() }),
+                    control("level", knob()),
+                    control("palette", UiPanelWidget::PaletteSwatch),
+                ]),
             ]);
         let panel = board_panel_picks(&root, None);
         assert_eq!(
-            channels(&panel),
-            [MASTER_CHANNEL, "a", "palette", "c", "d", "e", "pattern"]
-        );
-        assert_eq!(
-            headings(&panel),
-            [None, Some("plasma"), Some("noise"), Some("Pattern")]
+            sections(&panel),
+            [
+                vec!["brightness", "palette", "clock.rate", "a"],
+                vec!["e", "c", "d"],
+                vec!["e", "f"],
+                vec!["palette", "pattern", "level"],
+            ]
         );
     }
 
-    /// The clock's Speed knob is a control like any other.
+    /// The order that left Scale alone under the palette: the real
+    /// PLAYFUL choker's walk order, laid out as the band.
     #[test]
-    fn the_clocks_speed_knob_is_on_the_card() {
-        let root = UiPanelGroup::new("Porch", "/").with_controls(vec![
+    fn playfuls_band_is_brightness_palette_speed_scale() {
+        let root = UiPanelGroup::new("PLAYFUL", "/").with_controls(vec![
             control("clock.rate", UiPanelWidget::Speed),
-            control(MASTER_CHANNEL, knob()),
+            control("brightness", fader()),
+            control("palette", UiPanelWidget::PaletteSwatch),
+            control("scale", knob()),
         ]);
         let panel = board_panel_picks(&root, None);
-        assert_eq!(channels(&panel), [MASTER_CHANNEL, "clock.rate"]);
+        assert_eq!(
+            channels(&panel),
+            ["brightness", "palette", "clock.rate", "scale"]
+        );
+        assert_eq!(headings(&panel), [None]);
     }
 
     /// What the ⋯ menu's reset lets go of: every held control.
@@ -259,11 +245,30 @@ mod tests {
             .collect()
     }
 
-    fn headings(panel: &UiBoardPanel) -> Vec<Option<&str>> {
+    fn headings(panel: &UiBoardPanel) -> Vec<Option<(&str, &str)>> {
         panel
             .sections
             .iter()
-            .map(|section| section.heading.as_deref())
+            .map(|section| {
+                section
+                    .heading
+                    .as_ref()
+                    .map(|heading| (heading.name.as_str(), heading.kind.as_str()))
+            })
+            .collect()
+    }
+
+    fn sections(panel: &UiBoardPanel) -> Vec<Vec<&str>> {
+        panel
+            .sections
+            .iter()
+            .map(|section| {
+                section
+                    .controls
+                    .iter()
+                    .map(|control| control.view.channel.as_str())
+                    .collect()
+            })
             .collect()
     }
 

@@ -21,6 +21,12 @@ pub struct UiPanelGroup {
     /// Together with a channel name this is a control's identity (panel.md
     /// P1) — the DISPLAY half; the dispatchable half is [`Self::target`].
     pub scope: String,
+    /// The node kind label of the node whose scope this group presents
+    /// (`"Module"`, `"Playlist"`, …: what `node_kind_label` gives and the
+    /// web's `node_kind_icon` reads). The root module's group carries one
+    /// too, though the card draws no heading for it. Empty on a story
+    /// fixture that names none; the icon then reads as the generic one.
+    pub kind: String,
     /// The structured scope the group's reset gesture clears
     /// (`WirePanelClearRequest::Scope`). `None` on story fixtures with no
     /// runtime behind them — the reset affordance simply doesn't render.
@@ -42,10 +48,17 @@ impl UiPanelGroup {
         Self {
             label: label.into(),
             scope: scope.into(),
+            kind: String::new(),
             target: None,
             controls: Vec::new(),
             groups: Vec::new(),
         }
+    }
+
+    /// Name the kind of node whose scope this group presents.
+    pub fn with_kind(mut self, kind: impl Into<String>) -> Self {
+        self.kind = kind.into();
+        self
     }
 
     /// Attach the structured scope the reset gesture dispatches against.

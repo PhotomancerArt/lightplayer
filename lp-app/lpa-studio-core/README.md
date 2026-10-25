@@ -745,10 +745,16 @@ A card (`UiBoardCard`) is:
 **Connected**, the card carries the board's whole **panel** in the eight
 rows' place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while
 the session is connected with its project ready): every control of the
-project's root panel in sections (`board_panel_picks.rs`: the root's own
-with the master, the `brightness` channel, leading; then each nested
-group's under its name), each control the root panel's own
+project's root panel in sections (`board_panel_picks.rs`: the root's own,
+with no heading, which the web draws as the band; then each nested group's,
+depth first, under a `UiBoardPanelHeading` of its name and its node's kind,
+`UiPanelGroup.kind`), each control the root panel's own
 `UiPanelControlView` with its scope, so its writes are the panel's own.
+Every section is in panel order (`node/face/panel_order.rs`): by shape
+(`UiPanelWidget::shape()`: strips, then blocks, then cells), then by the
+bus's registry (`WELL_KNOWN_CHANNELS`), then the walk's; nothing is pulled
+forward by name. The play page and the editor keep the walk's order for
+now (`docs/adr/2026-10-20-panel-controls-lay-out-by-shape-and-the-bus.md`).
 The card grows to hold them. `auto_save` is `Some` only at the edit tier;
 it and the panel's reset are drawn in the status corner's details
 (`UiDetailPanel::PanelSettings`). `edit` is the panel foot's action: Edit,

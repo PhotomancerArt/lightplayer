@@ -4915,6 +4915,7 @@ impl ProjectController {
             preview,
             hero_choice,
             panel: crate::UiPanelGroup::new(label, path)
+                .with_kind(MODULE_KIND_LABEL)
                 .with_target(scope)
                 .with_controls(controls)
                 .with_groups(groups),
@@ -5467,14 +5468,14 @@ impl ProjectController {
             ],
         };
         Some(
-            crate::UiPanelGroup::new("Pattern", card.detail.clone()).with_controls(vec![
-                crate::UiPanelControlView {
+            crate::UiPanelGroup::new("Pattern", card.detail.clone())
+                .with_kind(card.kind.clone())
+                .with_controls(vec![crate::UiPanelControlView {
                     channel: lpc_model::PLAYLIST_CYCLE_CHANNEL.to_string(),
                     control,
                     state,
                     source,
-                },
-            ]),
+                }]),
         )
     }
 
@@ -5686,9 +5687,14 @@ impl ProjectController {
         };
         match (controls.is_empty(), module_panel) {
             (true, None) => None,
-            (true, Some(panel)) => Some(crate::UiPanelGroup { label, ..panel }),
+            (true, Some(panel)) => Some(crate::UiPanelGroup {
+                label,
+                kind: entry_card.kind.clone(),
+                ..panel
+            }),
             (false, module_panel) => Some(
                 crate::UiPanelGroup::new(label, entry_card.detail.clone())
+                    .with_kind(entry_card.kind.clone())
                     .with_target(scope)
                     .with_controls(controls)
                     .with_groups(module_panel.into_iter().collect()),
@@ -9728,10 +9734,10 @@ fn subtree_panel_controls(
             Some(crate::UiNodeFace::Shader(shader)) => {
                 out.extend(shader.controls.iter().map(Cow::Borrowed));
             }
-            // The fixture's brightness is a knob on a panel; its own card
-            // keeps the fader (the card panel pass, 2026-10-19).
+            // The fixture's brightness is its own fader on a panel too: one
+            // control, drawn the same on its card and on the panel.
             Some(crate::UiNodeFace::Fixture(fixture)) => {
-                out.push(Cow::Owned(fixture.panel_brightness()));
+                out.push(Cow::Borrowed(&fixture.brightness));
             }
             Some(crate::UiNodeFace::Controls(group)) => {
                 out.extend(

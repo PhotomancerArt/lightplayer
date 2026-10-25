@@ -152,10 +152,12 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         state: UiSlotFieldState::editable(),
         aspects: Vec::new(),
     };
-    UiPanelGroup::new("Pattern", "/playful.module/playlist.playlist").with_controls(vec![
-        UiPanelControlView::new(lpc_model::PLAYLIST_CYCLE_CHANNEL, control)
-            .with_state(state, None::<String>),
-    ])
+    UiPanelGroup::new("Pattern", "/playful.module/playlist.playlist")
+        .with_kind("Playlist")
+        .with_controls(vec![
+            UiPanelControlView::new(lpc_model::PLAYLIST_CYCLE_CHANNEL, control)
+                .with_state(state, None::<String>),
+        ])
 }
 
 /// The playlist's verbs for these facts, as core publishes them — what a
@@ -219,6 +221,7 @@ fn shared_controls() -> Vec<UiPanelControlView> {
 /// The playing pattern's own knobs, on its MODULE's scope (ruling 2).
 fn pattern_knobs(label: &str) -> UiPanelGroup {
     UiPanelGroup::new(label, PLAYING_PATTERN_SCOPE)
+        .with_kind("Module")
         .with_target(scope_target(PLAYING_PATTERN_SCOPE))
         .with_controls(vec![
             at_default(
