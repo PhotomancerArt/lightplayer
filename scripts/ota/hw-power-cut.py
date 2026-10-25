@@ -30,7 +30,12 @@ replaces --hub/--hub-port (the command is split shell-style and run as is).
 `--chip esp32s3` (S3 updates plan, M7 P11): espflash talks to an S3, and the
 verdict is Y's hello after the recovery (a power-on capture to the hello
 naming Y, `running`), not the `[CORE]` line, which the S3 can lose after a
-reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md).
+reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md),
+and its first heartbeat. An S3 PASS also needs proof that the power really
+went: a heartbeat reading `power-on` after the cut, or Y's boot count
+restarted (`cut_proof`). Without it the cut reads NO-CUT-PROOF. The C6's
+verdict still cannot tell a cut from none
+(docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
 """
 
 import argparse
@@ -77,6 +82,44 @@ def capture(lp_cli, port, console, seconds, offer=None, exit_on=None):
 def last_core(text):
     lines = [l for l in text.splitlines() if "[CORE] core @" in l]
     return lines[-1] if lines else ""
+
+
+def heartbeats(text):
+    """Each heartbeat's uptime, reset reason and boot count, in order."""
+    out = []
+    for line in text.splitlines():
+        if not line.startswith("M!") or '"heartbeat":' not in line:
+            continue
+        try:
+            hb = json.loads(line[2:])["msg"]["heartbeat"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        rec = hb.get("recovery") or {}
+        projects = [p.get("path") for p in hb.get("loaded_projects") or []]
+        out.append({"uptime_ms": hb.get("uptime_ms"), "reset": rec.get("resetReason"),
+                    "boots": rec.get("bootCount"), "projects": projects})
+    return out
+
+
+def cut_proof(pre, rec, fin):
+    """Why we believe the board lost power, or [] when nothing shows it.
+
+    The recovery region's boot count lives in RTC memory, which only a power
+    loss clears: an update with no cut adds at least three boots to X's count
+    (the hand-over to core-only, Y's trial, Y proven), and a cut restarts it
+    at 1, so Y's count after a real cut is the boots since the cut (at most
+    four). A heartbeat reading `power-on` after the cut says it directly.
+    """
+    proof = []
+    for hb in rec:
+        if hb["reset"] == "power-on":
+            proof.append(f"rec heartbeat resetReason power-on, uptime {hb['uptime_ms']} ms")
+            break
+    if pre and fin and isinstance(pre[-1]["boots"], int) and isinstance(fin[0]["boots"], int):
+        b0, b1 = pre[-1]["boots"], fin[0]["boots"]
+        if b1 < b0 + 3:
+            proof.append(f"bootCount {b0} before -> {b1} on Y (no cut would read >= {b0 + 3})")
+    return proof
 
 
 def main():
@@ -156,23 +199,41 @@ def main():
         cores = re.findall(r"\[CORE\] core @\S+ \+\d+ \(([a-z ]+)\) build (\S+)", text)
         served = re.findall(r"D \d+ chunk\(s\) / \d+ B; Z \d+ chunk\(s\) / \d+ B",
                             rec_err.read_text(errors="replace"))
+        extra = {}
         if a.chip == "esp32s3":
-            # Y's own word that its engine runs: a fresh capture to its hello.
+            # Y's own word that its engine runs: a fresh capture to its hello
+            # and its first heartbeat, which carries the boot count the cut's
+            # proof reads.
             fin = out / f"{tag}.fin.txt"
             port = port_of(a.mac, wait=20) or port
-            sh(capture(a.lp_cli, port, fin, 60, exit_on=f'"buildId":"{y_build}"'))
-            hello = [l for l in fin.read_text(errors="replace").splitlines() if '"hello":{' in l]
-            final = hello[-1][:200] if hello else ""
-            ok = ("done: UpToDate" in text and f'"buildId":"{y_build}"' in final
-                  and '"state":"running"' in final)
+            sh(capture(a.lp_cli, port, fin, 60, exit_on='"heartbeat":{'))
+            fin_text = fin.read_text(errors="replace")
+            hello = [l for l in fin_text.splitlines() if '"hello":{' in l]
+            hello = hello[-1] if hello else ""
+            ok = ("done: UpToDate" in text and f'"buildId":"{y_build}"' in hello
+                  and '"state":"running"' in hello)
+            final = (f"hello {y_build} running" if ok else hello[:160])
+            fin_hb = heartbeats(fin_text)
+            proof = cut_proof(heartbeats(pre.read_text(errors="replace")), heartbeats(text), fin_hb)
+            resumed = re.findall(r"\[OTA\] resuming (\w+) at (\d+)", text)
+            extra = {
+                "proof": proof,
+                "resumed": [f"{k} at {n}" for k, n in resumed],
+                "projects_after": fin_hb[0]["projects"] if fin_hb else [],
+            }
+            if ok and not proof:
+                # A cut that cannot show it cut counts as no cut
+                # (docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
+                ok = None
         else:
             ok = "done: UpToDate" in text and f"build {y_build}" in final and " engine " in final
         rows.append({
             "cut": t,
-            "verdict": "PASS" if ok else "FAIL",
+            "verdict": {True: "PASS", False: "FAIL", None: "NO-CUT-PROOF"}[ok],
             "first_boot_after": " ".join(cores[0]) if cores else "?",
             "recovery_served": served[-1] if served else "?",
             "final": final[max(final.find("[CORE]"), 0):][:160],
+            **extra,
         })
         print(json.dumps(rows[-1]), flush=True)
     (out / "summary.json").write_text(json.dumps(rows, indent=1))
