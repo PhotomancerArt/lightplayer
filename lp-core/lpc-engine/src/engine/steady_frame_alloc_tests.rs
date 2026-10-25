@@ -15,6 +15,7 @@ use super::test_support::dummy_shader_node;
 use super::test_support::{
     EngineTestBuilder, EngineTestHarness, bus, literal, output, produced_slot,
 };
+use crate::frame_plan::PlanMode;
 use crate::test_alloc_counter::{AllocSnapshot, measure};
 use lpc_model::{Revision, SlotPath};
 
@@ -30,12 +31,26 @@ use lpc_model::{Revision, SlotPath};
 /// This graph builds on dummy nodes, not the real shader runtimes, so P5's
 /// authored-def key cache does not show here; its own oracle is
 /// `nodes::shader::shader_node::authored_sync_tests`.
-pub(crate) const STEADY_FRAME_ALLOC_BUDGET: u64 = 30;
+///
+/// 8 on 2026-10-24 (the engine frame plan, PR A): a produce dispatch copies
+/// the interned slot handle instead of the path, and the tick keeps its
+/// producer set and resolve trace across frames.
+pub(crate) const STEADY_FRAME_ALLOC_BUDGET: u64 = 8;
 
 /// The richest graph the test builder offers: two shaders behind a selector,
 /// a bus channel driven by a third shader and read by a fixture, and an
 /// output node fed a literal — one of every resolution route.
+///
+/// In [`PlanMode::Replay`]: these budgets price what the product allocates,
+/// and the test build's default mode rebuilds every plan each frame to check
+/// it.
 fn steady_harness() -> EngineTestHarness {
+    let mut harness = steady_harness_checked();
+    harness.engine.set_plan_mode(PlanMode::Replay);
+    harness
+}
+
+fn steady_harness_checked() -> EngineTestHarness {
     EngineTestBuilder::new()
         .shader("a", output("outputs[0]", 3.0))
         .shader("b", output("outputs[0]", 4.0))
@@ -158,8 +173,10 @@ fn payloads_off_is_stable_too() {
 /// so what is left is what the engine re-derives per lane per frame.
 ///
 /// A ratchet, not a target (planning `lp2025/2026-10-24-0208-engine-frame-plan`,
-/// AC3): each frame-plan phase lowers it, and the plan ends at ≤ 2.
-pub(crate) const PER_LANE_STEADY_ALLOCS_BUDGET: u64 = 45;
+/// AC3): each frame-plan phase lowers it, and the plan ends at ≤ 2. 45 before
+/// the plan; 42 after PR A (the engine's own per-dispatch and per-frame
+/// scratch).
+pub(crate) const PER_LANE_STEADY_ALLOCS_BUDGET: u64 = 42;
 
 #[test]
 fn steady_frame_allocations_do_not_scale_with_lanes() {
@@ -189,6 +206,7 @@ fn steady_project_allocs(project: &str) -> AllocSnapshot {
     let root = alloc::format!("/{}.show", project.replace('-', "_"));
     let services = crate::EngineServices::new(lpc_model::TreePath::parse(&root).expect("root"));
     let mut rt = crate::ProjectLoader::load_from_root(&fs, services).expect("load lane project");
+    rt.set_plan_mode(PlanMode::Replay);
     rt.set_graphics(Some(alloc::sync::Arc::new(
         lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
     )));

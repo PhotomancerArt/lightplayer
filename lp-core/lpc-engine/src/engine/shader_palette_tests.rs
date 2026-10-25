@@ -632,13 +632,19 @@ const CYCLE_COLORS: [&str; 4] = [
 /// skipped on an unchanged authored value, 63 / 3,068 B with
 /// `GradientConfig::from_lp_value` run every frame. What is left is the
 /// bake path (`slot.gradient_config()` clones the set), not the parse.
-const AUTHORED_PALETTE_STEADY_FRAME_ALLOC_BUDGET: u64 = 41;
+/// 36 on 2026-10-24 (the engine's frame plan, PR A: interned produce keys,
+/// the tick's scratch kept across frames).
+const AUTHORED_PALETTE_STEADY_FRAME_ALLOC_BUDGET: u64 = 36;
 
 #[test]
 fn a_steady_frame_does_not_reparse_an_authored_gradient() {
     let fs = palette_fs(false, false);
     write(&fs, "/a.json", &authored_cycle_shader_json(&CYCLE_COLORS));
     let mut project = load(fs);
+    // What the product allocates: the plans replayed, not rebuilt to check.
+    project
+        .engine
+        .set_plan_mode(crate::frame_plan::PlanMode::Replay);
     let clock = project.node("clock.clock");
     let shader = project.node("a.shader");
     project.publish_time_product(clock);

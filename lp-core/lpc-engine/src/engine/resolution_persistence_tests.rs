@@ -331,6 +331,80 @@ fn structural_mutations_bump_the_epoch() {
     );
 }
 
+/// The two engine mutations that used to change the walk without saying so
+/// (planning `lp2025/2026-10-24-0208-engine-frame-plan`, P2): a runtime
+/// attached in place, and a new demand root. Each must move the epoch, or
+/// resolution and frame plans cached against the old graph keep being served
+/// — and the debug shape guard in `tick_nodes` (which counts demand roots
+/// and attaches) fails the next tick if one does not.
+#[test]
+fn attaching_a_runtime_and_adding_a_demand_root_move_the_epoch() {
+    let mut harness = EngineTestBuilder::new()
+        .shader("src", output("outputs[0]", 1.0))
+        .shader("other", output("outputs[0]", 2.0))
+        .output_node("out")
+        .bind_demand_input("out", produced_slot("src", "outputs[0]"))
+        .demand_root("out")
+        .build();
+    harness.tick(16).expect("tick");
+
+    let before = harness.engine.resolver().structure_epoch();
+    let src = harness.node("src");
+    harness
+        .engine
+        .attach_runtime_node(
+            src,
+            super::test_support::dummy_shader_node(path("outputs[0]"), 3.0),
+            Revision::new(5),
+        )
+        .expect("attach in place");
+    assert!(
+        harness.engine.resolver().structure_epoch() > before,
+        "attaching a runtime is a structural change"
+    );
+    harness
+        .tick(16)
+        .expect("the shape guard accepts an announced attach");
+    assert_eq!(harness.output_f32("out"), Some(3.0));
+
+    let before = harness.engine.resolver().structure_epoch();
+    let other = harness.node("other");
+    harness.engine.add_demand_root(other);
+    assert!(
+        harness.engine.resolver().structure_epoch() > before,
+        "a new demand root is a structural change"
+    );
+    harness
+        .tick(16)
+        .expect("the shape guard accepts an announced root");
+}
+
+/// A steady frame builds no frame plan and derives no lane topology; the
+/// frame after a structural change builds the engine's lane plan once.
+#[test]
+fn a_steady_frame_builds_no_plan() {
+    let mut harness = EngineTestBuilder::new()
+        .shader("src", output("outputs[0]", 1.0))
+        .output_node("out")
+        .bind_demand_input("out", produced_slot("src", "outputs[0]"))
+        .demand_root("out")
+        .build();
+    harness
+        .engine
+        .set_plan_mode(crate::frame_plan::PlanMode::Replay);
+    harness.tick(16).expect("tick");
+    harness.tick(16).expect("tick");
+    let steady = *harness.engine.resolver().frame_plan_counters();
+    assert_eq!(steady.structural_work(), 0, "{steady:?}");
+    assert!(steady.replays > 0, "the lane plan replays: {steady:?}");
+
+    harness.engine.add_demand_root(harness.node("src"));
+    harness.tick(16).expect("tick");
+    let after_edit = *harness.engine.resolver().frame_plan_counters();
+    assert_eq!(after_edit.builds, 1, "{after_edit:?}");
+    assert!(after_edit.default_fragments_reads > 0, "{after_edit:?}");
+}
+
 /// The same scene, resolved cached and uncached, must produce the same values.
 ///
 /// Every other test here asserts a specific thing that must not go stale. This

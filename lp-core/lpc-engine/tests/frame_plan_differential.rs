@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lpc_engine::engine::LoadedProjectRuntime;
+use lpc_engine::frame_plan::PlanMode;
 use lpc_engine::node::PressureLevel;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{ChannelName, LpValue, NodeUseLocation, SlotPath, TreePath, current_revision};
@@ -71,23 +72,37 @@ const SKIP: &[(&str, &str)] = &[
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     /// The product's configuration: the resolver keeps resolution across
-    /// frames until a structural edit.
+    /// frames until a structural edit, and frame plans are replayed.
     Cached,
     /// The resolver forgets every route, value and intern at the top of every
     /// frame (`Resolver::set_force_invalidate_per_frame`).
     ForcedInvalidate,
+    /// Every frame plan is rebuilt every frame, as if every key moved
+    /// (`PlanMode::RebuildEveryFrame`).
+    RebuildEveryFrame,
+    /// Plans replayed and also rebuilt and compared every frame, panicking
+    /// on a difference (`PlanMode::strict_check`): the checker's own verdict.
+    Checked,
 }
 
-const MODES: &[Mode] = &[Mode::Cached, Mode::ForcedInvalidate];
+const MODES: &[Mode] = &[
+    Mode::Cached,
+    Mode::ForcedInvalidate,
+    Mode::RebuildEveryFrame,
+    Mode::Checked,
+];
 
 impl Mode {
     fn configure(self, rt: &mut LoadedProjectRuntime) {
+        let engine = rt.engine_mut();
         match self {
-            Mode::Cached => {}
-            Mode::ForcedInvalidate => rt
-                .engine_mut()
-                .resolver_mut()
-                .set_force_invalidate_per_frame(true),
+            Mode::Cached => engine.set_plan_mode(PlanMode::Replay),
+            Mode::ForcedInvalidate => {
+                engine.set_plan_mode(PlanMode::Replay);
+                engine.resolver_mut().set_force_invalidate_per_frame(true);
+            }
+            Mode::RebuildEveryFrame => engine.set_plan_mode(PlanMode::RebuildEveryFrame),
+            Mode::Checked => engine.set_plan_mode(PlanMode::strict_check()),
         }
     }
 }
@@ -194,7 +209,7 @@ impl Session {
     /// with the reference lane after every frame.
     fn step(&mut self, label: &str, frames: usize) {
         self.steps.push(label.to_string());
-        for _ in 0..frames {
+        for frame_in_step in 0..frames {
             self.frames += 1;
             // A node error is a tick result like any other (a radio node with
             // no radio service, an output whose producer was removed): the
@@ -209,6 +224,19 @@ impl Session {
                     },
                 )
                 .collect();
+            // The last frame of every step is a steady one: it must build no
+            // plan and re-derive no structure (AC2).
+            if frame_in_step + 1 == frames && frames > 1 {
+                let engine = self.lanes[0].rt.engine();
+                let plans = *engine.resolver().frame_plan_counters();
+                let resolution = *engine.resolver().frame_counters();
+                if plans.structural_work() != 0 || resolution.structural_work() != 0 {
+                    self.failures.push(format!(
+                        "{} [{label}] frame {}: a steady frame did structural work: {plans:?}, {resolution:?}",
+                        self.name, self.frames
+                    ));
+                }
+            }
             let reference = published_outputs(&self.lanes[0].rt);
             if !self.distinct.contains(&reference) {
                 self.distinct.push(reference.clone());

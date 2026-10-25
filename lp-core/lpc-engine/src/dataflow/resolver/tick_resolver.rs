@@ -67,6 +67,13 @@ pub trait TickResolver {
         0
     }
 
+    /// The frame plans' mode, frame and counters
+    /// ([`crate::frame_plan::PlanHost`]). `None` on a test fake, whose
+    /// contexts fall back to a private state in the build's default mode.
+    fn frame_plans(&mut self) -> Option<&mut crate::frame_plan::FramePlanState> {
+        None
+    }
+
     /// The shared handle to use for a produced slot's path in a
     /// [`crate::dataflow::resolver::ProductionSource::ProducedSlot`].
     ///
@@ -247,6 +254,10 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
 
     fn structure_epoch(&self) -> u64 {
         self.session.structure_epoch()
+    }
+
+    fn frame_plans(&mut self) -> Option<&mut crate::frame_plan::FramePlanState> {
+        Some(self.session.frame_plans_mut())
     }
 
     fn publish_produced_slot(

@@ -250,7 +250,19 @@ impl ProjectLoader {
 
         let projected_nodes =
             Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
-        Self::attach_projected_nodes(root, &mut registry, &mut runtime, &projected_nodes, frame)?;
+        // Every attach and demand root invalidates the resolver's structure,
+        // and nothing resolves until the load is done: one epoch for the
+        // whole phase.
+        runtime.resolver_mut().begin_structure_batch();
+        let attached = Self::attach_projected_nodes(
+            root,
+            &mut registry,
+            &mut runtime,
+            &projected_nodes,
+            frame,
+        );
+        runtime.resolver_mut().end_structure_batch();
+        attached?;
         Self::register_projected_bindings(&mut registry, &mut runtime, &projected_nodes, frame)?;
 
         Ok(LoadedProjectRuntime::new(runtime, registry))

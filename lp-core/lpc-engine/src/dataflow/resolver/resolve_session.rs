@@ -48,6 +48,12 @@ impl<'a> EngineSession<'a> {
         self.revision
     }
 
+    /// End the session, handing back its trace for reuse
+    /// ([`ResolveTrace::recycled`]).
+    pub fn into_trace(self) -> ResolveTrace {
+        self.trace
+    }
+
     pub fn trace(&self) -> &ResolveTrace {
         &self.trace
     }
@@ -119,6 +125,11 @@ impl<'a> EngineSession<'a> {
     /// [`Resolver::structure_epoch`].
     pub fn structure_epoch(&self) -> u64 {
         self.resolver.structure_epoch()
+    }
+
+    /// The frame plans' state — see [`Resolver::frame_plan_counters`].
+    pub fn frame_plans_mut(&mut self) -> &mut crate::frame_plan::FramePlanState {
+        self.resolver.frame_plans_mut()
     }
 
     /// Resolve an already-interned query, fetching its key from the intern
@@ -199,7 +210,13 @@ impl<'a> EngineSession<'a> {
     ///
     /// Failures are deliberately not cached: an ambiguous channel or a cyclic
     /// graph is a broken project, and it should keep reporting itself rather
-    /// than be remembered as a decision.
+    /// than be remembered as a decision. The one exception is a bus read with
+    /// no provider at all ([`ResolvedRoute::NoBusProvider`]): that is the
+    /// normal answer for an optional channel nobody writes (a clock's
+    /// `clock.rate`, a fixture's `brightness`, a shader parameter), only a
+    /// binding or panel edit can change it, and both move the epoch. It still
+    /// reports itself — every frame gets the same error — without walking the
+    /// providers again.
     fn route_for<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
@@ -209,7 +226,16 @@ impl<'a> EngineSession<'a> {
         if let Some(route) = self.resolver.cache().route(id) {
             return Ok(Rc::clone(route));
         }
-        let route = Rc::new(self.compute_route(host, query)?);
+        let route = match self.compute_route(host, query) {
+            Ok(route) => route,
+            Err(SessionResolveError::NoBusProvider { .. })
+                if matches!(query, QueryKey::Bus { .. }) =>
+            {
+                ResolvedRoute::NoBusProvider
+            }
+            Err(err) => return Err(err),
+        };
+        let route = Rc::new(route);
         self.resolver
             .cache_mut()
             .insert_route(id, Rc::clone(&route));
@@ -431,6 +457,14 @@ impl<'a> EngineSession<'a> {
                 }
             }
             ResolvedRoute::Produce => self.produce_through_host(host, query),
+            ResolvedRoute::NoBusProvider => match query {
+                QueryKey::Bus { channel, .. } => Err(SessionResolveError::NoBusProvider {
+                    channel: channel.clone(),
+                }),
+                _ => Err(SessionResolveError::other(format!(
+                    "a no-provider route cached for a non-bus query {query:?}"
+                ))),
+            },
             ResolvedRoute::MergeByKey { inputs } => {
                 let mut productions = Vec::with_capacity(inputs.len());
                 for (binding_ref, target) in inputs.iter() {
