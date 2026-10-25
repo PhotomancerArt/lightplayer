@@ -17,6 +17,7 @@ use lps_q32::q32::{Q32, ToQ32};
 
 use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::nodes::fixture::direct_channels::DirectChannels;
+use crate::nodes::fixture::direct_lane_job::{DirectLaneJob, DirectLaneLamps, LampEncoding};
 use crate::nodes::fixture::fixture_frame_plan::{FixtureFramePlan, FixturePlanKey, FixtureReads};
 use crate::nodes::fixture::fixture_selection::{FixtureSelection, SelectionAt};
 use crate::nodes::fixture::gamma::apply_gamma16;
@@ -1673,7 +1674,7 @@ fn ensure_sample_batch<'a>(
 /// at a time, in mapping visit order. This is the one place the sampler's
 /// coordinates exist — computed per render from the mapping, never stored
 /// per lamp.
-enum DirectCoordFill<'a> {
+pub(crate) enum DirectCoordFill<'a> {
     /// Interleaved `[x, y]` pixel-space Q16 coordinates of the mapping's
     /// lamp centres.
     TwoD {
@@ -1703,7 +1704,7 @@ impl DirectCoordFill<'_> {
     /// Write the next batch into `coords` (a window of `coords.len() / 2`
     /// points) and return how many points it holds; `0` when the product is
     /// exhausted.
-    fn fill(&mut self, coords: &mut [i32]) -> u32 {
+    pub(crate) fn fill(&mut self, coords: &mut [i32]) -> u32 {
         match self {
             Self::TwoD {
                 centers,
@@ -1991,7 +1992,7 @@ fn render_direct_fixture_control(
             return Err(error);
         }
     };
-    let mut fill = match space {
+    let coords = match space {
         VisualSpace::TwoD => DirectCoordFill::TwoD {
             centers: lpc_model::nodes::fixture::mapping_centers(mapping),
             output_width,
@@ -2003,43 +2004,65 @@ fn render_direct_fixture_control(
             wire_reversed: settings.wire_reversed,
         },
     };
-    // One match on the channel encoding, then a stream monomorphized on that
+    let encoding = LampEncoding::new(
+        settings.color_order,
+        settings.gamma_correction,
+        settings.brightness,
+    );
+    // One match on the channel encoding, then a lane monomorphized on that
     // form's iterator — the identity case walks `0..n` with no per-lamp
     // branch and no list to read.
-    let mut written_samples = 0usize;
-    let streamed = match channels {
-        DirectChannels::Identity(count) => stream_direct_lamps(
-            0..*count,
-            &mut fill,
-            batch,
-            &mut target,
-            expected_samples,
-            &settings,
-            power,
-            visual_product,
-            (output_width, output_height),
-            space,
-            scope,
-            ctx,
-            selection,
-            &mut written_samples,
-        ),
-        DirectChannels::Explicit(list) => stream_direct_lamps(
-            list.iter().copied(),
-            &mut fill,
-            batch,
-            &mut target,
-            expected_samples,
-            &settings,
-            power,
-            visual_product,
-            (output_width, output_height),
-            space,
-            scope,
-            ctx,
-            selection,
-            &mut written_samples,
-        ),
+    let (streamed, written_samples) = match channels {
+        DirectChannels::Identity(count) => {
+            let mut job = DirectLaneJob {
+                coords,
+                lamps: DirectLaneLamps {
+                    channels: 0..*count,
+                    target: &mut target,
+                    expected_samples,
+                    encoding,
+                    power,
+                    selection,
+                    written_samples: 0,
+                },
+            };
+            let streamed = stream_direct_lane(
+                &mut job,
+                batch,
+                visual_product,
+                (output_width, output_height),
+                space,
+                settings.consume_policy,
+                scope,
+                ctx,
+            );
+            (streamed, job.lamps.written_samples)
+        }
+        DirectChannels::Explicit(list) => {
+            let mut job = DirectLaneJob {
+                coords,
+                lamps: DirectLaneLamps {
+                    channels: list.iter().copied(),
+                    target: &mut target,
+                    expected_samples,
+                    encoding,
+                    power,
+                    selection,
+                    written_samples: 0,
+                },
+            };
+            let streamed = stream_direct_lane(
+                &mut job,
+                batch,
+                visual_product,
+                (output_width, output_height),
+                space,
+                settings.consume_policy,
+                scope,
+                ctx,
+            );
+            (streamed, job.lamps.written_samples)
+        }
     };
     if writes_in_order_to_the_end {
         target.clear_product_from(written_samples);
@@ -2059,38 +2082,29 @@ fn render_direct_fixture_control(
     Ok(ControlLayout { spans })
 }
 
-/// Sample the visual through the window and encode each batch's lamps into
-/// the target as it arrives. Returns the sample index one past the last
-/// write, for the control layout's span report.
-fn stream_direct_lamps<I: Iterator<Item = u32>>(
-    mut channels: I,
-    fill: &mut DirectCoordFill<'_>,
+/// Run a [`DirectLaneJob`] through the visual's sample stream: the producer
+/// drives the batches (it decides compile, uniforms and projection once for
+/// the stream), the job fills each window's coordinates and writes each
+/// batch's lamps as it comes back.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the stream's own fields, handed through; bundling them would only rename them"
+)]
+fn stream_direct_lane<I: Iterator<Item = u32>>(
+    job: &mut DirectLaneJob<'_, '_, I>,
     batch: &mut SampleBatch,
-    target: &mut ControlRenderTarget<'_>,
-    expected_samples: usize,
-    settings: &FixtureRenderSettings,
-    power: &mut PowerPass,
     visual_product: VisualProduct,
     (output_width, output_height): (u32, u32),
     space: VisualSpace,
+    policy: ConsumerPolicy,
     scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
-    selection: SelectionAt<'_>,
-    written_samples: &mut usize,
 ) -> Result<(), NodeError> {
     let time_seconds = ctx.time_seconds();
-    let mut fill_batch = |coords: &mut [i32]| fill.fill(coords);
+    let DirectLaneJob { coords, lamps } = job;
+    let mut fill_batch = |window: &mut [i32]| coords.fill(window);
     let mut consume = |sampled: &[u16]| -> Result<(), NodeError> {
-        write_direct_lamps(
-            &mut channels,
-            sampled,
-            target,
-            expected_samples,
-            settings,
-            power,
-            written_samples,
-            selection,
-        );
+        lamps.write(sampled);
         Ok(())
     };
     let SampleBatch { points, samples } = batch;
@@ -2105,66 +2119,13 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
             output_height,
             time_seconds,
             space,
-            policy: settings.consume_policy,
+            policy,
             continuation: false,
             scope,
         },
-    )?;
-    Ok(())
+    )
 }
 
-/// Encode one batch of sampled lamps into their channels' three control
-/// samples, skipping lamps whose channel falls past the requested extent.
-/// `channels` is the render's running cursor — it resumes where the previous
-/// batch left it — and `written_samples` accumulates the sample index one
-/// past the last write across batches.
-fn write_direct_lamps(
-    channels: &mut impl Iterator<Item = u32>,
-    sampled: &[u16],
-    target: &mut ControlRenderTarget<'_>,
-    expected_samples: usize,
-    settings: &FixtureRenderSettings,
-    power: &mut PowerPass,
-    written_samples: &mut usize,
-    selection: SelectionAt<'_>,
-) {
-    let brightness = settings.brightness.to_q32() / 255.to_q32();
-    // The samples drive the zip. `Zip` pulls its LEFT side first, so with
-    // the channel cursor on the left the lamp after a batch's last sample
-    // would be pulled and dropped at every batch boundary.
-    for (rgba, channel) in sampled.chunks_exact(4).zip(channels) {
-        let base = (channel as usize).saturating_mul(3);
-        if base + 3 > expected_samples {
-            continue;
-        }
-        let r = encode_fixture_channel(
-            rgba[0],
-            settings.gamma_correction,
-            settings.brightness,
-            brightness,
-        );
-        let g = encode_fixture_channel(
-            rgba[1],
-            settings.gamma_correction,
-            settings.brightness,
-            brightness,
-        );
-        let b = encode_fixture_channel(
-            rgba[2],
-            settings.gamma_correction,
-            settings.brightness,
-            brightness,
-        );
-        // After gamma, never before. See `power_limit`.
-        let r = power.channel(r);
-        let g = power.channel(g);
-        let b = power.channel(b);
-        let [r, g, b] = selection.apply(channel, [r, g, b]);
-        let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
-        target.write(base, &ordered);
-        *written_samples = (*written_samples).max(base + 3);
-    }
-}
 fn render_fixture_diagnostic_control(
     request: &ControlRenderRequest,
     mut target: ControlRenderTarget<'_>,
@@ -2326,7 +2287,7 @@ fn finalize_fixture_rgb(
 /// Applied before the encode it would be raised to the 2.8 power on its way
 /// to the wire (`(s·c)^γ = s^γ·c^γ`), starving the 8-bit output at dim
 /// settings. See `docs/design/brightness-gamma-dithering.md`.
-fn encode_fixture_channel(
+pub(crate) fn encode_fixture_channel(
     value: u16,
     gamma_correction: bool,
     brightness_u8: u8,
@@ -2597,7 +2558,7 @@ fn render_fixture_control_target(
     })
 }
 
-fn ordered_rgb_u16(color_order: ColorOrder, r: u16, g: u16, b: u16) -> [u16; 3] {
+pub(crate) fn ordered_rgb_u16(color_order: ColorOrder, r: u16, g: u16, b: u16) -> [u16; 3] {
     match color_order {
         ColorOrder::Rgb => [r, g, b],
         ColorOrder::Grb => [g, r, b],
