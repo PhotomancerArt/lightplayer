@@ -242,12 +242,13 @@ impl UpdateHost {
         self.state.borrow_mut().own = source;
     }
 
-    /// This Studio's own build's facts, as its source says them now: a
-    /// source may learn them after it is installed (the bundle's, which
-    /// fetches its manifests), so the controller asks again after folds.
-    pub(crate) fn own_facts(&self) -> Option<lpa_update::HostBuildFacts> {
+    /// This Studio's own builds' facts, one per target, as its source says
+    /// them now: a source may learn them after it is installed (the
+    /// bundle's, which fetches its manifests), so the controller asks again
+    /// after folds.
+    pub(crate) fn own_facts(&self) -> Vec<lpa_update::HostBuildFacts> {
         let own = self.state.borrow().own.clone();
-        own.and_then(|own| own.facts())
+        own.map(|own| own.facts()).unwrap_or_default()
     }
 
     /// The credentials the controller holds for a core-side login: this
@@ -796,14 +797,19 @@ impl HostState {
         let Some(seams) = self.seams.clone() else {
             return;
         };
-        let own = self.own.clone();
-        let own_facts = own.as_ref().and_then(|own| own.facts());
         let me = self.me.clone();
         let Some(run) = self.runs.get_mut(&device) else {
             return;
         };
         let generation = run.generation;
         let facts = run.facts.clone();
+        // This Studio's own build of the board's target: never another
+        // target's.
+        let target = facts.as_ref().and_then(|f| f.target.clone());
+        let own = self.own.clone();
+        let own_facts = own.as_ref().and_then(|own| {
+            super::own_build_source::own_for(&own.facts(), target.as_deref()).cloned()
+        });
         // A custom build picked from files serves an install of its version.
         if let UpdateIntentFacts::Install { version, .. } = &run.intent
             && let Some(file) = self
@@ -828,9 +834,12 @@ impl HostState {
             UpdateIntentFacts::Auto | UpdateIntentFacts::Reinstall => own_facts.is_some(),
         };
         run.phase = RunPhase::Preparing { source: None };
-        if wants_own && let Some(own) = own {
+        if wants_own
+            && let Some(own) = own
+            && let Some(target) = target
+        {
             (seams.spawn)(Box::pin(async move {
-                let loaded = verified_own_build(own.load().await, own_facts.as_ref());
+                let loaded = verified_own_build(own.load(&target).await, own_facts.as_ref());
                 if let Some(cell) = me.upgrade() {
                     cell.borrow_mut()
                         .build_loaded(device, generation, loaded, false);

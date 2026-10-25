@@ -27,9 +27,14 @@
 //!   the update files require (update protocol Part B, DD29).
 //!
 //! Anything else — a single-image package (the fast local build), no
-//! `ota-manifest.json`, a mismatch — is **no build of its own**: [`facts`] stays
-//! `None`, no board is offered an over-the-air update, and over USB the card
-//! keeps today's flash (`device_update_route`). A restore still works.
+//! `ota-manifest.json`, a mismatch — is **no build of its own** for that
+//! target: [`facts`] leaves it out, no board of that target is offered an
+//! over-the-air update, and over USB its card keeps today's flash
+//! (`device_update_route`). A restore still works.
+//!
+//! **Every served target is read**, and each board is offered its own
+//! target's build: a Studio that kept only the first update-capable target
+//! (the C6's) offered an S3 nothing over the air (2026-10-24).
 //!
 //! [`load`] fetches the merged image and the two `.z` files, checks the
 //! image against the package manifest, slices the pieces, and builds the
@@ -38,7 +43,7 @@
 //! error naming the file ("this Studio's firmware files don't match: …").
 //!
 //! The facts load asynchronously ([`BundledOwnBuildSource::read_facts`],
-//! spawned by the shell at start); until they arrive [`facts`] is `None`,
+//! spawned by the shell at start); until they arrive [`facts`] is empty,
 //! and the controller reads them again after every device fold.
 //!
 //! [`facts`]: OwnBuildSource::facts
@@ -230,9 +235,9 @@ impl BundledOwnBuild {
     }
 }
 
-/// Where a served Studio's own build is read from: a fetch of the bundle's
+/// Where a served Studio's own builds are read from: a fetch of the bundle's
 /// own files under `base` (the served `firmware/` directory, a same-origin
-/// path or URL) for `targets`, the first update-capable one winning.
+/// path or URL) for `targets`, every update-capable one kept.
 pub struct BundledOwnBuildSource<F: FirmwareFetch> {
     state: Rc<SourceState<F>>,
 }
@@ -241,7 +246,9 @@ struct SourceState<F> {
     fetch: F,
     base: String,
     targets: Vec<String>,
-    read: RefCell<Option<Result<(String, BundledOwnBuild), String>>>,
+    /// Each update-capable target's build, once read (empty: none, or not
+    /// read yet).
+    read: RefCell<Vec<(String, BundledOwnBuild)>>,
 }
 
 impl<F: FirmwareFetch + 'static> BundledOwnBuildSource<F> {
@@ -251,34 +258,33 @@ impl<F: FirmwareFetch + 'static> BundledOwnBuildSource<F> {
                 fetch,
                 base: base.trim_end_matches('/').to_string(),
                 targets,
-                read: RefCell::new(None),
+                read: RefCell::new(Vec::new()),
             }),
         }
     }
 
-    /// Read every target's manifests until one is an update-capable build;
+    /// Read every target's manifests and keep each update-capable build;
     /// the shell spawns this once at start. Answers what it found, or why
     /// none (a single-image Studio is `Err` with the reason, and no error).
-    pub fn read_facts(&self) -> LocalBoxFuture<'static, Result<HostBuildFacts, String>> {
+    pub fn read_facts(&self) -> LocalBoxFuture<'static, Result<Vec<HostBuildFacts>, String>> {
         let state = Rc::clone(&self.state);
         Box::pin(async move {
             let mut why = Vec::new();
+            let mut builds = Vec::new();
             for target in &state.targets {
                 match read_target(&state, target).await {
-                    Ok(build) => {
-                        let facts = build.facts().clone();
-                        *state.read.borrow_mut() = Some(Ok((target.clone(), build)));
-                        return Ok(facts);
-                    }
+                    Ok(build) => builds.push((target.clone(), build)),
                     Err(reason) => why.push(format!("{target}: {reason}")),
                 }
             }
-            let why = match why.is_empty() {
-                true => "no served build".to_string(),
-                false => why.join("; "),
-            };
-            *state.read.borrow_mut() = Some(Err(why.clone()));
-            Err(why)
+            let facts: Vec<HostBuildFacts> =
+                builds.iter().map(|(_, b)| b.facts().clone()).collect();
+            *state.read.borrow_mut() = builds;
+            match (facts.is_empty(), why.is_empty()) {
+                (false, _) => Ok(facts),
+                (true, true) => Err("no served build".to_string()),
+                (true, false) => Err(why.join("; ")),
+            }
         })
     }
 }
@@ -292,18 +298,27 @@ impl<F: FirmwareFetch + 'static> Clone for BundledOwnBuildSource<F> {
 }
 
 impl<F: FirmwareFetch + 'static> OwnBuildSource for BundledOwnBuildSource<F> {
-    fn facts(&self) -> Option<HostBuildFacts> {
-        match &*self.state.read.borrow() {
-            Some(Ok((_, build))) => Some(build.facts().clone()),
-            _ => None,
-        }
+    fn facts(&self) -> Vec<HostBuildFacts> {
+        self.state
+            .read
+            .borrow()
+            .iter()
+            .map(|(_, build)| build.facts().clone())
+            .collect()
     }
 
-    fn load(&self) -> LocalBoxFuture<'static, Result<HostBuild, String>> {
+    fn load(&self, target: &str) -> LocalBoxFuture<'static, Result<HostBuild, String>> {
         let state = Rc::clone(&self.state);
+        let target = target.to_string();
         Box::pin(async move {
-            let Some(Ok((target, build))) = state.read.borrow().clone() else {
-                return Err("this Studio has no build of its own".to_string());
+            let found = state
+                .read
+                .borrow()
+                .iter()
+                .find(|(served, _)| *served == target)
+                .map(|(_, build)| build.clone());
+            let Some(build) = found else {
+                return Err(format!("this Studio has no build for {target}"));
             };
             let dir = format!("{}/{target}", state.base);
             let image = fetch_file(&state.fetch, &format!("{dir}/{}", build.image_file())).await?;
@@ -386,13 +401,14 @@ mod tests {
     fn a_split_package_with_its_update_files_is_this_studios_build() {
         let bundle = Bundle::split();
         let source = bundle.source();
-        assert_eq!(source.facts(), None, "nothing until it is read");
+        assert_eq!(source.facts(), Vec::new(), "nothing until it is read");
         let facts = block_on(source.read_facts()).expect("an own build");
-        assert_eq!(facts.identity.version, "2026.10.06-1");
-        assert_eq!(source.facts(), Some(facts.clone()));
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].identity.version, "2026.10.06-1");
+        assert_eq!(source.facts(), facts);
 
-        let build = block_on(source.load()).expect("it loads");
-        assert_eq!(build.facts(), facts);
+        let build = block_on(source.load("esp32c6-4mb")).expect("it loads");
+        assert_eq!(build.facts(), facts[0]);
         assert!(
             build.core.encoded.is_some() && build.engine.encoded.is_some(),
             "encoding 1 rides along"
@@ -410,8 +426,33 @@ mod tests {
         let source = bundle.source();
         let why = block_on(source.read_facts()).unwrap_err();
         assert!(why.contains("single image"), "{why}");
-        assert_eq!(source.facts(), None);
-        assert!(block_on(source.load()).is_err());
+        assert_eq!(source.facts(), Vec::new());
+        assert!(block_on(source.load("esp32c6-4mb")).is_err());
+    }
+
+    /// Every served target is this Studio's build for boards of that
+    /// target, not only the first one (an S3 was offered nothing over the
+    /// air, 2026-10-24); a target with no update files is left out.
+    #[test]
+    fn every_update_capable_target_is_kept_and_loaded_by_target() {
+        let mut files = Bundle::split().files;
+        files.extend(Bundle::for_target("esp32s3-8mb", "esp32s3", Some(2)).files);
+        let source = BundledOwnBuildSource::new(
+            MemoryFetch(files),
+            "fw/",
+            vec![
+                "esp32c6-4mb".to_string(),
+                "esp32s3-8mb".to_string(),
+                "esp32v3-4mb".to_string(),
+            ],
+        );
+        let facts = block_on(source.read_facts()).expect("own builds");
+        let targets: Vec<&str> = facts.iter().map(|f| f.identity.target.as_str()).collect();
+        assert_eq!(targets, ["esp32c6-4mb", "esp32s3-8mb"]);
+        let s3 = block_on(source.load("esp32s3-8mb")).expect("the S3's loads");
+        assert_eq!(s3.facts().identity.chip, "esp32s3");
+        assert_eq!(s3.facts().identity.layout, 2);
+        assert!(block_on(source.load("esp32v3-4mb")).is_err());
     }
 
     /// Stale update files beside a newer package (a single image packaged over
@@ -451,7 +492,7 @@ mod tests {
                 read: RefCell::new(source.state.read.borrow().clone()),
             }),
         };
-        let why = block_on(source.load()).unwrap_err();
+        let why = block_on(source.load("esp32c6-4mb")).unwrap_err();
         assert!(
             why.contains(OWN_BUILD_MISMATCH) && why.contains("engine.z"),
             "{why}"
@@ -469,9 +510,16 @@ mod tests {
             Self::with_core_ota(Some(1))
         }
 
-        /// A split package (loader, core, engine at their offsets) and its
-        /// update files, with the manifest core's `ota.layout`.
         fn with_core_ota(layout: Option<u16>) -> Self {
+            Self::for_target("esp32c6-4mb", "esp32c6", layout)
+        }
+
+        /// A split package (loader, core, engine at their offsets) of
+        /// `target` and its update files, with the manifest core's
+        /// `ota.layout` (the layout the update files require: 1, or the
+        /// manifest core's own).
+        fn for_target(target: &str, chip: &str, layout: Option<u16>) -> Self {
+            let image_file = format!("fw-{chip}-merged.bin");
             let core_off = 0x18000;
             let core: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
             let engine_off = 0x20000;
@@ -485,9 +533,9 @@ mod tests {
             let engine_z = vec![9u8; engine.len().div_ceil(4096)];
             let mut package = serde_json::json!({
                 "schemaVersion": 2,
-                "firmwareId": "esp32c6-4mb",
-                "core": { "target": "esp32c6-4mb" },
-                "images": [{ "path": "fw-esp32c6-merged.bin", "address": "0x0",
+                "firmwareId": target,
+                "core": { "target": target },
+                "images": [{ "path": image_file, "address": "0x0",
                     "sizeBytes": image.len(), "sha256": sha256_hex(&image) }],
                 "split": {
                     "core": { "offset": format!("{core_off:#x}"), "sizeBytes": core.len() },
@@ -501,14 +549,14 @@ mod tests {
 
             let ota = OtaManifest {
                 format: lpc_firmware_release::OTA_MANIFEST_FORMAT,
-                target: "esp32c6-4mb".to_string(),
-                chip: "esp32c6".to_string(),
+                target: target.to_string(),
+                chip: chip.to_string(),
                 version: "2026.10.06-1".to_string(),
                 commit: "e6775ad537f6039afabc35952488312141962ccd".to_string(),
                 wire_proto: 38,
                 requires: Requires {
                     fs_tree: false,
-                    layout: 1,
+                    layout: layout.filter(|layout| *layout > 1).unwrap_or(1),
                     loader: 1,
                 },
                 core: piece("core.bin", &core),
@@ -525,18 +573,18 @@ mod tests {
                     file: "package.json".to_string(),
                     length: package.len() as u64,
                     sha256: sha256_hex(&package),
-                    image: piece("fw-esp32c6-merged.bin", &image),
+                    image: piece(&image_file, &image),
                 },
             };
             let mut files = HashMap::new();
-            files.insert("fw/esp32c6-4mb/manifest.json".to_string(), package);
-            files.insert("fw/esp32c6-4mb/fw-esp32c6-merged.bin".to_string(), image);
+            files.insert(format!("fw/{target}/manifest.json"), package);
+            files.insert(format!("fw/{target}/{image_file}"), image);
             files.insert(
-                "fw/esp32c6-4mb/ota-manifest.json".to_string(),
+                format!("fw/{target}/ota-manifest.json"),
                 ota.to_json_bytes(),
             );
-            files.insert("fw/esp32c6-4mb/core.z".to_string(), core_z);
-            files.insert("fw/esp32c6-4mb/engine.z".to_string(), engine_z);
+            files.insert(format!("fw/{target}/core.z"), core_z);
+            files.insert(format!("fw/{target}/engine.z"), engine_z);
             Self { files }
         }
 

@@ -313,7 +313,7 @@ pub use lan_reach::LanReach;
 pub use lan_transport::{LanDeviceTransport, LanLinkSource};
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
-pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
+pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource, own_for};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use relay_connect_failure::{

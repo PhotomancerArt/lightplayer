@@ -49,8 +49,8 @@ use crate::{
     ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
     DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
     INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, OfferParamKind, PickedFirmwareFile, StudioController, UiOffer,
-    UpdateLink, UpdateStanding, firmware_file_action,
+    MemoryOwnBuildSource, OfferArgs, OfferParamKind, OwnBuildSource, PickedFirmwareFile,
+    StudioController, UiOffer, UpdateLink, UpdateStanding, firmware_file_action,
 };
 
 /// The model board's region (the sim's own size).
@@ -201,6 +201,57 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
         "each of the three reconnected links was opened by the model: {}",
         bench.board().opens_asked
     );
+}
+
+/// A Studio serves several targets' builds: a board is offered its own
+/// target's, wherever that target sits in the list. Holding only the first
+/// served build (the C6's, on lightplayer.app) left an S3 with nothing to
+/// update to over Bluetooth (2026-10-24); here the other target is listed
+/// first, and the board still updates to Y.
+#[test]
+fn a_studio_serving_two_targets_updates_a_board_to_its_own_targets_build() {
+    let mut board = Board::running_x();
+    board.endpoint = "ble:QkxFLWlk".to_string();
+    board.reconnects_itself = true;
+    let mut other = host_build(&w());
+    other.identity.target = "esp32s3-8mb".into();
+    other.identity.chip = "esp32s3".into();
+    other.identity.layout = 2;
+    let source = ServedBuilds(vec![other, host_build(&y())]);
+    let mut bench = Bench::with_source(board, Some(Rc::new(source)));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.run_until("Update offered for the board's own target", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over Bluetooth"));
+}
+
+/// Several targets' builds in memory, as a served Studio holds them.
+struct ServedBuilds(Vec<HostBuild>);
+
+impl OwnBuildSource for ServedBuilds {
+    fn facts(&self) -> Vec<lpa_update::HostBuildFacts> {
+        self.0.iter().map(HostBuild::facts).collect()
+    }
+
+    fn load(
+        &self,
+        target: &str,
+    ) -> crate::app::library::LocalBoxFuture<'static, Result<HostBuild, String>> {
+        let found = self
+            .0
+            .iter()
+            .find(|build| build.facts().identity.target == target)
+            .cloned()
+            .ok_or_else(|| format!("no build for {target}"));
+        Box::pin(core::future::ready(found))
+    }
 }
 
 /// Over Wi‑Fi (OTA M8): the same update over the LAN link's update channel.
@@ -2272,6 +2323,14 @@ impl Bench {
     /// A Studio holding `own` as its own build (or none), with `board` not
     /// yet granted.
     fn new(board: Board, own: Option<ModelBuild>) -> Self {
+        let source = own.map(|own| {
+            Rc::new(MemoryOwnBuildSource::new(host_build(&own))) as Rc<dyn OwnBuildSource>
+        });
+        Self::with_source(board, source)
+    }
+
+    /// A Studio whose own builds come from `source` (or none).
+    fn with_source(board: Board, source: Option<Rc<dyn OwnBuildSource>>) -> Self {
         let clock = Rc::clone(&board.clock);
         let board = Rc::new(RefCell::new(board));
         let granted = Rc::new(Cell::new(false));
@@ -2312,8 +2371,8 @@ impl Bench {
             board: Rc::clone(&board),
             granted: Rc::clone(&granted),
         }));
-        if let Some(own) = own {
-            controller.set_own_build_source(Rc::new(MemoryOwnBuildSource::new(host_build(&own))));
+        if let Some(source) = source {
+            controller.set_own_build_source(source);
         }
         Self {
             controller,
