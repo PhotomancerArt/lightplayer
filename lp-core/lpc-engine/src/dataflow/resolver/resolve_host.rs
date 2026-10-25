@@ -127,13 +127,16 @@ pub trait ResolveHost {
 
     /// Record `node`'s authored output name for patch routing; answers a
     /// live sibling's colliding claim (see the engine implementation).
+    /// `structure_epoch` is the resolver's: an output can only die through
+    /// a structural edit, so the dead sweep runs once per epoch.
     fn register_output_identity(
         &mut self,
         node: NodeId,
         name: Option<&str>,
         revision: Revision,
+        structure_epoch: u64,
     ) -> Option<alloc::string::String> {
-        let _ = (node, name, revision);
+        let _ = (node, name, revision, structure_epoch);
         None
     }
 

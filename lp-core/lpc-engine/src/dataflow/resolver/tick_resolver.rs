@@ -392,7 +392,9 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         name: Option<&str>,
         revision: Revision,
     ) -> Option<alloc::string::String> {
-        self.host.register_output_identity(node, name, revision)
+        let epoch = self.session.structure_epoch();
+        self.host
+            .register_output_identity(node, name, revision, epoch)
     }
 
     fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {

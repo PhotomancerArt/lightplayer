@@ -122,6 +122,8 @@ pub struct Engine {
     /// settles: a name registered one tick (or one output) after the fixture
     /// resolved must clear a transient dangling report without a patch edit.
     output_identity_revision: Revision,
+    /// See `EngineResolveHost::identities_swept_epoch`.
+    identities_swept_epoch: Option<u64>,
     /// The most bytes a serialized display layout may occupy in one
     /// project-read answer, declared by the EMBEDDER for its transport
     /// (`Engine::set_display_layout_budget`). `None` = unbounded. Defaults
@@ -236,6 +238,7 @@ impl Engine {
             safe_output_clamp_q16: None,
             output_identities: alloc::collections::BTreeMap::new(),
             output_identity_revision: revision,
+            identities_swept_epoch: None,
             display_layout_budget: Some(
                 lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
@@ -1062,6 +1065,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1228,6 +1232,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1276,6 +1281,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1369,6 +1375,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1430,6 +1437,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1476,6 +1484,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1522,6 +1531,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1599,6 +1609,7 @@ impl Engine {
             timebases: &mut self.timebases,
             output_identities: &mut self.output_identities,
             output_identity_revision: &mut self.output_identity_revision,
+            identities_swept_epoch: &mut self.identities_swept_epoch,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1655,6 +1666,8 @@ struct EngineResolveHost<'a> {
     /// revision it last changed at — see the fields on [`Engine`].
     output_identities: &'a mut alloc::collections::BTreeMap<NodeId, Option<alloc::string::String>>,
     output_identity_revision: &'a mut Revision,
+    /// The structure epoch the dead output identities were last swept at.
+    identities_swept_epoch: &'a mut Option<u64>,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -1691,6 +1704,34 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
+    /// Drop the identities of outputs no longer alive; returns whether any
+    /// went. `caller` is exempt (see below).
+    fn sweep_dead_output_identities(&mut self, caller: NodeId) -> bool {
+        let node = caller;
+        // Prune the dead so a deleted output releases its name. The caller
+        // is mid-`consume` — its runtime is out of the tree, `Executing` — and
+        // is alive by definition: sweeping it too removed and re-added every
+        // output's own entry on every frame, which moved
+        // `output_identity_revision` every frame and re-ran every fixture's
+        // patch resolution with it.
+        let dead: Vec<NodeId> = self
+            .output_identities
+            .keys()
+            .copied()
+            .filter(|id| {
+                *id != node
+                    && self.tree.get(*id).is_none_or(|entry| {
+                        !matches!(entry.state.value(), NodeEntryState::Alive(_))
+                    })
+            })
+            .collect();
+        let swept = !dead.is_empty();
+        for id in dead {
+            self.output_identities.remove(&id);
+        }
+        swept
+    }
+
     /// Is `consumer` the DEFAULT output for its bus channel — the target of
     /// every unaddressed patch run and of auto-flow (D40)?
     ///
@@ -2189,28 +2230,15 @@ impl ResolveHost for EngineResolveHost<'_> {
         node: NodeId,
         name: Option<&str>,
         revision: Revision,
+        structure_epoch: u64,
     ) -> Option<alloc::string::String> {
-        // Prune the dead so a deleted output releases its name. The caller
-        // is mid-`consume` — its runtime is out of the tree, `Executing` — and
-        // is alive by definition: sweeping it too removed and re-added every
-        // output's own entry on every frame, which moved
-        // `output_identity_revision` every frame and re-ran every fixture's
-        // patch resolution with it.
-        let dead: Vec<NodeId> = self
-            .output_identities
-            .keys()
-            .copied()
-            .filter(|id| {
-                *id != node
-                    && self.tree.get(*id).is_none_or(|entry| {
-                        !matches!(entry.state.value(), NodeEntryState::Alive(_))
-                    })
-            })
-            .collect();
         let mut changed = false;
-        for id in dead {
-            self.output_identities.remove(&id);
-            changed = true;
+        // Prune the dead so a deleted output releases its name — once per
+        // structure epoch, since only a structural edit removes a node (it
+        // was every output's every frame, a scan of every identity each).
+        if *self.identities_swept_epoch != Some(structure_epoch) {
+            *self.identities_swept_epoch = Some(structure_epoch);
+            changed |= self.sweep_dead_output_identities(node);
         }
         if self.output_identities.get(&node).map(Option::as_deref) != Some(name) {
             self.output_identities
@@ -3667,6 +3695,7 @@ pub(crate) fn resolve_with_engine_host(
         timebases: &mut eng.timebases,
         output_identities: &mut eng.output_identities,
         output_identity_revision: &mut eng.output_identity_revision,
+        identities_swept_epoch: &mut eng.identities_swept_epoch,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -3714,6 +3743,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         timebases: &mut eng.timebases,
         output_identities: &mut eng.output_identities,
         output_identity_revision: &mut eng.output_identity_revision,
+        identities_swept_epoch: &mut eng.identities_swept_epoch,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
