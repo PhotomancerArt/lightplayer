@@ -81,7 +81,13 @@ impl Project {
                 if own.iter().any(|x: &Run| x.object == r.object) {
                     continue; // One row per object: the first wins.
                 }
-                own.extend(run(&r.object, &r.output, start + r.pixel, r.reversed, r.rotation));
+                own.extend(run(
+                    &r.object,
+                    &r.output,
+                    start + r.pixel,
+                    r.reversed,
+                    r.rotation,
+                ));
             }
             let Some(output) = patch.auto.clone().filter(|o| self.output(o).is_some()) else {
                 runs.extend(own);

@@ -44,7 +44,10 @@ fn the_cursor_continues() {
 fn leaving_a_container_doesnt_move_the_cursor() {
     let (mut p, f, out) = bare(&[("D0", 60)]);
     let circle = p
-        .add(&f, ComponentKind::circle(Vec2::new(50.0, 50.0), &[(30.0, 8), (15.0, 4)]))
+        .add(
+            &f,
+            ComponentKind::circle(Vec2::new(50.0, 50.0), &[(30.0, 8), (15.0, 4)]),
+        )
         .unwrap();
     let after = path(&mut p, &f, 2);
     p.start_at(&f, &out, "0", 0);
@@ -60,7 +63,10 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
     let circle = p
         .add(
             &f,
-            ComponentKind::circle(Vec2::new(50.0, 50.0), &[(40.0, 6), (30.0, 5), (20.0, 4), (10.0, 3)]),
+            ComponentKind::circle(
+                Vec2::new(50.0, 50.0),
+                &[(40.0, 6), (30.0, 5), (20.0, 4), (10.0, 3)],
+            ),
         )
         .unwrap();
     p.start_at(&f, &out, "0", 0);
@@ -68,7 +74,11 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
     p.patch_object(&ring("r3"), &out, "1", 0).unwrap();
     assert_eq!(landing(&p, &ring("r2"), 0), Some(("0".into(), 6)));
     assert_eq!(landing(&p, &ring("r3"), 0), Some(("1".into(), 0)));
-    assert_eq!(landing(&p, &ring("r4"), 0), Some(("1".into(), 4)), "follows r3");
+    assert_eq!(
+        landing(&p, &ring("r4"), 0),
+        Some(("1".into(), 4)),
+        "follows r3"
+    );
 }
 
 /// One per port from D1: ring k starts on the k-th port from D1, at its
@@ -89,7 +99,10 @@ fn one_per_port_puts_each_child_on_its_own_port() {
         Children::OnePerPort { from: "1".into() },
     );
     for (k, port) in [("r1", "1"), ("r2", "2"), ("r3", "3")] {
-        assert_eq!(landing(&p, &ObjectId::new(&circle, k), 0), Some((port.into(), 0)));
+        assert_eq!(
+            landing(&p, &ObjectId::new(&circle, k), 0),
+            Some((port.into(), 0))
+        );
     }
 }
 
@@ -117,7 +130,11 @@ fn anchoring_one_copy_leaves_the_others_in_their_slots() {
     let copy = |k: u32| ObjectId::of(&arm).in_copy(k).canonical();
     p.patch_object(&copy(3), &out, "7", 0).unwrap();
     assert_eq!(landing(&p, &copy(3), 0), Some(("7".into(), 0)));
-    assert_eq!(landing(&p, &copy(4), 0), Some(("4".into(), 0)), "keeps its slot");
+    assert_eq!(
+        landing(&p, &copy(4), 0),
+        Some(("4".into(), 0)),
+        "keeps its slot"
+    );
 }
 
 /// A leaf that doesn't fit what is left of its port starts on the next
@@ -190,7 +207,11 @@ fn next_port_is_the_next_key() {
     let _a = path(&mut p, &f, 5);
     let b = path(&mut p, &f, 3);
     p.start_at(&f, &out, "0", 0);
-    p.set_start(&f, &PatchTarget::Component(b.component.clone()), Start::NextPort);
+    p.set_start(
+        &f,
+        &PatchTarget::Component(b.component.clone()),
+        Start::NextPort,
+    );
     assert_eq!(landing(&p, &b, 0), Some(("2".into(), 0)));
 }
 
@@ -273,7 +294,10 @@ fn path(p: &mut Project, f: &NodeId, n: u32) -> ObjectId {
     let k = p.fixture(f).unwrap().components.len() as f64;
     let y = 10.0 + 5.0 * k;
     let id = p
-        .add(f, ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(80.0, y)], n))
+        .add(
+            f,
+            ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(80.0, y)], n),
+        )
         .unwrap();
     ObjectId::of(&id)
 }

@@ -163,7 +163,9 @@ impl Editor {
         let mut items = Vec::new();
 
         let starts = self.start_options(fixture_only);
-        let chosen = self.shared(&targets, |f, t| Some(start_option(&self.rules_on(f, t).start)));
+        let chosen = self.shared(&targets, |f, t| {
+            Some(start_option(&self.rules_on(f, t).start))
+        });
         items.push(UiItem::PatchChoice {
             label: "Start",
             options: starts.iter().map(|o| self.option_words(o)).collect(),
@@ -524,9 +526,8 @@ impl Editor {
                     let per = self.per_lamp(f);
                     if let Some(at) = self.landed(o) {
                         let px = (at.channel as i64 / per as i64 + by).max(0) as u32;
-                        self.project.edit_override(o, |x| {
-                            x.channel = Some(ChannelOp::Set(Amount::px(px)))
-                        });
+                        self.project
+                            .edit_override(o, |x| x.channel = Some(ChannelOp::Set(Amount::px(px))));
                     }
                 }
             }
@@ -654,7 +655,9 @@ impl Editor {
             )),
             StepSource::Children(t) => {
                 let rules = match t {
-                    PatchTarget::Object(o) => self.rules_on(&w.fixture, &PatchTarget::Component(o.component.clone())),
+                    PatchTarget::Object(o) => {
+                        self.rules_on(&w.fixture, &PatchTarget::Component(o.component.clone()))
+                    }
                     other => self.rules_on(&w.fixture, other),
                 };
                 Some((
@@ -717,7 +720,12 @@ impl Editor {
                 let (last, rest) = names.split_last()?;
                 Some(format!("{} and {last} follow it", rest.join(", ")))
             }
-            n => Some(format!("{}, {} and {} more follow it", names[0], names[1], n - 2)),
+            n => Some(format!(
+                "{}, {} and {} more follow it",
+                names[0],
+                names[1],
+                n - 2
+            )),
         }
     }
 
@@ -802,11 +810,7 @@ impl Editor {
         let p = &self.project;
         let output = self.shared(targets, |f, t| {
             let walked = match t {
-                PatchTarget::Fixture => p
-                    .effective_patch()
-                    .walked
-                    .iter()
-                    .find(|w| &w.fixture == f),
+                PatchTarget::Fixture => p.effective_patch().walked.iter().find(|w| &w.fixture == f),
                 PatchTarget::Component(c) => p.effective_patch().walked(&ObjectId::of(c)),
                 PatchTarget::Object(o) => p.effective_patch().walked(o),
             };

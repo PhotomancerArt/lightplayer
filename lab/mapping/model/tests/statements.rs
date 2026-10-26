@@ -2381,10 +2381,7 @@ fn the_data_path_runs_object_to_object_in_patch_order() {
     let tail = e.project.data_path(&node_id(&e, "tail"));
     assert_eq!(
         tail.links,
-        vec![(
-            lamp_pos(&e, "path1", "", 24),
-            lamp_pos(&e, "path2", "", 0)
-        )]
+        vec![(lamp_pos(&e, "path1", "", 24), lamp_pos(&e, "path2", "", 0))]
     );
     assert!(
         tail.links[0].0.y > tail.links[0].1.y,
@@ -2484,11 +2481,7 @@ fn hovering_an_edge_says_what_it_carries() {
 #[test]
 fn the_bar_lead_says_what_youre_doing() {
     let mut e = editor();
-    for selection in [
-        vec![],
-        vec![comp("circle1")],
-        vec![lamp("path3", "", 2)],
-    ] {
+    for selection in [vec![], vec![comp("circle1")], vec![lamp("path3", "", 2)]] {
         e.select(selection.clone());
         assert_eq!(e.hint_bar().lead, "", "{selection:?}");
     }
@@ -2506,11 +2499,7 @@ fn the_bar_lead_says_what_youre_doing() {
     assert_eq!(e.hint_bar().lead, "Box-selecting");
     e.pointer_up(empty + Vec2::new(20.0, 20.0), none());
     // Choosing from the right-click list.
-    e.pointer_down(
-        lamp_screen(&e, "path3", "", 3),
-        Button::Secondary,
-        none(),
-    );
+    e.pointer_down(lamp_screen(&e, "path3", "", 3), Button::Secondary, none());
     assert_eq!(e.hint_bar().lead, "Choosing");
     key(&mut e, Key::Escape, none());
     // Drawing a path.
@@ -2792,7 +2781,10 @@ fn a_repeat_makes_one_copy_per_turn() {
             _ => panic!("a copy past copy 0 is an object"),
         })
         .collect();
-    assert_eq!(ids, [format!("{arm}@1"), format!("{arm}@2"), format!("{arm}@3")]);
+    assert_eq!(
+        ids,
+        [format!("{arm}@1"), format!("{arm}@2"), format!("{arm}@3")]
+    );
     assert_eq!(p.label(&copies[2]), "copy 2");
     // Copy 1 is turned a quarter clockwise: from above the centre to its
     // right.

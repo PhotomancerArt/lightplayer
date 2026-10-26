@@ -192,8 +192,7 @@ impl Opened {
         // walker's terms (a leaf makes one span, on one port): its fixture
         // opens as its box alone, and says why.
         for object in project.freeze_product_patches(&product) {
-            let Some(fixture) = project.fixture_of(&object.component).map(|n| n.id.clone())
-            else {
+            let Some(fixture) = project.fixture_of(&object.component).map(|n| n.id.clone()) else {
                 continue;
             };
             if let Some(f) = project.fixture_mut(&fixture) {

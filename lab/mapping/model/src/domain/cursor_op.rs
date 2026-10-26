@@ -76,7 +76,10 @@ pub enum PortOp {
     /// The port `plus` keys after `key` (`plus` 0: `key` itself). Absolute:
     /// "one per port from D4" makes child k `Set { key: D4, plus: k }`, so
     /// moving one child elsewhere leaves the others' ports alone.
-    Set { key: String, plus: u32 },
+    Set {
+        key: String,
+        plus: u32,
+    },
     /// `n` keys after the cursor's port: relative.
     Add(u32),
 }

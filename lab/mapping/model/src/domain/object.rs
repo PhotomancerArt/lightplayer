@@ -237,9 +237,9 @@ pub(crate) fn single_leaf(id: &ComponentId, kind: &ComponentKind) -> Option<Obje
                 outline: filled.points.clone(),
             },
         }),
-        ComponentKind::Circle { .. } | ComponentKind::Repeat { .. } | ComponentKind::Group { .. } => {
-            None
-        }
+        ComponentKind::Circle { .. }
+        | ComponentKind::Repeat { .. }
+        | ComponentKind::Group { .. } => None,
     }
 }
 

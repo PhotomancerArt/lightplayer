@@ -5,8 +5,8 @@
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
 use lab_mapping_files::{DirFiles, MemFiles, Opened};
 use lab_mapping_model::{
-    Amount, Channel, ColorOrder, ComponentKind, Direction, NodeId, NodeKind, PatchTarget,
-    Project, Start, Target,
+    Amount, Channel, ColorOrder, ComponentKind, Direction, NodeId, NodeKind, PatchTarget, Project,
+    Start, Target,
 };
 
 /// The choker opens with all five nodes, 12 paths and 73 lamps, its one

@@ -39,8 +39,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId,
-    ObjectRun, ProblemKind, ProductPatch, ProductRow, Project, Vec2,
+    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId, ObjectRun,
+    ProblemKind, ProductPatch, ProductRow, Project, Vec2,
 };
 use serde_json::{Map, Value, json};
 
@@ -173,7 +173,12 @@ impl<'a> Writer<'a> {
             .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_none()))
             .map(|n| n.id.clone())
             .collect();
-        let carried = |f: &NodeId| self.files.nodes.get(f).and_then(|x| x.product_patch.clone());
+        let carried = |f: &NodeId| {
+            self.files
+                .nodes
+                .get(f)
+                .and_then(|x| x.product_patch.clone())
+        };
         let mut explicit: BTreeSet<NodeId> = fixtures
             .iter()
             .filter(|f| carried(f).is_none())
@@ -574,7 +579,11 @@ impl<'a> Writer<'a> {
     /// object, and the product object (top-level component) it is in. A
     /// copy of a repeat's child (`panel@2`, or `panel` itself, copy 0) is
     /// the repeat's: `/<repeat>/2`.
-    fn object_path(&self, fixture: &NodeId, object: &ObjectId) -> Option<(ObjectPath, ComponentId)> {
+    fn object_path(
+        &self,
+        fixture: &NodeId,
+        object: &ObjectId,
+    ) -> Option<(ObjectPath, ComponentId)> {
         let p = self.project;
         let c = p.component(&object.component)?;
         if let Some(parent) = p.parent_group(&c.id).and_then(|id| p.component(id))
@@ -825,7 +834,12 @@ fn insert_after(obj: &mut Map<String, Value>, key: &str, value: Value, after: &s
 /// its address, reversed and turned as it runs; no auto.
 fn expanded(p: &Project, fixture: &NodeId) -> ProductPatch {
     let mut rows = Vec::new();
-    for r in p.effective_patch().runs.iter().filter(|r| &r.fixture == fixture) {
+    for r in p
+        .effective_patch()
+        .runs
+        .iter()
+        .filter(|r| &r.fixture == fixture)
+    {
         let Some(out) = p.output(&r.output) else {
             continue;
         };

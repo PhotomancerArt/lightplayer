@@ -392,7 +392,10 @@ pub fn shape_of(old: Option<&Value>, kind: &ComponentKind, ring: usize) -> Resul
         } => {
             let mut s = old_inner("repeat");
             let old_shape = s.get("shape").cloned();
-            s.insert("shape".into(), shape_of(old_shape.as_ref(), &child.kind, 0)?);
+            s.insert(
+                "shape".into(),
+                shape_of(old_shape.as_ref(), &child.kind, 0)?,
+            );
             let old_center = s.get("center").cloned();
             s.insert(
                 "center".into(),

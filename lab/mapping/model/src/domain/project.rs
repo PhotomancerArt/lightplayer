@@ -18,13 +18,13 @@
 
 use crate::domain::channel::Channel;
 use crate::domain::component::{Component, ComponentId, ComponentKind};
+use crate::domain::cursor_op::Amount;
 use crate::domain::derived::Derived;
 use crate::domain::fixture::Fixture;
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{self, Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
-use crate::domain::cursor_op::Amount;
 use crate::domain::patch_rule::Start;
 use crate::domain::pattern::Pattern;
 use crate::domain::placement::{Carried, Frame};

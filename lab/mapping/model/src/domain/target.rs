@@ -351,9 +351,10 @@ impl Project {
     pub fn lamp_count_under(&self, t: &Target) -> usize {
         match t {
             Target::Lamp { .. } => self.lamps_under(t).len(),
-            Target::Object(o) => self.placed().node(o).map_or(0, |(_, n)| {
-                n.leaves().iter().map(|o| o.lamps.len()).sum()
-            }),
+            Target::Object(o) => self
+                .placed()
+                .node(o)
+                .map_or(0, |(_, n)| n.leaves().iter().map(|o| o.lamps.len()).sum()),
             Target::Component(id) => self
                 .placed()
                 .node(&ObjectId::of(id))

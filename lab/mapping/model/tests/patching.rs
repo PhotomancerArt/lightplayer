@@ -44,7 +44,11 @@ fn an_edit_takes_what_follows_along() {
     let edit = p.patch_object(b, &out, "0", 30).unwrap();
     assert_eq!(pixels(&p, a), was_a, "before it: where it was");
     assert_eq!(pixels(&p, b), vec![30, 31, 32, 33]);
-    assert_eq!(pixels(&p, c), (34..39).collect::<Vec<_>>(), "after it: along");
+    assert_eq!(
+        pixels(&p, c),
+        (34..39).collect::<Vec<_>>(),
+        "after it: along"
+    );
     assert_eq!(edit.pinned, 0, "nothing is pinned behind your back");
 }
 
@@ -458,7 +462,14 @@ fn placing_a_circle_puts_its_rings_there_in_order() {
 #[test]
 fn reversing_a_circle_reverses_each_ring_in_its_slot() {
     let (mut p, f, out, circle) = circle(&[("D0", 40)]);
-    place(&mut p, &f, &PatchTarget::Component(circle.clone()), &out, "0", 10);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        10,
+    );
     p.edit_override(&ObjectId::of(&circle), |o| {
         o.direction = Some(Direction::Reversed)
     })
@@ -485,7 +496,10 @@ fn one_ring_reverses_without_an_address() {
     p.reverse_placement(&r2).unwrap();
     assert_eq!(pixels(&p, &r2), vec![21, 20, 19, 18]);
     let w = p.effective_patch().walked(&r2).unwrap();
-    assert!(w.sources.iter().all(|s| *s == StepSource::Follows), "no address");
+    assert!(
+        w.sources.iter().all(|s| *s == StepSource::Follows),
+        "no address"
+    );
     assert_eq!(
         p.override_of(&r2).unwrap().direction,
         Some(Direction::Reversed)
@@ -518,7 +532,14 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
 #[test]
 fn an_offset_is_a_leafs_alone() {
     let (mut p, f, out, circle) = circle(&[("D0", 40)]);
-    place(&mut p, &f, &PatchTarget::Component(circle.clone()), &out, "0", 0);
+    place(
+        &mut p,
+        &f,
+        &PatchTarget::Component(circle.clone()),
+        &out,
+        "0",
+        0,
+    );
     p.edit_override(&ObjectId::of(&circle), |o| o.offset = Some(3))
         .unwrap();
     let r1 = ObjectId::new(&circle, "r1");
@@ -541,17 +562,21 @@ fn the_inspector_shows_the_component_then_its_object() {
     assert_eq!(sections[0].0, "Component · circle1");
     assert!(sections[0].1.ends_with(&["Start", "Children"]));
     assert_eq!(sections[1].0, "Object · circle1/r2");
-    assert!(sections[1]
-        .1
-        .ends_with(&["Port", "Pixel", "Direction", "Offset", "On the wire"]));
+    assert!(
+        sections[1]
+            .1
+            .ends_with(&["Port", "Pixel", "Direction", "Offset", "On the wire"])
+    );
     assert_eq!(choice(&e, "Port").1, None, "nowhere yet: choose one");
     e.select(vec![Target::Component(circle.clone())]);
     let sections = patch_labels(&e);
     assert_eq!(sections[0].0, "Component · circle1");
     assert_eq!(sections[1].0, "Object · circle1");
-    assert!(sections[1]
-        .1
-        .ends_with(&["Port", "Pixel", "Direction", "On the wire"]));
+    assert!(
+        sections[1]
+            .1
+            .ends_with(&["Port", "Pixel", "Direction", "On the wire"])
+    );
     e.select(vec![Target::Node(f.clone())]);
     assert_eq!(
         e.rule_rows().map(|r| r.len()),
@@ -607,7 +632,10 @@ fn a_ring_with_a_port_of_its_own_says_what_follows_it() {
             _ => None,
         })
         .collect();
-    assert!(hints.contains(&"ring r2 follows it".to_string()), "{hints:?}");
+    assert!(
+        hints.contains(&"ring r2 follows it".to_string()),
+        "{hints:?}"
+    );
 }
 
 /// Direction "Reversed" on one ring, chosen in its Patch section, leaves its

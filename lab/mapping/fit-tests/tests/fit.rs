@@ -196,8 +196,7 @@ fn an_edited_zook_dome_still_fits() {
         let fixture = NodeId::new("fixture");
         let sector = p.fixture(&fixture).unwrap().components[0].id.clone();
         let mut arm = None;
-        if let ComponentKind::Repeat { child, .. } = &mut p.component_mut(&sector).unwrap().kind
-        {
+        if let ComponentKind::Repeat { child, .. } = &mut p.component_mut(&sector).unwrap().kind {
             arm = Some(child.id.clone());
             if let ComponentKind::Path { lamps, .. } = &mut child.kind {
                 *lamps = 290;
@@ -248,11 +247,7 @@ fn an_edited_choker_still_fits() {
 fn an_edited_radiance_dome_still_fits() {
     edited_still_fits(&radiance(), |p| {
         let dome = NodeId::new("dome");
-        let leaves: Vec<ObjectId> = p
-            .objects_in(&dome)
-            .iter()
-            .map(|o| o.id.clone())
-            .collect();
+        let leaves: Vec<ObjectId> = p.objects_in(&dome).iter().map(|o| o.id.clone()).collect();
         p.reverse_placement(&leaves[10]);
         p.edit_override(&leaves[10], |o| o.offset = Some(13));
         p.edit_override(&leaves[20], |o| o.off = true);

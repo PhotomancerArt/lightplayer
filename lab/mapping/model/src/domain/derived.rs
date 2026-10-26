@@ -430,9 +430,7 @@ fn index_node(node: &ObjectNode, fixture: &NodeId, p: &mut Placed) -> Vec<usize>
 /// A node with its lamps and shapes moved into world units.
 fn placed_node(node: ObjectNode, frame: Frame) -> ObjectNode {
     ObjectNode {
-        leaf: node
-            .leaf
-            .map(|o| crate::domain::project::placed(o, frame)),
+        leaf: node.leaf.map(|o| crate::domain::project::placed(o, frame)),
         children: node
             .children
             .into_iter()

@@ -139,7 +139,13 @@ impl Project {
         let roots = self.placed().tree(&n.id);
         for (k, root) in roots.iter().enumerate() {
             let from = fixture_rules.children.render(k);
-            w.enter(root, &from, &PatchTarget::Fixture, false, Direction::AsDrawn);
+            w.enter(
+                root,
+                &from,
+                &PatchTarget::Fixture,
+                false,
+                Direction::AsDrawn,
+            );
         }
         walk
     }
@@ -320,7 +326,10 @@ impl Walker<'_> {
                 self.fresh_set = true;
             }
             ChannelOp::Add(a) => {
-                self.cursor.channel = self.cursor.channel.saturating_add(a.channels(self.per_lamp))
+                self.cursor.channel = self
+                    .cursor
+                    .channel
+                    .saturating_add(a.channels(self.per_lamp))
             }
         }
     }
@@ -331,8 +340,17 @@ impl Walker<'_> {
     /// can say which port is gone.
     fn move_port(&mut self, key: &str, n: u32) {
         self.past_end = false;
-        let out = self.cursor.output.as_ref().and_then(|o| self.project.output(o));
-        match out.and_then(|out| out.ports.iter().position(|p| p.key == key).map(|i| (out, i))) {
+        let out = self
+            .cursor
+            .output
+            .as_ref()
+            .and_then(|o| self.project.output(o));
+        match out.and_then(|out| {
+            out.ports
+                .iter()
+                .position(|p| p.key == key)
+                .map(|i| (out, i))
+        }) {
             Some((out, i)) => match out.ports.get(i + n as usize) {
                 Some(p) => self.cursor.port = Some(p.key.clone()),
                 None => self.past_end = true,
@@ -478,4 +496,3 @@ fn choose<T: PartialEq>(
     }
     (keep, StepSource::Follows)
 }
-
