@@ -421,7 +421,10 @@ Off, the row says `disabled`, plain, with no button, and the same switch
 turns it back on. Where this link may not flip it the switch is dimmed, and
 a refusal says why under the line ("Bluetooth can only be turned off by
 USB…"); its hover says what a flip does, in the offer's words (Bluetooth's
-restarts the board).
+restarts the board). A switch waiting on a change on its way is dimmed and
+says why on its hover, with nothing under the line: the details never grow
+and shrink with routine work (P3), and Studio asking the board again holds
+nothing at all.
 
 ```text
 ᛒ Bluetooth        LP-3f2a                 › │   the row, which opened them
@@ -504,10 +507,35 @@ and its link counters.
 
 Its details: the switch line (Wi‑Fi and the board's switch), then the
 Wi‑Fi panel (its networks, adding one), and Connect over Wi‑Fi where the
-primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi is
-disabled on this board. It reaches Studio over USB and Bluetooth only."
+primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi
+is disabled on this board. It reaches Studio over USB and Bluetooth only."
 The panel draws no heading or switches of its own on the card: the switch
 line is both, and lightplayer.app's switch is its own row's.
+
+The panel holds still (P3): its line under the switch says how the board
+stands in every state ("Connected to Cedar Lane.", "Connecting to Cedar
+Lane…", "Not connected.", or the board's refusal in its place), and gives way to a test, which says it; a network
+being added is a row, "Saving…", with its test under it from the press;
+and the test's last line is held, "Testing · it takes a few seconds.",
+until its outcome takes the place.
+
+```text
+≋ Wi‑Fi                              (●━━)   the switch line
+Not connected.                               the line: how it stands, in every state
+▂▄▆  Cedar Lane      Not in range          › 
++ Connect to a network
+```
+
+```text
+≋ Wi‑Fi                              (●━━)   dimmed while the add is on its way
+▂▄▆  Cedar Lane      Not in range          ›   (no line: the test says it)
+▂▄▆  Starlink Apt    Saving…                 the add, from the press
+     ● Looking for Starlink Apt               its test: the steps…
+     ○ Checking the password
+     ○ Getting an address
+     Testing · it takes a few seconds.        …and the outcome's place, held
++ Connect to a network
+```
 
 ### Bluetooth ᛒ: the board's own radio
 

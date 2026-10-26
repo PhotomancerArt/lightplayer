@@ -226,6 +226,7 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
                 turn_on: card::ENABLE_CLOUD,
             },
         )
+        .waiting(input.wifi.is_some_and(|wifi| wifi.writing))
     });
     if details
         .switch

@@ -10,7 +10,7 @@
 //! Published only while the link holds edit and the board has answered its
 //! status ([`UiDeviceWifi::can_edit`], [`UiDeviceWifi::status`]), on every
 //! LightPlayer board whatever its station says (plan Q6). Drawn disabled,
-//! never hidden, while a read or a change is in flight. The board's
+//! never hidden, while a change is in flight; a read holds nothing. The board's
 //! validation is the authority; the binder mirrors it for early words, and
 //! the board's own sentence is shown when it refuses. The add verb reads
 //! **Connect** on a board that can connect and **Save** on one that cannot
@@ -59,7 +59,10 @@ pub fn wifi_offers(prefix: &OfferPath, wifi: &UiDeviceWifi) -> Vec<UiOffer> {
         return Vec::new();
     };
     let at = |verb: &str| prefix.clone().child(WIFI_SEGMENT).child(verb);
-    let busy = wifi.reading || wifi.writing;
+    // Only a change holds the controls: a read never does (the controller
+    // owes a change pressed while one is out), so the box's own re-reads
+    // never dim a switch (P3).
+    let busy = wifi.writing;
     let device = wifi.device;
     let saved: Vec<String> = status
         .networks
@@ -461,6 +464,13 @@ mod tests {
         let offers = wifi_offers(&prefix(), &busy);
         assert_eq!(offers.len(), 4, "drawn, not hidden");
         assert!(offers.iter().all(|offer| !offer.is_enabled()));
+
+        // A read holds nothing: the box's re-reads never dim a switch.
+        let mut reading = wifi(&["lp-walk-net"]);
+        reading.reading = true;
+        let offers = wifi_offers(&prefix(), &reading);
+        let enabled: Vec<bool> = offers.iter().map(UiOffer::is_enabled).collect();
+        assert_eq!(enabled, [false, true, true, true], "add waits only for its name");
 
         let mut play = wifi(&["lp-walk-net"]);
         play.can_edit = false;

@@ -31,9 +31,11 @@ pub struct UiDeviceWifi {
     pub can_edit: bool,
     /// The board's last answer; `None` until it has answered one.
     pub status: Option<NetworkStatus>,
-    /// A read is in flight.
+    /// A read is in flight. Nothing on the box shows it once a status is
+    /// held: a read never holds the controls (the controller owes a change
+    /// pressed meanwhile), so a re-read adds and removes nothing (P3).
     pub reading: bool,
-    /// A change is in flight.
+    /// A change is in flight: the verbs wait, drawn dimmed.
     pub writing: bool,
     /// The last change's (or read's) failure, in the board's words.
     pub error: Option<String>,
@@ -45,6 +47,10 @@ pub struct UiDeviceWifi {
     /// The network just added, whose test runs in its row until it is
     /// dismissed.
     pub testing: Option<String>,
+    /// The network an add in flight is saving: its row and its test show
+    /// from the press, so the board's answer changes words in place rather
+    /// than adding a row and a test card a moment later (P3).
+    pub adding: Option<String>,
 }
 
 /// One saved network's row on the Networks page.
@@ -77,6 +83,7 @@ impl UiDeviceWifi {
             heard: None,
             scanning: false,
             testing: None,
+            adding: None,
         }
     }
 
@@ -161,13 +168,14 @@ impl UiDeviceWifi {
         wifi_words::relay::line(self.status.as_ref()?)
     }
 
-    /// The Networks page's line under its header, when it has one — none
+    /// The Networks page's line under its header — one in every station
+    /// state, so a change of state changes its words in place (P3); none
     /// while a test shows in its row (the row says it).
     pub fn networks_line(&self) -> Option<String> {
         if self.test().is_some() {
             return None;
         }
-        wifi_words::networks_page_line(self.status.as_ref()?)
+        Some(wifi_words::networks_page_line(self.status.as_ref()?))
     }
 
     /// The saved networks as the Networks page lists them: the connected
@@ -184,15 +192,42 @@ impl UiDeviceWifi {
             .map(|(network, slug)| self.row(status, network, slug))
             .collect();
         rows.sort_by_key(|row| !row.in_use);
+        if let Some(adding) = self.pending() {
+            // Where the board's answer puts it: last, the newest saved.
+            rows.push(UiWifiNetworkRow {
+                ssid: adding.to_string(),
+                slug: String::new(),
+                word: row::SAVING.to_string(),
+                tone: WifiTone::Plain,
+                rssi: self.heard_as(adding).map(|heard| heard.rssi),
+                in_use: false,
+                has_password: true,
+            });
+        }
         rows
     }
 
-    /// The in-row test of the network just added, while it is saved.
+    /// The in-row test of the network just added, while it is saved — and
+    /// of the one an add is saving, from the press.
     pub fn test(&self) -> Option<UiWifiTest> {
-        let ssid = self.testing.as_deref()?;
         let status = self.status.as_ref()?;
+        if let Some(adding) = self.adding.as_deref() {
+            return Some(UiWifiTest::of(adding, status));
+        }
+        let ssid = self.testing.as_deref()?;
         status.network(ssid)?;
         Some(UiWifiTest::of(ssid, status))
+    }
+
+    /// The network an add is saving that the board does not hold yet (a
+    /// Change password is already a row).
+    fn pending(&self) -> Option<&str> {
+        let adding = self.adding.as_deref()?;
+        self.status
+            .as_ref()?
+            .network(adding)
+            .is_none()
+            .then_some(adding)
     }
 
     /// What the connect page lists: what the board heard, strongest first,
@@ -405,7 +440,11 @@ mod tests {
         assert!(wifi.rows()[0].in_use);
         assert_eq!(wifi.row_value(), "Starlink Truck");
         assert_eq!(wifi.row_tone(), WifiTone::Good);
-        assert_eq!(wifi.networks_line(), None, "connected: no line");
+        assert_eq!(
+            wifi.networks_line().as_deref(),
+            Some("Connected to Starlink Truck."),
+            "connected: the line holds its place"
+        );
         assert_eq!(wifi.rows()[0].slug, "starlink-truck");
     }
 
@@ -450,9 +489,42 @@ mod tests {
         wifi.testing = Some("lp-walk-net".to_string());
         let test = wifi.test().expect("a test row");
         assert_eq!(test.result().unwrap().headline, "Saved");
-        assert_eq!(wifi.networks_line(), None);
+        assert_eq!(wifi.networks_line(), None, "the row says it");
         wifi.testing = Some("forgotten-net".to_string());
         assert_eq!(wifi.test(), None, "a network no longer saved has no test");
+    }
+
+    /// An add shows its row and its test from the press: the board's
+    /// answer changes words in place (P3).
+    #[test]
+    fn an_add_on_its_way_shows_its_row_and_test_from_the_press() {
+        let mut wifi = wifi(
+            StationState::NotConnected,
+            vec![saved("Starlink Home", None)],
+        );
+        wifi.heard = Some(vec![heard("Starlink Apt", -60)]);
+        wifi.writing = true;
+        wifi.adding = Some("Starlink Apt".to_string());
+        assert_eq!(
+            words(&wifi),
+            [
+                ("Starlink Home".to_string(), "Not in range".to_string()),
+                ("Starlink Apt".to_string(), "Saving…".to_string()),
+            ]
+        );
+        assert_eq!(wifi.rows()[1].rssi, Some(-60));
+        let test = wifi.test().expect("its test, from the press");
+        assert_eq!(test.ssid, "Starlink Apt");
+        assert_eq!(
+            test.progress,
+            super::super::WifiTestProgress::Running(super::super::WifiTestStep::Looking)
+        );
+        assert_eq!(wifi.networks_line(), None, "the test row speaks");
+
+        // Change password: the network is a row already; only its test.
+        wifi.adding = Some("Starlink Home".to_string());
+        assert_eq!(wifi.rows().len(), 1);
+        assert_eq!(wifi.test().unwrap().ssid, "Starlink Home");
     }
 
     #[test]

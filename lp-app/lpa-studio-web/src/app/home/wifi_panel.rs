@@ -29,8 +29,18 @@
 //! `devices/<board>/wifi/…`. The panel never builds an op. The password
 //! field is a password input, its text leaves the form with the press, and
 //! it is never echoed.
+//!
+//! **It holds still** (P3, Yona 10-25: "a message near its top keeps
+//! appearing and disappearing, and everything below jumps"). A read adds
+//! and removes nothing; a change dims what it changes, and a just-added
+//! network's row and test show from the press. Each line that changes has
+//! one home that is always there: the Networks page's line (how the board
+//! stands, or the board's refusal in its place), Nearby's first line while
+//! nothing is listed (looking, or nothing heard), and the test's last line
+//! (testing, then its outcome).
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::network::wifi_words::test::{TESTING, TESTING_BODY};
 use lpa_studio_core::app::network::wifi_words::{
     CANNOT_LIST, CLOUD_RELAY_HELP, PICK_A_NETWORK, label,
 };
@@ -150,14 +160,14 @@ pub(crate) fn WifiPanel(
             forget_armed_preview,
         ),
     };
+    // The Networks page says a refusal in its line's place; another page
+    // under itself (a refusal is news, never routine).
+    let error = wifi.error.clone().filter(|_| shown != WifiPage::Networks);
     rsx! {
         div { class: panel_class,
             {body}
-            if wifi.writing {
-                p { class: HELP_CLASS, "{label::WRITING}" }
-            }
-            if let Some(error) = wifi.error.clone() {
-                p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground", "{error}" }
+            if let Some(error) = error {
+                p { class: ERROR_CLASS, "{error}" }
             }
         }
     }
@@ -200,12 +210,19 @@ fn networks_page(
     mut go: impl FnMut(WifiPage) + Copy + 'static,
 ) -> Element {
     let rows = wifi.rows();
-    let line = wifi.networks_line().filter(|_| test.is_none());
+    // One home: how the board stands, or the board's refusal in its place.
+    let line = match wifi.error.clone() {
+        Some(error) => Some((error, ERROR_CLASS)),
+        None => wifi
+            .networks_line()
+            .filter(|_| test.is_none())
+            .map(|line| (line, SAY_CLASS)),
+    };
     let device = wifi.device;
     rsx! {
         PageHead { title: label::WIFI.to_string(), switch: verbs.enabled.clone(), on_action }
-        if let Some(line) = line {
-            p { class: SAY_CLASS, "{line}" }
+        if let Some((line, class)) = line {
+            p { class: "{class}", "data-wifi-line": "true", "{line}" }
         }
         div { class: "tw:grid tw:min-w-0",
             for row in rows {
@@ -289,6 +306,9 @@ fn connect_page(
     }
     let nearby = wifi.nearby();
     let scanning = wifi.scanning;
+    // Nearby's first line while it lists nothing: looking (until a scan has
+    // answered), or that nothing was heard — words that change in place.
+    let heard_nothing = !scanning && wifi.heard.is_some();
     let _ = page;
     rsx! {
         {head}
@@ -312,8 +332,12 @@ fn connect_page(
             }
         }
         div { class: "tw:grid tw:min-w-0",
-            if scanning && nearby.is_empty() {
-                p { class: "tw:px-3 tw:py-2 tw:text-[12px] tw:text-dim-foreground tw:animate-pulse", "{label::LOOKING_FOR_NETWORKS}" }
+            if nearby.is_empty() {
+                if heard_nothing {
+                    p { class: NEARBY_LINE_CLASS, "data-wifi-nearby-line": "true", "{label::HEARS_NO_NETWORKS}" }
+                } else {
+                    p { class: "{NEARBY_LINE_CLASS} tw:animate-pulse", "data-wifi-nearby-line": "true", "{label::LOOKING_FOR_NETWORKS}" }
+                }
             }
             for heard in nearby {
                 HeardRowButton {
@@ -691,7 +715,7 @@ fn TestCard(
                 p { class: "tw:text-xs tw:leading-relaxed tw:text-status-warning-foreground", "{note}" }
             }
             if let Some(result) = result {
-                div { class: "tw:grid tw:gap-2 tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
+                div { class: RESULT_CLASS, "data-wifi-test-result": "true",
                     span {
                         b { class: if result.good { "tw:text-status-good-foreground" } else { "tw:text-strong-foreground" }, "{result.headline}" }
                         " · {result.body}"
@@ -718,6 +742,19 @@ fn TestCard(
                                 }
                             },
                         }
+                    }
+                }
+            } else {
+                // Running: the outcome's home, held — its line says the test
+                // is under way, and its Done is held in place, unseen, so
+                // the outcome changes words rather than adding them.
+                div { class: RESULT_CLASS, "data-wifi-test-result": "running",
+                    span {
+                        b { class: "tw:text-strong-foreground", "{TESTING}" }
+                        " · {TESTING_BODY}"
+                    }
+                    div { class: "tw:invisible tw:flex tw:justify-end", aria_hidden: "true",
+                        button { class: SMALL_BUTTON_CLASS, r#type: "button", tabindex: "-1", disabled: true, "{label::DONE}" }
                     }
                 }
             }
@@ -845,6 +882,18 @@ fn panel_class(in_card: bool) -> &'static str {
 }
 
 const SAY_CLASS: &str = "tw:m-0 tw:text-[12.5px] tw:leading-snug tw:text-muted-foreground";
+
+/// A refusal, in the board's words: in the Networks page's line, or under
+/// another page.
+const ERROR_CLASS: &str =
+    "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground";
+
+/// Nearby's first line while it lists nothing.
+const NEARBY_LINE_CLASS: &str = "tw:m-0 tw:px-3 tw:py-2 tw:text-[12px] tw:text-dim-foreground";
+
+/// The test's last line and its buttons: the outcome, or, running, its
+/// place held.
+const RESULT_CLASS: &str = "tw:grid tw:gap-2 tw:text-xs tw:leading-relaxed tw:text-muted-foreground";
 
 const ROW_BUTTON_CLASS: &str = "tw:-mx-1 tw:flex tw:w-[calc(100%+8px)] tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:rounded-md tw:border-0 tw:bg-transparent tw:px-1 tw:py-1.5 tw:text-left tw:hover:bg-white/5 ux-focus-ring";
 

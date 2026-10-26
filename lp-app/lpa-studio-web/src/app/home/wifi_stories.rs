@@ -451,7 +451,152 @@ fn wifi_refused() -> Element {
     panel(refused, None, None)
 }
 
+// --- 7 · Holding still --------------------------------------------------------
+//
+// Yona, 10-25, setting up a new C6: "a message near its top keeps appearing
+// and disappearing, and everything below jumps". Each run of stories below
+// is one box through its states, on the card, and every story in a run is
+// the same height: a read adds nothing, a change dims what it changes, and
+// a just-added network's row and test show from the press.
+
+#[story(
+    description = "Holding still, 1 of 3 — a joined board's Wi‑Fi details, at rest: the switch line (Wi‑Fi, on), \"Connected to Starlink Truck.\", the three saved networks and \"+ Connect to a network\"."
+)]
+fn wifi_box_holds_still_1_at_rest() -> Element {
+    wifi_details(connected_truck())
+}
+
+#[story(
+    description = "Holding still, 2 of 3 — the same box while Studio asks the board again (opening the details asks; a test asks every second): nothing on it changes. The switch stays live, and a flip pressed now goes once the read answers."
+)]
+fn wifi_box_holds_still_2_reading() -> Element {
+    let mut wifi = connected_truck();
+    wifi.reading = true;
+    wifi_details(wifi)
+}
+
+#[story(
+    description = "Holding still, 3 of 3 — the same box while a change is on its way (the switch flipped): the switch is dimmed, and its hover says \"Studio is talking to the board — a moment\". No line comes or goes."
+)]
+fn wifi_box_holds_still_3_writing() -> Element {
+    let mut wifi = connected_truck();
+    wifi.writing = true;
+    wifi_details(wifi)
+}
+
+#[story(
+    description = "An add holding still, 1 of 5 — Connect just pressed for Starlink Apt, the board not answered yet: its row is already in the list, \"Saving…\", and its test already runs under it, \"Looking for Starlink Apt\" now and \"Testing · it takes a few seconds.\" in the outcome's place."
+)]
+fn wifi_add_holds_still_1_saving() -> Element {
+    let mut wifi = adding_apt(StationState::NotConnected, RelayState::WaitingForInternet);
+    wifi.writing = true;
+    wifi.adding = Some("Starlink Apt".to_string());
+    wifi_details(wifi)
+}
+
+#[story(
+    description = "An add holding still, 2 of 5 — saved, the board looking for it, while Studio asks again for the test's next step: the row says \"Connecting…\" in place of \"Saving…\", and the re-read adds nothing."
+)]
+fn wifi_add_holds_still_2_looking_while_reading() -> Element {
+    let mut wifi = testing(
+        saved_apt(
+            StationState::Connecting {
+                ssid: "Starlink Apt".to_string(),
+                step: lpc_wire::ConnectStep::Looking,
+            },
+            RelayState::WaitingForInternet,
+        ),
+        "Starlink Apt",
+    );
+    wifi.reading = true;
+    wifi_details(wifi)
+}
+
+#[story(
+    description = "An add holding still, 3 of 5 — \"Looking for Starlink Apt\" and \"Checking the password\" ticked, \"Getting an address\" now."
+)]
+fn wifi_add_holds_still_3_getting_an_address() -> Element {
+    wifi_details(testing(
+        saved_apt(
+            StationState::Connecting {
+                ssid: "Starlink Apt".to_string(),
+                step: lpc_wire::ConnectStep::GettingAddress,
+            },
+            RelayState::WaitingForInternet,
+        ),
+        "Starlink Apt",
+    ))
+}
+
+#[story(
+    description = "An add holding still, 4 of 5 — joined (\"Getting an address · 10.0.0.23\"), \"Reaching lightplayer.app\" now; Starlink Apt leads the list, connected."
+)]
+fn wifi_add_holds_still_4_reaching_lightplayer_app() -> Element {
+    wifi_details(testing(
+        saved_apt(apt_joined(), RelayState::Connecting),
+        "Starlink Apt",
+    ))
+}
+
+#[story(
+    description = "An add holding still, 5 of 5 — every step ticked and \"Connected · good signal · 10.0.0.23\" with Done, in the place \"Testing\" held: the box is the height it was at the press."
+)]
+fn wifi_add_holds_still_5_connected() -> Element {
+    wifi_details(testing(
+        saved_apt(apt_joined(), RelayState::Connected),
+        "Starlink Apt",
+    ))
+}
+
 // --- fixtures ---------------------------------------------------------------
+
+/// A board card over USB with its Wi‑Fi row's details open on `wifi`.
+fn wifi_details(wifi: UiDeviceWifi) -> Element {
+    use crate::app::board_card::CardPart;
+    use lpa_studio_core::BarLayer;
+    rsx! {
+        div { class: CARD_FRAME,
+            crate::app::home::device_offer_story_fixtures::StoryBoardCard {
+                card: usb_card(),
+                access: Some(usb_access(Some(true), false)),
+                wifi: Some(wifi),
+                details_open: Some(CardPart::Bar(BarLayer::Wifi)),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// Starlink Home saved and out of reach; the board hears Starlink Apt, and
+/// is about to save it.
+fn adding_apt(station: StationState, relay: RelayState) -> UiDeviceWifi {
+    let mut wifi = board(station, vec![saved("Starlink Home", Some(LastAttempt::NotFound))]);
+    wifi.heard = Some(vec![heard_network("Starlink Apt", -57, true)]);
+    if let Some(status) = wifi.status.as_mut() {
+        status.relay = relay;
+    }
+    wifi
+}
+
+/// [`adding_apt`] once the board has saved Starlink Apt.
+fn saved_apt(station: StationState, relay: RelayState) -> UiDeviceWifi {
+    let last = matches!(station, StationState::Connected { .. }).then_some(LastAttempt::Connected);
+    let mut wifi = adding_apt(station, relay);
+    if let Some(status) = wifi.status.as_mut() {
+        status.networks.push(saved("Starlink Apt", last));
+    }
+    wifi
+}
+
+/// The board on Starlink Apt.
+fn apt_joined() -> StationState {
+    StationState::Connected {
+        ssid: "Starlink Apt".to_string(),
+        ip: "10.0.0.23".to_string(),
+        rssi: -57,
+        host: "lp-8e30.local".to_string(),
+    }
+}
 
 /// The popover in its frame, with the verbs core would publish.
 fn panel(wifi: UiDeviceWifi, page: Option<WifiPage>, args: Option<OfferArgs>) -> Element {
