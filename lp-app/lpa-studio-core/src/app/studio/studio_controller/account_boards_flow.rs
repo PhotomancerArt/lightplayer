@@ -4,7 +4,9 @@
 //!
 //! - **A board this browser knows** (remembered or live): it is "online at
 //!   lightplayer.app". With no link here its card moves to Online boards and
-//!   says so, and Connect through lightplayer.app is its way in; with a USB,
+//!   says so, with the project the board tells lightplayer.app it plays (its
+//!   Project row would otherwise say "not known" until a link reached it),
+//!   and Connect through lightplayer.app is its way in; with a USB,
 //!   Bluetooth or LAN link it keeps that link (plan D7), and the row only
 //!   tells the lightplayer.app row what it already says.
 //! - **A board it never met** is an in-memory roster entry under its MAC
@@ -12,7 +14,9 @@
 //!   row. It is never written to `/registry.json` (plan D6): once it says
 //!   hello over a link it is a stranger the roster remembers as usual, and
 //!   the entry folds into that board — while its link is still identifying,
-//!   the pending card stands for it alone.
+//!   the pending card stands for it alone, unless the entry's own connect
+//!   is under way: then its card says "Connecting…" until the hello, and
+//!   the pending card is not drawn beside it.
 //! - **A board offline everywhere** stays on its card in Offline boards:
 //!   a board this browser remembers takes the record's facts where the
 //!   record saw it more recently (its name, firmware, project, when it was
@@ -47,6 +51,21 @@ impl StudioController {
             .iter()
             .filter_map(|pending| relay_board(&pending.info.endpoint.0))
             .collect();
+        // A board being connected from its card: the card the person pressed
+        // keeps saying "Connecting…" until the hello, and its relay link's
+        // identifying card is not a second card for the same board.
+        let connecting = |key: BoardKey| {
+            self.wifi_connects
+                .connecting(crate::WifiConnectTarget::Relay(key))
+        };
+        let devices = &self.devices;
+        view.roster.pending.retain(|card| {
+            !devices
+                .roster()
+                .link_info(card.link)
+                .and_then(|info| relay_board(&info.endpoint.0))
+                .is_some_and(|key| connecting(key) && pending.contains(&key))
+        });
         for (key, _) in self.account_boards.rows() {
             let Some(cloud) = self.account_boards.view(key) else {
                 continue;
@@ -62,6 +81,13 @@ impl StudioController {
                         device.status == DeviceStatus::Offline && device.held_elsewhere.is_none();
                     if unreached && cloud.online {
                         device.state_label = ONLINE_AT_LIGHTPLAYER_APP.to_string();
+                        // What it plays now, as it tells lightplayer.app:
+                        // newer than anything this browser last heard.
+                        if let Some(label) = &cloud.project {
+                            device.loaded_project = LoadedProject::Running {
+                                label: label.clone(),
+                            };
+                        }
                     }
                     if unreached && !cloud.online {
                         let seen_here = view.last_seen.get(&device.id).copied();
@@ -75,12 +101,17 @@ impl StudioController {
                     device.id
                 }
                 // Its relay link is identifying: the pending card is the
-                // board's, until its hello says who it is.
-                None if pending.contains(&key) => continue,
+                // board's, until its hello says who it is — unless the
+                // entry's own connect is under way, whose card says so.
+                None if pending.contains(&key) && !connecting(key) => continue,
                 None => {
                     let entry = account_board_view(&cloud);
                     let device = entry.id;
                     view.link_kinds.insert(device, crate::UiLinkKind::Relay);
+                    // Its connect, under way or failed, as a roster card's.
+                    if let Some(connect) = self.wifi_connects.view_board(key) {
+                        view.wifi_connects.insert(device, connect);
+                    }
                     match (cloud.online, cloud.last_seen) {
                         (false, Some(seen)) => {
                             view.last_seen.insert(device, seen);

@@ -341,6 +341,22 @@ pressed in a row's details is that road alone. A board this tab already
 reaches (USB, Bluetooth, Wi‑Fi or lightplayer.app) has no road: Connect
 opens its session on that link.
 
+The connecting state lasts from the press until the board says hello, on
+the card that was pressed. The socket answering (through lightplayer.app,
+the secure link coming up) is half-way: the board is still being
+identified, and the card keeps its spinner rather than going back to its
+Connect. A board never met here does not trade its card for a separate
+"Identifying" one meanwhile. A board that never says hello gives up after a
+minute, in a held Connect's words. A second press finds the button waiting
+and dials nothing.
+
+```text
+do:   Connecting to this board through lightplayer.app.  ◌   # press → hello, one state
+bad:  (its picture, no words)               │ ☁ Connect │   # the relay answered, the board
+                                                            #   has not said hello: it reads
+                                                            #   as a press that was lost
+```
+
 ```text
 do:   │ Fabric Test                │ ≋ Connect │   # one press: Wi‑Fi, else lightplayer.app
 bad:  │ Fabric Test                │ ☁ Connect │   # on your own network, through the cloud:

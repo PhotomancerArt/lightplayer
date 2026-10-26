@@ -119,6 +119,11 @@ bad:  Old LightPlayer firmware                # spike r1: a word in front of the
 bad:  the card leaves Online boards for Offline boards and comes back, every few seconds,
       its open details closed                 # C6 walk 10-19: an erased board re-enumerating,
                                               #   "jarring and resets the ui"
+bad:  Connect pressed; the card swaps for an "Identifying" one, or shows Connect again,
+      until the board says hello              # Yona's C6 10-25: read as a lost press,
+                                              #   "it needs two presses"
+do:   Connect pressed; the same card says "Connecting to this board through
+      lightplayer.app." with its spinner until the board says hello
 ```
 
 A live number only moves forward: progress that goes back reads as the

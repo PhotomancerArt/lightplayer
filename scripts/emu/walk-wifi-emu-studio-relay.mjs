@@ -528,6 +528,79 @@ async function main() {
       await delay(1_000);
     }
   };
+  /// One press connects (defect
+  /// `2026-10-25-a-relay-connect-looked-like-it-needed-two-presses`): every
+  /// 25 ms, page-side, from just before the press until
+  /// `stopConnectTimeline`, what the board's card says (`data-surface`),
+  /// whether its face draws a Connect that can be pressed (`connect`,
+  /// `connect-relay`, `connect-wifi`), and how many board cards the page
+  /// draws; and every click on one of them, wherever it is drawn. A gap
+  /// where the card offered its Connect again, or a second card stood
+  /// beside it, is caught even if it lasted a moment.
+  const startConnectTimeline = async () => {
+    const scope = await driver.card({ board: mac });
+    await driver.evaluate(`(() => {
+      clearInterval(window.__lpConnectTimer);
+      const t0 = performance.now();
+      const timeline = { t0, presses: [], samples: [] };
+      window.__lpConnectTimeline = timeline;
+      const CONNECTS = '[data-offer-path$="/connect-relay"], [data-offer-path$="/connect"], [data-offer-path$="/connect-wifi"]';
+      const isConnect = (el) => el?.closest?.(CONNECTS);
+      window.__lpConnectClick = (event) => { if (isConnect(event.target)) timeline.presses.push(Math.round(performance.now() - t0)); };
+      document.addEventListener('click', window.__lpConnectClick, true);
+      const sample = () => {
+        const card = ${scope};
+        const enabled = card ? [...card.querySelectorAll(CONNECTS)]
+          .filter((mark) => !mark.closest('.ux-popover-layer'))
+          .some((mark) => { const all = mark.querySelectorAll('button'); const button = all[all.length - 1]; return button && !button.disabled; }) : false;
+        const now = { surface: card?.querySelector('[data-surface]')?.getAttribute('data-surface') ?? (card ? 'none' : 'no-card'),
+                      connect: enabled, cards: document.querySelectorAll('[data-board-card]').length };
+        const last = timeline.samples[timeline.samples.length - 1];
+        if (!last || last.surface !== now.surface || last.connect !== now.connect || last.cards !== now.cards) {
+          timeline.samples.push({ t: Math.round(performance.now() - t0), ...now });
+        }
+      };
+      sample();
+      window.__lpConnectTimer = setInterval(sample, 25);
+    })()`);
+  };
+  /// Stop the timeline and return it: `{ presses, samples }`, times in ms
+  /// from its start.
+  const stopConnectTimeline = async () =>
+    driver.evaluate(`(() => {
+      clearInterval(window.__lpConnectTimer);
+      document.removeEventListener('click', window.__lpConnectClick, true);
+      const { presses, samples } = window.__lpConnectTimeline;
+      return { presses, samples };
+    })()`);
+  /// Judge a timeline: one press; the card says "connecting" within a
+  /// second of it; and from then until the card says something else (the
+  /// board's hello), it draws no Connect to press and no second card stands
+  /// beside it — and what it says next is not the offline or online-at-
+  /// lightplayer.app face whose Connect asks for the press again. Returns
+  /// the numbers for the report; throws with the whole timeline otherwise.
+  const judgeOnePress = (timeline) => {
+    const { presses, samples } = timeline;
+    const fail = (why) => { throw new Error(`${why}: ${JSON.stringify(timeline)}`); };
+    if (presses.length !== 1) fail(`${presses.length} presses of Connect, not one`);
+    const pressAt = presses[0];
+    const before = [...samples].reverse().find((sample) => sample.t <= pressAt) ?? samples[0];
+    const first = samples.findIndex((sample) => sample.t >= pressAt && sample.surface === "connecting");
+    if (first < 0) fail("the card never said it was connecting");
+    const connectingAfterMs = Math.max(0, samples[first].t - pressAt);
+    if (connectingAfterMs > 1_000) fail(`the card said "connecting" ${connectingAfterMs} ms after the press`);
+    let end = first;
+    while (end + 1 < samples.length && samples[end + 1].surface === "connecting") end += 1;
+    const run = samples.slice(first, end + 1);
+    if (run.some((sample) => sample.connect)) fail("the card drew a Connect to press while it was connecting");
+    if (run.some((sample) => sample.cards !== before.cards)) fail(`a second card stood beside the board's while it connected (${before.cards} before the press)`);
+    const next = samples[end + 1];
+    if (!next) fail("the card was still connecting when the board was ready");
+    if (["online-at-cloud", "offline-reachable", "offline", "no-card"].includes(next.surface)) {
+      fail(`after "connecting" the card said "${next.surface}", which asks for the press again`);
+    }
+    return { presses: presses.length, connectingAfterMs, connectingForMs: next.t - samples[first].t, then: next.surface };
+  };
   /// The board's card back on the relay and ready: its link row reads
   /// the relay link, and core offers it a project or the editor. Returns the
   /// link row's line.
@@ -701,12 +774,16 @@ async function main() {
       seen.online = await driver.waitBar("cloud", WORDS.onlineLine, { board: mac, timeoutMs: STEP_MS });
       const hubFrom = cloud.log().length;
       const from = hold.console.mark();
+      await startConnectTimeline();
       seen.pressed = await pressConnectRelay();
       seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
       seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
       // The SAME device: the card keyed by ITS MAC (the hook) is the one
       // back on the relay link, and ready.
       const line = await readyOnRelay();
+      // One press did it, and the card said so the whole way.
+      seen.onePress = judgeOnePress(await stopConnectTimeline());
+      console.log(`  one press: "connecting" ${seen.onePress.connectingAfterMs} ms after it, for ${seen.onePress.connectingForMs} ms, then "${seen.onePress.then}"`);
       const ref = await driver.waitCard({ board: mac, timeoutMs: STEP_MS });
       const card = await cardLines();
       seen.card = card;
@@ -732,7 +809,7 @@ async function main() {
       await driver.waitBar("cloud", WORDS.relayLine, { board: mac, timeoutMs: STEP_MS });
       seen.stayed = stayed.text;
       seen.shim = await lanShimDials(driver);
-      return { hub: seen.hub, board: seen.board, line, stayed: seen.stayed };
+      return { hub: seen.hub, board: seen.board, line, stayed: seen.stayed, onePress: seen.onePress };
     }, { fatal: true });
 
     await step("T4", `${A} off the relay: the tile says "${WORDS.offline}"; back on, a press brings it back`, async (seen) => {
@@ -803,10 +880,14 @@ async function main() {
       await driver.screenshot(path.join(shots, "studio-relay-T5-never-met.png"));
       const hubFrom = cloud.log().length;
       const from = hold.console.mark();
+      await startConnectTimeline();
       seen.pressed = await pressConnectRelay();
       seen.hub = await waitHub(new RegExp(`relay: session ${board}/\\d+ open \\(member\\)`), "a member session to the board", hubFrom);
       seen.board = (await hold.console.waitFor(/\[relay\] route \d+: link \S+, secure session opening/, { from, what: "a relay route's secure session" })).trim();
       const line = await readyOnRelay();
+      // One press did it, on the card the person pressed, the whole way.
+      seen.onePress = judgeOnePress(await stopConnectTimeline());
+      console.log(`  one press: "connecting" ${seen.onePress.connectingAfterMs} ms after it, for ${seen.onePress.connectingForMs} ms, then "${seen.onePress.then}"`);
       // The session through lightplayer.app tries Wi‑Fi once (the list says
       // the board shares this network) and the shim refuses it, as Chrome
       // does without the Local Network grant: one line, the card still on
@@ -820,7 +901,7 @@ async function main() {
       await driver.waitBar("cloud", WORDS.relayLine, { board: mac, timeoutMs: STEP_MS });
       seen.stayed = stayed.text;
       seen.shim = await lanShimDials(driver);
-      return { seenAfterMs: seen.seenAfterMs, loadMs: seen.loadMs, online: seen.online, picture: seen.picture, litPixels: seen.lit, hub: seen.hub, board: seen.board, line, stayed: seen.stayed };
+      return { seenAfterMs: seen.seenAfterMs, loadMs: seen.loadMs, online: seen.online, picture: seen.picture, litPixels: seen.lit, hub: seen.hub, board: seen.board, line, stayed: seen.stayed, onePress: seen.onePress };
     });
 
     }
