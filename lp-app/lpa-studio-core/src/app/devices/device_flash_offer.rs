@@ -722,6 +722,92 @@ mod tests {
         assert!(bound.meta().consequence.arms());
     }
 
+    /// Yona's phone, 2026-10-25: a blank C6 on Chrome for Android's WebUSB
+    /// port. The port opened mid boot loop, so the first thing heard was
+    /// "invalid header" and no banner named the chip, and the install
+    /// picker listed every board kind there is. Identify now resets the
+    /// board once for its banner; once the banner answers, the picker holds
+    /// the C6's boards only, with every other board behind `all_boards`.
+    #[test]
+    fn a_blank_c6_opened_mid_boot_loop_gets_a_c6_only_pick_once_its_banner_answers() {
+        use lpa_devices::event::Input;
+        use lpa_devices::link::{LinkCommand, LinkEvent, LinkId, ResetKind};
+        use lpa_devices::replay::{Replay, Step};
+        use lpa_devices::time::Millis;
+
+        let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
+        replay.step(Millis(0), Step::attach(1, "usb-phone"));
+        replay.step(Millis(20), Step::opened(1));
+        let commands = replay.step(Millis(40), Step::line(1, "invalid header: 0xffffffff"));
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                lpa_devices::Command::Link {
+                    command: LinkCommand::RunReset(ResetKind::Normal),
+                    ..
+                }
+            )),
+            "no banner named the chip: the board is reset for one: {commands:?}"
+        );
+        assert_eq!(replay.view().pending[0].detected_chip, None, "the premise");
+
+        // The reset answers: the ROM's banner, then the loop again.
+        replay.feed(
+            Millis(150),
+            Input::link(
+                LinkId(1),
+                LinkEvent::ResetOutcome {
+                    kind: ResetKind::Normal,
+                    ok: true,
+                },
+            ),
+        );
+        replay.step(Millis(160), Step::opened(1));
+        replay.step(Millis(200), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+        replay.step(Millis(220), Step::line(1, "invalid header: 0xffffffff"));
+
+        let view = replay.view();
+        let pending = &view.pending[0];
+        assert!(pending.needs_firmware(), "{pending:?}");
+        assert_eq!(pending.detected_chip.as_deref(), Some("esp32c6"));
+        let prefix = OfferPath::board(&crate::BoardRef::New(1));
+        let offer = flash_pending_offer(pending, prefix).expect("a blank chip flashes");
+        let board = offer
+            .params()
+            .iter()
+            .find(|param| param.name == FLASH_BOARD_PARAM)
+            .expect("the pick");
+        let crate::OfferParamKind::Choice { options, .. } = &board.kind else {
+            panic!("{board:?}");
+        };
+        let shown: Vec<&str> = options
+            .iter()
+            .filter(|option| option.only_with.is_none())
+            .map(|option| option.value.as_str())
+            .collect();
+        let c6: Vec<String> = flash_offer(Some("esp32c6"))
+            .candidates
+            .into_iter()
+            .map(|choice| choice.board_id)
+            .collect();
+        assert!(!shown.is_empty());
+        assert_eq!(shown, c6, "the C6's boards, and only those");
+        assert!(
+            options
+                .iter()
+                .filter(|option| option.only_with.is_some())
+                .all(|option| option.only_with.as_deref() == Some(FLASH_ALL_BOARDS_PARAM)),
+            "every other board waits behind the toggle"
+        );
+        assert!(
+            offer
+                .params()
+                .iter()
+                .any(|param| param.name == FLASH_ALL_BOARDS_PARAM),
+            "the toggle is there"
+        );
+    }
+
     fn running(chip: Option<&str>) -> DeviceView {
         DeviceView {
             status: DeviceStatus::Ready,

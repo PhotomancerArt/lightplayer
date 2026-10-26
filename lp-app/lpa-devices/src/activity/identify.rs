@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, IncompatibleReason, WireVersion};
 use crate::firmware_age::FirmwareAge;
-use crate::link::{LinkCommand, LinkEvent};
+use crate::link::{LinkCommand, LinkEvent, ResetKind};
 use crate::time::Millis;
 use crate::wire::ClientFrame;
 
@@ -58,6 +58,15 @@ pub struct IdentifyActivity {
     /// first tick, and ask the board for nothing more ([`Self::on_hello_in_hand`]).
     #[serde(default)]
     hello_in_hand: bool,
+    /// A blank verdict that named no chip may reset the board, once, so its
+    /// ROM banner is heard ([`Self::resetting_for_the_banner`]). Off unless
+    /// the device asks for it: a board whose chip is already known, or one
+    /// with no reset lines (a network link), is never reset for it.
+    #[serde(default)]
+    banner_reset_allowed: bool,
+    /// That reset was sent in this run. One per run, whatever it heard.
+    #[serde(default)]
+    banner_reset_sent: bool,
 }
 
 impl IdentifyActivity {
@@ -70,7 +79,26 @@ impl IdentifyActivity {
             next_request_id: 1,
             winding_down: false,
             hello_in_hand: false,
+            banner_reset_allowed: false,
+            banner_reset_sent: false,
         }
+    }
+
+    /// Let a blank verdict that named no chip reset the board once, so the
+    /// ROM's banner (`ESP-ROM:esp32c6-…`) names it.
+    ///
+    /// The banner prints once per boot, before anything else. A blank chip
+    /// then floods "invalid header" until its watchdog resets it, so a port
+    /// opened mid-loop (a phone's WebUSB grant, a page opened late) hears
+    /// the flood and never the banner, and the install picker offered every
+    /// board kind there is
+    /// (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
+    /// The reset is the same pulse the card's Reset verb sends: the board
+    /// has no firmware, so it loses nothing, and the chip's own reset keeps
+    /// its USB (it does not re-enumerate).
+    pub fn with_banner_reset(mut self, allowed: bool) -> Self {
+        self.banner_reset_allowed = allowed;
+        self
     }
 
     /// An identify for a window that already holds the board's hello (a
@@ -147,6 +175,40 @@ impl IdentifyActivity {
                 summary: summary.to_string(),
             },
             commands,
+        }
+    }
+
+    /// Whether this blank verdict should first reset the board for its
+    /// banner: allowed, not sent yet this run, and no chip heard.
+    fn wants_banner(&self, ctx: &ActivityCtx<'_>) -> bool {
+        self.banner_reset_allowed
+            && !self.banner_reset_sent
+            && ctx.evidence.detected_chip().is_none()
+    }
+
+    /// Reset the board so its ROM prints the banner, and keep listening:
+    /// the reset starts a fresh window, the banner names the chip, and the
+    /// boot loop's next "invalid header" settles the verdict with it. If
+    /// the banner is lost anyway (a phone drops bytes), the next blank line
+    /// settles without it: the reset is sent once per run.
+    fn resetting_for_the_banner(&mut self, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        self.banner_reset_sent = true;
+        match ctx.link {
+            Some(link) => ActivityStep::Continue(vec![Command::Link {
+                link,
+                command: LinkCommand::RunReset(ResetKind::Normal),
+            }]),
+            None => self.settle_on_rom_verdict("blank or erased flash", ctx),
+        }
+    }
+
+    /// A ROM verdict the deadline reached (the board went quiet after the
+    /// banner reset) settles as one the line did: the port goes back.
+    fn rom_verdict(&self, ctx: &ActivityCtx<'_>) -> Option<&'static str> {
+        match ctx.evidence.classification {
+            Classification::Blank => Some("blank or erased flash"),
+            Classification::Bootloader => Some("waiting in ROM download mode"),
+            _ => None,
         }
     }
 
@@ -293,6 +355,11 @@ impl IdentifyActivity {
                     return ActivityStep::nothing();
                 }
                 if now >= self.settle_at {
+                    if self.banner_reset_sent
+                        && let Some(summary) = self.rom_verdict(ctx)
+                    {
+                        return self.settle_on_rom_verdict(summary, ctx);
+                    }
                     return self.settle(now, ctx);
                 }
                 if now >= self.next_ask_at {
@@ -354,7 +421,14 @@ impl IdentifyActivity {
             // (bench 2026-08-30: 49 adoption cycles in a row on a wiped
             // C6). The port goes back in the same step: a blank board has
             // nothing more to say, and listening only floods the journal.
+            //
+            // Unless no banner named the chip: then the board is reset once
+            // first, so the install picker can offer this chip's boards only
+            // ([`Self::with_banner_reset`]).
             LinkEvent::Line(_) if !self.winding_down => match ctx.evidence.classification {
+                Classification::Blank if self.wants_banner(ctx) => {
+                    self.resetting_for_the_banner(ctx)
+                }
                 Classification::Blank => self.settle_on_rom_verdict("blank or erased flash", ctx),
                 Classification::Bootloader => {
                     self.settle_on_rom_verdict("waiting in ROM download mode", ctx)
@@ -369,6 +443,17 @@ impl IdentifyActivity {
                     && matches!(ctx.evidence.classification, Classification::CoreOnly { .. }) =>
             {
                 self.settle(self.settle_at, ctx)
+            }
+            // The banner reset could not run (no reset lines after all, a
+            // port that refused the signals): the window it would have
+            // cleared still holds the blank verdict, so settle on it now.
+            LinkEvent::ResetOutcome { ok: false, .. }
+                if self.banner_reset_sent && !self.winding_down =>
+            {
+                match self.rom_verdict(ctx) {
+                    Some(summary) => self.settle_on_rom_verdict(summary, ctx),
+                    None => ActivityStep::nothing(),
+                }
             }
             // Boot lines (pre-verdict), errors and reset outcomes are
             // diagnosis: the fold has already recorded them and the
@@ -630,6 +715,179 @@ mod tests {
             assert!(matches!(step, ActivityStep::Continue(ref c) if c.len() == 1));
         }
         assert_eq!(identify.asks_sent(), 3);
+    }
+
+    /// The phone's case (2026-10-25): the port opened mid boot loop, so
+    /// the first line is "invalid header" and no banner named the chip. The
+    /// board is reset once, the banner it prints names the chip, and the
+    /// loop's next line settles the blank verdict with the port handed back.
+    #[test]
+    fn a_blank_board_with_no_banner_is_reset_once_for_it() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        let mut identify =
+            IdentifyActivity::new(Millis(0), Millis(5_000), 1_000).with_banner_reset(true);
+        fold(&mut evidence, Millis(0), opened(), &config);
+
+        let step = feed(
+            &mut identify,
+            &mut evidence,
+            Millis(40),
+            blank_line(),
+            &config,
+        );
+        assert_eq!(
+            step,
+            ActivityStep::Continue(vec![Command::Link {
+                link: LinkId(1),
+                command: LinkCommand::RunReset(ResetKind::Normal),
+            }]),
+            "no chip heard: reset for the banner, don't settle"
+        );
+
+        let reset = LinkEvent::ResetOutcome {
+            kind: ResetKind::Normal,
+            ok: true,
+        };
+        feed(&mut identify, &mut evidence, Millis(150), reset, &config);
+        feed(
+            &mut identify,
+            &mut evidence,
+            Millis(160),
+            opened_event(),
+            &config,
+        );
+        let banner = LinkEvent::Line("ESP-ROM:esp32c6-20220919".to_string());
+        let step = feed(&mut identify, &mut evidence, Millis(200), banner, &config);
+        assert_eq!(step, ActivityStep::nothing(), "the banner is not a verdict");
+        assert_eq!(evidence.detected_chip(), Some("esp32c6"));
+
+        let step = feed(
+            &mut identify,
+            &mut evidence,
+            Millis(220),
+            blank_line(),
+            &config,
+        );
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { ref summary },
+                    ref commands,
+                } if summary.contains("blank")
+                    && matches!(commands.as_slice(), [Command::Link { command: LinkCommand::Close, .. }])
+            ),
+            "{step:?}"
+        );
+    }
+
+    /// Once per run: a banner lost anyway (a phone drops bytes) settles on
+    /// the next blank line with no chip, and a reset the port refused
+    /// settles at once.
+    #[test]
+    fn the_banner_reset_is_sent_once_and_never_waited_on() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        let mut identify =
+            IdentifyActivity::new(Millis(0), Millis(5_000), 1_000).with_banner_reset(true);
+        fold(&mut evidence, Millis(0), opened(), &config);
+        feed(
+            &mut identify,
+            &mut evidence,
+            Millis(40),
+            blank_line(),
+            &config,
+        );
+        let reset = LinkEvent::ResetOutcome {
+            kind: ResetKind::Normal,
+            ok: true,
+        };
+        feed(&mut identify, &mut evidence, Millis(150), reset, &config);
+        let step = feed(
+            &mut identify,
+            &mut evidence,
+            Millis(220),
+            blank_line(),
+            &config,
+        );
+        assert!(matches!(step, ActivityStep::Done { .. }), "{step:?}");
+        assert_eq!(evidence.detected_chip(), None);
+
+        let mut evidence = Evidence::default();
+        let mut identify =
+            IdentifyActivity::new(Millis(0), Millis(5_000), 1_000).with_banner_reset(true);
+        fold(&mut evidence, Millis(0), opened(), &config);
+        feed(
+            &mut identify,
+            &mut evidence,
+            Millis(40),
+            blank_line(),
+            &config,
+        );
+        let refused = LinkEvent::ResetOutcome {
+            kind: ResetKind::Normal,
+            ok: false,
+        };
+        let step = feed(&mut identify, &mut evidence, Millis(60), refused, &config);
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { ref summary },
+                    ..
+                } if summary.contains("blank")
+            ),
+            "{step:?}"
+        );
+    }
+
+    /// A banner already heard, or a device that did not allow it: no reset.
+    #[test]
+    fn a_chip_already_named_or_a_reset_not_allowed_settles_at_once() {
+        let config = RosterConfig::default();
+        let settles = |allowed: bool, banner: bool| {
+            let mut evidence = Evidence::default();
+            let mut identify =
+                IdentifyActivity::new(Millis(0), Millis(5_000), 1_000).with_banner_reset(allowed);
+            fold(&mut evidence, Millis(0), opened(), &config);
+            if banner {
+                let line = LinkEvent::Line("ESP-ROM:esp32c6-20220919".to_string());
+                feed(&mut identify, &mut evidence, Millis(20), line, &config);
+            }
+            let step = feed(
+                &mut identify,
+                &mut evidence,
+                Millis(40),
+                blank_line(),
+                &config,
+            );
+            matches!(step, ActivityStep::Done { .. })
+        };
+        assert!(settles(true, true), "the banner named it");
+        assert!(settles(false, false), "the device did not allow a reset");
+        assert!(!settles(true, false), "the premise: otherwise it resets");
+    }
+
+    fn feed(
+        identify: &mut IdentifyActivity,
+        evidence: &mut Evidence,
+        now: Millis,
+        event: LinkEvent,
+        config: &RosterConfig,
+    ) -> ActivityStep {
+        let event = Event::Link {
+            link: LinkId(1),
+            event,
+        };
+        fold(evidence, now, event.clone(), config);
+        with_ctx(evidence, config, |ctx| {
+            identify.handle(now, &Input::Event(event), ctx)
+        })
+    }
+
+    fn blank_line() -> LinkEvent {
+        LinkEvent::Line("invalid header: 0xffffffff".to_string())
     }
 
     fn with_ctx<T>(

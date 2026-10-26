@@ -982,10 +982,22 @@ export class StudioDriver {
   /// starts). Finished means the work is gone and the row no longer says
   /// "none"; the board's own state (its backing's registry) is the caller's
   /// to check.
-  async flashBlank(model, { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000 } = {}) {
+  /// `expectChip`: the picker must have narrowed to that chip ("Detected
+  /// esp32c6 …"), not offered every served board because no boot banner
+  /// named it (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
+  async flashBlank(
+    model,
+    { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000, expectChip = null } = {},
+  ) {
     await this.waitBar("firmware", NO_FIRMWARE, { board, timeoutMs });
     await this.pressOffer("flash", { board, timeoutMs });
     await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the board-model picker" });
+    if (expectChip) {
+      await this.waitFor(
+        `(${PANEL})?.textContent.includes(${JSON.stringify(`Detected ${expectChip}`)})`,
+        { timeoutMs, what: `the board-model picker to narrow to ${expectChip}` },
+      );
+    }
     // Picking the model is the press: the board pick in verb mode.
     await this.click(model, { scope: PANEL });
     await this.waitWork("firmware", "running", { board, timeoutMs });
