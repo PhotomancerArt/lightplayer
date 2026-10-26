@@ -381,8 +381,22 @@ impl Device {
     /// no link to talk over.
     pub(crate) fn spawn_identify(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
         let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
-        let reducer = IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms);
+        let reducer = IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms)
+            .with_banner_reset(self.may_reset_for_the_banner());
         self.spawn_identify_with(now, settle_at, reducer, ctx)
+    }
+
+    /// Whether identify may reset a blank board whose banner it missed
+    /// ([`IdentifyActivity::with_banner_reset`]): only when nothing already
+    /// names the chip (the record remembers one it heard before) and the
+    /// link has reset lines (a network link has none, and no ROM speaks
+    /// over one).
+    fn may_reset_for_the_banner(&self) -> bool {
+        let chip_known = self
+            .record
+            .as_ref()
+            .is_some_and(|record| record.chip.is_some());
+        !chip_known && !self.resets_by_request()
     }
 
     /// Identify on a window that already holds the board's hello (step 4b
