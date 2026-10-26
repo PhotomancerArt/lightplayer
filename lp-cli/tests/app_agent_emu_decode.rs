@@ -193,7 +193,13 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
         if !f.is_complete() {
             return Err(format!("frame {} was cut short: {f:?}", f.n));
         }
-        if f.leds() != leds {
+        // The C6 follows a frame that could replay its RMT prefill with
+        // black pixels (lp-ws281x's replay recovery); they are not the strip.
+        let tail_is_black = f
+            .wire
+            .get(leds * 3..)
+            .is_some_and(|t| t.iter().all(|b| *b == 0));
+        if f.leds() < leds || !tail_is_black {
             return Err(format!(
                 "frame {} carries the wrong LED count: {} instead of {leds}",
                 f.n,
