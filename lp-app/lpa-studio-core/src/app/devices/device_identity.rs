@@ -658,6 +658,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            flash_step: None,
             update: None,
         });
         let line = device_identity_line(&view);

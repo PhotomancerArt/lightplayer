@@ -467,6 +467,42 @@ fn board_card_surface_work() -> Element {
 }
 
 #[story(
+    description = "An install on a blank board, step by step, as the surface says it (Yona's phone install, 2026-10-25: \"Installing firmware 100%\" at once, then the percent gone, then nothing for a while). READING the board (\"Reading this board before installing.\", no percent: the layout read is a few kilobytes and its 100 % read as done), INSTALLING at the write's own percent (a log line between two ticks keeps it), RESTARTING on the new firmware (\"This board is restarting on its new firmware.\": the flasher's reset and the wait for the board's hello), SAVING the board model (\"Saving the board model on this board.\"). Each wait has its words; only the write has a number."
+)]
+fn board_card_surface_install() -> Element {
+    let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
+        status: DeviceStatus::Busy,
+        activity: Some(DeviceActivityView {
+            flash_step: Some(step),
+            ..activity(DeviceActivityKind::Flash, step.label(), percent)
+        }),
+        escapes: vec![DeviceEscape::Cancel, DeviceEscape::Forget],
+        ..needs_firmware(DeviceFirmwareFace::Blank)
+    };
+    let steps = [
+        ("reading the board", at(DeviceFlashStep::ReadingBoard, None)),
+        (
+            "installing · 62%",
+            at(DeviceFlashStep::FlashingFirmware, Some(62)),
+        ),
+        ("restarting", at(DeviceFlashStep::Restarting, None)),
+        (
+            "saving the board model",
+            at(DeviceFlashStep::SavingBoardModel, None),
+        ),
+    ];
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            for (caption, card) in steps {
+                Cell { caption,
+                    StoryBoardCard { card, on_action: |_| {} }
+                }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The surface for what the board plays and who may: its files LOST (\"This board's files were lost. Restore them from a backup, or reset the board.\": with no backup in this browser, Reset is the primary), its project's SHADER ERROR (red; Edit project), NO PROJECT yet (Add a project), LOCKED (Unlock), a SEND that FAILED (Retry), its file store UNREADABLE (no button: no click here is safe), its files waiting for NEWER FIRMWARE (Update firmware), and a picture TOO LARGE to show over Bluetooth. Then the two states that say nothing over the picture: ALL WELL (Connect) and CONNECTED (Done, the panel in the rows' place). And one update over USB first, which is no notice: the board plays and connects, and the Firmware row's own Update carries it."
 )]
 fn board_card_surface_project() -> Element {
@@ -1468,6 +1504,7 @@ fn activity(kind: DeviceActivityKind, label: &str, percent: Option<u8>) -> Devic
         cancellable: true,
         cancel_requested: false,
         layout: None,
+        flash_step: None,
         update: None,
     }
 }
@@ -1580,6 +1617,7 @@ pub(crate) fn identifying() -> DeviceView {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            flash_step: None,
             update: None,
         }),
         escapes: vec![
@@ -1811,6 +1849,7 @@ fn layout_card(refused: bool) -> Element {
                         awaiting_consent: true,
                     }),
                     update: None,
+                    flash_step: Some(DeviceFlashStep::WaitingForAnswer),
                 }),
                 escapes: vec![
                     DeviceEscape::Cancel,

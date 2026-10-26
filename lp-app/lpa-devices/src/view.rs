@@ -183,6 +183,10 @@ pub struct ActivityView {
     /// [`Self::label`].
     #[serde(default)]
     pub update: Option<crate::activity::UpdateActivityView>,
+    /// A Flash's step (reading, writing, restarting, saving the board
+    /// model…), typed for the card's sentence the way [`Self::update`] is.
+    #[serde(default)]
+    pub flash_step: Option<crate::activity::FlashStep>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -298,6 +302,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         cancellable: cell.accepts_cancel() && !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
+        flash_step: cell.flash_step(),
         update: cell.update_view(),
     });
 
