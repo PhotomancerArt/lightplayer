@@ -84,13 +84,11 @@ impl Editor {
                 | Target::Span {
                     object: Some(o), ..
                 } => PatchTarget::Object(o.clone()),
-                Target::Component(c) => {
-                    let mut objects = p.objects_of(c);
-                    match (objects.next(), objects.next()) {
-                        (Some(o), None) => PatchTarget::Object(o.id.clone()),
-                        _ => PatchTarget::Component(c.clone()),
-                    }
-                }
+                // A path is its own object (copy 0 of it, in a repeat).
+                Target::Component(c) => match p.component(c) {
+                    Some(comp) if comp.is_single_object() => PatchTarget::Object(ObjectId::of(c)),
+                    _ => PatchTarget::Component(c.clone()),
+                },
                 _ => continue,
             };
             if let Some(f) = p.fixture_of_place(&target)

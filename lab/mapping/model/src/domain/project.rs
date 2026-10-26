@@ -383,21 +383,17 @@ impl Project {
         self.placed().get(id).map(|(_, o)| o)
     }
 
-    /// A component's own objects, in world units (a group has none).
+    /// The leaves a component renders, in world units and tree order: its
+    /// own, its generated ones, or everything under it (a group's
+    /// children's, every copy of a repeat's child's).
     pub fn objects_of(&self, id: &ComponentId) -> impl Iterator<Item = &Object> {
-        self.placed().of_component(id).iter().map(|(_, o)| o)
+        self.placed().of_component(id).into_iter().map(|(_, o)| o)
     }
 
-    /// Every object under a component — its own, then its children's — in
-    /// world units.
+    /// Every leaf under a component, in world units: the same as
+    /// [`Project::objects_of`], as a list.
     pub fn objects_under(&self, id: &ComponentId) -> Vec<&Object> {
-        let mut out: Vec<&Object> = self.objects_of(id).collect();
-        if let Some(c) = self.component(id) {
-            for child in c.children() {
-                out.extend(self.objects_under(&child.id));
-            }
-        }
-        out
+        self.objects_of(id).collect()
     }
 
     /// Lamps outside their own fixture's box, as (object, lamp index).

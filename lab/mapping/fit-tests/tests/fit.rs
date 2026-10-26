@@ -195,14 +195,18 @@ fn an_edited_zook_dome_still_fits() {
     edited_still_fits(&catalog("zook-dome"), |p| {
         let fixture = NodeId::new("fixture");
         let sector = p.fixture(&fixture).unwrap().components[0].id.clone();
-        if let ComponentKind::Repeat { shape, .. } = &mut p.component_mut(&sector).unwrap().kind
-            && let ComponentKind::Path { lamps, .. } = &mut **shape
+        let mut arm = None;
+        if let ComponentKind::Repeat { child, .. } = &mut p.component_mut(&sector).unwrap().kind
         {
-            *lamps = 290;
+            arm = Some(child.id.clone());
+            if let ComponentKind::Path { lamps, .. } = &mut child.kind {
+                *lamps = 290;
+            }
         }
+        let arm = arm.expect("a repeat");
         p.fixture_mut(&fixture).unwrap().places.insert(
             0,
-            placed_at(ObjectId::new(&sector, "3"), "output", "4", 0, true, 7),
+            placed_at(ObjectId::of(&arm).in_copy(3), "output", "4", 0, true, 7),
         );
     });
 }
@@ -250,7 +254,7 @@ fn an_edited_choker_still_fits() {
         f.color_order = lab_mapping_model::ColorOrder::Grb;
         f.places.insert(
             0,
-            placed_at(ObjectId::new(&a, "path"), "output", "0", 90, true, 2),
+            placed_at(ObjectId::of(&a), "output", "0", 90, true, 2),
         );
     });
 }
@@ -561,7 +565,9 @@ fn lab_objects(p: &Project, fixture: &NodeId) -> Vec<(String, lab_mapping_model:
     for c in &f.components {
         for o in lab_mapping_model::domain::object::objects_of(c) {
             let path = match &c.kind {
-                ComponentKind::Repeat { .. } => format!("/{}/{}", c.id, o.id.key),
+                ComponentKind::Repeat { .. } => {
+                    format!("/{}/{}", c.id, o.id.copies.first().copied().unwrap_or(0))
+                }
                 _ => format!("/{}", c.id),
             };
             out.push((path, o));

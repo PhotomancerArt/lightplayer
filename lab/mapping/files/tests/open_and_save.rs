@@ -58,17 +58,20 @@ fn the_choker_opens() {
 }
 
 /// The zook dome opens as one repeat of a zigzag path with a jumper: five
-/// copies of 300 lamps, copy k on port k.
+/// copies of 300 lamps, copy k on port k. The repeat holds the path as a
+/// component of its own, with an id the lab mints (`path1`): copy 0 is
+/// `path1`, copy 2 is `path1@2`.
 #[test]
 fn the_zook_dome_opens() {
     let o = open(&ZOOK_DOME);
     let p = &o.project;
     let f = p.fixture(&NodeId::new("fixture")).unwrap();
-    let ComponentKind::Repeat { shape, count, .. } = &f.components[0].kind else {
+    let ComponentKind::Repeat { child, count, .. } = &f.components[0].kind else {
         panic!("a repeat");
     };
     assert_eq!(*count, 5);
-    assert!(matches!(**shape, ComponentKind::Path { lamps: 300, ref gaps, .. } if gaps == &[6]));
+    assert!(matches!(child.kind, ComponentKind::Path { lamps: 300, ref gaps, .. } if gaps == &[6]));
+    assert_eq!(child.id.as_str(), "path1");
     assert_eq!(p.lamp_count(), 1500);
     let out = NodeId::new("output");
     for k in 0..5 {
@@ -234,7 +237,7 @@ fn a_new_place_rule_writes_a_patch() {
     p.fixture_mut(&fixture).unwrap().places.insert(
         0,
         PatchPlace {
-            on: PatchTarget::Object(lab_mapping_model::ObjectId::new(&a, "path")),
+            on: PatchTarget::Object(lab_mapping_model::ObjectId::of(&a)),
             wire: Some(Wire::At {
                 output: out.clone(),
                 port: "0".into(),

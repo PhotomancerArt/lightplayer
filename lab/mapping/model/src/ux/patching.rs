@@ -817,11 +817,11 @@ impl Editor {
             | Target::Span {
                 object: Some(o), ..
             } => Some(o.clone()),
-            Target::Component(c) => {
-                let mut objects = self.project.objects_of(c);
-                let first = objects.next()?;
-                objects.next().is_none().then(|| first.id.clone())
-            }
+            Target::Component(c) => self
+                .project
+                .component(c)
+                .is_some_and(|comp| comp.is_single_object())
+                .then(|| ObjectId::of(c)),
             _ => None,
         }
     }

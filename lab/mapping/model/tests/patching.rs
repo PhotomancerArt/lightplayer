@@ -861,7 +861,7 @@ fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec
                     ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(80.0, y)], n),
                 )
                 .unwrap();
-            ObjectId::new(&id, "path")
+            ObjectId::of(&id)
         })
         .collect();
     (p, f, out, objects)

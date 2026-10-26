@@ -367,10 +367,9 @@ impl Reader<'_> {
                     value: o.value.clone(),
                 },
             );
-            components.push(Component {
-                id: lab_id,
-                kind: o.kind.clone(),
-            });
+            let mut kind = o.kind.clone();
+            self.name_repeat_children(&mut kind);
+            components.push(Component { id: lab_id, kind });
         }
 
         // The box: the canvas, from (0, 0). A canvas that starts elsewhere
@@ -413,6 +412,28 @@ impl Reader<'_> {
             });
         }
         Ok(fixture)
+    }
+
+    /// A product repeat copies a bare shape; the lab's holds a component
+    /// with its own id, minted here (`polygon3`) the way the lab mints any
+    /// (theory "Ids"). The product's files can't hold it, so it is minted
+    /// again, the same, each time the project opens.
+    fn name_repeat_children(&mut self, kind: &mut ComponentKind) {
+        if let ComponentKind::Repeat { child, .. } = kind {
+            if child.id.as_str().is_empty() {
+                let word = child.kind.id_word();
+                let mut n = 1;
+                while self
+                    .taken_components
+                    .contains(&ComponentId::new(format!("{word}{n}")))
+                {
+                    n += 1;
+                }
+                child.id = ComponentId::new(format!("{word}{n}"));
+                self.taken_components.insert(child.id.clone());
+            }
+            self.name_repeat_children(&mut child.kind);
+        }
     }
 
     fn component_id(&mut self, product_id: &str) -> ComponentId {
@@ -616,19 +637,16 @@ pub(crate) fn rules_of(
 /// Each of a fixture's objects, with where its lamps start in the
 /// fixture's own numbering and how many it has, in wiring order.
 pub(crate) fn object_lamp_ranges(project: &Project, fixture: &NodeId) -> Vec<(ObjectId, u32, u32)> {
-    fn walk(list: &[Component], start: &mut u32, out: &mut Vec<(ObjectId, u32, u32)>) {
-        for c in list {
+    let mut out = Vec::new();
+    let mut start = 0;
+    if let Some(f) = project.fixture(fixture) {
+        for c in &f.components {
             for o in lab_mapping_model::domain::object::objects_of(c) {
                 let n = o.lamps.len() as u32;
-                out.push((o.id, *start, n));
-                *start += n;
+                out.push((o.id, start, n));
+                start += n;
             }
-            walk(c.children(), start, out);
         }
-    }
-    let mut out = Vec::new();
-    if let Some(f) = project.fixture(fixture) {
-        walk(&f.components, &mut 0, &mut out);
     }
     out
 }
@@ -648,23 +666,20 @@ fn object_of(
         .objects
         .iter()
         .find(|(_, o)| o.product_id == product_id)?;
-    let key = match (&project.component(id)?.kind, instances) {
-        (ComponentKind::Path { .. }, []) => lab_mapping_model::domain::object::PATH_KEY.to_string(),
-        (ComponentKind::Polygon { .. }, []) => {
-            lab_mapping_model::domain::object::POLYGON_KEY.to_string()
+    let c = project.component(id)?;
+    match (&c.kind, instances) {
+        (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => {
+            Some(ObjectId::new(id, rings[0].key.clone()))
         }
-        (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => rings[0].key.clone(),
-        (ComponentKind::Grid(_), []) => lab_mapping_model::domain::object::GRID_KEY.to_string(),
-        (ComponentKind::RingSet(_), []) => lab_mapping_model::domain::object::RINGS_KEY.to_string(),
-        (ComponentKind::Filled(_), []) => lab_mapping_model::domain::object::FILLED_KEY.to_string(),
-        (ComponentKind::Repeat { shape, count, .. }, [k])
-            if *k < *count && !matches!(**shape, ComponentKind::Repeat { .. }) =>
+        (_, []) if c.is_single_object() => Some(ObjectId::of(id)),
+        // `/sector/2`: copy 2 of the repeat's child, `<child>@2`.
+        (ComponentKind::Repeat { child, count, .. }, [k])
+            if *k < *count && child.is_single_object() =>
         {
-            k.to_string()
+            Some(ObjectId::of(&child.id).in_copy(*k).canonical())
         }
-        _ => return None,
-    };
-    Some(ObjectId::new(id, key))
+        _ => None,
+    }
 }
 
 /// The output a fixture auto-flows onto: the first output, in attach

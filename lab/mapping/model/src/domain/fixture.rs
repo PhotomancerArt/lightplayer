@@ -148,9 +148,7 @@ fn find_mut<'a>(list: &'a mut [Component], id: &ComponentId) -> Option<&'a mut C
         if &c.id == id {
             return Some(c);
         }
-        if let Some(children) = c.children_mut()
-            && let Some(found) = find_mut(children, id)
-        {
+        if let Some(found) = find_mut(c.children_slice_mut(), id) {
             return Some(found);
         }
     }

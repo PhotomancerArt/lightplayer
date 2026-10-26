@@ -103,7 +103,7 @@ impl Project {
         match t {
             Target::Node(id) => self.node(id).is_some(),
             Target::Component(id) => self.component(id).is_some(),
-            Target::Object(o) => self.object(o).is_some(),
+            Target::Object(o) => self.placed().node(o).is_some(),
             Target::Lamp { object, index } => self
                 .object(object)
                 .is_some_and(|o| (*index as usize) < o.lamps.len()),
@@ -143,12 +143,41 @@ impl Project {
         }
     }
 
-    /// The target that stands for an object in the tree: the component for
-    /// a path (1:1), the object itself for a ring.
+    /// The target that stands for an object node in the tree: its
+    /// component when it is the component's own node (a path, a circle,
+    /// copy 0 of a repeat's child), the object itself otherwise (a ring, a
+    /// copy `@k`).
     pub fn object_target(&self, o: &ObjectId) -> Target {
-        match self.component(&o.component) {
-            Some(c) if c.is_single_object() => Target::Component(o.component.clone()),
-            _ => Target::Object(o.clone()),
+        if o.is_component_node() {
+            Target::Component(o.component.clone())
+        } else {
+            Target::Object(o.clone())
+        }
+    }
+
+    /// The object node a target stands for, when it stands for one: a
+    /// component's own node, or an object.
+    pub fn object_of_target(&self, t: &Target) -> Option<ObjectId> {
+        match t {
+            Target::Component(id) => Some(ObjectId::of(id)),
+            Target::Object(o) => Some(o.clone()),
+            _ => None,
+        }
+    }
+
+    /// The targets for an object node's children: lamps under a leaf,
+    /// object nodes under a container.
+    fn object_children(&self, o: &ObjectId) -> Vec<Target> {
+        let Some((_, node)) = self.placed().node(o) else {
+            return Vec::new();
+        };
+        match &node.leaf {
+            Some(leaf) => lamp_targets(&leaf.id, leaf.lamps.len()),
+            None => node
+                .children
+                .iter()
+                .map(|c| self.object_target(&c.id))
+                .collect(),
         }
     }
 
@@ -160,7 +189,7 @@ impl Project {
                 Some(group) => Some(Target::Component(group.clone())),
                 None => self.fixture_of(id).map(|n| Target::Node(n.id.clone())),
             },
-            Target::Object(o) => Some(Target::Component(o.component.clone())),
+            Target::Object(o) => self.placed().parent_of(o).map(|p| self.object_target(p)),
             Target::Lamp { object, .. } => Some(self.object_target(object)),
             Target::Port { output, .. } => Some(Target::Node(output.clone())),
             Target::Span { .. } => t.port_of_pixel(),
@@ -206,31 +235,8 @@ impl Project {
                     .collect(),
                 Some(NodeKind::Source(_) | NodeKind::Other(_)) | None => Vec::new(),
             },
-            Target::Component(id) => {
-                let Some(c) = self.component(id) else {
-                    return Vec::new();
-                };
-                if matches!(c.kind, crate::ComponentKind::Group { .. }) {
-                    return c
-                        .children()
-                        .iter()
-                        .map(|c| Target::Component(c.id.clone()))
-                        .collect();
-                }
-                let mut objects = self.objects_of(id);
-                if c.is_single_object() {
-                    objects
-                        .next()
-                        .map(|o| lamp_targets(&o.id, o.lamps.len()))
-                        .unwrap_or_default()
-                } else {
-                    objects.map(|o| Target::Object(o.id.clone())).collect()
-                }
-            }
-            Target::Object(o) => self
-                .object(o)
-                .map(|obj| lamp_targets(o, obj.lamps.len()))
-                .unwrap_or_default(),
+            Target::Component(id) => self.object_children(&ObjectId::of(id)),
+            Target::Object(o) => self.object_children(o),
             Target::Port { output, key } => {
                 self.spans(output, key).iter().map(|s| s.target()).collect()
             }
@@ -310,8 +316,14 @@ impl Project {
                 .into_iter()
                 .collect(),
             Target::Object(o) => self
-                .object(o)
-                .map(|o| o.lamps.iter().map(|l| l.pos).collect())
+                .placed()
+                .node(o)
+                .map(|(_, n)| {
+                    n.leaves()
+                        .into_iter()
+                        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+                        .collect()
+                })
                 .unwrap_or_default(),
             Target::Component(id) => self
                 .objects_under(id)
@@ -332,7 +344,9 @@ impl Project {
     pub fn lamp_count_under(&self, t: &Target) -> usize {
         match t {
             Target::Lamp { .. } => self.lamps_under(t).len(),
-            Target::Object(o) => self.object(o).map_or(0, |o| o.lamps.len()),
+            Target::Object(o) => self.placed().node(o).map_or(0, |(_, n)| {
+                n.leaves().iter().map(|o| o.lamps.len()).sum()
+            }),
             Target::Component(id) => self.objects_under(id).iter().map(|o| o.lamps.len()).sum(),
             Target::Node(_) => self
                 .children(Some(t))
@@ -349,7 +363,7 @@ impl Project {
         match t {
             Target::Node(id) => self.node_name(id),
             Target::Component(id) => id.to_string(),
-            Target::Object(o) => format!("{} {}", self.object_word(o), o.key),
+            Target::Object(o) => self.object_label(o),
             Target::Lamp { index, .. } => format!("lamp {index}"),
             Target::Port { output, key } => self
                 .output(output)
@@ -375,7 +389,14 @@ impl Project {
     pub fn long_label(&self, t: &Target) -> String {
         match t {
             Target::Node(_) | Target::Component(_) => self.label(t),
-            Target::Object(o) => format!("{} {} of {}", self.object_word(o), o.key, o.component),
+            Target::Object(o) => match self.placed().parent_of(o) {
+                Some(p) => format!(
+                    "{} of {}",
+                    self.object_label(o),
+                    self.long_label(&self.object_target(p))
+                ),
+                None => self.object_label(o),
+            },
             Target::Lamp { object, .. } => {
                 let parent = self.object_target(object);
                 format!("{} of {}", self.label(t), self.long_label(&parent))
@@ -390,12 +411,21 @@ impl Project {
         }
     }
 
-    /// What one of a component's objects is called: a circle's are rings,
-    /// a repeat's are copies.
+    /// What an object is called: a circle's are rings, a repeat's copies
+    /// are copies.
     pub fn object_word(&self, o: &ObjectId) -> &'static str {
-        match self.component(&o.component).map(|c| &c.kind) {
-            Some(crate::ComponentKind::Repeat { .. }) => "copy",
-            _ => "ring",
+        if o.key.is_empty() { "copy" } else { "ring" }
+    }
+
+    /// An object's short label: `ring r2`, `copy 2` (the innermost copy it
+    /// is), and a ring in a copy says both (`ring r2 · copy 2`).
+    fn object_label(&self, o: &ObjectId) -> String {
+        let copy = o.copies.first().map(|k| format!("copy {k}"));
+        match (o.key.is_empty(), copy) {
+            (true, Some(copy)) => copy,
+            (true, None) => o.component.to_string(),
+            (false, None) => format!("ring {}", o.key),
+            (false, Some(copy)) => format!("ring {} · {copy}", o.key),
         }
     }
 

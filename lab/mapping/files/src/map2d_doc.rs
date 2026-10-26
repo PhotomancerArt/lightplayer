@@ -24,7 +24,7 @@ use lab_mapping_model::domain::component::Ring;
 use lab_mapping_model::domain::filled_polygon::FilledPolygon;
 use lab_mapping_model::domain::grid::{Grid, Routing, StartCorner};
 use lab_mapping_model::domain::ring_set::RingSet;
-use lab_mapping_model::{ComponentKind, Vec2};
+use lab_mapping_model::{Component, ComponentId, ComponentKind, Vec2};
 use serde_json::{Map, Value};
 
 use crate::json::{f32_of, num_f32, point_f32, points_f32, read_point, set, u32_of};
@@ -158,8 +158,14 @@ fn kind_of(shape: &Value) -> Result<ComponentKind, String> {
                 .get("center")
                 .and_then(read_point)
                 .ok_or("a repeat has no center")?;
+            // The product's repeat copies a bare shape; the lab's holds a
+            // component, whose id the project mints once it is open
+            // (`product_project.rs`).
             Ok(ComponentKind::Repeat {
-                shape: Box::new(kind_of(inner)?),
+                child: Box::new(Component {
+                    id: ComponentId::new(""),
+                    kind: kind_of(inner)?,
+                }),
                 center: Vec2::new(x, y),
                 count: count(s)?,
             })
@@ -380,13 +386,13 @@ pub fn shape_of(old: Option<&Value>, kind: &ComponentKind, ring: usize) -> Resul
             ("polygon", s)
         }
         ComponentKind::Repeat {
-            shape,
+            child,
             center,
             count,
         } => {
             let mut s = old_inner("repeat");
             let old_shape = s.get("shape").cloned();
-            s.insert("shape".into(), shape_of(old_shape.as_ref(), shape, 0)?);
+            s.insert("shape".into(), shape_of(old_shape.as_ref(), &child.kind, 0)?);
             let old_center = s.get("center").cloned();
             s.insert(
                 "center".into(),
@@ -404,7 +410,11 @@ pub fn shape_of(old: Option<&Value>, kind: &ComponentKind, ring: usize) -> Resul
                 point_f32(old_center.as_ref(), center.x, center.y),
             );
             let old_radius = s.get("radius").cloned();
-            s.insert("radius".into(), num_f32(old_radius.as_ref(), r.radius));
+            // A ring of one lamp is that lamp at the centre (the lab's
+            // rule); the product puts a ring's lamp 0 on its radius, so it
+            // is written with none.
+            let radius = if r.lamps == 1 { 0.0 } else { r.radius };
+            s.insert("radius".into(), num_f32(old_radius.as_ref(), radius));
             s.insert("outer_count".into(), r.lamps.into());
             let had = s.contains_key("dir");
             set(

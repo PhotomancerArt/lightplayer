@@ -98,6 +98,7 @@ pub use domain::geom::{Rect, Vec2};
 pub use domain::node::{Node, NodeId, NodeKind};
 pub use domain::notice::{Notice, NoticeKind};
 pub use domain::object::{Lamp, Object, ObjectId, ObjectShape};
+pub use domain::object_tree::{ObjectNode, ObjectNodeKind};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
 pub use domain::patch::{

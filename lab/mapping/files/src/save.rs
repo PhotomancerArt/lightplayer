@@ -424,7 +424,7 @@ impl<'a> Writer<'a> {
             rotation,
         } in rows
         {
-            let (Some(out), Some(c)) = (p.output(&output), p.component(&object.component)) else {
+            let Some(out) = p.output(&output) else {
                 continue;
             };
             let Some(start) = out.port_start(&port) else {
@@ -433,10 +433,10 @@ impl<'a> Writer<'a> {
             let source = match read_as_range(&object) {
                 Some(range) => range,
                 None => {
-                    let Some(path) = self.object_path(&n.id, c, &object.key) else {
+                    let Some((path, owner)) = self.object_path(&n.id, &object) else {
                         continue;
                     };
-                    addressed.insert(c.id.clone());
+                    addressed.insert(owner);
                     PatchSource::Path { path, range: None }
                 }
             };
@@ -477,17 +477,49 @@ impl<'a> Writer<'a> {
     }
 
     /// `/door`, `/sector/2`, `/circle1-r2`: what a patch row calls an
-    /// object.
-    fn object_path(&self, fixture: &NodeId, c: &Component, key: &str) -> Option<ObjectPath> {
+    /// object, and the product object (top-level component) it is in. A
+    /// copy of a repeat's child (`panel@2`, or `panel` itself, copy 0) is
+    /// the repeat's: `/<repeat>/2`.
+    fn object_path(&self, fixture: &NodeId, object: &ObjectId) -> Option<(ObjectPath, ComponentId)> {
+        let p = self.project;
+        let c = p.component(&object.component)?;
+        if let Some(parent) = p.parent_group(&c.id).and_then(|id| p.component(id))
+            && let ComponentKind::Repeat { .. } = &parent.kind
+        {
+            // The product's repeats copy one shape: its object is a copy.
+            let [k] = object.copies.as_slice() else {
+                return object.copies.is_empty().then(|| {
+                    (
+                        ObjectPath {
+                            id: self.product_id(fixture, parent),
+                            instances: vec![0],
+                        },
+                        parent.id.clone(),
+                    )
+                });
+            };
+            return Some((
+                ObjectPath {
+                    id: self.product_id(fixture, parent),
+                    instances: vec![*k],
+                },
+                parent.id.clone(),
+            ));
+        }
         let id = self.product_id(fixture, c);
-        let (id, instances) = match &c.kind {
-            ComponentKind::Repeat { .. } => (id, vec![key.parse().ok()?]),
+        let id = match &c.kind {
             ComponentKind::Circle { rings, .. } if rings.len() > 1 => {
-                (format!("{id}-{key}"), Vec::new())
+                format!("{id}-{}", object.key)
             }
-            _ => (id, Vec::new()),
+            _ => id,
         };
-        Some(ObjectPath { id, instances })
+        Some((
+            ObjectPath {
+                id,
+                instances: Vec::new(),
+            },
+            c.id.clone(),
+        ))
     }
 
     /// A component's id in its document: the carried one, else its lab id

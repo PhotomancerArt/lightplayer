@@ -16,6 +16,7 @@ pub mod grid;
 pub mod node;
 pub mod notice;
 pub mod object;
+pub mod object_tree;
 pub mod other_node;
 pub mod output;
 pub mod output_overrides;
