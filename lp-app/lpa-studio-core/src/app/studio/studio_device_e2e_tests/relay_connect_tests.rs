@@ -189,6 +189,61 @@ fn a_board_met_over_usb_is_reached_through_lightplayer_app_after_unplug_as_the_s
     bench.not_offered(&connect);
 }
 
+/// One press of the lightplayer.app row's Connect on a board met over USB
+/// (defect 2026-10-25): its card says it is connecting through
+/// lightplayer.app from the press until the board's hello — the relay's
+/// answer is half-way, not the end, so the card never offers Connect again
+/// meanwhile — and the board's identifying relay link is not a second card.
+#[test]
+fn one_press_on_a_remembered_board_says_connecting_until_its_hello() {
+    let device = relay_light_player("dev00000relaycon09");
+    let (mut bench, tasks) = identified(&device, "usb-relay-connect-9");
+    let rig = with_relay(&mut bench, &device);
+    let target = bench.view().devices[0].id;
+    unplug(&mut bench, &tasks, target);
+    bench
+        .controller
+        .apply_access_command(crate::AccessCommand::AccountKeys(Some(account(None))));
+    bench.step(&tasks);
+    let connect = bench.device_verb(target, "connect-relay");
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("the connect starts");
+
+    let mut turns = 0;
+    while !bench.view().devices.iter().any(|card| {
+        card.id == target && card.status != lpa_devices::device::DeviceStatus::Offline
+    }) {
+        let cards = bench.controller.view().home.unwrap().devices.cards;
+        assert_eq!(
+            cards.len(),
+            1,
+            "turn {turns}: one card for the board while it connects: {:?}",
+            cards.iter().map(|card| card.surface.state).collect::<Vec<_>>()
+        );
+        assert_eq!(cards[0].device, target, "the board's own card");
+        super::account_boards_tests::assert_connecting_through_lightplayer_app(&cards[0], turns);
+        bench.step(&tasks);
+        turns += 1;
+        assert!(turns < 200, "the board never said hello");
+    }
+    assert!(turns > 1, "the connect took more than the press's own turn");
+    bench.run_until(&tasks, "the board ready on the relay", |bench| {
+        bench.view().devices.iter().any(|card| {
+            card.id == target && card.activity.is_none() && card.state_label == "Ready"
+        })
+    });
+    assert_eq!(rig.asked.borrow().as_slice(), [BOARD], "one dial");
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty(),
+        "the hello ended the connect"
+    );
+}
+
 #[test]
 fn signed_out_the_cloud_row_offers_sign_in_which_asks_the_page_to_sign_in() {
     let device = relay_light_player("dev00000relaycon03");

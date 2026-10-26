@@ -6,10 +6,18 @@
 //! One attempt per target: a known board on the LAN or through the relay
 //! (by MAC, so the answer finds its card even if the roster merged the entry
 //! meanwhile), or Connect a board's one address field. A new press replaces the
-//! target's attempt; a success clears it (the board's card takes over from
-//! there); a failure stays, in plain words, until the next press — or until
-//! the board is reached by another road (plugged in, say), when it no longer
-//! says anything true.
+//! target's attempt. A card's connect is under way from the press until the
+//! board says who it is: the socket answering (through the relay, its secure
+//! link up) is half-way, and the card keeps saying "Connecting…" until a link
+//! of this tab reaches the board, or [`CONNECT_INTENT_GRACE`] passes with no
+//! hello, when it says [`CONNECT_GAVE_UP`] (a held Connect's words). Before,
+//! the socket's answer cleared it, and the card offered its Connect again
+//! while the board was still being identified — the press looked lost
+//! (`docs/defects/2026-10-25-a-relay-connect-looked-like-it-needed-two-presses.md`).
+//! The address field's connect ends at the socket's answer: the new board's
+//! own card takes over. A failure stays, in plain words, until the next
+//! press — or until the board is reached by another road (plugged in, say),
+//! when it no longer says anything true.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +25,7 @@ use lpa_devices::BoardKey;
 
 use super::relay_connect_failure::RelayConnectFailure;
 use super::wifi_connect_failure::WifiConnectFailure;
+use crate::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE};
 
 /// Whose connect it is.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -30,7 +39,7 @@ pub enum WifiConnectTarget {
 }
 
 /// One connect, under way or failed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct WifiConnectAttempt {
     /// The host (and port) dialled, as the words name it.
     host: String,
@@ -39,6 +48,9 @@ struct WifiConnectAttempt {
     /// It was turned away because another device holds the board's one
     /// network connection.
     busy: bool,
+    /// When the socket answered (epoch seconds): the board is being
+    /// identified, and the card still waits for its hello.
+    answered_at: Option<f64>,
 }
 
 /// What a card or Connect a board says about its connect.
@@ -75,21 +87,26 @@ impl WifiConnects {
                 host: host.to_string(),
                 failure: None,
                 busy: false,
+                answered_at: None,
             },
         );
     }
 
-    /// `target`'s connect never reached a socket, or its socket answered:
-    /// the failure stays until the next press; a success clears it.
+    /// `target`'s connect never reached a socket, or its socket answered
+    /// at `now`: the failure stays until the next press; a card's success
+    /// waits for the board's hello ([`Self::settle`]), the address field's
+    /// clears.
     pub fn finish(
         &mut self,
         target: WifiConnectTarget,
         host: &str,
         result: Result<(), WifiConnectFailure>,
+        now: f64,
     ) {
         self.finish_with_words(
             target,
             host,
+            now,
             result.map_err(|failure| {
                 let busy = matches!(failure, WifiConnectFailure::Busy);
                 (failure.words(), busy)
@@ -103,10 +120,12 @@ impl WifiConnects {
         target: WifiConnectTarget,
         host: &str,
         result: Result<(), RelayConnectFailure>,
+        now: f64,
     ) {
         self.finish_with_words(
             target,
             host,
+            now,
             result.map_err(|failure| {
                 let busy = matches!(failure, RelayConnectFailure::Busy);
                 (failure.words(), busy)
@@ -118,19 +137,32 @@ impl WifiConnects {
         &mut self,
         target: WifiConnectTarget,
         host: &str,
+        now: f64,
         result: Result<(), (String, bool)>,
     ) {
-        match result {
-            Ok(()) => {
+        match (result, target) {
+            (Ok(()), WifiConnectTarget::Address) => {
                 self.attempts.remove(&target);
             }
-            Err((words, busy)) => {
+            (Ok(()), _) => {
+                self.attempts.insert(
+                    target,
+                    WifiConnectAttempt {
+                        host: host.to_string(),
+                        failure: None,
+                        busy: false,
+                        answered_at: Some(now),
+                    },
+                );
+            }
+            (Err((words, busy)), _) => {
                 self.attempts.insert(
                     target,
                     WifiConnectAttempt {
                         host: host.to_string(),
                         failure: Some(words),
                         busy,
+                        answered_at: None,
                     },
                 );
             }
@@ -156,20 +188,34 @@ impl WifiConnects {
         self.forget(WifiConnectTarget::Relay(board));
     }
 
-    /// Drop the failed connects of every board `reached` says a link
-    /// reaches now: a board plugged in after its Wi‑Fi connect failed is
-    /// not unreachable. A connect under way is left to finish. Whether
-    /// anything went.
-    pub fn settle_reached(&mut self, reached: impl Fn(BoardKey) -> bool) -> bool {
-        let before = self.attempts.len();
+    /// Settle every card's connect against what `reached` says a link of
+    /// this tab reaches at `now`. A board reached: its failure goes (plugged
+    /// in after its Wi‑Fi connect failed, it is not unreachable), and so
+    /// does a connect whose socket answered (the board said hello: its card
+    /// takes over). A connect whose socket answered and whose board has not
+    /// said hello within [`CONNECT_INTENT_GRACE`] gives up, in a held
+    /// Connect's words. A connect still dialling is left to finish. Whether
+    /// anything changed.
+    pub fn settle(&mut self, reached: impl Fn(BoardKey) -> bool, now: f64) -> bool {
+        let before = self.attempts.clone();
         self.attempts.retain(|target, attempt| {
             let board = match target {
                 WifiConnectTarget::Board(board) | WifiConnectTarget::Relay(board) => *board,
                 WifiConnectTarget::Address => return true,
             };
-            attempt.failure.is_none() || !reached(board)
+            let settled = attempt.failure.is_some() || attempt.answered_at.is_some();
+            !(settled && reached(board))
         });
-        self.attempts.len() != before
+        for attempt in self.attempts.values_mut() {
+            let late = attempt
+                .answered_at
+                .is_some_and(|at| now - at >= CONNECT_INTENT_GRACE.as_secs_f64());
+            if late {
+                attempt.answered_at = None;
+                attempt.failure = Some(CONNECT_GAVE_UP.to_string());
+            }
+        }
+        self.attempts != before
     }
 
     /// What `target`'s card or slot says.
@@ -213,7 +259,13 @@ mod tests {
                 busy: false
             })
         );
-        connects.finish(board, "10.0.0.5", Ok(()));
+        connects.finish(board, "10.0.0.5", Ok(()), 1.0);
+        assert!(
+            connects.connecting(board),
+            "the socket answered: the card waits for the board's hello"
+        );
+        assert!(!connects.settle(|_| false, 2.0), "no hello yet");
+        assert!(connects.settle(|_| true, 2.0), "the board said hello");
         assert_eq!(connects.view(board), None);
 
         connects.start(WifiConnectTarget::Address, "10.0.0.9");
@@ -221,6 +273,7 @@ mod tests {
             WifiConnectTarget::Address,
             "10.0.0.9",
             Err(WifiConnectFailure::Busy),
+            1.0,
         );
         let view = connects.view(WifiConnectTarget::Address).unwrap();
         assert!(!view.connecting);
@@ -242,6 +295,7 @@ mod tests {
             WifiConnectTarget::Board(failed),
             "10.0.0.5",
             Err(WifiConnectFailure::Busy),
+            1.0,
         );
         connects.start(WifiConnectTarget::Relay(dialling), "lightplayer.app");
         connects.start(WifiConnectTarget::Address, "10.0.0.9");
@@ -249,10 +303,11 @@ mod tests {
             WifiConnectTarget::Address,
             "10.0.0.9",
             Err(WifiConnectFailure::Busy),
+            1.0,
         );
 
-        assert!(!connects.settle_reached(|_| false), "nothing reached");
-        assert!(connects.settle_reached(|_| true));
+        assert!(!connects.settle(|_| false, 2.0), "nothing reached");
+        assert!(connects.settle(|_| true, 2.0));
         assert_eq!(connects.view_board(failed), None, "reached: no failure");
         assert!(connects.connecting(WifiConnectTarget::Relay(dialling)));
         assert!(
@@ -269,11 +324,38 @@ mod tests {
         connects.start(relay, "lightplayer.app");
         assert!(connects.connecting(relay));
         assert!(!connects.connecting(WifiConnectTarget::Board(key)));
-        connects.finish_relay(relay, "lightplayer.app", Err(RelayConnectFailure::Offline));
+        connects.finish_relay(
+            relay,
+            "lightplayer.app",
+            Err(RelayConnectFailure::Offline),
+            1.0,
+        );
         let said = connects.view_board(key).expect("the card says why");
         assert!(said.through_relay && !said.connecting);
         assert_eq!(said.error.as_deref(), Some("The board isn't online."));
         connects.forget_board(key);
         assert_eq!(connects.view_board(key), None);
+    }
+
+    #[test]
+    fn an_answered_connect_waits_for_the_hello_then_gives_up_after_the_grace() {
+        let mut connects = WifiConnects::default();
+        let key = BoardKey::parse("a0f26287b48c").unwrap();
+        let relay = WifiConnectTarget::Relay(key);
+        connects.start(relay, "lightplayer.app");
+        connects.finish_relay(relay, "lightplayer.app", Ok(()), 10.0);
+        let grace = CONNECT_INTENT_GRACE.as_secs_f64();
+        assert!(!connects.settle(|_| false, 10.0 + grace - 1.0));
+        assert!(connects.connecting(relay), "still identifying the board");
+        assert!(connects.settle(|_| false, 10.0 + grace));
+        let said = connects.view_board(key).expect("the card says why");
+        assert!(!said.connecting);
+        assert_eq!(said.error.as_deref(), Some(CONNECT_GAVE_UP));
+
+        // The address field's connect ends at the socket's answer: the new
+        // board's own card takes over.
+        connects.start(WifiConnectTarget::Address, "10.0.0.9");
+        connects.finish(WifiConnectTarget::Address, "10.0.0.9", Ok(()), 1.0);
+        assert_eq!(connects.view(WifiConnectTarget::Address), None);
     }
 }

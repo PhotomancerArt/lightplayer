@@ -1024,7 +1024,8 @@ impl StudioController {
             self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         }
         let connected = result.is_ok();
-        self.wifi_connects.finish(target, host, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish(target, host, result, now);
         if let crate::WifiConnectTarget::Board(board) = target {
             match connected {
                 true => {
@@ -1096,8 +1097,13 @@ impl StudioController {
         }
         self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
-        self.wifi_connects
-            .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish_relay(
+            crate::WifiConnectTarget::Relay(board),
+            RELAY_HOST,
+            result,
+            now,
+        );
         self.fall_through_ended(board, !connected);
         if connected {
             self.device_sweep_pending = true;
@@ -2164,7 +2170,7 @@ impl StudioController {
         // A failed Connect's words go once the board is reached by any
         // road, and so do a failed Wi‑Fi or lightplayer.app connect's.
         self.settle_connect_failure();
-        self.settle_wifi_connect_failures();
+        self.settle_wifi_connects();
         // One tab holds a board: a refused open is read against the claims
         // standing now, at this batch's reconcile.
         if let Some(link) = link_error {
@@ -4778,6 +4784,9 @@ impl StudioController {
         Cancel: CancelSignal + ?Sized,
     {
         self.try_pending_device_lens().await;
+        // A card's connect whose board never said hello gives up, here as
+        // a held Connect does.
+        self.settle_wifi_connects();
         self.try_resume_held_lens().await;
         // A session through lightplayer.app moves onto Wi‑Fi, and back.
         self.drive_lan_moves().await;
