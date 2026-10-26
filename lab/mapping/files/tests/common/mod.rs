@@ -2,7 +2,7 @@
 //! page lays it out, and reading where lamps land and what the inspector
 //! says.
 
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each journey uses only some of these")]
 
 use lab_mapping_files::Opened;
 use lab_mapping_files::embedded::Embedded;
