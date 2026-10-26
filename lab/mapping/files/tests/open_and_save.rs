@@ -5,12 +5,14 @@
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
 use lab_mapping_files::{DirFiles, MemFiles, Opened};
 use lab_mapping_model::{
-    Channel, ColorOrder, ComponentKind, Direction, NodeId, NodeKind, PatchPlace, PatchTarget,
-    Project, Target, Wire,
+    Amount, Channel, ColorOrder, ComponentKind, Direction, NodeId, NodeKind, PatchTarget,
+    Project, Start, Target,
 };
 
 /// The choker opens with all five nodes, 12 paths and 73 lamps, its one
 /// port taking the rest, and its ids minted from its object names; its
+/// auto flow frozen into a start at its port's first pixel, with nothing
+/// overridden (the letters run end to end from there); its
 /// shader opens as a render source on `visual.out`, keeping its GLSL, and
 /// its fixture reads that channel.
 #[test]
@@ -30,14 +32,14 @@ fn the_choker_opens() {
     let out = NodeId::new("output");
     assert_eq!(p.output(&out).unwrap().ports[0].pixels, None);
     assert_eq!(
-        f.places,
-        vec![PatchPlace {
-            wire: Some(Wire::Auto {
-                output: out.clone()
-            }),
-            ..PatchPlace::on(PatchTarget::Fixture)
-        }]
+        f.start,
+        Start::At {
+            output: out.clone(),
+            port: "0".into(),
+            channel: Amount::px(0)
+        }
     );
+    assert!(f.overrides.is_empty());
     assert_eq!(p.port_fill(&out, "0"), (73, 73));
     let shader = p.node(&NodeId::new("shader")).unwrap();
     let NodeKind::Source(src) = &shader.kind else {
@@ -83,7 +85,9 @@ fn the_zook_dome_opens() {
 
 /// The radiance dome opens: 55 repeats of 5 copies, 22,000 lamps, ten
 /// named outputs of 32 ports, every panel placed by hand (no auto rule),
-/// its two quirks kept.
+/// frozen into a start and the overrides the walk needs to land every
+/// panel where the product does, its two quirks kept (one panel reversed,
+/// one entered off its first lamp).
 #[test]
 fn the_radiance_dome_opens() {
     let o = open(&RADIANCE_DOME);
@@ -98,22 +102,19 @@ fn the_radiance_dome_opens() {
             .iter()
             .all(|n| n.output().unwrap().ports.len() == 32)
     );
-    assert_eq!(f.places.len(), 275);
-    assert!(f.places.iter().all(|r| matches!(
-        (&r.on, &r.wire),
-        (PatchTarget::Object(_), Some(Wire::At { .. }))
-    )));
+    assert!(matches!(f.start, Start::At { .. }));
+    assert!(f.overrides.len() <= 275);
     assert_eq!(
-        f.places
-            .iter()
-            .filter(|r| r.direction == Some(Direction::Reversed))
+        f.overrides
+            .values()
+            .filter(|o| o.direction == Some(Direction::Reversed))
             .count(),
         1
     );
     assert_eq!(
-        f.places
-            .iter()
-            .filter(|r| r.turn.is_some_and(|t| t != 0))
+        f.overrides
+            .values()
+            .filter(|o| o.offset.is_some_and(|t| t != 0))
             .count(),
         1
     );
@@ -148,10 +149,30 @@ fn what_saving_writes_opens_as_the_same_project() {
     }
 }
 
-/// An edit writes only the files it touches: a new count on the zook dome
-/// rewrites its mapping, and nothing else.
+/// An edit writes only the files it touches: moving the zook dome rewrites
+/// its mapping, and nothing else.
 #[test]
 fn an_edit_writes_only_what_it_touches() {
+    let o = open(&ZOOK_DOME);
+    let mut p = o.project.clone();
+    let sector = p.fixture(&NodeId::new("fixture")).unwrap().components[0]
+        .id
+        .clone();
+    p.component_mut(&sector)
+        .unwrap()
+        .translate(lab_mapping_model::Vec2::new(2.0, 0.0));
+    let saved = o.files.save(&p).unwrap();
+    let paths: Vec<&str> = saved.writes.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, ["fixture.map2d.json"]);
+}
+
+/// A count the product's auto flow would lay differently from the walker
+/// writes the patch expanded: 299 lamps a copy, and the walker starts each
+/// copy on the next port (universe wrapping) where the product's flat wire
+/// would run copy 1 on from pixel 299 of port 0. It opens landing every
+/// lamp where the walker did.
+#[test]
+fn a_count_the_product_would_flow_differently_writes_the_patch() {
     let o = open(&ZOOK_DOME);
     let mut p = o.project.clone();
     let sector = p.fixture(&NodeId::new("fixture")).unwrap().components[0]
@@ -165,8 +186,13 @@ fn an_edit_writes_only_what_it_touches() {
     ));
     let saved = o.files.save(&p).unwrap();
     let paths: Vec<&str> = saved.writes.iter().map(|(p, _)| p.as_str()).collect();
-    assert_eq!(paths, ["fixture.map2d.json"]);
-    assert_eq!(reopen(&ZOOK_DOME, &saved.writes).project.lamp_count(), 1495);
+    assert_eq!(
+        paths,
+        ["fixture.json", "fixture.map2d.json", "fixture.patch.json"]
+    );
+    let again = reopen(&ZOOK_DOME, &saved.writes).project;
+    assert_eq!(again.lamp_count(), 1495);
+    assert_eq!(again.effective_patch().runs, p.effective_patch().runs);
 }
 
 /// A mapping that is written gives every object an id, stamped at the
@@ -225,28 +251,19 @@ fn deleting_a_node_drops_it_from_its_module() {
     assert_eq!(saved.removed, ["shader.json"]);
 }
 
-/// A new place rule writes a patch file for the fixture, naming the
-/// object by a stable id it now writes into the mapping.
+/// An override the product's rows can't follow writes the fixture's patch
+/// file expanded, naming each object by a stable id it now writes into the
+/// mapping, and it opens landing every lamp where it did.
 #[test]
-fn a_new_place_rule_writes_a_patch() {
+fn an_override_writes_the_patch_expanded() {
     let o = open(&CHOKER);
     let mut p = o.project.clone();
     let out = NodeId::new("output");
     let fixture = NodeId::new("fixture");
     let a = p.fixture(&fixture).unwrap().components[2].id.clone();
-    p.fixture_mut(&fixture).unwrap().places.insert(
-        0,
-        PatchPlace {
-            on: PatchTarget::Object(lab_mapping_model::ObjectId::of(&a)),
-            wire: Some(Wire::At {
-                output: out.clone(),
-                port: "0".into(),
-                pixel: 100,
-            }),
-            direction: Some(Direction::Reversed),
-            turn: None,
-        },
-    );
+    let object = lab_mapping_model::ObjectId::of(&a);
+    p.patch_object(&object, &out, "0", 100).unwrap();
+    p.reverse_placement(&object).unwrap();
     let saved = o.files.save(&p).unwrap();
     let paths: Vec<&str> = saved.writes.iter().map(|(p, _)| p.as_str()).collect();
     assert_eq!(
@@ -255,8 +272,8 @@ fn a_new_place_rule_writes_a_patch() {
     );
     let again = reopen(&CHOKER, &saved.writes);
     assert_eq!(
-        again.project.fixture(&fixture).unwrap().places,
-        p.fixture(&fixture).unwrap().places
+        again.project.effective_patch().runs,
+        p.effective_patch().runs
     );
 }
 
@@ -303,29 +320,29 @@ fn the_desk_saves_as_a_new_project() {
     };
     assert_eq!(wire(&again), wire(&desk));
 
-    // A circle placed whole, reversed, with one ring turned back the way it
-    // was drawn: today's rows can't say that (plan D14), so it saves as each
-    // ring at its address, and opens landing exactly as it did.
+    // A circle started at a pixel of its own, reversed, with one ring
+    // turned back the way it was drawn: today's rows can't say that (patch
+    // format 4 is M1's), so it saves as each ring at its address, and opens
+    // landing exactly as it did.
     let mut placed = Project::seed();
     let ring_display = placed.named("ring display").unwrap().id.clone();
     let main = placed.named("main").unwrap().id.clone();
     let circle = lab_mapping_model::ComponentId::new("circle1");
-    let target = PatchTarget::Component(circle.clone());
-    placed.set_wire(
+    placed.set_start(
         &ring_display,
-        &target,
-        Some(Wire::At {
+        &PatchTarget::Component(circle.clone()),
+        Start::At {
             output: main.clone(),
             port: "0".into(),
-            pixel: 5,
-        }),
+            channel: Amount::px(5),
+        },
     );
-    placed.set_direction(&ring_display, &target, Some(Direction::Reversed));
-    placed.set_direction(
-        &ring_display,
-        &PatchTarget::Object(lab_mapping_model::ObjectId::new(&circle, "r2")),
-        Some(Direction::AsDrawn),
-    );
+    placed.edit_override(&lab_mapping_model::ObjectId::of(&circle), |o| {
+        o.direction = Some(Direction::Reversed)
+    });
+    placed.edit_override(&lab_mapping_model::ObjectId::new(&circle, "r2"), |o| {
+        o.direction = Some(Direction::AsDrawn)
+    });
     let saved = empty.save(&placed).unwrap();
     let mut files = MemFiles::new(saved.writes.clone());
     files.files.insert(

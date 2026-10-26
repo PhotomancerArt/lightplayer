@@ -323,24 +323,12 @@ impl Editor {
         if on_ports && self.next_port_segment().is_some() {
             out.push(hv(".", "next port", &[GraphVerb::NextPort]));
         }
-        if let Some(fixture) = self.selection.first().and_then(|t| p.fixture_of_target(t)) {
-            out.push(hv(
-                "⇧A",
-                if p.is_auto(&fixture) {
-                    "auto off"
-                } else {
-                    "auto on"
-                },
-                &[GraphVerb::Auto],
-            ));
-            let placed = p.fixture(&fixture).is_some_and(|f| {
-                f.places.iter().any(|r| {
-                    r.on != crate::domain::patch_place::PatchTarget::Fixture && r.wire.is_some()
-                })
-            });
-            if placed {
-                out.push(hv("⇧U", "unpatch all", &[GraphVerb::UnpatchAll]));
-            }
+        if let Some(fixture) = self.selection.first().and_then(|t| p.fixture_of_target(t))
+            && p.objects_in(&fixture)
+                .iter()
+                .any(|o| p.effective_patch().lands(&o.id))
+        {
+            out.push(hv("⇧U", "unpatch all", &[GraphVerb::UnpatchAll]));
         }
         out
     }

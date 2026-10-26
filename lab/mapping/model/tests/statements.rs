@@ -976,17 +976,14 @@ fn deleting_an_output_leaves_problems_not_retargets() {
         .map(|x| p.node_name(&x.fixture))
         .collect();
     assert_eq!(broken, vec!["ring display", "strip"]);
-    assert!(
-        patch
-            .problems
-            .iter()
-            .all(|x| x.gone == Gone::Output(main.clone()))
-    );
+    assert!(patch.problems.iter().all(|x| matches!(
+        &x.kind,
+        ProblemKind::GoneOutput { output, .. } if *output == main
+    )));
     let ring = node_id(&e, "ring display");
-    assert_eq!(
-        p.fixture(&ring).unwrap().places,
-        vec![auto_onto(&main)],
-        "the placement still names main"
+    assert!(
+        matches!(&p.fixture(&ring).unwrap().start, Start::At { output, .. } if *output == main),
+        "its start still names main"
     );
     assert!(
         patch
@@ -2868,10 +2865,10 @@ fn a_copy_cant_be_deleted_on_its_own() {
     assert!(n.why.unwrap().contains("copies from a count"));
 }
 
-/// A place rule puts one object's lamps on a port, starting on a pixel.
-/// Reversed lays them end first, and a turn rotates them inside their own
-/// window: orientation first, then rotation, as on the device — five
-/// lamps at pixel 10 turned 2 land on 12, 13, 14, 10, 11; reversed too, on
+/// An override puts one object's lamps on a port, starting on a pixel.
+/// Reversed lays them end first, and an offset rotates them inside their
+/// own span: orientation first, then rotation, as on the device — five
+/// lamps at pixel 10 offset 2 land on 12, 13, 14, 10, 11; reversed too, on
 /// 11, 10, 14, 13, 12.
 #[test]
 fn a_place_rule_puts_an_object_on_a_pixel() {
@@ -2883,10 +2880,8 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
         );
         let object = ObjectId::of(&path);
-        p.fixture_mut(&f)
-            .unwrap()
-            .places
-            .push(placed_at(&object, &out, "0", 10, reversed, 2));
+        p.start_at(&f, &out, "0", 0);
+        placed_at(&mut p, &object, &out, "0", 10, reversed, 2);
         let got: Vec<u32> = (0..5)
             .map(|i| match p.pixel_of_lamp(&object, i) {
                 Some(Target::Pixel { index, .. }) => index,
@@ -2895,26 +2890,6 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             .collect();
         assert_eq!(got, want, "reversed: {reversed}");
     }
-}
-
-/// An output's ports make one flat wire, in key order: a run that passes
-/// the end of one port carries on into the next.
-#[test]
-fn a_run_carries_on_into_the_next_port() {
-    let (mut p, f, out) = bare(&[("D0", 4), ("D1", 10)]);
-    add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 6),
-    );
-    p.auto_patch(&f, &out);
-    let spans: Vec<(String, std::ops::Range<u32>, u32)> = p
-        .effective_patch()
-        .pixel_runs
-        .iter()
-        .map(|s| (s.port.clone(), s.lamps.clone(), s.start_pixel))
-        .collect();
-    assert_eq!(spans, vec![("0".into(), 0..4, 0), ("1".into(), 4..6, 0)]);
 }
 
 /// The last port may have no count: it takes the rest — as many pixels as
@@ -2928,129 +2903,30 @@ fn a_last_port_without_a_count_takes_the_rest() {
         &f,
         ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 10),
     );
-    p.auto_patch(&f, &out);
-    assert_eq!(p.port_fill(&out, &key), (6, 6));
+    p.start_at(&f, &out, &key, 0);
+    assert_eq!(p.port_fill(&out, &key), (10, 10));
     assert!(p.effective_patch().unpatched.is_empty());
 }
 
-/// Auto flows on after every placed run on its output. A fixture with
-/// place rules too flows its other lamps on after its own runs; a fixture
-/// with only an auto rule, after everything.
+/// An override putting an object on a port that's gone is a problem; it is
+/// never moved to another port, and the object lands nowhere.
 #[test]
-fn auto_flows_after_placed_runs() {
-    let (mut p, a, out) = bare(&[("D0", 40)]);
-    let a1 = add(
-        &mut p,
-        &a,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-    );
-    let a2 = add(
-        &mut p,
-        &a,
-        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
-    );
-    p.fixture_mut(&a).unwrap().places = vec![
-        placed_at(&ObjectId::of(&a2), &out, "0", 10, false, 0),
-        auto_onto(&out),
-    ];
-    let b = p.add_fixture(None, "b").unwrap();
-    let b1 = add(
-        &mut p,
-        &b,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 2),
-    );
-    p.auto_patch(&b, &out);
-    let at = |c: &ComponentId| {
-        p.effective_patch()
-            .pixel_runs
-            .iter()
-            .find(|s| &s.object.component == c)
-            .map(|s| s.start_pixel)
-    };
-    assert_eq!(at(&a2), Some(10));
-    assert_eq!(at(&a1), Some(12), "after a's own run");
-    assert_eq!(at(&b1), Some(15), "after every run");
-}
-
-/// A fixture with no auto rule is manual: a lamp no rule places is dark.
-#[test]
-fn without_an_auto_rule_unplaced_lamps_are_dark() {
+fn an_override_on_a_gone_port_is_a_problem() {
     let (mut p, f, out) = bare(&[("D0", 40)]);
     let a1 = add(
         &mut p,
         &f,
         ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     );
-    let a2 = add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
-    );
-    p.fixture_mut(&f).unwrap().places = vec![placed_at(
-        &ObjectId::of(&a2),
-        &out,
-        "0",
-        0,
-        false,
-        0,
-    )];
-    let patch = p.effective_patch();
-    assert_eq!(patch.pixel_runs.len(), 1);
-    assert_eq!(patch.unpatched.len(), 1);
-    assert_eq!(patch.unpatched[0].object, ObjectId::of(&a1));
-}
-
-/// Fixtures sharing an output fill it in the product's order — each
-/// module's nodes by name, depth first — not the order they were added in.
-#[test]
-fn fixtures_share_an_output_in_name_order() {
-    let mut p = Project::new("t");
-    let zebra = p.add_fixture(None, "zebra").unwrap();
-    let apple = p.add_fixture(None, "apple").unwrap();
-    let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
-    for f in [&zebra, &apple] {
-        add(
-            &mut p,
-            f,
-            ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-        );
-        p.auto_patch(f, &out);
-    }
-    let start = |f: &NodeId| {
-        p.effective_patch()
-            .pixel_runs
-            .iter()
-            .find(|s| &s.fixture == f)
-            .map(|s| s.start_pixel)
-    };
-    assert_eq!(start(&apple), Some(0));
-    assert_eq!(start(&zebra), Some(3));
-}
-
-/// A rule placing lamps on a port that's gone is a problem; it is never
-/// moved to another port, and its lamps fall to the next rule.
-#[test]
-fn a_rule_on_a_gone_port_is_a_problem() {
-    let (mut p, f, out) = bare(&[("D0", 40)]);
-    let a1 = add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-    );
-    p.fixture_mut(&f).unwrap().places = vec![
-        placed_at(&ObjectId::of(&a1), &out, "7", 0, false, 0),
-        auto_onto(&out),
-    ];
+    p.start_at(&f, &out, "0", 0);
+    placed_at(&mut p, &ObjectId::of(&a1), &out, "7", 0, false, 0);
     let patch = p.effective_patch();
     assert_eq!(patch.problems.len(), 1);
-    assert_eq!(
-        patch.problems[0].gone,
-        Gone::Port {
-            output: out.clone(),
-            port: "7".into()
-        }
-    );
-    assert_eq!(patch.pixel_runs.len(), 1, "auto still places it");
+    assert!(matches!(
+        &patch.problems[0].kind,
+        ProblemKind::GonePort { port, .. } if port == "7"
+    ));
+    assert!(patch.pixel_runs.is_empty(), "never moved to another port");
     assert!(patch.problems[0].notice(&p).why.is_some());
 }
 
@@ -3062,13 +2938,13 @@ fn colour_order_belongs_to_the_fixture() {
     let a = p.add_fixture(None, "a").unwrap();
     let b = p.add_fixture(None, "b").unwrap();
     let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
-    for f in [&a, &b] {
+    for (f, pixel) in [(&a, 0), (&b, 3)] {
         add(
             &mut p,
             f,
             ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
         );
-        p.auto_patch(f, &out);
+        p.start_at(f, &out, "0", pixel);
     }
     assert_eq!(
         p.fixture(&a).unwrap().color_order,
@@ -3900,35 +3776,22 @@ fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
         .collect()
 }
 
-/// An object on `pixel` of `port`, reversed and turned: its own placement.
+/// Put an object on `pixel` of `port`, reversed and offset: its own
+/// override.
 fn placed_at(
+    p: &mut Project,
     object: &ObjectId,
     output: &NodeId,
     port: &str,
     pixel: u32,
     reversed: bool,
-    rotation: u32,
-) -> PatchPlace {
-    PatchPlace {
-        on: PatchTarget::Object(object.clone()),
-        wire: Some(Wire::At {
-            output: output.clone(),
-            port: port.into(),
-            pixel,
-        }),
-        direction: reversed.then_some(Direction::Reversed),
-        turn: (rotation != 0).then_some(rotation),
-    }
-}
-
-/// The fixture's own wire, auto onto `output`.
-fn auto_onto(output: &NodeId) -> PatchPlace {
-    PatchPlace {
-        wire: Some(Wire::Auto {
-            output: output.clone(),
-        }),
-        ..PatchPlace::on(PatchTarget::Fixture)
-    }
+    offset: u32,
+) {
+    p.patch_object(object, output, port, pixel);
+    p.edit_override(object, |o| {
+        o.direction = reversed.then_some(Direction::Reversed);
+        o.offset = (offset != 0).then_some(offset);
+    });
 }
 
 /// path3's span on D1 of main.

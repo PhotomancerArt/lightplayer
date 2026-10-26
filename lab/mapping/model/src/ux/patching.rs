@@ -419,20 +419,10 @@ impl Editor {
             .iter()
             .find(|o| matches!(self.project.on_wire(o), OnWire::Flowing))
         {
-            let follows =
-                self.project
-                    .effective_patch()
-                    .resolved(o)
-                    .and_then(|r| r.wire_from.clone())
-                    .zip(self.project.fixture_of_place(
-                        &crate::domain::patch_place::PatchTarget::Object(o.clone()),
-                    ))
-                    .map(|(t, f)| self.project.target_words(&f, &t))
-                    .unwrap_or_else(|| self.fixture_words(o));
             self.notice = Some(Notice::refused(
-                format!("{} already follows {follows}", self.object_words(o)),
-                "U puts a thing back to following what's above it, and it does already",
-                "to take it off the wire, choose Not on the wire in its Patch section",
+                format!("{} already follows its rule", self.object_words(o)),
+                "U puts a thing back to following its rule, and it does already",
+                "to take it off the wire, choose Off for On the wire in its Patch section",
             ));
             return;
         }
@@ -538,27 +528,6 @@ impl Editor {
         }
     }
 
-    /// ⇧A: turn auto on or off for the selection's fixture.
-    pub fn toggle_auto(&mut self) {
-        let Some(fixture) = self.selected_fixture() else {
-            self.notice = Some(Notice::refused(
-                "No fixture to change",
-                "auto belongs to a fixture",
-                "select a fixture, or anything in one",
-            ));
-            return;
-        };
-        let on = !self.project.is_auto(&fixture);
-        self.checkpoint();
-        let output = self.project.set_auto(&fixture, on);
-        self.after_edit();
-        let name = self.project.node_name(&fixture);
-        self.notice = Some(Notice::info(match output {
-            Some(o) => format!("{name}: auto onto {}", self.project.node_name(&o)),
-            None => format!("{name}: auto off; what no rule places is dark"),
-        }));
-    }
-
     /// ⇧U: take every object of the selection's fixture off the wire.
     pub fn unpatch_all_selected(&mut self) {
         let Some(fixture) = self.selected_fixture() else {
@@ -573,12 +542,9 @@ impl Editor {
         let n = self.project.unpatch_all(&fixture);
         self.after_edit();
         let name = self.project.node_name(&fixture);
-        let tail = if self.project.is_auto(&fixture) {
-            "; auto flows them on again"
-        } else {
-            ""
-        };
-        self.notice = Some(Notice::info(format!("{name}: {n} unpatched{tail}")));
+        self.notice = Some(Notice::info(format!(
+            "{name}: {n} off the wire; patch them by hand"
+        )));
     }
 
     // ---- walking the wire ----------------------------------------------------
@@ -900,12 +866,6 @@ impl Editor {
 
     fn object_words(&self, o: &ObjectId) -> String {
         self.project.long_label(&self.project.object_target(o))
-    }
-
-    fn fixture_words(&self, o: &ObjectId) -> String {
-        self.project
-            .fixture_of(&o.component)
-            .map_or_else(|| "its fixture".into(), |n| n.name.clone())
     }
 
     /// Tell when an object now shares pixels with another (plan D7).

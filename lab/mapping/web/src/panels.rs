@@ -254,6 +254,7 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
             label,
             value,
             note,
+            reset,
             field,
         } => {
             let (down, up) = (ed.clone(), ed.clone());
@@ -281,6 +282,18 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                         }
                         if let Some(note) = note {
                             span { class: "num-note", "{note}" }
+                        }
+                        if let Some(back) = reset {
+                            button {
+                                class: "patch-button",
+                                tabindex: "-1",
+                                title: "Back to {back}",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Patch(PatchInput::Reset { field }));
+                                },
+                                "Reset"
+                            }
                         }
                     }
                 }

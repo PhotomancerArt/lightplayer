@@ -27,11 +27,11 @@
 //! - [`Target`] — anything you can select, in ONE tree: module → fixture →
 //!   group → path → lamp, fixture → circle → ring → lamp, output → port →
 //!   pixel.
-//! - [`patch`] — where lamps land: a fixture's placements
-//!   ([`PatchPlace`]: wire, direction and turn, on the fixture, a component
-//!   or an object, each inherited down the tree), and the effective patch
-//!   they make (derived, never stored); [`port_runs`] — a port's pixels as
-//!   one run per object.
+//! - [`patch`] — where lamps land: rules on a fixture and its components
+//!   ([`ComponentRules`]: Start, Children) and overrides on objects
+//!   ([`ObjectOverride`]), walked by [`walker`] with an (output, port,
+//!   channel) cursor into the effective patch (derived, never stored);
+//!   [`port_runs`] — a port's pixels as one run per object.
 //! - [`Placement`] — where each node sits, in world units, and each
 //!   fixture's frame (where its own units land, scaled when the stack draws
 //!   it bigger): a fact the view hands over. The model never lays anything
@@ -102,11 +102,15 @@ pub use domain::object_tree::{ObjectNode, ObjectNodeKind};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
 pub use domain::patch::{
-    EffectivePatch, Gone, Landing, ObjectRun, Overlap, PatchProblem, PixelRun, Unpatched,
+    EffectivePatch, Landing, ObjectRun, Overlap, PatchProblem, PixelRun, ProblemKind, Unpatched,
 };
 pub use domain::patch_edits::{OnWire, PatchEdit, PortEdge};
-pub use domain::patch_place::{Direction, PatchPlace, PatchTarget, Wire};
-pub use domain::patch_resolve::Resolved;
+pub use domain::cursor_op::{Amount, ChannelOp, Cursor, CursorOps, OutputOp, PortOp, Unit};
+pub use domain::object_override::{Direction, ObjectOverride};
+pub use domain::patch_rule::{Children, ComponentRules, Start};
+pub use domain::patch_target::PatchTarget;
+pub use domain::product_patch::{ProductPatch, ProductRow};
+pub use domain::walker::{StepSource, Walked};
 pub use domain::pattern::Pattern;
 pub use domain::picture::{Picture, picture_rect};
 pub use domain::piece::{Difference, DifferenceKind, Piece};

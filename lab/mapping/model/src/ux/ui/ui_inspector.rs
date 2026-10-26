@@ -89,11 +89,14 @@ pub enum UiItem {
     PatchHere {
         options: Vec<String>,
     },
-    /// A Patch row with a number and − + (`None` when mixed).
+    /// A Patch row with a number and − + (`None` when mixed). `reset`
+    /// names what Reset would go back to, when the value is the object's
+    /// own.
     PatchNumber {
         label: &'static str,
         value: Option<i64>,
         note: Option<String>,
+        reset: Option<String>,
         field: PatchField,
     },
 }

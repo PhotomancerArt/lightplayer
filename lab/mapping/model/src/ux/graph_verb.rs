@@ -68,8 +68,6 @@ pub enum GraphVerb {
     WirePrevious,
     /// .: the next port's first free segment.
     NextPort,
-    /// ⇧A: the fixture's auto on or off.
-    Auto,
     /// ⇧U: every object of the fixture off the wire.
     UnpatchAll,
     /// ⌘Z
@@ -79,7 +77,7 @@ pub enum GraphVerb {
 }
 
 impl GraphVerb {
-    pub const ALL: [GraphVerb; 31] = [
+    pub const ALL: [GraphVerb; 30] = [
         GraphVerb::Up,
         GraphVerb::GoIn,
         GraphVerb::Previous,
@@ -107,7 +105,6 @@ impl GraphVerb {
         GraphVerb::WireNext,
         GraphVerb::WirePrevious,
         GraphVerb::NextPort,
-        GraphVerb::Auto,
         GraphVerb::UnpatchAll,
         GraphVerb::Undo,
         GraphVerb::Redo,
@@ -144,7 +141,6 @@ impl GraphVerb {
             GraphVerb::WireNext => "wire-next",
             GraphVerb::WirePrevious => "wire-previous",
             GraphVerb::NextPort => "next-port",
-            GraphVerb::Auto => "auto",
             GraphVerb::UnpatchAll => "unpatch-all",
             GraphVerb::Undo => "undo",
             GraphVerb::Redo => "redo",
@@ -186,7 +182,6 @@ impl GraphVerb {
             GraphVerb::WireNext => "Next on wire",
             GraphVerb::WirePrevious => "Previous on wire",
             GraphVerb::NextPort => "Next port",
-            GraphVerb::Auto => "Auto",
             GraphVerb::UnpatchAll => "Unpatch all",
             GraphVerb::Undo => "Undo",
             GraphVerb::Redo => "Redo",
@@ -223,7 +218,6 @@ impl GraphVerb {
             GraphVerb::WireNext => "⇧→",
             GraphVerb::WirePrevious => "⇧←",
             GraphVerb::NextPort => ".",
-            GraphVerb::Auto => "⇧A",
             GraphVerb::UnpatchAll => "⇧U",
             GraphVerb::Undo => "⌘Z",
             GraphVerb::Redo => "⇧⌘Z",
@@ -273,7 +267,6 @@ impl GraphVerb {
             GraphVerb::WireNext => (Key::Right, shift),
             GraphVerb::WirePrevious => (Key::Left, shift),
             GraphVerb::NextPort => (Key::Char('.'), plain),
-            GraphVerb::Auto => (Key::Char('a'), shift),
             GraphVerb::UnpatchAll => (Key::Char('u'), shift),
             GraphVerb::Undo => (Key::Char('z'), command),
             GraphVerb::Redo => (

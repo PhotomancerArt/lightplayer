@@ -24,7 +24,8 @@ use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{self, Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
-use crate::domain::patch_place::{PatchTarget, Wire};
+use crate::domain::cursor_op::Amount;
+use crate::domain::patch_rule::Start;
 use crate::domain::pattern::Pattern;
 use crate::domain::placement::{Carried, Frame};
 use crate::domain::render_source::RenderSource;
@@ -215,12 +216,14 @@ impl Project {
         Some(id)
     }
 
-    /// Patch a fixture's lamps to an output: its own wire, auto onto it.
-    pub fn auto_patch(&mut self, fixture: &NodeId, output: &NodeId) {
+    /// Start a fixture's walk at `pixel` of `output`'s port `port`.
+    pub fn start_at(&mut self, fixture: &NodeId, output: &NodeId, port: &str, pixel: u32) {
         if let Some(f) = self.fixture_mut(fixture) {
-            f.place_mut(&PatchTarget::Fixture).wire = Some(Wire::Auto {
+            f.start = Start::At {
                 output: output.clone(),
-            });
+                port: port.to_string(),
+                channel: Amount::px(pixel),
+            };
         }
     }
 
@@ -472,10 +475,13 @@ impl Project {
             &strip,
             ComponentKind::path(vec![Vec2::new(6.0, 40.0), Vec2::new(74.0, 40.0)], 30),
         );
-        p.auto_patch(&tail, &tail_out);
-        p.auto_patch(&ring, &main);
-        p.auto_patch(&strip, &main);
-        p.auto_patch(&scarf, &scarf_out);
+        // Each fixture starts somewhere of its own (nothing flows across
+        // fixtures): the strip on D1, where the ring display's 64 lamps
+        // end on D0's 64 pixels.
+        p.start_at(&tail, &tail_out, "0", 0);
+        p.start_at(&ring, &main, "0", 0);
+        p.start_at(&strip, &main, "1", 0);
+        p.start_at(&scarf, &scarf_out, "0", 0);
         p
     }
 }

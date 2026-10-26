@@ -218,6 +218,25 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
     out
 }
 
+/// Where a fixture starts, in words: "Starts at D0 of main, pixel 0".
+fn start_words(p: &Project, start: &crate::domain::patch_rule::Start) -> String {
+    match start {
+        crate::domain::patch_rule::Start::At {
+            output,
+            port,
+            channel,
+        } => format!(
+            "Starts at {}, {}",
+            p.long_label(&Target::Port {
+                output: output.clone(),
+                key: port.clone()
+            }),
+            channel.words(3)
+        ),
+        _ => "Starts nowhere yet: its lamps go nowhere".into(),
+    }
+}
+
 /// Where a drawn thing's lamps land: one line per span, its pixels on its
 /// port. `None` for one with no lamps.
 fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
@@ -341,12 +360,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 // Auto and how much is on the wire first, with what changes
                 // them (patching by hand), then the rules themselves.
                 rules.extend(patch_facts(p, id));
-                if fx.places.is_empty() {
-                    rules.push(UiItem::Rule("Not placed: its lamps go nowhere yet".into()));
-                }
-                for r in &fx.places {
-                    rules.push(UiItem::Rule(p.place_label(id, r)));
-                }
+                rules.push(UiItem::Rule(start_words(p, &fx.start)));
                 let lands: Vec<String> = p.ports_of(t).iter().map(|x| p.long_label(x)).collect();
                 if !lands.is_empty() {
                     rules.push(UiItem::Rule(format!("Lands on {}", lands.join(", "))));
@@ -357,12 +371,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     .filter(|u| &u.fixture == id)
                     .map(|u| u.lamps.len())
                     .sum();
-                let working = fx.places.iter().any(|r| {
-                    r.wire
-                        .as_ref()
-                        .and_then(|w| w.output())
-                        .is_some_and(|o| p.node(o).is_some())
-                });
+                let working = !p.control_outputs(id).is_empty();
                 if left > 0 && working {
                     rules.push(UiItem::Rule(format!(
                         "{left} lamps past the end of its ports"
