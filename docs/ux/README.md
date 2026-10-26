@@ -134,6 +134,27 @@ A board's events never reset what someone is doing on its card: open
 details stay open, an armed button stays armed, and the card keeps its
 place.
 
+Routine work never adds or removes a line. Studio asking the board again,
+or a change on its way, shows on the thing it touches: a dimmed switch
+with its reason on hover, a row's word changing in place. A line that
+changes has one home that is always there, so its words change instead
+of the box growing and shrinking.
+
+```text
+do:   ≋ Wi‑Fi                       (●━━)     # waiting on a change: dimmed, the reason on hover
+      Connected to Starlink Truck.            # the box's one line, in every state
+do:   ▂▄▆ Starlink Apt   Saving…              # Connect pressed: the row and its test from the press,
+          ● Looking for Starlink Apt          #   "Saving…" then "Connecting…" in place
+          Testing · it takes a few seconds.   # the outcome's place, held until it lands
+
+bad:  ≋ Wi‑Fi                       (●━━)
+      Studio is talking to the board — a moment     # Yona 10-25, a new C6's Wi‑Fi: "a message near its top
+                                              #   keeps appearing and disappearing, and everything below
+                                              #   jumps" — every read (opening the box, each second of a
+                                              #   test) dimmed the switch and added this line
+bad:  Writing to the device…                  # 10-25: a line under the list for every change, then gone
+```
+
 app: `lpa-studio-core/…/board_card/ui_stack_bar.rs` (icon · summary · aside · tone · action)
 
 ## P4. quiet when good, loud when bad
