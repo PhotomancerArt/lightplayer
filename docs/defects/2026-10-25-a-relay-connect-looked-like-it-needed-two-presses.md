@@ -53,14 +53,14 @@ gives up in a held Connect's words ("The board didn't answer in time"). The
 account entry's card carries its connect, and stands in place while it runs,
 with the relay link's identifying card not drawn beside it. A second press
 finds the button waiting and dials nothing. The board can say hello before
-the relay's answer comes back to the page (the walk's T5 did), so the
-connect also settles the moment its answer arrives, not at the next fold. A remembered board online at
+the relay's answer comes back to the page (the walk's T5 did): the hello
+ends the connect either way, and an answer that lands later says nothing. A remembered board online at
 lightplayer.app shows the project the board reports there.
 
 **Regression tests** — `one_press_on_a_board_never_met_says_connecting_until_its_hello`
 and `one_press_on_a_remembered_board_says_connecting_until_its_hello` (core,
 pressed by offer path, every turn checked);
-`a_hello_before_the_relays_answer_ends_the_connect_with_the_answer`;
+`a_hello_before_the_relays_answer_ends_the_connect`;
 `a_remembered_board_moves_to_online_boards_while_the_list_names_it` (the
 project); the studio-relay walk's T3 and T5 now fail on a second press, a
 "connecting" later than a second, a pressable Connect or a second card while

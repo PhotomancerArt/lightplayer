@@ -189,22 +189,19 @@ impl WifiConnects {
     }
 
     /// Settle every card's connect against what `reached` says a link of
-    /// this tab reaches at `now`. A board reached: its failure goes (plugged
-    /// in after its Wi‑Fi connect failed, it is not unreachable), and so
-    /// does a connect whose socket answered (the board said hello: its card
-    /// takes over). A connect whose socket answered and whose board has not
-    /// said hello within [`CONNECT_INTENT_GRACE`] gives up, in a held
-    /// Connect's words. A connect still dialling is left to finish. Whether
+    /// this tab reaches at `now`. A board reached says nothing more: its
+    /// failure goes (plugged in after its Wi‑Fi connect failed, it is not
+    /// unreachable), and its connect is over, whether or not its socket's
+    /// answer has come back yet (the board said hello, and its card takes
+    /// over; an answer that comes later is settled as it lands). A connect
+    /// whose socket answered and whose board has not said hello within
+    /// [`CONNECT_INTENT_GRACE`] gives up, in a held Connect's words. Whether
     /// anything changed.
     pub fn settle(&mut self, reached: impl Fn(BoardKey) -> bool, now: f64) -> bool {
         let before = self.attempts.clone();
-        self.attempts.retain(|target, attempt| {
-            let board = match target {
-                WifiConnectTarget::Board(board) | WifiConnectTarget::Relay(board) => *board,
-                WifiConnectTarget::Address => return true,
-            };
-            let settled = attempt.failure.is_some() || attempt.answered_at.is_some();
-            !(settled && reached(board))
+        self.attempts.retain(|target, _| match target {
+            WifiConnectTarget::Board(board) | WifiConnectTarget::Relay(board) => !reached(*board),
+            WifiConnectTarget::Address => true,
         });
         for attempt in self.attempts.values_mut() {
             let late = attempt
@@ -286,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_goes_once_its_board_is_reached_and_a_connect_under_way_stays() {
+    fn a_failure_goes_once_its_board_is_reached_and_so_does_a_connect_under_way() {
         let mut connects = WifiConnects::default();
         let failed = BoardKey::parse("a0f26287b48c").unwrap();
         let dialling = BoardKey::parse("a0f26287b48d").unwrap();
@@ -307,9 +304,18 @@ mod tests {
         );
 
         assert!(!connects.settle(|_| false, 2.0), "nothing reached");
-        assert!(connects.settle(|_| true, 2.0));
+        assert!(connects.settle(|board| board == failed, 2.0));
         assert_eq!(connects.view_board(failed), None, "reached: no failure");
-        assert!(connects.connecting(WifiConnectTarget::Relay(dialling)));
+        assert!(
+            connects.connecting(WifiConnectTarget::Relay(dialling)),
+            "not reached yet: still dialling"
+        );
+        assert!(connects.settle(|_| true, 2.0));
+        assert_eq!(
+            connects.view_board(dialling),
+            None,
+            "the board said hello before its socket's answer: the connect is over"
+        );
         assert!(
             connects.view(WifiConnectTarget::Address).is_some(),
             "the address field's answer is no board's"

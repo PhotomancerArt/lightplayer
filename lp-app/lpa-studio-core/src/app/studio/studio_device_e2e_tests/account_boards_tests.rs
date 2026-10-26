@@ -206,12 +206,13 @@ fn one_press_on_a_board_never_met_says_connecting_until_its_hello() {
     );
 }
 
-/// The board says hello before the relay's answer comes back (seen on the
-/// studio-relay walk's T5): the card's connect ends with that answer, not at
-/// whatever happens next, so the board's card never keeps a spinner over a
-/// board that is already here.
+/// The board says hello before the relay's answer comes back to the page
+/// (seen on the studio-relay walk's T5, where the answer waits on the
+/// page's settle): the hello ends the connect, so the board's card never
+/// keeps a spinner over a board that is already here, and the late answer
+/// adds nothing.
 #[test]
-fn a_hello_before_the_relays_answer_ends_the_connect_with_the_answer() {
+fn a_hello_before_the_relays_answer_ends_the_connect() {
     let device = relay_light_player("dev00000acctbrd10");
     let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-account-boards-10");
     let rig = with_relay(&mut bench, &device);
@@ -223,6 +224,7 @@ fn a_hello_before_the_relays_answer_ends_the_connect_with_the_answer() {
     bench
         .press(&connect, OfferArgs::new())
         .expect("the connect starts");
+    assert_connecting_through_lightplayer_app(&home_card(&bench, entry), 0);
     // The session is up and announced (the page's `connect` edge sweeps it
     // in), and the board says hello while the answer waits.
     bench
@@ -242,32 +244,31 @@ fn a_hello_before_the_relays_answer_ends_the_connect_with_the_answer() {
         .find(|card| card.id != entry)
         .map(|card| card.id)
         .unwrap();
-    assert_eq!(
+    assert_ne!(
         home_card(&bench, board).surface.state,
         crate::SurfaceState::Connecting,
-        "the relay has not answered yet"
+        "the board said hello: no spinner over it"
+    );
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty()
     );
 
-    // The answer comes back: the connect is over at once.
+    // The answer comes back late: nothing to say.
     rig.answer_late.set(false);
-    pump(&tasks);
-    for command in drive(bench.access_rx.recv_coalesced()).unwrap_or_default() {
-        if let crate::StudioCommand::Network(command) = command {
-            bench.controller.apply_network_command(command);
-        }
-    }
+    bench.step(&tasks);
     assert!(
         bench
             .controller
             .device_roster_view()
             .wifi_connects
             .is_empty(),
-        "the board is here: nothing left to say"
+        "a late answer for a board already here says nothing"
     );
-    assert_ne!(
-        home_card(&bench, board).surface.state,
-        crate::SurfaceState::Connecting
-    );
+    assert_eq!(rig.asked.borrow().len(), 1, "one dial");
 }
 
 /// The card says a connect through lightplayer.app is under way, with its
