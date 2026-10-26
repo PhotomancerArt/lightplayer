@@ -529,7 +529,7 @@ fn wifi_add_holds_still_3_getting_an_address() -> Element {
 }
 
 #[story(
-    description = "An add holding still, 4 of 5 — joined (\"Getting an address · 10.0.0.23\"), \"Reaching lightplayer.app\" now; Starlink Apt leads the list, connected."
+    description = "An add holding still, 4 of 5 — joined (\"Getting an address · 10.0.0.23\"), \"Reaching lightplayer.app\" now; Starlink Apt, connected, keeps its place in the list under its test (Done sorts it to the top)."
 )]
 fn wifi_add_holds_still_4_reaching_lightplayer_app() -> Element {
     wifi_details(testing(

@@ -298,8 +298,9 @@ mod tests {
             rssi: -57,
             host: "lp-8e30.local".to_string(),
         });
-        assert_eq!(words(&wifi), ["Connected · 10.0.0.23", "Saved"]);
-        assert_eq!(wifi.rows()[0].tone, WifiTone::Good);
+        // The row under test keeps its place until Done (P3).
+        assert_eq!(words(&wifi), ["Saved", "Connected · 10.0.0.23"]);
+        assert_eq!(wifi.rows()[1].tone, WifiTone::Good);
         assert_eq!(wifi.row_value(), "Starlink Apt");
         assert_eq!(
             wifi.test().unwrap().result().unwrap().body,

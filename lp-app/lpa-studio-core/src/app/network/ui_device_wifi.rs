@@ -179,7 +179,8 @@ impl UiDeviceWifi {
     }
 
     /// The saved networks as the Networks page lists them: the connected
-    /// one first, then the rest in the order they were added.
+    /// one first, then the rest in the order they were added (while a test
+    /// shows, all in the order they were added).
     pub fn rows(&self) -> Vec<UiWifiNetworkRow> {
         let Some(status) = &self.status else {
             return Vec::new();
@@ -191,7 +192,12 @@ impl UiDeviceWifi {
             .zip(slugs)
             .map(|(network, slug)| self.row(status, network, slug))
             .collect();
-        rows.sort_by_key(|row| !row.in_use);
+        // The connected one leads — except while a test shows, when the
+        // list keeps its order so the row under test (and its card) stays
+        // where it was pressed (P3); Done sorts it.
+        if self.test().is_none() {
+            rows.sort_by_key(|row| !row.in_use);
+        }
         if let Some(adding) = self.pending() {
             // Where the board's answer puts it: last, the newest saved.
             rows.push(UiWifiNetworkRow {
@@ -520,6 +526,32 @@ mod tests {
             super::super::WifiTestProgress::Running(super::super::WifiTestStep::Looking)
         );
         assert_eq!(wifi.networks_line(), None, "the test row speaks");
+
+        // Joined mid-test: the row under test keeps its place.
+        let mut joined = wifi.clone();
+        joined.writing = false;
+        joined.adding = None;
+        joined.testing = Some("Starlink Apt".to_string());
+        if let Some(status) = joined.status.as_mut() {
+            status
+                .networks
+                .push(saved("Starlink Apt", Some(LastAttempt::Connected)));
+            status.station = StationState::Connected {
+                ssid: "Starlink Apt".to_string(),
+                ip: "10.0.0.23".to_string(),
+                rssi: -57,
+                host: "lp-8e30.local".to_string(),
+            };
+        }
+        let names: Vec<String> = joined.rows().into_iter().map(|row| row.ssid).collect();
+        assert_eq!(
+            names,
+            ["Starlink Home", "Starlink Apt"],
+            "held while tested"
+        );
+        joined.testing = None;
+        let names: Vec<String> = joined.rows().into_iter().map(|row| row.ssid).collect();
+        assert_eq!(names, ["Starlink Apt", "Starlink Home"], "Done sorts it");
 
         // Change password: the network is a row already; only its test.
         wifi.adding = Some("Starlink Home".to_string());
