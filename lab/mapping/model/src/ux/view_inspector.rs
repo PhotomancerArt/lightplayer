@@ -89,6 +89,16 @@ impl Editor {
             }
             out.extend(facts);
         }
+        // One component or object: the component first, then its object
+        // (Yona, 2026-10-25: one tree, components primary; the inspector
+        // shows the component's properties, then the object's).
+        if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice() {
+            out.extend(self.component_then_object(t));
+            if let Some(spans) = span_facts(p, t) {
+                out.push(section("Spans", spans));
+            }
+            return out;
+        }
         if let [t @ Target::Span { .. }] = selection.as_slice()
             && let Some(span) = p.span_of(t)
         {
@@ -144,6 +154,65 @@ impl Editor {
             });
         }
         out
+    }
+}
+
+impl Editor {
+    /// A component's section — its properties and its rules — then its
+    /// object's — what it does on the walk. For a ring or a copy the
+    /// component is the circle or the repeated thing, and what is edited
+    /// there changes every ring or every copy (D11).
+    fn component_then_object(&self, t: &Target) -> Vec<UiSection> {
+        let p = &self.project;
+        let (component, object) = match t {
+            Target::Component(c) => (c.clone(), crate::ObjectId::of(c)),
+            Target::Object(o) => (o.component.clone(), o.clone()),
+            _ => return Vec::new(),
+        };
+        let Some(fixture) = p.fixture_of(&component).map(|n| n.id.clone()) else {
+            return Vec::new();
+        };
+        let props = |targets: &[Target]| -> Vec<UiItem> {
+            common_props(p, targets)
+                .into_iter()
+                .map(|prop| UiItem::Prop {
+                    locked: !self.move_draw && prop.desc.reshapes,
+                    prop,
+                })
+                .collect()
+        };
+        let mut comp_items = Vec::new();
+        if let Target::Object(o) = t {
+            let what = if o.key.is_empty() { "copy" } else { "ring" };
+            comp_items.push(UiItem::Hint(format!(
+                "Changes here change every {what} of {component}."
+            )));
+        }
+        comp_items.extend(props(&[Target::Component(component.clone())]));
+        comp_items.extend(self.rule_rows_for(&[(
+            fixture.clone(),
+            crate::PatchTarget::Component(component.clone()),
+        )]));
+        let mut obj_items = Vec::new();
+        // A ring's own count, radius and way round live in its circle, but
+        // are the ring's alone.
+        if matches!(t, Target::Object(o) if !o.key.is_empty()) {
+            obj_items.extend(props(std::slice::from_ref(t)));
+        }
+        obj_items.extend(
+            self.object_rows_for(&[(fixture, object.clone())])
+                .unwrap_or_default(),
+        );
+        vec![
+            UiSection {
+                title: Some(format!("Component · {component}")),
+                items: comp_items,
+            },
+            UiSection {
+                title: Some(format!("Object · {object}")),
+                items: obj_items,
+            },
+        ]
     }
 }
 

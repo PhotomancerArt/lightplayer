@@ -210,7 +210,7 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                                 onclick: move |_| {
                                     ed.input(GraphInput::Select(vec![target.clone()]));
                                 },
-                                "from {words} ↗"
+                                "{words} ↗"
                             }
                         } else {
                             span { class: "patch-from-default", "by default" }

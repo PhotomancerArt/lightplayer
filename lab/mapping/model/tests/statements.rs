@@ -2801,6 +2801,71 @@ fn a_repeat_makes_one_copy_per_turn() {
     assert_eq!(p.lamps_under(&t).len(), 12);
 }
 
+/// The one tree (Yona, G1 direction): components are its rows; an object
+/// is a row only where it differs from its component — a circle's rings, a
+/// repeat's copies 1…n — drawn lighter, and still selectable. Copy 0 is the
+/// repeat's component itself.
+#[test]
+fn the_tree_lists_objects_only_where_they_differ() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let circle = add(
+        &mut p,
+        &f,
+        ComponentKind::circle(Vec2::new(50.0, 50.0), &[(30.0, 8), (15.0, 4)]),
+    );
+    let (_, arm) = add_repeat(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        3,
+    );
+    let rows: Vec<(String, bool)> = p
+        .tree_rows()
+        .into_iter()
+        .filter(|r| matches!(r.target, Target::Component(_) | Target::Object(_)))
+        .map(|r| (r.label, r.derived))
+        .collect();
+    let want: Vec<(String, bool)> = [
+        (circle.to_string(), false),
+        ("ring r1".into(), true),
+        ("ring r2".into(), true),
+        ("repeat1".into(), false),
+        (arm.to_string(), false),
+        ("copy 1".into(), true),
+        ("copy 2".into(), true),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(rows, want);
+}
+
+/// On the canvas a click selects the repeat, and the next goes into the
+/// copy under it: copy 0 is the repeated component, copy k its `@k`.
+#[test]
+fn a_click_selects_the_repeat_then_the_copy() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let (repeat, arm) = add_repeat(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
+    );
+    let mut e = editor_of(p);
+    e.fit();
+    let origin = e.project.origin(&f);
+    // Copy 1 is turned a quarter clockwise: right of the centre.
+    let on_copy_1 = origin + Vec2::new(80.0, 50.0);
+    click_at(&mut e, on_copy_1, none());
+    assert_eq!(e.selection, vec![Target::Component(repeat)]);
+    click_at(&mut e, on_copy_1, none());
+    assert_eq!(
+        e.selection,
+        vec![Target::Object(ObjectId::of(&arm).in_copy(1))]
+    );
+}
+
 /// A repeat's area is its copies' outlines, not the space between them:
 /// round a dome, the middle belongs to whatever is there.
 #[test]

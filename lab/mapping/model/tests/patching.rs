@@ -527,38 +527,37 @@ fn an_offset_is_a_leafs_alone() {
 
 // ---- the patching rows ------------------------------------------------------
 
-/// A component shows its rules, then its object's rows; an object (a ring)
-/// shows its rows only; a fixture, its rules. A ring of a circle that
-/// starts nowhere lands nowhere, and offers its ports.
+/// The inspector shows the component, then its object: a circle's section
+/// has its properties and rules (Start, Children), then its object's rows;
+/// a ring's has the circle's (every ring changes with it), then the ring's
+/// own. A fixture has its rules. A ring of a circle that starts nowhere
+/// lands nowhere, and offers its ports.
 #[test]
-fn the_patching_rows_follow_what_is_selected() {
+fn the_inspector_shows_the_component_then_its_object() {
     let (p, f, _, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
-    let labels = |e: &Editor| -> Vec<&'static str> {
-        e.patch_section()
-            .unwrap()
-            .iter()
-            .filter_map(|i| match i {
-                UiItem::PatchChoice { label, .. }
-                | UiItem::PatchInherited { label, .. }
-                | UiItem::PatchNumber { label, .. } => Some(*label),
-                _ => None,
-            })
-            .collect()
-    };
     e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
-    assert_eq!(
-        labels(&e),
-        vec!["Port", "Pixel", "Direction", "Offset", "On the wire"]
-    );
+    let sections = patch_labels(&e);
+    assert_eq!(sections[0].0, "Component · circle1");
+    assert!(sections[0].1.ends_with(&["Start", "Children"]));
+    assert_eq!(sections[1].0, "Object · circle1/r2");
+    assert!(sections[1]
+        .1
+        .ends_with(&["Port", "Pixel", "Direction", "Offset", "On the wire"]));
     assert_eq!(choice(&e, "Port").1, None, "nowhere yet: choose one");
     e.select(vec![Target::Component(circle.clone())]);
-    assert_eq!(
-        labels(&e),
-        vec!["Start", "Children", "Port", "Pixel", "Direction", "On the wire"]
-    );
+    let sections = patch_labels(&e);
+    assert_eq!(sections[0].0, "Component · circle1");
+    assert_eq!(sections[1].0, "Object · circle1");
+    assert!(sections[1]
+        .1
+        .ends_with(&["Port", "Pixel", "Direction", "On the wire"]));
     e.select(vec![Target::Node(f.clone())]);
-    assert_eq!(labels(&e), vec!["Start", "Children"]);
+    assert_eq!(
+        e.rule_rows().map(|r| r.len()),
+        Some(2),
+        "Start and Children"
+    );
 }
 
 /// Choosing a port puts the thing at that port's first pixel ("ring 3 is
@@ -582,6 +581,33 @@ fn choosing_a_port_places_it_and_pixel_moves_it() {
     });
     assert_eq!(landing(&e.project, &r1, 0), Some(("0".into(), 3)));
     let _ = out;
+}
+
+/// A ring given a port of its own says what moves with it: the rings after
+/// it that only follow on.
+#[test]
+fn a_ring_with_a_port_of_its_own_says_what_follows_it() {
+    let (mut p, f, out, circle) = circle(&[("D0", 40), ("D1", 40)]);
+    place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 0);
+    let mut e = editor_of(p);
+    e.select(vec![Target::Object(ObjectId::new(&circle, "r1"))]);
+    e.patch_input(PatchInput::Override {
+        field: PatchField::Port,
+    });
+    let (options, _) = choice(&e, "Port");
+    let d1 = options.iter().position(|o| o.starts_with("D1")).unwrap();
+    e.patch_input(PatchInput::Choose {
+        field: PatchField::Port,
+        option: d1,
+    });
+    let hints: Vec<String> = rows(&e)
+        .into_iter()
+        .filter_map(|i| match i {
+            UiItem::Hint(h) => Some(h),
+            _ => None,
+        })
+        .collect();
+    assert!(hints.contains(&"ring r2 follows it".to_string()), "{hints:?}");
 }
 
 /// Direction "Reversed" on one ring, chosen in its Patch section, leaves its
@@ -959,11 +985,42 @@ fn place(p: &mut Project, f: &NodeId, t: &PatchTarget, out: &NodeId, port: &str,
     assert!(p.set_start(f, t, start));
 }
 
-/// A Patch choice row's options and what is chosen.
-fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
-    e.patch_section()
-        .unwrap()
+/// The inspector's sections, each title with its rows' labels.
+fn patch_labels(e: &Editor) -> Vec<(String, Vec<&'static str>)> {
+    e.view_inspector()
+        .sections
         .into_iter()
+        .map(|s| {
+            let labels = s
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    UiItem::PatchChoice { label, .. }
+                    | UiItem::PatchInherited { label, .. }
+                    | UiItem::PatchNumber { label, .. } => Some(*label),
+                    _ => None,
+                })
+                .collect();
+            (s.title.unwrap_or_default(), labels)
+        })
+        .collect()
+}
+
+/// Every patching row the inspector shows for the selection.
+fn rows(e: &Editor) -> Vec<UiItem> {
+    e.view_inspector()
+        .sections
+        .into_iter()
+        .flat_map(|s| s.items)
+        .collect()
+}
+
+/// A Patch choice row's options and what is chosen (the last one with
+/// that label: the object's, after the component's).
+fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
+    rows(e)
+        .into_iter()
+        .rev()
         .find_map(|i| match i {
             UiItem::PatchChoice {
                 label: l,
@@ -978,9 +1035,9 @@ fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
 
 /// A Patch inherited row's value and where it is set.
 fn inherited(e: &Editor, label: &str) -> (String, Option<(String, Target)>) {
-    e.patch_section()
-        .unwrap()
+    rows(e)
         .into_iter()
+        .rev()
         .find_map(|i| match i {
             UiItem::PatchInherited {
                 label: l,

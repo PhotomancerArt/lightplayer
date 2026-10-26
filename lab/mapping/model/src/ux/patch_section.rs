@@ -81,7 +81,9 @@ pub enum PatchOption {
     At(NodeId, String),
     NextPort,
     EndToEnd,
-    OnePerPort(String),
+    /// One per port from this port of this output (the rule keeps only the
+    /// port's key; the output names it for the person).
+    OnePerPort(NodeId, String),
     Port(NodeId, String),
     AsDrawn,
     Reversed,
@@ -97,10 +99,13 @@ impl Editor {
         for t in &self.selection {
             let entry = match t {
                 Target::Node(id) if p.fixture(id).is_some() => (id.clone(), PatchTarget::Fixture),
-                Target::Component(c) => match p.fixture_of(c) {
-                    Some(n) => (n.id.clone(), PatchTarget::Component(c.clone())),
-                    None => continue,
-                },
+                // A ring's or a copy's rules are its component's.
+                Target::Component(c) | Target::Object(ObjectId { component: c, .. }) => {
+                    match p.fixture_of(c) {
+                        Some(n) => (n.id.clone(), PatchTarget::Component(c.clone())),
+                        None => continue,
+                    }
+                }
                 _ => continue,
             };
             if !out.contains(&entry) {
@@ -148,6 +153,12 @@ impl Editor {
         if targets.is_empty() || targets.len() != self.selection.len() {
             return None;
         }
+        Some(self.rule_rows_for(&targets))
+    }
+
+    /// The rules rows for these fixtures or components.
+    pub fn rule_rows_for(&self, targets: &[(NodeId, PatchTarget)]) -> Vec<UiItem> {
+        let targets = targets.to_vec();
         let fixture_only = targets.iter().all(|(_, t)| *t == PatchTarget::Fixture);
         let mut items = Vec::new();
 
@@ -186,12 +197,12 @@ impl Editor {
             items.push(UiItem::PatchChoice {
                 label: "Children",
                 options: options.iter().map(|o| self.option_words(o)).collect(),
-                chosen: chosen.and_then(|c| options.iter().position(|o| *o == c)),
+                chosen: chosen.and_then(|c| options.iter().position(|o| c.matches(o))),
                 reset: None,
                 field: PatchField::Children,
             });
         }
-        Some(items)
+        items
     }
 
     /// The object rows: where it is on the walk and why, against its rule.
@@ -201,6 +212,11 @@ impl Editor {
         if objects.is_empty() || objects.len() != self.selection.len() {
             return None;
         }
+        self.object_rows_for(&objects)
+    }
+
+    /// The object rows for these objects; `None` when one isn't on the walk.
+    pub fn object_rows_for(&self, objects: &[(NodeId, ObjectId)]) -> Option<Vec<UiItem>> {
         let p = &self.project;
         let patch = p.effective_patch();
         let walked: Vec<(&NodeId, &ObjectId, &Walked)> = objects
@@ -431,7 +447,9 @@ impl Editor {
                 for (f, t) in &rules {
                     let children = match &o {
                         PatchOption::EndToEnd => Children::EndToEnd,
-                        PatchOption::OnePerPort(from) => Children::OnePerPort { from: from.clone() },
+                        PatchOption::OnePerPort(_, from) => {
+                            Children::OnePerPort { from: from.clone() }
+                        }
                         _ => continue,
                     };
                     self.project.set_children(f, t, children);
@@ -643,7 +661,7 @@ impl Editor {
                     format!(
                         "from {}: {}",
                         self.owner_words(&w.fixture, t),
-                        self.option_words(&children_option(&rules.children)).to_lowercase()
+                        children_option(&rules.children).words()
                     ),
                     self.owner_target(&w.fixture, t),
                 ))
@@ -779,7 +797,7 @@ impl Editor {
     }
 
     /// Children's options: end to end, or one per port from each port of
-    /// the output the targets are on (every port, when that isn't one).
+    /// the output the targets are on (none when that isn't one output).
     fn children_options(&self, targets: &[(NodeId, PatchTarget)]) -> Vec<PatchOption> {
         let p = &self.project;
         let output = self.shared(targets, |f, t| {
@@ -796,8 +814,8 @@ impl Editor {
         });
         let mut out = vec![PatchOption::EndToEnd];
         for (o, port) in p.wire_ports() {
-            if output.as_ref().is_none_or(|x| *x == o) {
-                out.push(PatchOption::OnePerPort(port));
+            if output.as_ref() == Some(&o) {
+                out.push(PatchOption::OnePerPort(o, port));
             }
         }
         out
@@ -827,13 +845,11 @@ impl Editor {
             PatchOption::At(out, port) | PatchOption::Port(out, port) => self.port_words(out, port),
             PatchOption::NextPort => "Next port".into(),
             PatchOption::EndToEnd => "End to end".into(),
-            PatchOption::OnePerPort(port) => {
+            PatchOption::OnePerPort(out, port) => {
                 let name = p
-                    .wire_ports()
-                    .into_iter()
-                    .find(|(_, k)| k == port)
-                    .and_then(|(out, k)| p.output(&out)?.port(&k).map(|x| x.name.clone()))
-                    .unwrap_or_else(|| port.clone());
+                    .output(out)
+                    .and_then(|o| o.port(port))
+                    .map_or_else(|| port.clone(), |x| x.name.clone());
                 format!("One per port from {name}")
             }
             PatchOption::AsDrawn => "As drawn".into(),
@@ -852,10 +868,35 @@ fn start_option(s: &Start) -> PatchOption {
     }
 }
 
-fn children_option(c: &Children) -> PatchOption {
+/// A Children rule as the option it is among `options` (One per port is
+/// matched by its port's key).
+fn children_option(c: &Children) -> ChildrenKey {
     match c {
-        Children::EndToEnd => PatchOption::EndToEnd,
-        Children::OnePerPort { from } => PatchOption::OnePerPort(from.clone()),
+        Children::EndToEnd => ChildrenKey::EndToEnd,
+        Children::OnePerPort { from } => ChildrenKey::OnePerPort(from.clone()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChildrenKey {
+    EndToEnd,
+    OnePerPort(String),
+}
+
+impl ChildrenKey {
+    fn matches(&self, o: &PatchOption) -> bool {
+        match (self, o) {
+            (ChildrenKey::EndToEnd, PatchOption::EndToEnd) => true,
+            (ChildrenKey::OnePerPort(a), PatchOption::OnePerPort(_, b)) => a == b,
+            _ => false,
+        }
+    }
+
+    fn words(&self) -> String {
+        match self {
+            ChildrenKey::EndToEnd => "end to end".into(),
+            ChildrenKey::OnePerPort(_) => "one per port".into(),
+        }
     }
 }
 

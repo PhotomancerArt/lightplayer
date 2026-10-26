@@ -383,6 +383,20 @@ impl Project {
                 let p = *self.lamps_under(t).first()?;
                 Some(Area::hull(&[screen(p)], LAMP_PAD_PX))
             }
+            // A copy of a group or a circle holds no lamps of its own: its
+            // area is its leaves' outlines, as a repeat's is.
+            Target::Object(o) if self.object(o).is_none() => {
+                let (_, node) = self.placed().node(o)?;
+                let lines: Vec<Vec<Vec2>> = node
+                    .leaves()
+                    .into_iter()
+                    .map(|leaf| outline_points(&leaf.shape, &screen, camera.scale))
+                    .collect();
+                (!lines.is_empty()).then_some(Area::Polylines {
+                    lines,
+                    pad: PATH_PAD_PX,
+                })
+            }
             Target::Object(o) => match &self.object(o)?.shape {
                 ObjectShape::Ring { center, radius } => Some(Area::Band {
                     center: screen(*center),
@@ -423,29 +437,7 @@ impl Project {
                     ComponentKind::Repeat { .. } => Some(Area::Polylines {
                         lines: self
                             .objects_of(id)
-                            .map(|o| match &o.shape {
-                                ObjectShape::Polyline { points } => {
-                                    points.iter().map(|p| screen(*p)).collect()
-                                }
-                                ObjectShape::Ring { center, radius } => {
-                                    let mut ring =
-                                        ring_points(screen(*center), radius * camera.scale);
-                                    ring.extend(ring.first().copied());
-                                    ring
-                                }
-                                ObjectShape::Rings { center, radii } => {
-                                    let outer = radii.iter().copied().fold(0.0, f64::max);
-                                    let mut ring =
-                                        ring_points(screen(*center), outer * camera.scale);
-                                    ring.extend(ring.first().copied());
-                                    ring
-                                }
-                                ObjectShape::Filled { outline } => outline
-                                    .iter()
-                                    .chain(outline.first())
-                                    .map(|p| screen(*p))
-                                    .collect(),
-                            })
+                            .map(|o| outline_points(&o.shape, &screen, camera.scale))
                             .collect(),
                         pad: PATH_PAD_PX,
                     }),
@@ -675,5 +667,29 @@ fn rounded_hull_path(hull: &[Vec2], pad: f64) -> String {
             d.push('Z');
             d
         }
+    }
+}
+
+/// An object's outline on screen, as one closed (or open) line: a path's
+/// points, a ring round, an outline closed.
+fn outline_points(shape: &ObjectShape, screen: &impl Fn(Vec2) -> Vec2, scale: f64) -> Vec<Vec2> {
+    match shape {
+        ObjectShape::Polyline { points } => points.iter().map(|p| screen(*p)).collect(),
+        ObjectShape::Ring { center, radius } => {
+            let mut ring = ring_points(screen(*center), radius * scale);
+            ring.extend(ring.first().copied());
+            ring
+        }
+        ObjectShape::Rings { center, radii } => {
+            let outer = radii.iter().copied().fold(0.0, f64::max);
+            let mut ring = ring_points(screen(*center), outer * scale);
+            ring.extend(ring.first().copied());
+            ring
+        }
+        ObjectShape::Filled { outline } => outline
+            .iter()
+            .chain(outline.first())
+            .map(|p| screen(*p))
+            .collect(),
     }
 }

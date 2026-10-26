@@ -325,11 +325,18 @@ impl Project {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // A component's own node: in a repeat, copy 0 (the copies are
+            // their own objects); a repeat's node holds every copy.
             Target::Component(id) => self
-                .objects_under(id)
-                .into_iter()
-                .flat_map(|o| o.lamps.iter().map(|l| l.pos))
-                .collect(),
+                .placed()
+                .node(&ObjectId::of(id))
+                .map(|(_, n)| {
+                    n.leaves()
+                        .into_iter()
+                        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+                        .collect()
+                })
+                .unwrap_or_default(),
             Target::Node(_) => self
                 .children(Some(t))
                 .iter()
@@ -347,7 +354,10 @@ impl Project {
             Target::Object(o) => self.placed().node(o).map_or(0, |(_, n)| {
                 n.leaves().iter().map(|o| o.lamps.len()).sum()
             }),
-            Target::Component(id) => self.objects_under(id).iter().map(|o| o.lamps.len()).sum(),
+            Target::Component(id) => self
+                .placed()
+                .node(&ObjectId::of(id))
+                .map_or(0, |(_, n)| n.leaves().iter().map(|o| o.lamps.len()).sum()),
             Target::Node(_) => self
                 .children(Some(t))
                 .iter()
