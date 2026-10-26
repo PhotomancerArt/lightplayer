@@ -88,6 +88,20 @@ use crate::output::rmt::shared_driver::{
 const DRIVER_ID: &str = "esp32c6-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32-C6 RMT WS281x";
 
+/// Black pixels after every frame that can replay its prefill — lp-ws281x's
+/// replay recovery (its driver docs, "The first-interrupt replay").
+///
+/// A first refill interrupt late by a half or more makes the transmitter
+/// re-send the prefilled window, and the frame's last bits spill into the LEDs
+/// wired after it, which then freeze on pattern colours: seen in the field on
+/// a C6 with Wi-Fi busy in the first minute after boot, two and then three
+/// LEDs past a 73-pixel frame. On the two-channel plan a half is 24 bits (one
+/// pixel, 30 µs) and the window two pixels, so the window alone would not
+/// have held three. Eight pixels keep the spill in black for a first
+/// interrupt up to ~270 µs late, at 240 µs of wire time per frame; the
+/// one-channel plan's window is eight pixels already.
+const REPLAY_TAIL_PIXELS: usize = 8;
+
 /// One RMT TX channel this driver can hand out.
 struct ChannelSlot {
     /// The manifest resource backing this channel (`/rmt/ws281xK`), claimed
@@ -349,6 +363,7 @@ impl Esp32C6RmtWs281xDriver {
 
         DRIVER
             .configure_default_clock(ch, &ChannelTiming::WS2812)
+            .and_then(|()| DRIVER.enable_replay_recovery(ch, REPLAY_TAIL_PIXELS))
             .map_err(|error| HardwareEndpointError::Other {
                 message: format!("RMT channel {ch} timing configuration failed: {error:?}"),
             })?;

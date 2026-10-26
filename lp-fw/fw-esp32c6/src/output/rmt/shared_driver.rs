@@ -175,12 +175,12 @@ pub mod telemetry {
                 mean_lag_tenths(stats.refill_lag_sum, stats.refill_lag_count);
             // Field order is the classic's, verbatim: the matrix scripts grep
             // by position and the two chips' captures must line up column for
-            // column. `entry_max`/`entry_hist`/`trip_at` stay last — appended,
+            // column. `entry_max`/`entry_hist`/`trip_at`/`replays`/`resends` stay last — appended,
             // never inserted — so older captures keep matching the prefix.
             esp_println::println!(
                 "[WS281X] t_ms={} ch={} half={} frames={} complete={} trips={} skips={} \
                  errors={} refills={} wanted={} lag_avg={}.{} lag_max={} over_half={} \
-                 hist={} entry_max={} entry_hist={} trip_at={}",
+                 hist={} entry_max={} entry_hist={} trip_at={} replays={} resends={}",
                 now_ms,
                 ch,
                 half,
@@ -199,6 +199,8 @@ pub mod telemetry {
                 stats.entry_delay_max,
                 HistFmt(stats.entry_delay_hist),
                 stats.trip_bits_last,
+                stats.replays,
+                stats.resends,
             );
         }
     }

@@ -165,6 +165,29 @@ pub struct ChannelStats {
     /// deterministic late service rather than random load, and points at the
     /// refill that is late. Cheap: one relaxed store on the trip path.
     pub trip_bits_last: usize,
+    /// Transmissions whose **first** refill interrupt came so late that the
+    /// transmitter had already wrapped back into the first half — it was
+    /// re-sending the prefilled window.
+    ///
+    /// `start_frame` prefills both halves and plants no guard (see the
+    /// module docs of `driver.rs`), so until the first refill runs nothing
+    /// stops the transmitter from going round the window again. The bits it
+    /// re-sends are *inserted* into the frame: every later bit lands one
+    /// replay further down the chain, and the last ones spill past the
+    /// frame's final pixel into whatever LEDs are wired after it. Detected at
+    /// that first refill, by the read pointer being in the half the
+    /// threshold event had just left. A replay of a whole window (the
+    /// transmitter round twice, and back in the second half) leaves the
+    /// pointer where an on-time service finds it, so an even number of
+    /// replayed halves goes uncounted; an odd number is always caught. A
+    /// replay is never a guard trip: the cursor reaches the frame's end.
+    pub replays: usize,
+    /// Frames sent a second time because their first transmission replayed
+    /// (see [`Self::replays`]). Only channels with replay recovery on
+    /// (`Ws281xDriver::enable_replay_recovery`) resend, and each frame is
+    /// resent at most once, so `replays - resends` on such a channel counts
+    /// the resends that replayed again.
+    pub resends: usize,
 }
 
 impl ChannelStats {
@@ -234,11 +257,23 @@ pub struct ChannelState {
     pulse_one: AtomicU32,
     pulse_latch: AtomicU32,
     color_order: AtomicU8,
+    /// Black bits sent after a frame's pixels when the frame cannot finish
+    /// inside the prefilled window; 0 with replay recovery off. See
+    /// `Ws281xDriver::enable_replay_recovery`.
+    pub(crate) tail_bits: AtomicUsize,
 
     // --- frame descriptor (published by `arm`) ---
     frame_ptr: AtomicPtr<u8>,
     frame_len: AtomicUsize,
     pub(crate) total_bits: AtomicUsize,
+    /// The pixels' own bits — `total_bits` without the black tail.
+    pub(crate) data_bits: AtomicUsize,
+    /// This transmission's first refill is still to come.
+    pub(crate) first_service: AtomicBool,
+    /// This transmission replayed its prefill ([`ChannelStats::replays`]).
+    pub(crate) replayed: AtomicBool,
+    /// This frame has already been resent once.
+    pub(crate) resent: AtomicBool,
 
     // --- live transmission state (owned by the ISR after `arm`) ---
     pub(crate) bit_cursor: AtomicUsize,
@@ -276,6 +311,8 @@ pub struct ChannelState {
     pub(crate) entry_delay_hist: [AtomicU32; LAG_BUCKETS],
     /// See [`ChannelStats::trip_bits_last`].
     pub(crate) trip_bits_last: AtomicUsize,
+    pub(crate) replays: AtomicUsize,
+    pub(crate) resends: AtomicUsize,
 }
 
 impl ChannelState {
@@ -288,9 +325,14 @@ impl ChannelState {
             pulse_one: AtomicU32::new(0),
             pulse_latch: AtomicU32::new(0),
             color_order: AtomicU8::new(ColorOrder::Grb as u8),
+            tail_bits: AtomicUsize::new(0),
             frame_ptr: AtomicPtr::new(core::ptr::null_mut()),
             frame_len: AtomicUsize::new(0),
             total_bits: AtomicUsize::new(0),
+            data_bits: AtomicUsize::new(0),
+            first_service: AtomicBool::new(false),
+            replayed: AtomicBool::new(false),
+            resent: AtomicBool::new(false),
             bit_cursor: AtomicUsize::new(0),
             latch_written: AtomicBool::new(true),
             frame_complete: AtomicBool::new(true),
@@ -306,6 +348,8 @@ impl ChannelState {
             entry_delay_max: AtomicI32::new(0),
             entry_delay_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
             trip_bits_last: AtomicUsize::new(0),
+            replays: AtomicUsize::new(0),
+            resends: AtomicUsize::new(0),
         }
     }
 
@@ -403,13 +447,43 @@ impl ChannelState {
     /// until the frame completes (see [`crate::driver::Ws281xDriver::start_frame`]).
     pub(crate) unsafe fn arm(&self, ptr: *const u8, len: usize) {
         let pixels = len / BYTES_PER_PIXEL;
+        let data_bits = pixels * BITS_PER_PIXEL;
         self.frame_ptr.store(ptr.cast_mut(), Relaxed);
         self.frame_len.store(pixels * BYTES_PER_PIXEL, Relaxed);
-        self.total_bits.store(pixels * BITS_PER_PIXEL, Relaxed);
-        self.latch_written.store(false, Relaxed);
-        self.bit_cursor.store(0, Release);
+        self.data_bits.store(data_bits, Relaxed);
+        let tail = if self.can_replay(data_bits) {
+            self.tail_bits.load(Relaxed)
+        } else {
+            0
+        };
+        // The tail is bits past `frame_len`, which the fill reads as zero:
+        // black pixels, with no bytes behind them.
+        self.total_bits.store(data_bits + tail, Relaxed);
+        self.resent.store(false, Relaxed);
+        self.rewind();
         // Release: publishes every store above to the ISR's Acquire load.
         self.frame_complete.store(false, Release);
+    }
+
+    /// Reset the per-transmission state for the frame already armed: from
+    /// [`Self::arm`], and from the interrupt handler when it resends.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
+    pub(crate) fn rewind(&self) {
+        self.latch_written.store(false, Relaxed);
+        self.first_service.store(true, Relaxed);
+        self.replayed.store(false, Relaxed);
+        self.bit_cursor.store(0, Release);
+    }
+
+    /// Can a frame of `data_bits` replay its prefill?
+    ///
+    /// Only if it cannot end inside the window `start_frame` prefills: the
+    /// data, the latch word and at least one STOP word after it must all fit
+    /// for the transmitter to stop before it could wrap. A frame that does
+    /// fit never depends on a refill, so a late one costs it nothing.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
+    pub(crate) fn can_replay(&self, data_bits: usize) -> bool {
+        data_bits + 2 > self.ram_words.load(Relaxed)
     }
 
     /// Drop the frame descriptor and mark the channel idle.
@@ -506,9 +580,22 @@ impl ChannelState {
         self.bit_cursor.load(Acquire)
     }
 
-    /// Bits the current frame consists of.
+    /// Bits the current frame consists of, its black tail included (see
+    /// `Ws281xDriver::enable_replay_recovery`).
     pub fn total_bits(&self) -> usize {
         self.total_bits.load(Relaxed)
+    }
+
+    /// Bits of the current frame's own pixels — [`Self::total_bits`] without
+    /// the black tail.
+    pub fn data_bits(&self) -> usize {
+        self.data_bits.load(Relaxed)
+    }
+
+    /// Black bits a frame that can replay is followed by on this channel; 0
+    /// with replay recovery off.
+    pub fn tail_bits(&self) -> usize {
+        self.tail_bits.load(Relaxed)
     }
 
     /// The ping-pong half size in words — the refill deadline the lag figures
@@ -542,6 +629,8 @@ impl ChannelState {
             entry_delay_max: self.entry_delay_max.load(Relaxed),
             entry_delay_hist,
             trip_bits_last: self.trip_bits_last.load(Relaxed),
+            replays: self.replays.load(Relaxed),
+            resends: self.resends.load(Relaxed),
         }
     }
 
@@ -562,6 +651,8 @@ impl ChannelState {
             cell.store(0, Relaxed);
         }
         self.trip_bits_last.store(0, Relaxed);
+        self.replays.store(0, Relaxed);
+        self.resends.store(0, Relaxed);
     }
 }
 
