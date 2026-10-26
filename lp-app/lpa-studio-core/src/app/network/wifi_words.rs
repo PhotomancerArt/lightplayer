@@ -397,16 +397,8 @@ mod tests {
     #[test]
     fn the_networks_page_always_says_how_it_stands() {
         let cases = [
-            (
-                StationState::Unsupported,
-                true,
-                NOT_CONNECTED_UNSUPPORTED,
-            ),
-            (
-                StationState::Unsupported,
-                false,
-                NOT_SET_UP_UNSUPPORTED,
-            ),
+            (StationState::Unsupported, true, NOT_CONNECTED_UNSUPPORTED),
+            (StationState::Unsupported, false, NOT_SET_UP_UNSUPPORTED),
             (StationState::Off, true, WIFI_OFF),
             (StationState::NotConnected, true, NOT_CONNECTED),
             (

@@ -570,7 +570,10 @@ fn wifi_details(wifi: UiDeviceWifi) -> Element {
 /// Starlink Home saved and out of reach; the board hears Starlink Apt, and
 /// is about to save it.
 fn adding_apt(station: StationState, relay: RelayState) -> UiDeviceWifi {
-    let mut wifi = board(station, vec![saved("Starlink Home", Some(LastAttempt::NotFound))]);
+    let mut wifi = board(
+        station,
+        vec![saved("Starlink Home", Some(LastAttempt::NotFound))],
+    );
     wifi.heard = Some(vec![heard_network("Starlink Apt", -57, true)]);
     if let Some(status) = wifi.status.as_mut() {
         status.relay = relay;

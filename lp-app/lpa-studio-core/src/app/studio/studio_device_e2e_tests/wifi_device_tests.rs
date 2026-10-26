@@ -197,7 +197,10 @@ fn a_change_pressed_while_a_read_is_out_goes_after_it() {
     );
     let status = wifi_status(&mut bench, &tasks, target);
     assert!(!status.wifi, "it went once the read answered");
-    assert_eq!(bench.controller.device_roster_view().wifi[&target].error, None);
+    assert_eq!(
+        bench.controller.device_roster_view().wifi[&target].error,
+        None
+    );
 
     // An add pressed behind a read: its row and its test show at once.
     bench

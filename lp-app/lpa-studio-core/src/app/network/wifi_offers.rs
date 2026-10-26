@@ -470,7 +470,11 @@ mod tests {
         reading.reading = true;
         let offers = wifi_offers(&prefix(), &reading);
         let enabled: Vec<bool> = offers.iter().map(UiOffer::is_enabled).collect();
-        assert_eq!(enabled, [false, true, true, true], "add waits only for its name");
+        assert_eq!(
+            enabled,
+            [false, true, true, true],
+            "add waits only for its name"
+        );
 
         let mut play = wifi(&["lp-walk-net"]);
         play.can_edit = false;

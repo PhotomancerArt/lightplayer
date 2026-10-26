@@ -885,15 +885,15 @@ const SAY_CLASS: &str = "tw:m-0 tw:text-[12.5px] tw:leading-snug tw:text-muted-f
 
 /// A refusal, in the board's words: in the Networks page's line, or under
 /// another page.
-const ERROR_CLASS: &str =
-    "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground";
+const ERROR_CLASS: &str = "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground";
 
 /// Nearby's first line while it lists nothing.
 const NEARBY_LINE_CLASS: &str = "tw:m-0 tw:px-3 tw:py-2 tw:text-[12px] tw:text-dim-foreground";
 
 /// The test's last line and its buttons: the outcome, or, running, its
 /// place held.
-const RESULT_CLASS: &str = "tw:grid tw:gap-2 tw:text-xs tw:leading-relaxed tw:text-muted-foreground";
+const RESULT_CLASS: &str =
+    "tw:grid tw:gap-2 tw:text-xs tw:leading-relaxed tw:text-muted-foreground";
 
 const ROW_BUTTON_CLASS: &str = "tw:-mx-1 tw:flex tw:w-[calc(100%+8px)] tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:rounded-md tw:border-0 tw:bg-transparent tw:px-1 tw:py-1.5 tw:text-left tw:hover:bg-white/5 ux-focus-ring";
 
