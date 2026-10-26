@@ -4,6 +4,7 @@ pub mod bindings;
 pub mod board;
 pub mod breath;
 pub mod channel;
+pub mod circular_display;
 pub mod color_order;
 pub mod component;
 pub mod control_product;

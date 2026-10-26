@@ -106,6 +106,7 @@ fn App() -> Element {
                             project.set(key);
                         },
                         option { value: DESK, "desk" }
+                        option { value: CIRCULAR, "circular display" }
                         for p in embedded::ALL {
                             option { value: p.key, "{p.title}" }
                         }
@@ -311,12 +312,18 @@ fn scramble_piece(ed: &GraphEditor) {
 /// The picker's key for the lab's own starting project.
 const DESK: &str = "desk";
 
+/// The picker's key for the circular display, built in code (the product's
+/// files can't hold a circle of rings yet).
+const CIRCULAR: &str = "circular-display";
+
 /// Open a project in the editor and fit the view to it. A project that
 /// won't open leaves the current one and says why.
 fn open_project(ed: &GraphEditor, key: &str) {
     let entry = embedded::ALL.iter().find(|p| p.key == key);
     let project = if key == DESK {
         Ok(Project::seed())
+    } else if key == CIRCULAR {
+        Ok(Project::circular_display())
     } else {
         match entry {
             Some(p) => Opened::open(&p.files())
@@ -334,6 +341,16 @@ fn open_project(ed: &GraphEditor, key: &str) {
             let wired = entry.and_then(|p| p.wired_as).and_then(|w| {
                 let o = Opened::open(&w.files()).ok()?;
                 Some(Piece::of(&o.project, format!("{}'s patch", w.title)))
+            });
+            // The circular display is wired as a real one might be: ring 3
+            // the other way round, the inner rings on D1.
+            let wired = wired.or_else(|| {
+                (key == CIRCULAR).then(|| {
+                    Piece::of(
+                        &Project::circular_display_wired(),
+                        "the display as soldered: ring 3 reversed, rings 3–5 on D1",
+                    )
+                })
             });
             let piece = wired.unwrap_or_else(|| {
                 let name = entry.map_or("the desk", |p| p.title);
