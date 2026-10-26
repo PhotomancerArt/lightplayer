@@ -1026,6 +1026,9 @@ impl StudioController {
         let connected = result.is_ok();
         let now = (self.now_secs)();
         self.wifi_connects.finish(target, host, result, now);
+        // The board may have said hello before its socket's answer came
+        // back here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         if let crate::WifiConnectTarget::Board(board) = target {
             match connected {
                 true => {
@@ -1104,6 +1107,9 @@ impl StudioController {
             result,
             now,
         );
+        // The board may have said hello before the relay's answer came back
+        // here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         self.fall_through_ended(board, !connected);
         if connected {
             self.device_sweep_pending = true;

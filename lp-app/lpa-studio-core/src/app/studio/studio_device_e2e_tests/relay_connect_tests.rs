@@ -37,6 +37,10 @@ struct ConnectableRelayBoard {
     /// The socket's words the next connect fails with; `None` answers.
     refuse: Rc<RefCell<Option<String>>>,
     asked: Rc<RefCell<Vec<String>>>,
+    /// While set, a connect's session is present at once but its answer
+    /// waits: the board says hello before the relay's answer comes back, as
+    /// it can on a page.
+    answer_late: Rc<Cell<bool>>,
 }
 
 impl crate::RelayLinkSource for ConnectableRelayBoard {
@@ -88,7 +92,12 @@ impl crate::RelayLinkSource for ConnectableRelayBoard {
                 Ok(())
             }
         };
-        Box::pin(core::future::ready(answer))
+        let late = Rc::clone(&self.answer_late);
+        let mut answer = Some(answer);
+        Box::pin(core::future::poll_fn(move |_| match late.get() {
+            true => core::task::Poll::Pending,
+            false => core::task::Poll::Ready(answer.take().expect("answered once")),
+        }))
     }
 
     fn park(&self, _board: &str) {}
@@ -100,6 +109,7 @@ impl crate::RelayLinkSource for ConnectableRelayBoard {
 pub(super) struct RelayRig {
     pub(super) refuse: Rc<RefCell<Option<String>>>,
     pub(super) asked: Rc<RefCell<Vec<String>>>,
+    pub(super) answer_late: Rc<Cell<bool>>,
 }
 
 /// Install the shipped build's halves beside the bench's USB: a sim half
@@ -108,6 +118,7 @@ pub(super) fn with_relay(bench: &mut DeviceBench, device: &FakeEsp32Device) -> R
     let rig = RelayRig {
         refuse: Rc::default(),
         asked: Rc::default(),
+        answer_late: Rc::default(),
     };
     bench
         .controller
@@ -126,6 +137,7 @@ pub(super) fn with_relay(bench: &mut DeviceBench, device: &FakeEsp32Device) -> R
                 present: Rc::default(),
                 refuse: Rc::clone(&rig.refuse),
                 asked: Rc::clone(&rig.asked),
+                answer_late: Rc::clone(&rig.answer_late),
             },
         ))));
     rig
@@ -211,15 +223,21 @@ fn one_press_on_a_remembered_board_says_connecting_until_its_hello() {
         .expect("the connect starts");
 
     let mut turns = 0;
-    while !bench.view().devices.iter().any(|card| {
-        card.id == target && card.status != lpa_devices::device::DeviceStatus::Offline
-    }) {
+    while !bench
+        .view()
+        .devices
+        .iter()
+        .any(|card| card.id == target && card.status != lpa_devices::device::DeviceStatus::Offline)
+    {
         let cards = bench.controller.view().home.unwrap().devices.cards;
         assert_eq!(
             cards.len(),
             1,
             "turn {turns}: one card for the board while it connects: {:?}",
-            cards.iter().map(|card| card.surface.state).collect::<Vec<_>>()
+            cards
+                .iter()
+                .map(|card| card.surface.state)
+                .collect::<Vec<_>>()
         );
         assert_eq!(cards[0].device, target, "the board's own card");
         super::account_boards_tests::assert_connecting_through_lightplayer_app(&cards[0], turns);
@@ -229,9 +247,11 @@ fn one_press_on_a_remembered_board_says_connecting_until_its_hello() {
     }
     assert!(turns > 1, "the connect took more than the press's own turn");
     bench.run_until(&tasks, "the board ready on the relay", |bench| {
-        bench.view().devices.iter().any(|card| {
-            card.id == target && card.activity.is_none() && card.state_label == "Ready"
-        })
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == target && card.activity.is_none() && card.state_label == "Ready")
     });
     assert_eq!(rig.asked.borrow().as_slice(), [BOARD], "one dial");
     assert!(

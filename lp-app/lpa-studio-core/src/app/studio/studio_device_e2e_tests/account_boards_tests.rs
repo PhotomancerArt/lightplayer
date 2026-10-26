@@ -171,7 +171,10 @@ fn one_press_on_a_board_never_met_says_connecting_until_its_hello() {
             cards.len(),
             1,
             "turn {turns}: one card for the board while it connects: {:?}",
-            cards.iter().map(|card| card.surface.state).collect::<Vec<_>>()
+            cards
+                .iter()
+                .map(|card| card.surface.state)
+                .collect::<Vec<_>>()
         );
         assert_connecting_through_lightplayer_app(&cards[0], turns);
         // A second press finds the verb waiting, and a double click that
@@ -203,6 +206,70 @@ fn one_press_on_a_board_never_met_says_connecting_until_its_hello() {
     );
 }
 
+/// The board says hello before the relay's answer comes back (seen on the
+/// studio-relay walk's T5): the card's connect ends with that answer, not at
+/// whatever happens next, so the board's card never keeps a spinner over a
+/// board that is already here.
+#[test]
+fn a_hello_before_the_relays_answer_ends_the_connect_with_the_answer() {
+    let device = relay_light_player("dev00000acctbrd10");
+    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-account-boards-10");
+    let rig = with_relay(&mut bench, &device);
+    sign_in(&mut bench, &tasks);
+    list(&mut bench, &tasks, &[BOARD]);
+    let entry = crate::account_board_device(key());
+    rig.answer_late.set(true);
+    let connect = bench.device_verb(entry, "connect-relay");
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("the connect starts");
+    // The session is up and announced (the page's `connect` edge sweeps it
+    // in), and the board says hello while the answer waits.
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the board's hello", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id != entry && card.state_label == "Ready")
+    });
+    let board = bench
+        .view()
+        .devices
+        .iter()
+        .find(|card| card.id != entry)
+        .map(|card| card.id)
+        .unwrap();
+    assert_eq!(
+        home_card(&bench, board).surface.state,
+        crate::SurfaceState::Connecting,
+        "the relay has not answered yet"
+    );
+
+    // The answer comes back: the connect is over at once.
+    rig.answer_late.set(false);
+    pump(&tasks);
+    for command in drive(bench.access_rx.recv_coalesced()).unwrap_or_default() {
+        if let crate::StudioCommand::Network(command) = command {
+            bench.controller.apply_network_command(command);
+        }
+    }
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty(),
+        "the board is here: nothing left to say"
+    );
+    assert_ne!(
+        home_card(&bench, board).surface.state,
+        crate::SurfaceState::Connecting
+    );
+}
+
 /// The card says a connect through lightplayer.app is under way, with its
 /// spinner and no button to press again.
 pub(super) fn assert_connecting_through_lightplayer_app(card: &crate::UiBoardCard, turn: usize) {
@@ -212,7 +279,10 @@ pub(super) fn assert_connecting_through_lightplayer_app(card: &crate::UiBoardCar
         "turn {turn}: the card says it is connecting"
     );
     assert_eq!(
-        card.surface.notice.as_ref().map(|notice| notice.first.as_str()),
+        card.surface
+            .notice
+            .as_ref()
+            .map(|notice| notice.first.as_str()),
         Some("Connecting to this board through lightplayer.app."),
         "turn {turn}"
     );
@@ -413,4 +483,3 @@ pub(super) fn home_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::
         .find(|card| card.device == device)
         .unwrap_or_else(|| panic!("no card for {device:?}"))
 }
-
