@@ -247,19 +247,59 @@ impl ActivityCell {
     }
 
     /// The percent the card shows beside [`Self::label`]: the coarse
-    /// effect's latest, except while a Flash waits for the user's answer —
-    /// the read's closing 100 % is not a reading of the question.
+    /// effect's latest, while its step has work to count. A Flash shows
+    /// none while it waits for the user's answer, restarts or saves the
+    /// board model, nor for the few-kilobyte layout read — whose 100 % came
+    /// almost at once and read as the install being done
+    /// ([`super::FlashStep::shows_percent`]).
     pub fn percent(&self) -> Option<u8> {
-        let waiting = match &self.reducer {
-            Reducer::Flash(flash) => flash.step(None) == super::FlashStep::WaitingForAnswer,
+        let label = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.label.as_str());
+        let shows = match &self.reducer {
+            Reducer::Flash(flash) => flash.step(label).shows_percent(label),
             // An update's percent is its stage's, kept across a gap.
             Reducer::Update(update) => return update.percent(),
-            _ => false,
+            _ => true,
         };
-        match waiting {
-            true => None,
-            false => self.progress.as_ref().and_then(|progress| progress.percent),
+        match shows {
+            true => self.progress.as_ref().and_then(|progress| progress.percent),
+            false => None,
         }
+    }
+
+    /// A Flash activity's step, for the card's words.
+    pub fn flash_step(&self) -> Option<super::FlashStep> {
+        match &self.reducer {
+            Reducer::Flash(flash) => Some(
+                flash.step(
+                    self.progress
+                        .as_ref()
+                        .map(|progress| progress.label.as_str()),
+                ),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Land a coarse effect's progress on the cell. A step's percent
+    /// belongs to its step: a line with no percent (an esptool log, which
+    /// the effects layer forwards as label-only progress so the terminal
+    /// narrates) is narration, and leaves a counted step's label and
+    /// percent standing. Before any percent, it is the best word there is.
+    pub(crate) fn land_progress(&mut self, label: &str, percent: Option<u8>) {
+        let counting = self
+            .progress
+            .as_ref()
+            .is_some_and(|progress| progress.percent.is_some());
+        if percent.is_none() && counting {
+            return;
+        }
+        self.progress = Some(ActivityProgress {
+            label: label.to_string(),
+            percent,
+        });
     }
 
     /// A Flash activity's layout step (C6 repartition), for the card.

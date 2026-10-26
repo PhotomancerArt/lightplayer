@@ -281,13 +281,13 @@ impl FlashActivity {
             FlashPhase::Writing => FlashStep::of_write(progress, carries),
             // A write that moved the files is proven by the board's own boot
             // (its hello must say they mounted): that is still checking
-            // them. A plain flash's ladder is the firmware write's end.
-            FlashPhase::Reconnecting { .. } | FlashPhase::Stamping { .. } if carries => {
-                FlashStep::CheckingFiles
-            }
-            FlashPhase::Reconnecting { .. } | FlashPhase::Stamping { .. } => {
-                FlashStep::FlashingFirmware
-            }
+            // them. A plain flash's ladder is the board restarting on its
+            // new firmware.
+            FlashPhase::Reconnecting { .. } if carries => FlashStep::CheckingFiles,
+            FlashPhase::Reconnecting { .. } => FlashStep::Restarting,
+            // The hello came (and proved the files, when they moved): what
+            // is left is saving the board model on it.
+            FlashPhase::Stamping { .. } => FlashStep::SavingBoardModel,
         }
     }
 
@@ -1365,7 +1365,8 @@ mod tests {
         );
     }
 
-    /// A flash that moves no files keeps its one label after the read.
+    /// A flash that moves no files says Flashing firmware… through the
+    /// write, then names the restart and the board-model save.
     #[test]
     fn a_plain_flash_reads_then_flashes() {
         let config = RosterConfig::default();
@@ -1392,8 +1393,9 @@ mod tests {
         });
         assert_eq!(
             activity.step(Some("Resetting the board")),
-            FlashStep::FlashingFirmware
+            FlashStep::Restarting
         );
+        assert_eq!(activity.step(None), FlashStep::Restarting);
     }
 
     #[test]
