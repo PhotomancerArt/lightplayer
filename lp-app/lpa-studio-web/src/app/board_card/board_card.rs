@@ -314,6 +314,7 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                flash_step: None,
                 update: None,
             }),
             ..porch_view()

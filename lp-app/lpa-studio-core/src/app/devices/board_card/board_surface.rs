@@ -24,7 +24,7 @@
 //! | A take-over under way | link · working | "Moving this board to this tab." + the spinner | the spinner alone |
 //! | The layout question open (its flash waits for the answer) | firmware · attention | "This update is waiting for your confirmation." | — (the Firmware row's details rise with it) |
 //! | Updating (over the air, another device's, its missing part put back) | firmware · working | "This board is updating its firmware." + its progress | — |
-//! | Installing (a flash) | firmware · working | "Installing the firmware on this board." + its progress | — |
+//! | Installing (a flash) | firmware · working | "Installing the firmware on this board." + its progress, the sentence following the step: "Reading this board before installing.", "Moving this board's files.", "Checking this board's files.", "This board is restarting on its new firmware.", "Saving the board model on this board." | — |
 //! | Erasing | firmware · working | "Erasing this board." + its progress | — |
 //! | Sending | project · working | "Sending the project “studio” to this board." + its progress | — |
 //! | Removing | project · working | "Removing the project from this board." + its progress | — |
@@ -72,7 +72,7 @@
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{FirmwareFace, LoadedProject, PendingLinkView};
-use lpa_devices::{ActivityKind, HoldLevel, UpdateBoardState};
+use lpa_devices::{ActivityKind, FlashStep, HoldLevel, UpdateBoardState};
 
 use super::bar_work::{failed_kind, retry};
 use super::board_card_input::{BoardCardInput, link_icon};
@@ -576,11 +576,7 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
         ),
         MovingHere => Words::new(held_icon, Working, "Moving this board to this tab."),
         Updating => Words::new("firmware", Working, updating_sentence(input)),
-        Installing => Words::new(
-            "firmware",
-            Working,
-            "Installing the firmware on this board.",
-        ),
+        Installing => Words::new("firmware", Working, installing_sentence(input)),
         Erasing => Words::new("firmware", Working, "Erasing this board."),
         Sending => Words::new(
             "project",
@@ -820,6 +816,28 @@ fn identifying() -> Words {
 }
 
 /// Whose update it is, and what it does.
+/// What an install is doing, by its step: the write's words carry its
+/// percent; the read, the restart and the board-model save are named, so
+/// the surface never sits on a bare spinner (Yona's phone install,
+/// 2026-10-25: a percent that vanished, then no words for a while).
+fn installing_sentence(input: &BoardCardInput<'_>) -> &'static str {
+    let step = input
+        .view
+        .activity
+        .as_ref()
+        .and_then(|activity| activity.flash_step);
+    match step {
+        Some(FlashStep::ReadingBoard) => "Reading this board before installing.",
+        Some(FlashStep::MovingFiles) => "Moving this board's files.",
+        Some(FlashStep::CheckingFiles) => "Checking this board's files.",
+        Some(FlashStep::Restarting) => "This board is restarting on its new firmware.",
+        Some(FlashStep::SavingBoardModel) => "Saving the board model on this board.",
+        Some(FlashStep::FlashingFirmware | FlashStep::WaitingForAnswer) | None => {
+            "Installing the firmware on this board."
+        }
+    }
+}
+
 fn updating_sentence(input: &BoardCardInput<'_>) -> &'static str {
     match input.update.map(|update| &update.standing) {
         Some(UpdateStanding::AnotherDevice { .. }) => {
@@ -872,6 +890,99 @@ mod tests {
         );
         assert!(primary.offer.to_string().ends_with("/update-firmware"));
         assert_eq!(primary.refused, None);
+    }
+
+    /// Yona's phone install, 2026-10-25, folded by the real device model
+    /// and drawn on the card at every step: the surface names each step,
+    /// shows a percent only through the write — never the layout read's
+    /// near-instant 100 %, never a spinner between two of the write's
+    /// ticks — and names the restart and the board-model save instead of
+    /// sitting on a bare spinner.
+    #[test]
+    fn an_install_says_each_step_and_counts_only_the_write() {
+        use lpa_devices::replay::{Replay, Step};
+        use lpa_devices::{Millis, RosterConfig};
+
+        let mut replay = Replay::new(RosterConfig::default());
+        replay.step(Millis(0), Step::attach(1, "usb-1"));
+        replay.step(Millis(20), Step::opened(1));
+        replay.step(Millis(40), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+        replay.step(Millis(60), Step::line(1, "invalid header: 0xffffffff"));
+        replay.advance_to(Millis(6_000));
+        let device = replay.view().pending[0].device.0;
+        replay.step(
+            Millis(6_100),
+            Step::Flash {
+                device,
+                board: "seeed-xiao-esp32c6".to_string(),
+                build: "esp32c6-4mb".to_string(),
+                name: None,
+            },
+        );
+        let progress = |label: &str, percent: Option<u8>| Step::EffectProgress {
+            device,
+            label: label.to_string(),
+            percent,
+            effect: None,
+        };
+        let ended = || Step::EffectEnded {
+            device,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        };
+        let script = [
+            progress("Reading the board's layout", Some(33)),
+            progress("Reading the board's layout", Some(100)),
+            ended(),
+            progress("Changing baudrate to 460800", None),
+            progress("Writing firmware", Some(2)),
+            progress("Writing at 0x00010000... (2 %)", None),
+            progress("Writing firmware", Some(60)),
+            progress("Hash of data verified.", None),
+            progress("Writing firmware", Some(100)),
+            progress("Resetting the board", Some(100)),
+            ended(),
+            Step::opened(1),
+            Step::hello(1).uid("dev_2f8a").board("seeed-xiao-esp32c6"),
+        ];
+        let mut said = Vec::new();
+        for (at, step) in script.into_iter().enumerate() {
+            replay.step(Millis(10_000 + at as u64 * 1_000), step);
+            let mut fixture = needs_firmware(FirmwareFace::Blank);
+            fixture.view = replay.view().devices[0].clone();
+            let card = board_card(&fixture.input());
+            assert_eq!(card.surface.state, SurfaceState::Installing);
+            let first = card.surface.notice.expect("a notice").first;
+            said.push((first, card.surface.progress));
+        }
+        let reading = "Reading this board before installing.";
+        let installing = "Installing the firmware on this board.";
+        let restarting = "This board is restarting on its new firmware.";
+        let saving = "Saving the board model on this board.";
+        let spinner = Some(SurfaceProgress::Spinner);
+        let percent = |percent| Some(SurfaceProgress::Percent(percent));
+        let expected = [
+            (reading, spinner),
+            (reading, spinner),
+            (installing, spinner),
+            (installing, spinner),
+            (installing, percent(2)),
+            (installing, percent(2)),
+            (installing, percent(60)),
+            (installing, percent(60)),
+            (installing, percent(100)),
+            (restarting, spinner),
+            (restarting, spinner),
+            (restarting, spinner),
+            (saving, spinner),
+        ];
+        let said: Vec<_> = said
+            .iter()
+            .map(|(first, progress)| (first.as_str(), *progress))
+            .collect();
+        assert_eq!(said, expected);
     }
 
     /// One update has one number (round 2: the new firmware is the first

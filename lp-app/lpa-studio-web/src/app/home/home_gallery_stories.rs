@@ -875,6 +875,7 @@ fn devices_card_layout_change() -> Element {
                 awaiting_consent: true,
             }),
             update: None,
+            flash_step: Some(lpa_studio_core::DeviceFlashStep::WaitingForAnswer),
         }),
         escapes: vec![
             DeviceEscape::Cancel,
@@ -1155,7 +1156,7 @@ fn devices_card_restore_from_file_refused() -> Element {
 }
 
 #[story(
-    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). In the order an update that moves a board's files runs, each on the firmware bar: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted). The words are the device model's own (`FlashStep`); the disabled Edit says them after \"Busy:\". A flash that moves no files reads the board, then says Flashing firmware… to the end, as before."
+    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). In the order an update that moves a board's files runs, each on the firmware bar: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted), Saving the board model… (the new firmware answered; its board model is written on it). The words are the device model's own (`FlashStep`); the disabled Edit says them after \"Busy:\". A flash that moves no files reads the board with no percent (the layout read's 100 % came at once and read as done — Yona's phone install, 2026-10-25), says Flashing firmware… with the write's percent, then Restarting the board… with none."
 )]
 fn devices_card_update_steps() -> Element {
     use lpa_studio_core::DeviceFlashStep;
@@ -1185,6 +1186,7 @@ fn devices_card_update_steps() -> Element {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            flash_step: Some(step),
             update: None,
         }),
         can_remove_project: false,
@@ -1201,6 +1203,8 @@ fn devices_card_update_steps() -> Element {
         at(DeviceFlashStep::FlashingFirmware, Some(35)),
         at(DeviceFlashStep::MovingFiles, Some(70)),
         at(DeviceFlashStep::CheckingFiles, Some(100)),
+        at(DeviceFlashStep::Restarting, None),
+        at(DeviceFlashStep::SavingBoardModel, None),
     ];
     rsx! {
         section { class: "tw:p-4",
@@ -1570,6 +1574,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                         cancellable: true,
                         cancel_requested: false,
                         layout: None,
+                        flash_step: None,
                         update: None,
                     }),
                     last_outcome: None,
@@ -2315,6 +2320,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            flash_step: Some(step),
             update: None,
         }),
         can_remove_project: false,
@@ -2337,6 +2343,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            flash_step: Some(step),
             update: None,
         }),
         can_remove_project: false,

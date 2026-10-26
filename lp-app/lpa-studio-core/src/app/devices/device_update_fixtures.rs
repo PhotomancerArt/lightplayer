@@ -478,6 +478,7 @@ pub fn with_update_intent(
         cancellable,
         cancel_requested: false,
         layout: None,
+        flash_step: None,
         update: Some(UpdateActivityView {
             intent,
             stage,
