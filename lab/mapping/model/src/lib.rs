@@ -27,10 +27,11 @@
 //! - [`Target`] — anything you can select, in ONE tree: module → fixture →
 //!   group → path → lamp, fixture → circle → ring → lamp, output → port →
 //!   pixel.
-//! - [`patch`] — a fixture's rules (auto, and place: this object on that
-//!   port's pixel, reversed, turned), and the effective patch they make
-//!   (derived, never stored); [`port_runs`] — a port's pixels as one run
-//!   per object.
+//! - [`patch`] — where lamps land: a fixture's placements
+//!   ([`PatchPlace`]: wire, direction and turn, on the fixture, a component
+//!   or an object, each inherited down the tree), and the effective patch
+//!   they make (derived, never stored); [`port_runs`] — a port's pixels as
+//!   one run per object.
 //! - [`Placement`] — where each node sits, in world units, and each
 //!   fixture's frame (where its own units land, scaled when the stack draws
 //!   it bigger): a fact the view hands over. The model never lays anything
@@ -99,9 +100,15 @@ pub use domain::notice::{Notice, NoticeKind};
 pub use domain::object::{Lamp, Object, ObjectId, ObjectShape};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
-pub use domain::patch::{EffectivePatch, Gone, PatchProblem, PatchRule, Span, Unpatched};
+pub use domain::patch::{
+    EffectivePatch, Gone, Landing, ObjectRun, Overlap, PatchProblem, PixelRun, Unpatched,
+};
+pub use domain::patch_edits::{OnWire, PatchEdit, PortEdge};
+pub use domain::patch_place::{Direction, PatchPlace, PatchTarget, Wire};
+pub use domain::patch_resolve::Resolved;
 pub use domain::pattern::Pattern;
 pub use domain::picture::{Picture, picture_rect};
+pub use domain::piece::{Difference, DifferenceKind, Piece};
 pub use domain::placement::Placement;
 pub use domain::port_runs::PortRun;
 pub use domain::project::Project;
@@ -121,8 +128,11 @@ pub use ux::graph_input::GraphInput;
 pub use ux::graph_verb::GraphVerb;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
 pub use ux::hints::{Hint, HintBar, HintKind};
+pub use ux::patch_section::{PatchField, PatchInput, PatchOption};
+pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
+pub use ux::port_grouping::PortGrouping;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use ux::tree_rows::TreeRow;
 pub use ux::ui::*;

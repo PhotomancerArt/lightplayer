@@ -59,3 +59,15 @@ html:has(.lab.forced), body:has(.lab.forced) { background: var(--outside); }
 .brand { font-weight: 600; }
 .fixture-picker { color: var(--text-subtle); }
 .fixture-picker select { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+
+/* The piece (plan D4): the install as it is really wired, lit by the board.
+   Docked at the foot of the right column, under the inspector, in the
+   lower-right corner: it never covers the canvas. */
+.lab .right-column { grid-area: inspector; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--surface); }
+.lab .right-column > .inspector { flex: 1; min-height: 0; border-left: none; }
+.lab .piece-view { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--border); }
+.lab .piece-title { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.lab .piece-box { position: relative; width: 100%; background: var(--outside); border-radius: 4px; overflow: hidden; }
+.lab .piece-box .face-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lab .piece-note { font-size: 11px; color: var(--text-subtle); margin-top: 6px; }
+.lab .tools-label { font-size: 12px; color: var(--text-subtle); margin-right: 2px; }
