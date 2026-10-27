@@ -5,17 +5,18 @@
 //! side until project format 12 moves every project to format 6 (mapping
 //! rebuild M3).
 //!
-//! The format is peeked once and the document goes to the reader that owns
-//! it. Anything from 6 up goes to the format-6 reader, so a newer document
-//! is refused naming the newest this build reads (6); a document whose
-//! format can't be peeked goes to today's reader, whose words for "not a
-//! map2d document" stand unchanged.
+//! **Today's reader reads first, unchanged.** A format 1 to 5 document costs
+//! exactly what it did before format 6 existed (no second peek: one was 1
+//! allocation and 8 B per fixture at load on the device, measured by the
+//! engine heap ratchet), and today's words for "not a map2d document" stand.
+//! Only a document today's reader refuses as newer goes on to the format-6
+//! reader, which reads 6 and refuses anything newer naming 6.
 
 use alloc::string::{String, ToString};
 
-use lpc_mapping::Map2dDoc;
 use lpc_mapping::map2d6::{self, MAP2D6_FORMAT};
 use lpc_mapping::part::Mapping;
+use lpc_mapping::{Map2dDoc, Map2dError};
 
 /// A map2d document, read.
 pub(crate) enum Map2dDocument {
@@ -28,13 +29,14 @@ pub(crate) enum Map2dDocument {
 /// Read a map2d document by its format; `Err` is the reader's refusal, in
 /// its own words.
 pub(crate) fn read_map2d_document(text: &str) -> Result<Map2dDocument, String> {
-    match map2d6::peek_format(text) {
-        Ok(format) if format >= MAP2D6_FORMAT => map2d6::read(text)
-            .map(Map2dDocument::Parts)
-            .map_err(|error| error.to_string()),
-        _ => Map2dDoc::from_json(text)
-            .map(Map2dDocument::Layout)
-            .map_err(|error| error.to_string()),
+    match Map2dDoc::from_json(text) {
+        Ok(doc) => Ok(Map2dDocument::Layout(doc)),
+        Err(Map2dError::UnsupportedFormat { found, .. }) if found >= MAP2D6_FORMAT => {
+            map2d6::read(text)
+                .map(Map2dDocument::Parts)
+                .map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 
