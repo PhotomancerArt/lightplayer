@@ -25,7 +25,7 @@ use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputPorts, Override, PatchTarget, Patching, PortKey,
     PortOp, Problem, Start, patch_mapping,
 };
-use lpc_mapping::{GridShape, MAX_REPEAT_COUNT};
+use lpc_mapping::{GridShape, MAX_REPEAT_COUNT, map2d6};
 
 /// Inserting a part refuses an id in use, and a place past the end.
 #[test]
@@ -642,6 +642,63 @@ fn a_flow_belongs_to_a_part() {
     );
 }
 
+/// What the edits make saves as map2d format 6 and reads back the same:
+/// renamed parts, a wrapped part (with the repeat's explicit Keep), an
+/// expanded repeat (its copies turned, a grid baked to points), an unrepeat,
+/// rings added and removed, and kept overrides of gone nodes.
+#[test]
+fn what_the_edits_make_saves_and_reads_back() {
+    for journey in journeys() {
+        let mut m = journey.mapping.clone();
+        let first = m.parts[0].id.clone();
+        let repeat = wrap_in_repeat(&mut m, &first, 3, [5.0, 5.0]).unwrap();
+        round_trips(&m, journey.name);
+        expand_repeat(&mut m, &repeat).unwrap();
+        round_trips(&m, journey.name);
+        rename_part(&mut m, &first, part("renamed")).unwrap();
+        round_trips(&m, journey.name);
+    }
+
+    let mut m = dome_slice().mapping;
+    unrepeat(&mut m, &part("sector")).unwrap();
+    round_trips(&m, "unrepeated dome");
+
+    let mut m = circular_display().mapping;
+    remove_ring(&mut m, &part("circle1"), &key("r3")).unwrap();
+    add_ring(&mut m, &part("circle1"), 5.0, 4).unwrap();
+    round_trips(&m, "display");
+
+    let mut m = Mapping::new();
+    for _ in 0..2 {
+        let p = m.new_part(straight(4));
+        m.parts.push(p);
+    }
+    m.overrides.insert(
+        node("path2"),
+        Override {
+            port: Some(PortOp::Add(2)),
+            ..Override::default()
+        },
+    );
+    wrap_in_repeat(&mut m, &part("path2"), 1, [0.0, 0.0]).unwrap();
+    assert_eq!(m.overrides[&node("repeat1")].port, Some(PortOp::Keep));
+    round_trips(&m, "explicit keep");
+
+    let mut m = Mapping::new();
+    let grid = m.new_part(PartKind::Shape(Shape::Grid(GridShape {
+        origin: [10.0, 10.0],
+        cols: 3,
+        rows: 2,
+        pitch: 4.0,
+        routing: Default::default(),
+        start_corner: Default::default(),
+    })));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(grid, [0.0, 0.0], 3)));
+    m.parts.push(repeat);
+    expand_repeat(&mut m, &part("repeat1")).unwrap();
+    round_trips(&m, "baked grid");
+}
+
 /// Every journey still patches as it did when nothing is edited: the
 /// statements' oracle agrees with itself.
 #[test]
@@ -701,6 +758,13 @@ fn lands_where_it_did(journey: &Journey, after: &Mapping, new_id: impl Fn(&TreeI
         journey.name,
         after_patch.problems
     );
+}
+
+/// Written as format 6 and read back, it is the same mapping.
+fn round_trips(m: &Mapping, what: &str) {
+    let json = map2d6::write(m).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let back = map2d6::read(&json).unwrap_or_else(|e| panic!("{what}: {e}\n{json}"));
+    assert_eq!(&back, m, "{what}");
 }
 
 /// Every lamp is drawn within `tolerance` of where it was, through `new_id`.
