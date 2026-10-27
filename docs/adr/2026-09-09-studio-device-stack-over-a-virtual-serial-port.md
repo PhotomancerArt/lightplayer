@@ -136,6 +136,14 @@ A quieter consequence worth writing down: a polyfilled `navigator.serial`
 chooser for an agent driving real hardware. Under the shim none of them are
 needed, and none of them should be wired back in.
 
+*Amendment, 2026-10-26.* The standing grant moved from Brave to Google
+Chrome. It covers every port, and Studio opens every port it is granted on
+load, so a Brave tab on a bench port — Brave being Yona's daily browser —
+held every board on the desk and locked `lp-cli` and the other sessions out.
+Chrome is the agents' browser and nobody's daily one. A Chrome tab on a
+bench port still holds every board while it is open; AGENTS.md, "A real
+board in a browser", says how to keep that short.
+
 ### 4. `EmulatorPort` is the shared object, and it has two backings
 
 `lp-app/lpa-studio-web/public/lpa-link/emulator_port.js` is one emulated board
