@@ -25,48 +25,50 @@ const IDENTITY_TICKS: usize = 16;
 const IDENTITY_DELTA_MS: u32 = 40;
 
 /// `projects/test/fluid`'s published output, per tick, digested — captured
-/// 2026-10-20 from the code path BEFORE the pattern-space opt-in existed
-/// (worktree base `a118638e8`). Pixels mode must keep producing exactly
-/// these bytes; never re-capture this to make a change pass.
+/// from a code path WITHOUT the pattern-space opt-in: first 2026-10-20 at
+/// `a118638e8`, then again 2026-10-27 on plain `main` at `777989e5e`, after
+/// main's solver rework (#1282, #1285) changed the fluid's bits on purpose.
+/// Pixels mode must keep producing exactly what main without the opt-in
+/// produces; never re-capture this from the branch to make a change pass.
 const PIXELS_DIRECT_GOLDEN: &[(usize, u64)] = &[
-    (1446, 0xce0eb1457d246511),
-    (1446, 0x3fd4eb25414e2228),
-    (1446, 0x13086c59d40748d4),
-    (1446, 0xb850aa552eeda585),
-    (1446, 0x7d4e932ddb437627),
-    (1446, 0x7d4e932ddb437627),
-    (1446, 0xd56ade3ea4613248),
-    (1446, 0xd56ade3ea4613248),
-    (1446, 0x4037e74cb066662e),
-    (1446, 0x4037e74cb066662e),
-    (1446, 0x82e9a7dff550a7a4),
-    (1446, 0x82e9a7dff550a7a4),
-    (1446, 0x846cd7b2d0036fe7),
-    (1446, 0xfc23a09f13aac51c),
-    (1446, 0x00af9af7b37c172b),
-    (1446, 0x00af9af7b37c172b),
+    (1446, 0xe156c6ddf22bc947),
+    (1446, 0xa7cba13baa3c42d9),
+    (1446, 0x2146a89551d3db95),
+    (1446, 0x8a3c9444190ddc53),
+    (1446, 0xbd029161069d6a26),
+    (1446, 0xbd029161069d6a26),
+    (1446, 0x31123d93f64bf377),
+    (1446, 0x31123d93f64bf377),
+    (1446, 0xd3093e23b3d73e27),
+    (1446, 0xd3093e23b3d73e27),
+    (1446, 0x212f152240e7282b),
+    (1446, 0x212f152240e7282b),
+    (1446, 0x9963913a9bb975ac),
+    (1446, 0xfb6efed6f446caaf),
+    (1446, 0x510f66a51c4b0c88),
+    (1446, 0x510f66a51c4b0c88),
 ];
 
 /// The same project with the fixture switched to `texture_area` sampling,
 /// which reaches the Fluid's `render_texture_into` rather than its sample
 /// stream. Captured with [`PIXELS_DIRECT_GOLDEN`].
 const PIXELS_TEXTURE_AREA_GOLDEN: &[(usize, u64)] = &[
-    (1446, 0xce36610805350bbc),
-    (1446, 0xf3556e895d0f7180),
-    (1446, 0x389a8544086efef0),
-    (1446, 0x8a1f9c7717595fe8),
-    (1446, 0x66350633301c958e),
-    (1446, 0x66350633301c958e),
-    (1446, 0xc7373bfbc3d3562f),
-    (1446, 0xc7373bfbc3d3562f),
-    (1446, 0x8ae9e943cc9f3da3),
-    (1446, 0x8ae9e943cc9f3da3),
-    (1446, 0x55b2f99b4e5cc634),
-    (1446, 0x55b2f99b4e5cc634),
-    (1446, 0x1420568ca05de569),
-    (1446, 0x20e58827a4587ffc),
-    (1446, 0xa123eaba334864e9),
-    (1446, 0xa123eaba334864e9),
+    (1446, 0xa5847bcafb22a1e0),
+    (1446, 0xf871eb26b111bb0b),
+    (1446, 0xf61a59563e025737),
+    (1446, 0xe27be92c1510843c),
+    (1446, 0x4b41e46da5bbdb01),
+    (1446, 0x4b41e46da5bbdb01),
+    (1446, 0x336c22de9a591c76),
+    (1446, 0x336c22de9a591c76),
+    (1446, 0x2229ecb698ab7709),
+    (1446, 0x2229ecb698ab7709),
+    (1446, 0x680e19206d45a09f),
+    (1446, 0x680e19206d45a09f),
+    (1446, 0x3a453acedab303e2),
+    (1446, 0xd202a0dd04c7c16d),
+    (1446, 0x3fd346cc9e1a7258),
+    (1446, 0x3fd346cc9e1a7258),
 ];
 
 // ---- tests -----------------------------------------------------------------
