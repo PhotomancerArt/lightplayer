@@ -1,5 +1,5 @@
 {
-  "format": 11,
+  "format": 12,
   "name": "Ripples",
   "description": "Rings spawn at random spots and spread outward, fading as they grow, on a dark ground.",
   "kind": "pattern",

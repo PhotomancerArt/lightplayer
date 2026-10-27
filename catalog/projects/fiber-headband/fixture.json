@@ -15,24 +15,8 @@
   "sampling": "direct",
   "diagnostic_mode": "off",
   "mapping": {
-    "kind": "PathPoints",
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.25,
-            0.5
-          ],
-          "1": [
-            0.75,
-            0.5
-          ]
-        }
-      }
-    },
-    "sample_diameter": 1
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
   },
   "color_order": "rgb",
   "transform": [

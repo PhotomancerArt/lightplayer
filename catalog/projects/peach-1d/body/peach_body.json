@@ -18,10 +18,6 @@
     "kind": "Map2d",
     "source": "peach_body.map2d.json"
   },
-  "patch": {
-    "kind": "File",
-    "source": "peach_body.patch.json"
-  },
   "strip_order_meaningful": true,
   "color_order": "rgb",
   "transform": [

@@ -18,10 +18,6 @@
     "kind": "Map2d",
     "source": "doors.map2d.json"
   },
-  "patch": {
-    "kind": "File",
-    "source": "doors.patch.json"
-  },
   "color_order": "rgb",
   "brightness": 1.0,
   "gamma_correction": false

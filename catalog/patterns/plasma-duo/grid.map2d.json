@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -7,11 +7,35 @@
     100.0,
     100.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "2"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "panel",
       "name": "panel",
-      "shape": {
-        "grid": { "origin": [3.125, 3.125], "cols": 16, "rows": 16, "pitch": 6.25 }
+      "kind": {
+        "grid": {
+          "origin": [
+            3.125,
+            3.125
+          ],
+          "cols": 16,
+          "rows": 16,
+          "pitch": 6.25,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     }
   ]
