@@ -281,7 +281,7 @@ impl Rotation2d {
     }
 }
 
-fn resolve_grid(
+pub(crate) fn resolve_grid(
     grid: &GridShape,
     invalid: &impl Fn(&str) -> Map2dError,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
@@ -318,7 +318,7 @@ fn resolve_grid(
     Ok(positions)
 }
 
-fn resolve_ring(
+pub(crate) fn resolve_ring(
     ring: &RingShape,
     invalid: &impl Fn(&str) -> Map2dError,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
@@ -375,7 +375,7 @@ fn derived_ring_count(outer_count: u32, radius: f32, outer_radius: f32) -> u32 {
     (scaled as u32).max(1)
 }
 
-fn resolve_path(
+pub(crate) fn resolve_path(
     path: &PathShape,
     invalid: &impl Fn(&str) -> Map2dError,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
@@ -482,7 +482,7 @@ pub fn path_gap_breaks(path: &PathShape) -> Vec<u32> {
 /// triangle of 9 lamps over equal sides carries exactly 3 per side with
 /// lamps 0/3/6 on the corners. That per-side regularity is the polygon's
 /// intrinsic rotation stride ([`shape_stride`]).
-fn resolve_polygon(
+pub(crate) fn resolve_polygon(
     polygon: &PolygonShape,
     invalid: &impl Fn(&str) -> Map2dError,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
@@ -516,7 +516,7 @@ fn resolve_polygon(
 /// empty, as the same object-naming error every other shape gives. It checks
 /// the malformed cases FIRST so each gets its own reason — the walk itself
 /// answers "empty" to all of them alike.
-fn resolve_filled_polygon(
+pub(crate) fn resolve_filled_polygon(
     filled: &FilledPolygonShape,
     invalid: &impl Fn(&str) -> Map2dError,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
@@ -917,7 +917,7 @@ pub fn shape_lamp_count(shape: &Map2dShape) -> u32 {
 /// end of the strip the data enters from. Out-of-range indices name no segment
 /// and are ignored — the editor sanitizes them out, and a hand-authored
 /// document should not fail to resolve over one.
-fn inert_segments(path: &PathShape) -> Vec<bool> {
+pub(crate) fn inert_segments(path: &PathShape) -> Vec<bool> {
     let segments = path.points.len().saturating_sub(1);
     let mut inert = Vec::new();
     inert.resize(segments, false);
@@ -936,7 +936,7 @@ fn inert_segments(path: &PathShape) -> Vec<bool> {
 }
 
 /// Summed length of the segments that carry lamps.
-fn active_length(points: &[[f32; 2]], inert: &[bool]) -> f32 {
+pub(crate) fn active_length(points: &[[f32; 2]], inert: &[bool]) -> f32 {
     points
         .windows(2)
         .enumerate()
@@ -978,11 +978,11 @@ fn point_at_active_distance(points: &[[f32; 2]], inert: &[bool], target_distance
     last_active_end.unwrap_or_else(|| *points.first().expect("non-empty points"))
 }
 
-fn is_inert(inert: &[bool], index: usize) -> bool {
+pub(crate) fn is_inert(inert: &[bool], index: usize) -> bool {
     inert.get(index).copied().unwrap_or(false)
 }
 
-fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+pub(crate) fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
     libm::sqrtf(dx * dx + dy * dy)
