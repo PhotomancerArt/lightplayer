@@ -53,6 +53,10 @@ fn whole<T>(json: &str, read: fn(&mut JsonText) -> Read<T>) -> Result<T, Map2d6E
 }
 
 /// Read a format-6 document (rules in the module doc).
+///
+/// Not inlined: measured, inlining this and `read_doc` into the engine's
+/// one caller cost the C6 engine 198 B.
+#[inline(never)]
 pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     match peek_format(json)? {
         MAP2D6_FORMAT => {}

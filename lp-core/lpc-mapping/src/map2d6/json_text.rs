@@ -300,14 +300,24 @@ impl<'a> JsonText<'a> {
     /// with a stack, not recursion) and its strings may hold lone
     /// surrogates.
     pub fn skip(&mut self) -> Read<()> {
-        // `true` for an object.
-        let mut open: Vec<bool> = Vec::new();
+        // What is open, innermost last, one bit each (set for an object):
+        // the first 64 in `bits`, any deeper in `deeper`, so a skip
+        // allocates nothing until then.
+        let mut depth = 0usize;
+        let mut bits = 0u64;
+        let mut deeper: Vec<bool> = Vec::new();
         loop {
             match self.peek() {
                 Some(b @ (b'{' | b'[')) => {
                     self.at += 1;
                     self.first = true;
-                    open.push(b == b'{');
+                    let object = b == b'{';
+                    if depth < 64 {
+                        bits = bits & !(1 << depth) | (object as u64) << depth;
+                    } else {
+                        deeper.push(object);
+                    }
+                    depth += 1;
                 }
                 Some(b'"') => self.skip_string()?,
                 Some(b't' | b'f') => drop(self.bool()?),
@@ -316,11 +326,18 @@ impl<'a> JsonText<'a> {
             }
             // Close what ends here, then step to the next member.
             loop {
-                let Some(&object) = open.last() else {
+                let Some(inner) = depth.checked_sub(1) else {
                     return Ok(());
                 };
+                let object = match inner.checked_sub(64) {
+                    None => bits >> inner & 1 != 0,
+                    Some(at) => deeper[at],
+                };
                 if !self.next_member(if object { b'}' } else { b']' })? {
-                    open.pop();
+                    depth = inner;
+                    if depth >= 64 {
+                        deeper.pop();
+                    }
                     continue;
                 }
                 if object {

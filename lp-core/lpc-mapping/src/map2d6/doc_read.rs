@@ -118,6 +118,8 @@ const DOC_FIELDS: [&str; 8] = [
 ];
 
 /// The document (its `format` is read on its own first, [`read_format`]).
+/// Not inlined: see `read`.
+#[inline(never)]
 pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
     let mut doc = DocText {
         sample_diameter: DEFAULT_SAMPLE_DIAMETER,
