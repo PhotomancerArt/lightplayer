@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -7,10 +7,24 @@
     250.0,
     8.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "strip",
       "name": "strip",
-      "shape": {
+      "kind": {
         "grid": {
           "origin": [
             0.5,
@@ -18,7 +32,9 @@
           ],
           "cols": 250,
           "rows": 1,
-          "pitch": 1.0
+          "pitch": 1.0,
+          "routing": "snake",
+          "start_corner": "tl"
         }
       }
     }
