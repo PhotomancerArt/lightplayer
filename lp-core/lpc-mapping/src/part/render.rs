@@ -2,24 +2,26 @@
 //! lamps.
 //!
 //! **Geometry is today's arithmetic, never a copy.** Each shape's lamps come
-//! from the per-shape resolvers in `map2d_resolve.rs` (the ones the device
-//! runs today), so a part's segments carry the lamps today's
-//! [`crate::resolve`] gives the same geometry, bit for bit. A path goes
-//! through today's path (its moves as jumpers); a circle's ring k through a
-//! single-ring ring set, except a ring of one lamp, which sits at the
-//! centre; a repeat turns every lamp of copy k by today's
-//! [`crate::Rotation2d`] in today's order, copy 0 included.
+//! from today's resolver itself: the shape as a one-object document through
+//! [`crate::resolve_into`], the call the device makes today. So a part's
+//! segments carry the lamps today's [`crate::resolve`] gives the same
+//! geometry, bit for bit. A path goes through today's path (its moves as
+//! jumpers); a circle's ring k through a single-ring ring set, except a ring
+//! of one lamp, which sits at the centre; a repeat turns every lamp of copy
+//! k by today's [`crate::Rotation2d`] in today's order, copy 0 included.
+//!
+//! Only the resolver's public entry points are called, never its private
+//! helpers: a new caller of a private function changes how the compiler
+//! inlines it into today's resolver, and the firmware image must stay
+//! byte-identical while nothing in it uses this module.
 
 use alloc::collections::BTreeSet;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-use crate::map2d_doc::Map2dShape;
+use crate::map2d_doc::{Map2dDoc, Map2dObject, Map2dShape};
 use crate::map2d_error::Map2dError;
-use crate::map2d_resolve::{
-    Rotation2d, filled_polygon_cells, resolve_filled_polygon, resolve_grid, resolve_path,
-    resolve_polygon, resolve_ring, shape_lamp_count,
-};
+use crate::map2d_resolve::{Rotation2d, filled_polygon_cells, resolve_into, shape_lamp_count};
 use crate::part::circle::Circle;
 use crate::part::lamp_ref::LampRef;
 use crate::part::mapping::Mapping;
@@ -125,23 +127,39 @@ fn render_shape(
     me: usize,
     lamp: &LampRef,
 ) -> Result<(), RenderError> {
-    let invalid = |reason: &str| Map2dError::InvalidObject {
-        object: 0,
-        name: id.to_string(),
-        reason: reason.to_string(),
-    };
-    let fail = |e| RenderError::from_shape(id, e);
-    let lamps = match shape {
+    let today = match shape {
         Shape::Path(path) => return render_path(tree, id, path, me, lamp),
         Shape::Circle(circle) => return render_circle(tree, id, circle, me, lamp),
-        Shape::Polygon(polygon) => resolve_polygon(polygon, &invalid).map_err(fail)?,
-        Shape::RingSet(ring) => resolve_ring(ring, &invalid).map_err(fail)?,
-        Shape::Grid(grid) => resolve_grid(grid, &invalid).map_err(fail)?,
-        Shape::FilledPolygon(filled) => resolve_filled_polygon(filled, &invalid).map_err(fail)?,
+        Shape::Polygon(polygon) => Map2dShape::Polygon(polygon.clone()),
+        Shape::RingSet(ring) => Map2dShape::Ring(ring.clone()),
+        Shape::Grid(grid) => Map2dShape::Grid(grid.clone()),
+        Shape::FilledPolygon(filled) => Map2dShape::FilledPolygon(filled.clone()),
     };
+    let lamps = resolve_today(id, today)?;
     let segment = push_segment(tree, TreeId::of(id), &lamps, lamp);
     tree.nodes[me].segment = Some(segment);
     Ok(())
+}
+
+/// One shape's lamps, from today's resolver: the shape as the one object of
+/// a document, through [`resolve_into`].
+fn resolve_today(id: &PartId, shape: Map2dShape) -> Result<Vec<[f32; 2]>, RenderError> {
+    let mut doc = Map2dDoc::new();
+    doc.objects.push(Map2dObject {
+        name: id.to_string(),
+        id: None,
+        stride: None,
+        shape,
+    });
+    let mut lamps = Vec::new();
+    let mut strands = Vec::new();
+    match resolve_into(&doc, &mut lamps, &mut strands) {
+        Ok(()) => Ok(lamps),
+        Err(Map2dError::TooBigForMemory { lamps, bytes }) => {
+            Err(RenderError::TooBigForMemory { lamps, bytes })
+        }
+        Err(error) => Err(RenderError::from_shape(id, error)),
+    }
 }
 
 /// A path: today's path's lamps, as one segment at the path's own id, or
@@ -153,25 +171,20 @@ fn render_path(
     me: usize,
     lamp: &LampRef,
 ) -> Result<(), RenderError> {
-    let invalid = |reason: &str| Map2dError::InvalidObject {
-        object: 0,
-        name: id.to_string(),
-        reason: reason.to_string(),
-    };
     let today = path
         .to_path_shape()
         .map_err(|reason| RenderError::InvalidPart {
             part: id.clone(),
             reason: reason.to_string(),
         })?;
-    let lamps = resolve_path(&today, &invalid).map_err(|e| RenderError::from_shape(id, e))?;
+    let lamps = resolve_today(id, Map2dShape::Path(today.clone()))?;
     match path.split {
         PathSplit::One => {
             let segment = push_segment(tree, TreeId::of(id), &lamps, lamp);
             tree.nodes[me].segment = Some(segment);
         }
         PathSplit::Subpaths => {
-            for run in subpath_runs(&today) {
+            for run in subpath_runs(path, &today) {
                 let range = run.start as usize..(run.start + run.count) as usize;
                 push_leaf(
                     tree,
@@ -195,17 +208,11 @@ fn render_circle(
     me: usize,
     lamp: &LampRef,
 ) -> Result<(), RenderError> {
-    let invalid = |reason: &str| Map2dError::InvalidObject {
-        object: 0,
-        name: id.to_string(),
-        reason: reason.to_string(),
-    };
     for ring in circle.rings_in_order() {
         let lamps = if ring.count == 1 {
             alloc::vec![circle.center]
         } else {
-            resolve_ring(&circle.ring_shape(ring), &invalid)
-                .map_err(|e| RenderError::from_shape(id, e))?
+            resolve_today(id, Map2dShape::Ring(circle.ring_shape(ring)))?
         };
         push_leaf(
             tree,
