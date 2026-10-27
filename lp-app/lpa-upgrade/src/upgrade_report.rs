@@ -52,6 +52,16 @@ impl UpgradeReport {
     pub(crate) fn record_changed(&mut self, path: &str) {
         insert_sorted(&mut self.changed_files, path);
     }
+
+    /// Record that `path` was added. Idempotent, sorted.
+    pub(crate) fn record_added(&mut self, path: &str) {
+        insert_sorted(&mut self.added_files, path);
+    }
+
+    /// Record that `path` was removed. Idempotent, sorted.
+    pub(crate) fn record_removed(&mut self, path: &str) {
+        insert_sorted(&mut self.removed_files, path);
+    }
 }
 
 fn insert_sorted(paths: &mut Vec<String>, path: &str) {

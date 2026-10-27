@@ -6861,6 +6861,7 @@ name = "lpa-upgrade"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpfs",
