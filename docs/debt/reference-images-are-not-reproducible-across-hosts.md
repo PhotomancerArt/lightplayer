@@ -132,6 +132,12 @@ it wrong is a red CI run on a correct change.
   `test-emu-serve`, re-run, passed whole (load average ~30–45). The PR's C6
   jobs were path-skipped, so this local run was the merge's evidence (the
   diff touched `fw-esp32s3` only). Seven of seven on the building run.
+- 2026-10-27 (#1319, mapping rebuild M2b) — the eighth, byte for byte:
+  `just test-emu-serve`'s first `emu_serve_walk` (building the pinned
+  `13b04dd0b` reference lp-cli and image) read `220468 B free / 105068 B
+  used`; the one test re-run with the build cached passed (6.1 s), and the
+  LAN cells after it passed. This branch's firmware is not in that test.
+  Eight of eight on the building run.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that
