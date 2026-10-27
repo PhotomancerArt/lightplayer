@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "nodes": {
+    "/dome.module/dome.fixture": {"mapping":{"footprint":{"bbox":[12.314,14.6346,95.386,90.7308],"lamps":5950}}},
+    "/doors.module/doors.fixture": {"mapping":{"footprint":{"bbox":[29.4,83.0532,61.2,19.0468],"lamps":360}}}
+  }
+}

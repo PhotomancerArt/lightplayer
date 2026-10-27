@@ -1,0 +1,95 @@
+{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "next": {
+    "repeat": 3
+  },
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 62
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "repeat1",
+      "kind": {
+        "repeat": {
+          "center": [
+            50.0,
+            50.0
+          ],
+          "count": 2,
+          "part": {
+            "id": "repeat2",
+            "kind": {
+              "repeat": {
+                "center": [
+                  50.0,
+                  50.0
+                ],
+                "count": 3,
+                "part": {
+                  "id": "x",
+                  "kind": {
+                    "path": {
+                      "d": "M 60 50 L 80 50",
+                      "count": 2
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "x@0@1": {
+      "port": {
+        "set": 0
+      },
+      "channel": {
+        "set": {
+          "lamps": 50
+        }
+      },
+      "direction": "reverse"
+    },
+    "x@1@1": {
+      "port": {
+        "set": 0
+      },
+      "channel": {
+        "set": {
+          "lamps": 66
+        }
+      }
+    },
+    "x@2": {
+      "port": {
+        "set": 0
+      },
+      "channel": {
+        "set": {
+          "lamps": 60
+        }
+      },
+      "direction": "reverse"
+    }
+  }
+}

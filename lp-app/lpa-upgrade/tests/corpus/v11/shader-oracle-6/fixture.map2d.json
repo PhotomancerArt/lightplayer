@@ -1,0 +1,42 @@
+{
+  "format": 6,
+  "sample_diameter": 1.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "main"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "panel",
+      "name": "panel",
+      "kind": {
+        "grid": {
+          "origin": [
+            6.25,
+            6.25
+          ],
+          "cols": 8,
+          "rows": 8,
+          "pitch": 12.5,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
+      }
+    }
+  ]
+}

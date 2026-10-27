@@ -50,6 +50,16 @@ fn every_corpus_project_matches_its_golden() {
                 differing_paths(&input, &migrated),
                 "{project}: changed_files must name exactly the files whose bytes moved"
             );
+            assert_eq!(
+                report.added_files,
+                paths_only_in(&migrated, &input),
+                "{project}: added_files must name exactly the files the upgrade added"
+            );
+            assert_eq!(
+                report.removed_files,
+                paths_only_in(&input, &migrated),
+                "{project}: removed_files must name exactly the files the upgrade removed"
+            );
 
             let expected_dir = expected_root(version).join(&project);
             if blessing() {
@@ -69,7 +79,9 @@ fn untouched_files_come_back_byte_identical() {
         let report = upgrade_to_current(&mut migrated).expect("upgrade");
 
         for (path, before) in input.iter() {
-            if report.changed_files.iter().any(|p| p == path) {
+            if report.changed_files.iter().any(|p| p == path)
+                || report.removed_files.iter().any(|p| p == path)
+            {
                 continue;
             }
             assert_eq!(
@@ -78,11 +90,21 @@ fn untouched_files_come_back_byte_identical() {
                 "{project}/{path} was rewritten without being reported"
             );
         }
-        // Nothing is added or dropped: a migration is an edit, not a rebuild.
+        // The file set changes exactly as the report says: a migration is an
+        // edit, and the only files it adds or drops are the ones it names
+        // (v11→v12 retires patch documents and adds a map2d for hand-placed
+        // lamps).
+        let mut expected: Vec<String> = input
+            .paths()
+            .filter(|path| !report.removed_files.iter().any(|p| p == path))
+            .map(String::from)
+            .chain(report.added_files.iter().cloned())
+            .collect();
+        expected.sort();
         assert_eq!(
-            input.paths().collect::<Vec<_>>(),
-            migrated.paths().collect::<Vec<_>>(),
-            "{project}: the file set changed"
+            expected,
+            migrated.paths().map(String::from).collect::<Vec<_>>(),
+            "{project}: the file set changed other than as reported"
         );
     }
 }
@@ -356,19 +378,30 @@ fn corpus_projects(version: u32) -> Vec<String> {
     projects
 }
 
+/// Every file of the project at `dir`, keyed by its `/`-separated path in
+/// the project (a project's submodules live in subdirectories: peach-1d's
+/// `body/`, small-dome's `dome/`).
 fn read_tree(dir: &Path) -> ProjectFiles {
     let mut files = ProjectFiles::new();
+    read_tree_into(dir, dir, &mut files);
+    files
+}
+
+fn read_tree_into(root: &Path, dir: &Path, files: &mut ProjectFiles) {
     for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
         let entry = entry.expect("entry");
-        assert!(
-            entry.file_type().expect("file type").is_file(),
-            "{}: the corpus is flat",
-            entry.path().display()
-        );
-        let name = entry.file_name().to_string_lossy().into_owned();
-        files.insert(name, std::fs::read(entry.path()).expect("read"));
+        let path = entry.path();
+        if entry.file_type().expect("file type").is_dir() {
+            read_tree_into(root, &path, files);
+            continue;
+        }
+        let key = path
+            .strip_prefix(root)
+            .expect("under the project")
+            .to_string_lossy()
+            .replace('\\', "/");
+        files.insert(key, std::fs::read(&path).expect("read"));
     }
-    files
 }
 
 fn write_tree(dir: &Path, files: &ProjectFiles) {
@@ -377,15 +410,27 @@ fn write_tree(dir: &Path, files: &ProjectFiles) {
     }
     std::fs::create_dir_all(dir).expect("create");
     for (path, bytes) in files.iter() {
-        std::fs::write(dir.join(path), bytes).expect("write");
+        let target = dir.join(path);
+        std::fs::create_dir_all(target.parent().expect("a file has a directory")).expect("create");
+        std::fs::write(target, bytes).expect("write");
     }
 }
 
+/// Files in both trees whose bytes moved.
 fn differing_paths(before: &ProjectFiles, after: &ProjectFiles) -> Vec<String> {
     before
         .iter()
-        .filter(|(path, bytes)| after.get(path) != Some(bytes))
+        .filter(|(path, bytes)| after.get(path).is_some_and(|now| now != *bytes))
         .map(|(path, _)| String::from(path))
+        .collect()
+}
+
+/// Files in `these` and not in `those`, sorted.
+fn paths_only_in(these: &ProjectFiles, those: &ProjectFiles) -> Vec<String> {
+    these
+        .paths()
+        .filter(|path| those.get(path).is_none())
+        .map(String::from)
         .collect()
 }
 

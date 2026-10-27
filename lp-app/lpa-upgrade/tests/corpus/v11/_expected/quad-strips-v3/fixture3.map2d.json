@@ -1,0 +1,42 @@
+{
+  "format": 6,
+  "sample_diameter": 3.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "3"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "strip3",
+      "name": "strip3",
+      "kind": {
+        "grid": {
+          "origin": [
+            1.6667,
+            62.5
+          ],
+          "cols": 30,
+          "rows": 1,
+          "pitch": 3.3333,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
+      }
+    }
+  ]
+}

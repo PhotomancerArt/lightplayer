@@ -1,0 +1,38 @@
+{
+  "format": 4,
+  "sample_diameter": 1.0,
+  "canvas": [
+    0.0,
+    0.0,
+    120.0,
+    120.0
+  ],
+  "objects": [
+    {
+      "name": "door",
+      "id": "door",
+      "stride": 180,
+      "shape": {
+        "path": {
+          "points": [
+            [
+              90.6,
+              102.1
+            ],
+            [
+              60.0,
+              83.0
+            ],
+            [
+              29.4,
+              102.1
+            ]
+          ],
+          "count": 360,
+          "reversed": false,
+          "align": "inside"
+        }
+      }
+    }
+  ]
+}

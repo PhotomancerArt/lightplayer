@@ -1,0 +1,41 @@
+{
+  "format": 6,
+  "sample_diameter": 1.0,
+  "canvas": [
+    0.0,
+    0.0,
+    120.0,
+    120.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 12
+    },
+    "channel": {
+      "set": {
+        "lamps": 119
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "door",
+      "name": "door",
+      "kind": {
+        "path": {
+          "d": "M 90.6 102.1 L 60 83 L 29.4 102.1",
+          "count": 360,
+          "align": "inside"
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "door": {
+      "offset": 180
+    }
+  }
+}

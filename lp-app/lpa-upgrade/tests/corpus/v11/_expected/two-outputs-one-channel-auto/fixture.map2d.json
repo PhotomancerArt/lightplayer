@@ -1,0 +1,45 @@
+{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "top",
+      "name": "top",
+      "kind": {
+        "path": {
+          "d": "M 10 30 L 90 30",
+          "count": 12
+        }
+      }
+    },
+    {
+      "id": "bottom",
+      "name": "bottom",
+      "kind": {
+        "path": {
+          "d": "M 10 70 L 90 70",
+          "count": 12
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "dome": {
+      "ref": "./dome/module.json"
+    },
+    "doors": {
+      "ref": "./doors/module.json"
+    },
+    "out_a": {
+      "ref": "./out_a.json"
+    },
+    "out_b": {
+      "ref": "./out_b.json"
+    }
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

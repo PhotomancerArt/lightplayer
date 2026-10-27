@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "objects": [
+    { "name": "top", "shape": { "path": { "points": [[10, 30], [90, 30]], "count": 12 } } },
+    { "name": "bottom", "shape": { "path": { "points": [[10, 70], [90, 70]], "count": 12 } } }
+  ]
+}

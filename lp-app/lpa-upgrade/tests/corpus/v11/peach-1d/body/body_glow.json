@@ -1,0 +1,55 @@
+{
+  "kind": "Shader",
+  "source": "body_glow.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
+    },
+    "glow": {
+      "source": "bus:glow"
+    }
+  },
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 12.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Phase",
+      "description": "Master cycle; both ripples ride whole multiples of it"
+    },
+    "glow": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.35,
+      "min": 0.05,
+      "max": 1.0,
+      "label": "Glow",
+      "description": "How far the warm core reaches along the strand, as a fraction of it"
+    }
+  },
+  "space": {
+    "kind": "OneD",
+    "in_2d": {
+      "kind": "Project",
+      "shape": {
+        "kind": "ExtrudeX"
+      },
+      "mirror": {
+        "kind": "Normal"
+      },
+      "flip": {
+        "kind": "Normal"
+      }
+    }
+  }
+}

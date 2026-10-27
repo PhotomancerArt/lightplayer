@@ -1,0 +1,22 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "body": {
+      "ref": "./body/module.json"
+    },
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "leaf": {
+      "ref": "./leaf/module.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}
