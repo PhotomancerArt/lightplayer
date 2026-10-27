@@ -26,6 +26,9 @@ pub struct FixtureLanding {
     pub mapping_file: Option<String>,
     /// Its patch document, when it has one.
     pub patch_file: Option<String>,
+    /// Why the engine cannot read that patch, when it cannot: the fixture
+    /// auto-flows as if it had none (DD8).
+    pub patch_unread: Option<String>,
     pub layout: FixtureLayout,
 }
 

@@ -10,10 +10,9 @@
 //! reflow, every lamp no row claims flowing on after the highest anchored
 //! end on the default output — or nowhere, under `flow: manual`.
 
-use super::v11_files::{refused, scalar};
+use super::v11_files::scalar;
 use super::v11_segments::{SegmentSource, V11Segment, check_object_id};
 use crate::json::JsonNode;
-use crate::upgrade_error::UpgradeError;
 
 /// A read patch document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,30 +78,21 @@ impl PatchedRun {
     }
 }
 
-/// Read a patch document. Anything `PatchDoc::from_json` would not read —
-/// including a format above 3 — is refused: today the engine ignores such a
-/// file and auto-flows the fixture, which is not something an upgrade should
-/// write down on its own.
-pub(crate) fn read_patch(file: &str, doc: &JsonNode) -> Result<V11PatchDoc, UpgradeError> {
-    let unreadable = |reason: &str| {
-        refused(
-            file,
-            &format!(
-                "the engine cannot read this patch ({reason}) and auto-flows the fixture \
-                 instead; fix the patch or remove it, then upgrade"
-            ),
-        )
-    };
+/// Read a patch document as `PatchDoc::from_json` does, or say why the
+/// engine cannot: anything it would not read, a format above 3 included.
+/// The engine attaches such a patch with no placement and auto-flows the
+/// fixture (`resolve_fixture_patch`), and so does the frozen landing (DD8).
+pub(crate) fn read_patch(doc: &JsonNode) -> Result<V11PatchDoc, String> {
     let format = doc
         .get("format")
         .and_then(scalar::<u32>)
-        .ok_or_else(|| unreadable("it has no format"))?;
+        .ok_or_else(|| String::from("it has no format"))?;
     match format {
-        1 => read_v1(doc).map_err(|reason| unreadable(&reason)),
-        2 | 3 => read_rows(doc, format).map_err(|reason| unreadable(&reason)),
-        _ => Err(unreadable(&format!(
+        1 => read_v1(doc),
+        2 | 3 => read_rows(doc, format),
+        _ => Err(format!(
             "format {format}; this build reads patch formats 1 to 3"
-        ))),
+        )),
     }
 }
 
@@ -498,7 +488,7 @@ mod tests {
     use super::*;
 
     fn doc(text: &str) -> V11PatchDoc {
-        read_patch("f.patch.json", &JsonNode::parse(text).unwrap()).unwrap()
+        read_patch(&JsonNode::parse(text).unwrap()).unwrap()
     }
 
     fn object(id: &str, first_lamp: u32, lamps: u32, copy: Option<u32>) -> V11Segment {
@@ -614,14 +604,12 @@ mod tests {
         assert_eq!(placed(&runs), vec![(0, 3, 5, false, 0)]);
     }
 
-    /// A patch at a format this build does not read is refused, by name.
+    /// A patch at a format this build does not read is unreadable, and says
+    /// why.
     #[test]
-    fn a_patch_above_format_3_is_refused() {
-        let error = read_patch(
-            "f.patch.json",
-            &JsonNode::parse(r#"{"format":4,"entries":[]}"#).unwrap(),
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("format 4"), "{error}");
+    fn a_patch_above_format_3_is_unreadable() {
+        let error =
+            read_patch(&JsonNode::parse(r#"{"format":4,"entries":[]}"#).unwrap()).unwrap_err();
+        assert!(error.contains("format 4"), "{error}");
     }
 }

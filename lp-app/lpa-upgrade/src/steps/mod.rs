@@ -8,6 +8,7 @@
 //! crate README and `just format-bump`.
 
 pub(crate) mod v10_to_v11;
+pub(crate) mod v11_to_v12;
 pub(crate) mod v4_to_v5;
 pub(crate) mod v5_to_v6;
 pub(crate) mod v6_to_v7;

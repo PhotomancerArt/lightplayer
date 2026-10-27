@@ -28,6 +28,11 @@ libm = "0.2"
 # merely well-formed (docs/defects/2026-07-27-created-package-unloadable.md).
 lpc-registry = { path = "../../lp-core/lpc-registry" }
 lpfs = { path = "../../lp-base/lpfs" }
+# The format-6 reader, the renderer and the patcher, so the v11→v12 step's
+# output is checked by the real thing rather than by the step's own
+# arithmetic (lean Q6: a dev-dependency only; the step itself depends on no
+# current model).
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 
 [lints]
 workspace = true

@@ -65,3 +65,18 @@ pub use v11::{
     DarkReason, FixtureLanding, FixtureLayout, LandedPiece, Landing, OutputLanding, ProjectLanding,
     SegmentLanding, SegmentSource, landing,
 };
+
+/// The v11 → v12 step on its own, before it joins the chain: the step's
+/// tests call it while project format 12 does not exist yet (mapping
+/// rebuild M3 P3). M3 P4 registers the step in the chain with the format
+/// bump, and this goes with it.
+///
+/// All-or-nothing, like [`upgrade_to_current`]: a refusal leaves `files`
+/// as they were.
+#[doc(hidden)]
+pub fn upgrade_v11_to_v12(files: &mut ProjectFiles) -> Result<UpgradeReport, UpgradeError> {
+    let mut report = UpgradeReport::new(11);
+    steps::v11_to_v12::apply(files, &mut report)?;
+    report.to = 12;
+    Ok(report)
+}
