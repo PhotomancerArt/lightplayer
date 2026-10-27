@@ -146,7 +146,10 @@ fn read_part(doc: PartText, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Er
             part,
         } => {
             if count > MAX_REPEAT_COUNT {
-                return Err(Map2d6Error::TooManyCopies { part: doc.id, count });
+                return Err(Map2d6Error::TooManyCopies {
+                    part: doc.id,
+                    count,
+                });
             }
             PartKind::Repeat(Repeat {
                 part: Box::new(read_part(*part, ids)?),

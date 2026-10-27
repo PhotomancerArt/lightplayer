@@ -245,7 +245,10 @@ impl<'a> JsonText<'a> {
         }
         let mut n: u32 = 0;
         for b in text.bytes() {
-            match n.checked_mul(10).and_then(|n| n.checked_add((b - b'0') as u32)) {
+            match n
+                .checked_mul(10)
+                .and_then(|n| n.checked_add((b - b'0') as u32))
+            {
                 Some(next) => n = next,
                 None => return Err(self.fail("expected an integer that fits a u32")),
             }
@@ -572,14 +575,19 @@ fn f64_overflows(text: &[u8]) -> bool {
     if let Some(end) = end {
         for &c in &text[end + 1..] {
             if c.is_ascii_digit() {
-                exponent = exponent.saturating_mul(10).saturating_add((c - b'0') as i64);
+                exponent = exponent
+                    .saturating_mul(10)
+                    .saturating_add((c - b'0') as i64);
             }
         }
         if text[end + 1] == b'-' {
             exponent = -exponent;
         }
     }
-    let whole = mantissa.iter().take_while(|c| **c != b'.').filter(|c| c.is_ascii_digit());
+    let whole = mantissa
+        .iter()
+        .take_while(|c| **c != b'.')
+        .filter(|c| c.is_ascii_digit());
     let mut power = whole.count() as i64 - 1;
     let mut digits = mantissa.iter().copied().filter(u8::is_ascii_digit);
     // The first significant digit and its power of ten.

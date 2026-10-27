@@ -310,12 +310,15 @@ fn read_kind(t: &mut JsonText) -> Read<KindText> {
             (true, "points") => "",
             (_, key) => key,
         };
-        let found = FIELD_NAMES.iter().position(|n| *n == name).and_then(|index| {
-            fields
-                .iter()
-                .position(|field| (field & !NEEDED) as usize == index)
-                .map(|at| (index, at))
-        });
+        let found = FIELD_NAMES
+            .iter()
+            .position(|n| *n == name)
+            .and_then(|index| {
+                fields
+                    .iter()
+                    .position(|field| (field & !NEEDED) as usize == index)
+                    .map(|at| (index, at))
+            });
         let Some((index, at)) = found else {
             t.skip()?;
             continue;
@@ -326,7 +329,11 @@ fn read_kind(t: &mut JsonText) -> Read<KindText> {
     for (at, field) in fields.iter().enumerate() {
         if seen & (1 << at) == 0 && field & NEEDED != 0 {
             let index = (field & !NEEDED) as usize;
-            return Err(t.missing(if kind == POINTS { "at" } else { FIELD_NAMES[index] }));
+            return Err(t.missing(if kind == POINTS {
+                "at"
+            } else {
+                FIELD_NAMES[index]
+            }));
         }
     }
     t.end_variant()?;
@@ -417,8 +424,8 @@ fn read_field(t: &mut JsonText, f: &mut Fields, kind: usize, index: usize) -> Re
         2 => f.reversed = t.bool()?,
         3 => {
             let words = ["on", "inside", "outside"];
-            f.align = [PathAlign::On, PathAlign::Inside, PathAlign::Outside]
-                [t.unit_variant(&words)?];
+            f.align =
+                [PathAlign::On, PathAlign::Inside, PathAlign::Outside][t.unit_variant(&words)?];
         }
         4 => {
             let words: &[&str] = if kind == PATH {
@@ -434,7 +441,8 @@ fn read_field(t: &mut JsonText, f: &mut Fields, kind: usize, index: usize) -> Re
         8 => f.dir = [RingDir::Cw, RingDir::Ccw][t.unit_variant(&["cw", "ccw"])?],
         9 => {
             let words = ["outside", "inside"];
-            f.drawn_from = [RingOrder::OuterFirst, RingOrder::InnerFirst][t.unit_variant(&words)?];
+            f.drawn_from =
+                [RingOrder::OuterFirst, RingOrder::InnerFirst][t.unit_variant(&words)?];
         }
         10 => f.next_ring = NextRing(t.u32()?),
         11 => {
@@ -454,7 +462,12 @@ fn read_field(t: &mut JsonText, f: &mut Fields, kind: usize, index: usize) -> Re
         }
         18 => {
             let words = ["tl", "tr", "bl", "br"];
-            let corners = [GridCorner::Tl, GridCorner::Tr, GridCorner::Bl, GridCorner::Br];
+            let corners = [
+                GridCorner::Tl,
+                GridCorner::Tr,
+                GridCorner::Bl,
+                GridCorner::Br,
+            ];
             f.start_corner = corners[t.unit_variant(&words)?];
         }
         19 => f.parts = read_parts(t)?,
@@ -566,7 +579,11 @@ fn read_port_op(t: &mut JsonText) -> Read<PortOp> {
     }
     let n = t.u32()?;
     t.end_variant()?;
-    Ok(if word == 1 { PortOp::set(n) } else { PortOp::Add(n) })
+    Ok(if word == 1 {
+        PortOp::set(n)
+    } else {
+        PortOp::Add(n)
+    })
 }
 
 /// `"keep"`, `{"set": {"lamps": 0}}` or `{"add": {"channels": 13}}`.
