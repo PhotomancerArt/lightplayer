@@ -1,0 +1,50 @@
+{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    200.0,
+    60.0
+  ],
+  "start": {
+    "output": {
+      "set": "out"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "front",
+      "name": "front",
+      "kind": {
+        "path": {
+          "d": "M 10 50 L 10 10 M 12 8 L 100 8",
+          "count": 60
+        }
+      }
+    },
+    {
+      "id": "side",
+      "name": "side",
+      "kind": {
+        "path": {
+          "d": "M 110 8 L 188 8 M 190 10 L 190 50",
+          "count": 50
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "front": {
+      "direction": "reverse"
+    }
+  }
+}

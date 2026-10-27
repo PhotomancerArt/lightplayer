@@ -7,8 +7,9 @@
 //! segments carry the lamps today's [`crate::resolve`] gives the same
 //! geometry, bit for bit. A path goes through today's path (its moves as
 //! jumpers); a circle's ring k through a single-ring ring set, except a ring
-//! of one lamp, which sits at the centre; a repeat turns every lamp of copy
-//! k by today's [`crate::Rotation2d`] in today's order, copy 0 included.
+//! of radius 0, which is one lamp at the centre; points are where they are
+//! listed; a repeat turns every lamp of copy k by today's
+//! [`crate::Rotation2d`] in today's order, copy 0 included.
 //!
 //! Only the resolver's public entry points are called, never its private
 //! helpers: a new caller of a private function changes how the compiler
@@ -21,8 +22,9 @@ use alloc::vec::Vec;
 
 use crate::map2d_doc::{Map2dDoc, Map2dObject, Map2dShape};
 use crate::map2d_error::Map2dError;
-use crate::map2d_resolve::{Rotation2d, filled_polygon_cells, resolve_into, shape_lamp_count};
-use crate::part::circle::Circle;
+use crate::map2d_resolve::{Rotation2d, filled_polygon_cells, resolve_into};
+use crate::part::circle::{Circle, Ring};
+use crate::part::circle_split::CircleSplit;
 use crate::part::lamp_ref::LampRef;
 use crate::part::mapping::Mapping;
 use crate::part::part::Part;
@@ -130,8 +132,12 @@ fn render_shape(
     let today = match shape {
         Shape::Path(path) => return render_path(tree, id, path, me, lamp),
         Shape::Circle(circle) => return render_circle(tree, id, circle, me, lamp),
+        Shape::Points(points) => {
+            let segment = push_segment(tree, TreeId::of(id), &points.at, lamp);
+            tree.nodes[me].segment = Some(segment);
+            return Ok(());
+        }
         Shape::Polygon(polygon) => Map2dShape::Polygon(polygon.clone()),
-        Shape::RingSet(ring) => Map2dShape::Ring(ring.clone()),
         Shape::Grid(grid) => Map2dShape::Grid(grid.clone()),
         Shape::FilledPolygon(filled) => Map2dShape::FilledPolygon(filled.clone()),
     };
@@ -199,8 +205,9 @@ fn render_path(
     Ok(())
 }
 
-/// A circle: one segment per ring, in the circle's ring order. A ring of
-/// one lamp is one lamp at the centre, whatever its radius.
+/// A circle: one segment per ring, in the circle's ring order, or one
+/// segment of every ring's lamps in that order. A ring of radius 0 is one
+/// lamp at the centre.
 fn render_circle(
     tree: &mut Tree,
     id: &PartId,
@@ -208,21 +215,47 @@ fn render_circle(
     me: usize,
     lamp: &LampRef,
 ) -> Result<(), RenderError> {
+    let first = tree.positions.len() as u32;
     for ring in circle.rings_in_order() {
-        let lamps = if ring.count == 1 {
-            alloc::vec![circle.center]
-        } else {
-            resolve_today(id, Map2dShape::Ring(circle.ring_shape(ring)))?
-        };
-        push_leaf(
-            tree,
-            TreeId::generated(id, ring.key.clone()),
-            me,
-            &lamps,
-            lamp,
-        );
+        let lamps = ring_lamps(id, circle, ring)?;
+        match circle.split {
+            CircleSplit::Rings => push_leaf(
+                tree,
+                TreeId::generated(id, ring.key.clone()),
+                me,
+                &lamps,
+                lamp,
+            ),
+            CircleSplit::One => tree.positions.extend_from_slice(&lamps),
+        }
+    }
+    if circle.split == CircleSplit::One {
+        tree.segments.push(Segment {
+            id: TreeId::of(id),
+            lamps: first..tree.positions.len() as u32,
+            lamp: lamp.clone(),
+        });
+        tree.nodes[me].segment = Some(tree.segments.len() - 1);
     }
     Ok(())
+}
+
+/// One ring's lamps: today's single ring, or the centre.
+fn ring_lamps(id: &PartId, circle: &Circle, ring: &Ring) -> Result<Vec<[f32; 2]>, RenderError> {
+    if !ring.is_centre() {
+        return resolve_today(id, Map2dShape::Ring(circle.ring_shape(ring)));
+    }
+    if ring.count != 1 {
+        return Err(RenderError::InvalidPart {
+            part: id.clone(),
+            reason: alloc::format!(
+                "ring {} is the centre (radius 0) and holds one lamp, not {}",
+                ring.key,
+                ring.count
+            ),
+        });
+    }
+    Ok(alloc::vec![circle.center])
 }
 
 /// A repeat: copy 0 is its part's own subtree; copy k the same subtree with
@@ -338,7 +371,7 @@ fn shape_count(shape: &Shape) -> u64 {
         Shape::Path(path) => u64::from(path.count),
         Shape::Polygon(polygon) => u64::from(polygon.count),
         Shape::Circle(circle) => circle.rings.iter().map(|r| u64::from(r.count)).sum(),
-        Shape::RingSet(ring) => u64::from(shape_lamp_count(&Map2dShape::Ring(ring.clone()))),
+        Shape::Points(points) => points.at.len() as u64,
         Shape::Grid(grid) => u64::from(grid.cols) * u64::from(grid.rows),
         Shape::FilledPolygon(filled) => filled_polygon_cells(filled).len() as u64,
     }

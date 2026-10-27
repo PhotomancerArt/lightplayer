@@ -625,6 +625,7 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
+| `lpc-mapping`    | Mapping = layout + patching: one model (parts render a tree whose leaves are segments) and one patcher (a cursor gives each segment its address), for engine, firmware and Studio alike; map2d format 6 holds both in one file. Today's map2d ≤ 5 and patch documents run the engine until the mapping rebuild's M2–M3 move it over (`docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`) | yes |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO); relay protocol 2: the picture, the project report by keyed tags, the picture schedule | yes |

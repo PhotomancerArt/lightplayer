@@ -56,9 +56,9 @@ fn leaving_a_part_doesnt_move_the_cursor() {
     assert_eq!(lamps(&p, &after), [12, 13]);
 }
 
-/// A ring set to port 1 at channel 0 takes the rings after it along.
+/// A ring given port 1 at channel 0 takes the rings after it along.
 #[test]
-fn a_ring_set_elsewhere_takes_the_rest_along() {
+fn a_ring_moved_elsewhere_takes_the_rest_along() {
     let mut m = Mapping::new();
     circle(&mut m, &[(40.0, 6), (30.0, 5), (20.0, 4), (10.0, 3)]);
     m.start = Start::at("out", 0, Amount::lamps(0));

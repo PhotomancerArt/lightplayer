@@ -37,6 +37,7 @@ extern crate alloc;
 pub mod corpus;
 mod editor_meta;
 pub mod import;
+pub mod map2d6;
 mod map2d_doc;
 mod map2d_error;
 mod map2d_fit;
