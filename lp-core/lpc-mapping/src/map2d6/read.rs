@@ -24,20 +24,15 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::map2d_doc::{MAX_REPEAT_COUNT, RingOrder};
-use crate::map2d6::map2d6_doc::{FormatPeek, Map2d6Doc};
+use crate::map2d_doc::MAX_REPEAT_COUNT;
+use crate::map2d6::doc_read::{CircleText, DocText, KindText, PartText, read_doc, read_format};
+use crate::map2d6::json_text::{JsonText, Read};
 use crate::map2d6::map2d6_error::Map2d6Error;
 use crate::map2d6::numbered_id::{minted_part_number, minted_ring_number};
-use crate::map2d6::op_doc::{AmountDoc, ChannelOpDoc, FlowDoc, OutputOpDoc, PortOpDoc, StartDoc};
-use crate::map2d6::override_doc::OverrideDoc;
-use crate::map2d6::part_doc::{CircleDoc, DrawnFromDoc, KindDoc, PartDoc};
 use crate::map2d6::path_data::{PathDataError, parse_path_data};
 use crate::part::{
-    Circle, IdCounters, Mapping, PART_KIND_WORDS, Part, PartId, PartKind, Path, Points, Repeat,
-    Ring, SegmentKey, Shape, TreeId,
-};
-use crate::patching::{
-    Amount, ChannelOp, Flow, OutputName, OutputOp, Override, PortKey, PortOp, Start,
+    Circle, IdCounters, Mapping, PART_KIND_WORDS, Part, PartId, PartKind, Path, Repeat, Ring,
+    SegmentKey, Shape, TreeId,
 };
 
 /// The format this reader reads and the writer writes.
@@ -45,9 +40,16 @@ pub const MAP2D6_FORMAT: u32 = 6;
 
 /// A map2d document's `format`, read on its own.
 pub fn peek_format(json: &str) -> Result<u32, Map2d6Error> {
-    let peek: FormatPeek =
-        serde_json::from_str(json).map_err(|e| Map2d6Error::Parse(e.to_string()))?;
-    Ok(peek.format)
+    whole(json, read_format)
+}
+
+/// Read all of `json` with `read`.
+fn whole<T>(json: &str, read: fn(&mut JsonText) -> Read<T>) -> Result<T, Map2d6Error> {
+    let mut text = JsonText::new(json);
+    match read(&mut text).and_then(|value| text.end().map(|()| value)) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(text.error()),
+    }
 }
 
 /// Read a format-6 document (rules in the module doc).
@@ -57,13 +59,12 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
         found @ 1..MAP2D6_FORMAT => return Err(Map2d6Error::OlderFormat { found }),
         found => return Err(Map2d6Error::UnsupportedFormat { found }),
     }
-    let doc: Map2d6Doc =
-        serde_json::from_str(json).map_err(|e| Map2d6Error::Parse(e.to_string()))?;
+    let doc: DocText = whole(json, read_doc)?;
 
     let mut ids = BTreeSet::new();
     let parts = doc
         .parts
-        .iter()
+        .into_iter()
         .map(|part| read_part(part, &mut ids))
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -87,10 +88,11 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     }
 
     let mut overrides = BTreeMap::new();
-    for (text, entry) in &doc.overrides {
-        let id = TreeId::parse(text)
-            .ok_or_else(|| Map2d6Error::MalformedOverrideId { id: text.clone() })?;
-        overrides.insert(id, read_override(entry));
+    for (text, entry) in doc.overrides {
+        let Some(id) = TreeId::parse(&text) else {
+            return Err(Map2d6Error::MalformedOverrideId { id: text });
+        };
+        overrides.insert(id, entry);
     }
 
     Ok(Mapping {
@@ -99,19 +101,19 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
         parts,
         lamp: Default::default(),
         next,
-        start: read_start(&doc.start),
-        flow: read_flow(doc.flow),
+        start: doc.start,
+        flow: doc.flow,
         overrides,
     })
 }
 
-fn read_part(doc: &PartDoc, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Error> {
+fn read_part(doc: PartText, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Error> {
     let id = read_part_id(&doc.id)?;
     if !ids.insert(doc.id.clone()) {
-        return Err(Map2d6Error::DuplicatePartId { id: doc.id.clone() });
+        return Err(Map2d6Error::DuplicatePartId { id: doc.id });
     }
-    let kind = match &doc.kind {
-        KindDoc::Path(path) => {
+    let kind = match doc.kind {
+        KindText::Path(path) => {
             let commands = parse_path_data(&path.d).map_err(|error| match error {
                 PathDataError::NotBuilt(command) => Map2d6Error::PathCommandNotBuilt {
                     part: doc.id.clone(),
@@ -130,38 +132,33 @@ fn read_part(doc: &PartDoc, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Er
                 split: path.split,
             }))
         }
-        KindDoc::Polygon(polygon) => PartKind::Shape(Shape::Polygon(polygon.clone())),
-        KindDoc::Circle(circle) => PartKind::Shape(Shape::Circle(read_circle(&doc.id, circle)?)),
-        KindDoc::Grid(grid) => PartKind::Shape(Shape::Grid(grid.clone())),
-        KindDoc::FilledPolygon(filled) => PartKind::Shape(Shape::FilledPolygon(filled.clone())),
-        KindDoc::Points(points) => PartKind::Shape(Shape::Points(Points {
-            at: points.at.clone(),
-        })),
-        KindDoc::Group(group) => PartKind::Group {
-            parts: group
-                .parts
-                .iter()
+        KindText::Shape(shape) => PartKind::Shape(shape),
+        KindText::Circle(circle) => PartKind::Shape(Shape::Circle(read_circle(&doc.id, circle)?)),
+        KindText::Group(parts) => PartKind::Group {
+            parts: parts
+                .into_iter()
                 .map(|part| read_part(part, ids))
                 .collect::<Result<Vec<_>, _>>()?,
         },
-        KindDoc::Repeat(repeat) => {
-            if repeat.count > MAX_REPEAT_COUNT {
-                return Err(Map2d6Error::TooManyCopies {
-                    part: doc.id.clone(),
-                    count: repeat.count,
-                });
+        KindText::Repeat {
+            center,
+            count,
+            part,
+        } => {
+            if count > MAX_REPEAT_COUNT {
+                return Err(Map2d6Error::TooManyCopies { part: doc.id, count });
             }
             PartKind::Repeat(Repeat {
-                part: Box::new(read_part(&repeat.part, ids)?),
-                center: repeat.center,
-                count: repeat.count,
+                part: Box::new(read_part(*part, ids)?),
+                center,
+                count,
             })
         }
     };
     let mut part = Part::new(id, kind);
-    part.name = doc.name.clone();
-    part.start = read_start(&doc.start);
-    part.flow = read_flow(doc.flow);
+    part.name = doc.name;
+    part.start = doc.start;
+    part.flow = doc.flow;
     Ok(part)
 }
 
@@ -184,7 +181,7 @@ fn read_part_id(id: &str) -> Result<PartId, Map2d6Error> {
     })
 }
 
-fn read_circle(part: &str, doc: &CircleDoc) -> Result<Circle, Map2d6Error> {
+fn read_circle(part: &str, doc: CircleText) -> Result<Circle, Map2d6Error> {
     let mut keys = BTreeSet::new();
     let mut rings = Vec::with_capacity(doc.rings.len());
     for ring in &doc.rings {
@@ -216,70 +213,9 @@ fn read_circle(part: &str, doc: &CircleDoc) -> Result<Circle, Map2d6Error> {
         center: doc.center,
         start_angle_deg: doc.start_angle_deg,
         dir: doc.dir,
-        drawn_from: match doc.drawn_from {
-            DrawnFromDoc::Outside => RingOrder::OuterFirst,
-            DrawnFromDoc::Inside => RingOrder::InnerFirst,
-        },
+        drawn_from: doc.drawn_from,
         split: doc.split,
         rings,
         next_ring: doc.next_ring,
     })
-}
-
-fn read_start(doc: &StartDoc) -> Start {
-    Start {
-        output: doc.output.as_ref().map_or(OutputOp::Keep, read_output_op),
-        port: doc.port.map_or(PortOp::Keep, read_port_op),
-        channel: doc.channel.map_or(ChannelOp::Keep, read_channel_op),
-    }
-}
-
-fn read_override(doc: &OverrideDoc) -> Override {
-    Override {
-        output: doc.output.as_ref().map(read_output_op),
-        port: doc.port.map(read_port_op),
-        channel: doc.channel.map(read_channel_op),
-        off: doc.off,
-        direction: doc.direction,
-        offset: doc.offset,
-    }
-}
-
-fn read_output_op(doc: &OutputOpDoc) -> OutputOp {
-    match doc {
-        OutputOpDoc::Keep => OutputOp::Keep,
-        OutputOpDoc::Set(name) => OutputOp::Set(OutputName::new(name)),
-    }
-}
-
-fn read_port_op(doc: PortOpDoc) -> PortOp {
-    match doc {
-        PortOpDoc::Keep => PortOp::Keep,
-        PortOpDoc::Set(key) => PortOp::set(key),
-        PortOpDoc::Add(n) => PortOp::Add(n),
-    }
-}
-
-fn read_channel_op(doc: ChannelOpDoc) -> ChannelOp {
-    match doc {
-        ChannelOpDoc::Keep => ChannelOp::Keep,
-        ChannelOpDoc::Set(amount) => ChannelOp::Set(read_amount(amount)),
-        ChannelOpDoc::Add(amount) => ChannelOp::Add(read_amount(amount)),
-    }
-}
-
-fn read_amount(doc: AmountDoc) -> Amount {
-    match doc {
-        AmountDoc::Lamps(n) => Amount::lamps(n),
-        AmountDoc::Channels(n) => Amount::channels(n),
-    }
-}
-
-fn read_flow(doc: FlowDoc) -> Flow {
-    match doc {
-        FlowDoc::EndToEnd => Flow::EndToEnd,
-        FlowDoc::OnePerPort { from } => Flow::OnePerPort {
-            from: PortKey(from),
-        },
-    }
 }

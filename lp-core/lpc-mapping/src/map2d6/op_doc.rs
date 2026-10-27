@@ -8,16 +8,16 @@
 
 use alloc::string::String;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// A start: each field absent is Keep.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub(crate) struct StartDoc {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputOpDoc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<PortOpDoc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<ChannelOpDoc>,
 }
 
@@ -28,7 +28,7 @@ impl StartDoc {
 }
 
 /// `"keep"` or `{"set": "main"}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OutputOpDoc {
     Keep,
@@ -36,7 +36,7 @@ pub(crate) enum OutputOpDoc {
 }
 
 /// `"keep"`, `{"set": 0}` or `{"add": 1}`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum PortOpDoc {
     Keep,
@@ -45,7 +45,7 @@ pub(crate) enum PortOpDoc {
 }
 
 /// `"keep"`, `{"set": {"lamps": 0}}` or `{"add": {"channels": 13}}`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ChannelOpDoc {
     Keep,
@@ -54,7 +54,7 @@ pub(crate) enum ChannelOpDoc {
 }
 
 /// `{"lamps": n}` or `{"channels": n}`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AmountDoc {
     Lamps(u32),
@@ -62,7 +62,7 @@ pub(crate) enum AmountDoc {
 }
 
 /// `"end_to_end"` or `{"one_per_port": {"from": 0}}`.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FlowDoc {
     #[default]

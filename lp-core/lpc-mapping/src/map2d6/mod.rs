@@ -23,16 +23,23 @@
 //! `Map2dDoc::from_json`, still reads formats 1 to 5 and refuses 6, so the
 //! engine is unchanged until M2; [`peek_format`] lets a caller choose.
 //!
-//! **Where the serde lives.** In this module, on document structs of its
-//! own, converted to and from the model: the model's shapes are not the
-//! file's (a path's commands are one `d` string; a port Set carries a
-//! flow's `plus`; parts nest their kind), and the model stays free of serde
-//! attributes. The polygon, grid and filled polygon reuse today's shape
-//! structs, whose deserializers every firmware already links, and the small
-//! unit enums whose words are the file's ([`crate::part::PathSplit`],
-//! [`crate::part::CircleSplit`], [`crate::patching::Direction`]) derive
-//! serde themselves. Nothing here is linked into firmware until M2.
+//! **Reading is by hand, writing is serde.** The device reads these files
+//! at project load, so the reader is what firmware links: a small JSON
+//! reader that is not generic (`json_text.rs`) and one short loop per
+//! document struct (`doc_read.rs`), straight into the model's types where a
+//! value has no rules to check. Derived deserializers cost the C6 engine
+//! about 30 KB more (one visitor, field enum and error path per struct and
+//! enum, monomorphized over serde_json's reader); the hand reader reads and
+//! refuses what they did, apart from serde's positional form of a struct (a
+//! JSON array of its fields), which no format-6 document uses and this
+//! reader refuses. The writer stays on serde, on document structs of its
+//! own (`map2d6_doc.rs` and its parts), which only hosts link: the model's
+//! shapes are not the file's (a path's commands are one `d` string; a port
+//! Set carries a flow's `plus`; parts nest their kind), and the model stays
+//! free of serde attributes.
 
+mod doc_read;
+mod json_text;
 mod map2d6_doc;
 mod map2d6_error;
 mod numbered_id;
