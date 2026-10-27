@@ -24,15 +24,24 @@
 
 mod copy_levels;
 mod edit_error;
+mod expand_repeat;
 mod free_id;
 mod insert_part;
 mod move_part;
 mod part_place;
 mod remove_part;
 mod rename_part;
+mod rotate_part;
+mod set_repeat_count;
+mod unrepeat;
+mod wrap_in_repeat;
 
 pub use edit_error::EditError;
+pub use expand_repeat::expand_repeat;
 pub use insert_part::insert_part;
 pub use move_part::move_part;
 pub use remove_part::{RemovedPart, remove_part};
 pub use rename_part::rename_part;
+pub use set_repeat_count::set_repeat_count;
+pub use unrepeat::unrepeat;
+pub use wrap_in_repeat::wrap_in_repeat;
