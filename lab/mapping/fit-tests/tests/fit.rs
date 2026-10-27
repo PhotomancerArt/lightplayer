@@ -505,14 +505,29 @@ fn lamps_are_the_products(dir: &Path) {
 /// with the product's older inline point lists instead of a map2d document
 /// (Map can't open them either). Every other fixture in every project
 /// opens whole (plan M4), and a project here still opens round the box.
+///
+/// The test projects whose map2d is format 6 are the lab's to refuse: its
+/// copy of the readers stops at format 5, and the Graph moves onto the
+/// product's model at mapping rebuild M4. Each is named, refused as newer.
 #[test]
 fn the_fixtures_the_graph_cant_show_yet() {
     let mut boxes = Vec::new();
+    let mut newer = Vec::new();
     for dir in every_project() {
-        let opened = open(&dir);
+        let name = dir.strip_prefix(workspace()).unwrap().display().to_string();
+        let opened = match Opened::open(&DirFiles::new(&dir)) {
+            Ok(opened) => opened,
+            Err(e)
+                if e.to_string()
+                    .contains("mapping format 6 is newer than this copy reads") =>
+            {
+                newer.push(name);
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", dir.display()),
+        };
         for n in opened.project.fixtures() {
             if let Some(u) = n.fixture().and_then(|f| f.unsupported.as_ref()) {
-                let name = dir.strip_prefix(workspace()).unwrap().display().to_string();
                 boxes.push(format!("{name} {}: {} ({})", n.name, u.what, u.edit_in));
             }
         }
@@ -523,6 +538,15 @@ fn the_fixtures_the_graph_cant_show_yet() {
             "catalog/projects/fiber-headband fixture: its point-list mapping (Nodes)",
             "projects/test/five-wire fixture: its point-list mapping (Nodes)",
             "projects/test/penta-strands-v3 fixture: its point-list mapping (Nodes)",
+        ]
+    );
+    assert_eq!(
+        newer,
+        [
+            "projects/test/circular-display-6",
+            "projects/test/lanes-6x128-6",
+            "projects/test/segments-64-6",
+            "projects/test/shader-oracle-6",
         ]
     );
 }
