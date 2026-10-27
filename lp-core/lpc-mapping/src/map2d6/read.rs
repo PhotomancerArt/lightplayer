@@ -20,7 +20,7 @@
 //! would misread does.
 
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -32,7 +32,7 @@ use crate::map2d6::numbered_id::{minted_part_number, minted_ring_number};
 use crate::map2d6::path_data::{PathDataError, parse_path_data};
 use crate::part::{
     Circle, IdCounters, Mapping, PART_KIND_WORDS, Part, PartId, PartKind, Path, Repeat, Ring,
-    SegmentKey, Shape, TreeId,
+    SegmentKey, Shape,
 };
 
 /// The format this reader reads and the writer writes.
@@ -87,12 +87,8 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
         }
     }
 
-    let mut overrides = BTreeMap::new();
-    for (text, entry) in doc.overrides {
-        let Some(id) = TreeId::parse(&text) else {
-            return Err(Map2d6Error::MalformedOverrideId { id: text });
-        };
-        overrides.insert(id, entry);
+    if let Some(id) = doc.malformed_override {
+        return Err(Map2d6Error::MalformedOverrideId { id });
     }
 
     Ok(Mapping {
@@ -103,7 +99,7 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
         next,
         start: doc.start,
         flow: doc.flow,
-        overrides,
+        overrides: doc.overrides,
     })
 }
 

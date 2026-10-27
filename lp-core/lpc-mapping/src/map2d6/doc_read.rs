@@ -25,7 +25,7 @@ use crate::map2d_doc::{
     PolygonShape, RingDir, RingOrder,
 };
 use crate::map2d6::json_text::{JsonText, Read};
-use crate::part::{CircleSplit, PathSplit, Points, Shape};
+use crate::part::{CircleSplit, PathSplit, Points, Shape, TreeId};
 use crate::patching::{
     Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, Override, PortKey, PortOp, Start,
 };
@@ -38,8 +38,11 @@ pub(crate) struct DocText {
     pub start: Start,
     pub flow: Flow,
     pub parts: Vec<PartText>,
-    /// By the key's text, sorted, one per key (its last).
-    pub overrides: Vec<(String, Override)>,
+    /// By node id; a key given twice keeps its last.
+    pub overrides: BTreeMap<TreeId, Override>,
+    /// The first override key (in text order) that is not a node id: the
+    /// one `read.rs` refuses, once the parts are checked.
+    pub malformed_override: Option<String>,
 }
 
 pub(crate) struct PartText {
@@ -123,7 +126,8 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
         start: Start::KEEP,
         flow: Flow::EndToEnd,
         parts: Vec::new(),
-        overrides: Vec::new(),
+        overrides: BTreeMap::new(),
+        malformed_override: None,
     };
     let mut seen = 0;
     t.begin_object()?;
@@ -155,13 +159,18 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
             6 => doc.parts = read_parts(t)?,
             _ => {
                 t.begin_object()?;
-                while let Some(id) = t.next_key()? {
+                while let Some(text) = t.next_key()? {
                     let entry = read_override(t)?;
-                    let id = id.into_owned();
-                    let list = &mut doc.overrides;
-                    match list.binary_search_by(|(held, _)| held.as_str().cmp(&id)) {
-                        Ok(at) => list[at].1 = entry,
-                        Err(at) => list.insert(at, (id, entry)),
+                    // A node id reads back to its own text, so two keys are
+                    // one node only when they are one text.
+                    match TreeId::parse(&text) {
+                        Some(id) => drop(doc.overrides.insert(id, entry)),
+                        None => {
+                            let first = &mut doc.malformed_override;
+                            if first.as_deref().is_none_or(|held| *text < *held) {
+                                *first = Some(text.into_owned());
+                            }
+                        }
                     }
                 }
             }
