@@ -1,8 +1,9 @@
 //! The mapping model: a fixture's **parts** (shapes, groups, repeats) form a
 //! tree whose leaves are **segments**, runs of lamps (names.html draft 3).
 //!
-//! Saved as map2d format 6 ([`crate::map2d6`]). Nothing outside this crate
-//! calls it yet: the engine still runs `Map2dDoc` and `PatchDoc`.
+//! Saved as map2d format 6 ([`crate::map2d6`]). The engine renders and
+//! patches it for a fixture whose map2d is format 6 (mapping rebuild M2);
+//! formats 1 to 5 still run `Map2dDoc` and `PatchDoc` until M3.
 
 mod circle;
 mod circle_split;
@@ -21,6 +22,7 @@ mod points;
 mod render;
 mod render_error;
 mod repeat;
+mod same_layout;
 mod segment;
 mod segment_key;
 mod shape;

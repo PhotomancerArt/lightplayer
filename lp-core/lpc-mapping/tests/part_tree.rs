@@ -519,6 +519,85 @@ fn a_mapping_too_big_for_memory_is_refused() {
     ));
 }
 
+/// Two mappings that differ only in their patching (a start, a flow, an
+/// override, an id counter) have the same layout, and render the same tree.
+#[test]
+fn a_patching_edit_keeps_the_layout() {
+    use lpc_mapping::patching::{Amount, Flow, Override, PortKey, Start};
+
+    let mut m = Mapping::new();
+    add(&mut m, straight(5));
+    let c = add(&mut m, circle(&[(40.0, 24), (20.0, 12)]));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(
+        Part::new(pid("panel"), straight(3)),
+        [50.0, 50.0],
+        4,
+    )));
+    m.parts.push(repeat);
+
+    let mut edited = m.clone();
+    edited.start = Start::at("main", 1, Amount::lamps(4));
+    edited.flow = Flow::OnePerPort { from: PortKey(2) };
+    edited.parts[1].flow = Flow::OnePerPort { from: PortKey(0) };
+    edited.parts[0].start = Start::at("main", 3, Amount::lamps(0));
+    let PartKind::Repeat(inner) = &mut edited.parts[2].kind else {
+        unreachable!("the repeat");
+    };
+    inner.part.start = Start::at("main", 0, Amount::lamps(9));
+    edited.overrides.insert(
+        TreeId::generated(&c, SegmentKey::new("r2").unwrap()),
+        Override {
+            off: true,
+            ..Override::default()
+        },
+    );
+    edited.next.raise("path", 40);
+
+    assert!(m.same_layout(&edited));
+    assert_eq!(render(&m).unwrap(), render(&edited).unwrap());
+}
+
+/// A mapping whose lamps moved, or whose parts changed, has another
+/// layout: a shape's geometry, a repeat's count, a part's id, the sample
+/// diameter or the canvas.
+#[test]
+fn a_layout_edit_is_another_layout() {
+    let mut m = Mapping::new();
+    add(&mut m, straight(5));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(
+        Part::new(pid("panel"), straight(3)),
+        [50.0, 50.0],
+        4,
+    )));
+    m.parts.push(repeat);
+
+    let edits: [(&str, fn(&mut Mapping)); 6] = [
+        ("a shape's count", |m| {
+            m.parts[0].kind = straight(6);
+        }),
+        ("a repeat's count", |m| {
+            let PartKind::Repeat(r) = &mut m.parts[1].kind else {
+                unreachable!()
+            };
+            r.count = 5;
+        }),
+        ("a repeated part's shape", |m| {
+            let PartKind::Repeat(r) = &mut m.parts[1].kind else {
+                unreachable!()
+            };
+            r.part.kind = straight(4);
+        }),
+        ("a part's id", |m| m.parts[0].id = pid("path9")),
+        ("the sample diameter", |m| m.sample_diameter = 3.0),
+        ("the canvas", |m| m.canvas = Some([0.0, 0.0, 10.0, 10.0])),
+    ];
+    for (what, edit) in edits {
+        let mut edited = m.clone();
+        edit(&mut edited);
+        assert!(!m.same_layout(&edited), "{what}");
+    }
+}
+
 // ---- parity with today's resolver (A2) ---------------------------------
 
 /// Every corpus document's parts carry exactly the lamps today's
