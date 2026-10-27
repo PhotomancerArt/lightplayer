@@ -2,8 +2,12 @@
 //! "Direction"). Different from a shape's own lamp order ("drawn from"),
 //! which is layout.
 
-/// Forward from lamp 0, or reverse from the last lamp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+use serde::{Deserialize, Serialize};
+
+/// Forward from lamp 0, or reverse from the last lamp. Written `"forward"`
+/// or `"reverse"` in map2d format 6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Direction {
     /// From its first lamp, as drawn.
     #[default]

@@ -4,11 +4,15 @@
 //! settled words, plus the parity statements (A2): every segment carries
 //! the lamps today's `resolve()` gives the same geometry, bit for bit.
 
+mod support;
+
 use std::path::{Path as FsPath, PathBuf};
 
+use support::{bits, today_as_mapping};
+
 use lpc_mapping::part::{
-    Circle, Colors, Mapping, NodeKind, Order, Part, PartId, PartKind, Path, PathCommand, PathSplit,
-    RenderError, Repeat, SegmentKey, Shape, Tree, TreeId, render,
+    Circle, CircleSplit, Colors, Mapping, NodeKind, Order, Part, PartId, PartKind, Path,
+    PathCommand, PathSplit, Points, RenderError, Repeat, SegmentKey, Shape, Tree, TreeId, render,
 };
 use lpc_mapping::{
     GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathAlign, PathShape, RingDir,
@@ -26,6 +30,26 @@ fn a_path_is_its_own_segment() {
     assert_eq!(tree.segments()[0].id, TreeId::of(&path));
     assert_eq!(tree.node(0).segment, Some(0));
     assert_eq!(tree.segments()[0].count(), 5);
+}
+
+/// Taking a tree's positions moves them out whole, in lamp order, and
+/// leaves its segments as they were.
+#[test]
+fn taking_the_positions_moves_them_out_and_keeps_the_segments() {
+    let mut m = Mapping::new();
+    add(&mut m, circle(&[(40.0, 24), (20.0, 12)]));
+    let mut tree = render(&m).unwrap();
+    let expected = tree.positions().to_vec();
+    let segments = tree.segments().to_vec();
+    let taken = tree.take_positions();
+    assert_eq!(taken, expected);
+    assert_eq!(
+        taken.capacity(),
+        taken.len(),
+        "still the one exact-size buffer"
+    );
+    assert!(tree.positions().is_empty(), "nothing else holds them");
+    assert_eq!(tree.segments(), segments.as_slice());
 }
 
 /// A circle renders one segment per ring, `circle1/r1`, `circle1/r2`,
@@ -51,25 +75,100 @@ fn a_circle_renders_one_segment_per_ring() {
     assert_eq!(ids(&tree), ["circle1/r1", "circle1/r2"]);
 }
 
-/// A ring of one lamp is one lamp at the circle's centre, whatever its
-/// radius.
+/// A ring of radius 0 is the centre: its one lamp sits at the circle's
+/// centre.
 #[test]
-fn a_ring_of_one_lamp_sits_at_the_centre() {
+fn a_ring_of_radius_0_is_the_centre() {
     let mut m = Mapping::new();
-    add(&mut m, circle(&[(40.0, 24), (12.0, 1)]));
+    add(&mut m, circle(&[(40.0, 24), (0.0, 1)]));
     let tree = render(&m).unwrap();
     let r2 = tree.segment(&id("circle1/r2")).unwrap();
     assert_eq!(tree.lamps_of(r2), [[50.0, 50.0]]);
 }
 
-/// A ring set renders one segment, as today: its rings are one run.
+/// A ring of one lamp on a radius above 0 sits at the start angle on that
+/// radius, as every ring's lamp 0 does (and as today's ring set puts it).
 #[test]
-fn a_ring_set_renders_one_segment() {
+fn a_ring_of_one_lamp_sits_on_its_radius() {
     let mut m = Mapping::new();
-    add(&mut m, PartKind::Shape(Shape::RingSet(ring_set(2))));
+    add(&mut m, circle(&[(40.0, 24), (12.0, 1)]));
     let tree = render(&m).unwrap();
-    assert_eq!(ids(&tree), ["ringset1"]);
-    assert_eq!(tree.segments()[0].count(), 16 + 8);
+    let r2 = tree.segment(&id("circle1/r2")).unwrap();
+    let [x, y] = tree.lamps_of(r2)[0];
+    assert!(
+        (x - 50.0).abs() < 1e-4 && (y - 38.0).abs() < 1e-4,
+        "12 o'clock: {x}, {y}"
+    );
+}
+
+/// A ring at the centre holds one lamp: more is refused, naming the ring.
+#[test]
+fn a_centre_ring_of_more_than_one_lamp_is_refused() {
+    let mut m = Mapping::new();
+    add(&mut m, circle(&[(40.0, 24), (0.0, 3)]));
+    let Err(RenderError::InvalidPart { part, reason }) = render(&m) else {
+        panic!("rendered a centre of three lamps");
+    };
+    assert_eq!(part, pid("circle1"));
+    assert!(reason.contains("r2"), "{reason}");
+}
+
+/// A circle split one renders one segment at the circle's own id: its
+/// rings are one run, with the lamps one segment per ring would have.
+#[test]
+fn a_circle_split_one_renders_one_segment() {
+    let rings = [(40.0, 16), (20.0, 8), (0.0, 1)];
+    let mut by_ring = Mapping::new();
+    add(&mut by_ring, circle(&rings));
+    let mut one = Mapping::new();
+    let mut c = Circle::new([50.0, 50.0], &rings);
+    c.split = CircleSplit::One;
+    add(&mut one, PartKind::Shape(Shape::Circle(c)));
+
+    let by_ring = render(&by_ring).unwrap();
+    let one = render(&one).unwrap();
+    assert_eq!(ids(&one), ["circle1"]);
+    assert!(one.node(0).is_segment(), "the circle is its segment");
+    assert_eq!(one.segments()[0].count(), 16 + 8 + 1);
+    assert_eq!(bits(one.positions()), bits(by_ring.positions()));
+}
+
+/// Today's ring set is a circle split one, every lamp where it was, a
+/// one-lamp ring included: ring k at today's radius and count, keys `r1`,
+/// `r2`….
+#[test]
+fn a_ring_set_is_a_circle_with_every_lamp_where_it_was() {
+    let mut ring = ring_set(4);
+    ring.outer_count = 4; // rings of 4, 3, 2 and 1 lamps
+    let c = Circle::from_ring_set(&ring).unwrap();
+    assert_eq!(c.split, CircleSplit::One);
+    let counts: Vec<u32> = c.rings.iter().map(|r| r.count).collect();
+    assert_eq!(counts, [4, 3, 2, 1]);
+    let keys: Vec<&str> = c.rings.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys, ["r1", "r2", "r3", "r4"]);
+
+    let mut doc = Map2dDoc::new();
+    doc.objects.push(lpc_mapping::Map2dObject {
+        name: String::new(),
+        id: None,
+        stride: None,
+        shape: Map2dShape::Ring(ring),
+    });
+    assert_parity("a ring set with a one-lamp ring", &doc);
+}
+
+/// Points are one segment, their lamps where they are listed.
+#[test]
+fn points_are_one_segment_where_listed() {
+    let at = vec![[1.5, 2.0], [-3.0, 0.25], [1.5, 2.0]];
+    let mut m = Mapping::new();
+    add(
+        &mut m,
+        PartKind::Shape(Shape::Points(Points { at: at.clone() })),
+    );
+    let tree = render(&m).unwrap();
+    assert_eq!(ids(&tree), ["points1"]);
+    assert_eq!(bits(tree.positions()), bits(&at));
 }
 
 /// A path split by subpaths renders one segment per subpath, `path1/s1`,
@@ -497,6 +596,10 @@ fn every_shape_kind_renders_todays_lamps_bit_for_bit() {
             shapes.push(Map2dShape::Ring(ring));
         }
     }
+    let mut one_lamp_ring = ring_set(4);
+    one_lamp_ring.outer_count = 4;
+    one_lamp_ring.start_angle_deg = 33.0;
+    shapes.push(Map2dShape::Ring(one_lamp_ring));
     shapes.push(Map2dShape::Polygon(lpc_mapping::PolygonShape {
         points: vec![[0.0, 0.0], [30.0, 0.0], [15.0, 26.0]],
         count: 9,
@@ -533,17 +636,18 @@ fn every_shape_kind_renders_todays_lamps_bit_for_bit() {
 }
 
 /// A circle's ring k carries the lamps of a single-ring ring set of the same
-/// radius and count, except a ring of one lamp.
+/// radius and count, a ring of one lamp included; only the centre (radius
+/// 0) is not one.
 #[test]
 fn a_circles_ring_is_a_single_ring_ring_set() {
-    let mut c = Circle::new([40.0, 60.0], &[(30.0, 24), (20.0, 13), (5.0, 1)]);
+    let mut c = Circle::new([40.0, 60.0], &[(30.0, 24), (20.0, 13), (5.0, 1), (0.0, 1)]);
     c.start_angle_deg = 17.0;
     c.dir = RingDir::Ccw;
     let mut m = Mapping::new();
     add(&mut m, PartKind::Shape(Shape::Circle(c.clone())));
     let tree = render(&m).unwrap();
     for (ring, segment) in c.rings.iter().zip(tree.segments()) {
-        if ring.count == 1 {
+        if ring.radius == 0.0 {
             assert_eq!(tree.lamps_of(segment), [c.center]);
             continue;
         }
@@ -626,26 +730,11 @@ fn ring_set(rings: u32) -> RingShape {
     }
 }
 
-fn bits(positions: &[[f32; 2]]) -> Vec<[u32; 2]> {
-    positions
-        .iter()
-        .map(|p| [p[0].to_bits(), p[1].to_bits()])
-        .collect()
-}
-
 /// The document's objects as parts, rendered, against today's resolver:
 /// the same lamps bit for bit, and one segment per strand.
 fn assert_parity(name: &str, doc: &Map2dDoc) {
     let today = resolve(doc).unwrap_or_else(|e| panic!("{name}: {e}"));
-    let mut m = Mapping::new();
-    for object in &doc.objects {
-        let kind = kind_of(&object.shape, &mut m);
-        let part = match &object.id {
-            Some(id) => Part::new(pid(id.as_str()), kind),
-            None => m.new_part(kind),
-        };
-        m.parts.push(part);
-    }
+    let m = today_as_mapping(doc);
     let tree = render(&m).unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(
         bits(tree.positions()),
@@ -659,40 +748,6 @@ fn assert_parity(name: &str, doc: &Map2dDoc) {
         .map(|s| (s.lamps.start, s.count()))
         .collect();
     assert_eq!(segments, strands, "{name}: one segment per strand");
-}
-
-/// Test-only: today's shape as a part kind (a repeat's shape becomes a part
-/// with an id of its own).
-fn kind_of(shape: &Map2dShape, m: &mut Mapping) -> PartKind {
-    match shape {
-        Map2dShape::Grid(grid) => PartKind::Shape(Shape::Grid(grid.clone())),
-        Map2dShape::Ring(ring) => PartKind::Shape(Shape::RingSet(ring.clone())),
-        Map2dShape::Polygon(polygon) => PartKind::Shape(Shape::Polygon(polygon.clone())),
-        Map2dShape::FilledPolygon(filled) => PartKind::Shape(Shape::FilledPolygon(filled.clone())),
-        Map2dShape::Path(path) => {
-            let commands = path
-                .points
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    if i == 0 || path.gaps.contains(&(i as u32 - 1)) {
-                        PathCommand::Move(*p)
-                    } else {
-                        PathCommand::Line(*p)
-                    }
-                })
-                .collect();
-            let mut new = Path::of(commands, path.count);
-            new.reversed = path.reversed;
-            new.align = path.align;
-            PartKind::Shape(Shape::Path(new))
-        }
-        Map2dShape::Repeat(repeat) => {
-            let inner = kind_of(&repeat.shape, m);
-            let part = m.new_part(inner);
-            PartKind::Repeat(Repeat::new(part, repeat.center, repeat.count))
-        }
-    }
 }
 
 fn collect_map2d(dir: &FsPath, out: &mut Vec<PathBuf>) {

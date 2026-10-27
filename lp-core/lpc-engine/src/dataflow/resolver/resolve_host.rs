@@ -181,6 +181,15 @@ pub trait ResolveHost {
         (Vec::new(), Revision::default())
     }
 
+    /// The named outputs that read `producer`'s bus channel, each with its
+    /// ports' slices of its buffer: what a format-6 fixture patches against.
+    /// Built only when asked (it allocates), so a project with no format-6
+    /// fixture never pays for it. Empty where nothing models outputs.
+    fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
+        let _ = producer;
+        crate::node::ReachableOutputs::default()
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: RuntimeBufferId,

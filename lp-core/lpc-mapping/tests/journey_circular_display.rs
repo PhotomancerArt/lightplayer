@@ -80,12 +80,12 @@ fn the_circular_display() {
 
 // ---- helpers --------------------------------------------------------------
 
-/// The display: rings of 24, 16, 12, 8 and a one-lamp centre, outside in,
-/// starting at port 0, lamp 0.
+/// The display: rings of 24, 16, 12, 8 and a one-lamp centre (a ring of
+/// radius 0), outside in, starting at port 0, lamp 0.
 fn display() -> Mapping {
     let circle = Circle::new(
         [50.0, 50.0],
-        &[(42.0, 24), (32.0, 16), (22.0, 12), (12.0, 8), (4.0, 1)],
+        &[(42.0, 24), (32.0, 16), (22.0, 12), (12.0, 8), (0.0, 1)],
     );
     let mut m = Mapping::new();
     let mut part = Part::new(

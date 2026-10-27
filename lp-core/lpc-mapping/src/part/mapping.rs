@@ -9,6 +9,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use crate::map2d_doc::DEFAULT_SAMPLE_DIAMETER;
 use crate::part::id_counters::IdCounters;
 use crate::part::lamp_ref::LampRef;
 use crate::part::part::Part;
@@ -18,8 +19,14 @@ use crate::part::tree_id::TreeId;
 use crate::patching::{Flow, Override, Start};
 
 /// One fixture's mapping.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mapping {
+    /// Each lamp's sample diameter, in the layout's units (a layout fact,
+    /// as today's `Map2dDoc` holds it).
+    pub sample_diameter: f32,
+    /// The authored canvas `[min_x, min_y, width, height]`, when there is
+    /// one: what the fit frames instead of the lamps' bounds.
+    pub canvas: Option<[f32; 4]>,
     /// The top-level parts, in order: the order their segments come.
     pub parts: Vec<Part>,
     /// The fixture's lamp facts: what every part inherits.
@@ -35,8 +42,24 @@ pub struct Mapping {
     pub overrides: BTreeMap<TreeId, Override>,
 }
 
+impl Default for Mapping {
+    fn default() -> Self {
+        Self {
+            sample_diameter: DEFAULT_SAMPLE_DIAMETER,
+            canvas: None,
+            parts: Vec::new(),
+            lamp: LampRef::default(),
+            next: IdCounters::default(),
+            start: Start::default(),
+            flow: Flow::default(),
+            overrides: BTreeMap::new(),
+        }
+    }
+}
+
 impl Mapping {
-    /// An empty mapping.
+    /// An empty mapping: no parts, today's default sample diameter, no
+    /// canvas.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

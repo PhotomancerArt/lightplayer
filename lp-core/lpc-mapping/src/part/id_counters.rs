@@ -14,7 +14,7 @@ use crate::part::part_id::PartId;
 
 /// The words a part's id is minted from, one per kind.
 pub const PART_KIND_WORDS: [&str; 8] = [
-    "path", "polygon", "circle", "ringset", "grid", "filled", "group", "repeat",
+    "path", "polygon", "circle", "grid", "filled", "points", "group", "repeat",
 ];
 
 /// The next number per kind: `{"path": 4, "circle": 2}`.
