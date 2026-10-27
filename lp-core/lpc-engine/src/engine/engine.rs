@@ -1736,6 +1736,76 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
+    /// Whether a bus read of `channel` from `scope` gathers `producer`'s
+    /// write: the nearest scope with a provider holds it, and a provider
+    /// that is a module export (its source an inner channel) is followed
+    /// into the scope the module introduces. Depth-bounded, as a module
+    /// tree is.
+    fn bus_read_reaches(
+        &self,
+        scope: Option<crate::node::ScopeRef>,
+        channel: &lpc_model::ChannelName,
+        producer: NodeId,
+    ) -> bool {
+        use crate::dataflow::binding::{BindingSource, BindingTarget};
+        const DEPTH: usize = 16;
+        let mut reads = alloc::vec![(scope, channel.clone())];
+        for _ in 0..DEPTH {
+            let mut inward = Vec::new();
+            for (scope, channel) in &reads {
+                for (_, provider) in self.tree.providers_for_bus_read(*scope, channel) {
+                    match (&provider.source, &provider.target) {
+                        (BindingSource::ProducedSlot { node, .. }, _) if *node == producer => {
+                            return true;
+                        }
+                        (BindingSource::BusChannel(inner), BindingTarget::BusChannel(_)) => {
+                            inward.push((self.tree.bus_read_scope(provider.owner), inner.clone()));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if inward.is_empty() {
+                return false;
+            }
+            reads = inward;
+        }
+        false
+    }
+
+    /// `node`'s port table, when it is a loaded output with a name: the
+    /// name patch routing matches on (the one it registered at the top of
+    /// its `consume`, [`ResolveHost::control_patch_placement`] filters on
+    /// exactly that; before it has registered, its def's authored name) and
+    /// its AUTHORED ports' slices, through the walk its wires are cut by (an
+    /// output whose ports can't be sliced drives no wires and is offered
+    /// with none).
+    fn output_port_table(&self, node: NodeId) -> Option<crate::node::OutputPortTable> {
+        let def = self
+            .tree
+            .get(node)
+            .and_then(|entry| entry.def_location.as_ref())
+            .and_then(|location| loaded_registry_def(self.registry, location).ok())
+            .and_then(|def| match def {
+                NodeDef::Output(def) => Some(def),
+                _ => None,
+            })?;
+        let name = match self.output_identities.get(&node) {
+            Some(registered) => registered.clone(),
+            None => def
+                .output_name()
+                .map(|name| alloc::string::String::from(name.as_str())),
+        }?;
+        let ports = if super::engine_services::remainder_offender(def).is_some() {
+            Vec::new()
+        } else {
+            crate::node::output_port_slices(def)
+                .map(|(_, slice)| slice)
+                .collect()
+        };
+        Some(crate::node::OutputPortTable { name, ports })
+    }
+
     /// Drop the identities of outputs no longer alive; returns whether any
     /// went. `caller` is exempt (see below).
     fn sweep_dead_output_identities(&mut self, caller: NodeId) -> bool {
@@ -2311,9 +2381,11 @@ impl ResolveHost for EngineResolveHost<'_> {
     /// channel, with their authored ports' slices (lean Q38, Q40).
     ///
     /// An output is offered when its `Fragments` input reads the channel the
-    /// producer publishes and its read reaches this producer (the nearest
-    /// scope with a provider holds it: a shadowed read gathers someone
-    /// else). Its name is the one patch routing matches on: the name it
+    /// producer publishes, or a channel a module exports it as (R7: peach's
+    /// fixtures write `control.out` inside their submodules, which export it
+    /// to the root, where the output reads it), and its read reaches this
+    /// producer (the nearest scope with a provider holds it: a shadowed read
+    /// gathers someone else; an export is followed inward). Its name is the one patch routing matches on: the name it
     /// registered at the top of its `consume` ([`Self::control_patch_placement`]
     /// filters on exactly that), or, before it has registered (the first
     /// frame), its def's authored name. An output with no name is not
@@ -2339,53 +2411,39 @@ impl ResolveHost for EngineResolveHost<'_> {
         else {
             return crate::node::ReachableOutputs::default();
         };
+        // The names the product is published under: the channel, and every
+        // name a module export republishes one of them as.
+        let mut names: Vec<lpc_model::ChannelName> = alloc::vec![channel.clone()];
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for binding in self.tree.bindings() {
+                if let (BindingSource::BusChannel(inner), BindingTarget::BusChannel(outer)) =
+                    (&binding.source, &binding.target)
+                {
+                    if names.contains(inner) && !names.contains(outer) {
+                        names.push(outer.clone());
+                        grew = true;
+                    }
+                }
+            }
+        }
         let mut outputs: Vec<(NodeId, crate::node::OutputPortTable)> = Vec::new();
-        for (_, entry) in self.tree.consumers_for_bus(&channel) {
-            let BindingTarget::ConsumedSlot { node, slot } = &entry.target else {
-                continue;
-            };
-            if outputs.iter().any(|(seen, _)| seen == node)
-                || self.merge_policy_for_consumed_slot(*node, slot) != SlotMerge::Fragments
-            {
-                continue;
+        for name in &names {
+            for (_, entry) in self.tree.consumers_for_bus(name) {
+                let BindingTarget::ConsumedSlot { node, slot } = &entry.target else {
+                    continue;
+                };
+                if outputs.iter().any(|(seen, _)| seen == node)
+                    || self.merge_policy_for_consumed_slot(*node, slot) != SlotMerge::Fragments
+                    || !self.bus_read_reaches(self.tree.bus_read_scope(*node), name, producer)
+                {
+                    continue;
+                }
+                if let Some(table) = self.output_port_table(*node) {
+                    outputs.push((*node, table));
+                }
             }
-            let reaches = self
-                .tree
-                .providers_for_bus_read(self.tree.bus_read_scope(*node), &channel)
-                .iter()
-                .any(|(_, provider)| is_producer(&provider.source));
-            if !reaches {
-                continue;
-            }
-            let Some(def) = self
-                .tree
-                .get(*node)
-                .and_then(|entry| entry.def_location.as_ref())
-                .and_then(|location| loaded_registry_def(self.registry, location).ok())
-                .and_then(|def| match def {
-                    NodeDef::Output(def) => Some(def),
-                    _ => None,
-                })
-            else {
-                continue;
-            };
-            let name = match self.output_identities.get(node) {
-                Some(registered) => registered.clone(),
-                None => def
-                    .output_name()
-                    .map(|name| alloc::string::String::from(name.as_str())),
-            };
-            let Some(name) = name else {
-                continue;
-            };
-            let ports = if super::engine_services::remainder_offender(def).is_some() {
-                Vec::new()
-            } else {
-                crate::node::output_port_slices(def)
-                    .map(|(_, slice)| slice)
-                    .collect()
-            };
-            outputs.push((*node, crate::node::OutputPortTable { name, ports }));
         }
         outputs.sort_by_key(|(node, _)| *node);
         crate::node::ReachableOutputs {

@@ -180,22 +180,53 @@ fn renaming_an_output_moves_the_key() {
     assert_eq!(names(&after.outputs), vec!["lounge"]);
 }
 
-/// Asking costs a project with no format-6 fixture nothing: the question is
-/// never asked.
+/// Asking costs a project whose fixture holds an older mapping nothing:
+/// project format 12 refuses that fixture at load, by name, and the
+/// question is never asked.
 #[test]
-fn a_project_with_no_format_6_fixture_never_asks() {
-    let mut project = Project::load(&[
-        Output::named("main", MAIN_PORTS),
-        Output::named("other", &[(0, Some(4))]),
-    ]);
+fn a_fixture_refused_for_an_older_mapping_never_asks() {
+    let mut project = Project::load_map2d(
+        &[
+            Output::named("main", MAIN_PORTS),
+            Output::named("other", &[(0, Some(4))]),
+        ],
+        OLDER_STRIP,
+    );
+    let status = project
+        .rt
+        .tree()
+        .get(project.fixture)
+        .map(|entry| entry.status.value().clone());
+    assert!(
+        matches!(
+            &status,
+            Some(lpc_model::NodeRuntimeStatus::Error(message))
+                if message.contains(crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL)
+        ),
+        "{status:?}"
+    );
     let asked = port_table_questions::asked();
-    project.tick(5);
+    project.tick_allowing_failure(5);
     project.edit("/out_main.json", "ports[0].count.some", LpValue::U32(16));
-    project.tick(3);
+    project.tick_allowing_failure(3);
     assert_eq!(
         port_table_questions::asked(),
         asked,
-        "a format ≤ 5 fixture never asks for port tables"
+        "a refused fixture never asks for port tables"
+    );
+}
+
+/// A fixture inside a submodule that exports its channel to the root
+/// reaches the root's output through the export (peach's shape: each
+/// fixture writes `control.out` in its own module, which exports it).
+#[test]
+fn a_fixture_in_a_submodule_reaches_an_output_through_its_export() {
+    let mut project = Project::load_in_submodule(&[Output::named("main", MAIN_PORTS)]);
+    let reachable = project.reachable();
+    assert_eq!(names(&reachable.outputs), vec!["main"]);
+    assert_eq!(
+        reachable.channel.map(|channel| channel.0),
+        Some(String::from("control.out"))
     );
 }
 
@@ -272,8 +303,80 @@ struct Project {
     fixture: NodeId,
 }
 
+/// The fixture's strand: four lamps, format 6, no start (the port tables
+/// do not depend on where it lands).
+const STRIP: &str = r#"{
+  "format": 6,
+  "sample_diameter": 1.0,
+  "canvas": [0.0, 0.0, 4.0, 1.0],
+  "parts": [
+    { "id": "strand", "kind": { "grid": { "origin": [0.5, 0.5], "cols": 4, "rows": 1, "pitch": 1 } } }
+  ]
+}"#;
+
+/// The same strand as map2d format 1, which a format-12 project refuses.
+const OLDER_STRIP: &str = r#"{
+  "format": 1,
+  "sample_diameter": 1.0,
+  "canvas": [0.0, 0.0, 4.0, 1.0],
+  "objects": [
+    { "name": "strand", "shape": { "grid": { "origin": [0.5, 0.5], "cols": 4, "rows": 1, "pitch": 1 } } }
+  ]
+}"#;
+
 impl Project {
     fn load(outputs: &[Output]) -> Self {
+        Self::load_map2d(outputs, STRIP)
+    }
+
+    /// [`Self::load`] with the fixture inside a submodule `strip_mod`,
+    /// which exports `control.out` to the root, where the outputs are.
+    fn load_in_submodule(outputs: &[Output]) -> Self {
+        let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
+            .expect("manifest");
+        let mut nodes = vec![String::from(
+            "\"strip_mod\": { \"ref\": \"./strip_mod/module.json\" }",
+        )];
+        for (index, output) in outputs.iter().enumerate() {
+            let node = output.node(index);
+            nodes.push(format!("\"{node}\": {{ \"ref\": \"./{node}.json\" }}"));
+            fs.write_file(format!("/{node}.json").as_path(), output.json().as_bytes())
+                .expect("output def");
+        }
+        fs.write_file(
+            "/module.json".as_path(),
+            format!(
+                "{{ \"kind\": \"Module\", \"nodes\": {{ {} }} }}",
+                nodes.join(", ")
+            )
+            .as_bytes(),
+        )
+        .expect("module");
+        fs.write_file(
+            "/strip_mod/module.json".as_path(),
+            br#"{ "kind": "Module", "nodes": { "strip": { "ref": "./strip.json" } },
+  "exports": { "control.out": "bus:control.out" } }"#,
+        )
+        .expect("submodule");
+        write_strip(&fs, "/strip_mod", STRIP);
+        let services = EngineServices::new(TreePath::parse("/ports.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let strip_mod = rt
+            .tree()
+            .lookup_sibling(
+                rt.tree().root(),
+                NodeName::parse("strip_mod").expect("name"),
+            )
+            .expect("submodule node");
+        let fixture = rt
+            .tree()
+            .lookup_sibling(strip_mod, NodeName::parse("strip").expect("name"))
+            .expect("fixture node");
+        Self { fs, rt, fixture }
+    }
+
+    fn load_map2d(outputs: &[Output], map2d: &str) -> Self {
         let fs = LpFsMemory::new();
         fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("manifest");
@@ -293,32 +396,7 @@ impl Project {
             .as_bytes(),
         )
         .expect("module");
-        fs.write_file(
-            "/strip.json".as_path(),
-            br#"{
-  "kind": "Fixture",
-  "render_size": { "width": 4, "height": 1 },
-  "bindings": { "output": { "target": "bus:control.out" } },
-  "sampling": "direct",
-  "diagnostic_mode": "led_index",
-  "mapping": { "kind": "Map2d", "source": "strip.map2d.json" },
-  "color_order": "rgb",
-  "gamma_correction": false
-}"#,
-        )
-        .expect("fixture def");
-        fs.write_file(
-            "/strip.map2d.json".as_path(),
-            br#"{
-  "format": 1,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 4.0, 1.0],
-  "objects": [
-    { "name": "strand", "shape": { "grid": { "origin": [0.5, 0.5], "cols": 4, "rows": 1, "pitch": 1 } } }
-  ]
-}"#,
-        )
-        .expect("map2d");
+        write_strip(&fs, "", map2d);
         let services = EngineServices::new(TreePath::parse("/ports.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         let fixture = rt
@@ -341,6 +419,13 @@ impl Project {
     fn tick(&mut self, frames: u32) {
         for _ in 0..frames {
             self.rt.tick(16).expect("tick");
+        }
+    }
+
+    /// Tick, a refused fixture's frame failure allowed.
+    fn tick_allowing_failure(&mut self, frames: u32) {
+        for _ in 0..frames {
+            let _ = self.rt.tick(16);
         }
     }
 
@@ -378,6 +463,30 @@ impl Project {
         };
         def
     }
+}
+
+/// The diagnostic fixture `strip` (and its map2d) in `dir`, publishing on
+/// `bus:control.out`.
+fn write_strip(fs: &LpFsMemory, dir: &str, map2d: &str) {
+    fs.write_file(
+        format!("{dir}/strip.json").as_path(),
+        br#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 1 },
+  "bindings": { "output": { "target": "bus:control.out" } },
+  "sampling": "direct",
+  "diagnostic_mode": "led_index",
+  "mapping": { "kind": "Map2d", "source": "strip.map2d.json" },
+  "color_order": "rgb",
+  "gamma_correction": false
+}"#,
+    )
+    .expect("fixture def");
+    fs.write_file(
+        format!("{dir}/strip.map2d.json").as_path(),
+        map2d.as_bytes(),
+    )
+    .expect("map2d");
 }
 
 fn table<'a>(tables: &'a [OutputPortTable], name: &str) -> &'a OutputPortTable {
