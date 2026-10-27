@@ -42,6 +42,7 @@ mod map2d_error;
 mod map2d_fit;
 mod map2d_object_id;
 mod map2d_resolve;
+pub mod map2d6;
 mod map_object_path;
 pub mod part;
 mod patch;

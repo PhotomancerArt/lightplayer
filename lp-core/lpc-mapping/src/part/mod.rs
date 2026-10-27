@@ -1,11 +1,11 @@
 //! The mapping model: a fixture's **parts** (shapes, groups, repeats) form a
 //! tree whose leaves are **segments**, runs of lamps (names.html draft 3).
 //!
-//! In memory only: no file format reads or writes these yet, and nothing
-//! outside this crate calls them (the engine still runs `Map2dDoc` and
-//! `PatchDoc`).
+//! Saved as map2d format 6 ([`crate::map2d6`]). Nothing outside this crate
+//! calls it yet: the engine still runs `Map2dDoc` and `PatchDoc`.
 
 mod circle;
+mod circle_split;
 mod colors;
 mod id_counters;
 mod lamp_ref;
@@ -17,6 +17,7 @@ mod part_kind;
 mod path;
 mod path_command;
 mod path_split;
+mod points;
 mod render;
 mod render_error;
 mod repeat;
@@ -29,6 +30,7 @@ mod tree_id;
 mod tree_node;
 
 pub use circle::{Circle, Ring};
+pub use circle_split::CircleSplit;
 pub use colors::{ColorChannel, Colors};
 pub use id_counters::{IdCounters, PART_KIND_WORDS};
 pub use lamp_ref::LampRef;
@@ -40,6 +42,7 @@ pub use part_kind::PartKind;
 pub use path::Path;
 pub use path_command::PathCommand;
 pub use path_split::PathSplit;
+pub use points::Points;
 pub use render::render;
 pub use render_error::RenderError;
 pub use repeat::Repeat;
