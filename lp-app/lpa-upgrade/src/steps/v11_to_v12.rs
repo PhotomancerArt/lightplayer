@@ -586,9 +586,11 @@ fn insert_output_name(
 #[derive(Default)]
 struct DefEdit {
     drop_patch: bool,
-    /// The map2d its `mapping` names, when that changes.
+    /// The file name of the map2d its `mapping` names, when that changes:
+    /// a copy beside the shared one, or a new file beside the def.
     mapping_source: Option<String>,
-    /// A `PathPoints` mapping becomes a `Map2d` one.
+    /// A `PathPoints` mapping becomes a `Map2d` one (its source is then
+    /// the file name alone: the new map2d sits beside the def).
     becomes_map2d: bool,
 }
 
@@ -615,7 +617,17 @@ fn edit_def(
                     ]),
                 );
             } else if let Some(mapping) = def.get_mut("mapping") {
-                mapping.set("source", JsonNode::string(source));
+                // The copy sits beside the shared file: the authored path
+                // keeps its directories and changes its last name.
+                let authored = mapping
+                    .get("source")
+                    .and_then(JsonNode::as_str)
+                    .unwrap_or_default();
+                let renamed = match authored.rsplit_once('/') {
+                    Some((dir, _)) => format!("{dir}/{source}"),
+                    None => source.clone(),
+                };
+                mapping.set("source", JsonNode::string(&renamed));
             }
         }
         Ok(())

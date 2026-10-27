@@ -497,13 +497,13 @@ fn a_shared_map2d_patched_two_ways_is_copied_for_the_later_fixture() {
         ),
         (
             "a.json",
-            r#"{"kind":"Fixture","bindings":{"output":{"target":"bus:control.a"}},"mapping":{"kind":"Map2d","source":"m.map2d.json"}}"#,
+            r#"{"kind":"Fixture","bindings":{"output":{"target":"bus:control.a"}},"mapping":{"kind":"Map2d","source":"./maps/m.map2d.json"}}"#,
         ),
         (
             "b.json",
-            r#"{"kind":"Fixture","bindings":{"output":{"target":"bus:control.b"}},"mapping":{"kind":"Map2d","source":"m.map2d.json"},"patch":{"kind":"File","source":"b.patch.json"}}"#,
+            r#"{"kind":"Fixture","bindings":{"output":{"target":"bus:control.b"}},"mapping":{"kind":"Map2d","source":"maps/m.map2d.json"},"patch":{"kind":"File","source":"b.patch.json"}}"#,
         ),
-        ("m.map2d.json", &paths(&[("a", 3)])),
+        ("maps/m.map2d.json", &paths(&[("a", 3)])),
         ("b.patch.json", r#"{"format":2,"entries":[["/a",-1,7]]}"#),
         (
             "o.json",
@@ -517,9 +517,9 @@ fn a_shared_map2d_patched_two_ways_is_copied_for_the_later_fixture() {
     let mut after = before.clone();
     let report = upgrade_v11_to_v12(&mut after).unwrap();
     lands_as_today(&before, &after);
-    assert_eq!(report.added_files, vec!["m-2.map2d.json"]);
+    assert_eq!(report.added_files, vec!["maps/m-2.map2d.json"]);
     let b: serde_json::Value = serde_json::from_slice(after.get("b.json").unwrap()).unwrap();
-    assert_eq!(b["mapping"]["source"], "m-2.map2d.json");
+    assert_eq!(b["mapping"]["source"], "maps/m-2.map2d.json");
 }
 
 /// The written map2d reads back through the format-6 reader, and the
