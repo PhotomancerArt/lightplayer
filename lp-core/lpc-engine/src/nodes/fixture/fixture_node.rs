@@ -19,12 +19,15 @@ use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::nodes::fixture::direct_channels::DirectChannels;
 use crate::nodes::fixture::direct_lane_job::{DirectLaneJob, DirectLaneLamps, LampEncoding};
 use crate::nodes::fixture::fixture_frame_plan::{FixtureFramePlan, FixturePlanKey, FixtureReads};
+use crate::nodes::fixture::fixture_parts_source::FixturePartsSource;
 use crate::nodes::fixture::fixture_selection::{FixtureSelection, SelectionAt};
 use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
 };
+use crate::nodes::fixture::parts_carrier::render_parts_carrier;
+use crate::nodes::fixture::parts_patch::FixturePartsPatch;
 use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
@@ -161,6 +164,12 @@ pub struct FixtureNode {
     /// Keep-last-good, like `mapping_error`: a patch that stops parsing keeps
     /// the last good placement lighting and surfaces the failure as status.
     patch_error: Option<alloc::string::String>,
+    /// Present when the mapping is a format-6 one (parts and patching,
+    /// [`Self::with_parts_mapping`]): the fixture patches itself with
+    /// `lpc_mapping::patching`, publishes runs that each name their output,
+    /// and never auto-flows. Boxed: one pointer for every other fixture,
+    /// which runs exactly the patch-document path above.
+    parts: Option<alloc::boxed::Box<FixturePartsPatch>>,
     /// The input didn't resolve (fresh fixture, nothing bound yet): lamps
     /// render unlit and the cause surfaces as runtime status.
     input_error: Option<alloc::string::String>,
@@ -253,6 +262,7 @@ impl FixtureNode {
             patch_generation: 0,
             object_spans: alloc::vec::Vec::new(),
             patch_error: None,
+            parts: None,
             input_error: None,
             def_view: None,
             last_visual_product: None,
@@ -319,6 +329,54 @@ impl FixtureNode {
         spans: alloc::vec::Vec<lpc_mapping::ObjectInstanceSpan>,
     ) -> Self {
         self.object_spans = spans;
+        self
+    }
+
+    /// Hold a format-6 mapping: render its parts once into the compact
+    /// carrier for a `render_width` × `render_height` fixture, and patch
+    /// them from the first `produce` on (`parts_patch.rs`).
+    ///
+    /// Replaces whatever mapping the fixture was built with. A mapping that
+    /// can't render (a part that can't be drawn, more lamps than memory
+    /// holds) is the fixture's mapping error, and it lights nothing: a
+    /// format-6 fixture is never auto-flowed, broken or not.
+    #[must_use]
+    pub fn with_parts_mapping(
+        mut self,
+        source: FixturePartsSource,
+        render_width: u32,
+        render_height: u32,
+    ) -> Self {
+        debug_assert!(
+            self.patch_source.is_none(),
+            "a format-6 fixture has no patch document"
+        );
+        let (carrier, tree) = match render_parts_carrier(&source, render_width, render_height) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                self.mapping_error = Some(error);
+                (
+                    ResolvedMappingCompact {
+                        spans: Vec::new(),
+                        points: Vec::new(),
+                        sample_diameter: source.sample_diameter,
+                    },
+                    lpc_mapping::part::Tree::default(),
+                )
+            }
+        };
+        self.mapping = FixtureMapping::Compact(carrier);
+        let node = self.state.output.value().node();
+        self.state = FixtureState::new(
+            node,
+            0,
+            fixture_control_extent(self.mapping.as_mapping_ref()),
+        );
+        self.object_spans = Vec::new();
+        self.precomputed = None;
+        self.direct_channels = None;
+        self.display_layout_revision = None;
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(source, tree)));
         self
     }
 
@@ -575,7 +633,14 @@ impl FixtureNode {
         // After the mapping settles and before the control product is
         // published: the output reads this placement in the same tick, right
         // after the resolve that ran us.
-        self.ensure_patch_resolved(ctx);
+        if let Some(parts) = self.parts.as_deref_mut() {
+            debug_assert!(self.patch_source.is_none());
+            if parts.ensure(ctx, self.mapping_version, color_order) {
+                self.patch_generation = self.patch_generation.wrapping_add(1);
+            }
+        } else {
+            self.ensure_patch_resolved(ctx);
+        }
         Ok(FrameSettingsRead {
             render_size,
             color_order,
@@ -1001,12 +1066,18 @@ impl NodeRuntime for FixtureNode {
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
         self.mapping_error
             .as_ref()
+            .or(self.parts.as_ref().and_then(|parts| parts.status.as_ref()))
             .or(self.patch_error.as_ref())
             .or(self.input_error.as_ref())
             .map(|error| NodeRuntimeStatus::Error(error.clone()))
     }
 
     fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
+        // A format-6 fixture always answers, even with no runs: it is
+        // placed by its own patching, never auto-flowed (lean Q37).
+        if let Some(parts) = &self.parts {
+            return Some(parts.runs.as_slice());
+        }
         self.resolved_patch
             .as_ref()
             .map(|(_, runs)| runs.as_slice())
@@ -1022,6 +1093,11 @@ impl NodeRuntime for FixtureNode {
     /// not parse at all, is auto: the flow flag is a claim a fixture makes,
     /// and silence is not that claim.
     fn control_patch_manual(&self) -> bool {
+        // A format-6 fixture says where it starts and is never flowed onto
+        // the default output (lean Q37).
+        if self.parts.is_some() {
+            return true;
+        }
         self.patch_source
             .as_ref()
             .and_then(|source| source.doc.as_ref())
