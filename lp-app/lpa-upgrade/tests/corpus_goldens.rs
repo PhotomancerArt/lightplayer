@@ -128,14 +128,33 @@ fn every_migrated_project_loads_through_the_real_registry() {
         }
         let shapes = lpc_model::SlotShapeRegistry::default();
         let ctx = lpc_registry::ParseCtx { shapes: &shapes };
-        lpc_registry::ProjectRegistry::new()
+        let mut registry = lpc_registry::ProjectRegistry::new();
+        registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 lpc_model::Revision::new(1),
                 &ctx,
             )
             .unwrap_or_else(|e| panic!("{project}: migrated project must load: {e:?}"));
+        // The root is the module, as the engine loads it (`/module.json`),
+        // and `load_root` gates only `project.json`: a node file that fails
+        // to parse stays in the inventory as an error state, not an `Err`.
+        // So every node definition is checked here, or a migrated project
+        // whose module the engine refuses passes (the old-uid-sign defect,
+        // docs/defects/2026-10-27-the-upgrade-corpus-loaded-only-its-manifest.md).
+        let inventory = registry.inventory();
+        assert!(
+            !inventory.defs.is_empty(),
+            "v{version}/{project}: the migrated project read no node definitions"
+        );
+        for (location, entry) in inventory.defs.iter() {
+            assert!(
+                entry.state.is_loaded(),
+                "v{version}/{project}: {location:?} did not load: {:?}",
+                entry.state
+            );
+        }
     }
 }
 
@@ -154,7 +173,7 @@ fn the_unmigrated_corpus_is_refused_by_the_real_registry() {
         let ctx = lpc_registry::ParseCtx { shapes: &shapes };
         let result = lpc_registry::ProjectRegistry::new().load_root(
             &fs,
-            lpfs::LpPath::new("/project.json"),
+            lpfs::LpPath::new("/module.json"),
             lpc_model::Revision::new(1),
             &ctx,
         );

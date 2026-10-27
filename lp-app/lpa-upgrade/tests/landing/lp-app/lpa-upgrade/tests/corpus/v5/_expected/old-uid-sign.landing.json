@@ -1,6 +1,13 @@
 {
-  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "recorded_at": "590c4ea7988180275e2abca4b6ce1a471a37e25b",
   "project_format": 11,
-  "refused": "ProjectParse { file: \"/module.json\", error: \"parse error: uid: unknown field \\\"uid\\\". Expected one of: nodes, bindings, inputs, exports, meta, provenance.\" }",
-  "fixtures": {}
+  "fixtures": {
+    "/fixture.json": {
+      "lamps": 241,
+      "runs": [
+        [0, 241, "/output.json", "0", 0, 3]
+      ],
+      "dark": []
+    }
+  }
 }
