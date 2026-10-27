@@ -1,11 +1,11 @@
 //! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{format, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
 use lp_collection::VecMap;
 use lpc_model::nodes::clock::ClockDef;
-use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec};
-use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig, OutputName};
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
@@ -28,6 +28,9 @@ pub struct ProjectBuilder {
     output_id: u32,
     fixture_id: u32,
     nodes: Vec<(String, LpPathBuf)>,
+    /// Each output's artifact path and the name it was given (its number),
+    /// for the fixtures that start on it.
+    output_names: Vec<(LpPathBuf, String)>,
 }
 
 /// Builder for texture nodes
@@ -67,7 +70,8 @@ pub struct OutputBuilder {
 /// Builder for fixture nodes
 pub struct FixtureBuilder {
     texture_path: LpPathBuf,
-    mapping: MappingConfig,
+    /// The output its map2d's start names, when its output was built here.
+    output_name: Option<String>,
     color_order: ColorOrder,
     transform: [[f32; 4]; 4],
     brightness: Option<u8>,
@@ -86,6 +90,7 @@ impl ProjectBuilder {
             output_id: 1,
             fixture_id: 1,
             nodes: Vec::new(),
+            output_names: Vec::new(),
         }
     }
 
@@ -134,14 +139,14 @@ impl ProjectBuilder {
     }
 
     /// Start building a fixture node
-    pub fn fixture(
-        &mut self,
-        _output_path: &LpPathBuf,
-        texture_path: &LpPathBuf,
-    ) -> FixtureBuilder {
+    pub fn fixture(&mut self, output_path: &LpPathBuf, texture_path: &LpPathBuf) -> FixtureBuilder {
         FixtureBuilder {
             texture_path: texture_path.clone(),
-            mapping: default_mapping(),
+            output_name: self
+                .output_names
+                .iter()
+                .find(|(path, _)| path == output_path)
+                .map(|(_, name)| name.clone()),
             color_order: ColorOrder::Rgb,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],
@@ -355,7 +360,13 @@ impl OutputBuilder {
         let node_name = numbered_node_name("output", id);
         let path = artifact_path_for_node(&node_name);
 
+        // Named by its number, so a fixture's map2d can start on it (project
+        // format 12: a fixture's patching names its output).
+        let name = format!("{id}");
         let config = OutputDef {
+            name: OptionSlot::some(ValueSlot::new(
+                OutputName::parse(name.clone()).expect("a number is an output name"),
+            )),
             bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
             ..OutputDef::new(self.endpoint)
@@ -367,18 +378,13 @@ impl OutputBuilder {
             .write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write output artifact");
         builder.register_node(node_name, path.clone());
+        builder.output_names.push((path.clone(), name));
 
         path
     }
 }
 
 impl FixtureBuilder {
-    /// Set the mapping configuration
-    pub fn mapping(mut self, mapping: MappingConfig) -> Self {
-        self.mapping = mapping;
-        self
-    }
-
     /// Set the color order
     pub fn color_order(mut self, order: ColorOrder) -> Self {
         self.color_order = order;
@@ -411,6 +417,13 @@ impl FixtureBuilder {
         let node_name = numbered_node_name("fixture", id);
         let path = artifact_path_for_node(&node_name);
         let _texture_path = self.texture_path;
+        let map2d = format!("{node_name}.map2d.json");
+        builder
+            .write_file_helper(
+                &format!("/{map2d}"),
+                default_map2d(self.output_name.as_deref()).as_bytes(),
+            )
+            .expect("Failed to write fixture map2d");
 
         let config = FixtureDef {
             input: Default::default(),
@@ -421,7 +434,7 @@ impl FixtureBuilder {
             bindings: fixture_binding_defs(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
-            mapping: EnumSlot::new(self.mapping),
+            mapping: EnumSlot::new(MappingConfig::map2d(map2d)),
             strip_order_meaningful: ValueSlot::new(true),
             wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),
@@ -500,10 +513,21 @@ fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
     BindingDefs::new(entries)
 }
 
-fn default_mapping() -> MappingConfig {
-    // One center lamp: the smallest resolved mapping (the legacy single-lamp
-    // ring retired with the parametric ring variants).
-    MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0)
+/// One centre lamp, as map2d format 6: the smallest mapping, a `points`
+/// part at the middle of a unit canvas (a 16 × 16 texture's centre, sampled
+/// 2 px wide), starting at lamp 0 of `output` when the fixture's output was
+/// built here (else no start: it lights nothing, and says so).
+fn default_map2d(output: Option<&str>) -> String {
+    let start = output
+        .map(|output| {
+            format!(
+                "\n  \"start\": {{ \"output\": {{ \"set\": \"{output}\" }}, \"port\": {{ \"set\": 0 }}, \"channel\": {{ \"set\": {{ \"lamps\": 0 }} }} }},"
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "{{\n  \"format\": 6,\n  \"sample_diameter\": 0.125,\n  \"canvas\": [0.0, 0.0, 1.0, 1.0],\n  \"next\": {{ \"points\": 2 }},{start}\n  \"parts\": [ {{ \"id\": \"points1\", \"kind\": {{ \"points\": {{ \"at\": [[0.5, 0.5]] }} }} }} ]\n}}\n"
+    )
 }
 
 fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
