@@ -366,6 +366,13 @@ jobs:
               - 'lp-app/lpa-palettes/**'
               - 'lp-app/lpa-mapping-editor/**'
               - 'lp-core/lpc-mapping/**'
+              # The mapping lab's crates: Studio's Graph mounts them, and
+              # test-studio-host runs their statements (nothing else does).
+              - 'lab/mapping/model/**'
+              - 'lab/mapping/web/**'
+              - 'lab/mapping/files/**'
+              - 'lab/mapping/layout/**'
+              - 'lab/mapping/arrows/**'
               - 'docs/user-guide/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'

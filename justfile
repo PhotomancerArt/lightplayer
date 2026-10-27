@@ -2982,6 +2982,9 @@ clippy-host:
     # lp-cli's `desk-images` feature (Studio's board drawing rendered server-
     # side for the desk's board bench) is off by default for the same reason.
     cargo clippy -p lp-cli --features desk-images --lib --tests -- --no-deps -D warnings
+    # lpc-mapping's `edit` module (the Graph's edit rules, never in a
+    # firmware) is off by default for the same reason.
+    cargo clippy -p lpc-mapping --features edit --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -3291,6 +3294,9 @@ test-rust-features:
     # `hardware desk-images` reads Studio's style.css between marker comments;
     # these tests fail if the markers move or a board stops exporting.
     cargo test -p lp-cli --features desk-images --lib desk_images
+    # lpc-mapping's edit operations (feature `edit`, off in every firmware):
+    # their statements are `required-features`, so the workspace run skips them.
+    cargo test -p lpc-mapping --features edit --test edit
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -3428,8 +3434,12 @@ build-xt-fixtures:
 # without it that module is not compiled and its tests silently do not run.
 # CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
 # the single most expensive test compile); locally it is part of `test-rust`.
+# The mapping lab's crates ride along: Studio's Graph mounts them, they are
+# not default members, and nothing else runs their statements. Not
+# `lab-mapping-fit-tests` (slow, and retired with the old patch path).
 test-studio-host:
-    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories \
+        -p lab-mapping-model -p lab-mapping-files -p lab-layout -p lab-arrows
 
 # The browser CPU tier's shader frontend, on the engine's own palette suite.
 #

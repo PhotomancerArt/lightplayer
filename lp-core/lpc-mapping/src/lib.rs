@@ -35,6 +35,8 @@
 extern crate alloc;
 
 pub mod corpus;
+#[cfg(feature = "edit")]
+pub mod edit;
 mod editor_meta;
 pub mod import;
 pub mod map2d6;

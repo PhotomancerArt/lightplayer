@@ -12,11 +12,21 @@ default = ["std"]
 # no_std + alloc and must stay that way: the device resolves mapping
 # documents at project load.
 std = []
+# Edit operations on a `part::Mapping` (`edit/`): the rules for edits that
+# rewrite references (rename, expand, repeat counts). For editors only
+# (Studio's Graph, someday lp-cli): never enabled by `lpc-engine` or any
+# firmware, so none of it is compiled into a device image.
+edit = []
 
 [dependencies]
 libm = "0.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+
+[[test]]
+name = "edit"
+path = "tests/edit.rs"
+required-features = ["edit"]
 
 [lints]
 workspace = true
