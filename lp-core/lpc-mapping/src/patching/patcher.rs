@@ -81,6 +81,23 @@ use crate::patching::walked::Walked;
 /// outputs' ports (rules in the module doc).
 #[must_use]
 pub fn patch_mapping(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) -> Patching {
+    patch(mapping, tree, outputs, true)
+}
+
+/// [`patch_mapping`] without the record of the walk: the same segments,
+/// spans and problems, and [`Patching::walked`] left empty.
+///
+/// For a reader that needs only where each segment landed and what is
+/// wrong: the engine on a device. The walk holds one entry per node of the
+/// tree (its id, its steps and where they came from, the cursor after
+/// them), which at a few hundred bytes each was most of a patching's
+/// memory (mapping rebuild M2 P6).
+#[must_use]
+pub fn patch_mapping_placed(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) -> Patching {
+    patch(mapping, tree, outputs, false)
+}
+
+fn patch(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts], record_walk: bool) -> Patching {
     let mut parts = BTreeMap::new();
     for part in mapping.all_parts() {
         parts.insert(&part.id, part);
@@ -104,6 +121,7 @@ pub fn patch_mapping(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) ->
         fresh_set: false,
         output_from: PatchTarget::Fixture,
         port_from: PatchTarget::Fixture,
+        record_walk,
         out: Patching::default(),
     };
     // 7. Overrides whose node is gone, and 8. orders that don't fit.
@@ -153,6 +171,8 @@ struct Patcher<'a> {
     /// reported against.
     output_from: PatchTarget,
     port_from: PatchTarget,
+    /// Whether [`Patching::walked`] is kept.
+    record_walk: bool,
     out: Patching,
 }
 
@@ -217,15 +237,17 @@ impl Patcher<'_> {
             };
             self.step(&steps, &whom(&output_source), &whom(&port_source));
         }
-        self.out.walked.push(Walked {
-            id: node.id.clone(),
-            steps,
-            sources: [output_source, port_source, channel_source],
-            at: self.cursor.clone(),
-            off,
-            direction,
-            offset,
-        });
+        if self.record_walk {
+            self.out.walked.push(Walked {
+                id: node.id.clone(),
+                steps,
+                sources: [output_source, port_source, channel_source],
+                at: self.cursor.clone(),
+                off,
+                direction,
+                offset,
+            });
+        }
 
         if let Some(segment) = node.segment {
             if !off {

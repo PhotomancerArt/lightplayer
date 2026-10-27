@@ -34,7 +34,7 @@ pub use output_name::OutputName;
 pub use output_ports::{OutputPorts, Port};
 pub use override_entry::Override;
 pub use patch_target::PatchTarget;
-pub use patcher::patch_mapping;
+pub use patcher::{patch_mapping, patch_mapping_placed};
 pub use patching::Patching;
 pub use port_key::PortKey;
 pub use problem::Problem;
