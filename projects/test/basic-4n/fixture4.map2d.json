@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 2.0,
   "canvas": [
     0.0,
@@ -7,44 +7,93 @@
     100.0,
     100.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "4"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "center",
       "name": "center",
-      "shape": {
+      "kind": {
         "grid": {
           "origin": [
-            50,
-            50
+            50.0,
+            50.0
           ],
           "cols": 1,
           "rows": 1,
-          "pitch": 1
+          "pitch": 1.0,
+          "routing": "snake",
+          "start_corner": "tl"
         }
       }
     },
     {
+      "id": "disc",
       "name": "disc",
-      "shape": {
-        "ring": {
+      "kind": {
+        "circle": {
           "center": [
-            50,
-            50
+            50.0,
+            50.0
           ],
-          "radius": 50,
-          "outer_count": 60,
-          "rings": 8,
-          "counts": [
-            60,
-            48,
-            40,
-            32,
-            24,
-            16,
-            12,
-            8
-          ],
-          "order": "inner_first",
-          "start_angle_deg": 0
+          "start_angle_deg": 0.0,
+          "dir": "cw",
+          "drawn_from": "inside",
+          "split": "one",
+          "next_ring": 9,
+          "rings": [
+            {
+              "key": "r1",
+              "radius": 50.0,
+              "count": 60
+            },
+            {
+              "key": "r2",
+              "radius": 43.75,
+              "count": 48
+            },
+            {
+              "key": "r3",
+              "radius": 37.5,
+              "count": 40
+            },
+            {
+              "key": "r4",
+              "radius": 31.25,
+              "count": 32
+            },
+            {
+              "key": "r5",
+              "radius": 25.0,
+              "count": 24
+            },
+            {
+              "key": "r6",
+              "radius": 18.75,
+              "count": 16
+            },
+            {
+              "key": "r7",
+              "radius": 12.5,
+              "count": 12
+            },
+            {
+              "key": "r8",
+              "radius": 6.25,
+              "count": 8
+            }
+          ]
         }
       }
     }

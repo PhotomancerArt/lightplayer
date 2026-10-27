@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 2.0,
   "canvas": [
     0.0,
@@ -7,10 +7,24 @@
     100.0,
     100.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "5"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "lane-5",
       "name": "lane-5",
-      "shape": {
+      "kind": {
         "grid": {
           "origin": [
             51.0,
@@ -18,7 +32,9 @@
           ],
           "cols": 8,
           "rows": 16,
-          "pitch": 1.3125
+          "pitch": 1.3125,
+          "routing": "snake",
+          "start_corner": "tl"
         }
       }
     }

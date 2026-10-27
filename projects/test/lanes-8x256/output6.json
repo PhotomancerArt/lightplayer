@@ -1,5 +1,6 @@
 {
   "kind": "Output",
+  "name": "6",
   "ports": {
     "0": {
       "endpoint": "ws281x:local:D5"

@@ -1,5 +1,5 @@
 {
-  "format": 5,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -7,30 +7,40 @@
     100.0,
     100.0
   ],
-  "objects": [
+  "next": {
+    "repeat": 2
+  },
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
-      "id": "spoke",
-      "name": "spoke",
-      "shape": {
+      "id": "repeat1",
+      "kind": {
         "repeat": {
           "center": [
             50.0,
             50.0
           ],
           "count": 64,
-          "shape": {
-            "path": {
-              "points": [
-                [
-                  50.0,
-                  40.0
-                ],
-                [
-                  50.0,
-                  4.0
-                ]
-              ],
-              "count": 8
+          "part": {
+            "id": "spoke",
+            "name": "spoke",
+            "kind": {
+              "path": {
+                "d": "M 50 40 L 50 4",
+                "count": 8
+              }
             }
           }
         }

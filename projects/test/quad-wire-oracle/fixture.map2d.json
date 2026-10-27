@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -7,29 +7,86 @@
     100.0,
     100.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "panel",
       "name": "panel",
-      "shape": {
-        "grid": { "origin": [6.25, 6.25], "cols": 8, "rows": 2, "pitch": 12.5 }
+      "kind": {
+        "grid": {
+          "origin": [
+            6.25,
+            6.25
+          ],
+          "cols": 8,
+          "rows": 2,
+          "pitch": 12.5,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     },
     {
+      "id": "panel-2",
       "name": "panel-2",
-      "shape": {
-        "grid": { "origin": [6.25, 31.25], "cols": 8, "rows": 2, "pitch": 12.5 }
+      "kind": {
+        "grid": {
+          "origin": [
+            6.25,
+            31.25
+          ],
+          "cols": 8,
+          "rows": 2,
+          "pitch": 12.5,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     },
     {
+      "id": "panel-3",
       "name": "panel-3",
-      "shape": {
-        "grid": { "origin": [6.25, 56.25], "cols": 8, "rows": 2, "pitch": 12.5 }
+      "kind": {
+        "grid": {
+          "origin": [
+            6.25,
+            56.25
+          ],
+          "cols": 8,
+          "rows": 2,
+          "pitch": 12.5,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     },
     {
+      "id": "panel-4",
       "name": "panel-4",
-      "shape": {
-        "grid": { "origin": [6.25, 81.25], "cols": 8, "rows": 2, "pitch": 12.5 }
+      "kind": {
+        "grid": {
+          "origin": [
+            6.25,
+            81.25
+          ],
+          "cols": 8,
+          "rows": 2,
+          "pitch": 12.5,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     }
   ]

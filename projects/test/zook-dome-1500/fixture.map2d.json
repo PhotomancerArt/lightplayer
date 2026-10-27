@@ -1,87 +1,110 @@
 {
- "format": 1,
- "sample_diameter": 2.0,
- "canvas": [
-  0.0,
-  0.0,
-  100.0,
-  100.0
- ],
- "objects": [
-  {
-   "name": "strand0",
-   "shape": {
-    "grid": {
-     "origin": [
-      0.17,
-      10.0
-     ],
-     "cols": 300,
-     "rows": 1,
-     "pitch": 0.33331,
-     "routing": "raster"
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
     }
-   }
   },
-  {
-   "name": "strand1",
-   "shape": {
-    "grid": {
-     "origin": [
-      0.17,
-      30.0
-     ],
-     "cols": 300,
-     "rows": 1,
-     "pitch": 0.33331,
-     "routing": "raster"
+  "parts": [
+    {
+      "id": "strand0",
+      "name": "strand0",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.17,
+            10.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 0.33331,
+          "routing": "raster",
+          "start_corner": "tl"
+        }
+      }
+    },
+    {
+      "id": "strand1",
+      "name": "strand1",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.17,
+            30.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 0.33331,
+          "routing": "raster",
+          "start_corner": "tl"
+        }
+      }
+    },
+    {
+      "id": "strand2",
+      "name": "strand2",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.17,
+            50.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 0.33331,
+          "routing": "raster",
+          "start_corner": "tl"
+        }
+      }
+    },
+    {
+      "id": "strand3",
+      "name": "strand3",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.17,
+            70.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 0.33331,
+          "routing": "raster",
+          "start_corner": "tl"
+        }
+      }
+    },
+    {
+      "id": "strand4",
+      "name": "strand4",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.17,
+            90.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 0.33331,
+          "routing": "raster",
+          "start_corner": "tl"
+        }
+      }
     }
-   }
-  },
-  {
-   "name": "strand2",
-   "shape": {
-    "grid": {
-     "origin": [
-      0.17,
-      50.0
-     ],
-     "cols": 300,
-     "rows": 1,
-     "pitch": 0.33331,
-     "routing": "raster"
-    }
-   }
-  },
-  {
-   "name": "strand3",
-   "shape": {
-    "grid": {
-     "origin": [
-      0.17,
-      70.0
-     ],
-     "cols": 300,
-     "rows": 1,
-     "pitch": 0.33331,
-     "routing": "raster"
-    }
-   }
-  },
-  {
-   "name": "strand4",
-   "shape": {
-    "grid": {
-     "origin": [
-      0.17,
-      90.0
-     ],
-     "cols": 300,
-     "rows": 1,
-     "pitch": 0.33331,
-     "routing": "raster"
-    }
-   }
-  }
- ]
+  ]
 }
