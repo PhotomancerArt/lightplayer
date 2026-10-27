@@ -1,0 +1,6 @@
+{
+  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "project_format": 11,
+  "refused": "every frame fails: Node { node: NodeId(4), message: \"render control: control render: sample visual: sample visual: sample visual: sample visual: shader fuel exhausted: render_samples sample 0 exceeded 100000 iterations\" }",
+  "fixtures": {}
+}

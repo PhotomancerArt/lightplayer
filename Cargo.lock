@@ -6860,6 +6860,7 @@ dependencies = [
 name = "lpa-upgrade"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "lpc-model",
  "lpc-registry",
  "lpfs",

@@ -1,0 +1,48 @@
+{
+  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "project_format": 11,
+  "fixtures": {
+    "/fixture1.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output1.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/fixture2.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output2.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/fixture3.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output3.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/fixture4.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output4.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/fixture5.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output5.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/fixture6.json": {
+      "lamps": 128,
+      "runs": [
+        [0, 128, "/output6.json", "0", 0, 3]
+      ],
+      "dark": []
+    }
+  }
+}
