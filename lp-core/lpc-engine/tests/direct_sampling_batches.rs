@@ -223,17 +223,14 @@ fn scaled_button_playlist(scale: u32) -> (PathBuf, u32) {
         serde_json::from_str(&std::fs::read_to_string(src.join("fixture.map2d.json")).unwrap())
             .expect("button-playlist map2d parses");
     let mut lamps = 0u64;
-    for object in map["objects"].as_array_mut().expect("objects") {
-        if let Some(ring) = object["shape"].get_mut("ring") {
-            let counts = ring["counts"].as_array_mut().expect("ring counts");
-            for count in counts.iter_mut() {
-                let scaled = count.as_u64().expect("count") * u64::from(scale);
-                *count = serde_json::json!(scaled);
+    for part in map["parts"].as_array_mut().expect("parts") {
+        if let Some(circle) = part["kind"].get_mut("circle") {
+            for ring in circle["rings"].as_array_mut().expect("circle rings") {
+                let scaled = ring["count"].as_u64().expect("ring count") * u64::from(scale);
+                ring["count"] = serde_json::json!(scaled);
                 lamps += scaled;
             }
-            let outer = ring["outer_count"].as_u64().expect("outer_count") * u64::from(scale);
-            ring["outer_count"] = serde_json::json!(outer);
-        } else if let Some(grid) = object["shape"].get("grid") {
+        } else if let Some(grid) = part["kind"].get("grid") {
             lamps += grid["cols"].as_u64().unwrap_or(1) * grid["rows"].as_u64().unwrap_or(1);
         }
     }

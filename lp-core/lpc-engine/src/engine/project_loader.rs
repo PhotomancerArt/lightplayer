@@ -2785,11 +2785,12 @@ mod tests {
         assert_fixture_node_error(&rt, &words);
     }
 
-    /// A format-6 fixture that also names a patch document is refused by
-    /// name: the map2d holds its own patching (one file).
+    /// Project format 12 has no patch slot (one file holds a fixture's
+    /// patching): a fixture def that still names a patch document does not
+    /// parse, and the fixture says so by the field's name.
     #[cfg(feature = "node-fixture")]
     #[test]
-    fn a_format_6_fixture_naming_a_patch_document_is_refused_by_name() {
+    fn a_fixture_naming_a_patch_document_does_not_parse() {
         let fs = fixture_project_fs();
         write_fixture_def(&fs, Some("./fixture.patch.json"));
         fs.write_file("/fixture.map2d.json".as_path(), FORMAT_6_STRIP.as_bytes())
@@ -2802,10 +2803,51 @@ mod tests {
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        assert_fixture_node_error(&rt, "patch: unknown field \"patch\"");
+    }
+
+    /// A map2d of format 5 or older inside a format-12 project (a hand edit,
+    /// or an older writer) fails the fixture's load by name (lean Q67).
+    #[cfg(feature = "node-fixture")]
+    #[test]
+    fn an_older_map2d_in_a_format_12_project_is_refused_by_name() {
+        let fs = fixture_project_fs();
+        write_fixture_def(&fs, None);
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
+            br#"{ "format": 5, "canvas": [0.0, 0.0, 20.0, 10.0],
+  "objects": [ { "name": "path", "shape": { "path": { "points": [[0, 5], [20, 5]], "count": 3 } } } ] }"#,
+        )
+        .expect("fixture.map2d.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         assert_fixture_node_error(
             &rt,
-            "this fixture's map2d is format 6, which holds its own patching: remove its patch \
-             document fixture.patch.json",
+            "this mapping is from an older LightPlayer; open the project in Studio to upgrade it",
+        );
+    }
+
+    /// Hand-placed `PathPoints` lamps inside a format-12 project (they became
+    /// a map2d of `points` parts) fail the fixture's load by the same name.
+    #[cfg(feature = "node-fixture")]
+    #[test]
+    fn hand_placed_path_points_in_a_format_12_project_are_refused_by_name() {
+        let fs = fixture_project_fs();
+        fs.write_file(
+            "/fixture.json".as_path(),
+            br#"{ "kind": "Fixture", "render_size": { "width": 4, "height": 4 },
+  "bindings": { "output": { "target": "bus:control.out" } },
+  "mapping": { "kind": "PathPoints", "sample_diameter": 1.0, "paths": { "0": {
+    "kind": "PointList", "first_channel": 0, "points": { "0": [0.5, 0.5] } } } } }"#,
+        )
+        .expect("fixture.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        assert_fixture_node_error(
+            &rt,
+            "this mapping is from an older LightPlayer; open the project in Studio to upgrade it",
         );
     }
 
@@ -5726,25 +5768,27 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
   }
 }
 "#,
         )
         .expect("fixture.json");
+        // One lamp at the texture's centre, as the `PathPoints` fixture this
+        // was before project format 12 had it.
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
+            br#"{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [0.0, 0.0, 1.0, 1.0],
+  "next": { "points": 2 },
+  "parts": [ { "id": "points1", "kind": { "points": { "at": [[0.5, 0.5]] } } } ]
+}
+"#,
+        )
+        .expect("fixture.map2d.json");
     }
     // --- Default-binding characterization (M5, ADR 2026-07-09) -------------
     //

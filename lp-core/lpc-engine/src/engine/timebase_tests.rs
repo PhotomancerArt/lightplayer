@@ -191,11 +191,11 @@ fn write_shared_assets(fs: &LpFsMemory) {
         "/map.json",
         r#"
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 2.0,
   "canvas": [0.0, 0.0, 100.0, 100.0],
-  "objects": [
-    { "name": "grid", "shape": { "grid": { "origin": [50, 50], "cols": 2, "rows": 2, "pitch": 10 } } }
+  "parts": [
+    { "id": "grid", "kind": { "grid": { "origin": [50, 50], "cols": 2, "rows": 2, "pitch": 10 } } }
   ]
 }
 "#,

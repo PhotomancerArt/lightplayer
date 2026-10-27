@@ -196,9 +196,15 @@ fn synthetic_from_basic(label: &'static str, pairs: u32, half: bool) -> Fixture 
     );
     for index in 1..=pairs {
         let mut map = base_map.clone();
-        let ring = &mut map["objects"][1]["shape"]["ring"];
-        ring["counts"] = serde_json::json!(counts);
-        ring["outer_count"] = serde_json::json!(counts[0]);
+        let rings = map["parts"][1]["kind"]["circle"]["rings"]
+            .as_array_mut()
+            .expect("basic's disc is a circle of rings");
+        assert_eq!(rings.len(), counts.len(), "one count per ring");
+        for (ring, count) in rings.iter_mut().zip(&counts) {
+            ring["count"] = serde_json::json!(count);
+        }
+        // Each pair's fixture starts on its own output, named for its index.
+        map["start"]["output"]["set"] = serde_json::json!(format!("{index}"));
         std::fs::write(
             dir.join(format!("fixture{index}.map2d.json")),
             serde_json::to_string_pretty(&map).unwrap(),
@@ -222,6 +228,7 @@ fn synthetic_from_basic(label: &'static str, pairs: u32, half: bool) -> Fixture 
         );
 
         let mut output = base_output.clone();
+        output["name"] = serde_json::json!(format!("{index}"));
         output["ports"]["0"]["endpoint"] =
             serde_json::json!(format!("ws281x:local:{}", PINS[index as usize - 1]));
         output["bindings"]["input"]["source"] =

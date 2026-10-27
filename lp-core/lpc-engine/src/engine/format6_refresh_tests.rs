@@ -65,22 +65,28 @@ fn an_edit_to_the_layout_renders_it_again() {
     assert_ne!(rig.layout_revision(), layout, "four lamps, drawn anew");
 }
 
-/// A document edited from format 5 to format 6, live, switches path
-/// cleanly: from auto-flowed to placed by its own patching, and back.
+/// A live edit back to an older map2d format inside a format-12 project
+/// (a hand edit, or an older writer) is refused by name: the last good
+/// mapping keeps lighting, and a format-6 edit clears the refusal.
 #[test]
-fn a_document_edited_across_formats_switches_path_cleanly() {
-    let mut rig = Rig::load(&strip_5(3));
-    assert_eq!(rig.wire(), lit_at(&[0, 1, 2]), "format 5: auto-flowed");
-    assert!(!rig.manual());
-
-    rig.edit(&strip_6(3, 5));
-    assert_eq!(rig.wire(), lit_at(&[5, 6, 7]), "format 6: its own start");
-    assert!(rig.manual());
+fn a_live_edit_to_an_older_format_is_refused_by_name() {
+    let mut rig = Rig::load(&strip_6(3, 5));
+    assert_eq!(rig.wire(), lit_at(&[5, 6, 7]));
 
     rig.edit(&strip_5(3));
-    assert_eq!(rig.wire(), lit_at(&[0, 1, 2]), "format 5 again");
-    assert!(!rig.manual());
-    assert_eq!(rig.status(), None);
+    assert_eq!(rig.wire(), lit_at(&[5, 6, 7]), "the last good mapping");
+    assert!(rig.manual(), "still placed by its own patching");
+    let Some(NodeRuntimeStatus::Error(message)) = rig.status() else {
+        panic!("the refusal is the fixture's status");
+    };
+    assert_eq!(
+        message,
+        crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL
+    );
+
+    rig.edit(&strip_6(3, 2));
+    assert_eq!(rig.wire(), lit_at(&[2, 3, 4]));
+    assert_eq!(rig.status(), None, "a format-6 edit clears it");
 }
 
 /// A format-6 edit the reader refuses keeps the last good mapping
@@ -98,22 +104,6 @@ fn a_refused_edit_keeps_the_last_good_mapping_and_says_why() {
 
     rig.edit(&strip_6(3, 2));
     assert_eq!(rig.status(), None, "a good edit clears it");
-}
-
-/// A fixture that names a patch document can't take a format-6 map2d by a
-/// live edit either: refused by name, the last good mapping kept.
-#[test]
-fn a_live_edit_to_format_6_beside_a_patch_document_is_refused_by_name() {
-    let mut rig = Rig::load_patched(&strip_5(3));
-    rig.edit(&strip_6(3, 4));
-    let Some(NodeRuntimeStatus::Error(message)) = rig.status() else {
-        panic!("the refusal is the fixture's status");
-    };
-    assert!(
-        message.contains("holds its own patching: remove its patch document"),
-        "{message}"
-    );
-    assert!(!rig.manual(), "still the format-5 fixture it was");
 }
 
 // --- the rig ------------------------------------------------------------------
@@ -142,7 +132,7 @@ fn strip_6(lamps: u32, start: u32) -> String {
     )
 }
 
-/// Today's document of the same strip, unpatched.
+/// The same strip as map2d format 5, which a format-12 project refuses.
 fn strip_5(lamps: u32) -> String {
     format!(
         r#"{{
@@ -165,15 +155,6 @@ struct Rig {
 
 impl Rig {
     fn load(map2d: &str) -> Self {
-        Self::load_with(map2d, false)
-    }
-
-    /// [`Self::load`], with a patch document beside the map2d.
-    fn load_patched(map2d: &str) -> Self {
-        Self::load_with(map2d, true)
-    }
-
-    fn load_with(map2d: &str, patched: bool) -> Self {
         let fs = LpFsMemory::new();
         write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         write(
@@ -184,16 +165,6 @@ impl Rig {
   "output": { "ref": "./output.json" }
 } }"#,
         );
-        let patch = if patched {
-            write(
-                &fs,
-                "/fixture.patch.json",
-                r#"{ "format": 3, "entries": [] }"#,
-            );
-            ",\n  \"patch\": { \"kind\": \"File\", \"source\": \"fixture.patch.json\" }"
-        } else {
-            ""
-        };
         write(
             &fs,
             "/fixture.json",
@@ -204,7 +175,7 @@ impl Rig {
   "bindings": {{ "output": {{ "target": "bus:control.out" }} }},
   "sampling": "direct",
   "diagnostic_mode": "led_index",
-  "mapping": {{ "kind": "Map2d", "source": "fixture.map2d.json" }}{patch},
+  "mapping": {{ "kind": "Map2d", "source": "fixture.map2d.json" }},
   "color_order": "rgb",
   "brightness": 1.0,
   "gamma_correction": false

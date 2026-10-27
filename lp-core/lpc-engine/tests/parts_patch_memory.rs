@@ -1,20 +1,18 @@
-//! What a format-6 fixture costs the engine's heap, against its format ≤ 5
-//! twin (mapping rebuild M2 P3; leans Q43, Q44).
+//! What a format-6 fixture costs the engine's heap (mapping rebuild M2 P3;
+//! leans Q43, Q44).
 //!
-//! Four shapes, each built twice: as a format-6 fixture (an in-memory
-//! `lpc_mapping` mapping, given to the fixture with `with_parts_mapping`, the
-//! way M2 P4's loader will) and as its format ≤ 5 twin (the same geometry as
-//! a map2d document, auto-flowed). One path of 256 and of 512 lamps (the
-//! per-lamp slope), and a repeat of 32 and of 64 copies of an 8-lamp path
-//! (256 and 512 lamps again: the per-segment figure). Each is loaded,
-//! ticked four times (the compile defers to the second), and bracketed under
-//! a tracking allocator.
+//! Four shapes, each a format-6 map2d the loader reads: one path of 256 and
+//! of 512 lamps (the per-lamp slope), and a repeat of 32 and of 64 copies of
+//! an 8-lamp path (256 and 512 lamps again: the per-segment figure). Each is
+//! loaded, ticked four times (the compile defers to the second), and
+//! bracketed under a tracking allocator.
 //!
-//! It asserts only what must hold at any width: **the per-lamp resident
-//! slope of a format-6 fixture equals its twin's within 1 B** (the lamps'
-//! positions are held once, in the carrier, not again in the tree). The rest
-//! is printed under `--nocapture` as the input to Q44's device-width bar,
-//! measured for real on fw-emu in M2 P5:
+//! Until project format 12 each shape also ran as its format ≤ 5 twin (the
+//! same geometry auto-flowed), and the probe asserted that the per-lamp
+//! resident slopes agreed within 1 B (M2's bar: the lamps' positions held
+//! once). A format-12 project refuses the twin at load, so the probe now
+//! prints the format-6 figures alone, under `--nocapture`, as the input to
+//! the heap bars (DD23), measured for real on fw-emu:
 //!
 //! ```bash
 //! cargo test -p lpc-engine --test parts_patch_memory -- --nocapture
@@ -36,23 +34,19 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use lpc_engine::nodes::FixtureNode;
 use lpc_engine::{EngineServices, ProjectLoader};
-use lpc_mapping::part::{Mapping, PartKind, Path, Repeat, Shape};
-use lpc_mapping::patching::{Amount, Start};
-use lpc_model::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
-use lpc_model::{NodeName, Revision, TreePath, current_revision};
+use lpc_model::TreePath;
 use lpfs::{AsLpPath, LpFs, LpFsMemory};
 
-/// The headline: per-lamp resident slopes of each format-6 shape against its
-/// twin, within 1 B.
+/// The format-6 figures: per-lamp and per-segment resident slopes, and each
+/// shape's first-patch transient, resident and peak.
 #[test]
 fn parts_patch_memory() {
     let _ = env_logger::builder().is_test(true).try_init();
     // The first engine in a process pays the JIT's and the compiler's
     // once-cells (and frees in its first tick what they replaced): a
     // warm-up run takes that out of every row below.
-    let _ = measure(Shape6::Path(256), false);
+    let _ = measure(Shape6::Path(256));
     let mut rows = Vec::new();
     for shape in [
         Shape6::Path(256),
@@ -60,90 +54,56 @@ fn parts_patch_memory() {
         Shape6::Repeat(32),
         Shape6::Repeat(64),
     ] {
-        for format6 in [false, true] {
-            let phases = measure(shape, format6);
-            print_table(shape, format6, &phases);
-            rows.push((shape, format6, phases));
-        }
+        let phases = measure(shape);
+        print_table(shape, &phases);
+        rows.push((shape, phases));
     }
 
-    let figure = |shape: Shape6, format6: bool, what: fn(&[Phase]) -> i64| -> i64 {
-        let (_, _, phases) = rows
-            .iter()
-            .find(|(s, f, _)| *s == shape && *f == format6)
-            .expect("measured");
+    let figure = |shape: Shape6, what: fn(&[Phase]) -> i64| -> i64 {
+        let (_, phases) = rows.iter().find(|(s, _)| *s == shape).expect("measured");
         what(phases)
     };
-    println!("\n== slopes ==");
-    println!("{:<44} {:>14} {:>14}", "", "format 5 twin", "format 6");
+    println!("\n== slopes (format 6) ==");
     // Per lamp: one path at two lengths (one segment either way).
-    let per_lamp = |format6| {
-        (figure(Shape6::Path(512), format6, resident)
-            - figure(Shape6::Path(256), format6, resident)) as f64
-            / 256.0
-    };
-    let (lamp5, lamp6) = (per_lamp(false), per_lamp(true));
+    let lamp =
+        (figure(Shape6::Path(512), resident) - figure(Shape6::Path(256), resident)) as f64 / 256.0;
     println!(
-        "{:<44} {lamp5:>14.2} {lamp6:>14.2}",
+        "{:<44} {lamp:>14.2}",
         "resident B/lamp (one path, 256 → 512)"
     );
     // Per segment: the same 512 lamps as one path and as 64 copies (63 more
     // segments), and 32 → 64 copies less the lamps' own share.
-    for (label, figure_of) in [
-        (
-            "resident B/segment (512 lamps, 1 → 64 segments)",
-            Box::new(|format6: bool| {
-                (figure(Shape6::Repeat(64), format6, resident)
-                    - figure(Shape6::Path(512), format6, resident)) as f64
-                    / 63.0
-            }) as Box<dyn Fn(bool) -> f64>,
-        ),
-        (
-            "resident B/segment (32 → 64 copies, net of lamps)",
-            Box::new(|format6: bool| {
-                let lamps = if format6 { lamp6 } else { lamp5 };
-                ((figure(Shape6::Repeat(64), format6, resident)
-                    - figure(Shape6::Repeat(32), format6, resident)) as f64
-                    - 256.0 * lamps)
-                    / 32.0
-            }),
-        ),
-    ] {
-        println!(
-            "{label:<44} {:>14.2} {:>14.2}",
-            figure_of(false),
-            figure_of(true)
-        );
-    }
-    for shape in [Shape6::Path(512), Shape6::Repeat(64)] {
-        let first_tick = |format6| figure(shape, format6, |p| p[2].transient());
-        println!(
-            "{:<44} {:>14} {:>14}",
-            format!("tick 1 transient B ({}, first patch)", shape.label()),
-            first_tick(false),
-            first_tick(true)
-        );
-        let after = |format6| figure(shape, format6, resident);
-        println!(
-            "{:<44} {:>14} {:>14}",
-            format!("resident after load + 4 ticks B ({})", shape.label()),
-            after(false),
-            after(true)
-        );
-        let peak = |format6| figure(shape, format6, peak_over_live_before_load);
-        println!(
-            "{:<44} {:>14} {:>14}",
-            format!("peak over the start B ({})", shape.label()),
-            peak(false),
-            peak(true)
-        );
-    }
-
-    assert!(
-        (lamp6 - lamp5).abs() <= 1.0,
-        "a format-6 fixture costs {lamp6:.2} B/lamp resident, its twin {lamp5:.2}: positions \
-         held twice?"
+    let one_to_64 =
+        (figure(Shape6::Repeat(64), resident) - figure(Shape6::Path(512), resident)) as f64 / 63.0;
+    println!(
+        "{:<44} {one_to_64:>14.2}",
+        "resident B/segment (512 lamps, 1 → 64 segments)"
     );
+    let net = ((figure(Shape6::Repeat(64), resident) - figure(Shape6::Repeat(32), resident))
+        as f64
+        - 256.0 * lamp)
+        / 32.0;
+    println!(
+        "{:<44} {net:>14.2}",
+        "resident B/segment (32 → 64 copies, net of lamps)"
+    );
+    for shape in [Shape6::Path(512), Shape6::Repeat(64)] {
+        println!(
+            "{:<44} {:>14}",
+            format!("tick 1 transient B ({}, first patch)", shape.label()),
+            figure(shape, |p| p[2].transient())
+        );
+        println!(
+            "{:<44} {:>14}",
+            format!("resident after load + 4 ticks B ({})", shape.label()),
+            figure(shape, resident)
+        );
+        println!(
+            "{:<44} {:>14}",
+            format!("peak over the start B ({})", shape.label()),
+            figure(shape, peak_over_live_before_load)
+        );
+    }
 }
 
 // --- the shapes ------------------------------------------------------------
@@ -164,51 +124,35 @@ impl Shape6 {
         }
     }
 
-    /// The format-6 mapping: from lamp 0 of output `main`.
-    fn mapping(self) -> Mapping {
-        let mut m = Mapping::new();
-        let part = match self {
-            Shape6::Path(n) => m.new_part(path(n)),
-            Shape6::Repeat(k) => {
-                let copy = m.new_part(path(8));
-                m.new_part(PartKind::Repeat(Repeat::new(copy, [50.0, 50.0], k)))
-            }
-        };
-        m.parts.push(part);
-        m.start = Start::at("main", 0, Amount::lamps(0));
-        m
-    }
-
-    /// The same geometry as a map2d document.
+    /// The shape as a format-6 map2d document, from lamp 0 of output
+    /// `main`.
     fn map2d(self) -> String {
-        let path = |count: u32| {
+        let path = |id: &str, count: u32| {
             format!(
-                r#"{{ "path": {{ "points": [[54.0, 50.0], [96.0, 50.0]], "count": {count} }} }}"#
+                r#"{{ "id": "{id}", "kind": {{ "path": {{ "d": "M 54 50 L 96 50", "count": {count} }} }} }}"#
             )
         };
-        let shape = match self {
-            Shape6::Path(n) => path(n),
-            Shape6::Repeat(k) => format!(
-                r#"{{ "repeat": {{ "shape": {}, "center": [50.0, 50.0], "count": {k} }} }}"#,
-                path(8)
+        let (part, next) = match self {
+            Shape6::Path(n) => (path("strip", n), String::new()),
+            Shape6::Repeat(k) => (
+                format!(
+                    r#"{{ "id": "repeat1", "kind": {{ "repeat": {{ "center": [50.0, 50.0], "count": {k}, "part": {} }} }} }}"#,
+                    path("strip", 8)
+                ),
+                String::from(r#""next": { "repeat": 2 },"#),
             ),
         };
         format!(
             r#"{{
-  "format": 3,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [0.0, 0.0, 100.0, 100.0],
-  "objects": [ {{ "name": "strip", "id": "strip", "shape": {shape} }} ]
+  {next}
+  "start": {{ "output": {{ "set": "main" }}, "port": {{ "set": 0 }}, "channel": {{ "set": {{ "lamps": 0 }} }} }},
+  "parts": [ {part} ]
 }}"#
         )
     }
-}
-
-fn path(count: u32) -> PartKind {
-    PartKind::Shape(Shape::Path(Path::through(
-        &[[54.0, 50.0], [96.0, 50.0]],
-        count,
-    )))
 }
 
 // --- measurement -------------------------------------------------------------
@@ -250,11 +194,9 @@ fn peak_over_live_before_load(phases: &[Phase]) -> i64 {
     phases.iter().map(|p| p.step_peak).max().expect("phases") - phases[0].live_before
 }
 
-/// Load `shape` (as format 6 or its twin), set graphics, tick four times;
-/// every phase bracketed.
-fn measure(shape: Shape6, format6: bool) -> Vec<Phase> {
-    let fs = project_fs(shape, format6);
-    let mapping = format6.then(|| shape.mapping());
+/// Load `shape`, set graphics, tick four times; every phase bracketed.
+fn measure(shape: Shape6) -> Vec<Phase> {
+    let fs = project_fs(shape);
     let mut phases = Vec::with_capacity(PHASES.len());
     let mut run = |label: &'static str, f: &mut dyn FnMut()| {
         let live_before = live();
@@ -269,37 +211,9 @@ fn measure(shape: Shape6, format6: bool) -> Vec<Phase> {
     };
 
     let mut loaded = None;
-    let mut mapping = mapping;
     run(PHASES[0], &mut || {
         let services = EngineServices::new(TreePath::parse("/memory.show").expect("path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        if let Some(mapping) = mapping.take() {
-            // What M2 P4's loader will do: the format-6 fixture's runtime,
-            // built from its mapping.
-            let id = rt
-                .tree()
-                .lookup_sibling(rt.tree().root(), NodeName::parse("strip").expect("name"))
-                .expect("fixture node");
-            let fixture = FixtureNode::new(
-                id,
-                MappingConfig::path_points_vec(Vec::new(), 1.0),
-                FixtureSamplingConfig::Direct,
-                Revision::new(1),
-            )
-            .with_parts_mapping(
-                Mapping {
-                    canvas: Some([0.0, 0.0, 100.0, 100.0]),
-                    sample_diameter: 1.0,
-                    ..mapping
-                },
-                64,
-                64,
-            );
-            rt.engine_mut()
-                .attach_runtime_node(id, Box::new(fixture), current_revision())
-                .expect("attach");
-        }
-        loaded = Some(rt);
+        loaded = Some(ProjectLoader::load_from_root(&fs, services).expect("load"));
     });
     let mut rt = loaded.expect("loaded");
     run(PHASES[1], &mut || {
@@ -317,12 +231,8 @@ fn measure(shape: Shape6, format6: bool) -> Vec<Phase> {
     phases
 }
 
-fn print_table(shape: Shape6, format6: bool, phases: &[Phase]) {
-    println!(
-        "\n== {} as format {} ==",
-        shape.label(),
-        if format6 { "6" } else { "5 (twin)" }
-    );
+fn print_table(shape: Shape6, phases: &[Phase]) {
+    println!("\n== {} ==", shape.label());
     println!(
         "{:<20} {:>12} {:>12} {:>12}",
         "phase", "live-before", "transient", "resident-d"
@@ -339,9 +249,9 @@ fn print_table(shape: Shape6, format6: bool, phases: &[Phase]) {
 }
 
 /// The project: a shader on `bus:visual.out`, one fixture `strip` (its map2d
-/// is the twin's document, or a one-lamp placeholder for format 6), and one
-/// output `main` whose one port takes everything.
-fn project_fs(shape: Shape6, format6: bool) -> LpFsMemory {
+/// the shape's document), and one output `main` whose one port takes
+/// everything.
+fn project_fs(shape: Shape6) -> LpFsMemory {
     let fs = LpFsMemory::new();
     let write = |path: &str, text: &str| {
         fs.write_file(path.as_path(), text.as_bytes())
@@ -384,12 +294,7 @@ fn project_fs(shape: Shape6, format6: bool) -> LpFsMemory {
   "power": { "lamp_type": "ws2812b_5v", "budget_ma": 0 }
 }"#,
     );
-    let map2d = if format6 {
-        Shape6::Path(1).map2d()
-    } else {
-        shape.map2d()
-    };
-    write("/strip.map2d.json", &map2d);
+    write("/strip.map2d.json", &shape.map2d());
     write(
         "/out.json",
         r#"{

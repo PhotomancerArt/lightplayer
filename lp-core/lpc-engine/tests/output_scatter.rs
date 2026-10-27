@@ -1,16 +1,20 @@
-//! D40 — the scatter rule, end to end: a fixture's patch entries naming
-//! different outputs split its fragments across those outputs; unaddressed
-//! runs (and wholly-unpatched producers) flow to the DEFAULT output — the
-//! first fragments-consuming output in attach order; a producer with zero
-//! runs on an output is NOT a gap there; rotation is real in rendering.
+//! D40 — the scatter rule, end to end: a fixture's parts landing on
+//! different outputs split its fragments across those outputs; a producer
+//! with zero runs on an output is NOT a gap there; rotation is real in
+//! rendering.
 //!
 //! The topology under test is the small-dome's shape in miniature: TWO
 //! producers (`dome`, 6 lamps · `doors`, 4 lamps) scattered across TWO
-//! outputs (`output`, unnamed = the default · `output2`, named "Box 2")
-//! with interleaved anchors — many-to-many, the case the peach
-//! (many-to-one) and zook (one-to-many) leave uncovered. Expectations are
-//! stated byte-exactly against the auto-flow baseline, the same discipline
-//! `output_patch_reflow.rs` uses.
+//! outputs (`output`, named "1" · `output2`, named "Box 2") with interleaved
+//! anchors — many-to-many, the case the peach (many-to-one) and zook
+//! (one-to-many) leave uncovered. Expectations are stated byte-exactly
+//! against a baseline that lays both fixtures end to end on "1".
+//!
+//! Since project format 12 the placement is each fixture's map2d (format 6:
+//! its start and overrides), not a patch document; a run is a part, so a
+//! fixture split across two outputs is two parts. (Until then this file
+//! also pinned auto-flow onto the default output, which format 12 does not
+//! have: a format-6 fixture lands only where its patching says.)
 
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{NodeRuntimeStatus, TreePath};
@@ -24,7 +28,41 @@ const DOORS_LAMPS: u32 = 4;
 /// output identities settle one tick after registration.
 const SETTLE_TICKS: usize = 3;
 
-fn project_fs(dome_patch: Option<&str>, doors_patch: Option<&str>) -> LpFsMemory {
+/// One fixture's map2d (format 6): `parts` as `(id, lamps)` one-row grids
+/// laid end to end, and `patching` (the document's `start` / `overrides`
+/// members, comma-led).
+fn map2d(parts: &[(&str, u32)], patching: &str) -> String {
+    let mut x = 0.5;
+    let parts: Vec<String> = parts
+        .iter()
+        .map(|(id, lamps)| {
+            let part = format!(
+                r#"{{ "id": "{id}", "kind": {{ "grid": {{ "origin": [{x}, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}"#
+            );
+            x += *lamps as f32;
+            part
+        })
+        .collect();
+    format!(
+        r#"{{
+  "format": 6,
+  "sample_diameter": 1.0,
+  "canvas": [0.0, 0.0, 10.0, 1.0]{patching},
+  "parts": [ {} ]
+}}"#,
+        parts.join(", ")
+    )
+}
+
+/// A start: lamp `lamps` of port 0 of `output`.
+fn start(output: &str, lamps: u32) -> String {
+    format!(
+        r#",
+  "start": {{ "output": {{ "set": "{output}" }}, "port": {{ "set": 0 }}, "channel": {{ "set": {{ "lamps": {lamps} }} }} }}"#
+    )
+}
+
+fn project_fs(dome: &str, doors: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
     fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
         .expect("container manifest");
@@ -42,6 +80,7 @@ fn project_fs(dome_patch: Option<&str>, doors_patch: Option<&str>) -> LpFsMemory
         "/output.json".as_path(),
         br#"{
   "kind": "Output",
+  "name": "1",
   "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "input": { "source": "bus:control.out" } }
 }"#,
@@ -57,25 +96,12 @@ fn project_fs(dome_patch: Option<&str>, doors_patch: Option<&str>) -> LpFsMemory
 }"#,
     )
     .expect("output2.json");
-    write_fixture(&fs, "dome", DOME_LAMPS, 1.0, dome_patch.is_some());
-    write_fixture(&fs, "doors", DOORS_LAMPS, 0.25, doors_patch.is_some());
-    if let Some(patch) = dome_patch {
-        fs.write_file("/dome.patch.json".as_path(), patch.as_bytes())
-            .expect("dome patch");
-    }
-    if let Some(patch) = doors_patch {
-        fs.write_file("/doors.patch.json".as_path(), patch.as_bytes())
-            .expect("doors patch");
-    }
+    write_fixture(&fs, "dome", DOME_LAMPS, 1.0, dome);
+    write_fixture(&fs, "doors", DOORS_LAMPS, 0.25, doors);
     fs
 }
 
-fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patched: bool) {
-    let patch = if patched {
-        format!(",\n  \"patch\": {{ \"kind\": \"File\", \"source\": \"{name}.patch.json\" }}")
-    } else {
-        String::new()
-    };
+fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, map2d: &str) {
     fs.write_file(
         format!("/{name}.json").as_path(),
         format!(
@@ -85,7 +111,7 @@ fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patch
   "bindings": {{ "output": {{ "target": "bus:control.out" }} }},
   "sampling": "direct",
   "diagnostic_mode": "led_index",
-  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }}{patch},
+  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }},
   "color_order": "rgb",
   "brightness": {brightness},
   "gamma_correction": false
@@ -94,21 +120,8 @@ fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patch
         .as_bytes(),
     )
     .expect("fixture def");
-    fs.write_file(
-        format!("/{name}.map2d.json").as_path(),
-        format!(
-            r#"{{
-  "format": 1,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, {lamps}.0, 1.0],
-  "objects": [
-    {{ "name": "strip", "shape": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
-  ]
-}}"#
-        )
-        .as_bytes(),
-    )
-    .expect("fixture map2d");
+    fs.write_file(format!("/{name}.map2d.json").as_path(), map2d.as_bytes())
+        .expect("fixture map2d");
 }
 
 fn settled(fs: &LpFsMemory) -> (Engine, ProjectRegistry) {
@@ -157,10 +170,13 @@ fn node_status(engine: &Engine, suffix: &str) -> Option<NodeRuntimeStatus> {
     node.runtime_status()
 }
 
-/// The auto-flow baseline every scatter expectation is a permutation of:
-/// dome's six lamps then doors' four, all on the default output.
+/// The baseline every scatter expectation is a permutation of: dome's six
+/// lamps then doors' four, end to end on "1".
 fn baseline() -> Vec<[u16; 3]> {
-    let (engine, _registry) = settled(&project_fs(None, None));
+    let (engine, _registry) = settled(&project_fs(
+        &map2d(&[("dome", DOME_LAMPS)], &start("1", 0)),
+        &map2d(&[("doors", DOORS_LAMPS)], &start("1", DOME_LAMPS)),
+    ));
     let lamps = published_lamps(&engine, "output.output");
     assert_eq!(lamps.len(), (DOME_LAMPS + DOORS_LAMPS) as usize);
     lamps
@@ -170,36 +186,36 @@ fn baseline() -> Vec<[u16; 3]> {
 /// scattered, interleaved anchors — byte-exact on BOTH wires, reversal and
 /// rotation included.
 ///
-/// dome:  lamps 0-2 → default @0 · lamps 3-5 → "Box 2" @2, reversed
-/// doors: lamps 0-1 → default @3 · lamps 2-3 → "Box 2" @0, rotated 1
+/// dome:  lamps 0-2 (`front`) → "1" @0 · lamps 3-5 (`back`) → "Box 2" @2, reversed
+/// doors: lamps 0-1 (`left`) → "1" @3 · lamps 2-3 (`right`) → "Box 2" @0, rotated 1
 #[test]
 fn many_to_many_scatter_is_byte_exact_on_both_outputs() {
-    let dome = r#"{
-  "format": 2,
-  "outputs": ["Box 2"],
-  "entries": [
-    [[0, 3], -1, 0],
-    [[3, 3], 0, 2, "r"]
-  ]
-}
-"#;
-    let doors = r#"{
-  "format": 2,
-  "outputs": ["Box 2"],
-  "entries": [
-    [[0, 2], -1, 3],
-    [[2, 2], 0, 0, "", 1]
-  ]
-}
-"#;
+    let dome = map2d(
+        &[("front", 3), ("back", 3)],
+        &format!(
+            r#"{},
+  "overrides": {{ "back": {{ "output": {{ "set": "Box 2" }}, "port": {{ "set": 0 }},
+    "channel": {{ "set": {{ "lamps": 2 }} }}, "direction": "reverse" }} }}"#,
+            start("1", 0)
+        ),
+    );
+    let doors = map2d(
+        &[("left", 2), ("right", 2)],
+        &format!(
+            r#"{},
+  "overrides": {{ "right": {{ "output": {{ "set": "Box 2" }}, "port": {{ "set": 0 }},
+    "channel": {{ "set": {{ "lamps": 0 }} }}, "offset": 1 }} }}"#,
+            start("1", 3)
+        ),
+    );
     let flowed = baseline();
-    let (engine, _registry) = settled(&project_fs(Some(dome), Some(doors)));
+    let (engine, _registry) = settled(&project_fs(&dome, &doors));
 
-    // Default output: dome 0-2 at wire 0-2, doors 0-1 at wire 3-4.
+    // "1": dome 0-2 at wire 0-2, doors 0-1 at wire 3-4.
     assert_eq!(
         published_lamps(&engine, "output.output"),
         vec![flowed[0], flowed[1], flowed[2], flowed[6], flowed[7]],
-        "the default output carries the runs addressed to nobody"
+        "the first output carries the runs addressed to it"
     );
     // "Box 2": doors 2-3 rotated one lamp within their window (rotate right:
     // [d2, d3] → [d3, d2]), then dome 3-5 laid down end-first.
@@ -212,47 +228,20 @@ fn many_to_many_scatter_is_byte_exact_on_both_outputs() {
     assert_eq!(node_status(&engine, "output2.output"), None);
 }
 
-/// D40's default rule, with the ORDER pinned: an unpatched producer flows
-/// onto the FIRST fragments-consuming output in attach order (module
-/// `nodes` key order — `output` before `output2`), and the second output
-/// carries nothing without warning about it.
-#[test]
-fn an_unpatched_producer_flows_to_the_first_output_only() {
-    let (engine, _registry) = settled(&project_fs(None, None));
-
-    let first = published_lamps(&engine, "output.output");
-    assert_eq!(first.len(), (DOME_LAMPS + DOORS_LAMPS) as usize);
-    assert_eq!(
-        published_lamps(&engine, "output2.output"),
-        Vec::<[u16; 3]>::new(),
-        "the non-default output receives no auto-flow"
-    );
-    assert_eq!(
-        node_status(&engine, "output2.output"),
-        None,
-        "zero runs here is not a gap"
-    );
-}
-
-/// A producer patched WHOLLY onto the other output contributes no fragment
-/// and no gap to the default output; its neighbour keeps auto-flowing.
+/// A producer placed WHOLLY on the other output contributes no fragment and
+/// no gap to the first one; its neighbour keeps its place there.
 #[test]
 fn a_fully_scattered_producer_leaves_no_gap_behind() {
-    let doors = r#"{
-  "format": 2,
-  "outputs": ["Box 2"],
-  "entries": [
-    [[0], 0, 0]
-  ]
-}
-"#;
     let flowed = baseline();
-    let (engine, _registry) = settled(&project_fs(None, Some(doors)));
+    let (engine, _registry) = settled(&project_fs(
+        &map2d(&[("dome", DOME_LAMPS)], &start("1", 0)),
+        &map2d(&[("doors", DOORS_LAMPS)], &start("Box 2", 0)),
+    ));
 
     assert_eq!(
         published_lamps(&engine, "output.output"),
         flowed[..DOME_LAMPS as usize].to_vec(),
-        "the dome auto-flows alone on the default output"
+        "the dome alone on the first output"
     );
     assert_eq!(
         published_lamps(&engine, "output2.output"),
@@ -262,7 +251,7 @@ fn a_fully_scattered_producer_leaves_no_gap_behind() {
     assert_eq!(
         node_status(&engine, "output.output"),
         None,
-        "the doors' absence from the default output is not a gap"
+        "the doors' absence from the first output is not a gap"
     );
 }
 
@@ -272,22 +261,24 @@ fn a_fully_scattered_producer_leaves_no_gap_behind() {
 /// N = 6 and N = 4).
 #[test]
 fn rotation_permutes_lamps_within_the_run_window() {
-    let dome = r#"{
-  "format": 2,
-  "entries": [
-    [[0], -1, 0, "", 2]
-  ]
-}
-"#;
-    let doors = r#"{
-  "format": 2,
-  "entries": [
-    [[0], -1, 6, "r", 1]
-  ]
-}
-"#;
+    let dome = map2d(
+        &[("dome", DOME_LAMPS)],
+        &format!(
+            r#"{},
+  "overrides": {{ "dome": {{ "offset": 2 }} }}"#,
+            start("1", 0)
+        ),
+    );
+    let doors = map2d(
+        &[("doors", DOORS_LAMPS)],
+        &format!(
+            r#"{},
+  "overrides": {{ "doors": {{ "direction": "reverse", "offset": 1 }} }}"#,
+            start("1", DOME_LAMPS)
+        ),
+    );
     let flowed = baseline();
-    let (engine, _registry) = settled(&project_fs(Some(dome), Some(doors)));
+    let (engine, _registry) = settled(&project_fs(&dome, &doors));
 
     let lamps = published_lamps(&engine, "output.output");
     // Dome, rotated 2 of 6: window slot (j + 2) mod 6 — a right-rotation.
@@ -307,28 +298,30 @@ fn rotation_permutes_lamps_within_the_run_window() {
 }
 
 /// A run naming an output nobody carries degrades per RUN: the rest of the
-/// document stands, the lamps are unplaced, and the fixture's status names
+/// mapping stands, those lamps are unplaced, and the fixture's status names
 /// the missing output.
 #[test]
 fn a_dangling_output_name_degrades_and_reports() {
-    let dome = r#"{
-  "format": 2,
-  "outputs": ["Box 9"],
-  "entries": [
-    [[0, 3], -1, 0],
-    [[3, 3], 0, 0]
-  ]
-}
-"#;
+    let dome = map2d(
+        &[("front", 3), ("back", 3)],
+        &format!(
+            r#"{},
+  "overrides": {{ "back": {{ "output": {{ "set": "Box 9" }}, "port": {{ "set": 0 }},
+    "channel": {{ "set": {{ "lamps": 0 }} }} }} }}"#,
+            start("1", 0)
+        ),
+    );
     let flowed = baseline();
-    let (engine, _registry) = settled(&project_fs(Some(dome), None));
+    let (engine, _registry) = settled(&project_fs(
+        &dome,
+        &map2d(&[("doors", DOORS_LAMPS)], &start("1", DOME_LAMPS)),
+    ));
 
     let Some(NodeRuntimeStatus::Error(message)) = node_status(&engine, "dome.fixture") else {
         panic!("the dangling name is the fixture's error");
     };
     assert!(message.contains("Box 9"), "{message}");
-    // The placed half stands; the dangling half is unplaced (its lamps are
-    // claimed by the document, so they do not reflow — dark, not moved).
+    // The placed part stands; the dangling part is dark, not moved.
     let lamps = published_lamps(&engine, "output.output");
     assert_eq!(
         lamps[..3],
@@ -342,11 +335,15 @@ fn a_dangling_output_name_degrades_and_reports() {
     );
 }
 
-/// Two outputs claiming one name make `at.output` ambiguous: BOTH wear an
-/// error and routing stays exact-match (nothing is guessed onto either).
+/// Two outputs claiming one name make a placement's output ambiguous: BOTH
+/// wear an error and routing stays exact-match (nothing is guessed onto
+/// either).
 #[test]
 fn duplicate_output_names_error_both_outputs() {
-    let mut fs = project_fs(None, None);
+    let mut fs = project_fs(
+        &map2d(&[("dome", DOME_LAMPS)], &start("Box 2", 0)),
+        &map2d(&[("doors", DOORS_LAMPS)], &start("Box 2", DOME_LAMPS)),
+    );
     fs.write_file_mut(
         "/output.json".as_path(),
         br#"{

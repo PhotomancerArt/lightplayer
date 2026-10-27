@@ -247,7 +247,7 @@ fn a_start_naming_an_output_off_the_channel_places_nothing_and_says_so() {
     let mut rig = Rig::load(
         vec![
             Fix::parts("strip", mapping),
-            Fix::Grid("other", 4, "bus:other.out"),
+            Fix::Grid("other", 4, "bus:other.out", "elsewhere"),
         ],
         outputs,
     );
@@ -324,35 +324,6 @@ fn renaming_the_named_output_darkens_and_naming_it_back_lights() {
     rig.assert_lands("strip", &mapping);
     assert_eq!(rig.lit("out_main"), 10);
     assert_eq!(rig.status("strip"), None);
-}
-
-/// A format ≤ 5 fixture auto-flowing on the same output starts after the
-/// format-6 fixture's last placed lamp (lean Q50).
-#[test]
-fn a_format_5_fixture_auto_flows_after_the_format_6_fixtures_last_lamp() {
-    let mapping = strip("strip", 12, Start::at("main", 0, Amount::lamps(0)));
-    let outputs = vec![Out::named("main", &[None])];
-    let grid = {
-        let mut rig = Rig::load(
-            vec![Fix::Grid("grid", 6, "bus:control.out")],
-            outputs.clone(),
-        );
-        rig.settle();
-        rig.published("out_main")
-    };
-    assert_eq!(grid.len(), 6);
-
-    let mut rig = Rig::load(
-        vec![
-            Fix::Grid("grid", 6, "bus:control.out"),
-            Fix::parts("strip", mapping.clone()),
-        ],
-        outputs,
-    );
-    rig.settle();
-    rig.assert_lands("strip", &mapping);
-    let wire = rig.published("out_main");
-    assert_eq!(wire[12..18], grid[..], "the grid flows on after lamp 11");
 }
 
 /// The fixture's status names the first problem, and is clear when there
@@ -669,9 +640,9 @@ enum Fix {
     /// A format-6 fixture: loaded as a placeholder, then given its runtime
     /// with this mapping.
     Parts(&'static str, Box<Mapping>),
-    /// A format ≤ 5 fixture, as loaded: a one-row grid of this many lamps,
-    /// unpatched, publishing on this channel.
-    Grid(&'static str, u32, &'static str),
+    /// A fixture as loaded: a one-row grid of this many lamps, publishing on
+    /// this channel, starting at lamp 0 of port 0 of this output.
+    Grid(&'static str, u32, &'static str, &'static str),
 }
 
 impl Fix {
@@ -722,9 +693,18 @@ impl Rig {
         for fixture in &fixtures {
             let node = fixture.node();
             nodes.push(format!("\"{node}\": {{ \"ref\": \"./{node}.json\" }}"));
-            let (lamps, channel) = match fixture {
-                Fix::Parts(..) => (1, "bus:control.out"),
-                Fix::Grid(_, lamps, channel) => (*lamps, *channel),
+            // A format-6 fixture is loaded with a one-lamp placeholder
+            // that places nothing, then given its runtime below.
+            let (lamps, channel, start) = match fixture {
+                Fix::Parts(..) => (1, "bus:control.out", String::new()),
+                Fix::Grid(_, lamps, channel, output) => (
+                    *lamps,
+                    *channel,
+                    format!(
+                        r#""start": {{ "output": {{ "set": "{output}" }}, "port": {{ "set": 0 }},
+             "channel": {{ "set": {{ "lamps": 0 }} }} }},"#
+                    ),
+                ),
             };
             write(
                 &fs,
@@ -749,11 +729,12 @@ impl Rig {
                 &format!("/{node}.map2d.json"),
                 &format!(
                     r#"{{
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [0.0, 0.0, {lamps}.0, 1.0],
-  "objects": [
-    {{ "name": "strip", "shape": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
+  {start}
+  "parts": [
+    {{ "id": "strip", "kind": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
   ]
 }}"#
                 ),

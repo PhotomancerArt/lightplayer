@@ -48,11 +48,14 @@ const CHANNEL_EPS: f64 = 3.0 / 65535.0;
 #[test]
 fn choker_lamps_span_x_minus_one_to_one_with_y_from_the_lamp_box() {
     let choker = choker_dir();
-    let doc = lpc_mapping::Map2dDoc::from_json(
+    let doc = lpc_mapping::map2d6::read(
         &std::fs::read_to_string(choker.join("playful.map2d.json")).unwrap(),
     )
     .expect("choker map2d parses");
-    let lamps = lpc_mapping::resolve(&doc).expect("resolve").positions();
+    let lamps = lpc_mapping::part::render(&doc)
+        .expect("render")
+        .positions()
+        .to_vec();
     let (min, max) = bounds(&lamps);
     let (width, height) = (max[0] - min[0], max[1] - min[1]);
     assert!(width > height, "the choker is wide: {width} x {height}");
@@ -116,7 +119,7 @@ fn a_16x16_grid_maps_to_the_unit_square() {
                 .collect()
         })
         .collect();
-    project.write_path_points_fixture(&paths, (16, 16));
+    project.write_points_fixture(&paths, (16, 16));
     project.write_probe_shader_2d("pattern");
     let frame = render_last_frame(project.path());
 
@@ -149,7 +152,7 @@ fn a_16x16_grid_maps_to_the_unit_square() {
 fn a_straight_strip_in_2d_has_zero_extent_y_and_no_nan() {
     let project = Scratch::from(&choker_dir(), "strip-pattern");
     let strip: Vec<[f32; 2]> = (0..60).map(|k| [(k as f32 + 0.5) / 60.0, 0.5]).collect();
-    project.write_path_points_fixture(&[strip], (60, 8));
+    project.write_points_fixture(&[strip], (60, 8));
     project.write_probe_shader_2d("pattern");
     let frame = render_last_frame(project.path());
 
@@ -290,19 +293,18 @@ fn an_opt_out_shader_is_unchanged() {
 #[cfg(feature = "node-fixture")]
 #[test]
 fn dome_scale_pitch_is_nonzero_and_q32_safe() {
-    use lpc_engine::nodes::fixture::mapping::map2d::mapping_from_map2d_doc;
+    use lpc_engine::nodes::fixture::parts_carrier::render_parts_carrier;
     use lpc_engine::products::visual::{
         PatternFrame, ScopeGeometry, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
     };
     use lpc_model::nodes::fixture::{MappingRef, mapping_centers};
 
     let dir = workspace_dir().join("catalog/projects/small-dome/dome");
-    let doc = lpc_mapping::Map2dDoc::from_json(
-        &std::fs::read_to_string(dir.join("dome.map2d.json")).unwrap(),
-    )
-    .expect("dome map2d parses");
+    let doc =
+        lpc_mapping::map2d6::read(&std::fs::read_to_string(dir.join("dome.map2d.json")).unwrap())
+            .expect("dome map2d parses");
     let (width, height) = (128, 128);
-    let mapping = mapping_from_map2d_doc(&doc, width, height).expect("resolve the dome");
+    let mapping = render_parts_carrier(&doc, width, height).expect("render the dome");
     let mapping = MappingRef::Compact(&mapping);
     let scope = ScopeGeometry::from_mapping(mapping, width, height).expect("lamps");
     assert_eq!(scope.lamp_count, 5950, "the small dome's dome fixture");
@@ -323,15 +325,15 @@ fn dome_scale_pitch_is_nonzero_and_q32_safe() {
     );
 
     // The same rule in f64 from doc space: mean consecutive distance within
-    // resolver spans, over half the long side of the lamp box.
-    let resolved = lpc_mapping::resolve(&doc).expect("resolve");
-    let positions = resolved.positions();
-    let (min, max) = bounds(&positions);
+    // rendered segments, over half the long side of the lamp box.
+    let rendered = lpc_mapping::part::render(&doc).expect("render");
+    let positions = rendered.positions();
+    let (min, max) = bounds(positions);
     let half_long = f64::from((max[0] - min[0]).max(max[1] - min[1])) / 2.0;
     let mut sum = 0.0f64;
     let mut pairs = 0usize;
-    for span in &resolved.spans {
-        let lamps = &positions[span.start as usize..(span.start + span.count) as usize];
+    for segment in rendered.segments() {
+        let lamps = rendered.lamps_of(segment);
         for pair in lamps.windows(2) {
             let dx = f64::from(pair[1][0] - pair[0][0]);
             let dy = f64::from(pair[1][1] - pair[0][1]);
@@ -717,13 +719,13 @@ impl Frame {
         assert!(checked > 0);
     }
 
-    /// Strand starts of the choker, one per resolved span (a letter).
-    fn strand_starts_choker(&self, doc: &lpc_mapping::Map2dDoc) -> Vec<usize> {
-        lpc_mapping::resolve(doc)
-            .expect("resolve")
-            .spans
+    /// Strand starts of the choker, one per rendered segment (a letter).
+    fn strand_starts_choker(&self, doc: &lpc_mapping::part::Mapping) -> Vec<usize> {
+        lpc_mapping::part::render(doc)
+            .expect("render")
+            .segments()
             .iter()
-            .map(|span| span.start as usize)
+            .map(|segment| segment.lamps.start as usize)
             .collect()
     }
 }
@@ -884,37 +886,37 @@ impl Scratch {
         .expect("write shader.glsl");
     }
 
-    /// Replace the choker's map2d mapping with hand-authored `PathPoints`
-    /// (normalized texture-space centres, one path per strand) at a
-    /// `render_size` of `size`.
-    fn write_path_points_fixture(&self, paths: &[Vec<[f32; 2]>], size: (u32, u32)) {
-        let mut first_channel = 0usize;
-        let paths_json: Vec<String> = paths
+    /// Replace the choker's mapping with lamps at listed positions: a
+    /// format-6 map2d of `points` parts, one per strand, given in normalized
+    /// texture space and laid on a canvas of the texture's aspect, `1 × h/w`,
+    /// so each lamp reaches the sampler where it was given (hand-placed
+    /// `PathPoints` until project format 12), at a `render_size` of `size`.
+    fn write_points_fixture(&self, paths: &[Vec<[f32; 2]>], size: (u32, u32)) {
+        let aspect = size.1 as f32 / size.0 as f32;
+        let parts: Vec<String> = paths
             .iter()
             .enumerate()
             .map(|(index, points)| {
-                let points_json: Vec<String> = points
+                let at: Vec<String> = points
                     .iter()
-                    .enumerate()
-                    .map(|(k, [x, y])| format!("\"{k}\": [{x}, {y}]"))
+                    .map(|[x, y]| format!("[{x}, {}]", y * aspect))
                     .collect();
-                let json = format!(
-                    "\"{index}\": {{ \"kind\": \"PointList\", \"first_channel\": {first_channel}, \"points\": {{ {} }} }}",
-                    points_json.join(", ")
-                );
-                first_channel += points.len();
-                json
+                format!(
+                    "{{ \"id\": \"points{}\", \"kind\": {{ \"points\": {{ \"at\": [{}] }} }} }}",
+                    index + 1,
+                    at.join(", ")
+                )
             })
             .collect();
-        let mapping = format!(
-            "\"mapping\": {{ \"kind\": \"PathPoints\", \"paths\": {{ {} }}, \"sample_diameter\": 1.0 }}",
-            paths_json.join(", ")
+        let map2d = format!(
+            "{{\n  \"format\": 6,\n  \"sample_diameter\": 1.0,\n  \"canvas\": [0.0, 0.0, 1.0, {aspect}],\n  \"next\": {{ \"points\": {} }},\n  \"start\": {{ \"output\": {{ \"set\": \"1\" }}, \"port\": {{ \"set\": 0 }}, \"channel\": {{ \"set\": {{ \"lamps\": 0 }} }} }},\n  \"parts\": [{}]\n}}\n",
+            paths.len() + 1,
+            parts.join(", ")
         );
+        std::fs::write(self.dir.join("points.map2d.json"), map2d).expect("write points.map2d.json");
         self.edit("fixture.json", |text| {
-            let start = text.find("\"mapping\": {").expect("mapping key");
-            let end = start + text[start..].find('}').expect("mapping end") + 1;
-            let with_mapping = format!("{}{}{}", &text[..start], mapping, &text[end..]);
-            with_mapping
+            assert!(text.contains("playful.map2d.json"), "the choker's mapping");
+            text.replace("playful.map2d.json", "points.map2d.json")
                 .replace("\"width\": 104", &format!("\"width\": {}", size.0))
                 .replace("\"height\": 28", &format!("\"height\": {}", size.1))
         });

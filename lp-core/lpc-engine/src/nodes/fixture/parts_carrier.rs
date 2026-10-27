@@ -23,7 +23,7 @@ use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 /// the carrier. `Err` is the fixture's
 /// mapping error, in words (a mapping too big for memory is refused here,
 /// never aborted).
-pub(crate) fn render_parts_carrier(
+pub fn render_parts_carrier(
     mapping: &Mapping,
     texture_width: u32,
     texture_height: u32,

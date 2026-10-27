@@ -3,10 +3,19 @@
 //! landing in the gap between them.
 //!
 //! Wire order and fixture order stop agreeing here, which is the whole point
-//! of a patch. The assertions are stated as a PERMUTATION of the unpatched
+//! of patching. The assertions are stated as a PERMUTATION of the unpatched
 //! buffer rather than as literal colors: "the wire's third lamp is the leaf's
 //! first" is the claim, and it survives any change to what colors a
 //! diagnostic pattern paints.
+//!
+//! Since project format 12 the patching is each fixture's map2d (format 6):
+//! the body is two parts, `near` and `far`, and "patched" is the leaf's start
+//! between them and an override that plugs `far` in backwards; "unpatched"
+//! starts each fixture where the one before it ends (what the upgrade froze
+//! auto-flow into). The patch-document statements this file held until then
+//! (an open-ended range, a document that outgrows its fixture, a newer patch
+//! format, manual flow) went with the documents; `off` stands in for manual
+//! flow's "not mapped = not lit".
 //!
 //! ```bash
 //! cargo test -p lpc-engine --test output_patch_reflow
@@ -27,25 +36,47 @@ const BODY_LAMPS: u32 = 4;
 /// body lamp of the same index.
 const LEAF_LAMPS: u32 = 2;
 
-/// Body lamps 0–1 lead the wire; lamps 2–3 are the far half, plugged in at
-/// their far end twelve channels down.
-const BODY_PATCH: &str = r#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 0 } },
-    { "range": { "start": 2, "count": 2 }, "at": { "channel": 4 }, "reversed": true }
-  ]
+/// A fixture's map2d (format 6): `parts` as `(id, lamps)` one-row grids laid
+/// end to end on a canvas as wide as the fixture, its start at lamp `start`
+/// of output "1", and `overrides` (a JSON object's members, or empty).
+fn map2d(parts: &[(&str, u32)], start: u32, overrides: &str) -> String {
+    let lamps: u32 = parts.iter().map(|(_, lamps)| lamps).sum();
+    let mut x = 0.5;
+    let parts: Vec<String> = parts
+        .iter()
+        .map(|(id, lamps)| {
+            let part = format!(
+                r#"{{ "id": "{id}", "kind": {{ "grid": {{ "origin": [{x}, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}"#
+            );
+            x += *lamps as f32;
+            part
+        })
+        .collect();
+    format!(
+        r#"{{
+  "format": 6,
+  "sample_diameter": 1.0,
+  "canvas": [0.0, 0.0, {lamps}.0, 1.0],
+  "start": {{ "output": {{ "set": "1" }}, "port": {{ "set": 0 }}, "channel": {{ "set": {{ "lamps": {start} }} }} }},
+  "overrides": {{ {overrides} }},
+  "parts": [ {} ]
+}}"#,
+        parts.join(", ")
+    )
 }
-"#;
 
-/// The leaf plugs into the two channels between the body's halves.
-const LEAF_PATCH: &str = r#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 } }
-  ]
+/// The body: `near` (lamps 0–1) and `far` (lamps 2–3), from wire lamp 0.
+fn body(overrides: &str) -> String {
+    map2d(&[("near", 2), ("far", 2)], 0, overrides)
 }
-"#;
+
+/// The leaf, from wire lamp `start`.
+fn leaf(start: u32) -> String {
+    map2d(&[("leaf", LEAF_LAMPS)], start, "")
+}
+
+/// The body's far half, plugged in at its far end four lamps down.
+const FAR_REVERSED: &str = r#""far": { "port": { "set": 0 }, "channel": { "set": { "lamps": 4 } }, "direction": "reverse" }"#;
 
 /// The project: two diagnostic fixtures publishing to one output.
 ///
@@ -53,6 +84,17 @@ const LEAF_PATCH: &str = r#"{
 /// lamp with no visual product involved, so the buffer reads as pure placement
 /// and the test needs no graphics backend.
 fn project_fs(patched: bool) -> LpFsMemory {
+    if patched {
+        // Body lamps 0–1 lead the wire; the leaf plugs into the two lamps
+        // between the body's halves; the far half is plugged in backwards.
+        project_fs_with(&body(FAR_REVERSED), &leaf(2))
+    } else {
+        project_fs_with(&body(""), &leaf(BODY_LAMPS))
+    }
+}
+
+/// [`project_fs`] with these map2d documents.
+fn project_fs_with(body_map2d: &str, leaf_map2d: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
     fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
         .expect("container manifest");
@@ -69,29 +111,19 @@ fn project_fs(patched: bool) -> LpFsMemory {
         "/output.json".as_path(),
         br#"{
   "kind": "Output",
+  "name": "1",
   "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "input": { "source": "bus:control.out" } }
 }"#,
     )
     .expect("output.json");
 
-    write_fixture(&fs, "body", BODY_LAMPS, 1.0, patched);
-    write_fixture(&fs, "leaf", LEAF_LAMPS, 0.25, patched);
-    if patched {
-        fs.write_file("/body.patch.json".as_path(), BODY_PATCH.as_bytes())
-            .expect("body patch");
-        fs.write_file("/leaf.patch.json".as_path(), LEAF_PATCH.as_bytes())
-            .expect("leaf patch");
-    }
+    write_fixture(&fs, "body", BODY_LAMPS, 1.0, body_map2d);
+    write_fixture(&fs, "leaf", LEAF_LAMPS, 0.25, leaf_map2d);
     fs
 }
 
-fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patched: bool) {
-    let patch = if patched {
-        format!(",\n  \"patch\": {{ \"kind\": \"File\", \"source\": \"{name}.patch.json\" }}")
-    } else {
-        String::new()
-    };
+fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, map2d: &str) {
     fs.write_file(
         format!("/{name}.json").as_path(),
         format!(
@@ -101,7 +133,7 @@ fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patch
   "bindings": {{ "output": {{ "target": "bus:control.out" }} }},
   "sampling": "direct",
   "diagnostic_mode": "led_index",
-  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }}{patch},
+  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }},
   "color_order": "rgb",
   "brightness": {brightness},
   "gamma_correction": false
@@ -110,21 +142,8 @@ fn write_fixture(fs: &LpFsMemory, name: &str, lamps: u32, brightness: f32, patch
         .as_bytes(),
     )
     .expect("fixture def");
-    fs.write_file(
-        format!("/{name}.map2d.json").as_path(),
-        format!(
-            r#"{{
-  "format": 1,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, {lamps}.0, 1.0],
-  "objects": [
-    {{ "name": "strand", "shape": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
-  ]
-}}"#
-        )
-        .as_bytes(),
-    )
-    .expect("map2d");
+    fs.write_file(format!("/{name}.map2d.json").as_path(), map2d.as_bytes())
+        .expect("map2d");
 }
 
 fn load(fs: &LpFsMemory) -> (Engine, ProjectRegistry) {
@@ -238,54 +257,43 @@ fn the_patched_wire_is_the_authored_permutation_of_the_auto_flowed_one() {
     );
 }
 
-/// Clearing the patch restores auto-flow — the property an installer relies on
-/// when a rig is rebuilt, and the reason the patch is its own document.
-///
-/// Emptying the entries is what a patching editor's "clear" writes, and it
-/// must mean what deleting the file means. Anything else and the installer
-/// who clears one strand of three finds the wire contested instead of plain.
+/// Clearing the patching, live, returns the wire to fixture order: the
+/// override goes and each start moves back to where the fixture before it
+/// ends, and the next frames place exactly what the unpatched project places.
 #[test]
-fn deleting_the_patch_restores_auto_flow() {
+fn clearing_the_patching_returns_the_wire_to_fixture_order() {
     let flowed = published_lamps(&settled(&project_fs(false)).0);
     assert_ne!(
         published_lamps(&settled(&project_fs(true)).0),
         flowed,
-        "the patch was doing something"
+        "the patching was doing something"
     );
 
-    // Emptying the document is the "clear" a patching editor performs; the
-    // reference stays, so this exercises the resolve path, not the loader.
     let mut fs = project_fs(true);
     let (mut engine, mut registry) = load(&fs);
     tick(&mut engine, &registry, SETTLE_TICKS);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{ "format": 1, "entries": [] }"#,
-    )
-    .expect("clear body patch");
-    fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{ "format": 1, "entries": [] }"#,
-    )
-    .expect("clear leaf patch");
+    fs.write_file_mut("/body.map2d.json".as_path(), body("").as_bytes())
+        .expect("clear the body's override");
+    fs.write_file_mut("/leaf.map2d.json".as_path(), leaf(BODY_LAMPS).as_bytes())
+        .expect("move the leaf back after the body");
     apply_asset_change(
         &mut engine,
         &mut registry,
         &fs,
-        &["/body.patch.json", "/leaf.patch.json"],
+        &["/body.map2d.json", "/leaf.map2d.json"],
     );
     tick(&mut engine, &registry, SETTLE_TICKS);
 
     assert_eq!(
         published_lamps(&engine),
         flowed,
-        "an empty patch places exactly what no patch places"
+        "cleared patching places exactly what the unpatched project places"
     );
 }
 
-/// The live-edit path: editing the patch document moves the wire on the next
+/// The live-edit path: editing the patching moves the wire on the next
 /// tick. Nothing caches a fragment set across frames, and the fixture
-/// re-resolves off the bumped patch version — this test is what says so.
+/// re-patches off the re-read document — this test is what says so.
 #[test]
 fn editing_the_patch_moves_the_wire_on_the_next_tick() {
     let mut fs = project_fs(true);
@@ -295,17 +303,11 @@ fn editing_the_patch_moves_the_wire_on_the_next_tick() {
 
     // Unplug the far half's reversal, in place.
     fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 0 } },
-    { "range": { "start": 2, "count": 2 }, "at": { "channel": 4 } }
-  ]
-}"#,
+        "/body.map2d.json".as_path(),
+        body(r#""far": { "port": { "set": 0 }, "channel": { "set": { "lamps": 4 } } }"#).as_bytes(),
     )
-    .expect("edit body patch");
-    apply_asset_change(&mut engine, &mut registry, &fs, &["/body.patch.json"]);
+    .expect("edit the body's patching");
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/body.map2d.json"]);
     engine.tick(&registry, 16).expect("tick after the edit");
 
     let after = published_lamps(&engine);
@@ -318,24 +320,12 @@ fn editing_the_patch_moves_the_wire_on_the_next_tick() {
     );
 }
 
-/// A range with no `count` runs to the end of the fixture, and "the end"
-/// moves when the MAPPING does — so a mapping edit re-resolves the patch even
-/// though the patch document did not change. The strand that grew stays
-/// patched; nobody edits two documents to add a lamp.
+/// A mapping edit carries its patching with it: one more lamp on the far
+/// half, and the far half, still overridden backwards, grows into the wire
+/// with no hole (one document holds both since project format 12).
 #[test]
-fn a_mapping_edit_re_resolves_an_open_ended_range() {
+fn a_mapping_edit_carries_its_patching() {
     let mut fs = project_fs(true);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 0 } },
-    { "range": { "start": 2 }, "at": { "channel": 4 } }
-  ]
-}"#,
-    )
-    .expect("open-ended body patch");
     let (mut engine, mut registry) = load(&fs);
     tick(&mut engine, &registry, SETTLE_TICKS);
     assert_eq!(
@@ -345,26 +335,19 @@ fn a_mapping_edit_re_resolves_an_open_ended_range() {
     );
     assert_eq!(output_status(&engine), None);
 
-    // One more lamp on the body strand, mapping only.
+    // One more lamp on the body's far half, the override unchanged.
     fs.write_file_mut(
         "/body.map2d.json".as_path(),
-        br#"{
-  "format": 1,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 5.0, 1.0],
-  "objects": [
-    { "name": "strand", "shape": { "grid": { "origin": [0.5, 0.5], "cols": 5, "rows": 1, "pitch": 1 } } }
-  ]
-}"#,
+        map2d(&[("near", 2), ("far", 3)], 0, FAR_REVERSED).as_bytes(),
     )
-    .expect("grow the body strand");
+    .expect("grow the far half");
     apply_asset_change(&mut engine, &mut registry, &fs, &["/body.map2d.json"]);
     tick(&mut engine, &registry, 2);
 
     assert_eq!(
         published_lamps(&engine).len(),
         (BODY_LAMPS + LEAF_LAMPS + 1) as usize,
-        "the open-ended range grew with the strand"
+        "the far half grew on the wire"
     );
     assert_eq!(
         output_status(&engine),
@@ -373,188 +356,69 @@ fn a_mapping_edit_re_resolves_an_open_ended_range() {
     );
 }
 
-/// A patch that no longer fits its fixture is reported, not obeyed: the lamps
-/// fall back to auto-flow rather than being placed by a document that
-/// describes a fixture this is not.
+/// "Not mapped = not lit", end to end: the body's far half is `off`, so
+/// lamps 2–3 reach NO wire. (Manual flow's job, with a patch document, until
+/// project format 12.)
 #[test]
-fn a_patch_that_outgrows_its_fixture_degrades_to_auto_flow_and_reports() {
-    let mut fs = project_fs(true);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 99 }, "at": { "channel": 0 } }
-  ]
-}"#,
-    )
-    .expect("overlong body patch");
-
-    let (engine, _registry) = settled(&fs);
-
-    let status = fixture_status(&engine, "body").expect("the fixture reports the bad patch");
-    let NodeRuntimeStatus::Error(message) = status else {
-        panic!("a patch that cannot be resolved is an error, not a warning");
-    };
-    assert!(message.contains("patch"), "{message}");
-
-    // The leaf's patch still anchors it at channels 2–3, so the body — now
-    // unpatched — auto-flows after every anchor, and channels 0–1 are a hole
-    // the output warns about rather than quietly closing.
+fn an_off_part_reaches_no_wire() {
     let flowed = published_lamps(&settled(&project_fs(false)).0);
-    assert_eq!(
-        published_lamps(&engine),
-        vec![
-            [0, 0, 0],
-            [0, 0, 0],
-            flowed[4],
-            flowed[5],
-            flowed[0],
-            flowed[1],
-            flowed[2],
-            flowed[3],
-        ],
-        "every body lamp still reaches the wire, after the anchored leaf"
-    );
-    let Some(NodeRuntimeStatus::Warn(warning)) = output_status(&engine) else {
-        panic!("the hole the failed patch left is a warning on the output");
-    };
-    assert!(warning.contains("0-1"), "{warning}");
-}
-
-/// A patch document newer than this build is refused at load, whole and by
-/// name — the share-envelope posture, not a silent partial read.
-#[test]
-fn a_newer_patch_format_refuses_the_fixture_at_load() {
-    let mut fs = project_fs(true);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{ "format": 4, "entries": [] }"#,
-    )
-    .expect("newer body patch");
-
-    let (engine, _registry) = settled(&fs);
-
-    let status = fixture_status(&engine, "body").expect("the fixture reports the refusal");
-    let NodeRuntimeStatus::Error(message) = status else {
-        panic!("a refused document is an error");
-    };
-    assert!(message.contains("unsupported patch format 4"), "{message}");
-}
-
-/// MANUAL flow (P5b), end to end: the body declares it and names only its
-/// first two lamps, so lamps 2–3 reach NO wire — where auto-flow would have
-/// re-placed them past the last anchor. This is what makes "not mapped =
-/// not lit" a state a fixture can actually be in.
-#[test]
-fn a_manual_fixture_places_only_what_its_entries_name() {
-    let flowed = published_lamps(&settled(&project_fs(false)).0);
-    let mut fs = project_fs(true);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 3,
-  "flow": "manual",
-  "entries": [
-    [[0, 2], -1, 0]
-  ]
-}"#,
-    )
-    .expect("manual body patch");
-    fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{ "format": 1, "entries": [ { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 } } ] }"#,
-    )
-    .expect("leaf patch");
+    let fs = project_fs_with(&body(r#""far": { "off": true }"#), &leaf(2));
 
     let (engine, _registry) = settled(&fs);
     assert_eq!(
         published_lamps(&engine),
         vec![flowed[0], flowed[1], flowed[4], flowed[5]],
-        "the body's unnamed lamps 2-3 are on no wire at all"
+        "the body's far half is on no wire at all"
     );
     assert_eq!(
         fixture_status(&engine, "body"),
         None,
-        "unmapped lamps are a state, not a fault"
+        "unlit lamps are a state, not a fault"
     );
 }
 
-/// The unmap-all state: a manual document with NO entries lights nothing of
-/// its fixture — the one place an empty document does not mean auto-flow.
+/// The unmap-all state: every part of the body `off` lights nothing of it.
 #[test]
-fn an_empty_manual_document_takes_the_fixture_off_the_wire() {
+fn a_fixture_whose_parts_are_all_off_lights_nothing() {
     let flowed = published_lamps(&settled(&project_fs(false)).0);
-    let mut fs = project_fs(true);
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{ "format": 3, "flow": "manual", "entries": [] }"#,
-    )
-    .expect("unmapped body");
-    fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{ "format": 1, "entries": [] }"#,
-    )
-    .expect("cleared leaf patch");
+    let fs = project_fs_with(
+        &body(r#""near": { "off": true }, "far": { "off": true }"#),
+        &leaf(0),
+    );
 
     let (engine, _registry) = settled(&fs);
     assert_eq!(
         published_lamps(&engine),
         vec![flowed[4], flowed[5]],
-        "only the auto leaf reaches the wire; the manual body is dark"
+        "only the leaf reaches the wire; the body is dark"
     );
 }
 
-/// Flipping the flag back is the whole undo story: the same entries under
-/// `auto` flow the tail again, with no other edit.
+/// Taking `off` away is the whole undo story: the far half follows the near
+/// one again, with no other edit.
 #[test]
-fn flipping_the_flag_back_to_auto_returns_the_lamps_to_flow() {
+fn taking_off_away_returns_the_lamps_to_the_wire() {
     let flowed = published_lamps(&settled(&project_fs(false)).0);
-    let mut fs = project_fs(true);
-    // The leaf sits far down the wire, so the body's own tail has somewhere
-    // visible to flow INTO when the flag comes off.
-    fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{ "format": 1, "entries": [ { "range": { "start": 0, "count": 2 }, "at": { "channel": 10 } } ] }"#,
-    )
-    .expect("leaf patch");
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 3,
-  "flow": "manual",
-  "entries": [
-    [[0, 2], -1, 0]
-  ]
-}"#,
-    )
-    .expect("manual body patch");
+    // The leaf sits far down the wire, so the body's far half has somewhere
+    // visible to follow on INTO when `off` comes off.
+    let mut fs = project_fs_with(&body(r#""far": { "off": true }"#), &leaf(10));
     let (mut engine, mut registry) = load(&fs);
     tick(&mut engine, &registry, SETTLE_TICKS);
     assert_eq!(
         published_lamps(&engine)[2],
         [0, 0, 0],
-        "wire lamp 2 is dark while the body is manual"
+        "wire lamp 2 is dark while the far half is off"
     );
 
-    // The SAME entries, `auto` — one field, no other edit.
-    fs.write_file_mut(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 2,
-  "entries": [
-    [[0, 2], -1, 0]
-  ]
-}"#,
-    )
-    .expect("auto body patch");
-    apply_asset_change(&mut engine, &mut registry, &fs, &["/body.patch.json"]);
+    fs.write_file_mut("/body.map2d.json".as_path(), body("").as_bytes())
+        .expect("take off away");
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/body.map2d.json"]);
     tick(&mut engine, &registry, SETTLE_TICKS);
 
     assert_eq!(
         published_lamps(&engine)[2..4],
         [flowed[2], flowed[3]],
-        "the body's tail flows again the moment the flag comes off"
+        "the far half follows on again the moment off comes off"
     );
 }
 
@@ -729,9 +593,10 @@ fn display_layout_answer(engine: &mut Engine, registry: &ProjectRegistry) -> Geo
     published_geometry(engine, registry).display_layout
 }
 
-/// A patch edit re-cuts the wire without touching any mapping — so the
-/// producers' own layout revisions do not move, and a client gating on
-/// `IfChanged` would keep drawing the old geometry over the new frame.
+/// A patching-only edit re-cuts the wire without touching any lamp's
+/// position — so the producers' own layout revisions do not move, and a
+/// client gating on `IfChanged` would keep drawing the old geometry over the
+/// new frame.
 #[test]
 fn re_patching_moves_the_display_layout_revision() {
     let mut fs = project_fs(true);
@@ -740,16 +605,16 @@ fn re_patching_moves_the_display_layout_revision() {
     let before = published_display_layout(&mut engine, &registry);
 
     fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 }, "reversed": true }
-  ]
-}"#,
+        "/leaf.map2d.json".as_path(),
+        map2d(
+            &[("leaf", LEAF_LAMPS)],
+            2,
+            r#""leaf": { "direction": "reverse" }"#,
+        )
+        .as_bytes(),
     )
     .expect("flip the leaf");
-    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.patch.json"]);
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.map2d.json"]);
     tick(&mut engine, &registry, 2);
 
     let after = published_display_layout(&mut engine, &registry);
@@ -769,7 +634,8 @@ fn re_patching_moves_the_display_layout_revision() {
 /// Trigger 3 of the geometry gate — the PLACEMENTS move. A client holding
 /// the wire's geometry at its revision hears `Unchanged` while nothing
 /// moves, and `Changed` — with the re-cut placements — the read after a
-/// patch edit, though no mapping (and so no producer's own layout) changed.
+/// patching-only edit, though no lamp moved (and so no producer's own
+/// layout changed).
 #[test]
 fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
     let mut fs = project_fs(true);
@@ -794,16 +660,16 @@ fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
     );
 
     fs.write_file_mut(
-        "/leaf.patch.json".as_path(),
-        br#"{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 }, "reversed": true }
-  ]
-}"#,
+        "/leaf.map2d.json".as_path(),
+        map2d(
+            &[("leaf", LEAF_LAMPS)],
+            2,
+            r#""leaf": { "direction": "reverse" }"#,
+        )
+        .as_bytes(),
     )
     .expect("flip the leaf");
-    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.patch.json"]);
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.map2d.json"]);
     tick(&mut engine, &registry, 2);
 
     let RevisionGateResult::Changed(after) = output_entries(&mut engine, &registry, known)
@@ -880,59 +746,16 @@ fn the_declared_link_budget_gates_the_published_layout() {
 #[test]
 fn the_header_total_gates_layouts_across_outputs() {
     // Three outputs on the same control bus, each carrying real content:
-    // since the scatter rule (D40) landed, an unpatched producer flows to
-    // the DEFAULT output only, so the extra outputs get theirs by explicit
-    // format-2 scatter — body split across the default and "B", leaf whole
-    // on "C". Three published frames, three same-sized layouts (two lamps
-    // each) in one header.
-    let fs = project_fs(false);
-    fs.write_file(
-        "/body.patch.json".as_path(),
-        br#"{
-  "format": 2,
-  "outputs": ["B"],
-  "entries": [
-    [[0, 2], -1, 0],
-    [[2, 2], 0, 0]
-  ]
-}
-"#,
-    )
-    .expect("scattered body patch");
-    fs.write_file(
-        "/leaf.patch.json".as_path(),
-        br#"{
-  "format": 2,
-  "outputs": ["C"],
-  "entries": [
-    [[0, 2], 0, 0]
-  ]
-}
-"#,
-    )
-    .expect("scattered leaf patch");
-    for name in ["body", "leaf"] {
-        // Re-point the fixtures at the patch docs (project_fs(false) wrote
-        // them unpatched).
-        let def = format!(
-            r#"{{
-  "kind": "Fixture",
-  "render_size": {{ "width": {lamps}, "height": 1 }},
-  "bindings": {{ "output": {{ "target": "bus:control.out" }} }},
-  "sampling": "direct",
-  "diagnostic_mode": "led_index",
-  "mapping": {{ "kind": "Map2d", "source": "{name}.map2d.json" }},
-  "patch": {{ "kind": "File", "source": "{name}.patch.json" }},
-  "color_order": "rgb",
-  "brightness": {brightness},
-  "gamma_correction": false
-}}"#,
-            lamps = if name == "body" { 4 } else { 2 },
-            brightness = if name == "body" { 1.0 } else { 0.25 },
-        );
-        fs.write_file(format!("/{name}.json").as_path(), def.as_bytes())
-            .expect("re-pointed fixture def");
-    }
+    // the body split across "1" and "B" (its far half overridden there), the
+    // leaf whole on "C". Three published frames, three same-sized layouts
+    // (two lamps each) in one header.
+    let fs = project_fs_with(
+        &body(
+            r#""far": { "output": { "set": "B" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } }"#,
+        ),
+        &map2d(&[("leaf", LEAF_LAMPS)], 0, "")
+            .replace(r#""output": { "set": "1" }"#, r#""output": { "set": "C" }"#),
+    );
     fs.write_file(
         "/module.json".as_path(),
         br#"{ "kind": "Module", "nodes": {

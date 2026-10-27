@@ -131,8 +131,8 @@ libm = "0.2"
 # depends only on the `lp-gfx` traits; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 # Unconditional for tests (the lib's copy is optional behind node-fixture):
-# small_dome_scatter derives its expectations through the mapping resolver,
-# and the gates-off clippy pass compiles tests with every node gate closed.
+# pattern_space reads format-6 maps through the mapping reader, and the
+# gates-off clippy pass compiles tests with every node gate closed.
 lpc-mapping = { path = "../lpc-mapping" }
 # Per-thread ambient revision so parallel engine tests that tick/stamp
 # revisions cannot race each other through the process-wide clock.

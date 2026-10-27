@@ -8,6 +8,10 @@
 //! same project was an `AmbiguousBusBinding` — two producers on one channel
 //! had no defined meaning.
 //!
+//! Since project format 12 each fixture's map2d (format 6) says where it
+//! starts; the projects here start each fixture where the one before it in
+//! the module ends, which is what the upgrade froze auto-flow into.
+//!
 //! ```bash
 //! cargo test -p lpc-engine --test output_fragments
 //! ```
@@ -59,12 +63,14 @@ fn project_fs(fixtures: &[(&str, u32, f32)]) -> LpFsMemory {
         "/output.json".as_path(),
         br#"{
   "kind": "Output",
+  "name": "1",
   "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "input": { "source": "bus:control.out" } }
 }"#,
     )
     .expect("output.json");
 
+    let mut start = 0;
     for (name, lamps, brightness) in fixtures {
         fs.write_file(
             format!("/{name}.json").as_path(),
@@ -90,17 +96,19 @@ fn project_fs(fixtures: &[(&str, u32, f32)]) -> LpFsMemory {
             format!("/{name}.map2d.json").as_path(),
             format!(
                 r#"{{
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [0.0, 0.0, {lamps}.0, 1.0],
-  "objects": [
-    {{ "name": "strip", "shape": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
+  "start": {{ "output": {{ "set": "1" }}, "port": {{ "set": 0 }}, "channel": {{ "set": {{ "lamps": {start} }} }} }},
+  "parts": [
+    {{ "id": "strip", "kind": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
   ]
 }}"#
             )
             .as_bytes(),
         )
         .expect("map2d");
+        start += lamps;
     }
     fs
 }
@@ -197,16 +205,17 @@ fn two_fixtures_on_one_channel_concatenate_into_one_buffer() {
     assert_eq!(
         output_status(&[("a_strip", 2, 1.0), ("b_strip", 3, 0.25)]),
         None,
-        "auto-flow can neither overlap nor gap, so a merged output is clean",
+        "starts end to end can neither overlap nor gap, so a merged output is clean",
     );
 }
 
-/// Placement is DETERMINISTIC and it follows the module's node order, not the
+/// Placement is DETERMINISTIC and it follows the fixtures' starts, not the
 /// order the files happen to be written in or any hash iteration. The two
 /// projects below differ only in which name carries which fixture, and the
-/// buffer follows the names.
+/// buffer follows the starts (here, the module's node order, as the upgrade
+/// froze it).
 #[test]
-fn fragment_order_follows_module_node_order() {
+fn fragment_order_follows_the_starts() {
     let a_first = published_samples(&[("a_strip", 2, 1.0), ("b_strip", 3, 0.25)]);
     let b_first = published_samples(&[("a_strip", 3, 0.25), ("b_strip", 2, 1.0)]);
 
