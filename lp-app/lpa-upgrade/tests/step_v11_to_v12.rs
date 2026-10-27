@@ -34,8 +34,8 @@ use lpc_mapping::{Bounds2d, Map2dDoc, fit_points, fit_scale, resolve};
 /// format 11), the step's files land every lamp where the live engine did,
 /// keep every lamp's position bit for bit, write the format-6 writer's own
 /// bytes, report exactly the files it changed, added and removed, and come
-/// out the same twice. The one project refused is quad-wire-oracle, whose
-/// grid its ports cut (hand-migrated in P4, lean Q70).
+/// out the same twice. None is refused: quad-wire-oracle, whose one grid its
+/// ports cut, was split by hand into a grid per port (M3 P4, lean Q70).
 #[test]
 fn every_repo_project_lands_every_lamp_where_the_engine_did() {
     let workspace = workspace_dir();
@@ -96,24 +96,18 @@ fn every_repo_project_lands_every_lamp_where_the_engine_did() {
         "the step moved lamps:\n{}",
         failures.join("\n")
     );
-    assert_eq!(
-        refused.len(),
-        1,
-        "only quad-wire-oracle is refused:\n{}",
-        refused.join("\n")
-    );
     assert!(
-        refused[0].starts_with("projects/test/quad-wire-oracle: "),
-        "{}",
-        refused[0]
+        refused.is_empty(),
+        "no repo project is refused:\n{}",
+        refused.join("\n")
     );
     assert!(migrated > 90, "only {migrated} projects were migrated");
 }
 
-/// The two goldens the engine recorded as refused (old-uid-sign's
-/// `module.json` carries a `uid` the engine's module reader rejects;
-/// fault-demo's shader runs out of fuel every frame) have no lamps to
-/// compare with. The step still migrates them, and lands every lamp where
+/// The golden the engine recorded as refused (fault-demo's shader runs out
+/// of fuel every frame; old-uid-sign's was re-recorded once its corpus input
+/// stopped carrying a module uid, docs/defects/2026-10-27-the-upgrade-corpus-
+/// loaded-only-its-manifest.md) has no lamps to compare with. The step still migrates them, and lands every lamp where
 /// the frozen landing says (the frozen landing being the engine's on every
 /// other project).
 #[test]
@@ -131,7 +125,7 @@ fn the_projects_the_engine_refused_land_as_the_frozen_landing_says() {
         checked.push(project);
     }
     eprintln!("checked against the frozen landing: {checked:?}");
-    assert_eq!(checked.len(), 2, "{checked:?}");
+    assert_eq!(checked, vec![String::from("projects/test/fault-demo")]);
 }
 
 // --- statements, on small projects ----------------------------------------------

@@ -68,11 +68,12 @@ fn the_frozen_landing_lands_every_lamp_where_the_engine_did() {
     assert!(compared > 90, "only {compared} projects were compared");
 }
 
-/// The only segment in the repo that does not land as one window on one
-/// port is quad-wire-oracle's 64-lamp grid, which its four 16-lamp ports
-/// cut into four.
+/// No segment in the repo is cut by a port boundary. The one there was,
+/// quad-wire-oracle's 64-lamp grid over four 16-lamp ports, was split by hand
+/// into four 8 × 2 grids, one per port (M3 P4, lean Q70); the cut refusal
+/// itself is tested on the old grid in `tests/refusals.rs`.
 #[test]
-fn the_only_cut_segment_is_quad_wire_oracles_grid() {
+fn no_repo_segment_is_cut_by_a_port_boundary() {
     let workspace = workspace_dir();
     let mut cuts = Vec::new();
     for (project, golden) in goldens(&workspace) {
@@ -98,13 +99,7 @@ fn the_only_cut_segment_is_quad_wire_oracles_grid() {
             }
         }
     }
-    assert_eq!(
-        cuts,
-        vec![String::from(
-            "projects/test/quad-wire-oracle /fixture.json panel: a port boundary falls inside \
-             it (4 pieces)"
-        )]
-    );
+    assert_eq!(cuts, Vec::<String>::new());
 }
 
 // --- the golden side --------------------------------------------------------
