@@ -1,22 +1,27 @@
 //! The frozen format-11 landing agrees with the live engine, lamp for lamp,
-//! on every project in the repo.
+//! on every upgrade-corpus project carried by the chain to format 11.
 //!
 //! The "before" side is the landing goldens under `tests/landing/`, recorded
-//! by `lpc-engine`'s `upgrade_landing` test from the live engine at project
-//! format 11. [`lpa_upgrade::landing`] computes the same answer from the
-//! files alone — the arithmetic the v11→v12 step is built on. The two share
-//! no code, so a bug in the frozen copy cannot hide behind itself.
+//! from the live engine at project format 11. [`lpa_upgrade::landing`]
+//! computes the same answer from the files alone — the arithmetic the
+//! v11→v12 step is built on. The two share no code, so a bug in the frozen
+//! copy cannot hide behind itself. Until the bump this walked every project
+//! in the repo; the repo is at format 12 now, so it walks the corpus, each
+//! project carried by the chain up to 11 (stopping before `v11_to_v12`).
 //!
 //! ```bash
 //! cargo test -p lpa-upgrade --test frozen_landing
 //! ```
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
-use lpa_upgrade::{FixtureLayout, Landing, ProjectFiles, SegmentSource, landing};
+use lpa_upgrade::{FixtureLayout, Landing, SegmentSource, landing};
 
-/// For every project with a landing golden whose files are at format 11,
+mod common;
+
+use common::{corpus_at_11, workspace_dir};
+
+/// For every corpus project with a landing golden, carried to format 11,
 /// the frozen landing lands every lamp exactly where the engine did.
 #[test]
 fn the_frozen_landing_lands_every_lamp_where_the_engine_did() {
@@ -24,12 +29,13 @@ fn the_frozen_landing_lands_every_lamp_where_the_engine_did() {
     let mut compared = 0usize;
     let mut skipped = Vec::new();
     let mut failures = Vec::new();
-    for (project, golden) in goldens(&workspace) {
+    let corpus = corpus_at_11(&workspace);
+    let total = corpus.len();
+    for (project, files, golden) in corpus {
         if let Some(why) = golden.refused {
             skipped.push(format!("{project}: the engine refused it ({why})"));
             continue;
         }
-        let files = read_project(&workspace.join(&project));
         let landed = match landing(&files) {
             Ok(landed) => landed,
             Err(error) => {
@@ -65,22 +71,27 @@ fn the_frozen_landing_lands_every_lamp_where_the_engine_did() {
         "the frozen landing disagrees with the engine:\n{}",
         failures.join("\n")
     );
-    assert!(compared > 90, "only {compared} projects were compared");
+    assert_eq!(
+        compared + skipped.iter().filter(|s| s.contains("refused")).count(),
+        total,
+        "every corpus golden is compared or refused"
+    );
+    assert!(compared >= 25, "only {compared} projects were compared");
 }
 
-/// No segment in the repo is cut by a port boundary. The one there was,
-/// quad-wire-oracle's 64-lamp grid over four 16-lamp ports, was split by hand
-/// into four 8 × 2 grids, one per port (M3 P4, lean Q70); the cut refusal
-/// itself is tested on the old grid in `tests/refusals.rs`.
+/// No corpus segment is cut by a port boundary or a row. The one cut the
+/// repo had, quad-wire-oracle's 64-lamp grid over four 16-lamp ports, was
+/// split by hand into four 8 × 2 grids, one per port (M3 P4, lean Q70); the
+/// cut refusal is tested on the old grid in `tests/refusals.rs`.
 #[test]
-fn no_repo_segment_is_cut_by_a_port_boundary() {
+fn no_corpus_segment_is_cut() {
     let workspace = workspace_dir();
     let mut cuts = Vec::new();
-    for (project, golden) in goldens(&workspace) {
+    for (project, files, golden) in corpus_at_11(&workspace) {
         if golden.refused.is_some() {
             continue;
         }
-        let Ok(landed) = landing(&read_project(&workspace.join(&project))) else {
+        let Ok(landed) = landing(&files) else {
             continue;
         };
         for fixture in &landed.fixtures {
@@ -102,77 +113,8 @@ fn no_repo_segment_is_cut_by_a_port_boundary() {
     assert_eq!(cuts, Vec::<String>::new());
 }
 
-// --- the golden side --------------------------------------------------------
-
 /// `(output, port, channel)` of one lamp on one wire.
-type Place = (String, u32, u32);
-
-/// One recorded golden, read lamp by lamp.
-struct Golden {
-    refused: Option<String>,
-    /// Fixture node → each lamp's places.
-    fixtures: BTreeMap<String, Vec<Vec<Place>>>,
-}
-
-/// Every golden under `tests/landing/`, with the project path it mirrors.
-fn goldens(workspace: &Path) -> Vec<(String, Golden)> {
-    let root = workspace.join("lp-app/lpa-upgrade/tests/landing");
-    let mut paths = Vec::new();
-    collect_files(&root, &mut paths);
-    paths.sort();
-    let mut out = Vec::new();
-    for path in paths {
-        let Some(project) = path
-            .strip_prefix(&root)
-            .ok()
-            .and_then(|relative| relative.to_str())
-            .and_then(|relative| relative.strip_suffix(".landing.json"))
-        else {
-            continue;
-        };
-        let text = std::fs::read_to_string(&path).expect("golden");
-        out.push((project.replace('\\', "/"), read_golden(&text)));
-    }
-    assert!(
-        !out.is_empty(),
-        "no landing goldens under {}",
-        root.display()
-    );
-    out
-}
-
-fn read_golden(text: &str) -> Golden {
-    let value: serde_json::Value = serde_json::from_str(text).expect("golden parses");
-    let refused = value
-        .get("refused")
-        .and_then(|why| why.as_str())
-        .map(String::from);
-    let mut fixtures = BTreeMap::new();
-    for (node, fixture) in value["fixtures"].as_object().expect("fixtures") {
-        let lamps = fixture["lamps"].as_u64().expect("lamps") as usize;
-        let mut places: Vec<Vec<Place>> = vec![Vec::new(); lamps];
-        for run in fixture["runs"].as_array().expect("runs") {
-            let first = run[0].as_i64().expect("first");
-            let count = run[1].as_i64().expect("count");
-            let output = run[2].as_str().expect("output");
-            let port: u32 = run[3].as_str().expect("port").parse().expect("port key");
-            let channel = run[4].as_i64().expect("channel");
-            let step = run[5].as_i64().expect("step");
-            for k in 0..count {
-                places[(first + k) as usize].push((
-                    String::from(output),
-                    port,
-                    (channel + step * k) as u32,
-                ));
-            }
-        }
-        for lamp in &mut places {
-            lamp.sort();
-        }
-        fixtures.insert(node.clone(), places);
-    }
-    Golden { refused, fixtures }
-}
+type Place = common::Place;
 
 // --- the frozen side --------------------------------------------------------
 
@@ -281,46 +223,4 @@ fn source_name(source: &SegmentSource) -> String {
         }
         SegmentSource::PointList { key, .. } => format!("path {key}"),
     }
-}
-
-// --- helpers ----------------------------------------------------------------
-
-/// Every file of the project at `dir`, keyed by its path in the project.
-fn read_project(dir: &Path) -> ProjectFiles {
-    let mut paths = Vec::new();
-    collect_files(dir, &mut paths);
-    paths
-        .into_iter()
-        .map(|path| {
-            let key = path
-                .strip_prefix(dir)
-                .expect("under the project")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let bytes = std::fs::read(&path).expect("project file");
-            (key, bytes)
-        })
-        .collect()
-}
-
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files(&path, out);
-        } else {
-            out.push(path);
-        }
-    }
-}
-
-fn workspace_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("lpa-upgrade lives two levels under the workspace root")
-        .to_path_buf()
 }

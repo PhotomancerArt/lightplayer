@@ -1,5 +1,11 @@
 //! Reading projects and the landing goldens from the workspace, for the
 //! tests that compare against what the live engine recorded (M3 P1).
+//!
+//! The repo's own projects are at project format 12 since the bump (M3
+//! P4), so the format-11 side of every comparison here is the upgrade
+//! corpus: each corpus project carried by the chain to format 11
+//! ([`corpus_at_11`]), against the golden the live engine recorded from it
+//! at 11.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +21,37 @@ pub struct Golden {
     pub refused: Option<String>,
     /// Fixture node → each lamp's places.
     pub fixtures: BTreeMap<String, Vec<Vec<Place>>>,
+}
+
+/// The landing goldens of the upgrade corpus, each with its project's files
+/// carried by the chain to format 11 (the format the golden was recorded
+/// at): `tests/corpus/v<N>/_expected/<p>`'s golden goes with
+/// `tests/corpus/v<N>/<p>` upgraded to 11 (a v11 input as it is).
+pub fn corpus_at_11(workspace: &Path) -> Vec<(String, ProjectFiles, Golden)> {
+    const PREFIX: &str = "lp-app/lpa-upgrade/tests/corpus/";
+    let mut out = Vec::new();
+    for (project, golden) in goldens(workspace) {
+        let Some(rest) = project.strip_prefix(PREFIX) else {
+            continue;
+        };
+        let (version, name) = rest
+            .split_once("/_expected/")
+            .unwrap_or_else(|| panic!("{project}: a corpus golden names an _expected project"));
+        let input = workspace.join(PREFIX).join(version).join(name);
+        let mut files = read_project(&input);
+        assert!(
+            files.manifest().is_some(),
+            "{project}: its corpus input {} is missing",
+            input.display()
+        );
+        if version != "v11" {
+            lpa_upgrade::upgrade_to(&mut files, 11)
+                .unwrap_or_else(|error| panic!("{project}: carrying it to 11: {error}"));
+        }
+        out.push((format!("{PREFIX}{version}/{name}"), files, golden));
+    }
+    assert!(!out.is_empty(), "no corpus goldens");
+    out
 }
 
 /// Every golden under `tests/landing/`, with the project path it mirrors.

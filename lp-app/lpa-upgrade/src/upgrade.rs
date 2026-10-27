@@ -32,21 +32,34 @@ pub fn upgrade_steps() -> &'static [UpgradeStep] {
 /// they were. A caller that writes a half-migrated package back to disk has
 /// destroyed the only copy that still loaded *somewhere*.
 pub fn upgrade_to_current(files: &mut ProjectFiles) -> Result<UpgradeReport, UpgradeError> {
+    upgrade_to(files, PROJECT_FORMAT_VERSION)
+}
+
+/// Migrate `files` in place to format `target`, which may be older than
+/// [`PROJECT_FORMAT_VERSION`]: the chain runs from the project's format and
+/// stops after the step that writes `target`.
+///
+/// The same contract as [`upgrade_to_current`] (all-or-nothing, only
+/// changed files rewritten); a project already at or past `target`, or a
+/// `target` the chain does not reach, is refused with the classifier's
+/// verdict and nothing touched.
+pub fn upgrade_to(files: &mut ProjectFiles, target: u32) -> Result<UpgradeReport, UpgradeError> {
     let class = classify(files);
     let FormatClass::Upgradable { found } = class else {
         return Err(UpgradeError::NotUpgradable(class));
     };
 
-    // A chain that does not actually reach the current format would
-    // otherwise report a cheerful success over an unchanged project. That is
-    // exactly what a format bump landed without its step looks like, so it
-    // fails here as well as in the chain-tip test.
-    let chain: Vec<&UpgradeStep> = STEPS.iter().filter(|step| step.from >= found).collect();
-    let reaches_current = chain.first().is_some_and(|step| step.from == found)
-        && chain
-            .last()
-            .is_some_and(|step| step.to == PROJECT_FORMAT_VERSION);
-    if !reaches_current {
+    // A chain that does not actually reach the target would otherwise
+    // report a cheerful success over an unchanged project. That is exactly
+    // what a format bump landed without its step looks like, so it fails
+    // here as well as in the chain-tip test.
+    let chain: Vec<&UpgradeStep> = STEPS
+        .iter()
+        .filter(|step| step.from >= found && step.to <= target)
+        .collect();
+    let reaches_target = chain.first().is_some_and(|step| step.from == found)
+        && chain.last().is_some_and(|step| step.to == target);
+    if !reaches_target {
         return Err(UpgradeError::NotUpgradable(class));
     }
 
@@ -128,6 +141,32 @@ mod tests {
             upgrade_to_current(&mut files),
             Err(UpgradeError::NotUpgradable(FormatClass::Current))
         );
+    }
+
+    /// `upgrade_to` stops after the step that writes its target, and
+    /// refuses a target the project is already at.
+    #[test]
+    fn upgrade_to_stops_at_its_target() {
+        let before: ProjectFiles = [
+            ("project.json", br#"{"format": 9}"#.to_vec()),
+            ("module.json", br#"{"kind":"Module","nodes":{}}"#.to_vec()),
+        ]
+        .into_iter()
+        .collect();
+        let mut files = before.clone();
+        let report = upgrade_to(&mut files, 10).expect("9 -> 10");
+        assert_eq!((report.from, report.to), (9, 10));
+        let manifest = String::from_utf8(files.manifest().expect("manifest").to_vec()).unwrap();
+        assert!(manifest.contains("\"format\": 10"), "{manifest}");
+
+        let at_ten = files.clone();
+        assert!(upgrade_to(&mut files, 10).is_err(), "already at 10");
+        assert_eq!(files, at_ten);
+        assert!(
+            upgrade_to(&mut files, PROJECT_FORMAT_VERSION + 1).is_err(),
+            "past the chain's tip"
+        );
+        assert_eq!(files, at_ten);
     }
 
     #[test]

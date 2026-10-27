@@ -1,31 +1,31 @@
-//! Where every lamp lands today: the landing goldens the format-12 upgrade
-//! is proven against.
+//! The format-12 upgrade moved no lamp: every project's lamps land, at
+//! project format 12, exactly where the live engine landed them at 11 (A6).
 //!
-//! Project format 12 moves every mapping onto the patcher, and the proof
-//! that no lamp moved needs a "before" that shares no code with the upgrade
-//! step. This file is that "before": the live engine at project format 11
-//! loads every project in the repo, renders it, and reads where each
-//! fixture lamp landed — the output's own published fragments (the plan the
-//! output renders from), cut into ports by the slicing the wires register
+//! Project format 12 moved every mapping onto the patcher. The "before"
+//! shares no code with the upgrade step: the live engine at project format
+//! 11 loaded every project in the repo (and every upgrade-corpus project),
+//! rendered it, and recorded where each fixture lamp landed — the output's
+//! own published fragments (the plan the output renders from), cut into
+//! ports by the slicing the wires register
 //! ([`EngineServices::planned_wire_slices_for_landing`]). Nothing here reads
 //! a map2d or a patch document.
 //!
-//! The answer is committed as one golden per project under
-//! `lp-app/lpa-upgrade/tests/landing/<project path>.landing.json`, recorded
-//! before the bump and never re-blessed: a golden is replaced only by
-//! deleting it by hand and saying why in the PR.
+//! Those answers are the landing goldens, one per project, under
+//! `lp-app/lpa-upgrade/tests/landing/<project path>.landing.json`. They were
+//! recorded at format 11 and are never re-blessed: the recorder was deleted
+//! with the bump (mapping rebuild M3 P4), and the goldens stay as the
+//! record. This test walks the goldens, not the tree: each golden's project
+//! must exist, load at format 12 through the engine's format-6 path, and
+//! land every lamp exactly where its golden says (output node, port key,
+//! channel; dark stays dark). A project deleted later takes its golden with
+//! it, and the PR says why; a project created after the bump has no
+//! "before" and needs none.
 //!
 //! ```bash
-//! cargo test -p lpc-engine --test upgrade_landing                       # check
-//! LP_LANDING_RECORD=1 cargo test -p lpc-engine --test upgrade_landing   # record missing goldens
+//! cargo test -p lpc-engine --test upgrade_landing
 //! ```
-//!
-//! Until the bump a project with no golden is listed on stderr, not failed,
-//! so a project added to `main` before it does not block anyone; the bump
-//! records the missing ones first.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -38,19 +38,6 @@ use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest
 use lpc_model::{FixtureState, NodeDef, NodeDefState, NodeId, TreePath};
 use lpfs::LpFsStd;
 
-/// Where the project directories live, relative to the workspace root.
-const PROJECT_ROOTS: [&str; 5] = [
-    "catalog",
-    "projects",
-    "lab/mapping/projects",
-    "lp-fw/fw-browser/www",
-    "lp-app/lpa-studio-core/tests/fixtures",
-];
-
-/// The upgrade corpus: only each version's `_expected/` projects (the chain's
-/// output, at the current format) are in the set.
-const CORPUS_ROOT: &str = "lp-app/lpa-upgrade/tests/corpus";
-
 /// Where the goldens live, relative to the workspace root.
 const GOLDEN_ROOT: &str = "lp-app/lpa-upgrade/tests/landing";
 
@@ -59,79 +46,49 @@ const GOLDEN_ROOT: &str = "lp-app/lpa-upgrade/tests/landing";
 /// by the third.
 const TICKS: usize = 4;
 
-/// The environment variable that turns recording on.
-const RECORD_ENV: &str = "LP_LANDING_RECORD";
-
-/// The engine lands every lamp of every recorded project as its golden says
-/// (and this branch records every project in the repo).
+/// Every project a golden names exists, is at the current project format,
+/// and lands every lamp where the live engine landed it at format 11:
+/// zero differences, lamp for lamp.
 #[test]
-fn the_engine_lands_every_lamp_as_its_golden_says() {
+fn every_golden_project_lands_every_lamp_where_it_did_at_format_11() {
     let workspace = workspace_dir();
-    let recording = std::env::var_os(RECORD_ENV).is_some();
-    let recorded_at = if recording {
-        git_head(&workspace)
-    } else {
-        String::new()
-    };
-
     let mut failures = Vec::new();
-    let mut missing = Vec::new();
     let mut totals = Totals::default();
-    for project in project_dirs(&workspace) {
-        let relative = relative_path(&workspace, &project);
+    for (relative, golden) in goldens(&workspace) {
+        let project = workspace.join(&relative);
+        assert!(
+            project.join("project.json").is_file(),
+            "{relative}: its landing golden names a project that is not there. A project \
+             deleted after the bump takes its golden with it, and the PR says why"
+        );
+        let format = project_format(&project);
+        if format != u64::from(lpc_model::PROJECT_FORMAT_VERSION) {
+            failures.push(format!(
+                "{relative}: at project format {format}, not {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            ));
+            continue;
+        }
+        let recorded = ProjectLanding::from_golden(&golden)
+            .unwrap_or_else(|why| panic!("{relative}: unreadable golden: {why}"));
         let landing = project_landing(&project);
-        totals.add(&relative, &landing);
-        let golden = golden_path(&workspace, &relative);
-        match std::fs::read_to_string(&golden) {
-            Ok(text) => {
-                let recorded = ProjectLanding::from_golden(&text)
-                    .unwrap_or_else(|why| panic!("{}: unreadable golden: {why}", golden.display()));
-                if let Some(difference) = recorded.first_difference(&landing) {
-                    failures.push(format!("{relative}: {difference}"));
-                }
-            }
-            Err(_) if recording => {
-                let text = landing.to_golden(&recorded_at);
-                match record_golden(&golden, &text) {
-                    Recorded::Written => eprintln!("recorded {}", golden.display()),
-                    Recorded::AlreadyThere => {
-                        panic!("{}: appeared while recording", golden.display())
-                    }
-                }
-            }
-            Err(_) => missing.push(relative),
+        totals.add(&relative, &recorded, &landing);
+        if let Some(difference) = recorded.first_difference(&landing) {
+            failures.push(format!("{relative}: {difference}"));
         }
     }
 
     eprintln!("{totals}");
-    for relative in &missing {
-        eprintln!("no landing golden yet: {relative} (record with {RECORD_ENV}=1)");
-    }
     assert!(
         failures.is_empty(),
-        "the engine no longer lands these projects' lamps where their goldens say:\n{}",
+        "these projects' lamps no longer land where they did at format 11:\n{}",
         failures.join("\n")
     );
-}
-
-/// Recording never overwrites a golden.
-#[test]
-fn recording_never_overwrites_a_golden() {
-    let dir = std::env::temp_dir().join(format!(
-        "upgrade-landing-never-overwrites-{}",
-        std::process::id()
-    ));
-    let path = dir.join("nested/project.landing.json");
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert_eq!(record_golden(&path, "first\n"), Recorded::Written);
-    assert_eq!(record_golden(&path, "second\n"), Recorded::AlreadyThere);
-    assert_eq!(
-        std::fs::read_to_string(&path).expect("golden"),
-        "first\n",
-        "the second recording left the first golden alone"
+    assert!(
+        totals.projects > 100,
+        "only {} goldens were compared",
+        totals.projects
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// small-dome's band-c copy 0 starts at port 4, lamp 119 of output "1",
@@ -293,12 +250,13 @@ fn radiance_dome_lands_every_panel_and_nothing_on_output_10() {
     assert_eq!(dome.lands(rotated + 53), vec![at("/out_7.json", 12, 0)]);
 }
 
-/// quad-wire-oracle's one 64-lamp grid runs across its four 16-lamp ports:
-/// the one segment in the repo a port boundary cuts.
+/// quad-wire-oracle's 64 lamps run across its four 16-lamp ports, one
+/// 8 × 2 grid per port since it was split by hand for format 12 (it was one
+/// 8 × 8 grid the ports cut).
 ///
-/// From its `output.json` (ports 16, 16, 16, rest) and one grid of 8 × 8.
+/// From its `output.json` (ports 16, 16, 16, rest).
 #[test]
-fn quad_wire_oracle_grid_runs_across_four_ports() {
+fn quad_wire_oracle_lands_sixteen_lamps_per_port() {
     let landing = repo_landing("projects/test/quad-wire-oracle");
     let (_, fixture) = landing
         .fixtures
@@ -314,7 +272,7 @@ fn quad_wire_oracle_grid_runs_across_four_ports() {
     }
 }
 
-// --- the recorder -----------------------------------------------------------
+// --- the live landing ---------------------------------------------------------
 
 /// Where every fixture lamp of one project landed, keyed by the fixture's
 /// node path (its definition file, from the project root).
@@ -592,70 +550,6 @@ impl FixtureLanding {
     fn lands(&self, lamp: u32) -> Vec<Landing> {
         self.landings[lamp as usize].clone()
     }
-
-    /// The landings as runs: `count` consecutive fixture lamps landing at
-    /// channels `first, first + step, …` of one port. Canonical whatever
-    /// order the fragments came in: every `(lamp, landing)` pair sorted by
-    /// output, port and lamp, merged greedily, then ordered by first lamp.
-    fn runs(&self) -> Vec<Run> {
-        let mut pairs: Vec<(&Landing, u32)> = self
-            .landings
-            .iter()
-            .enumerate()
-            .flat_map(|(lamp, lands)| lands.iter().map(move |land| (land, lamp as u32)))
-            .collect();
-        pairs.sort_by(|a, b| {
-            (&a.0.output, a.0.port, a.1, a.0.channel).cmp(&(
-                &b.0.output,
-                b.0.port,
-                b.1,
-                b.0.channel,
-            ))
-        });
-        let mut runs: Vec<Run> = Vec::new();
-        for (land, lamp) in pairs {
-            if let Some(run) = runs.last_mut()
-                && run.output == land.output
-                && run.port == land.port
-                && run.first + run.count == lamp
-            {
-                let next = i64::from(run.channel) + i64::from(run.step) * i64::from(run.count);
-                let step = i64::from(land.channel) - i64::from(run.channel);
-                if run.count == 1 && (step == 3 || step == -3) {
-                    run.step = step as i32;
-                    run.count += 1;
-                    continue;
-                }
-                if run.count > 1 && next == i64::from(land.channel) {
-                    run.count += 1;
-                    continue;
-                }
-            }
-            runs.push(Run {
-                first: lamp,
-                count: 1,
-                output: land.output.clone(),
-                port: land.port,
-                channel: land.channel,
-                step: 3,
-            });
-        }
-        runs.sort_by(|a, b| {
-            (a.first, &a.output, a.port, a.channel).cmp(&(b.first, &b.output, b.port, b.channel))
-        });
-        runs
-    }
-}
-
-/// One golden run.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Run {
-    first: u32,
-    count: u32,
-    output: String,
-    port: u32,
-    channel: u32,
-    step: i32,
 }
 
 impl ProjectLanding {
@@ -663,53 +557,6 @@ impl ProjectLanding {
         self.fixtures
             .get(path)
             .unwrap_or_else(|| panic!("no fixture {path}; have {:?}", self.fixtures.keys()))
-    }
-
-    /// The golden's text: keys sorted, one run per line, so a diff reads.
-    fn to_golden(&self, recorded_at: &str) -> String {
-        let mut text = String::from("{\n");
-        let _ = writeln!(text, "  \"recorded_at\": {},", json_string(recorded_at));
-        let _ = write!(text, "  \"project_format\": {}", self.project_format);
-        if let Some(why) = &self.refused {
-            let _ = write!(text, ",\n  \"refused\": {}", json_string(why));
-        }
-        text.push_str(",\n  \"fixtures\": {");
-        for (index, (path, fixture)) in self.fixtures.iter().enumerate() {
-            text.push_str(if index == 0 { "\n" } else { ",\n" });
-            let _ = writeln!(text, "    {}: {{", json_string(path));
-            let _ = writeln!(text, "      \"lamps\": {},", fixture.lamps);
-            text.push_str("      \"runs\": [");
-            for (index, run) in fixture.runs().iter().enumerate() {
-                text.push_str(if index == 0 { "\n" } else { ",\n" });
-                let _ = write!(
-                    text,
-                    "        [{}, {}, {}, {}, {}, {}]",
-                    run.first,
-                    run.count,
-                    json_string(&run.output),
-                    json_string(&run.port.to_string()),
-                    run.channel,
-                    run.step
-                );
-            }
-            text.push_str(if fixture.runs().is_empty() {
-                "],\n"
-            } else {
-                "\n      ],\n"
-            });
-            text.push_str("      \"dark\": [");
-            for (index, (first, count)) in fixture.dark.iter().enumerate() {
-                text.push_str(if index == 0 { "" } else { ", " });
-                let _ = write!(text, "[{first}, {count}]");
-            }
-            text.push_str("]\n    }");
-        }
-        text.push_str(if self.fixtures.is_empty() {
-            "}\n}\n"
-        } else {
-            "\n  }\n}\n"
-        });
-        text
     }
 
     /// Read a golden back into lamp-by-lamp landings.
@@ -822,24 +669,7 @@ impl ProjectLanding {
     }
 }
 
-/// Write `text` to `path` unless a golden is already there.
-fn record_golden(path: &Path, text: &str) -> Recorded {
-    if path.exists() {
-        return Recorded::AlreadyThere;
-    }
-    std::fs::create_dir_all(path.parent().expect("a golden has a directory"))
-        .expect("create the golden's directory");
-    std::fs::write(path, text).expect("write the golden");
-    Recorded::Written
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Recorded {
-    Written,
-    AlreadyThere,
-}
-
-/// Totals over every project, for the PR.
+/// Totals over every golden compared, for the PR.
 #[derive(Default)]
 struct Totals {
     projects: usize,
@@ -847,22 +677,34 @@ struct Totals {
     fixtures: usize,
     lamps: u64,
     dark: u64,
+    differences: usize,
 }
 
 impl Totals {
-    fn add(&mut self, relative: &str, landing: &ProjectLanding) {
+    fn add(&mut self, relative: &str, recorded: &ProjectLanding, live: &ProjectLanding) {
         self.projects += 1;
-        if let Some(why) = &landing.refused {
+        if let Some(why) = &live.refused {
             self.refused.push(format!("{relative}: {why}"));
         }
-        self.fixtures += landing.fixtures.len();
-        for fixture in landing.fixtures.values() {
+        self.fixtures += recorded.fixtures.len();
+        for (path, fixture) in &recorded.fixtures {
             self.lamps += u64::from(fixture.lamps);
             self.dark += fixture
                 .dark
                 .iter()
                 .map(|(_, count)| u64::from(*count))
                 .sum::<u64>();
+            let Some(other) = live.fixtures.get(path) else {
+                self.differences += fixture.landings.len();
+                continue;
+            };
+            self.differences += fixture
+                .landings
+                .iter()
+                .zip(&other.landings)
+                .filter(|(was, is)| was != is)
+                .count();
+            self.differences += fixture.landings.len().abs_diff(other.landings.len());
         }
     }
 }
@@ -871,12 +713,15 @@ impl std::fmt::Display for Totals {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "landing: {} projects, {} fixtures, {} lamps, {} dark, {} refused",
+            "landing at format {}: {} projects, {} fixtures, {} lamps compared, {} dark, \
+             {} refused as at format 11, {} lamps landing differently",
+            lpc_model::PROJECT_FORMAT_VERSION,
             self.projects,
             self.fixtures,
             self.lamps,
             self.dark,
-            self.refused.len()
+            self.refused.len(),
+            self.differences
         )?;
         for refused in &self.refused {
             write!(f, "\n  refused {refused}")?;
@@ -892,103 +737,66 @@ fn repo_landing(relative: &str) -> ProjectLanding {
     project_landing(&workspace_dir().join(relative))
 }
 
-/// The index of the map2d object whose id is `id`, in radiance-dome's map.
+/// The index of the panel whose id is `id` among radiance-dome's parts:
+/// each top-level part is a 5-way repeat holding one panel (format 6 keeps
+/// today's object order, the repeat holding the object's id).
 fn object_index(id: &str) -> u32 {
     let text = std::fs::read_to_string(
         workspace_dir().join("lab/mapping/projects/radiance-dome/dome.map2d.json"),
     )
     .expect("radiance map2d");
     let value: serde_json::Value = serde_json::from_str(&text).expect("radiance map2d parses");
-    value["objects"]
+    value["parts"]
         .as_array()
-        .expect("objects")
+        .expect("parts")
         .iter()
-        .position(|object| object["id"] == id)
-        .unwrap_or_else(|| panic!("no object {id}")) as u32
+        .position(|part| part["kind"]["repeat"]["part"]["id"] == id)
+        .unwrap_or_else(|| panic!("no panel {id}")) as u32
 }
 
-/// Every project directory in the set, sorted.
-fn project_dirs(workspace: &Path) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    for root in PROJECT_ROOTS {
-        collect_projects(&workspace.join(root), &mut dirs);
-    }
-    let corpus = workspace.join(CORPUS_ROOT);
-    for version in read_dir_sorted(&corpus) {
-        let expected = version.join("_expected");
-        for project in read_dir_sorted(&expected) {
-            if project.join("project.json").is_file() {
-                dirs.push(project);
-            }
-        }
-    }
-    dirs.sort();
-    dirs
+/// Every landing golden, keyed by the project path it names (from the
+/// workspace root), with its text; sorted.
+fn goldens(workspace: &Path) -> Vec<(String, String)> {
+    let root = workspace.join(GOLDEN_ROOT);
+    let mut files = Vec::new();
+    collect_goldens(&root, &mut files);
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let relative = path
+                .strip_prefix(&root)
+                .expect("under the golden root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let project = relative
+                .strip_suffix(".landing.json")
+                .unwrap_or_else(|| panic!("{relative}: not a landing golden"))
+                .to_string();
+            let text = std::fs::read_to_string(&path).expect("golden");
+            (project, text)
+        })
+        .collect()
 }
 
-fn collect_projects(dir: &Path, out: &mut Vec<PathBuf>) {
-    if dir.join("project.json").is_file() {
-        out.push(dir.to_path_buf());
-        return;
-    }
-    for child in read_dir_sorted(dir) {
-        let name = child
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if name.starts_with('.') || name == "node_modules" || name == "target" {
-            continue;
-        }
-        collect_projects(&child, out);
-    }
-}
-
-fn read_dir_sorted(dir: &Path) -> Vec<PathBuf> {
+fn collect_goldens(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+        return;
     };
-    let mut children: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    children.sort();
-    children
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_goldens(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
 }
 
 fn project_format(project: &Path) -> u64 {
     let text = std::fs::read_to_string(project.join("project.json")).expect("project.json");
     let value: serde_json::Value = serde_json::from_str(&text).expect("project.json parses");
     value["format"].as_u64().expect("project.json has a format")
-}
-
-fn golden_path(workspace: &Path, relative: &str) -> PathBuf {
-    workspace
-        .join(GOLDEN_ROOT)
-        .join(format!("{relative}.landing.json"))
-}
-
-fn relative_path(workspace: &Path, project: &Path) -> String {
-    project
-        .strip_prefix(workspace)
-        .expect("projects live under the workspace")
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-fn git_head(workspace: &Path) -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(workspace)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_else(|| String::from("unknown"))
-}
-
-fn json_string(text: &str) -> String {
-    serde_json::to_string(text).expect("a string serializes")
 }
 
 fn workspace_dir() -> PathBuf {

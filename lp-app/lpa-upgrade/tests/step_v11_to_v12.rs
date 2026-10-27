@@ -4,7 +4,10 @@
 //! arithmetic.
 //!
 //! "Before" is the live engine's landing goldens (`tests/landing/`, M3 P1)
-//! for every project in the repo, and the frozen landing
+//! for every upgrade-corpus project carried to format 11 (the repo's own
+//! projects were walked here until the bump; they are at 12 now, and
+//! `lpc-engine`'s `upgrade_landing` holds them to their goldens), and the
+//! frozen landing
 //! ([`lpa_upgrade::landing`], itself proved against those goldens) for the
 //! synthetic cases. "After" is the step's files: each fixture's map2d read
 //! by `map2d6::read`, rendered, and patched against the project's named
@@ -19,7 +22,7 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{Place, goldens, read_project, workspace_dir};
+use common::{Place, corpus_at_11, workspace_dir};
 use lpa_upgrade::{
     FixtureLayout, Landing, ProjectFiles, ProjectLanding, landing, upgrade_to_current,
 };
@@ -28,30 +31,26 @@ use lpc_mapping::part::render;
 use lpc_mapping::patching::{OutputName, OutputPorts, Port, PortKey, Problem, patch_mapping};
 use lpc_mapping::{Bounds2d, Map2dDoc, fit_points, fit_scale, resolve};
 
-// --- the gate: every project in the repo --------------------------------------
+// --- the gate: every corpus project at format 11 -------------------------------
 
-/// For every project with a landing golden (every project in the repo at
-/// format 11), the step's files land every lamp where the live engine did,
+/// For every upgrade-corpus project with a landing golden, carried to
+/// format 11, the step's files land every lamp where the live engine did,
 /// keep every lamp's position bit for bit, write the format-6 writer's own
 /// bytes, report exactly the files it changed, added and removed, and come
-/// out the same twice. None is refused: quad-wire-oracle, whose one grid its
-/// ports cut, was split by hand into a grid per port (M3 P4, lean Q70).
+/// out the same twice. None is refused (the one repo project a port cut,
+/// quad-wire-oracle, was split by hand, M3 P4, lean Q70; its old form is a
+/// refusal statement in `tests/refusals.rs`). A golden the engine recorded
+/// as a refusal has no lamps to compare with: its project lands where the
+/// frozen landing says (the frozen landing being the engine's everywhere
+/// else).
 #[test]
-fn every_repo_project_lands_every_lamp_where_the_engine_did() {
+fn every_corpus_project_lands_every_lamp_where_the_engine_did() {
     let workspace = workspace_dir();
     let mut migrated = 0usize;
-    let mut skipped = Vec::new();
     let mut refused = Vec::new();
     let mut failures = Vec::new();
     let mut summaries = Vec::new();
-    for (project, golden) in goldens(&workspace) {
-        if let Some(why) = golden.refused {
-            skipped.push(format!(
-                "{project}: the engine refused it at format 11 ({why})"
-            ));
-            continue;
-        }
-        let before = read_project(&workspace.join(&project));
+    for (project, before, golden) in corpus_at_11(&workspace) {
         let mut after = before.clone();
         let report = match upgrade_to_current(&mut after) {
             Ok(report) => report,
@@ -64,6 +63,13 @@ fn every_repo_project_lands_every_lamp_where_the_engine_did() {
             }
         };
         migrated += 1;
+        if golden.refused.is_some() {
+            lands_as_today(&before, &after);
+            summaries.push(format!(
+                "{project}: refused by the engine at 11; lands as the frozen landing says"
+            ));
+            continue;
+        }
         let nodes: Vec<String> = golden.fixtures.keys().cloned().collect();
         let checked = after_landing(&after, &nodes)
             .and_then(|lands| compare(&golden.fixtures, &lands.places).map(|()| lands))
@@ -81,12 +87,9 @@ fn every_repo_project_lands_every_lamp_where_the_engine_did() {
             Err(error) => failures.push(format!("{project}: {error}")),
         }
     }
-    eprintln!("v11→v12: {migrated} projects migrated, every lamp where the engine put it");
+    eprintln!("v11→v12: {migrated} corpus projects migrated, every lamp where the engine put it");
     for line in &summaries {
         eprintln!("  {line}");
-    }
-    for line in &skipped {
-        eprintln!("  skipped {line}");
     }
     for line in &refused {
         eprintln!("  REFUSED {line}");
@@ -98,34 +101,10 @@ fn every_repo_project_lands_every_lamp_where_the_engine_did() {
     );
     assert!(
         refused.is_empty(),
-        "no repo project is refused:\n{}",
+        "no corpus project is refused:\n{}",
         refused.join("\n")
     );
-    assert!(migrated > 90, "only {migrated} projects were migrated");
-}
-
-/// The golden the engine recorded as refused (fault-demo's shader runs out
-/// of fuel every frame; old-uid-sign's was re-recorded once its corpus input
-/// stopped carrying a module uid, docs/defects/2026-10-27-the-upgrade-corpus-
-/// loaded-only-its-manifest.md) has no lamps to compare with. The step still migrates them, and lands every lamp where
-/// the frozen landing says (the frozen landing being the engine's on every
-/// other project).
-#[test]
-fn the_projects_the_engine_refused_land_as_the_frozen_landing_says() {
-    let workspace = workspace_dir();
-    let mut checked = Vec::new();
-    for (project, golden) in goldens(&workspace) {
-        if golden.refused.is_none() {
-            continue;
-        }
-        let before = read_project(&workspace.join(&project));
-        let mut after = before.clone();
-        upgrade_to_current(&mut after).unwrap_or_else(|e| panic!("{project}: {e}"));
-        lands_as_today(&before, &after);
-        checked.push(project);
-    }
-    eprintln!("checked against the frozen landing: {checked:?}");
-    assert_eq!(checked, vec![String::from("projects/test/fault-demo")]);
+    assert!(migrated >= 25, "only {migrated} projects were migrated");
 }
 
 // --- statements, on small projects ----------------------------------------------
