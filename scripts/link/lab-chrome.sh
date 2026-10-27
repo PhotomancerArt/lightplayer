@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One comms-lab run through Chromium's Web Serial (headless Brave): lp-link
+# One comms-lab run through Chromium's Web Serial (headless Chrome): lp-link
 # in wasm (spikes/link-lab-wasm) against a test_comms_lab board.
 #
 #   scripts/link/lab-chrome.sh <out-dir> <name> '<query>'
@@ -8,8 +8,8 @@
 #
 # the M1b soak page's shape: serves spikes/serial-lab (its /lab page) on a
 # bench-block port, which the serial-grant policy covers (`just serial-grant`;
-# Brave only — install it for the sitting and `just serial-ungrant` after: it
-# is not standing, since it hands the page every port), opens the page in headless Brave with a scratch profile, waits
+# Google Chrome only since 2026-10-26, Brave before), opens the page in
+# headless Chrome with a scratch profile, waits
 # for the page to post its report, and stops the browser and the server it
 # started (by pid). The board must run a test_comms_lab image and be the only
 # Espressif port attached; nothing else may hold the port.
@@ -19,7 +19,7 @@ set -euo pipefail
 
 out="$1"; name="$2"; query="$3"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-browser="${SOAK_BROWSER:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+browser="${SOAK_BROWSER:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 [[ -f "$root/spikes/link-lab-wasm/pkg/link_lab_wasm.js" ]] || "$root/spikes/link-lab-wasm/build.sh" >/dev/null
@@ -28,7 +28,7 @@ port="$("$root/scripts/dev-port.sh" --bench soak-lab)"
 SERIAL_LAB_PORT="$port" SOAK_OUT="$out" python3 "$root/spikes/serial-lab/server.py" \
     >"$out/$name.server.log" 2>&1 &
 server_pid=$!
-profile="$(mktemp -d "${TMPDIR:-/tmp}/lab-brave-XXXXXX")"
+profile="$(mktemp -d "${TMPDIR:-/tmp}/lab-chrome-XXXXXX")"
 browser_pid=""
 cleanup() {
     [[ -n "$browser_pid" ]] && kill "$browser_pid" 2>/dev/null || true

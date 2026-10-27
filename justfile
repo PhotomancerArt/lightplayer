@@ -556,8 +556,8 @@ studio-story-check *filters: studio-web-story-build
 # `just claude-launch-json bench` predicts the bench-block port instead
 # and points the entry at studio-dev-bench (hardware walks — see that
 # recipe). Put the entry back with plain `just claude-launch-json` when the
-# sitting ends: a preview left on a bench port is where the serial grant,
-# if installed, hands one tab every board on the desk. The bench prediction is more collision-prone than a hashed one
+# sitting ends: the harness pane has no grant, but a person who opens the
+# same URL in Chrome hands that tab every board on the desk. The bench prediction is more collision-prone than a hashed one
 # (ten shared slots): if another worktree grabs the slot between query and
 # launch, the server probes onward and the entry goes stale — regenerate.
 # The server's printed URL remains the source of truth.
@@ -609,11 +609,11 @@ lab-mapping: install-wasm32-target
     echo "Serving the mapping lab at http://127.0.0.1:${port}/"
     dx serve --web -p lab-mapping-web --port "${port}" --addr 127.0.0.1 --open false
 
-# studio-dev on a reserved bench-block port, so the WebSerial grant
-# (`just serial-grant`), WHEN INSTALLED for a sitting, covers the origin and
-# the chooser never appears. The grant is no longer standing (it handed the
-# page every board on the desk — see serial-grant); without it this is just
-# a port, and the chooser is the browser's own. HARDWARE WALKS ONLY — the block is tiny and deliberately
+# studio-dev on a reserved bench-block port, so the standing WebSerial
+# grant (`just serial-grant`, Google Chrome only) covers the origin and the
+# chooser never appears — in Chrome. Open it in Chrome; in any other
+# browser it is just a port. The Chrome tab holds every board on the desk
+# while it is open, so close it when the walk ends. HARDWARE WALKS ONLY — the block is tiny and deliberately
 # exclusive (Yona: bench sessions shouldn't share); everyday dev uses
 # plain `just studio-dev` and hashed ports. The printed URL is the source
 # of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
@@ -5339,26 +5339,28 @@ desk-images *args:
 hardware-list *args:
     cargo run -p lp-cli -- hardware list {{ args }}
 
-# ⚠️ NOT A STANDING INSTALL (retired 2026-10-26). The grant gives the page
-# EVERY serial port on the machine, and Studio opens every port it is
-# granted when it loads — so with a desk of boards attached, one Brave tab
-# on a bench port took all of them and locked `lp-cli`, `board` and every
-# other session out. Install it for one sitting that needs it (today only
-# `scripts/link/lab-chrome.sh`), then `just serial-ungrant` the same day.
-# For a real board in a browser without it, see AGENTS.md, "A real board in
-# a browser".
+# ⚠️ GOOGLE CHROME ONLY, since 2026-10-26 — never Brave. The grant gives a
+# bench-port page EVERY serial port on the machine, and Studio opens every
+# port it is granted when it loads. In Brave, Yona's daily browser, one tab
+# on a bench port took every board on the desk and locked `lp-cli`, `board`
+# and every other session out. Chrome is the agents' browser (the walk
+# driver's first pick), which no person uses day to day. A Chrome tab on a
+# bench port still holds EVERY board while it is open: close it when the
+# sitting ends. The profile keeps its PayloadIdentifier, so installing this
+# one REPLACES a standing Brave grant. See AGENTS.md, "A real board in a
+# browser".
 #
-# Remove the WebSerial chooser dialog for local dev servers by granting Brave
+# Remove the WebSerial chooser dialog for local dev servers by granting Chrome
 # standing serial access via the Chromium enterprise policy
 # SerialAllowAllPortsForUrls. Why: the chooser is a NATIVE dialog no agent
 # tooling can click, and per-device grants are fragile anyway — Brave drops
-# them on reload, and CH340 boards carry no USB serial number so a grant
+# them on reload (Chrome keeps them), and CH340 boards carry no USB serial number so a grant
 # also dies on replug.
 #
 # Hard-won mechanics (verified 2026-08-30/31, on silicon + in Chromium
 # source — do not relitigate):
 #
-# ⚠️ A plain `defaults write com.brave.Browser ...` DOES NOT WORK for this
+# ⚠️ A plain `defaults write com.google.Chrome ...` DOES NOT WORK for this
 # policy. The macOS policy loader treats non-forced preferences as
 # POLICY_LEVEL_RECOMMENDED (policy_loader_mac.mm), and
 # SerialAllowAllPortsForUrls is mandatory-only, so the value silently
@@ -5368,7 +5370,10 @@ hardware-list *args:
 # preference is honored without MDM — on an unmanaged Mac that means a
 # configuration profile, which is what this recipe generates. Verified
 # working end-to-end in Brave (MCX-Forced profile → gesture-free
-# getPorts()) 2026-08-31.
+# getPorts()) 2026-08-31. Each browser reads its own bundle id's domain
+# (chrome_browser_policy_connector.cc): com.google.Chrome for every Chrome
+# channel, com.google.ChromeForTesting, com.brave.Browser — so a grant
+# scoped to one leaves the others untouched.
 #
 # ⚠️ Policy entries are STRICT ORIGINS, not URL patterns
 # (serial_policy_allowed_ports.cc: GURL → url::Origin, exact
@@ -5389,7 +5394,7 @@ hardware-list *args:
 # REPLACES the standing profile instead of stacking beside it.
 # Finish the install yourself: System Settings → General → Device
 # Management → double-click the downloaded profile → Install (admin
-# password). Then restart Brave and verify at brave://policy that
+# password). Then restart Chrome and verify at chrome://policy that
 # SerialAllowAllPortsForUrls shows level "Mandatory" with no error badge;
 # the real proof is navigator.serial.getPorts() returning ports with no
 # gesture on a bench-block dev page.
@@ -5403,6 +5408,7 @@ serial-grant:
     # Stale user-domain defaults from the refuted approach only muddy
     # diagnosis; clear them if present.
     defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
+    defaults delete com.google.Chrome SerialAllowAllPortsForUrls 2>/dev/null || true
     mkdir -p "$HOME/.photomancer"
     out="$HOME/.photomancer/serial-grant.mobileconfig"
     read -r block_lo block_hi < <(scripts/dev-port.sh --bench-block)
@@ -5416,7 +5422,7 @@ serial-grant:
         <dict>
           <key>PayloadContent</key>
           <dict>
-            <key>com.brave.Browser</key>
+            <key>com.google.Chrome</key>
             <dict>
               <key>Forced</key>
               <array>
@@ -5440,9 +5446,9 @@ serial-grant:
           <key>PayloadEnabled</key>
           <true/>
           <key>PayloadDisplayName</key>
-          <string>Brave WebSerial localhost grant</string>
+          <string>Chrome WebSerial localhost grant</string>
           <key>PayloadIdentifier</key>
-          <string>art.photomancer.serial-grant.brave</string>
+          <string>art.photomancer.serial-grant.chrome</string>
           <key>PayloadType</key>
           <string>com.apple.ManagedClient.preferences</string>
           <key>PayloadUUID</key>
@@ -5452,7 +5458,7 @@ serial-grant:
         </dict>
       </array>
       <key>PayloadDisplayName</key>
-      <string>LightPlayer dev — Brave WebSerial grant (loopback only)</string>
+      <string>LightPlayer dev — Chrome WebSerial grant (loopback only)</string>
       <key>PayloadIdentifier</key>
       <string>art.photomancer.serial-grant</string>
       <key>PayloadRemovalDisallowed</key>
@@ -5471,18 +5477,22 @@ serial-grant:
     open "$HOME/.photomancer/serial-grant.mobileconfig"
     echo "profile generated (bench block ${block_lo}-${block_hi}, both loopback hosts) and handed to macOS."
     echo "finish: System Settings → General → Device Management → install it (admin password)"
-    echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
+    echo "then:   restart Chrome and check chrome://policy (SerialAllowAllPortsForUrls, level Mandatory)"
     echo "serve:  just studio-dev-bench (hardware walks only)"
-    echo "after:  just serial-ungrant — the grant hands the page EVERY port; never leave it installed"
+    echo "note:   a Chrome tab on a bench port holds EVERY board while open — close it when done"
 
 # Best-effort check of the standing grant: managed preferences appear under
-# /Library/Managed Preferences once the profile is installed. brave://policy
-# is the authoritative view.
+# /Library/Managed Preferences once the profile is installed. chrome://policy
+# is the authoritative view. A Brave grant still present is the retired one:
+# reinstall (`just serial-grant`) to replace it.
 serial-grant-status:
     #!/usr/bin/env bash
     set -euo pipefail
-    if defaults read "/Library/Managed Preferences/com.brave.Browser" SerialAllowAllPortsForUrls 2>/dev/null; then
-      echo "managed grant present (verify level Mandatory at brave://policy)"
+    if defaults read "/Library/Managed Preferences/com.brave.Browser" SerialAllowAllPortsForUrls >/dev/null 2>&1; then
+      echo "⚠️ a Brave grant is still installed — the retired one; run \`just serial-grant\` to replace it with Chrome's" >&2
+    fi
+    if defaults read "/Library/Managed Preferences/com.google.Chrome" SerialAllowAllPortsForUrls 2>/dev/null; then
+      echo "managed Chrome grant present (verify level Mandatory at chrome://policy)"
     else
       echo "no managed grant found — run \`just serial-grant\` and install the profile"
       exit 1
@@ -5491,7 +5501,8 @@ serial-grant-status:
 # Remove the standing grant. Configuration profiles cannot be removed from
 # the CLI on modern macOS; do it in System Settings.
 serial-ungrant:
-    @echo 'System Settings → General → Device Management → "LightPlayer dev — Brave WebSerial grant" → Remove'
+    @echo 'System Settings → General → Device Management → "LightPlayer dev — Chrome WebSerial grant" (or the older Brave one) → Remove'
+    @defaults delete com.google.Chrome SerialAllowAllPortsForUrls 2>/dev/null || true
     @defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
 
 # Build and flash a FIXTURE firmware — a CURRENT build that misreports its
