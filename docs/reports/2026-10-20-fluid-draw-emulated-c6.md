@@ -77,9 +77,9 @@ dips to 32,888 B, 120 B over. A desk sitting should look at both first.
 ## What the measurement found, fixed in this PR
 
 1. **Every touch write rebuilt the whole binding graph** (~40 ms on the C6),
-   so drawing ran at **13 fps**. Fixed: a re-write of an engaged panel writer
-   reads its value from the store and changes no structure. Knob turns gain
-   the same.
+   so drawing ran at **13 fps**. Fixed: a re-write of an engaged momentary
+   writer (a finger) reads its value from the store and changes no
+   structure. Latched writes (knobs, picks) still rebuild.
    (`docs/defects/2026-10-20-every-panel-write-rebuilt-the-whole-graph.md`)
 2. **A fluid without the new `coords` key hung the C6** in its first frame
    (`projects/test/fluid` never lit; LP_WDT reset). Worked around by reading

@@ -513,10 +513,12 @@ fn probe_reports_engaged_writers_with_panel_origin() {
 
 #[test]
 fn re_writing_an_engaged_panel_writer_costs_no_structural_work() {
-    // A knob turn or a finger moving re-writes a writer that is already
-    // engaged: the winning provider set is the same, so the next frame must
-    // not re-derive the graph (on the C6 that rebuild cost ~40 ms a write).
-    // Engaging and releasing still do. The reader sees every new value.
+    // A finger moving re-writes a momentary writer that is already engaged:
+    // the winning provider set is the same, so the next frame must not
+    // re-derive the graph (on the C6 that rebuild cost ~40 ms a write).
+    // Engaging and releasing still do, and so does every latched write (a
+    // knob, a playlist pick), which readers caching by structure epoch
+    // count on. The reader sees every new value.
     let mut h = EngineTestBuilder::new()
         .shader("writer", output("outputs[0]", 0.25))
         .bind_bus("chan", produced_slot("writer", "outputs[0]"))

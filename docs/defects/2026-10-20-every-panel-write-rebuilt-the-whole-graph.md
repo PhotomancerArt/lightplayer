@@ -27,9 +27,14 @@ static path memos, and the next frame re-derived the whole graph — about
 (`BindingSource::PanelWriter { scope, channel }`), and its route reads the
 held value from the store each time it resolves
 (`ResolveHost::panel_writer_production`, stamped with the writer's own write
-revision, so an untouched value still reads as unchanged). Only engaging a
-writer invalidates; re-writing an engaged one changes no structure.
-Clearing and despawning still invalidate. Pinned by
+revision, so an untouched value still reads as unchanged). Re-writing an
+engaged **momentary** writer changes no structure; engaging, clearing,
+despawning and every latched write (a knob, a playlist pick) still
+invalidate. Latched writes keep invalidating on purpose: the playlist caches
+its pick until the structure epoch moves, and a first cut that skipped every
+re-write left a re-pick unplayed (found merging main's playlists-on-the-bus,
+`a_pick_of_an_unknown_entry_plays_the_authored_entry`). Knob turns are rare
+enough not to need the speedup. Pinned by
 `re_writing_an_engaged_panel_writer_costs_no_structural_work`
 (`lpc-engine/src/engine/scoped_resolution_tests.rs`): zero structural work
 on a re-write frame, the new value read.

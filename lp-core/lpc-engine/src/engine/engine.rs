@@ -540,13 +540,21 @@ impl Engine {
         // instant; renewal is just another write with a fresh TTL.
         let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
         // Engaging a writer changes the winning provider set; re-writing an
-        // engaged one does not — its route reads the store, so a knob turn
-        // or a finger moving costs no rebuild of the graph (on the C6 that
-        // rebuild cost ~40 ms a write, halving a drawing pattern's fps).
-        let newly_engaged = self.panel_writers.get(scope, &channel).is_none();
+        // engaged momentary one does not — its route reads the store, so a
+        // finger moving costs no rebuild of the graph (on the C6 that rebuild
+        // cost ~40 ms a write, halving a drawing pattern's fps). A latched
+        // write still moves the structure epoch, every time: readers that
+        // cache a value until the graph changes (the playlist's pick) count
+        // on it, and a latched write is a user's deliberate setting, not a
+        // gesture's stream.
+        let gesture_rewrite = expires_at_ms.is_some()
+            && self
+                .panel_writers
+                .get(scope, &channel)
+                .is_some_and(|held| held.expires_at_ms.is_some());
         self.panel_writers
             .set(scope, channel, value, self.revision, expires_at_ms);
-        if newly_engaged {
+        if !gesture_rewrite {
             self.resolver.invalidate_structure();
         }
     }
@@ -825,8 +833,11 @@ impl Engine {
                 else {
                     continue;
                 };
-                if let Some(writer) = self.panel_writers.get(scope, &channel) {
-                    settled.push((entry.id, slot, writer.value.clone(), writer.write));
+                // A map write (a touch set) is momentary, never load-deciding.
+                if let Some(writer) = self.panel_writers.get(scope, &channel)
+                    && let Some(value) = writer.value.as_value()
+                {
+                    settled.push((entry.id, slot, value.clone(), writer.write));
                 }
             }
         }
