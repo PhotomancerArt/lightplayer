@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
   "recorded": "2026-10-27",
-  "commit": "33c25518e",
+  "commit": "e1f037787",
   "modes": {
     "startup": {
       "windows": {
@@ -18,8 +18,8 @@
           "transient": 94476,
           "retained": 92029,
           "largest_alloc": 7552,
-          "alloc_count": 5422,
-          "alloc_bytes": 272958,
+          "alloc_count": 5410,
+          "alloc_bytes": 272970,
           "largest_free_at_close": 153336,
           "holes_at_close": 49
         },
