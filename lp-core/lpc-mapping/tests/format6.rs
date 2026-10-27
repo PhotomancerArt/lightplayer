@@ -451,13 +451,13 @@ fn zooks_dome_is_small_in_format_6() {
         );
     }
     let every_copy = map2d6::write(&every_copy).unwrap();
-    eprintln!(
+    let sizes = format!(
         "zook dome: today {today_bytes} B; format 6 one per port {} B; an override on every copy {} B",
         as_flowing.len(),
         every_copy.len()
     );
-    assert!(as_flowing.len() < today_bytes);
-    assert!(every_copy.len() < 32 * 1024);
+    assert!(as_flowing.len() < today_bytes, "{sizes}");
+    assert!(every_copy.len() < 32 * 1024, "{sizes}");
 }
 
 // ---- the journeys' documents -----------------------------------------------

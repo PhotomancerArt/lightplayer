@@ -3,8 +3,8 @@
 //! fixture's tree with a cursor; starts, flows and overrides move it by
 //! Keep / Set / Add.
 //!
-//! In memory only: no file format reads or writes these yet, and nothing
-//! outside this crate calls them (the engine still runs `PatchDoc`).
+//! Saved with the parts as map2d format 6 ([`crate::map2d6`]). Nothing
+//! outside this crate calls it yet: the engine still runs `PatchDoc`.
 
 mod address;
 mod amount;

@@ -4,7 +4,7 @@
 //! subpath, and a move inside a path is the jumper. Lamps spread over the
 //! drawn subpaths only, so the path keeps one count and one pitch. Its lamps
 //! are today's [`PathShape`]'s, bit for bit: the points are every command's
-//! point in order, and each move after the first makes the segment ending at
+//! point in order, and each move after the first makes the line ending at
 //! it a jumper (today's `gaps`).
 
 use alloc::vec::Vec;
@@ -68,7 +68,7 @@ impl Path {
     }
 
     /// Today's form of the same path, whose lamps it has: every command's
-    /// point in order, and the segment ending at each later move a jumper.
+    /// point in order, and the line ending at each later move a jumper.
     /// `Err` names why it isn't a path: it must start with a move.
     pub fn to_path_shape(&self) -> Result<PathShape, &'static str> {
         match self.commands.first() {
@@ -77,7 +77,7 @@ impl Path {
             None => return Err("path has no commands"),
         }
         let points = self.commands.iter().map(|c| c.point()).collect();
-        // Segment `i` runs from point `i` to point `i + 1`: a move at
+        // Line `i` runs from point `i` to point `i + 1`: a move at
         // command `i + 1` makes it a jumper.
         let gaps = self
             .commands
