@@ -253,9 +253,11 @@ impl EngineServices {
     ///
     /// For the upgrade landing goldens (`tests/upgrade_landing.rs`) only, which
     /// must read where a lamp reaches a wire with the code the wires use, not
-    /// a copy of it. Nothing in production calls this.
+    /// a copy of it. Nothing in production calls this, and it is a host-only
+    /// convenience (`std`), so no firmware image links it.
     #[doc(hidden)]
     #[must_use]
+    #[cfg(feature = "std")]
     pub fn planned_wire_slices_for_landing(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
         if remainder_offender(config).is_some() {
             return Vec::new();
