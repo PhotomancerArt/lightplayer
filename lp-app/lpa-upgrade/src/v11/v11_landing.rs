@@ -9,7 +9,10 @@
 //!
 //! 1. Each fixture resolves its patch on its own. An empty document is no
 //!    patch (auto-flow, or nothing under `flow: manual`); a document the
-//!    kernel refuses falls back the same way; a row naming an output no
+//!    kernel refuses falls back the same way; a document the engine cannot
+//!    read at all (not JSON, or not a patch it knows) is attached with no
+//!    placement, and the fixture auto-flows (`resolve_fixture_patch`; DD8:
+//!    the upgrade keeps that and says so); a row naming an output no
 //!    output is named is dropped, its lamps unplaced — and a fixture left
 //!    with no runs at all is treated as unpatched.
 //! 2. Each output, for each fixture it reads (provider order): an unpatched
@@ -23,7 +26,7 @@
 //!    count the rest; a count-less port before the last means the output
 //!    drives no wire at all.
 
-use super::v11_files::{read_json, refused, scalar};
+use super::v11_files::{read_json, read_text, refused, scalar};
 use super::v11_patch::{PatchedRun, read_patch, resolve_patch};
 use super::v11_project::{V11Fixture, V11Mapping, V11Output, V11Project};
 use super::v11_project_landing::{
@@ -31,6 +34,7 @@ use super::v11_project_landing::{
     SegmentLanding,
 };
 use super::v11_segments::{Map2dSegments, V11Segment, map2d_segments, path_points_segments};
+use crate::json::JsonNode;
 use crate::project_files::ProjectFiles;
 use crate::upgrade_error::UpgradeError;
 
@@ -113,6 +117,7 @@ pub fn landing(files: &ProjectFiles) -> Result<ProjectLanding, UpgradeError> {
                 _ => None,
             },
             patch_file: fixture.patch_file.clone(),
+            patch_unread: state.patch_unread.clone(),
             layout,
         });
     }
@@ -142,6 +147,8 @@ struct FixtureState {
     /// The runs the dangling-name filter dropped, for the dark reasons.
     dropped: Vec<PatchedRun>,
     manual: bool,
+    /// Why the engine cannot read the fixture's patch, when it cannot.
+    patch_unread: Option<String>,
 }
 
 impl FixtureState {
@@ -187,11 +194,24 @@ impl FixtureState {
             runs: None,
             dropped: Vec::new(),
             manual: false,
+            patch_unread: None,
         };
         let (Some(patch_file), Some(segments)) = (&fixture.patch_file, &state.segments) else {
             return Ok(state);
         };
-        let doc = read_patch(patch_file, &read_json(files, patch_file, &fixture.node)?)?;
+        // A patch file that is not there fails the engine's load (refused,
+        // as `read_text` says); one that is there but unreadable auto-flows.
+        let text = read_text(files, patch_file, &fixture.node)?;
+        let doc = match JsonNode::parse(text)
+            .map_err(|error| format!("it is not JSON: {}", error.detail))
+            .and_then(|json| read_patch(&json))
+        {
+            Ok(doc) => doc,
+            Err(reason) => {
+                state.patch_unread = Some(reason);
+                return Ok(state);
+            }
+        };
         state.manual = doc.manual;
         if doc.entries.is_empty() {
             return Ok(state);
@@ -974,6 +994,45 @@ mod tests {
             landings(&landed, "/f.json"),
             vec![landed_at("/o.json", 0, 0)]
         );
+    }
+
+    /// A patch the engine cannot read at all (not JSON, or a format it does
+    /// not know) is attached with no placement: the fixture auto-flows, and
+    /// the landing says why (DD8).
+    #[test]
+    fn an_unreadable_patch_auto_flows_and_says_why() {
+        for text in [r#"{"format":9,"entries":[]}"#, "not json"] {
+            let landed = landing(&project(
+                &[
+                    fixture("f", "f", Some("f.patch.json")),
+                    output("o", None, &[(0, None)]),
+                ],
+                &[
+                    ("f.map2d.json", &paths(&[("a", 6)])),
+                    ("f.patch.json", text),
+                ],
+            ))
+            .unwrap();
+            assert_eq!(
+                landings(&landed, "/f.json"),
+                vec![landed_at("/o.json", 0, 0)]
+            );
+            assert!(landed.fixtures[0].patch_unread.is_some(), "{text}");
+        }
+    }
+
+    /// A patch file the fixture names but the project lacks fails the
+    /// engine's load, so the landing refuses it.
+    #[test]
+    fn a_missing_patch_file_is_refused() {
+        let files = project(
+            &[
+                fixture("f", "f", Some("f.patch.json")),
+                output("o", None, &[(0, None)]),
+            ],
+            &[("f.map2d.json", &paths(&[("a", 6)]))],
+        );
+        assert!(landing(&files).is_err());
     }
 
     /// Lamps past the last counted port land on no wire.
