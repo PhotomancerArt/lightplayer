@@ -1,8 +1,12 @@
 //! One fixture's mapping: layout plus patching (names.html "Mapping").
 //!
 //! The layout is its parts, a tree; [`crate::part::render`] turns it into
-//! the rendered tree, whose leaves are the segments.
+//! the rendered tree, whose leaves are the segments. The patching is the
+//! fixture's start and flow, each part's own start and flow, and the
+//! overrides by node id; [`crate::patching::patch_mapping`] gives each
+//! segment its address.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::part::id_counters::IdCounters;
@@ -10,6 +14,8 @@ use crate::part::lamp_ref::LampRef;
 use crate::part::part::Part;
 use crate::part::part_id::PartId;
 use crate::part::part_kind::PartKind;
+use crate::part::tree_id::TreeId;
+use crate::patching::{Flow, Override, Start};
 
 /// One fixture's mapping.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -20,6 +26,13 @@ pub struct Mapping {
     pub lamp: LampRef,
     /// The next number per kind of part.
     pub next: IdCounters,
+    /// Where the fixture starts: its output, port and channel. All Keep is
+    /// no start (a problem when anything is to be laid).
+    pub start: Start,
+    /// How its top-level parts follow each other.
+    pub flow: Flow,
+    /// What a person set on single nodes, by id, over the flows' starts.
+    pub overrides: BTreeMap<TreeId, Override>,
 }
 
 impl Mapping {
