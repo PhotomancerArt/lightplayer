@@ -16,10 +16,6 @@
     "kind": "Map2d",
     "source": "fixture.map2d.json"
   },
-  "patch": {
-    "kind": "File",
-    "source": "fixture.patch.json"
-  },
   "render_size": {
     "height": 32,
     "width": 32

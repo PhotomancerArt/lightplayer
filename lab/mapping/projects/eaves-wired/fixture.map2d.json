@@ -1,13 +1,50 @@
 {
-  "format": 3,
+  "format": 6,
   "sample_diameter": 2.0,
-  "canvas": [0.0, 0.0, 200.0, 60.0],
-  "objects": [
-    { "id": "front", "name": "front", "shape": { "path": {
-        "points": [[10, 50], [10, 10], [12, 8], [100, 8]], "count": 60, "gaps": [1]
-    } } },
-    { "id": "side", "name": "side", "shape": { "path": {
-        "points": [[110, 8], [188, 8], [190, 10], [190, 50]], "count": 50, "gaps": [1]
-    } } }
-  ]
+  "canvas": [
+    0.0,
+    0.0,
+    200.0,
+    60.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "front",
+      "name": "front",
+      "kind": {
+        "path": {
+          "d": "M 10 50 L 10 10 M 12 8 L 100 8",
+          "count": 60
+        }
+      }
+    },
+    {
+      "id": "side",
+      "name": "side",
+      "kind": {
+        "path": {
+          "d": "M 110 8 L 188 8 M 190 10 L 190 50",
+          "count": 50
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "front": {
+      "direction": "reverse"
+    }
+  }
 }

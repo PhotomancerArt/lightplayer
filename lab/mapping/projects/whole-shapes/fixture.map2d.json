@@ -1,16 +1,113 @@
 {
-  "format": 5,
+  "format": 6,
   "sample_diameter": 2.0,
-  "canvas": [0.0, 0.0, 100.0, 100.0],
-  "objects": [
-    { "id": "panel", "name": "panel", "shape": { "grid": { "origin": [10, 10], "cols": 5, "rows": 3, "pitch": 4, "routing": "raster", "start_corner": "br" } } },
-    { "id": "heart", "name": "heart", "shape": { "filled_polygon": {
-        "points": [[50, 30], [70, 15], [90, 30], [70, 60], [50, 30]],
-        "pitch": 3.5, "angle_deg": 15, "origin": [0.4, 1.1], "start_corner": "tr"
-    } } },
-    { "id": "eye", "name": "eye", "shape": { "ring": {
-        "center": [30, 75], "radius": 18, "outer_count": 30, "rings": 3,
-        "order": "inner_first", "start_angle_deg": 45, "dir": "ccw"
-    } } }
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "panel",
+      "name": "panel",
+      "kind": {
+        "grid": {
+          "origin": [
+            10.0,
+            10.0
+          ],
+          "cols": 5,
+          "rows": 3,
+          "pitch": 4.0,
+          "routing": "raster",
+          "start_corner": "br"
+        }
+      }
+    },
+    {
+      "id": "heart",
+      "name": "heart",
+      "kind": {
+        "filled_polygon": {
+          "points": [
+            [
+              50.0,
+              30.0
+            ],
+            [
+              70.0,
+              15.0
+            ],
+            [
+              90.0,
+              30.0
+            ],
+            [
+              70.0,
+              60.0
+            ],
+            [
+              50.0,
+              30.0
+            ]
+          ],
+          "pitch": 3.5,
+          "angle_deg": 15.0,
+          "origin": [
+            0.4,
+            1.1
+          ],
+          "start_corner": "tr"
+        }
+      }
+    },
+    {
+      "id": "eye",
+      "name": "eye",
+      "kind": {
+        "circle": {
+          "center": [
+            30.0,
+            75.0
+          ],
+          "start_angle_deg": 45.0,
+          "dir": "ccw",
+          "drawn_from": "inside",
+          "split": "one",
+          "next_ring": 4,
+          "rings": [
+            {
+              "key": "r1",
+              "radius": 18.0,
+              "count": 30
+            },
+            {
+              "key": "r2",
+              "radius": 12.0,
+              "count": 20
+            },
+            {
+              "key": "r3",
+              "radius": 6.0,
+              "count": 10
+            }
+          ]
+        }
+      }
+    }
   ]
 }
