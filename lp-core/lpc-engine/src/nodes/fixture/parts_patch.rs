@@ -66,8 +66,10 @@ impl FixturePartsPatch {
         self.repatch(key, ctx.control_patch_outputs().0, color_order)
     }
 
-    /// [`Self::ensure`] with the question passed in: `ask` runs only when
-    /// `key` differs from the one the runs were made under.
+    /// [`Self::ensure`] with the question passed in (a test double of P1's
+    /// host question): `ask` runs only when `key` differs from the one the
+    /// runs were made under.
+    #[cfg(test)]
     pub fn ensure_with(
         &mut self,
         key: PartsPatchKey,

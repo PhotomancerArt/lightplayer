@@ -28,6 +28,10 @@
 //! once-cells are process-wide), and honest numbers come only from
 //! `cargo test -p lpc-engine` (a workspace run unifies host-only features in).
 
+// A format-6 fixture painted by a shader: the probe needs both node kinds,
+// and the gates-off clippy pass compiles this file to nothing.
+#![cfg(all(feature = "node-fixture", feature = "node-shader"))]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;

@@ -3843,6 +3843,7 @@ pub(super) mod port_table_questions {
     }
 
     /// Questions answered on this thread so far.
+    #[cfg(feature = "node-fixture")]
     pub(in crate::engine) fn asked() -> u64 {
         ASKED.with(Cell::get)
     }
@@ -3850,7 +3851,7 @@ pub(super) mod port_table_questions {
 
 /// Ask the engine's host which outputs `producer` reaches, outside a tick
 /// (the probes' way of building a host), with the key a tick would read.
-#[cfg(test)]
+#[cfg(all(test, feature = "node-fixture"))]
 pub(super) fn control_patch_outputs_with_engine_host(
     eng: &mut Engine,
     registry: &ProjectRegistry,

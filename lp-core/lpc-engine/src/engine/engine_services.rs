@@ -583,7 +583,7 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
 
 /// The wires an output's ports are cut into, as `(port, start, len)` in
 /// samples: what a test compares the port tables against.
-#[cfg(test)]
+#[cfg(all(test, feature = "node-fixture"))]
 pub(crate) fn planned_wire_slices(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
     planned_wires(config)
         .map(|wire| (wire.port, wire.start_samples, wire.len_samples))
