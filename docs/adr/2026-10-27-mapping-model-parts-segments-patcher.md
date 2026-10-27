@@ -252,8 +252,63 @@ RGB, and path commands not built (the reader's refusal).
 ## Follow-ups
 
 - M2: the engine's side, an amendment to this ADR (the contract between
-  fixture and output, port tables, refusals).
+  fixture and output, port tables, refusals): written, below.
 - M3: the upgrade, an amendment (the freeze into starts and overrides, the
   refusals, `PathPoints` fixtures into `points` parts).
 - M4: Studio's side, an amendment; "Add centre lamp" adds a ring of
   radius 0.
+
+## Amendment (2026-10-27): the engine's side
+
+Mapping rebuild M2 (PRs #1314 and #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M2 planning",
+Q36–Q51). What the engine does with a format-6 map2d, until M3 moves every
+project onto it:
+
+- **Two paths, chosen by the document's format (Q3).** The loader and the
+  asset refresh read a fixture's map2d with today's reader first, unchanged;
+  only a document it refuses as newer goes to `lpc_mapping::map2d6::read`
+  (`nodes/fixture/map2d_document.rs`). A format 1–5 document costs exactly
+  what it did (a peek before every read was one allocation and 8 B per
+  fixture, caught by the engine heap ratchet). A newer document is refused
+  naming 6. A format-6 fixture whose def also names a patch document is
+  refused by name: one file holds the patching (G1, Q14).
+- **The fixture patches itself and publishes runs that name their output
+  (Q36).** The output is unchanged: it filters the fixture's `PatchedRun`s
+  by its own name, as it does a patch document's. The output cannot take
+  the patcher's `SegmentPatch`es because the output node is never gated
+  out while `lpc-mapping` can be (`node-fixture`); and the patcher needs
+  the whole fixture under one cursor, so it cannot run per output.
+- **No default output, no auto-flow (Q37).** A format-6 fixture is always
+  manual; with no start it lights nothing and says so.
+- **Port tables come from the authored output defs through the same walk
+  that cuts the wires** (`node::output_port_slices`, Q38), offered only for
+  named outputs that read the fixture's bus channel. Capacity in channels
+  is the port's samples (`count × 3`; RGB only). An address becomes a wire
+  position as the port's first sample plus the channel (Q39). An unnamed
+  output is not offered (Q40).
+- **Refusals are per segment (Q41):** a start part-way into a lamp, colors
+  other than RGB, an order other than the fixture's colour order. The rest
+  light where the patcher put them, and a refused segment keeps its room on
+  the port. Path commands not built are the reader's refusal and fail the
+  load (keep-last-good on a live edit).
+- **Problems are one status line (Q42):** the first problem in words, then
+  "(and N more)". No wire change: Studio computes the full patching itself
+  (M4).
+- **A patching-only edit renders nothing (Q46).** A re-read mapping whose
+  layout is the same (`Mapping::same_layout`: everything `render` reads)
+  keeps the carrier and the mapping version; only the patching is done
+  again. A document edited across formats switches the fixture's path.
+- **What stays resident (Q43, M2 P6).** The mapping and the runs. The tree
+  is rendered for each patch and dropped with it, and the patching is made
+  without its walk record (`patching::patch_mapping_placed`): at device
+  width the walk was most of a first frame's transient (a 512-lamp,
+  64-segment fixture's largest allocation 29,184 B), and the resident tree a
+  node and a segment, each owning its id, per segment (+13,480 B retained
+  at load for that fixture). Interned ids (P6 step 3) were not done: they
+  change `TreeId`, which Studio's edit operations (M4) build on.
+- **Cost (fw-emu at device width; the C6 split image).** The format-6
+  twins against their format-5 twins, and the image's growth against
+  `main` with M2a, are in PR #1319. Both crossed the plan's bars (lean Q44
+  for heap, Q45's 32 KB for the engine), which went to the director with
+  the numbers rather than being tuned toward them.

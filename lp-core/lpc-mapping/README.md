@@ -9,9 +9,10 @@ of the mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
 ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
 
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
-  parts, segments and the patcher, in one file. Built in M1; nothing outside
-  the crate calls it yet. The engine moves onto it in M2, every project in
-  M3, Studio's Graph in M4.
+  parts, segments and the patcher, in one file. Built in M1. Since M2 the
+  engine runs it for every fixture whose map2d is format 6 (the test
+  projects `projects/test/*-6`), beside today's path for formats 1–5;
+  every project moves onto it in M3, Studio's Graph in M4.
 - **Today's documents** (map2d formats 1–5, the patch document): what the
   engine, the device and Studio run until M3 retires them (below).
 
@@ -112,8 +113,8 @@ circular display as soldered:
 
 | Module | What |
 |---|---|
-| `part/` | The parts, the rendered tree, ids, segments, `render` |
-| `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, spans, problems |
+| `part/` | The parts, the rendered tree, ids, segments, `render`, `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
+| `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
 | `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
 | `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
 | `patch` | Today's patch document (until M3) |
