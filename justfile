@@ -555,7 +555,9 @@ studio-story-check *filters: studio-web-story-build
 #
 # `just claude-launch-json bench` predicts the bench-block port instead
 # and points the entry at studio-dev-bench (hardware walks — see that
-# recipe). The bench prediction is more collision-prone than a hashed one
+# recipe). Put the entry back with plain `just claude-launch-json` when the
+# sitting ends: a preview left on a bench port is where the serial grant,
+# if installed, hands one tab every board on the desk. The bench prediction is more collision-prone than a hashed one
 # (ten shared slots): if another worktree grabs the slot between query and
 # launch, the server probes onward and the entry goes stale — regenerate.
 # The server's printed URL remains the source of truth.
@@ -607,9 +609,11 @@ lab-mapping: install-wasm32-target
     echo "Serving the mapping lab at http://127.0.0.1:${port}/"
     dx serve --web -p lab-mapping-web --port "${port}" --addr 127.0.0.1 --open false
 
-# studio-dev on a reserved bench-block port, so the standing WebSerial
-# grant (`just serial-grant`) covers the origin and the chooser never
-# appears. HARDWARE WALKS ONLY — the block is tiny and deliberately
+# studio-dev on a reserved bench-block port, so the WebSerial grant
+# (`just serial-grant`), WHEN INSTALLED for a sitting, covers the origin and
+# the chooser never appears. The grant is no longer standing (it handed the
+# page every board on the desk — see serial-grant); without it this is just
+# a port, and the chooser is the browser's own. HARDWARE WALKS ONLY — the block is tiny and deliberately
 # exclusive (Yona: bench sessions shouldn't share); everyday dev uses
 # plain `just studio-dev` and hashed ports. The printed URL is the source
 # of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
@@ -5335,6 +5339,15 @@ desk-images *args:
 hardware-list *args:
     cargo run -p lp-cli -- hardware list {{ args }}
 
+# ⚠️ NOT A STANDING INSTALL (retired 2026-10-26). The grant gives the page
+# EVERY serial port on the machine, and Studio opens every port it is
+# granted when it loads — so with a desk of boards attached, one Brave tab
+# on a bench port took all of them and locked `lp-cli`, `board` and every
+# other session out. Install it for one sitting that needs it (today only
+# `scripts/link/lab-chrome.sh`), then `just serial-ungrant` the same day.
+# For a real board in a browser without it, see AGENTS.md, "A real board in
+# a browser".
+#
 # Remove the WebSerial chooser dialog for local dev servers by granting Brave
 # standing serial access via the Chromium enterprise policy
 # SerialAllowAllPortsForUrls. Why: the chooser is a NATIVE dialog no agent
@@ -5460,6 +5473,7 @@ serial-grant:
     echo "finish: System Settings → General → Device Management → install it (admin password)"
     echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
     echo "serve:  just studio-dev-bench (hardware walks only)"
+    echo "after:  just serial-ungrant — the grant hands the page EVERY port; never leave it installed"
 
 # Best-effort check of the standing grant: managed preferences appear under
 # /Library/Managed Preferences once the profile is installed. brave://policy

@@ -8,7 +8,8 @@
 #
 # the M1b soak page's shape: serves spikes/serial-lab (its /lab page) on a
 # bench-block port, which the serial-grant policy covers (`just serial-grant`;
-# Brave only), opens the page in headless Brave with a scratch profile, waits
+# Brave only — install it for the sitting and `just serial-ungrant` after: it
+# is not standing, since it hands the page every port), opens the page in headless Brave with a scratch profile, waits
 # for the page to post its report, and stops the browser and the server it
 # started (by pid). The board must run a test_comms_lab image and be the only
 # Espressif port attached; nothing else may hold the port.

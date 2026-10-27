@@ -28,9 +28,10 @@ PORT_BASE=20000
 PORT_RANGE=20000
 MAX_PROBES=50
 
-# The bench block: a small port range reserved OUT of the hash space and
-# granted standing WebSerial access by the serial-grant configuration
-# profile (see `just serial-grant`). The Chromium device-access policies
+# The bench block: a small port range reserved OUT of the hash space, the
+# origins the serial-grant configuration profile covers when it is
+# installed for a sitting (see `just serial-grant`; it is not standing since
+# 2026-10-26). The Chromium device-access policies
 # match exact origins — scheme, host, AND port — so the grant can only
 # cover ports known when the profile was installed. Bench mode hands out
 # ports from this block with the same semantics as hashing (never steal a

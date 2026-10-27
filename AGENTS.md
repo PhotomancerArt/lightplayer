@@ -1524,6 +1524,40 @@ board drop fixture-c6 --as "direct: ota"
   `lp-fw/builds/README.md` — it leases through this same `board` when
   present.
 
+### A real board in a browser
+
+**A browser tab holds every board it has been granted.** Studio opens every
+granted serial port when it loads, and the port is then exclusive: `lp-cli`,
+`board`, `espflash` and every other session are locked out of it until the
+tab closes. There is **no standing Web Serial grant** on the desk any more:
+the Brave policy profile (`just serial-grant`) gave a bench-port page every
+port on the machine, and one tab took the whole desk (retired 2026-10-26).
+Install it only for the one sitting that needs it, and `just serial-ungrant`
+the same day; never leave a preview on a bench port (`just
+claude-launch-json`, not `… bench`).
+
+No automation can answer the desktop Web Serial or WebUSB chooser: CDP's
+`DeviceAccess` covers the Bluetooth chooser only, Chrome has no switch that
+picks a serial device, and the narrower policies match a USB vendor and
+product id, which every C6 shares (`303a:1001`). So pick by what the work
+needs, in this order:
+
+1. **No board at all:** the emulator (`?emu=`, `?emu=tab`, `?ble=emu`, the
+   walks above). Its `navigator.serial` grants itself; this is the norm.
+2. **A real board, not in a browser:** `lp-cli` over the leased port
+   (`board take`, then `fwcheck port --mac`). Nothing in the browser holds
+   it.
+3. **A real board in a real browser, no hands:** the desk's Android phone
+   (`scripts/phone/README.md`). The board plugs into the phone, and
+   `phone.tapText` answers Chrome's WebUSB chooser and Android's access
+   dialog by what they say (`just walk-usb-phone`).
+4. **A real board in desktop Chrome or Brave:** a person picks it in the
+   chooser. That grant names one board (its USB serial number, a C6's MAC),
+   so the tab takes only that board. Say so in the hand-off and wait.
+
+Firefox has Web Serial since 151 (behind a per-site add-on prompt, no
+WebUSB, nothing automation can answer); Safari has neither.
+
 ## Hardware validation — one system, no board most days
 
 Claims about what firmware does on a chip go through **one** system:
