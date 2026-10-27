@@ -86,9 +86,9 @@ impl FixturePartsPatch {
     /// Cold and never inlined: the caller is the fixture's
     /// `read_frame_settings`, which every fixture runs every frame on the
     /// C6's main stack. Inlined there, the patcher's working set became part
-    /// of that function's frame (6,736 B on the C6, measured in M2 P3),
-    /// paid by every fixture, format ≤ 5 included, on every frame. Out of
-    /// line, it is paid only while re-patching.
+    /// of that function's frame (6,736 B on the C6 against 3,296 B without
+    /// it, measured in M2 P3), paid by every fixture, format ≤ 5 included,
+    /// on every frame. Out of line, it is paid only while re-patching.
     #[cold]
     #[inline(never)]
     fn repatch(
