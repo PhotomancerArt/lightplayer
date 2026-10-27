@@ -56,6 +56,10 @@ use crate::nodes::PowerButtonNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
 #[cfg(feature = "node-fixture")]
+use crate::nodes::fixture::fixture_node::format_6_with_patch_document;
+#[cfg(feature = "node-fixture")]
+use crate::nodes::fixture::map2d_document::{Map2dDocument, read_map2d_document};
+#[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::map2d::object_spans_of;
 #[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
@@ -1010,7 +1014,57 @@ impl ProjectLoader {
                     continue;
                 };
                 match resolve_fixture_mapping(fs, registry, node, &config) {
-                    Ok((mapping, map2d_source, object_spans)) => {
+                    Ok(FixtureMappingRead::Parts { mapping, source }) => {
+                        // One file holds a format-6 fixture's patching (G1,
+                        // Q14): a patch document beside it is refused by
+                        // name rather than one of the two silently losing.
+                        if let Some(patch) = config.patch.value().source() {
+                            let patch = patch
+                                .artifact_value()
+                                .map(ToString::to_string)
+                                .unwrap_or_default();
+                            let error = ProjectLoadError::InvalidProjectReference {
+                                path: node_label(node),
+                                reason: format_6_with_patch_document(&patch),
+                            };
+                            mark_node_load_error(
+                                runtime,
+                                node.id,
+                                frame,
+                                &node_label(node),
+                                error.to_string(),
+                            );
+                            continue;
+                        }
+                        let (width, height) = (config.render_width(), config.render_height());
+                        let fixture = FixtureNode::new(
+                            node.id,
+                            FixtureMapping::Compact(
+                                lpc_model::nodes::fixture::ResolvedMappingCompact {
+                                    spans: Vec::new(),
+                                    points: Vec::new(),
+                                    sample_diameter: mapping.sample_diameter,
+                                },
+                            ),
+                            *config.sampling.value(),
+                            frame,
+                        )
+                        .with_render_defaults(width, height, *config.color_order.value())
+                        .with_map2d_source(source)
+                        .with_parts_mapping(mapping, width, height);
+                        runtime
+                            .attach_runtime_node(node.id, Box::new(fixture), frame)
+                            .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                                path: node_label(node),
+                                reason: format!("attach fixture runtime: {e}"),
+                            })?;
+                        mark_node_status(runtime, node.id, frame, NodeRuntimeStatus::Ok);
+                    }
+                    Ok(FixtureMappingRead::Layout {
+                        mapping,
+                        source: map2d_source,
+                        spans: object_spans,
+                    }) => {
                         let mut fixture =
                             FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
                                 .with_render_defaults(
@@ -1341,20 +1395,34 @@ fn playlist_runtime_entries(
     entries
 }
 
+/// A fixture's mapping, as the loader read it.
+#[cfg(feature = "node-fixture")]
+enum FixtureMappingRead {
+    /// A map2d document of format 1 to 5, a hand-authored `PathPoints`, or
+    /// no mapping: today's path, with the patch document beside it.
+    Layout {
+        mapping: FixtureMapping,
+        source: Option<FixtureMap2dSource>,
+        spans: Vec<lpc_mapping::ObjectInstanceSpan>,
+    },
+    /// A map2d document of format 6: parts and patching, which the fixture
+    /// renders and patches itself.
+    Parts {
+        mapping: lpc_mapping::part::Mapping,
+        source: FixtureMap2dSource,
+    },
+}
+
+/// Read a fixture's mapping. A map2d document goes to the reader its
+/// format names (`map2d_document.rs`); one this build can't read, or whose
+/// lamps don't resolve, fails the fixture's load in the reader's words.
 #[cfg(feature = "node-fixture")]
 fn resolve_fixture_mapping(
     fs: &dyn LpFs,
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<
-    (
-        FixtureMapping,
-        Option<FixtureMap2dSource>,
-        Vec<lpc_mapping::ObjectInstanceSpan>,
-    ),
-    ProjectLoadError,
-> {
+) -> Result<FixtureMappingRead, ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
@@ -1364,24 +1432,11 @@ fn resolve_fixture_mapping(
                 AssetContentType::FixtureMap2d,
                 "fixture map2d document",
             )?;
-            let doc = lpc_mapping::Map2dDoc::from_json(&text.text).map_err(|e| {
-                ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("resolve map2d fixture mapping: {e}"),
-                }
-            })?;
-            let mapping =
-                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
-                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                        path: node_label(node),
-                        reason: format!("resolve map2d fixture mapping: {e}"),
-                    })?;
-            // The per-strand instance-address table `/sector/2`-style patch
-            // entries lower through — from the mapping's own spans, so the
-            // document resolves exactly once (the runtime node recomputes it
-            // on asset refresh).
-            let spans = lpc_mapping::object_instance_spans_of(&doc, &object_spans_of(&mapping));
-            // Keep the source so the runtime node can re-resolve on asset
+            let refused = |e: &dyn core::fmt::Display| ProjectLoadError::InvalidProjectReference {
+                path: node_label(node),
+                reason: format!("resolve map2d fixture mapping: {e}"),
+            };
+            // Keep the source so the runtime node can re-read on asset
             // refresh (the in-place editor's apply path).
             let source = FixtureMap2dSource {
                 location: text.location,
@@ -1389,13 +1444,35 @@ fn resolve_fixture_mapping(
                 render_width: config.render_width(),
                 render_height: config.render_height(),
             };
+            let doc = match read_map2d_document(&text.text).map_err(|e| refused(&e))? {
+                Map2dDocument::Layout(doc) => doc,
+                Map2dDocument::Parts(mapping) => {
+                    return Ok(FixtureMappingRead::Parts { mapping, source });
+                }
+            };
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| refused(&e))?;
+            // The per-strand instance-address table `/sector/2`-style patch
+            // entries lower through — from the mapping's own spans, so the
+            // document resolves exactly once (the runtime node recomputes it
+            // on asset refresh).
+            let spans = lpc_mapping::object_instance_spans_of(&doc, &object_spans_of(&mapping));
             // Document geometry stays compact: never expanded into slots,
             // never serialized, never slot-addressed.
-            Ok((FixtureMapping::Compact(mapping), Some(source), spans))
+            Ok(FixtureMappingRead::Layout {
+                mapping: FixtureMapping::Compact(mapping),
+                source: Some(source),
+                spans,
+            })
         }
         // Hand-authored `PathPoints` (and an unset mapping) keep the slot
         // form — Studio edits individual lamps there.
-        other => Ok((FixtureMapping::Slots(other.clone()), None, Vec::new())),
+        other => Ok(FixtureMappingRead::Layout {
+            mapping: FixtureMapping::Slots(other.clone()),
+            source: None,
+            spans: Vec::new(),
+        }),
     }
 }
 
@@ -2731,42 +2808,26 @@ mod tests {
     }
 
     /// Device-side loud refusal: a mapping written by a newer LightPlayer —
-    /// unknown shape variant and all — must fail the fixture with the honest
-    /// "unsupported format" message, not with an opaque parse error. The
-    /// format peek in `Map2dDoc::from_json` is what makes that true; this
-    /// pins the message a user actually sees on the device.
+    /// unknown parts and all — fails the fixture with the honest
+    /// "unsupported format" message naming the newest this build reads (6),
+    /// not an opaque parse error. The format peek (`map2d_document.rs`) is
+    /// what makes that true; this pins the message a user sees on the device.
     ///
     /// Feature-gated because the expected message names
-    /// `lpc_mapping::MAP2D_FORMAT`, and the crate is only linked when
-    /// fixture nodes are — the behavior under test doesn't exist without
-    /// them anyway.
+    /// `lpc_mapping::map2d6::MAP2D6_FORMAT`, and the crate is only linked
+    /// when fixture nodes are.
     #[cfg(feature = "node-fixture")]
     #[test]
     fn fixture_map2d_mapping_rejects_newer_format() {
         let fs = fixture_project_fs();
-        fs.write_file(
-            "/fixture.json".as_path(),
-            br#"
-{
-  "kind": "Fixture",
-  "render_size": { "width": 20, "height": 10 },
-  "sampling": "direct",
-  "bindings": {
-    "input": { "source": "bus:visual.out" },
-    "output": { "target": "bus:control.out" }
-  },
-  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" }
-}
-"#,
-        )
-        .expect("fixture.json");
+        write_fixture_def(&fs, None);
         fs.write_file(
             "/fixture.map2d.json".as_path(),
             br#"
 {
-  "format": 99,
-  "objects": [
-    { "name": "sector", "shape": { "helix": { "turns": 5, "count": 300 } } }
+  "format": 7,
+  "parts": [
+    { "id": "sector1", "kind": { "helix": { "turns": 5, "count": 300 } } }
   ]
 }
 "#,
@@ -2775,15 +2836,128 @@ mod tests {
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        // The supported number tracks MAP2D_FORMAT so a format bump cannot
-        // silently stale this pin (it did once, at the 3→4 bump).
+        // The supported number tracks the newest reader so a format bump
+        // cannot silently stale this pin (it did once, at the 3→4 bump).
         assert_fixture_node_error(
             &rt,
             &format!(
-                "unsupported map2d format 99 (this build reads up to {})",
-                lpc_mapping::MAP2D_FORMAT
+                "unsupported map2d format 7 (this build reads up to {})",
+                lpc_mapping::map2d6::MAP2D6_FORMAT
             ),
         );
+    }
+
+    /// A format-6 fixture loads: its runtime holds the parts, places itself
+    /// (it is never auto-flowed) and says nothing is wrong.
+    #[cfg(feature = "node-fixture")]
+    #[test]
+    fn a_format_6_fixture_loads() {
+        let fs = fixture_project_fs();
+        write_fixture_def(&fs, None);
+        fs.write_file("/fixture.map2d.json".as_path(), FORMAT_6_STRIP.as_bytes())
+            .expect("fixture.map2d.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load format-6 fixture");
+        let node = node_for_def_path(&rt, "/fixture.json").expect("runtime node");
+        let entry = rt.tree().get(node).expect("runtime entry");
+        assert_eq!(entry.status.value(), &NodeRuntimeStatus::Ok);
+        let NodeEntryState::Alive(runtime) = entry.state.value() else {
+            panic!("the fixture is alive");
+        };
+        assert!(runtime.control_patch_manual(), "it places itself");
+        assert_eq!(runtime.runtime_status(), None);
+    }
+
+    /// A curve in a format-6 path is refused at load, in the reader's words.
+    #[cfg(feature = "node-fixture")]
+    #[test]
+    fn a_curve_in_a_format_6_path_is_refused_in_the_readers_words() {
+        let fs = fixture_project_fs();
+        write_fixture_def(&fs, None);
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
+            FORMAT_6_STRIP
+                .replace("M 0 5 L 20 5", "M 0 5 C 5 0 15 0 20 5")
+                .as_bytes(),
+        )
+        .expect("fixture.map2d.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with a curve");
+        let words = lpc_mapping::map2d6::read(
+            &FORMAT_6_STRIP.replace("M 0 5 L 20 5", "M 0 5 C 5 0 15 0 20 5"),
+        )
+        .expect_err("the reader refuses a curve")
+        .to_string();
+        assert!(words.contains("cubic curve"), "{words}");
+        assert_fixture_node_error(&rt, &words);
+    }
+
+    /// A format-6 fixture that also names a patch document is refused by
+    /// name: the map2d holds its own patching (one file).
+    #[cfg(feature = "node-fixture")]
+    #[test]
+    fn a_format_6_fixture_naming_a_patch_document_is_refused_by_name() {
+        let fs = fixture_project_fs();
+        write_fixture_def(&fs, Some("./fixture.patch.json"));
+        fs.write_file("/fixture.map2d.json".as_path(), FORMAT_6_STRIP.as_bytes())
+            .expect("fixture.map2d.json");
+        fs.write_file(
+            "/fixture.patch.json".as_path(),
+            br#"{ "format": 3, "entries": [] }"#,
+        )
+        .expect("fixture.patch.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        assert_fixture_node_error(
+            &rt,
+            "this fixture's map2d is format 6, which holds its own patching: remove its patch \
+             document fixture.patch.json",
+        );
+    }
+
+    /// A one-path format-6 document: three lamps from lamp 0 of `main`.
+    #[cfg(feature = "node-fixture")]
+    const FORMAT_6_STRIP: &str = r#"{
+  "format": 6,
+  "canvas": [0.0, 0.0, 20.0, 10.0],
+  "start": { "output": { "set": "main" }, "port": { "set": 0 },
+             "channel": { "set": { "lamps": 0 } } },
+  "parts": [ { "id": "path1", "kind": { "path": { "d": "M 0 5 L 20 5", "count": 3 } } } ],
+  "next": { "path": 2 }
+}
+"#;
+
+    /// The fixture def the loader statements share: a map2d mapping, and a
+    /// patch document when `patch` names one.
+    #[cfg(feature = "node-fixture")]
+    fn write_fixture_def(fs: &LpFsMemory, patch: Option<&str>) {
+        let patch = patch
+            .map(|source| {
+                format!(",\n  \"patch\": {{ \"kind\": \"File\", \"source\": \"{source}\" }}")
+            })
+            .unwrap_or_default();
+        fs.write_file(
+            "/fixture.json".as_path(),
+            format!(
+                r#"
+{{
+  "kind": "Fixture",
+  "render_size": {{ "width": 20, "height": 10 }},
+  "sampling": "direct",
+  "bindings": {{
+    "input": {{ "source": "bus:visual.out" }},
+    "output": {{ "target": "bus:control.out" }}
+  }},
+  "mapping": {{ "kind": "Map2d", "source": "./fixture.map2d.json" }}{patch}
+}}
+"#
+            )
+            .as_bytes(),
+        )
+        .expect("fixture.json");
     }
 
     /// A node whose *definition file* will not parse must be reported, not
@@ -2819,6 +2993,14 @@ mod tests {
     fn assert_node_for_def_error(rt: &Engine, path: &str, expected: &str) {
         let node = node_for_def_path(rt, path).expect("runtime node");
         let entry = rt.tree().get(node).expect("runtime entry");
+        assert!(
+            matches!(
+                entry.status.value(),
+                NodeRuntimeStatus::Error(message) if message.contains(expected)
+            ),
+            "{:?} does not say {expected:?}",
+            entry.status.value()
+        );
         assert!(matches!(
             entry.status.value(),
             NodeRuntimeStatus::Error(message) if message.contains(expected)

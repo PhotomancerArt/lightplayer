@@ -51,7 +51,7 @@ use lpc_wire::{
 use super::test_support::read_probe_results;
 use super::{EngineServices, LoadedProjectRuntime, ProjectLoader};
 use crate::node::NodeEntryState;
-use crate::nodes::{FixtureNode, FixturePartsSource};
+use crate::nodes::FixtureNode;
 
 /// The circular display, as soldered: rings r1, r2 on port 0 from 0; r3
 /// reversed on port 1 from 0; r4, r5 following on port 1.
@@ -792,11 +792,11 @@ impl Rig {
                 Revision::new(1),
             )
             .with_parts_mapping(
-                FixturePartsSource {
-                    mapping: *mapping,
+                Mapping {
                     // Every journey is drawn inside 100 × 100.
                     canvas: Some([0.0, 0.0, 100.0, 100.0]),
                     sample_diameter: 1.0,
+                    ..*mapping
                 },
                 RENDER,
                 RENDER,

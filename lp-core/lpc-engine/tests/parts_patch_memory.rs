@@ -36,7 +36,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use lpc_engine::nodes::{FixtureNode, FixturePartsSource};
+use lpc_engine::nodes::FixtureNode;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_mapping::part::{Mapping, PartKind, Path, Repeat, Shape};
 use lpc_mapping::patching::{Amount, Start};
@@ -287,10 +287,10 @@ fn measure(shape: Shape6, format6: bool) -> Vec<Phase> {
                 Revision::new(1),
             )
             .with_parts_mapping(
-                FixturePartsSource {
-                    mapping,
+                Mapping {
                     canvas: Some([0.0, 0.0, 100.0, 100.0]),
                     sample_diameter: 1.0,
+                    ..mapping
                 },
                 64,
                 64,

@@ -19,9 +19,9 @@ use crate::frame_plan::{PlanSlot, PlannedRead};
 use crate::nodes::fixture::direct_channels::DirectChannels;
 use crate::nodes::fixture::direct_lane_job::{DirectLaneJob, DirectLaneLamps, LampEncoding};
 use crate::nodes::fixture::fixture_frame_plan::{FixtureFramePlan, FixturePlanKey, FixtureReads};
-use crate::nodes::fixture::fixture_parts_source::FixturePartsSource;
 use crate::nodes::fixture::fixture_selection::{FixtureSelection, SelectionAt};
 use crate::nodes::fixture::gamma::apply_gamma16;
+use crate::nodes::fixture::map2d_document::{Map2dDocument, read_map2d_document};
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
@@ -334,7 +334,8 @@ impl FixtureNode {
 
     /// Hold a format-6 mapping: render its parts once into the compact
     /// carrier for a `render_width` × `render_height` fixture, and patch
-    /// them from the first `produce` on (`parts_patch.rs`).
+    /// them from the first `produce` on (`parts_patch.rs`). The mapping's
+    /// canvas and sample diameter frame the fit, as a map2d document's do.
     ///
     /// Replaces whatever mapping the fixture was built with. A mapping that
     /// can't render (a part that can't be drawn, more lamps than memory
@@ -343,7 +344,7 @@ impl FixtureNode {
     #[must_use]
     pub fn with_parts_mapping(
         mut self,
-        source: FixturePartsSource,
+        mapping: lpc_mapping::part::Mapping,
         render_width: u32,
         render_height: u32,
     ) -> Self {
@@ -351,7 +352,7 @@ impl FixtureNode {
             self.patch_source.is_none(),
             "a format-6 fixture has no patch document"
         );
-        let (carrier, tree) = match render_parts_carrier(&source, render_width, render_height) {
+        let (carrier, tree) = match render_parts_carrier(&mapping, render_width, render_height) {
             Ok(rendered) => rendered,
             Err(error) => {
                 self.mapping_error = Some(error);
@@ -359,7 +360,7 @@ impl FixtureNode {
                     ResolvedMappingCompact {
                         spans: Vec::new(),
                         points: Vec::new(),
-                        sample_diameter: source.sample_diameter,
+                        sample_diameter: mapping.sample_diameter,
                     },
                     lpc_mapping::part::Tree::default(),
                 )
@@ -376,7 +377,9 @@ impl FixtureNode {
         self.precomputed = None;
         self.direct_channels = None;
         self.display_layout_revision = None;
-        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(source, tree)));
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(
+            mapping, tree,
+        )));
         self
     }
 
@@ -769,6 +772,65 @@ impl FixtureNode {
         Ok(())
     }
 
+    /// The format-6 half of [`NodeRuntime::refresh_asset`]: hold the
+    /// re-read `mapping`, keep-last-good on any error.
+    ///
+    /// **A patching-only edit re-patches and renders nothing** (lean Q46):
+    /// one file holds the layout and the patching (G1, Q14), so a start, a
+    /// flow or an override edit rewrites the whole document. When the new
+    /// mapping draws the same lamps
+    /// ([`lpc_mapping::part::Mapping::same_layout`]) the carrier, the tree
+    /// and `mapping_version` stand, so the sampling plans and every cache
+    /// keyed on the mapping stay; only the patching is done again, on the
+    /// next frame. Otherwise the parts render anew, as at load.
+    ///
+    /// A fixture that names a patch document can't take a format-6 mapping
+    /// (it holds its own patching): refused by name, the last good mapping
+    /// kept.
+    fn refresh_parts_mapping(
+        &mut self,
+        mapping: lpc_mapping::part::Mapping,
+        render_width: u32,
+        render_height: u32,
+        revision: Revision,
+    ) {
+        if let Some(patch) = &self.patch_source {
+            let lpc_model::AssetLocation::Artifact { location } = &patch.location;
+            self.mapping_error = Some(format_6_with_patch_document(location.file_path().as_str()));
+            return;
+        }
+        if let Some(parts) = self.parts.as_deref_mut() {
+            if parts.mapping.same_layout(&mapping) {
+                parts.repatch_with(mapping);
+                self.mapping_error = None;
+                return;
+            }
+        }
+        let (carrier, tree) = match render_parts_carrier(&mapping, render_width, render_height) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                self.mapping_error = Some(error);
+                return;
+            }
+        };
+        if self.parts.is_none() {
+            // An older document edited to format 6: from now on the fixture
+            // places itself, and its runs replace the auto-flow it had.
+            self.resolved_patch = None;
+            self.patch_generation = self.patch_generation.wrapping_add(1);
+        }
+        self.mapping = FixtureMapping::Compact(carrier);
+        self.mapping_version = revision;
+        self.object_spans = Vec::new();
+        self.precomputed = None;
+        self.direct_channels = None;
+        self.display_layout_revision = None;
+        self.mapping_error = None;
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(
+            mapping, tree,
+        )));
+    }
+
     /// The patch half of [`NodeRuntime::refresh_asset`].
     ///
     /// `None` means "not my patch document" and the caller falls through to
@@ -848,6 +910,16 @@ struct FixtureDisplayLayoutKey {
     mapping_version: Revision,
     width: u32,
     height: u32,
+}
+
+/// Why a fixture naming a patch document can't hold a format-6 map2d: the
+/// map2d holds its own patching (one file, G1 Q14). The fixture's status,
+/// naming the patch document.
+pub(crate) fn format_6_with_patch_document(patch: &str) -> alloc::string::String {
+    format!(
+        "this fixture's map2d is format 6, which holds its own patching: remove its patch \
+         document {patch}"
+    )
 }
 
 /// The fixture's authored input slot. Resolution takes it as a constant so
@@ -1030,12 +1102,30 @@ impl NodeRuntime for FixtureNode {
             }
         };
         let asset_revision = text.revision;
-        let resolved = lpc_mapping::Map2dDoc::from_json(&text.text)
-            .map_err(|e| format!("parse fixture map2d document: {e}"))
-            .and_then(|doc| {
-                let mapping =
-                    mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
-                        .map_err(|e| format!("resolve fixture map2d document: {e}"))?;
+        let (render_width, render_height) = (source.render_width, source.render_height);
+        let document = match read_map2d_document(&text.text) {
+            Ok(document) => document,
+            // Keep-last-good: a half-typed edit should not go dark.
+            Err(error) => {
+                self.mapping_error = Some(format!("parse fixture map2d document: {error}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+        let doc = match document {
+            Map2dDocument::Layout(doc) => doc,
+            Map2dDocument::Parts(mapping) => {
+                self.refresh_parts_mapping(mapping, render_width, render_height, ctx.revision());
+                if self.mapping_error.is_none() {
+                    if let Some(source) = &mut self.map2d_source {
+                        source.revision = asset_revision;
+                    }
+                }
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+        let resolved = mapping_from_map2d_doc(&doc, render_width, render_height)
+            .map_err(|e| format!("resolve fixture map2d document: {e}"))
+            .map(|mapping| {
                 // The per-strand instance-address table `/sector/2`-style
                 // patch entries lower through, from the mapping's own spans
                 // (one resolve of the document, never two).
@@ -1043,10 +1133,18 @@ impl NodeRuntime for FixtureNode {
                     &doc,
                     &super::mapping::map2d::object_spans_of(&mapping),
                 );
-                Ok((mapping, spans))
+                (mapping, spans)
             });
         match resolved {
             Ok((mapping, spans)) => {
+                if self.parts.take().is_some() {
+                    // A format-6 document edited back to an older format:
+                    // the patch-document path takes over, from nothing
+                    // resolved (with no patch document, the output
+                    // auto-flows it).
+                    self.resolved_patch = None;
+                    self.patch_generation = self.patch_generation.wrapping_add(1);
+                }
                 self.object_spans = spans;
                 self.mapping = FixtureMapping::Compact(mapping);
                 self.mapping_version = ctx.revision();

@@ -14,13 +14,12 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::Tree;
+use lpc_mapping::part::{Mapping, Tree};
 use lpc_mapping::patching::{OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping};
 use lpc_model::Revision;
 use lpc_model::nodes::fixture::ColorOrder;
 
 use crate::node::{PatchedRun, PortTablesKey, ReachableOutputs, TickContext};
-use crate::nodes::fixture::fixture_parts_source::FixturePartsSource;
 use crate::nodes::fixture::parts_problem_text::{problem_text, refusal_text};
 use crate::nodes::fixture::patching_runs::patching_runs;
 
@@ -29,8 +28,8 @@ pub(crate) type PartsPatchKey = (Revision, PortTablesKey, ColorOrder);
 
 /// A format-6 fixture's patching.
 pub(crate) struct FixturePartsPatch {
-    /// The mapping and its fit facts.
-    pub source: FixturePartsSource,
+    /// The mapping: its parts, its fit facts and its patching.
+    pub mapping: Mapping,
     /// The rendered tree, positions taken out.
     pub tree: Tree,
     key: Option<PartsPatchKey>,
@@ -42,9 +41,9 @@ pub(crate) struct FixturePartsPatch {
 }
 
 impl FixturePartsPatch {
-    pub fn new(source: FixturePartsSource, tree: Tree) -> Self {
+    pub fn new(mapping: Mapping, tree: Tree) -> Self {
         Self {
-            source,
+            mapping,
             tree,
             key: None,
             runs: Vec::new(),
@@ -64,6 +63,16 @@ impl FixturePartsPatch {
             return false;
         }
         self.repatch(key, ctx.control_patch_outputs().0, color_order)
+    }
+
+    /// Take a mapping that draws the same lamps
+    /// ([`Mapping::same_layout`]) and patch it on the next
+    /// [`Self::ensure`], whatever the key: a patching-only edit keeps the
+    /// tree and the layout's version, so nothing else would move the key.
+    pub fn repatch_with(&mut self, mapping: Mapping) {
+        debug_assert!(self.mapping.same_layout(&mapping));
+        self.mapping = mapping;
+        self.key = None;
     }
 
     /// [`Self::ensure`] with the question passed in (a test double of P1's
@@ -101,7 +110,7 @@ impl FixturePartsPatch {
     ) -> bool {
         self.key = Some(key);
         let ports = patcher_ports(&reachable);
-        let patching = patch_mapping(&self.source.mapping, &self.tree, &ports);
+        let patching = patch_mapping(&self.mapping, &self.tree, &ports);
         drop(ports);
         let placed = patching_runs(&patching, &self.tree, &reachable.outputs, color_order);
         self.status = status(&patching, &placed.refusals, &reachable);
@@ -220,14 +229,14 @@ mod tests {
         use crate::node::NodeRuntime;
         use lpc_model::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 
-        let source = parts_patch(Start::at("main", 0, Amount::lamps(0))).source;
+        let mapping = parts_patch(Start::at("main", 0, Amount::lamps(0))).mapping;
         let fixture = crate::nodes::FixtureNode::new(
             lpc_model::NodeId::new(1),
             MappingConfig::path_points_vec(Vec::new(), 1.0),
             FixtureSamplingConfig::default(),
             Revision::new(1),
         )
-        .with_parts_mapping(source, 10, 2);
+        .with_parts_mapping(mapping, 10, 2);
         assert!(fixture.control_patch_manual());
         assert_eq!(fixture.control_patch_placement(), Some(&[][..]));
         assert_eq!(fixture.runtime_status(), None);
@@ -285,14 +294,7 @@ mod tests {
         }
         mapping.start = start;
         let tree = render(&mapping).unwrap();
-        FixturePartsPatch::new(
-            FixturePartsSource {
-                mapping,
-                canvas: None,
-                sample_diameter: 1.0,
-            },
-            tree,
-        )
+        FixturePartsPatch::new(mapping, tree)
     }
 
     /// Output `main` with ports of these lamp counts, on `bus:control.out`.

@@ -13,23 +13,20 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Tree, render};
-use lpc_mapping::{fit_points_in_place, fit_scale};
+use lpc_mapping::part::{Mapping, Tree, render};
+use lpc_mapping::{Bounds2d, fit_points_in_place, fit_scale};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 
-use crate::nodes::fixture::fixture_parts_source::FixturePartsSource;
-
-/// Render `source` for a `texture_width` × `texture_height` fixture: the
+/// Render `mapping` for a `texture_width` × `texture_height` fixture: the
 /// carrier, and the tree without its positions. `Err` is the fixture's
 /// mapping error, in words (a mapping too big for memory is refused here,
 /// never aborted).
 pub(crate) fn render_parts_carrier(
-    source: &FixturePartsSource,
+    mapping: &Mapping,
     texture_width: u32,
     texture_height: u32,
 ) -> Result<(ResolvedMappingCompact, Tree), String> {
-    let mut tree =
-        render(&source.mapping).map_err(|error| format!("render fixture mapping: {error}"))?;
+    let mut tree = render(mapping).map_err(|error| format!("render fixture mapping: {error}"))?;
     let mut points = tree.take_positions();
 
     let mut spans = Vec::new();
@@ -57,16 +54,16 @@ pub(crate) fn render_parts_carrier(
             ResolvedMappingCompact {
                 spans,
                 points,
-                sample_diameter: source.sample_diameter,
+                sample_diameter: mapping.sample_diameter,
             },
             tree,
         ));
     }
-    let frame = source.canvas_bounds();
+    let frame = canvas_bounds(mapping);
     let fit = |error| format!("fit fixture mapping: {error}");
     // The diameter is a drawing-space length and rides the same fit as the
     // positions (`docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.md`).
-    let sample_diameter = source.sample_diameter
+    let sample_diameter = mapping.sample_diameter
         * fit_scale(&points, frame, texture_width, texture_height).map_err(fit)?;
     fit_points_in_place(&mut points, frame, texture_width, texture_height).map_err(fit)?;
     Ok((
@@ -79,19 +76,32 @@ pub(crate) fn render_parts_carrier(
     ))
 }
 
+/// The mapping's canvas as the fit reads it; a canvas of no width or height
+/// is none (as a map2d document's is), and the fit frames the lamps' own
+/// bounds.
+fn canvas_bounds(mapping: &Mapping) -> Option<Bounds2d> {
+    let [min_x, min_y, width, height] = mapping.canvas?;
+    (width > f32::EPSILON && height > f32::EPSILON).then_some(Bounds2d {
+        min_x,
+        min_y,
+        width,
+        height,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, Repeat, Shape};
-    use lpc_mapping::{Bounds2d, fit_points};
+    use lpc_mapping::fit_points;
+    use lpc_mapping::part::{Part, PartId, PartKind, Path, Repeat, Shape};
 
     /// The carrier holds the tree's positions, fitted, and nothing else
     /// holds them.
     #[test]
     fn the_carrier_holds_the_trees_positions_fitted_and_nothing_else_does() {
-        let source = source(&[3, 5]);
-        let raw = render(&source.mapping).unwrap().positions().to_vec();
-        let (carrier, tree) = render_parts_carrier(&source, 40, 20).unwrap();
+        let mapping = mapping(&[3, 5]);
+        let raw = render(&mapping).unwrap().positions().to_vec();
+        let (carrier, tree) = render_parts_carrier(&mapping, 40, 20).unwrap();
 
         let frame = Some(Bounds2d {
             min_x: 0.0,
@@ -119,7 +129,7 @@ mod tests {
     /// One carrier span per segment, in tree order.
     #[test]
     fn one_carrier_span_per_segment_in_tree_order() {
-        let (carrier, tree) = render_parts_carrier(&source(&[3, 5, 2]), 40, 20).unwrap();
+        let (carrier, tree) = render_parts_carrier(&mapping(&[3, 5, 2]), 40, 20).unwrap();
         let spans: Vec<(u32, u32, u32)> = carrier
             .spans
             .iter()
@@ -134,17 +144,13 @@ mod tests {
     fn a_mapping_too_big_for_memory_is_refused_not_aborted() {
         // u32::MAX copies of u32::MAX lamps: more than any heap can hand
         // over in one piece, so the one big ask fails before anything runs.
-        let mut huge = source(&[]);
-        let path = huge
-            .mapping
-            .new_part(PartKind::Shape(Shape::Path(Path::through(
-                &[[10.0, 5.0], [90.0, 5.0]],
-                u32::MAX,
-            ))));
-        let repeat =
-            huge.mapping
-                .new_part(PartKind::Repeat(Repeat::new(path, [50.0, 25.0], u32::MAX)));
-        huge.mapping.parts.push(repeat);
+        let mut huge = mapping(&[]);
+        let path = huge.new_part(PartKind::Shape(Shape::Path(Path::through(
+            &[[10.0, 5.0], [90.0, 5.0]],
+            u32::MAX,
+        ))));
+        let repeat = huge.new_part(PartKind::Repeat(Repeat::new(path, [50.0, 25.0], u32::MAX)));
+        huge.parts.push(repeat);
         let error = render_parts_carrier(&huge, 40, 20).unwrap_err();
         assert!(
             error.contains("more than this board's memory has free"),
@@ -155,7 +161,7 @@ mod tests {
     // --- helpers ---
 
     /// One straight path per count, side by side, on a 100 × 50 canvas.
-    fn source(counts: &[u32]) -> FixturePartsSource {
+    fn mapping(counts: &[u32]) -> Mapping {
         let mut mapping = Mapping::new();
         for (i, count) in counts.iter().enumerate() {
             let y = 5.0 + 10.0 * i as f32;
@@ -165,10 +171,8 @@ mod tests {
                 PartKind::Shape(Shape::Path(Path::through(&[[10.0, y], [90.0, y]], *count))),
             ));
         }
-        FixturePartsSource {
-            mapping,
-            canvas: Some([0.0, 0.0, 100.0, 50.0]),
-            sample_diameter: 2.0,
-        }
+        mapping.canvas = Some([0.0, 0.0, 100.0, 50.0]);
+        mapping.sample_diameter = 2.0;
+        mapping
     }
 }
