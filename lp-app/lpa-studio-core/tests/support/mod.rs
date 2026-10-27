@@ -62,8 +62,10 @@ impl Schemas {
     }
 }
 
-/// Oracle 1: every `.json` file conforms (mapping and patch documents by
-/// parsing with `lpc-mapping`). Returns the failures, one line each.
+/// Oracle 1: every `.json` file conforms (mapping documents by parsing with
+/// `lpc-mapping`: map2d format 6 since project format 12, which holds the
+/// patching too, so a patch document is a failure). Returns the failures,
+/// one line each.
 pub fn schema_failures(schemas: &Schemas, label: &str, files: &Files) -> Vec<String> {
     let mut failures = Vec::new();
     for (path, bytes) in files {
@@ -72,15 +74,17 @@ pub fn schema_failures(schemas: &Schemas, label: &str, files: &Files) -> Vec<Str
         }
         let text = std::str::from_utf8(bytes).expect("authored artifacts are utf8");
         if path.ends_with(".patch.json") {
-            lpc_mapping::PatchDoc::from_json(text)
-                .unwrap_or_else(|error| panic!("{label}/{path}: {error}"));
+            failures.push(format!(
+                "{label}/{path}: a patch document; since project format 12 a fixture's map2d \
+                 holds its patching"
+            ));
             continue;
         }
         if path.ends_with(".map2d.json") {
-            let doc = lpc_mapping::Map2dDoc::from_json(text)
+            let mapping = lpc_mapping::map2d6::read(text)
                 .unwrap_or_else(|error| panic!("{label}/{path}: {error}"));
-            lpc_mapping::resolve(&doc)
-                .unwrap_or_else(|error| panic!("{label}/{path}: does not resolve: {error}"));
+            lpc_mapping::part::render(&mapping)
+                .unwrap_or_else(|error| panic!("{label}/{path}: does not render: {error}"));
             continue;
         }
         if path.ends_with("editor.json") {

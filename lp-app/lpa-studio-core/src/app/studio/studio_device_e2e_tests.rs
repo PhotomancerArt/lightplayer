@@ -8525,10 +8525,10 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
 
-    // A real v10 fixture from the upgrader's corpus, installed as-is.
+    // A real fixture one format behind, from the upgrader's corpus, installed as-is.
     let old = PROJECT_FORMAT_VERSION - 1;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/quad-strips-v3"));
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
         let entry = entry.unwrap();
@@ -8606,7 +8606,7 @@ fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
     // The same real v10 fixture as the test above, installed as-is.
     let old = PROJECT_FORMAT_VERSION - 1;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/quad-strips-v3"));
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
         let entry = entry.unwrap();

@@ -192,7 +192,6 @@ The fields you can `set` on each kind, with the JSON they take (`set` a group of
 - `sampling`: a string
 - `diagnostic_mode`: a string
 - `mapping`: one of `{"kind": …}`: Unset, PathPoints, Map2d
-- `patch`: one of `{"kind": …}`: Unset, File
 - `strip_order_meaningful`: true or false
 - `wire_reversed`: true or false
 - `consume`: one of `{"kind": …}`: Auto, Policy

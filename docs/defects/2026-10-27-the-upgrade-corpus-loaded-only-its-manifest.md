@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-27      # how: live-debugging (mapping rebuild M3-0, recording the landing goldens)
-fixed: this change
+fixed: 03bd40648
 area: lpa-upgrade — the corpus test that proves migrated projects load (tests/corpus_goldens.rs)
 class: opt-in-degradation   # a node that fails to parse is an inventory state, not an Err, and the test never asked
 related:

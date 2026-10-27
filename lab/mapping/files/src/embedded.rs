@@ -64,7 +64,7 @@ pub const RADIANCE_DOME: Embedded = Embedded {
     title: "Radiance dome",
     files: files!("../../projects/radiance-dome":
         "project.json", "module.json", "clock.json", "shader.json", "shader.glsl", "dome.json",
-        "dome.map2d.json", "dome.patch.json", "out_1.json", "out_2.json", "out_3.json",
+        "dome.map2d.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),
     wired_as: None,
@@ -85,7 +85,7 @@ pub const EAVES_WIRED: Embedded = Embedded {
     title: "Sean's eaves, as wired",
     files: files!("../../projects/eaves-wired":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
-        "fixture.patch.json", "output.json", "effect/module.json", "effect/shader.json",
+        "output.json", "effect/module.json", "effect/shader.json",
         "effect/shader.glsl"),
     wired_as: None,
 };
