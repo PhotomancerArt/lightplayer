@@ -60,7 +60,10 @@ impl FixturePartsPatch {
         color_order: ColorOrder,
     ) -> bool {
         let key = (layout_version, ctx.port_tables_key(), color_order);
-        self.ensure_with(key, || ctx.control_patch_outputs().0, color_order)
+        if self.key == Some(key) {
+            return false;
+        }
+        self.repatch(key, ctx.control_patch_outputs().0, color_order)
     }
 
     /// [`Self::ensure`] with the question passed in: `ask` runs only when
@@ -74,8 +77,27 @@ impl FixturePartsPatch {
         if self.key == Some(key) {
             return false;
         }
+        self.repatch(key, ask(), color_order)
+    }
+
+    /// Patch against `reachable` and convert; returns whether the runs
+    /// changed.
+    ///
+    /// Cold and never inlined: the caller is the fixture's
+    /// `read_frame_settings`, which every fixture runs every frame on the
+    /// C6's main stack. Inlined there, the patcher's working set became part
+    /// of that function's frame (6,736 B on the C6, measured in M2 P3),
+    /// paid by every fixture, format ≤ 5 included, on every frame. Out of
+    /// line, it is paid only while re-patching.
+    #[cold]
+    #[inline(never)]
+    fn repatch(
+        &mut self,
+        key: PartsPatchKey,
+        reachable: ReachableOutputs,
+        color_order: ColorOrder,
+    ) -> bool {
         self.key = Some(key);
-        let reachable = ask();
         let ports = patcher_ports(&reachable);
         let patching = patch_mapping(&self.source.mapping, &self.tree, &ports);
         drop(ports);
