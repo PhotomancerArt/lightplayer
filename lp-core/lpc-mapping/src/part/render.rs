@@ -67,9 +67,26 @@ pub fn render(mapping: &Mapping) -> Result<Tree, RenderError> {
         });
     }
 
+    // The nodes and segments at the size they will be, so neither grows by
+    // doubling (65 nodes took a 128-node buffer, 8,192 B on RV32). A count
+    // the heap refuses here is left to the pushes, as before.
+    let (node_total, segment_total) = mapping
+        .parts
+        .iter()
+        .map(node_and_segment_count)
+        .fold((0u64, 0u64), |(n, s), (dn, ds)| {
+            (n.saturating_add(dn), s.saturating_add(ds))
+        });
+    let mut nodes = Vec::new();
+    let mut segments = Vec::new();
+    if let (Ok(n), Ok(s)) = (usize::try_from(node_total), usize::try_from(segment_total)) {
+        let _ = nodes.try_reserve_exact(n);
+        let _ = segments.try_reserve_exact(s);
+    }
+
     let mut tree = Tree {
-        nodes: Vec::new(),
-        segments: Vec::new(),
+        nodes,
+        segments,
         positions,
     };
     for part in &mapping.parts {
@@ -79,6 +96,10 @@ pub fn render(mapping: &Mapping) -> Result<Tree, RenderError> {
         tree.positions.len() as u64,
         total,
         "lamp_count drifted from the render: the exact-size reserve is broken"
+    );
+    debug_assert!(
+        tree.nodes.len() as u64 <= node_total && tree.segments.len() as u64 <= segment_total,
+        "node_and_segment_count fell short of the render: the reserve is too small"
     );
     // Every repeat round each node has added its copy: now drop the
     // trailing zeros.
@@ -366,6 +387,49 @@ fn lamp_count(part: &Part) -> u64 {
     }
 }
 
+/// How many nodes and segments a part renders: exactly what the render
+/// pushes, except a path split by subpaths, counted at its most (one per
+/// subpath, a subpath with no lamps making none).
+fn node_and_segment_count(part: &Part) -> (u64, u64) {
+    match &part.kind {
+        PartKind::Shape(shape) => {
+            // Leaves under the part's own node, or the node is the segment.
+            let leaves = match shape {
+                Shape::Path(path) if path.split == PathSplit::Subpaths => subpath_most(path),
+                Shape::Circle(circle) if circle.split == CircleSplit::Rings => {
+                    circle.rings.len() as u64
+                }
+                _ => return (1, 1),
+            };
+            (1 + leaves, leaves)
+        }
+        PartKind::Group { parts } => parts
+            .iter()
+            .map(node_and_segment_count)
+            .fold((1u64, 0u64), |(n, s), (dn, ds)| {
+                (n.saturating_add(dn), s.saturating_add(ds))
+            }),
+        PartKind::Repeat(repeat) => {
+            let (n, s) = node_and_segment_count(&repeat.part);
+            let count = u64::from(repeat.count);
+            (
+                n.saturating_mul(count).saturating_add(1),
+                s.saturating_mul(count),
+            )
+        }
+    }
+}
+
+/// The most segments a path split by subpaths renders: one per subpath (a
+/// move after the first command starts another), never more than its lamps.
+fn subpath_most(path: &Path) -> u64 {
+    if path.count == 0 || path.commands.len() < 2 {
+        return 0;
+    }
+    let jumpers = path.commands[1..].iter().filter(|c| c.is_move()).count() as u64;
+    (jumpers + 1).min(u64::from(path.count))
+}
+
 fn shape_count(shape: &Shape) -> u64 {
     match shape {
         Shape::Path(path) => u64::from(path.count),
@@ -374,5 +438,75 @@ fn shape_count(shape: &Shape) -> u64 {
         Shape::Points(points) => points.at.len() as u64,
         Shape::Grid(grid) => u64::from(grid.cols) * u64::from(grid.rows),
         Shape::FilledPolygon(filled) => filled_polygon_cells(filled).len() as u64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::part::path_command::PathCommand;
+    use crate::part::points::Points;
+    use alloc::vec;
+
+    /// The tree's nodes and segments are allocated at the size they are,
+    /// not grown by doubling: a repeat of 64 spokes, and a group of a circle
+    /// split into rings, a split path and points.
+    #[test]
+    fn the_nodes_and_segments_are_allocated_at_their_size() {
+        let mut m = Mapping::new();
+        let spoke = part("path1", straight(8));
+        m.parts.push(part(
+            "spoke",
+            PartKind::Repeat(Repeat::new(spoke, [50.0, 50.0], 64)),
+        ));
+        let mut split = Path::of(
+            vec![
+                PathCommand::Move([0.0, 0.0]),
+                PathCommand::Line([10.0, 0.0]),
+                PathCommand::Move([20.0, 0.0]),
+                PathCommand::Line([30.0, 0.0]),
+            ],
+            6,
+        );
+        split.split = PathSplit::Subpaths;
+        m.parts.push(part(
+            "group1",
+            PartKind::Group {
+                parts: vec![
+                    part(
+                        "circle1",
+                        PartKind::Shape(Shape::Circle(Circle::new(
+                            [50.0, 50.0],
+                            &[(40.0, 24), (20.0, 12), (0.0, 1)],
+                        ))),
+                    ),
+                    part("path2", PartKind::Shape(Shape::Path(split))),
+                    part(
+                        "points1",
+                        PartKind::Shape(Shape::Points(Points {
+                            at: vec![[1.0, 1.0], [2.0, 2.0]],
+                        })),
+                    ),
+                ],
+            },
+        ));
+        let tree = render(&m).unwrap();
+        // The repeat and its 64 copies; the group, the circle and its 3
+        // rings, the path and its 2 subpaths, the points.
+        assert_eq!(tree.nodes.len(), 65 + 1 + 4 + 3 + 1);
+        assert_eq!(tree.nodes.capacity(), tree.nodes.len());
+        assert_eq!(tree.segments.len(), 64 + 3 + 2 + 1);
+        assert_eq!(tree.segments.capacity(), tree.segments.len());
+    }
+
+    fn part(id: &str, kind: PartKind) -> Part {
+        Part::new(PartId::new(id).unwrap(), kind)
+    }
+
+    fn straight(count: u32) -> PartKind {
+        PartKind::Shape(Shape::Path(Path::through(
+            &[[50.0, 40.0], [50.0, 4.0]],
+            count,
+        )))
     }
 }
