@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
     Brightness, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, MappingConfig,
-    PatchConfig, VisualConsumerSpace,
+    VisualConsumerSpace,
 };
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
@@ -29,16 +29,10 @@ pub struct FixtureDef {
     pub sampling: ValueSlot<FixtureSamplingConfig>,
     /// Fixture-level hardware diagnostic pattern.
     pub diagnostic_mode: ValueSlot<FixtureDiagnosticMode>,
-    /// Fixture mapping definition.
+    /// Fixture mapping definition. Since project format 12 its map2d
+    /// document (format 6) also says where the fixture's lamps land on its
+    /// outputs' wires: there is no separate patch document or slot.
     pub mapping: EnumSlot<MappingConfig>,
-    /// Where this fixture's lamps land on its output's wire.
-    ///
-    /// A separate slot from `mapping` on purpose (mapping & patching vision
-    /// D4/D6): a fixture is mapped once and re-patched on every install, so
-    /// clearing the patch back to `Unset` — pure auto-flow — must never
-    /// disturb a lamp position. Absent/`Unset` is the ordinary state; a
-    /// patch is opt-in and even then usually sparse.
-    pub patch: EnumSlot<PatchConfig>,
     /// Whether this fixture's strip/lamp order carries meaning ("does strip
     /// order mean something?", dimensionality-first-class vision D3).
     /// Defaults true (a bare strip is `{1D}`); a serpentine matrix author
@@ -99,7 +93,6 @@ impl Default for FixtureDef {
             sampling: ValueSlot::new(FixtureSamplingConfig::default()),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::default()),
             mapping: EnumSlot::default(),
-            patch: EnumSlot::default(),
             strip_order_meaningful: ValueSlot::new(true),
             wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),
@@ -395,7 +388,6 @@ mod tests {
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
-            patch: EnumSlot::default(),
             strip_order_meaningful: ValueSlot::new(true),
             wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),

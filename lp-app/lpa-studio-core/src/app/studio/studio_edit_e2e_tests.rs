@@ -2426,7 +2426,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 11\n}\n";
+    let project_json = "{\n  \"format\": 12\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2505,7 +2505,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 11\n}\n"),
+        ("project.json", "{\n  \"format\": 12\n}\n"),
         (
             "module.json",
             r#"{

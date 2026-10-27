@@ -15,7 +15,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::node::kind::NodeKind;
-use crate::nodes::fixture::{FixtureDef, MappingConfig, PatchConfig};
+use crate::nodes::fixture::{FixtureDef, MappingConfig};
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSlotDef};
 use crate::nodes::texture::TextureDef;
 use crate::{AssetSlot, EnumSlot, MapSlot, NodeDef, PhasorConfig, Waveform};
@@ -88,9 +88,9 @@ impl NodeStarter {
 
 /// Every sibling asset reference a node def carries, in a stable order.
 ///
-/// Plural because a fixture carries two — its mapping document and its patch
-/// — and a copy that followed only the first would paste a node whose second
-/// document is not there. Shares [`NodeStarter::for_stem`]'s knowledge of
+/// A list, because a kind may carry more than one (a fixture carries one
+/// since project format 12: its mapping document, which holds its patching
+/// too). Shares [`NodeStarter::for_stem`]'s knowledge of
 /// which kinds reference assets, so a new asset-bearing kind is added in one
 /// place.
 pub fn node_def_asset_refs(def: &NodeDef) -> Vec<String> {
@@ -104,9 +104,6 @@ pub fn node_def_asset_refs(def: &NodeDef) -> Vec<String> {
         }
         NodeDef::Fixture(fixture) => {
             if let MappingConfig::Map2d { source } = fixture.mapping.value() {
-                refs.extend(source.artifact_value().map(|spec| spec.to_string()));
-            }
-            if let Some(source) = fixture.patch.value().source() {
                 refs.extend(source.artifact_value().map(|spec| spec.to_string()));
             }
         }
@@ -140,11 +137,6 @@ pub fn rewrite_node_def_asset_refs(def: &mut NodeDef, rename: impl Fn(&str) -> O
                 let mut source = source.clone();
                 rewrite(&mut source, &rename);
                 fixture.mapping = EnumSlot::new(MappingConfig::Map2d { source });
-            }
-            if let Some(source) = fixture.patch.value().source() {
-                let mut source = source.clone();
-                rewrite(&mut source, &rename);
-                fixture.patch = EnumSlot::new(PatchConfig::File { source });
             }
         }
         _ => {}
@@ -426,45 +418,31 @@ mod tests {
         assert_eq!(read.write_json(&registry).expect("re-write"), text);
     }
 
-    /// The starter fixture is UNPATCHED: a patch is opt-in, and a scaffolded
-    /// one would be a file every new fixture carries and nobody asked for.
+    /// The starter fixture ships one document, its mapping (which holds its
+    /// patching since project format 12).
     #[test]
-    fn the_fixture_starter_ships_no_patch_document() {
+    fn the_fixture_starter_ships_one_mapping_document() {
         let starter = starter_for_kind(NodeKind::Fixture)
             .expect("fixture starter")
             .for_stem("sign");
-        let NodeDef::Fixture(fixture) = &starter.def else {
+        let NodeDef::Fixture(_) = &starter.def else {
             panic!("expected fixture");
         };
-        assert_eq!(*fixture.patch.value(), PatchConfig::Unset);
         assert_eq!(starter.assets.len(), 1, "the mapping document, and only it");
     }
 
-    /// The copy/paste pair is plural because a fixture carries two documents;
-    /// following only the first pastes a node missing its patch.
+    /// A pasted fixture follows its mapping document to its new name.
     #[test]
-    fn a_patched_fixtures_asset_refs_list_both_documents_and_both_rewrite() {
+    fn a_fixtures_asset_ref_rewrites() {
         let mut def = NodeDef::Fixture(FixtureDef {
             mapping: EnumSlot::new(MappingConfig::map2d("sign.map2d.json")),
-            patch: EnumSlot::new(PatchConfig::file("sign.patch.json")),
             ..FixtureDef::default()
         });
-
-        assert_eq!(
-            node_def_asset_refs(&def),
-            vec![
-                String::from("sign.map2d.json"),
-                String::from("sign.patch.json")
-            ]
-        );
 
         rewrite_node_def_asset_refs(&mut def, |current| Some(current.replace("sign", "copy_2")));
         assert_eq!(
             node_def_asset_refs(&def),
-            vec![
-                String::from("copy_2.map2d.json"),
-                String::from("copy_2.patch.json")
-            ]
+            vec![String::from("copy_2.map2d.json")]
         );
     }
 
@@ -474,25 +452,21 @@ mod tests {
     fn an_unmatched_asset_reference_is_left_alone() {
         let mut def = NodeDef::Fixture(FixtureDef {
             mapping: EnumSlot::new(MappingConfig::map2d("sign.map2d.json")),
-            patch: EnumSlot::new(PatchConfig::file("sign.patch.json")),
             ..FixtureDef::default()
         });
 
         rewrite_node_def_asset_refs(&mut def, |current| {
-            (current == "sign.patch.json").then(|| String::from("other.patch.json"))
+            (current == "other.map2d.json").then(|| String::from("third.map2d.json"))
         });
 
         assert_eq!(
             node_def_asset_refs(&def),
-            vec![
-                String::from("sign.map2d.json"),
-                String::from("other.patch.json")
-            ]
+            vec![String::from("sign.map2d.json")]
         );
     }
 
     #[test]
-    fn an_unpatched_fixture_lists_only_its_mapping() {
+    fn a_fixture_lists_only_its_mapping() {
         let def = NodeDef::Fixture(FixtureDef {
             mapping: EnumSlot::new(MappingConfig::map2d("sign.map2d.json")),
             ..FixtureDef::default()

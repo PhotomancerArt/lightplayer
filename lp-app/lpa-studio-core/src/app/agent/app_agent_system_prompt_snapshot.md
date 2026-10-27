@@ -33,7 +33,7 @@ This is the project the app itself creates for a seeed/xiao-esp32-c6 board: a cl
 `project.json`:
 ```json
 {
-  "format": 11,
+  "format": 12,
   "name": "Example",
   "target": "seeed/xiao-esp32-c6"
 }

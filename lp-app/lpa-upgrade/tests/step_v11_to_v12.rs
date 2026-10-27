@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{Place, goldens, read_project, workspace_dir};
 use lpa_upgrade::{
-    FixtureLayout, Landing, ProjectFiles, ProjectLanding, landing, upgrade_v11_to_v12,
+    FixtureLayout, Landing, ProjectFiles, ProjectLanding, landing, upgrade_to_current,
 };
 use lpc_mapping::map2d6;
 use lpc_mapping::part::render;
@@ -53,7 +53,7 @@ fn every_repo_project_lands_every_lamp_where_the_engine_did() {
         }
         let before = read_project(&workspace.join(&project));
         let mut after = before.clone();
-        let report = match upgrade_v11_to_v12(&mut after) {
+        let report = match upgrade_to_current(&mut after) {
             Ok(report) => report,
             Err(error) => {
                 if after != before {
@@ -120,7 +120,7 @@ fn the_projects_the_engine_refused_land_as_the_frozen_landing_says() {
         }
         let before = read_project(&workspace.join(&project));
         let mut after = before.clone();
-        upgrade_v11_to_v12(&mut after).unwrap_or_else(|e| panic!("{project}: {e}"));
+        upgrade_to_current(&mut after).unwrap_or_else(|e| panic!("{project}: {e}"));
         lands_as_today(&before, &after);
         checked.push(project);
     }
@@ -212,7 +212,7 @@ fn a_fixture_no_output_reads_has_no_start_and_lights_nothing() {
         ("o.json", r#"{"kind":"Output","ports":{"0":{"count":10}}}"#),
     ]);
     let mut after = before.clone();
-    let report = upgrade_v11_to_v12(&mut after).unwrap();
+    let report = upgrade_to_current(&mut after).unwrap();
     lands_as_today(&before, &after);
     let doc = map2d(&after, "f.map2d.json");
     assert!(doc.get("start").is_none(), "{doc}");
@@ -372,7 +372,7 @@ fn a_segment_a_port_boundary_cuts_is_refused_by_name() {
         )],
     );
     let mut after = before.clone();
-    let error = upgrade_v11_to_v12(&mut after).unwrap_err().to_string();
+    let error = upgrade_to_current(&mut after).unwrap_err().to_string();
     assert_eq!(after, before, "a refusal leaves every file as it was");
     for words in [
         "project \"t\"",
@@ -400,7 +400,7 @@ fn a_patch_file_is_removed_and_its_slot_is_gone() {
         &[output("o", None, r#"{"0":{}}"#)],
     );
     let mut after = before.clone();
-    let report = upgrade_v11_to_v12(&mut after).unwrap();
+    let report = upgrade_to_current(&mut after).unwrap();
     assert!(!after.contains("f.patch.json"));
     assert_eq!(report.removed_files, vec!["f.patch.json"]);
     let def: serde_json::Value = serde_json::from_slice(after.get("f.json").unwrap()).unwrap();
@@ -418,7 +418,7 @@ fn an_unreadable_patch_freezes_auto_flow_and_says_so() {
         &[output("o", None, r#"{"0":{}}"#)],
     );
     let mut after = before.clone();
-    let report = upgrade_v11_to_v12(&mut after).unwrap();
+    let report = upgrade_to_current(&mut after).unwrap();
     lands_as_today(&before, &after);
     assert!(
         report
@@ -450,7 +450,7 @@ fn hand_placed_lamps_become_a_map2d_of_points() {
         ("o.json", r#"{"kind":"Output","ports":{"0":{}}}"#),
     ]);
     let mut after = before.clone();
-    let report = upgrade_v11_to_v12(&mut after).unwrap();
+    let report = upgrade_to_current(&mut after).unwrap();
     lands_as_today(&before, &after);
     assert_eq!(report.added_files, vec!["fixture.map2d.json"]);
     let def: serde_json::Value =
@@ -509,7 +509,7 @@ fn a_shared_map2d_patched_two_ways_is_copied_for_the_later_fixture() {
         ),
     ]);
     let mut after = before.clone();
-    let report = upgrade_v11_to_v12(&mut after).unwrap();
+    let report = upgrade_to_current(&mut after).unwrap();
     lands_as_today(&before, &after);
     assert_eq!(report.added_files, vec!["maps/m-2.map2d.json"]);
     let b: serde_json::Value = serde_json::from_slice(after.get("b.json").unwrap()).unwrap();
@@ -830,7 +830,7 @@ fn files_reported(
 /// The same input gives the same bytes.
 fn deterministic(before: &ProjectFiles, after: &ProjectFiles) -> Result<(), String> {
     let mut again = before.clone();
-    upgrade_v11_to_v12(&mut again).map_err(|e| e.to_string())?;
+    upgrade_to_current(&mut again).map_err(|e| e.to_string())?;
     if &again != after {
         return Err(String::from("a second run wrote different bytes"));
     }
@@ -928,7 +928,7 @@ fn map2d(files: &ProjectFiles, path: &str) -> serde_json::Value {
 /// Run the step and check it lands as today.
 fn step(before: &ProjectFiles) -> ProjectFiles {
     let mut after = before.clone();
-    upgrade_v11_to_v12(&mut after).unwrap();
+    upgrade_to_current(&mut after).unwrap();
     lands_as_today(before, &after);
     after
 }

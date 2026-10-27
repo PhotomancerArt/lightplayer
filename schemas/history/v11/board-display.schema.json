@@ -1,0 +1,583 @@
+{
+  "$defs": {
+    "BoardDrawing": {
+      "description": "The drawing block the row-engine diagram renderer consumes.\n\nGeometry is in board-local units; the renderer derives every other size\nfrom the pin pitch (`u`). See `docs/design/board-diagrams.md`.",
+      "properties": {
+        "buttons": {
+          "items": {
+            "$ref": "#/$defs/DrawnButton"
+          },
+          "type": "array"
+        },
+        "left": {
+          "items": {
+            "$ref": "#/$defs/DrawnPin"
+          },
+          "type": "array"
+        },
+        "module": {
+          "$ref": "#/$defs/DrawnModule"
+        },
+        "rgb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DrawnRgb"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "right": {
+          "items": {
+            "$ref": "#/$defs/DrawnPin"
+          },
+          "type": "array"
+        },
+        "terminals": {
+          "description": "Top-edge screw terminals (band rows + leader lines).",
+          "items": {
+            "$ref": "#/$defs/DrawnTerminal"
+          },
+          "type": "array"
+        },
+        "usb": {
+          "items": {
+            "$ref": "#/$defs/DrawnUsb"
+          },
+          "type": "array"
+        },
+        "width": {
+          "description": "Board width in drawing units. Height derives from pin counts.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "module",
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "BoardNote": {
+      "description": "One detail-view note. Deliberately minimal: text plus optional OS (and\nfreeform OS-version qualifier) tags — the whole \"note system\".",
+      "properties": {
+        "os": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoteOs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "os_version": {
+          "description": "Freeform version qualifier shown with the OS tag (\"Sequoia+\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "CapKind": {
+      "description": "Cell type: drives the capability cell's color family.",
+      "oneOf": [
+        {
+          "enum": [
+            "adc",
+            "dac",
+            "touch",
+            "spi",
+            "i2c",
+            "uart",
+            "usb",
+            "strap",
+            "pwr",
+            "note"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "warn",
+          "description": "Caution: input-only, XTAL, PSRAM-reserved, JTAG, onboard LED.",
+          "type": "string"
+        }
+      ]
+    },
+    "DrawnButton": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "description": "Negative y = offset from the board's bottom edge.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "label"
+      ],
+      "type": "object"
+    },
+    "DrawnModule": {
+      "description": "The SoC module / can outline.",
+      "properties": {
+        "antenna": {
+          "default": false,
+          "type": "boolean"
+        },
+        "h": {
+          "format": "float",
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "w": {
+          "format": "float",
+          "type": "number"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h",
+        "label"
+      ],
+      "type": "object"
+    },
+    "DrawnPin": {
+      "description": "One pin on a left/right rail.",
+      "properties": {
+        "caps": {
+          "items": {
+            "$ref": "#/$defs/PinCap"
+          },
+          "type": "array"
+        },
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "description": "Silkscreen label (\"4\", \"3V3\", \"D10\", \"RST\").",
+          "type": "string"
+        },
+        "pad_style": {
+          "$ref": "#/$defs/PadStyle",
+          "description": "The pin's physical connector. Header/solder pads are the default;\nscrew terminals (DIN-rail controllers like the DOM-Z-102) draw as a\nsquare block with a screw head."
+        },
+        "role": {
+          "$ref": "#/$defs/PinRole"
+        }
+      },
+      "required": [
+        "label",
+        "role"
+      ],
+      "type": "object"
+    },
+    "DrawnRgb": {
+      "properties": {
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "DrawnTerminal": {
+      "description": "A top-edge screw terminal. Terminal rows keep a leading name cell because\nthere is no inside-the-board space for their labels.",
+      "properties": {
+        "caps": {
+          "items": {
+            "$ref": "#/$defs/PinCap"
+          },
+          "type": "array"
+        },
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/PinRole"
+        }
+      },
+      "required": [
+        "label",
+        "role"
+      ],
+      "type": "object"
+    },
+    "DrawnUsb": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "label"
+      ],
+      "type": "object"
+    },
+    "FirmwarePin": {
+      "description": "One pinned board↔firmware exception. The reason is required: an exception\nwith no stated cause is indistinguishable from the hand-authored\ncompatibility tables the computed join replaces.",
+      "properties": {
+        "build_id": {
+          "description": "Build id, i.e. the stem of a `lp-fw/builds/<id>.json` build def.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why this board deviates from the computed result.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "build_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "NoteOs": {
+      "description": "The OS a note applies to.",
+      "enum": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "type": "string"
+    },
+    "PadStyle": {
+      "description": "How a rail pin physically presents on the board.",
+      "oneOf": [
+        {
+          "const": "pad",
+          "description": "Header pin / solder pad.",
+          "type": "string"
+        },
+        {
+          "const": "screw",
+          "description": "Screw terminal.",
+          "type": "string"
+        }
+      ]
+    },
+    "PinCap": {
+      "description": "A capability cell in the pin's row (\"ADC1_3\", \"Touch4\", \"U0_TXD\").",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CapKind"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PinRole": {
+      "description": "Pin role: drives pad/label color and output eligibility.\n\nOutput-eligible for LED discovery: `io` and `strap` only.",
+      "oneOf": [
+        {
+          "enum": [
+            "pwr5",
+            "pwr3",
+            "gnd",
+            "io",
+            "nc"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "io-in",
+          "description": "Input-only (classic ESP32 34-39).",
+          "type": "string"
+        },
+        {
+          "const": "strap",
+          "description": "Boot-strap pin: usable, with care.",
+          "type": "string"
+        },
+        {
+          "const": "usb",
+          "description": "USB D+/D- — driving it drops the link.",
+          "type": "string"
+        },
+        {
+          "const": "ctl",
+          "description": "EN / RST.",
+          "type": "string"
+        },
+        {
+          "const": "rsvd",
+          "description": "Connected but reserved (in-package flash/PSRAM pins on boards that\nexpose them). Never claimable, never discovery-eligible.",
+          "type": "string"
+        }
+      ]
+    },
+    "PurchaseUrl": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "href"
+      ],
+      "type": "object"
+    },
+    "SupportTier": {
+      "description": "Support tier shown on the catalog. Definitions live in\n`lp-core/lpc-hardware/boards/README.md`.",
+      "oneOf": [
+        {
+          "const": "gold",
+          "description": "First-class: tested every release.",
+          "type": "string"
+        },
+        {
+          "const": "silver",
+          "description": "Supported: tested occasionally.",
+          "type": "string"
+        },
+        {
+          "const": "bronze",
+          "description": "Community-verified: should work.",
+          "type": "string"
+        }
+      ]
+    },
+    "UsbBridge": {
+      "description": "The USB-UART bridge (or native USB) a board's USB connector goes through.",
+      "oneOf": [
+        {
+          "const": "native-usb-jtag",
+          "description": "The SoC's own USB-Serial-JTAG peripheral (S3, C6). No bridge chip,\nno driver anywhere.",
+          "type": "string"
+        },
+        {
+          "const": "ch340g",
+          "description": "WCH CH340G — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch340c",
+          "description": "WCH CH340C — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch340k",
+          "description": "WCH CH340K — NOT covered by Apple's built-in driver (it matches only\n0x7523 and CH9102F); needs WCH's DriverKit extension on macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch9102f",
+          "description": "WCH CH9102F — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "cp2102",
+          "description": "Silicon Labs CP2102 — driverless on modern macOS.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/board-display.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One board's display sidecar (`<vendor>/<product>.display.json`).",
+  "properties": {
+    "blurb": {
+      "type": "string"
+    },
+    "board_id": {
+      "description": "Must equal the sibling runtime manifest id and the `vendor/product`\nfile path stem.",
+      "type": "string"
+    },
+    "capabilities": {
+      "description": "Catalog capability chips (\"Wi-Fi 6\", \"level shifter\", ...).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "default_led_wires": {
+      "description": "The board-visible wire names LED output goes to by default, **best\nfirst** — the answer to \"where do the pixels plug in\" that project\ngeneration and the provisioning picker need.\n\nEach entry is a silkscreen label from this board's own pin/terminal\ntables (`IO18`, `LED1`, `D10`, `18`), so an endpoint spec is the\nlabel with the target prefix:\n`ws281x:local:<wire>` (`docs/adr/2026-08-03-multi-endpoint-output-node.md`\n— the middle segment names the device, the last one names the wire).\n[`Self::validate`] refuses a name that is not an output-eligible pin\nor terminal with a gpio, because a wrong wire is the\nphysical-damage class of mistake `boards/README.md` is about.\n\nOrder is meaningful and is a board fact where the board has one: the\nDOM-Z-102 lists its four fused DATA terminals and deliberately omits\nthe un-level-shifted spare. Single-wire generation takes\n[`Self::default_led_wire`]; multi-wire generation is future work.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "family": {
+      "description": "The chip this board carries, in **espflash spelling**: \"esp32\",\n\"esp32c6\", \"esp32s3\". Kept a plain string so display data never gates\non firmware target enums, but the vocabulary is not free-form — it is\nthe same identity a build def's `chip.name` states, and the\nboard↔build join (`compatible_builds`) matches on it exactly. It\ndoubles as the catalog's SoC filter key.",
+      "type": "string"
+    },
+    "firmware_allow": {
+      "description": "Firmware builds this board runs even though the computed join says\notherwise (it relaxes the flash-fit rule only — chip identity is\nnever overridable). Empty on every normal board: hand-listing\nboard→firmware is forbidden, so each entry states its reason.",
+      "items": {
+        "$ref": "#/$defs/FirmwarePin"
+      },
+      "type": "array"
+    },
+    "firmware_deny": {
+      "description": "Firmware builds this board must never be offered even though the\ncomputed join matches. Empty on every normal board.",
+      "items": {
+        "$ref": "#/$defs/FirmwarePin"
+      },
+      "type": "array"
+    },
+    "flash": {
+      "description": "Flash size as written on the datasheet, e.g. \"8 MB\".",
+      "type": "string"
+    },
+    "flash_mb": {
+      "description": "The same flash size as a number of megabytes, for the board↔build\njoin (a build's `flashSizeMb` must fit). Omit when the flash size is\nnot verified — a board with no `flash_mb` matches no build, which is\nthe honest outcome (boards/README.md: omit what you cannot verify).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "hw": {
+      "$ref": "#/$defs/BoardDrawing"
+    },
+    "manufacturer": {
+      "type": "string"
+    },
+    "notes": {
+      "description": "Freeform board notes shown on the detail view, optionally OS-tagged\n(an untagged note shows everywhere; a tagged one only on that OS).",
+      "items": {
+        "$ref": "#/$defs/BoardNote"
+      },
+      "type": "array"
+    },
+    "price_usd": {
+      "description": "Approximate street price, USD, for catalog sorting.",
+      "format": "double",
+      "type": "number"
+    },
+    "psram": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "purchase_urls": {
+      "items": {
+        "$ref": "#/$defs/PurchaseUrl"
+      },
+      "type": "array"
+    },
+    "soc": {
+      "description": "Human SoC name, e.g. \"ESP32-C6\".",
+      "type": "string"
+    },
+    "support_note": {
+      "description": "Honest support caveat shown with the tier, e.g. \"runs when classic\nESP32 firmware lands\".",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tier": {
+      "$ref": "#/$defs/SupportTier"
+    },
+    "usb_bridge": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UsbBridge"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The USB-UART bridge the board's USB connector goes through — drives\nper-OS driver warnings (plan decision D5). Set only when verified;\nomitted = unknown."
+    }
+  },
+  "required": [
+    "board_id",
+    "display_name",
+    "manufacturer",
+    "soc",
+    "family",
+    "flash",
+    "price_usd",
+    "tier",
+    "blurb",
+    "hw"
+  ],
+  "title": "BoardDisplayFile",
+  "type": "object"
+}

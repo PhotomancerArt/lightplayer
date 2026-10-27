@@ -28,6 +28,16 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
+/// - `12` — one mapping file holds a fixture's parts and patching: every
+///   `*.map2d.json` is map2d format 6 (parts, the fixture's start,
+///   overrides), the `*.patch.json` documents and the fixture's `patch`
+///   slot are gone, and hand-placed `PathPoints` lamps became a map2d of
+///   `points` parts. Auto-flow is frozen into starts and overrides: the
+///   upgrader (`lpa-upgrade`'s `v11_to_v12`) lands every lamp where format
+///   11 landed it, and refuses a segment a port boundary cuts. The engine
+///   refuses a map2d of format 5 or older, or a `PathPoints` mapping,
+///   inside a format-12 project by name. See
+///   `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`.
 /// - `9` — the projection vocabulary FACTORED (post-G2 ruling):
 ///   `SpaceAnswer2` (`ShaderDef.space.OneD.in_2d`) and `ConsumerCell2`
 ///   (`FixtureDef.consume.Policy.from_1d`) collapsed their per-shape
@@ -97,7 +107,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 11;
+pub const PROJECT_FORMAT_VERSION: u32 = 12;
 
 /// A project's authored kind (module authoring unit, P1 —
 /// `docs/design/modules.md`): the default general project, or one of two
@@ -569,7 +579,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 11,\n  \"uid\": \"prj0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 12,\n  \"uid\": \"prj0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -593,7 +603,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 11,\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\"\n}\n"
+            "{\n  \"format\": 12,\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -628,7 +638,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 11,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n"
+            "{\n  \"format\": 12,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -704,7 +714,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 11,\n  \"created\": \"2026-08-07\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\",\n    \"sparkle\"\n  ],\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 12,\n  \"created\": \"2026-08-07\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\",\n    \"sparkle\"\n  ],\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -730,7 +740,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 11,\n  \"kind\": \"rig\",\n  \"exports\": []\n}\n"
+            "{\n  \"format\": 12,\n  \"kind\": \"rig\",\n  \"exports\": []\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -752,7 +762,7 @@ mod tests {
             ..ProjectManifest::default()
         };
         let text = manifest.write_json();
-        assert_eq!(text, "{\n  \"format\": 11,\n  \"kind\": \"show\"\n}\n");
+        assert_eq!(text, "{\n  \"format\": 12,\n  \"kind\": \"show\"\n}\n");
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
         assert_eq!(read.project_kind(), ProjectKind::Show);

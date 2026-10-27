@@ -357,7 +357,7 @@ impl Harness {
 
     fn write_project_files(&self) {
         let files: [(&str, &[u8]); 8] = [
-            ("project.json", b"{\n  \"format\": 11\n}\n"),
+            ("project.json", b"{\n  \"format\": 12\n}\n"),
             (
                 "module.json",
                 br#"{"kind":"Module","nodes":{"clock":{"ref":"./clock.json"},"list":{"ref":"./playlist.json"}}}"#,

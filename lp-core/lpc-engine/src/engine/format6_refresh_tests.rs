@@ -175,7 +175,7 @@ impl Rig {
 
     fn load_with(map2d: &str, patched: bool) -> Self {
         let fs = LpFsMemory::new();
-        write(&fs, "/project.json", "{\n  \"format\": 11\n}\n");
+        write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         write(
             &fs,
             "/module.json",

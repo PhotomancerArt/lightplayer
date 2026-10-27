@@ -700,7 +700,7 @@ struct Rig {
 impl Rig {
     fn load(fixtures: Vec<Fix>, outputs: Vec<Out>) -> Self {
         let fs = LpFsMemory::new();
-        write(&fs, "/project.json", "{\n  \"format\": 11\n}\n");
+        write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         let mut nodes = vec![String::from("\"shader\": { \"ref\": \"./shader.json\" }")];
         write(
             &fs,

@@ -275,7 +275,7 @@ struct Project {
 impl Project {
     fn load(outputs: &[Output]) -> Self {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("manifest");
         let mut nodes = vec![String::from("\"strip\": { \"ref\": \"./strip.json\" }")];
         for (index, output) in outputs.iter().enumerate() {

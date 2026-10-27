@@ -347,7 +347,7 @@ fn project_fs(shape: Shape6, format6: bool) -> LpFsMemory {
         fs.write_file(path.as_path(), text.as_bytes())
             .expect("write project file");
     };
-    write("/project.json", "{\n  \"format\": 11\n}\n");
+    write("/project.json", "{\n  \"format\": 12\n}\n");
     write(
         "/module.json",
         r#"{ "kind": "Module", "nodes": {

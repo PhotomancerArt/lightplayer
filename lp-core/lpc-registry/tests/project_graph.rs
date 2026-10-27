@@ -177,7 +177,7 @@ fn load_inline_project(
     let shapes = lpc_model::SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 12\n}\n")
         .unwrap();
     fs.write_file_mut(LpPath::new("/module.json"), project.as_bytes())
         .unwrap();

@@ -34,7 +34,7 @@ fn a_manifest_with_a_uid_says_it() {
     copy_project(
         &mut server,
         "lamp",
-        Some(r#"{"format":11,"uid":"prj7m3qk2x9z4w8v6t5r1n0p2a4c","name":"Rocaille"}"#),
+        Some(r#"{"format":12,"uid":"prj7m3qk2x9z4w8v6t5r1n0p2a4c","name":"Rocaille"}"#),
     );
     server
         .load_project("/projects/lamp".as_path())
@@ -47,7 +47,7 @@ fn a_manifest_with_a_uid_says_it() {
 #[test]
 fn a_manifest_with_no_name_says_the_folders() {
     let mut server = server();
-    copy_project(&mut server, "desk-lamp", Some(r#"{"format":11}"#));
+    copy_project(&mut server, "desk-lamp", Some(r#"{"format":12}"#));
     server
         .load_project("/projects/desk-lamp".as_path())
         .expect("loads");
@@ -67,7 +67,7 @@ fn a_renamed_manifest_is_the_new_name_after_the_refresh() {
         .base_fs_mut()
         .write_file(
             "/projects/basic/project.json".as_path(),
-            br#"{"format":11,"name":"Porch","uid":"prjaaaabbbbccccddddeeeeffff"}"#,
+            br#"{"format":12,"name":"Porch","uid":"prjaaaabbbbccccddddeeeeffff"}"#,
         )
         .expect("rename");
     server.advance_frame(16).expect("tick");

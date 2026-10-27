@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "OpenTo": {
+      "description": "What an untrusted link holds before (or without) logging in: the device\nstore's `open` setting.\n\n- `nobody` — a key or password is needed for anything.\n- `play` — anyone nearby can play; authoring needs a key or password.\n- `edit` — anyone nearby can play AND author. The default for a board\n  with no store, for now (development and alpha: \"like WLED\").\n\nIt only ever adds to a login: a link holds the higher of what its login\ngranted and this. Serialized `\"nobody\"` / `\"play\"` / `\"edit\"`, in the\npersisted device store and on the wire alike.",
+      "enum": [
+        "nobody",
+        "play",
+        "edit"
+      ],
+      "type": "string"
+    },
+    "SecretEntry": {
+      "additionalProperties": false,
+      "description": "A shared secret the board accepts, stored as the KDF's OUTPUT.\n\n`k = PBKDF2-HMAC-SHA256(password, salt, iterations)` is computed by the\nclient that installs the secret; the password itself is never stored and\nnever crosses a link. `k` is login-equivalent — anyone holding it can\nanswer a challenge — which is accepted (the threat model is someone\ncheeky nearby, not a cracker with the flash chip), and is why no link at\nany tier can read an access file back.\n\n`label` names the secret for people (\"camp\", \"mine\"). It is never\noffered before login; a successful login names the label it matched.\n`kind` and `added_at` are for people too (\"Who has access\"); the board\ngrants by `tier` alone.\n\nThis is the version-2 entry shape. A version-1 file's entries carry no\n`kind` and no `addedAt`; they are read through a private v1 shape and\nbecome `kind: password` with no time.",
+      "properties": {
+        "addedAt": {
+          "description": "When it was added, epoch seconds, as the adding client said\n(caller-supplied: nothing here reads a clock). Absent when unknown,\nwhich every version-1 entry is.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "iterations": {
+          "description": "PBKDF2 iteration count (≥ 1), tuned by the installing client.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "k": {
+          "description": "The derived key `K`, base64 (32 bytes).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "description": "Who holds it: a browser, an account, or a password."
+        },
+        "label": {
+          "description": "Human name for this secret.",
+          "type": "string"
+        },
+        "salt": {
+          "description": "PBKDF2 salt, base64 (16 bytes).",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/Tier",
+          "description": "What a login with this secret grants."
+        }
+      },
+      "required": [
+        "label",
+        "kind",
+        "tier",
+        "salt",
+        "iterations",
+        "k"
+      ],
+      "type": "object"
+    },
+    "SecretKind": {
+      "description": "Who a [`crate::SecretEntry`] belongs to — what a person sees in \"Who has\naccess\", and nothing the board decides anything by.\n\nThe board treats every kind alike: the login verifies `k` and grants the\nentry's tier whatever its kind. The kind is for people, and for a client\nthat wants to recognise its own entries.\n\n- `browser` — a key a browser generated for itself (32 random bytes,\n  one salt the browser uses on every device, `iterations: 1`).\n- `account` — the signed-in account's key, generated the same way and\n  shared by every browser signed in to that account.\n- `password` — a password a person typed or was given. Every v1 entry\n  reads as this kind: before v2, a password was the only kind there was.",
+      "oneOf": [
+        {
+          "const": "browser",
+          "description": "A key one browser generated for itself.",
+          "type": "string"
+        },
+        {
+          "const": "account",
+          "description": "The signed-in account's key.",
+          "type": "string"
+        },
+        {
+          "const": "password",
+          "description": "A typed or shared password.",
+          "type": "string"
+        }
+      ]
+    },
+    "Tier": {
+      "description": "An access tier. `Edit` implies `Play`: the derived ordering is\n`Play < Edit`, so \"has at least tier X\" is `held >= X`.\n\n- **Play** — the panel (knobs, brightness) plus reads: project reads,\n  project listings, and reading project files over fs.\n- **Edit** — everything: loading projects, authoring, fs writes and\n  deletes, device commands.\n\nNo tier, on any link, reads an access file (`**/.lp/access.json`).\n\nSerialized as `\"play\"` / `\"edit\"`, in the persisted access files and on\nthe wire alike.",
+      "enum": [
+        "play",
+        "edit"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/device-access.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The device's own access settings, at the root of its filesystem.\n\nIt holds the device's secrets — browser keys, the account key, typed\npasswords, each a [`SecretEntry`] of its [`crate::SecretKind`] — and two\nsettings:\n\n- `bleEnabled` — whether the BLE link may start.\n- `open` — what anyone nearby holds with no password ([`OpenTo`]):\n  nobody, play, or play and edit.\n\n**Bluetooth on and open to anyone nearby, by default — for now.** A\ndevice with no store is [`Self::fresh`]: BLE on, open at edit, no\nsecrets. Development and alpha testing want public access (\"like WLED\");\nthe default is one constant to change later. A store that fails to parse\nreads as [`Self::locked`] instead (BLE off, open to nobody; the caller\nlogs the error): damage only ever takes access away.\n\n**Two readers since over-the-air updates.** The engine (the server)\nreads and writes the whole file; the split image's **core** reads\n`secrets` and `open` for its update session's login and access (doors\n#14). After an update or a rollback, a core may read a file a newer or\nolder engine wrote, so changes to `secrets` and `open` stay **additive**\n— a core that cannot read the file reads it as [`Self::locked`] — and no\nfirmware migrates the file on an unconfirmed trial boot\n(`lpa_server::access_store::may_migrate_device_store`).\n\nVersion 3 (this shape) made `open` an [`OpenTo`]. A version-2 file still\nreads — `open: true` is play, `false` is nobody, so an existing board\nkeeps exactly the access it had — and so does a version-1 file (its\nentries become `kind: password` with no time). Both are written back as\nversion 3.",
+  "properties": {
+    "bleEnabled": {
+      "description": "Whether the BLE link may start at all.",
+      "type": "boolean"
+    },
+    "open": {
+      "$ref": "#/$defs/OpenTo",
+      "description": "What an untrusted link holds without logging in."
+    },
+    "secrets": {
+      "description": "The device's secrets.",
+      "items": {
+        "$ref": "#/$defs/SecretEntry"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Format version; always [`DeviceAccessFile::VERSION`] when written.",
+      "format": "uint32",
+      "maximum": 3,
+      "minimum": 3,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "secrets",
+    "bleEnabled",
+    "open"
+  ],
+  "title": "DeviceAccessFile",
+  "type": "object"
+}

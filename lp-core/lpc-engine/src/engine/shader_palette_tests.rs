@@ -229,7 +229,7 @@ fn shader_json(bind_palette: bool) -> String {
 /// the slot's own default (private).
 fn palette_fs(bind_palette: bool, second_shader: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 11 }\n");
+    write(&fs, "/project.json", "{ \"format\": 12 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,

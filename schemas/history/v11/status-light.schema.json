@@ -1,0 +1,43 @@
+{
+  "$id": "https://lightplayer.dev/schemas/status-light.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The update light's record, root `/.lp/status-light.json` on a device (lpc_update::StatusLightRecord): the strip the over-the-air core lights while it has no engine — dark yellow while updating, dark red while it waits for its engine. Written by the engine when a project's first WS281x output opens. Format 1; readers ignore unknown keys and stay dark for an unknown driver or colour order. Device-only: never part of a project, so lpa-upgrade never sees it.",
+  "properties": {
+    "colorOrder": {
+      "description": "The byte order the strip takes a colour in (`\"grb\"`, `\"rgb\"`, …).",
+      "type": "string"
+    },
+    "count": {
+      "description": "LEDs on the strip.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "driver": {
+      "description": "How the strip is driven: `\"ws281x\"` in format 1.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Shape version; always `1` ([`STATUS_LIGHT_FORMAT`]).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pin": {
+      "description": "The GPIO the strip's data line is on.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "driver",
+    "pin",
+    "count",
+    "colorOrder"
+  ],
+  "title": "status-light.json",
+  "type": "object"
+}

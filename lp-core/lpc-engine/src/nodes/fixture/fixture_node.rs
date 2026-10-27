@@ -24,7 +24,7 @@ use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::map2d_document::{Map2dDocument, read_map2d_document};
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
-    initialize_channel_accumulators, mapping_from_map2d_doc,
+    initialize_channel_accumulators,
 };
 use crate::nodes::fixture::parts_carrier::render_parts_carrier;
 use crate::nodes::fixture::parts_patch::FixturePartsPatch;
@@ -905,6 +905,14 @@ struct FixtureDisplayLayoutKey {
     height: u32,
 }
 
+/// Why a fixture inside a format-12 project can't take a map2d of format 5
+/// or older, or a hand-placed `PathPoints` mapping (lean Q67): project
+/// format 12 holds every mapping as map2d format 6, and the upgrade is a
+/// host's (Studio, lp-cli), never the engine's. The words a person reads on
+/// the fixture, at load and on an asset refresh alike.
+pub const OLDER_MAPPING_REFUSAL: &str =
+    "this mapping is from an older LightPlayer; open the project in Studio to upgrade it";
+
 /// Why a fixture naming a patch document can't hold a format-6 map2d: the
 /// map2d holds its own patching (one file, G1 Q14). The fixture's status,
 /// naming the patch document.
@@ -1104,8 +1112,12 @@ impl NodeRuntime for FixtureNode {
                 return Ok(AssetRefreshResult::Refreshed);
             }
         };
-        let doc = match document {
-            Map2dDocument::Layout(doc) => doc,
+        match document {
+            // Project format 12 refuses an older document by name; the last
+            // good mapping stands (keep-last-good, as for a half-typed edit).
+            Map2dDocument::Layout => {
+                self.mapping_error = Some(alloc::string::String::from(OLDER_MAPPING_REFUSAL));
+            }
             Map2dDocument::Parts(mapping) => {
                 self.refresh_parts_mapping(mapping, render_width, render_height, ctx.revision());
                 if self.mapping_error.is_none() {
@@ -1113,43 +1125,7 @@ impl NodeRuntime for FixtureNode {
                         source.revision = asset_revision;
                     }
                 }
-                return Ok(AssetRefreshResult::Refreshed);
             }
-        };
-        let resolved = mapping_from_map2d_doc(&doc, render_width, render_height)
-            .map_err(|e| format!("resolve fixture map2d document: {e}"))
-            .map(|mapping| {
-                // The per-strand instance-address table `/sector/2`-style
-                // patch entries lower through, from the mapping's own spans
-                // (one resolve of the document, never two).
-                let spans = lpc_mapping::object_instance_spans_of(
-                    &doc,
-                    &super::mapping::map2d::object_spans_of(&mapping),
-                );
-                (mapping, spans)
-            });
-        match resolved {
-            Ok((mapping, spans)) => {
-                if self.parts.take().is_some() {
-                    // A format-6 document edited back to an older format:
-                    // the patch-document path takes over, from nothing
-                    // resolved (with no patch document, the output
-                    // auto-flows it).
-                    self.resolved_patch = None;
-                    self.patch_generation = self.patch_generation.wrapping_add(1);
-                }
-                self.object_spans = spans;
-                self.mapping = FixtureMapping::Compact(mapping);
-                self.mapping_version = ctx.revision();
-                if let Some(source) = &mut self.map2d_source {
-                    source.revision = asset_revision;
-                }
-                self.precomputed = None;
-                self.direct_channels = None;
-                self.display_layout_revision = None;
-                self.mapping_error = None;
-            }
-            Err(message) => self.mapping_error = Some(message),
         }
         Ok(AssetRefreshResult::Refreshed)
     }
@@ -5167,6 +5143,7 @@ mod space_negotiation {
     use super::*;
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
+    use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
     use crate::products::visual::{ProductSpaceInfo, ProjectionShape, VisualSampleStream};
 
     /// An authored factored answer cell: `Project { shape, mirror, flip }`.
@@ -6165,6 +6142,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
 #[cfg(test)]
 mod mapping_representation_differential {
     use super::*;
+    use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 
     use alloc::vec;
     use lp_collection::VecMap;

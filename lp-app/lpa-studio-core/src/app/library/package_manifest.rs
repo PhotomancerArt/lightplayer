@@ -164,7 +164,7 @@ mod tests {
     use lpfs::LpFsMemory;
 
     const MANIFEST: &[u8] = br#"{
-  "format": 11,
+  "format": 12,
   "name": "demo"
 }
 "#;
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(read_manifest(&fs).unwrap().description, None);
 
         let described: &[u8] = br#"{
-  "format": 11,
+  "format": 12,
   "name": "demo",
   "description": "A porch sign that spells hello"
 }
@@ -417,7 +417,7 @@ mod tests {
         fs.write_file(
             MANIFEST_PATH.as_path(),
             br#"{
-  "format": 11,
+  "format": 12,
   "uid": "garbage"
 }
 "#,

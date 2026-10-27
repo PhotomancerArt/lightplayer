@@ -422,7 +422,6 @@ impl FixtureBuilder {
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(self.mapping),
-            patch: EnumSlot::default(),
             strip_order_meaningful: ValueSlot::new(true),
             wire_reversed: ValueSlot::new(false),
             consume: EnumSlot::default(),

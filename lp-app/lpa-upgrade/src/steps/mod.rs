@@ -75,4 +75,9 @@ pub(crate) const STEPS: &[UpgradeStep] = &[
         to: 11,
         apply: v10_to_v11::apply,
     },
+    UpgradeStep {
+        from: 11,
+        to: 12,
+        apply: v11_to_v12::apply,
+    },
 ];

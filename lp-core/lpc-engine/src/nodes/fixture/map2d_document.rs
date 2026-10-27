@@ -1,9 +1,9 @@
-//! A fixture's `*.map2d.json`, read by its format: formats 1 to 5 are the
-//! layout document today's path resolves ([`Map2dDoc`]); format 6 is one
+//! A fixture's `*.map2d.json`, read by its format: format 6 is one
 //! fixture's parts and patching ([`Mapping`], `lpc_mapping::map2d6`), which
-//! the fixture patches itself (`parts_patch.rs`). Both kinds live side by
-//! side until project format 12 moves every project to format 6 (mapping
-//! rebuild M3).
+//! the fixture patches itself (`parts_patch.rs`); formats 1 to 5 are the
+//! older layout document ([`Map2dDoc`]), which a project at format 12 holds
+//! only by a hand edit or an older writer, and which the fixture refuses by
+//! name (`fixture_node::OLDER_MAPPING_REFUSAL`, mapping rebuild M3).
 //!
 //! **Today's reader reads first, unchanged.** A format 1 to 5 document costs
 //! exactly what it did before format 6 existed (no second peek: one was 1
@@ -20,8 +20,9 @@ use lpc_mapping::{Map2dDoc, Map2dError};
 
 /// A map2d document, read.
 pub(crate) enum Map2dDocument {
-    /// Formats 1 to 5: today's layout, resolved by today's path.
-    Layout(Map2dDoc),
+    /// Formats 1 to 5: an older layout document, refused in a format-12
+    /// project.
+    Layout,
     /// Format 6: parts and patching.
     Parts(Mapping),
 }
@@ -30,7 +31,7 @@ pub(crate) enum Map2dDocument {
 /// its own words.
 pub(crate) fn read_map2d_document(text: &str) -> Result<Map2dDocument, String> {
     match Map2dDoc::from_json(text) {
-        Ok(doc) => Ok(Map2dDocument::Layout(doc)),
+        Ok(_) => Ok(Map2dDocument::Layout),
         Err(Map2dError::UnsupportedFormat { found, .. }) if found >= MAP2D6_FORMAT => {
             map2d6::read(text)
                 .map(Map2dDocument::Parts)
@@ -50,7 +51,7 @@ mod tests {
         let text = r#"{ "format": 5, "objects": [] }"#;
         assert!(matches!(
             read_map2d_document(text),
-            Ok(Map2dDocument::Layout(_))
+            Ok(Map2dDocument::Layout)
         ));
     }
 

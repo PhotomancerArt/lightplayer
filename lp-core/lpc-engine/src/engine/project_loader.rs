@@ -56,17 +56,13 @@ use crate::nodes::PowerButtonNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
 #[cfg(feature = "node-fixture")]
-use crate::nodes::fixture::fixture_node::format_6_with_patch_document;
+use crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL;
 #[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::map2d_document::{Map2dDocument, read_map2d_document};
-#[cfg(feature = "node-fixture")]
-use crate::nodes::fixture::mapping::map2d::object_spans_of;
-#[cfg(feature = "node-fixture")]
-use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
-use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode, FixturePatchSource};
+use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode};
 #[cfg(feature = "node-playlist")]
 use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
 
@@ -1016,26 +1012,8 @@ impl ProjectLoader {
                 match resolve_fixture_mapping(fs, registry, node, &config) {
                     Ok(FixtureMappingRead::Parts { mapping, source }) => {
                         // One file holds a format-6 fixture's patching (G1,
-                        // Q14): a patch document beside it is refused by
-                        // name rather than one of the two silently losing.
-                        if let Some(patch) = config.patch.value().source() {
-                            let patch = patch
-                                .artifact_value()
-                                .map(ToString::to_string)
-                                .unwrap_or_default();
-                            let error = ProjectLoadError::InvalidProjectReference {
-                                path: node_label(node),
-                                reason: format_6_with_patch_document(&patch),
-                            };
-                            mark_node_load_error(
-                                runtime,
-                                node.id,
-                                frame,
-                                &node_label(node),
-                                error.to_string(),
-                            );
-                            continue;
-                        }
+                        // Q14): project format 12 has no patch slot, so a
+                        // fixture def still naming one does not parse.
                         let (width, height) = (config.render_width(), config.render_height());
                         let fixture = FixtureNode::new(
                             node.id,
@@ -1060,42 +1038,14 @@ impl ProjectLoader {
                             })?;
                         mark_node_status(runtime, node.id, frame, NodeRuntimeStatus::Ok);
                     }
-                    Ok(FixtureMappingRead::Layout {
-                        mapping,
-                        source: map2d_source,
-                        spans: object_spans,
-                    }) => {
-                        let mut fixture =
+                    Ok(FixtureMappingRead::Unset { mapping }) => {
+                        let fixture =
                             FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
                                 .with_render_defaults(
                                     config.render_width(),
                                     config.render_height(),
                                     *config.color_order.value(),
-                                )
-                                .with_object_spans(object_spans);
-                        if let Some(source) = map2d_source {
-                            fixture = fixture.with_map2d_source(source);
-                        }
-                        match resolve_fixture_patch(fs, registry, node, &config) {
-                            Ok(Some((source, error))) => {
-                                fixture = fixture.with_patch_source(source);
-                                if let Some(error) = error {
-                                    fixture = fixture.with_patch_error(error);
-                                }
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                let message = error.to_string();
-                                mark_node_load_error(
-                                    runtime,
-                                    node.id,
-                                    frame,
-                                    &node_label(node),
-                                    message,
                                 );
-                                continue;
-                            }
-                        }
                         runtime
                             .attach_runtime_node(node.id, Box::new(fixture), frame)
                             .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -1398,13 +1348,8 @@ fn playlist_runtime_entries(
 /// A fixture's mapping, as the loader read it.
 #[cfg(feature = "node-fixture")]
 enum FixtureMappingRead {
-    /// A map2d document of format 1 to 5, a hand-authored `PathPoints`, or
-    /// no mapping: today's path, with the patch document beside it.
-    Layout {
-        mapping: FixtureMapping,
-        source: Option<FixtureMap2dSource>,
-        spans: Vec<lpc_mapping::ObjectInstanceSpan>,
-    },
+    /// No mapping authored yet: a fixture with no lamps.
+    Unset { mapping: FixtureMapping },
     /// A map2d document of format 6: parts and patching, which the fixture
     /// renders and patches itself.
     Parts {
@@ -1416,6 +1361,12 @@ enum FixtureMappingRead {
 /// Read a fixture's mapping. A map2d document goes to the reader its
 /// format names (`map2d_document.rs`); one this build can't read, or whose
 /// lamps don't resolve, fails the fixture's load in the reader's words.
+///
+/// Project format 12 holds every mapping as map2d format 6. A map2d of
+/// format 5 or older, or hand-placed `PathPoints` lamps, inside a format-12
+/// project (a hand edit, or an older writer) fails the fixture's load by
+/// name ([`OLDER_MAPPING_REFUSAL`], lean Q67): the upgrade is Studio's and
+/// lp-cli's, never the board's.
 #[cfg(feature = "node-fixture")]
 fn resolve_fixture_mapping(
     fs: &dyn LpFs,
@@ -1444,79 +1395,19 @@ fn resolve_fixture_mapping(
                 render_width: config.render_width(),
                 render_height: config.render_height(),
             };
-            let doc = match read_map2d_document(&text.text).map_err(|e| refused(&e))? {
-                Map2dDocument::Layout(doc) => doc,
-                Map2dDocument::Parts(mapping) => {
-                    return Ok(FixtureMappingRead::Parts { mapping, source });
-                }
-            };
-            let mapping =
-                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
-                    .map_err(|e| refused(&e))?;
-            // The per-strand instance-address table `/sector/2`-style patch
-            // entries lower through — from the mapping's own spans, so the
-            // document resolves exactly once (the runtime node recomputes it
-            // on asset refresh).
-            let spans = lpc_mapping::object_instance_spans_of(&doc, &object_spans_of(&mapping));
-            // Document geometry stays compact: never expanded into slots,
-            // never serialized, never slot-addressed.
-            Ok(FixtureMappingRead::Layout {
-                mapping: FixtureMapping::Compact(mapping),
-                source: Some(source),
-                spans,
-            })
+            match read_map2d_document(&text.text).map_err(|e| refused(&e))? {
+                Map2dDocument::Layout => Err(refused(&OLDER_MAPPING_REFUSAL)),
+                Map2dDocument::Parts(mapping) => Ok(FixtureMappingRead::Parts { mapping, source }),
+            }
         }
-        // Hand-authored `PathPoints` (and an unset mapping) keep the slot
-        // form — Studio edits individual lamps there.
-        other => Ok(FixtureMappingRead::Layout {
-            mapping: FixtureMapping::Slots(other.clone()),
-            source: None,
-            spans: Vec::new(),
+        MappingConfig::PathPoints { .. } => Err(ProjectLoadError::InvalidProjectReference {
+            path: node_label(node),
+            reason: format!("resolve fixture mapping: {OLDER_MAPPING_REFUSAL}"),
+        }),
+        MappingConfig::Unset => Ok(FixtureMappingRead::Unset {
+            mapping: FixtureMapping::Slots(MappingConfig::Unset),
         }),
     }
-}
-
-/// Read and parse the fixture's patch document, when it authored one.
-///
-/// Parsed here and RESOLVED by the node: resolution is fixture-relative, and
-/// the lamp count belongs to the mapping, which a live edit can change under
-/// a running project.
-///
-/// A DANGLING reference fails the load, exactly as a dangling mapping does —
-/// a project pointing at a file that is not there is broken, not degraded. A
-/// document that is there but this build cannot read attaches anyway, with no
-/// placement and the reason on the node: the strand keeps lighting in wire
-/// order while its author fixes the document, which is the difference between
-/// a bad patch and a dark show.
-#[cfg(feature = "node-fixture")]
-fn resolve_fixture_patch(
-    fs: &dyn LpFs,
-    registry: &mut ProjectRegistry,
-    node: &ProjectedNode,
-    config: &FixtureDef,
-) -> Result<Option<(FixturePatchSource, Option<String>)>, ProjectLoadError> {
-    if config.patch.value().source().is_none() {
-        return Ok(None);
-    }
-    let text = materialize_node_text_asset(
-        fs,
-        registry,
-        node,
-        AssetContentType::FixturePatch,
-        "fixture patch document",
-    )?;
-    let (doc, error) = match lpc_mapping::PatchDoc::from_json(&text.text) {
-        Ok(doc) => (Some(doc), None),
-        Err(e) => (None, Some(format!("parse fixture patch document: {e}"))),
-    };
-    Ok(Some((
-        FixturePatchSource {
-            location: text.location,
-            revision: text.revision,
-            doc,
-        },
-        error,
-    )))
 }
 
 fn node_kind_name(
@@ -2751,7 +2642,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3013,7 +2904,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3111,7 +3002,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3625,7 +3516,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_product_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3787,7 +3678,7 @@ mod tests {
     #[test]
     fn a_phasor_uniform_rides_the_clocks_default_time_product_with_no_authoring() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3873,7 +3764,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3903,7 +3794,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4294,7 +4185,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4369,7 +4260,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -4389,7 +4280,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4560,7 +4451,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5325,7 +5216,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5396,7 +5287,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5721,7 +5612,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5915,7 +5806,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -6599,7 +6490,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 12\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn a_broken_dormant_entry_is_named_and_warned_about() {
         let fs = LpFsMemory::new();
-        write(&fs, "/project.json", "{\n  \"format\": 11\n}\n");
+        write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         write(
             &fs,
             "/module.json",
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn a_project_with_every_entry_fine_has_no_notice() {
         let fs = LpFsMemory::new();
-        write(&fs, "/project.json", "{\n  \"format\": 11\n}\n");
+        write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         write(
             &fs,
             "/module.json",
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn two_playlists_in_one_module_are_warned_about() {
         let fs = LpFsMemory::new();
-        write(&fs, "/project.json", "{\n  \"format\": 11\n}\n");
+        write(&fs, "/project.json", "{\n  \"format\": 12\n}\n");
         write(
             &fs,
             "/module.json",
