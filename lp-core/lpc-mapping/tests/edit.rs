@@ -13,15 +13,17 @@ mod journey_mappings;
 
 use journey_mappings::{Journey, choker, circular_display, dome_slice, eaves, journeys};
 use lpc_mapping::edit::{
-    EditError, expand_repeat, insert_part, move_part, remove_part, rename_part, set_repeat_count,
-    unrepeat, wrap_in_repeat,
+    EditError, OverrideField, OverrideFieldKind, add_ring, clear_override_field, expand_repeat,
+    insert_part, move_part, remove_part, remove_ring, rename_part, set_flow, set_override_field,
+    set_path_split, set_repeat_count, set_start, unrepeat, wrap_in_repeat,
 };
 use lpc_mapping::part::{
-    Mapping, Part, PartId, PartKind, Path, PathCommand, Repeat, Shape, TreeId, render,
+    Mapping, Part, PartId, PartKind, Path, PathCommand, PathSplit, Repeat, SegmentKey, Shape,
+    TreeId, render,
 };
 use lpc_mapping::patching::{
-    Amount, ChannelOp, Direction, Flow, OutputPorts, Override, Patching, PortKey, PortOp, Problem,
-    Start, patch_mapping,
+    Amount, ChannelOp, Direction, Flow, OutputPorts, Override, PatchTarget, Patching, PortKey,
+    PortOp, Problem, Start, patch_mapping,
 };
 use lpc_mapping::{GridShape, MAX_REPEAT_COUNT};
 
@@ -498,6 +500,148 @@ fn counting_a_repeat_down_keeps_its_dropped_copies_overrides() {
     );
 }
 
+/// A ring added to a circle gets a key never used before, even after one
+/// was removed; the removed ring's override is kept and reported.
+#[test]
+fn a_ring_added_gets_a_key_never_used_before() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    let circle = part("circle1");
+    let gone = remove_ring(&mut m, &circle, &key("r3")).unwrap();
+    assert_eq!(gone.key, key("r3"));
+    assert_eq!(add_ring(&mut m, &circle, 5.0, 4), Ok(key("r6")));
+    remove_ring(&mut m, &circle, &key("r6")).unwrap();
+    assert_eq!(add_ring(&mut m, &circle, 5.0, 4), Ok(key("r7")));
+    let p = patch(&m, &journey.outputs);
+    assert!(p.problems.contains(&Problem::GoneNode(node("circle1/r3"))));
+    assert!(p.segment(&node("circle1/r7")).is_some());
+
+    assert_eq!(
+        remove_ring(&mut m, &circle, &key("r3")),
+        Err(EditError::NoSuchRing {
+            part: circle.clone(),
+            key: key("r3")
+        })
+    );
+    assert!(matches!(
+        add_ring(&mut m, &circle, 0.0, 2),
+        Err(EditError::BadRing(_))
+    ));
+    assert_eq!(
+        add_ring(&mut m, &part("nope"), 1.0, 2),
+        Err(EditError::NoSuchPart(part("nope")))
+    );
+}
+
+/// Splitting a path into its subpaths finds the overrides on them again;
+/// making it whole leaves them kept and reported.
+#[test]
+fn splitting_a_path_finds_its_subpaths_overrides() {
+    let journey = eaves();
+    let mut m = journey.mapping.clone();
+    m.overrides.insert(node("side/s2"), reversed());
+    assert!(
+        patch(&m, &journey.outputs)
+            .problems
+            .contains(&Problem::GoneNode(node("side/s2")))
+    );
+    set_path_split(&mut m, &part("side"), PathSplit::Subpaths).unwrap();
+    let p = patch(&m, &journey.outputs);
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    assert!(p.segment(&node("side/s2")).unwrap().direction.is_reverse());
+    assert_eq!(
+        set_path_split(&mut m, &part("sector"), PathSplit::One),
+        Err(EditError::NoSuchPart(part("sector")))
+    );
+}
+
+/// Clearing the last field of an override removes it.
+#[test]
+fn clearing_the_last_field_of_an_override_removes_it() {
+    let mut m = eaves().mapping;
+    let side = node("side");
+    set_override_field(&mut m, &side, OverrideField::Direction(Direction::Reverse)).unwrap();
+    set_override_field(&mut m, &side, OverrideField::Port(PortOp::set(0))).unwrap();
+    clear_override_field(&mut m, &side, OverrideFieldKind::Port).unwrap();
+    assert_eq!(m.overrides[&side], reversed());
+    clear_override_field(&mut m, &side, OverrideFieldKind::Direction).unwrap();
+    assert!(!m.overrides.contains_key(&side));
+
+    set_override_field(&mut m, &side, OverrideField::Off(false)).unwrap();
+    assert!(
+        !m.overrides.contains_key(&side),
+        "nothing set is no override"
+    );
+    assert_eq!(
+        set_override_field(&mut m, &node("nope"), OverrideField::Offset(1)),
+        Err(EditError::NoSuchPart(part("nope")))
+    );
+}
+
+/// Setting a start on a part applies to every copy; setting one on a
+/// copy's node applies to that copy, and setting all Keep there takes it
+/// back to the flow.
+#[test]
+fn a_start_on_a_part_applies_to_every_copy_and_on_a_copy_to_that_copy() {
+    let mut m = Mapping::new();
+    let arm = m.new_part(straight(10));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(arm, [0.0, 0.0], 3)));
+    m.parts.push(repeat);
+    set_start(
+        &mut m,
+        PatchTarget::Fixture,
+        Start::at("out", 0, Amount::lamps(0)),
+    )
+    .unwrap();
+    let outputs = [OutputPorts::of_lamps("out", &[Some(60); 8], 3)];
+
+    set_start(&mut m, PatchTarget::Part(part("path1")), Start::next_port()).unwrap();
+    let p = patch(&m, &outputs);
+    for (copy, port) in [("path1", 1), ("path1@1", 2), ("path1@2", 3)] {
+        assert_eq!(first_lamp(&p, copy), Some((port, 0)), "{copy}");
+    }
+
+    let copy1 = node("path1@1");
+    set_start(
+        &mut m,
+        PatchTarget::Node(copy1.clone()),
+        Start::at("out", 5, Amount::lamps(0)),
+    )
+    .unwrap();
+    let p = patch(&m, &outputs);
+    assert_eq!(first_lamp(&p, "path1"), Some((1, 0)));
+    assert_eq!(first_lamp(&p, "path1@1"), Some((5, 0)));
+    assert_eq!(first_lamp(&p, "path1@2"), Some((6, 0)), "follows copy 1");
+
+    set_start(&mut m, PatchTarget::Node(copy1.clone()), Start::KEEP).unwrap();
+    assert!(!m.overrides.contains_key(&copy1));
+    assert_eq!(first_lamp(&patch(&m, &outputs), "path1@1"), Some((2, 0)));
+}
+
+/// A flow is set on the fixture or a part, never on one node of it.
+#[test]
+fn a_flow_belongs_to_a_part() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    m.overrides.clear();
+    set_flow(
+        &mut m,
+        PatchTarget::Part(part("circle1")),
+        Flow::OnePerPort { from: PortKey(0) },
+    )
+    .unwrap();
+    let p = patch(&m, &journey.outputs);
+    assert_eq!(first_lamp(&p, "circle1/r4"), Some((3, 0)));
+    assert_eq!(
+        set_flow(
+            &mut m,
+            PatchTarget::Node(node("circle1/r4")),
+            Flow::EndToEnd
+        ),
+        Err(EditError::FlowOnNode(node("circle1/r4")))
+    );
+}
+
 /// Every journey still patches as it did when nothing is edited: the
 /// statements' oracle agrees with itself.
 #[test]
@@ -658,4 +802,8 @@ fn part(id: &str) -> PartId {
 
 fn node(text: &str) -> TreeId {
     TreeId::parse(text).unwrap_or_else(|| panic!("{text:?} is no id"))
+}
+
+fn key(text: &str) -> SegmentKey {
+    SegmentKey::new(text).unwrap()
 }
