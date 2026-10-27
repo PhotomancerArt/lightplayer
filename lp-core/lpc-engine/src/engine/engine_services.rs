@@ -581,6 +581,15 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
     })
 }
 
+/// The wires an output's ports are cut into, as `(port, start, len)` in
+/// samples: what a test compares the port tables against.
+#[cfg(test)]
+pub(crate) fn planned_wire_slices(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
+    planned_wires(config)
+        .map(|wire| (wire.port, wire.start_samples, wire.len_samples))
+        .collect()
+}
+
 /// The key of the first port that takes the remainder without being the
 /// last one, if any — the one authoring mistake that makes the slices
 /// undefined.
@@ -589,7 +598,7 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
 /// count-less port in the middle leaves everything after it without a
 /// start. Rather than guess, the whole output is refused: a wrong strip lit is
 /// worse than a dark one, and the log names the port to fix.
-fn remainder_offender(config: &OutputDef) -> Option<u32> {
+pub(crate) fn remainder_offender(config: &OutputDef) -> Option<u32> {
     let mut remainder: Option<u32> = None;
     for wire in planned_wires(config) {
         if let Some(previous) = remainder {

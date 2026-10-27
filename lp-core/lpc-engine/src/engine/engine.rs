@@ -2307,6 +2307,93 @@ impl ResolveHost for EngineResolveHost<'_> {
         (names, *self.output_identity_revision)
     }
 
+    /// The named outputs that gather `producer`'s product off its bus
+    /// channel, with their authored ports' slices (lean Q38, Q40).
+    ///
+    /// An output is offered when its `Fragments` input reads the channel the
+    /// producer publishes and its read reaches this producer (the nearest
+    /// scope with a provider holds it: a shadowed read gathers someone
+    /// else). Its name is the one patch routing matches on: the name it
+    /// registered at the top of its `consume` ([`Self::control_patch_placement`]
+    /// filters on exactly that), or, before it has registered (the first
+    /// frame), its def's authored name. An output with no name is not
+    /// offered. Its ports come from its AUTHORED def through the walk its
+    /// wires are cut by; an output whose ports can't be sliced (a count-less
+    /// port that isn't its last) drives no wires and is offered with none.
+    ///
+    /// Allocates; only a format-6 fixture whose key moved asks.
+    fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
+        use crate::dataflow::binding::{BindingSource, BindingTarget};
+        #[cfg(test)]
+        port_table_questions::count();
+        let is_producer = |source: &BindingSource| matches!(source, BindingSource::ProducedSlot { node, .. } if *node == producer);
+        let Some(channel) = self
+            .tree
+            .bindings()
+            .find_map(|binding| match &binding.target {
+                BindingTarget::BusChannel(channel) if is_producer(&binding.source) => {
+                    Some(channel.clone())
+                }
+                _ => None,
+            })
+        else {
+            return crate::node::ReachableOutputs::default();
+        };
+        let mut outputs: Vec<(NodeId, crate::node::OutputPortTable)> = Vec::new();
+        for (_, entry) in self.tree.consumers_for_bus(&channel) {
+            let BindingTarget::ConsumedSlot { node, slot } = &entry.target else {
+                continue;
+            };
+            if outputs.iter().any(|(seen, _)| seen == node)
+                || self.merge_policy_for_consumed_slot(*node, slot) != SlotMerge::Fragments
+            {
+                continue;
+            }
+            let reaches = self
+                .tree
+                .providers_for_bus_read(self.tree.bus_read_scope(*node), &channel)
+                .iter()
+                .any(|(_, provider)| is_producer(&provider.source));
+            if !reaches {
+                continue;
+            }
+            let Some(def) = self
+                .tree
+                .get(*node)
+                .and_then(|entry| entry.def_location.as_ref())
+                .and_then(|location| loaded_registry_def(self.registry, location).ok())
+                .and_then(|def| match def {
+                    NodeDef::Output(def) => Some(def),
+                    _ => None,
+                })
+            else {
+                continue;
+            };
+            let name = match self.output_identities.get(node) {
+                Some(registered) => registered.clone(),
+                None => def
+                    .output_name()
+                    .map(|name| alloc::string::String::from(name.as_str())),
+            };
+            let Some(name) = name else {
+                continue;
+            };
+            let ports = if super::engine_services::remainder_offender(def).is_some() {
+                Vec::new()
+            } else {
+                crate::node::output_port_slices(def)
+                    .map(|(_, slice)| slice)
+                    .collect()
+            };
+            outputs.push((*node, crate::node::OutputPortTable { name, ports }));
+        }
+        outputs.sort_by_key(|(node, _)| *node);
+        crate::node::ReachableOutputs {
+            channel: Some(channel),
+            outputs: outputs.into_iter().map(|(_, table)| table).collect(),
+        }
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: crate::resource::RuntimeBufferId,
@@ -3738,6 +3825,69 @@ pub(crate) fn resolve_with_engine_host(
         .map(|pv| (pv, session.trace().clone()));
     eng.resolver = resolver_tmp;
     result
+}
+
+/// How many times this thread's engines answered
+/// [`ResolveHost::control_patch_outputs`]: what proves a project with no
+/// format-6 fixture never asks.
+#[cfg(test)]
+pub(super) mod port_table_questions {
+    use core::cell::Cell;
+
+    std::thread_local! {
+        static ASKED: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::engine) fn count() {
+        ASKED.with(|asked| asked.set(asked.get() + 1));
+    }
+
+    /// Questions answered on this thread so far.
+    pub(in crate::engine) fn asked() -> u64 {
+        ASKED.with(Cell::get)
+    }
+}
+
+/// Ask the engine's host which outputs `producer` reaches, outside a tick
+/// (the probes' way of building a host), with the key a tick would read.
+#[cfg(test)]
+pub(super) fn control_patch_outputs_with_engine_host(
+    eng: &mut Engine,
+    registry: &ProjectRegistry,
+    producer: NodeId,
+) -> (crate::node::ReachableOutputs, crate::node::PortTablesKey) {
+    let mut producers_ticked = VecSet::new();
+    let time_s = eng.frame_time.total_ms as f32 / 1000.0;
+    let time_provider = eng.services.time_provider();
+    let button_service = eng.services.button_service();
+    let radio_service = eng.services.radio_service();
+    let key = crate::node::PortTablesKey {
+        structure_epoch: eng.resolver.structure_epoch(),
+        output_identities: eng.output_identity_revision,
+    };
+    let host = EngineResolveHost {
+        tree: &mut eng.tree,
+        registry,
+        panel_writers: &eng.panel_writers,
+        timebases: &mut eng.timebases,
+        output_identities: &mut eng.output_identities,
+        output_identity_revision: &mut eng.output_identity_revision,
+        identities_swept_epoch: &mut eng.frame_plans.identities_swept_epoch,
+        producers_ticked: &mut producers_ticked,
+        runtime_buffers: &mut eng.runtime_buffers,
+        slot_shapes: &eng.slot_shapes,
+        graphics: eng.graphics.clone(),
+        time_provider,
+        button_service,
+        radio_service,
+        frame_time_seconds: time_s,
+        safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        services: &eng.services,
+        frame_revision: eng.revision,
+        fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
+        lane_topology: None,
+    };
+    (host.control_patch_outputs(producer), key)
 }
 
 #[cfg(test)]
