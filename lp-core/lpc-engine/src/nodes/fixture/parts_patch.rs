@@ -192,7 +192,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use core::cell::Cell;
-    use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, Shape, render};
+    use lpc_mapping::part::{Part, PartId, PartKind, Path, Shape};
     use lpc_mapping::patching::{Amount, Start};
     use lpc_model::ChannelName;
 
