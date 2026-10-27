@@ -352,18 +352,15 @@ impl FixtureNode {
             self.patch_source.is_none(),
             "a format-6 fixture has no patch document"
         );
-        let (carrier, tree) = match render_parts_carrier(&mapping, render_width, render_height) {
-            Ok(rendered) => rendered,
+        let carrier = match render_parts_carrier(&mapping, render_width, render_height) {
+            Ok(carrier) => carrier,
             Err(error) => {
                 self.mapping_error = Some(error);
-                (
-                    ResolvedMappingCompact {
-                        spans: Vec::new(),
-                        points: Vec::new(),
-                        sample_diameter: mapping.sample_diameter,
-                    },
-                    lpc_mapping::part::Tree::default(),
-                )
+                ResolvedMappingCompact {
+                    spans: Vec::new(),
+                    points: Vec::new(),
+                    sample_diameter: mapping.sample_diameter,
+                }
             }
         };
         self.mapping = FixtureMapping::Compact(carrier);
@@ -377,9 +374,7 @@ impl FixtureNode {
         self.precomputed = None;
         self.direct_channels = None;
         self.display_layout_revision = None;
-        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(
-            mapping, tree,
-        )));
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(mapping)));
         self
     }
 
@@ -779,8 +774,8 @@ impl FixtureNode {
     /// one file holds the layout and the patching (G1, Q14), so a start, a
     /// flow or an override edit rewrites the whole document. When the new
     /// mapping draws the same lamps
-    /// ([`lpc_mapping::part::Mapping::same_layout`]) the carrier, the tree
-    /// and `mapping_version` stand, so the sampling plans and every cache
+    /// ([`lpc_mapping::part::Mapping::same_layout`]) the carrier and
+    /// `mapping_version` stand, so the sampling plans and every cache
     /// keyed on the mapping stay; only the patching is done again, on the
     /// next frame. Otherwise the parts render anew, as at load.
     ///
@@ -806,8 +801,8 @@ impl FixtureNode {
                 return;
             }
         }
-        let (carrier, tree) = match render_parts_carrier(&mapping, render_width, render_height) {
-            Ok(rendered) => rendered,
+        let carrier = match render_parts_carrier(&mapping, render_width, render_height) {
+            Ok(carrier) => carrier,
             Err(error) => {
                 self.mapping_error = Some(error);
                 return;
@@ -826,9 +821,7 @@ impl FixtureNode {
         self.direct_channels = None;
         self.display_layout_revision = None;
         self.mapping_error = None;
-        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(
-            mapping, tree,
-        )));
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(mapping)));
     }
 
     /// The patch half of [`NodeRuntime::refresh_asset`].

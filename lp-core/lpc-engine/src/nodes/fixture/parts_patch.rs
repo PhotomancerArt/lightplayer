@@ -1,10 +1,12 @@
 //! A format-6 fixture's patching, kept current: what it holds between
 //! frames and when it re-patches (lean Q36, Q37, Q42, Q43).
 //!
-//! **Resident:** the mapping (parts and patching), the rendered tree without
-//! its positions (they live once, in the fixture's carrier), the runs it
-//! publishes, and its status. The [`Patching`] itself, with what every node
-//! did and why, lives only inside [`FixturePartsPatch::ensure_with`].
+//! **Resident:** the mapping (parts and patching), the runs it publishes,
+//! and its status. The tree the patcher walks is rendered for each patch
+//! and dropped with it (M2 P6 step 2: resident, it cost a node and a
+//! segment, each owning its id, per segment on the device), and so is the
+//! [`Patching`], made without its walk ([`patch_mapping_placed`], step 1).
+//! The lamps' positions live once, in the fixture's carrier.
 //!
 //! **When:** only when the key moves: the layout's version (a re-render),
 //! the port tables' key (a name, a port, a count, or the outputs on the
@@ -14,8 +16,10 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Mapping, Tree};
-use lpc_mapping::patching::{OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping};
+use lpc_mapping::part::{Mapping, render};
+use lpc_mapping::patching::{
+    OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping_placed,
+};
 use lpc_model::Revision;
 use lpc_model::nodes::fixture::ColorOrder;
 
@@ -30,8 +34,6 @@ pub(crate) type PartsPatchKey = (Revision, PortTablesKey, ColorOrder);
 pub(crate) struct FixturePartsPatch {
     /// The mapping: its parts, its fit facts and its patching.
     pub mapping: Mapping,
-    /// The rendered tree, positions taken out.
-    pub tree: Tree,
     key: Option<PartsPatchKey>,
     /// The runs the fixture publishes, every one naming its output.
     pub runs: Vec<PatchedRun>,
@@ -41,10 +43,9 @@ pub(crate) struct FixturePartsPatch {
 }
 
 impl FixturePartsPatch {
-    pub fn new(mapping: Mapping, tree: Tree) -> Self {
+    pub fn new(mapping: Mapping) -> Self {
         Self {
             mapping,
-            tree,
             key: None,
             runs: Vec::new(),
             status: None,
@@ -68,7 +69,7 @@ impl FixturePartsPatch {
     /// Take a mapping that draws the same lamps
     /// ([`Mapping::same_layout`]) and patch it on the next
     /// [`Self::ensure`], whatever the key: a patching-only edit keeps the
-    /// tree and the layout's version, so nothing else would move the key.
+    /// layout's version, so nothing else would move the key.
     pub fn repatch_with(&mut self, mapping: Mapping) {
         debug_assert!(self.mapping.same_layout(&mapping));
         self.mapping = mapping;
@@ -109,10 +110,23 @@ impl FixturePartsPatch {
         color_order: ColorOrder,
     ) -> bool {
         self.key = Some(key);
+        // The same mapping rendered at load, so only memory can refuse it
+        // now; then nothing lands, and the status says why.
+        let mut tree = match render(&self.mapping) {
+            Ok(tree) => tree,
+            Err(error) => {
+                self.status = Some(alloc::format!("render fixture mapping: {error}"));
+                let changed = !self.runs.is_empty();
+                self.runs = Vec::new();
+                return changed;
+            }
+        };
+        drop(tree.take_positions());
         let ports = patcher_ports(&reachable);
-        let patching = patch_mapping(&self.mapping, &self.tree, &ports);
+        let patching = patch_mapping_placed(&self.mapping, &tree, &ports);
         drop(ports);
-        let placed = patching_runs(&patching, &self.tree, &reachable.outputs, color_order);
+        let placed = patching_runs(&patching, &tree, &reachable.outputs, color_order);
+        drop(tree);
         self.status = status(&patching, &placed.refusals, &reachable);
         let changed = self.runs != placed.runs;
         self.runs = placed.runs;
@@ -293,8 +307,7 @@ mod tests {
             ));
         }
         mapping.start = start;
-        let tree = render(&mapping).unwrap();
-        FixturePartsPatch::new(mapping, tree)
+        FixturePartsPatch::new(mapping)
     }
 
     /// Output `main` with ports of these lamp counts, on `bus:control.out`.

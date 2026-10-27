@@ -1,31 +1,33 @@
 //! Render a format-6 fixture's parts into today's compact carrier: the
-//! lamps' positions fitted into the fixture's texture, one carrier span per
-//! segment in tree order, and the position-less tree kept for re-patching.
+//! lamps' positions fitted into the fixture's texture, and one carrier span
+//! per segment in tree order.
 //!
 //! **Positions live once.** [`render`] writes every lamp into one
 //! exact-size buffer; [`Tree::take_positions`] moves that buffer out and the
 //! fit rewrites it in place, the way `mapping_from_map2d_doc` carries a
 //! map2d document's (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
-//! The tree the patcher reads keeps its nodes and segments and no copy of
-//! the lamps.
+//! The rest of the tree is dropped: the patcher renders its own for each
+//! patch (`parts_patch.rs`).
+//!
+//! [`Tree::take_positions`]: lpc_mapping::part::Tree::take_positions
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Mapping, Tree, render};
+use lpc_mapping::part::{Mapping, render};
 use lpc_mapping::{Bounds2d, fit_points_in_place, fit_scale};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 
-/// Render `mapping` for a `texture_width` × `texture_height` fixture: the
-/// carrier, and the tree without its positions. `Err` is the fixture's
+/// Render `mapping` for a `texture_width` × `texture_height` fixture into
+/// the carrier. `Err` is the fixture's
 /// mapping error, in words (a mapping too big for memory is refused here,
 /// never aborted).
 pub(crate) fn render_parts_carrier(
     mapping: &Mapping,
     texture_width: u32,
     texture_height: u32,
-) -> Result<(ResolvedMappingCompact, Tree), String> {
+) -> Result<ResolvedMappingCompact, String> {
     let mut tree = render(mapping).map_err(|error| format!("render fixture mapping: {error}"))?;
     let mut points = tree.take_positions();
 
@@ -47,17 +49,15 @@ pub(crate) fn render_parts_carrier(
             count: segment.count(),
         });
     }
+    drop(tree);
 
     if points.is_empty() {
         // Nothing to fit (the fit would reject empty bounds).
-        return Ok((
-            ResolvedMappingCompact {
-                spans,
-                points,
-                sample_diameter: mapping.sample_diameter,
-            },
-            tree,
-        ));
+        return Ok(ResolvedMappingCompact {
+            spans,
+            points,
+            sample_diameter: mapping.sample_diameter,
+        });
     }
     let frame = canvas_bounds(mapping);
     let fit = |error| format!("fit fixture mapping: {error}");
@@ -66,14 +66,11 @@ pub(crate) fn render_parts_carrier(
     let sample_diameter = mapping.sample_diameter
         * fit_scale(&points, frame, texture_width, texture_height).map_err(fit)?;
     fit_points_in_place(&mut points, frame, texture_width, texture_height).map_err(fit)?;
-    Ok((
-        ResolvedMappingCompact {
-            spans,
-            points,
-            sample_diameter,
-        },
-        tree,
-    ))
+    Ok(ResolvedMappingCompact {
+        spans,
+        points,
+        sample_diameter,
+    })
 }
 
 /// The mapping's canvas as the fit reads it; a canvas of no width or height
@@ -95,13 +92,13 @@ mod tests {
     use lpc_mapping::fit_points;
     use lpc_mapping::part::{Part, PartId, PartKind, Path, Repeat, Shape};
 
-    /// The carrier holds the tree's positions, fitted, and nothing else
-    /// holds them.
+    /// The carrier holds the tree's positions, fitted, in the render's one
+    /// exact-size buffer.
     #[test]
-    fn the_carrier_holds_the_trees_positions_fitted_and_nothing_else_does() {
+    fn the_carrier_holds_the_trees_positions_fitted() {
         let mapping = mapping(&[3, 5]);
         let raw = render(&mapping).unwrap().positions().to_vec();
-        let (carrier, tree) = render_parts_carrier(&mapping, 40, 20).unwrap();
+        let carrier = render_parts_carrier(&mapping, 40, 20).unwrap();
 
         let frame = Some(Bounds2d {
             min_x: 0.0,
@@ -115,10 +112,6 @@ mod tests {
             carrier.points.len(),
             "the render's one exact-size buffer"
         );
-        assert!(
-            tree.positions().is_empty(),
-            "the tree kept no copy of the lamps"
-        );
         assert_eq!(
             carrier.sample_diameter,
             2.0 * 0.4,
@@ -129,14 +122,13 @@ mod tests {
     /// One carrier span per segment, in tree order.
     #[test]
     fn one_carrier_span_per_segment_in_tree_order() {
-        let (carrier, tree) = render_parts_carrier(&mapping(&[3, 5, 2]), 40, 20).unwrap();
+        let carrier = render_parts_carrier(&mapping(&[3, 5, 2]), 40, 20).unwrap();
         let spans: Vec<(u32, u32, u32)> = carrier
             .spans
             .iter()
             .map(|s| (s.object, s.first_channel, s.count))
             .collect();
         assert_eq!(spans, [(0, 0, 3), (1, 3, 5), (2, 8, 2)]);
-        assert_eq!(tree.segments().len(), 3);
     }
 
     /// A mapping too big for memory is refused, not aborted.
