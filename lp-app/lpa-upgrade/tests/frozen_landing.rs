@@ -39,7 +39,20 @@ fn the_frozen_landing_lands_every_lamp_where_the_engine_did() {
         };
         compared += 1;
         let frozen = lamp_landings(&landed);
-        if let Some(difference) = first_difference(&golden.fixtures, &frozen) {
+        // A map2d already at format 6 is not the frozen landing's to read
+        // (the step passes it through byte for byte); the engine's parity
+        // check covers it.
+        let mut recorded = golden.fixtures;
+        for fixture in &landed.fixtures {
+            if fixture.layout == FixtureLayout::AlreadyFormat6 {
+                recorded.remove(&fixture.node);
+                skipped.push(format!(
+                    "{project} {}: its map2d is already format 6",
+                    fixture.node
+                ));
+            }
+        }
+        if let Some(difference) = first_difference(&recorded, &frozen) {
             failures.push(format!("{project}: {difference}"));
         }
     }
@@ -211,7 +224,9 @@ fn lamp_landings(landed: &lpa_upgrade::ProjectLanding) -> BTreeMap<String, Vec<V
                 }
             }
         }
-        fixtures.insert(fixture.node.clone(), places);
+        if fixture.layout != FixtureLayout::AlreadyFormat6 {
+            fixtures.insert(fixture.node.clone(), places);
+        }
     }
     fixtures
 }
