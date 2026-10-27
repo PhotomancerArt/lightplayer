@@ -146,11 +146,10 @@ silently destroyed.)
   applies the latest value per tick.
 - `PanelClear { scope?, channel? }` — absent fields widen the clear
   (channel-level → scope-level → everything).
-- Both are runtime pokes on the playlist-activate pattern: nothing
-  staged, nothing dirty, no overlay interaction. Studio, play mode,
-  phones, and future hardware inputs all speak exactly these two ops for
-  every control. (Play mode's one other command is not a control: picking
-  which playlist entry plays, P12.)
+- Both are runtime pokes: nothing staged, nothing dirty, no overlay
+  interaction. Studio, play mode, phones, and future hardware inputs all
+  speak exactly these two ops for every control — picking which playlist
+  entry plays included (P12, since 2026-10-20).
 
 > Status: implemented 2026-08-02. `WireProjectCommand::PanelWrite` /
 > `PanelClear` (project-level arms — they address a scope, not a node),
@@ -241,6 +240,13 @@ applying restored panel state is non-conforming.
 > An engaged writer for a dormant entry therefore persists, restores and
 > reappears exactly as if the entry had stayed loaded.
 
+> **A pick is a panel entry like any other** (2026-10-20,
+> `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`): the
+> playlist's `playlist.entry` writer persists and restores here, and the
+> engine settles it into the playlist before the first tick, so boot loads
+> the picked entry, not the authored one. Writes are throttled to 10 s, so
+> a pick made just before a power cut can be lost.
+
 > **Prerequisite that made this safe:** a write inside the project fs
 > fires an FsEvent back at the artifact-refresh path, so `/.lp/**` is
 > filtered out of project changes before anything reads the batch —
@@ -252,56 +258,66 @@ applying restored panel state is non-conforming.
 
 Play mode renders **panels only** — the root module's panel, which
 recursively presents nested module groups (modules.md R8) — no faces, no
-authoring surfaces. It speaks P8's two ops plus reads, and one more
-runtime command, `PlaylistActivateEntry` (below). Anything play mode can
-do, an end user is allowed to do.
+authoring surfaces. It speaks P8's two ops plus reads, and nothing else.
+Anything play mode can do, an end user is allowed to do.
 
-**The one exception: picking a pattern.** Choosing which playlist entry
-plays is not a value on a channel. It is a switch the playlist makes —
-hold the frame, unload the old entry, load the new one, fade — and the
-playlist already had a runtime command for it, the one P8 cites as the
-pattern ("the playlist-activate pattern": nothing staged, nothing dirty).
-Modelling a pick as a panel write would mean a writer with no value to
-hold, a persisted "current entry" that fights the cycle, and a Clear that
-means nothing. So the Pattern instrument's tap and its next/previous send
-`PlaylistActivateEntry` (Studio picks the key for next/previous; there is
-no next/previous command). Everything else the instrument does is a panel
-write.
+**Picking a pattern is turning a knob** (2026-10-20, superseding this
+section's earlier exception; `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`).
+The playlist's picked entry is its `idle_entry`, consumed from
+`bus:playlist.entry` and panel-shown: the authored entry is the default, a
+pick is a panel write of the entry's key that holds and survives a reboot,
+and Clear returns the authored entry. A picked entry holds: the playlist
+moves on its own only by the cycle (which walks from the pick) and by a
+trigger's excursion (an entry a button starts plays its `duration` and
+comes back). A fresh write counts even when it repeats the value, so
+re-tapping the entry the cycle started from restarts the cycle there. The
+earlier argument — "a writer with no value to hold, a persisted 'current
+entry' that fights the cycle, and a Clear that means nothing" — does not
+hold: the writer holds a key, what persists is where the cycle starts (the
+cycle never writes it), and Clear means "the authored entry again".
 
 **The Pattern instrument** (2026-09-25; multi-pattern vision D15/D21;
 `lpa-studio-core` `UiPatternPicker`). A playlist holding a set of patterns
 shows, between the shared knobs and the playing pattern's own knobs:
 
 - the set's names in authored order, the playing one marked, with a failed
-  entry and a skipped one shown as such — **tap** a name to play it
-  (`PlaylistActivateEntry`; a dormant entry loads, a failed one is retried);
+  entry and a skipped one shown as such — **tap** a name to pick it (a
+  panel write on `playlist.entry`; a dormant entry loads, a failed one is
+  retried);
 - **the cycle**: a switch and a step time. It is the playlist's `cycle`
   option, consumed from `bus:playlist.cycle` and panel-shown: the authored
   value is the default, a Play-mode write (a whole `PlaylistCycle` value:
   off is `Hold`, on is a cycle at a step from a fixed ladder) overrides it,
-  and it persists in `.lp/panel.json` like any writer (P11);
+  and it persists in `.lp/panel.json` like any writer (P11). Turning it off
+  also picks the pattern playing, so the hold survives a reboot;
 - **per-pattern on/off**, where off means "skip it in the cycle". It is the
   playlist's `skip` option on `bus:playlist.skip`: one whole `u32` list with
   one writer, rewritten with one key flipped, because the bus has no
   read-modify-write. A skipped pattern can still be tapped;
-- **next / previous**: an activate of the adjacent enabled key, wrapping.
+- **next / previous**: a pick of the adjacent enabled key, wrapping
+  (`lpc_model::playlist_step`, the rule the engine's next/prev buttons use);
+- **reset**: the pick, the cycle and the skip list back to what was
+  authored, together.
 
-Clear on the cycle or the skip list returns it to the authored default. Two
-playlists in one module share the one `playlist.cycle` / `playlist.skip`
-pair of their scope (a known limit, not a design).
+What plays is published read-only on `bus:playlist.playing`. Two playlists
+in one module would share one `playlist.entry` / `playlist.cycle` /
+`playlist.skip` set of their scope: one playlist per module (the engine and
+Studio's save warn).
 
 > Status: implemented 2026-08-03 — mounted at
 > `/p/<slug>-<uid>/play` and `/device/<uid>/play`, the same session as
 > the editor route (the
 > segment changes the surface, never the runtime). What a panel PUBLISHES
-> is `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+> is `docs/adr/2026-08-03-panel-visibility-is-derived.md`. The pick moved
+> onto the bus 2026-10-20.
 
 ### P13 — External inputs (future, seam only)
 
 MIDI, OSC, and hardware encoders enter as **panel writers through P8's
 ops** — same identity, same latch or momentary semantics, same
 persistence rules — with per-input takeover policy (P5). No second
-control path will be added for them.
+control path will be added for them. (Until then a playlist's next/prev
+*buttons* step it at runtime only: a reboot forgets the step.)
 
 ### P14 — Momentary controls: the gesture class
 

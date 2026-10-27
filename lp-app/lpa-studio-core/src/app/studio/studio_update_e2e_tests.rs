@@ -49,8 +49,8 @@ use crate::{
     ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
     DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
     INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, OfferParamKind, PickedFirmwareFile, StudioController, UiOffer,
-    UpdateLink, UpdateStanding, firmware_file_action,
+    MemoryOwnBuildSource, OfferArgs, OfferParamKind, OwnBuildSource, PickedFirmwareFile,
+    StudioController, UiOffer, UpdateLink, UpdateStanding, firmware_file_action,
 };
 
 /// The model board's region (the sim's own size).
@@ -137,6 +137,43 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     ));
 }
 
+/// The update's one number only moves forward, from the first percent to
+/// the end, across the reset between its two parts. The engine's first
+/// chunk holds its header, and the board writes it last (a half-written
+/// engine never looks valid): its request is at offset 0, and the card
+/// once read that as the engine starting over — 98 %, then 50 %, then
+/// done (FS3 over Bluefy, 2026-10-24).
+#[test]
+fn an_updates_one_number_only_moves_forward() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    let mut said: Vec<u8> = Vec::new();
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        if let Some(percent) = bench.standing(device).whole_percent()
+            && said.last() != Some(&percent)
+        {
+            said.push(percent);
+        }
+        if bench.outcome(device).is_some() {
+            break;
+        }
+    }
+    bench.assert_runs(&y());
+    assert!(
+        said.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the number went back: {said:?}"
+    );
+    assert!(said.first().is_some_and(|first| *first < 50), "{said:?}");
+    assert!(
+        said.last().is_some_and(|last| *last >= 90),
+        "the last number before done: {said:?}"
+    );
+}
+
 /// The board's resets keep the port open (the link's session resets, as
 /// over the emulator's door): the update host drops what was in flight on
 /// the old session, comes back up when the board speaks on the new one —
@@ -201,6 +238,57 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
         "each of the three reconnected links was opened by the model: {}",
         bench.board().opens_asked
     );
+}
+
+/// A Studio serves several targets' builds: a board is offered its own
+/// target's, wherever that target sits in the list. Holding only the first
+/// served build (the C6's, on lightplayer.app) left an S3 with nothing to
+/// update to over Bluetooth (2026-10-24); here the other target is listed
+/// first, and the board still updates to Y.
+#[test]
+fn a_studio_serving_two_targets_updates_a_board_to_its_own_targets_build() {
+    let mut board = Board::running_x();
+    board.endpoint = "ble:QkxFLWlk".to_string();
+    board.reconnects_itself = true;
+    let mut other = host_build(&w());
+    other.identity.target = "esp32s3-8mb".into();
+    other.identity.chip = "esp32s3".into();
+    other.identity.layout = 2;
+    let source = ServedBuilds(vec![other, host_build(&y())]);
+    let mut bench = Bench::with_source(board, Some(Rc::new(source)));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.run_until("Update offered for the board's own target", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(bench.said("update v2026.10.05-1 → v2026.10.06-1 over Bluetooth"));
+}
+
+/// Several targets' builds in memory, as a served Studio holds them.
+struct ServedBuilds(Vec<HostBuild>);
+
+impl OwnBuildSource for ServedBuilds {
+    fn facts(&self) -> Vec<lpa_update::HostBuildFacts> {
+        self.0.iter().map(HostBuild::facts).collect()
+    }
+
+    fn load(
+        &self,
+        target: &str,
+    ) -> crate::app::library::LocalBoxFuture<'static, Result<HostBuild, String>> {
+        let found = self
+            .0
+            .iter()
+            .find(|build| build.facts().identity.target == target)
+            .cloned()
+            .ok_or_else(|| format!("no build for {target}"));
+        Box::pin(core::future::ready(found))
+    }
 }
 
 /// Over Wi‑Fi (OTA M8): the same update over the LAN link's update channel.
@@ -850,10 +938,8 @@ fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
         said.iter().any(|words| words.starts_with("backing up")),
         "{said:?}"
     );
-    assert!(
-        said.iter().any(|words| words.starts_with("updating · ")),
-        "{said:?}"
-    );
+    // The surface carries the update's number; the row says its verb.
+    assert!(said.iter().any(|words| words == "updating"), "{said:?}");
     assert!(
         said.iter().all(|words| !words.contains("of 2")),
         "one number, never 1 of 2: {said:?}"
@@ -2272,6 +2358,14 @@ impl Bench {
     /// A Studio holding `own` as its own build (or none), with `board` not
     /// yet granted.
     fn new(board: Board, own: Option<ModelBuild>) -> Self {
+        let source = own.map(|own| {
+            Rc::new(MemoryOwnBuildSource::new(host_build(&own))) as Rc<dyn OwnBuildSource>
+        });
+        Self::with_source(board, source)
+    }
+
+    /// A Studio whose own builds come from `source` (or none).
+    fn with_source(board: Board, source: Option<Rc<dyn OwnBuildSource>>) -> Self {
         let clock = Rc::clone(&board.clock);
         let board = Rc::new(RefCell::new(board));
         let granted = Rc::new(Cell::new(false));
@@ -2312,8 +2406,8 @@ impl Bench {
             board: Rc::clone(&board),
             granted: Rc::clone(&granted),
         }));
-        if let Some(own) = own {
-            controller.set_own_build_source(Rc::new(MemoryOwnBuildSource::new(host_build(&own))));
+        if let Some(source) = source {
+            controller.set_own_build_source(source);
         }
         Self {
             controller,

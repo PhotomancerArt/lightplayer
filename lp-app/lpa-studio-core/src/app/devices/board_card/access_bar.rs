@@ -14,7 +14,8 @@
 //! | Play only | "play only" | — | Neutral | Unlock (the sheet) |
 //! | Unlocked at edit with a key | "edit · password" | — | Neutral | — |
 //! | Open to edit, with no password | "edit · no password" | — | Neutral | — |
-//! | Checking, unlocking | (work: "checking", "unlocking") | — | Neutral | — |
+//! | Checking | "—" | "checking", still | Neutral | — |
+//! | Unlocking | "—" | (work: "unlocking") | Neutral | — |
 //! | No password reaches it | "USB only · no password" | — | Attention | — (the fix is in the details) |
 //!
 //! Over any row: a board whose account key could not be added (#1056)
@@ -42,7 +43,7 @@ use super::detail_sections::{caution, facts, notice, verbs, without_empty};
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiBarDetails, UiStackBar};
 use crate::app::access::{
     PLAY_ONLY_SENTENCE, UiAccessPanel, UiAccessWait, UiPasswordLine, UiUnlockOffer, open_summary,
 };
@@ -51,6 +52,8 @@ use crate::{RichLine, UiStatusKind};
 
 /// The row's name when Studio cannot tell what this link may do.
 const ACCESS_UNKNOWN: &str = "unknown";
+/// The row's state while the link's hello is read.
+const CHECKING: &str = "checking";
 /// The notice on a board anyone nearby may edit.
 pub const ANYONE_CAN_EDIT_SENTENCE: &str = "Anyone nearby can change this board.";
 /// The account-key notice's title, ahead of #1056's sentence.
@@ -72,6 +75,8 @@ enum Held {
     UsbOnly,
     /// Not known (offline with nothing remembered, or not settled).
     Unknown,
+    /// Not known yet: the link's hello is being read.
+    Checking,
 }
 
 /// How the edit tier is held.
@@ -96,6 +101,7 @@ impl Held {
             Held::Locked => "locked",
             Held::UsbOnly => "USB only · no password",
             Held::Unknown => ACCESS_UNKNOWN,
+            Held::Checking => NOT_KNOWN_YET,
         }
     }
 
@@ -104,7 +110,7 @@ impl Held {
         match self {
             Held::Edit(_) => "play and edit",
             Held::Play => "play",
-            Held::Locked | Held::UsbOnly | Held::Unknown => "nothing yet",
+            Held::Locked | Held::UsbOnly | Held::Unknown | Held::Checking => "nothing yet",
         }
     }
 }
@@ -153,13 +159,15 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         Held::Edit(Via::NoPassword)
     } else if waiting == Some(UiAccessWait::NoPassword) {
         Held::UsbOnly
+    } else if waiting == Some(UiAccessWait::Checking) {
+        // The link's own hello, read by itself: no one waits on it, so it
+        // stays still ("○ Access  —  checking"), the word in the state's
+        // place (P4). Over Bluetooth it can run the length of an update.
+        Held::Checking
     } else {
-        if let Some(words) = match waiting {
-            Some(UiAccessWait::Checking) => Some("checking"),
-            Some(UiAccessWait::Unlocking) => Some("unlocking"),
-            _ => None,
-        } {
-            work = Some(UiBarWork::running(words, None));
+        if waiting == Some(UiAccessWait::Unlocking) {
+            // A login someone asked for: the row's work.
+            work = Some(UiBarWork::running("unlocking", None));
         }
         Held::Unknown
     };
@@ -172,6 +180,7 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             UiStatusKind::Attention,
         ),
         (None, Held::UsbOnly) => (None, UiStatusKind::Attention),
+        (None, Held::Checking) => (Some(CHECKING.to_string()), UiStatusKind::Neutral),
         _ => (None, UiStatusKind::Neutral),
     };
     let action = (held == Held::Play)
@@ -182,10 +191,10 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 .with_icon("lock")
                 .drawn(UiActionDraw::Sheet)
         });
+    // The name is never empty: a dash while the tier is not known yet,
+    // the work's words beside it ("◌ Access  —  unlocking").
     let summary = match work {
-        // While it is checked the row says only that ("◌ Access
-        // checking").
-        Some(_) => String::new(),
+        Some(_) => NOT_KNOWN_YET.to_string(),
         None => held.words().to_string(),
     };
     UiStackBar {
@@ -268,7 +277,7 @@ fn details(
                 Held::Play => "no password".to_string(),
                 _ => "—".to_string(),
             }),
-        Held::Locked | Held::UsbOnly | Held::Unknown => "—".to_string(),
+        Held::Locked | Held::UsbOnly | Held::Unknown | Held::Checking => "—".to_string(),
     };
     sections.push(facts(
         "Your access",
@@ -475,18 +484,25 @@ mod tests {
         ));
     }
 
+    /// Checking is the link's own hello, read by itself: a still state
+    /// beside a dash, never work (it once spun through a whole Bluetooth
+    /// update, FS3 2026-10-24). Unlocking is a login someone asked for: the
+    /// row's work, beside the same dash.
     #[test]
-    fn checking_and_unlocking_are_the_rows_work() {
+    fn checking_is_still_and_unlocking_is_the_rows_work() {
         let mut fixture = CardFixture::ready().over(UiLinkKind::Relay);
         fixture.access = Some(UiDeviceAccess {
             waiting: Some(UiAccessWait::Checking),
             ..UiDeviceAccess::default()
         });
         let bar = access_bar(&fixture.input());
-        assert_eq!(bar.summary, "");
-        assert_eq!(bar.work.map(|work| work.words).as_deref(), Some("checking"));
+        assert_eq!(bar.summary, "\u{2014}");
+        assert_eq!(bar.aside.as_deref(), Some("checking"));
+        assert_eq!(bar.tone, UiStatusKind::Neutral);
+        assert_eq!(bar.work, None);
         fixture.access.as_mut().unwrap().waiting = Some(UiAccessWait::Unlocking);
         let bar = access_bar(&fixture.input());
+        assert_eq!(bar.summary, "\u{2014}");
         assert_eq!(
             bar.work.map(|work| work.words).as_deref(),
             Some("unlocking")

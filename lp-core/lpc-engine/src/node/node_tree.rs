@@ -38,22 +38,14 @@ pub struct RuntimeNodeTree<N> {
     by_path: VecMap<TreePath, NodeId>,
     by_sibling: VecMap<(NodeId, NodeName), NodeId>,
     binding_index: NodeBindingIndex,
-    /// Per-node answers derived from the binding graph and the topology,
-    /// asked every frame and moved only by a structural change. Cleared
-    /// wherever the binding index is edited or rebuilt and wherever a node
-    /// is added or removed — the same points that keep `binding_index`
-    /// true, so it can never be staler than the index it is derived from.
-    derived: core::cell::RefCell<DerivedFacts>,
+    /// The channels each module node declares it takes from its host
+    /// (`ModuleDef::inputs`): they list in the host scope — through a
+    /// playlist entry's sink — though nothing there names them (modules.md
+    /// R2, playlists-on-the-bus D5). A side map, so only a module that
+    /// declares something pays for it. Set with the module's bindings.
+    declared_inputs: VecMap<NodeId, Vec<ChannelName>>,
     next_id: u32,
     root: NodeId,
-}
-
-/// See [`RuntimeNodeTree::derived`].
-#[derive(Debug, Default)]
-struct DerivedFacts {
-    /// Whether a consumer is the first fragments consumer of the bus channel
-    /// its `input` reads (`EngineResolveHost::is_default_fragments_consumer`).
-    default_fragments_consumer: VecMap<NodeId, bool>,
 }
 
 impl<N> RuntimeNodeTree<N> {
@@ -73,7 +65,7 @@ impl<N> RuntimeNodeTree<N> {
             by_path,
             by_sibling: VecMap::new(),
             binding_index: NodeBindingIndex::default(),
-            derived: Default::default(),
+            declared_inputs: VecMap::new(),
             next_id: 1,
             root: root_id,
         }
@@ -163,7 +155,6 @@ impl<N> RuntimeNodeTree<N> {
 
         // Ids are monotonic, so the new entry lands at the end.
         self.nodes.push(child_entry);
-        self.clear_derived();
 
         // Update indices
         self.by_path.insert(child_path, child_id);
@@ -203,6 +194,7 @@ impl<N> RuntimeNodeTree<N> {
         }
 
         // Drop this entry and remove it from the indices
+        self.declared_inputs.remove(&id);
         if let Some(e) = self.nodes.remove(id) {
             self.by_path.remove(&e.path);
             if let Some(name) = e.path.0.last().map(|seg| seg.name.clone()) {
@@ -262,7 +254,6 @@ impl<N> RuntimeNodeTree<N> {
 
         let binding_ref = BindingRef::new(owner, index);
         self.binding_index.insert_binding(binding_ref, &binding)?;
-        self.clear_derived();
 
         let entry = self
             .get_mut(owner)
@@ -287,7 +278,6 @@ impl<N> RuntimeNodeTree<N> {
             entry.bindings.mark_updated(revision);
         }
         self.binding_index = NodeBindingIndex::default();
-        self.clear_derived();
     }
 
     /// Iterate over all node-owned bindings.
@@ -376,8 +366,11 @@ impl<N> RuntimeNodeTree<N> {
     /// The channels listed in `scope` (R3 — a public slot's channel exists
     /// in the slot's scope): a publishing endpoint lists where the write
     /// lands (the owner's inhabited scope, R4), a consuming endpoint where
-    /// its resolution starts (the owner's read scope). Listing only —
-    /// resolution is the scoped-key walk.
+    /// its resolution starts (the owner's read scope), and a module's
+    /// declared input where the module is placed — its host scope, lifted
+    /// out of a playlist entry's sink (R2, playlists-on-the-bus D5). Only a
+    /// LOADED module declares anything, so a dormant entry lists nothing
+    /// (no demand). Listing only — resolution is the scoped-key walk.
     pub fn scope_channels(
         &self,
         scope: crate::node::ScopeRef,
@@ -399,8 +392,49 @@ impl<N> RuntimeNodeTree<N> {
                 }
             }
         }
+        for (module, inputs) in self.declared_inputs.iter() {
+            if self.input_host_scope(*module) != Some(scope) {
+                continue;
+            }
+            for channel in inputs {
+                if channels.iter().any(|(existing, _)| existing == channel) {
+                    continue;
+                }
+                let kind = lpc_model::well_known_channel(&channel.0)
+                    .map(|known| known.kind)
+                    .or_else(|| {
+                        self.bus_channels()
+                            .find(|(name, _)| *name == channel)
+                            .map(|(_, kind)| kind)
+                    })
+                    .unwrap_or(lpc_model::Kind::Ratio);
+                channels.push((channel.clone(), kind));
+            }
+        }
         channels.sort_by(|(a, _), (b, _)| a.cmp(b));
         channels
+    }
+
+    /// Record the channels `module` declares as inputs (none clears it).
+    pub fn set_declared_inputs(&mut self, module: NodeId, inputs: Vec<ChannelName>) {
+        if inputs.is_empty() {
+            self.declared_inputs.remove(&module);
+        } else {
+            self.declared_inputs.insert(module, inputs);
+        }
+    }
+
+    /// Where a module's declared inputs list: the scope the module node is
+    /// placed in, or — when that is a playlist entry's sink — the
+    /// playlist's own scope (reads go out of a sink; writes never do).
+    pub fn input_host_scope(&self, module: NodeId) -> Option<crate::node::ScopeRef> {
+        // The scope the module is placed in; the root is placed nowhere.
+        let placed = self.get(module)?.scope?;
+        if placed.is_sink() {
+            self.parent_scope(placed)
+        } else {
+            Some(placed)
+        }
     }
 
     /// Providers of `channel` whose write lands in `scope` — the LISTING
@@ -563,36 +597,7 @@ impl<N> RuntimeNodeTree<N> {
 
     fn rebuild_binding_index(&mut self) -> Result<(), BindingError> {
         self.binding_index = NodeBindingIndex::rebuild(&self.nodes)?;
-        self.clear_derived();
         Ok(())
-    }
-
-    fn clear_derived(&mut self) {
-        *self.derived.get_mut() = DerivedFacts::default();
-    }
-
-    /// `compute`'s answer for `consumer`, kept until the next structural
-    /// change ([`Self::derived`]). `compute` runs with no borrow of the cache
-    /// held, so it may read the tree freely.
-    pub(crate) fn default_fragments_consumer_cached(
-        &self,
-        consumer: NodeId,
-        compute: impl FnOnce() -> bool,
-    ) -> bool {
-        if let Some(known) = self
-            .derived
-            .borrow()
-            .default_fragments_consumer
-            .get(&consumer)
-        {
-            return *known;
-        }
-        let answer = compute();
-        self.derived
-            .borrow_mut()
-            .default_fragments_consumer
-            .insert(consumer, answer);
-        answer
     }
 
     /// A cheap summary of the tree's *shape*, for catching structural changes
@@ -746,49 +751,6 @@ mod tests {
         .unwrap();
         let root_entry = tree.get(root).unwrap();
         assert_eq!(root_entry.children_changed_at().0, 5);
-    }
-
-    #[test]
-    fn derived_facts_are_kept_until_a_structural_change() {
-        let mut tree = make_tree();
-        let a = add_test_child(&mut tree, "a");
-        let calls = core::cell::Cell::new(0);
-        let ask = |tree: &RuntimeNodeTree<()>| {
-            tree.default_fragments_consumer_cached(a, || {
-                calls.set(calls.get() + 1);
-                true
-            })
-        };
-        assert!(ask(&tree));
-        assert!(ask(&tree));
-        assert_eq!(calls.get(), 1, "asked twice, computed once");
-
-        // Each structural change clears it: a node added, a binding added,
-        // the bindings cleared, a node removed.
-        let b = add_test_child(&mut tree, "b");
-        ask(&tree);
-        assert_eq!(calls.get(), 2);
-        tree.add_binding(
-            BindingDraft {
-                source: BindingSource::Literal(LpValue::F32(1.0)),
-                target: BindingTarget::BusChannel(ChannelName(String::from("visual"))),
-                priority: BindingPriority::new(0),
-                kind: Kind::Color,
-                owner: b,
-            },
-            Revision::new(2),
-        )
-        .unwrap();
-        ask(&tree);
-        assert_eq!(calls.get(), 3);
-        tree.clear_bindings(Revision::new(3));
-        ask(&tree);
-        assert_eq!(calls.get(), 4);
-        tree.remove_subtree(b, Revision::new(4)).unwrap();
-        ask(&tree);
-        assert_eq!(calls.get(), 5);
-        ask(&tree);
-        assert_eq!(calls.get(), 5);
     }
 
     #[test]

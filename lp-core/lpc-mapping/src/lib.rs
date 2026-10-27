@@ -43,7 +43,9 @@ mod map2d_fit;
 mod map2d_object_id;
 mod map2d_resolve;
 mod map_object_path;
+pub mod part;
 mod patch;
+pub mod patching;
 
 pub use editor_meta::{
     EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,

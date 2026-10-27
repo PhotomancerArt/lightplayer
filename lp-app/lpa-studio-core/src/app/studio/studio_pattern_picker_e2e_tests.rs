@@ -35,10 +35,9 @@ use crate::app::studio::studio_edit_e2e_tests::{
 use crate::{
     OfferArgs, OfferPath, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM, PLAYLIST_ENTRY_PARAM,
     PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_SKIP_VERB,
-    PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, PanelWriteOp, PlaylistActivateOp,
-    ProjectOp, StudioActor, StudioCommand, StudioController, StudioServerClient, UiAction,
-    UiNodeFace, UiOffer, UiPanelGroup, UiPanelWidget, UiPatternEntryState, UiPatternPicker,
-    UiStudioView,
+    PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, PanelWriteOp, PlaylistPickOp, ProjectOp,
+    StudioActor, StudioCommand, StudioController, StudioServerClient, UiAction, UiNodeFace,
+    UiOffer, UiPanelGroup, UiPanelWidget, UiPatternEntryState, UiPatternPicker, UiStudioView,
 };
 
 #[test]
@@ -123,6 +122,52 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
             .map(|target| target.scope),
         Some(scope),
         "and its knob writes there"
+    );
+}
+
+/// A declared input stands in the band (D6): the playing pattern's own
+/// control for it, written at the playlist's level, and gone from the
+/// pattern's own group, which shows it again only while the pattern holds
+/// its own value (D14).
+#[test]
+fn a_declared_input_stands_in_the_band_and_leaves_the_patterns_group() {
+    let session = Session::connect_with(SHARING_PATTERN_MODULE);
+    let panel = root_panel(&session.view);
+    let root = panel.target.expect("the root panel's scope");
+
+    let tail = panel
+        .controls
+        .iter()
+        .find(|control| control.channel == "tail")
+        .unwrap_or_else(|| {
+            panic!(
+                "the band shows the shared tail: {:?}",
+                panel
+                    .controls
+                    .iter()
+                    .map(|c| &c.channel)
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        tail.control
+            .panel_target
+            .as_ref()
+            .map(|target| target.scope),
+        Some(root),
+        "a write lands at the playlist's level, where every pattern inherits it"
+    );
+    assert_eq!(
+        tail.control.label, "Tail",
+        "meta follows the pattern's binding"
+    );
+    assert!(
+        panel
+            .groups
+            .iter()
+            .flat_map(|group| group.controls.iter())
+            .all(|control| control.channel != "tail"),
+        "the pattern's own tail is not shown while it holds no value of its own"
     );
 }
 
@@ -212,8 +257,8 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     });
 }
 
-/// P8, D11: activating a dormant entry — from the strip chip's action, the
-/// same `PlaylistActivateOp` the Pattern picker's tap sends — loads AND
+/// P8, D11: picking a dormant entry — from the strip chip's action, the
+/// same `PlaylistPickOp` the Pattern picker's tap sends — loads AND
 /// opens the entry's card. `aurora` starts dormant (Soft Noise is idle);
 /// tapping it plays it, and once its subtree lands in a synced view, its
 /// card is the focused one, with no second click.
@@ -316,8 +361,13 @@ fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
 
 impl Session {
     fn connect() -> Self {
+        Self::connect_with(PATTERN_MODULE)
+    }
+
+    /// The same set, every pattern module being `pattern_module`.
+    fn connect_with(pattern_module: &'static str) -> Self {
         Self::connect_to(
-            pattern_set_e2e_server(),
+            pattern_set_e2e_server(pattern_module),
             StudioController::connected_with_client_for_test,
         )
     }
@@ -447,10 +497,7 @@ pub(super) fn picker(view: &UiStudioView) -> UiPatternPicker {
 }
 
 fn activated(action: &UiAction) -> u32 {
-    action
-        .op_as::<PlaylistActivateOp>()
-        .expect("an activate")
-        .entry
+    action.op_as::<PlaylistPickOp>().expect("a pick").entry
 }
 
 const PATTERN_SET_DIR: &str = "/projects/pattern-set-e2e";
@@ -460,6 +507,13 @@ const PATTERN_SET_DIR: &str = "/projects/pattern-set-e2e";
 const PATTERN_MODULE: &str = r#"{
   "kind": "Module",
   "nodes": { "shader": { "ref": "./shader.json" } }
+}"#;
+/// The same pattern, declaring its `tail` as an input the piece shares
+/// (playlists-on-the-bus D4).
+const SHARING_PATTERN_MODULE: &str = r#"{
+  "kind": "Module",
+  "nodes": { "shader": { "ref": "./shader.json" } },
+  "inputs": ["tail"]
 }"#;
 const PATTERN_SHADER: &str = r#"{
   "kind": "Shader",
@@ -483,7 +537,7 @@ const PATTERN_GLSL: &str = "layout(binding = 0) uniform float tail;\n\nvec4 rend
 const BROKEN_GLSL: &str = "layout(binding = 0) uniform float tail;\n\nvec4 render_2d(vec2 pos) {\n    return not_a_function(pos);\n}\n";
 
 /// Four pattern entries; the fourth does not compile. Idle is the first.
-fn pattern_set_e2e_server() -> LpServer {
+fn pattern_set_e2e_server(pattern_module: &'static str) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -554,7 +608,7 @@ fn pattern_set_e2e_server() -> LpServer {
         ("scanner", PATTERN_GLSL),
         ("broken", BROKEN_GLSL),
     ] {
-        files.push((format!("modules/{folder}/module.json"), PATTERN_MODULE));
+        files.push((format!("modules/{folder}/module.json"), pattern_module));
         files.push((format!("modules/{folder}/shader.json"), PATTERN_SHADER));
         files.push((format!("modules/{folder}/shader.glsl"), glsl));
     }

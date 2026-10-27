@@ -16,7 +16,9 @@ use super::access_bar::{access_bar, pending_access_bar};
 use super::bluetooth_bar::bluetooth_bar;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
-use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
+use super::board_surface::{
+    board_surface, carried_layer, carries_work, pending_surface, surface_state,
+};
 use super::cloud_bar::cloud_bar;
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
@@ -28,9 +30,10 @@ use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_board_card::{UiBoardCard, UiBoardPresence};
 use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
+use super::ui_board_surface::SurfaceState;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
-use super::ui_stack_bar::{BarLayer, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use super::usb_bar::{pending_link_bars, usb_bar};
 use super::wifi_bar::wifi_bar;
@@ -52,6 +55,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     .into_iter()
     .map(with_failure_notice)
     .map(with_work_tone)
+    .map(with_a_name)
     .collect();
     let running_work = bars
         .iter()
@@ -70,6 +74,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         state_action(input, state).as_ref(),
     );
     let bars = quiet_rows(bars, carried_layer(input, state));
+    let bars = carried_rows(bars, state);
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -119,6 +124,29 @@ fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBa
             let loud = matches!(bar.tone, UiStatusKind::Attention | UiStatusKind::Error);
             if Some(bar.layer) == carried && loud {
                 bar.tone = UiStatusKind::Neutral;
+            }
+            bar
+        })
+        .collect()
+}
+
+/// A row's name is never empty: a dash while its value is not known yet,
+/// so its work's words are always its state ("USB  —  connecting"), never
+/// the name's place (one grammar, P8).
+fn with_a_name(mut bar: UiStackBar) -> UiStackBar {
+    if bar.summary.is_empty() {
+        bar.summary = NOT_KNOWN_YET.to_string();
+    }
+    bar
+}
+
+/// A row whose work the surface says is carried: its verb alone and its
+/// spinner, no fill and no number, so one work has one bar (P2).
+fn carried_rows(bars: Vec<UiStackBar>, state: SurfaceState) -> Vec<UiStackBar> {
+    bars.into_iter()
+        .map(|mut bar| {
+            if carries_work(state, bar.layer) {
+                bar.work = bar.work.map(UiBarWork::carried_by_surface);
             }
             bar
         })
@@ -230,6 +258,7 @@ pub fn pending_board_card(
                 pending_firmware_bar(pending, board, offers),
                 pending_hardware_bar(pending, board, offers),
             ])
+            .map(with_a_name)
             .collect(),
         panel: None,
     };

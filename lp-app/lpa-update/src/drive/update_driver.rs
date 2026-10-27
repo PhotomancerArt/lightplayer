@@ -234,6 +234,10 @@ pub struct UpdateDriver {
     retries: u8,
     /// This host served core chunks (only names the engine's stage).
     moved_core: bool,
+    /// How far each stage's piece has come: the furthest offset the board
+    /// asked for in it. Its progress never goes back for a request behind
+    /// it (the engine's header chunk, which the board writes last).
+    furthest: [Option<u32>; 3],
     /// The board asked for engine chunks under `Reinstall`: the engine was
     /// erased and is being, or has been, written again.
     reinstalled: bool,
@@ -274,6 +278,7 @@ impl UpdateDriver {
             login_retry_at: None,
             retries: 0,
             moved_core: false,
+            furthest: [None; 3],
             reinstalled: false,
             engine_answered: false,
             links_up: 0,
@@ -414,11 +419,9 @@ impl UpdateDriver {
                     r.kind == PieceKind::Engine && self.config.intent == UpdateIntent::Reinstall;
                 let stage = self.stage_of(which, r.kind);
                 let total = self.served_build(which).piece(r.kind).len;
-                self.effects.push(DriverEffect::Progress {
-                    stage,
-                    done: r.off,
-                    total,
-                });
+                let done = self.furthest(stage, r.off);
+                self.effects
+                    .push(DriverEffect::Progress { stage, done, total });
                 self.serve_message(which, bytes);
             }
             Ok(BoardMessage::Refusal(r)) => match self.phase {
@@ -757,6 +760,24 @@ impl UpdateDriver {
             (Serving::Heal, Some(b)) => b,
             _ => &self.build,
         }
+    }
+
+    /// How far `stage`'s piece has come once the board asks for `off`: the furthest
+    /// offset asked for so far. The board asks for a piece's chunks in
+    /// order from its first unwritten one, but holds the engine's header
+    /// chunk (offset 0) and asks for it last, so a valid engine never
+    /// shows while its bytes change: read as an offset, that last request
+    /// would put the engine back at 0 % (FS3, 2026-10-24: 100 % → 50 % →
+    /// done on the card).
+    fn furthest(&mut self, stage: Stage, off: u32) -> u32 {
+        let slot = &mut self.furthest[match stage {
+            Stage::Updating | Stage::BackingUp => 0,
+            Stage::Restoring => 1,
+            Stage::Finishing => 2,
+        }];
+        let done = slot.map_or(off, |seen| seen.max(off));
+        *slot = Some(done);
+        done
     }
 
     fn stage_of(&self, which: Serving, kind: PieceKind) -> Stage {

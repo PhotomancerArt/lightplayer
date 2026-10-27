@@ -50,10 +50,10 @@ use lpa_devices::view::{FirmwareFace, LoadedProject};
 use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{danger, facts, notice, verbs, without_empty};
-use super::ui_bar_work::{BarWorkState, UiBarWork};
+use super::ui_bar_work::BarWorkState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_detail_panel::UiDetailPanel;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use super::ui_stack_bar::{BarLayer, NOT_KNOWN_YET, UiBarDetails, UiStackBar};
 use crate::app::devices::board_plays::BoardPlays;
 use crate::app::devices::device_push_offer::PUSH_SOURCE_PARAM;
 use crate::core::data_kinds::age_words;
@@ -189,8 +189,8 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 None,
             ),
             BoardPlays::Running { label } => (label.clone(), None, UiStatusKind::Neutral, None),
-            // A moment: a LightPlayer on a link has not said yet. A
-            // spinner, no words. A core alone never will.
+            // A moment: a LightPlayer on a link has not said yet. A dash,
+            // still: nobody waits on it (P4). A core alone never will.
             BoardPlays::Unknown
                 if input.linked()
                     && matches!(
@@ -199,7 +199,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                     ) =>
             {
                 waiting = true;
-                (String::new(), None, UiStatusKind::Neutral, None)
+                (NOT_KNOWN_YET.to_string(), None, UiStatusKind::Neutral, None)
             }
             BoardPlays::Unknown => (
                 PROJECT_UNKNOWN.to_string(),
@@ -209,13 +209,12 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             ),
         }
     };
-    let work = bar_work(input, BarLayer::Project).or_else(|| {
-        // The board has not said what it runs: the row waits, quietly.
-        waiting.then(|| UiBarWork::running("", None))
-    });
+    let work = bar_work(input, BarLayer::Project);
     let running = work
         .as_ref()
         .is_some_and(|work| work.state == BarWorkState::Running);
+    // Until the board says what it runs, nothing on the row can be pressed.
+    let hushed = running || waiting;
     // While its own work runs the row keeps its name — what it plays now;
     // on a board that plays nothing yet the work's words take the name's
     // place ("◌ Project  sending · 40%").
@@ -229,13 +228,13 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let edit_in_details = action.is_some();
     let action = action.or_else(|| edit.clone());
     UiStackBar {
-        aside: if running { None } else { aside },
+        aside: if hushed { None } else { aside },
         // Work in progress reads neutral; its words are the row's state.
-        tone: if running { UiStatusKind::Neutral } else { tone },
-        action: if running { None } else { action },
-        way_out: if running { None } else { way_out },
+        tone: if hushed { UiStatusKind::Neutral } else { tone },
+        action: if hushed { None } else { action },
+        way_out: if hushed { None } else { way_out },
         stale,
-        todo: todo && !running,
+        todo: todo && !hushed,
         details: details(
             input,
             tone,
@@ -651,18 +650,17 @@ mod tests {
         assert_eq!(bar.action, None, "no Add a project on a locked board");
     }
 
-    /// A board that has not said yet waits a moment: a spinner, no words.
+    /// A board that has not said yet waits a moment, still: a dash, no
+    /// spinner and nothing to press (nobody waits on it, P4).
     #[test]
-    fn a_board_that_has_not_said_waits_with_a_spinner() {
+    fn a_board_that_has_not_said_waits_still() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Unknown;
         fixture.plays = BoardPlays::Unknown;
         let bar = project_bar(&fixture.input());
-        assert_eq!(bar.summary, "");
-        let work = bar.work.expect("the spinner");
-        assert_eq!(work.state, BarWorkState::Running);
-        assert_eq!(work.words, "");
-        assert_eq!(work.percent, None);
+        assert_eq!(bar.summary, "\u{2014}");
+        assert_eq!(bar.work, None);
+        assert_eq!(bar.action, None);
     }
 
     /// P13: offline, the last project known stays, dimmed.

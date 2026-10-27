@@ -44,7 +44,7 @@ impl Editor {
             add(b.from.to_string(), b.to.to_string());
         }
         // A fixture reaching an output only by place rules feeds it too.
-        for s in &p.effective_patch().spans {
+        for s in &p.effective_patch().pixel_runs {
             add(s.fixture.to_string(), s.output.to_string());
         }
         input

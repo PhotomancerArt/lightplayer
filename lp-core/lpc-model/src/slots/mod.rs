@@ -7,6 +7,7 @@
 mod affine2d;
 mod artifact_path;
 mod asset_slot;
+mod channel_name_list;
 mod color_order;
 mod control_product;
 mod dim2u;
@@ -25,6 +26,7 @@ pub use affine2d::{Affine2d, Affine2dSlot};
 pub use artifact_path::{ArtifactPath, ArtifactPathSlot};
 pub(crate) use asset_slot::ASSET_SLOT_CODEC_ID;
 pub use asset_slot::{AssetSlot, AssetSlotValue};
+pub use channel_name_list::{ChannelNameList, ChannelNameListSlot};
 pub use color_order::{ColorOrderSlot, ColorOrderValue};
 pub use control_product::ControlProductSlot;
 pub use dim2u::{Dim2u, Dim2uSlot};

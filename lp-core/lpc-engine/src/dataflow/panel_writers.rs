@@ -29,6 +29,12 @@ pub struct PanelWriter {
     pub value: PanelWriteValue,
     /// Engine revision of the most recent write (display/coalescing aid).
     pub written_at: Revision,
+    /// Which write this is: unique per [`PanelWriterStore::set`], so a
+    /// consumer can tell a fresh write of the same value from the held one
+    /// (a re-tapped playlist pick restarts the cycle; playlists-on-the-bus
+    /// Q2). Two writes between the same pair of ticks share a revision but
+    /// never a `write`.
+    pub write: u64,
     /// Momentary liveness deadline (panel.md P14), in engine total-ms:
     /// gesture channels write while active and DESPAWN past this instant —
     /// the despawn IS the fallback mechanism. `None` = latching writer.
@@ -74,15 +80,16 @@ impl PanelWriterStore {
         at: Revision,
         expires_at_ms: Option<u64>,
     ) {
+        self.mutations = self.mutations.saturating_add(1);
         self.writers.insert(
             (scope, channel),
             PanelWriter {
                 value,
                 written_at: at,
+                write: self.mutations,
                 expires_at_ms,
             },
         );
-        self.mutations = self.mutations.saturating_add(1);
     }
 
     /// Despawn every momentary writer whose deadline has passed (a dropped
@@ -260,6 +267,9 @@ impl PanelWriterStore {
                 PanelWriter {
                     value: PanelWriteValue::Value(value),
                     written_at: at,
+                    // Re-engaged with its entry, not written: no fresh
+                    // gesture for a consumer to react to.
+                    write: 0,
                     expires_at_ms: None,
                 },
             );

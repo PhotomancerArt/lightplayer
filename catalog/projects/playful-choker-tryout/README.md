@@ -59,17 +59,23 @@ into it. The lamps never go dark.
 In Studio, connected to the choker, open **Play**. The **Pattern** row lists
 the 25 names:
 
-- **tap a name** to play it now; while cycling, the cycle carries on from
-  there;
-- **the cycle switch** turns the cycle off (hold the current pattern) or back
-  on, and its step sets the seconds per pattern;
+- **tap a name** to pick it; while cycling, the cycle carries on from
+  there, and with the cycle off it stays on that pattern;
+- **the cycle switch** turns the cycle off (the pattern playing is picked
+  and stays) or back on, and its step sets the seconds per pattern;
 - **the per-pattern switch** takes a pattern out of the cycle (it can still
   be tapped);
-- **next / previous** step through the list.
+- **next / previous** pick the neighbouring pattern;
+- **↺** puts the picked pattern, the cycle and the switches back to what
+  `playlist.json` says.
 
-These are remembered on the choker, like the other knobs. The authored
-defaults in `playlist.json` (cycle on, 30 s, nothing skipped) are what a
-fresh upload starts from.
+All of these are remembered on the choker, like the other knobs: pull the
+power and it comes back on the pattern you picked, from its first frame.
+The authored defaults in `playlist.json` (Soft Noise picked, cycle on, 30 s,
+nothing skipped) are what a fresh upload starts from. A picked pattern holds
+for as long as the cycle is off. The entries' `"duration": 30` is left over
+from before the cycle existed and does nothing now: a duration only times a
+pattern a button starts, and there is no button here.
 
 There is no button on the choker (the playlist's `trigger` input is left
 unbound).

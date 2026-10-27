@@ -4,18 +4,23 @@
 //!
 //! | verb | takes | published when |
 //! |---|---|---|
-//! | `play` | `entry`, a choice of the set (the playing one disabled) | the set has entries |
-//! | `prev`, `next` | nothing: the neighbouring enabled entry, wrapping | something plays and another entry is enabled |
+//! | `play` | `entry`, a choice of the set (the playing one disabled) | the pick is on a channel |
+//! | `prev`, `next` | nothing: the neighbouring enabled entry, wrapping | the pick is on a channel, something plays and another entry is enabled |
 //! | `cycle` | `cycling`, a toggle (its state is the cycle's) | the cycle is on a channel |
 //! | `step-shorter`, `step-longer` | nothing: one rung of the step ladder | the cycle runs and a rung is left that way |
 //! | `skip` | `entry`, a choice, and `skipped`, a toggle that is on unless the press says otherwise | the skip list is on a channel |
+//! | `reset` | nothing: the pick, the cycle and the skip list back to what was authored | any of the three is held |
 //!
-//! **Levels.** Every one is Routine: they are live pokes, not edits. A play
-//! is a `PlaylistActivateOp` through the runtime command channel, and the
-//! cycle, step and skip verbs are whole-value panel writes on the
-//! playlist's `playlist.cycle` / `playlist.skip` channels. Nothing stages
-//! in the overlay, nothing is dirty, and the panel's own reset releases a
-//! held channel.
+//! **Levels.** Every one is Routine: they are panel gestures, not edits. A
+//! play, next or prev is a pick — a panel write of the entry's key on the
+//! playlist's `playlist.entry`, which holds and survives a reboot
+//! (playlists-on-the-bus vision D1) — and the cycle, step and skip verbs
+//! are whole-value panel writes on `playlist.cycle` / `playlist.skip`.
+//! Nothing stages in the overlay and nothing is dirty. Turning the cycle
+//! off also picks the pattern playing, so the hold survives a reboot too
+//! (the cycle never writes the pick itself). `reset` lets all three go
+//! (D13): one batch naming exactly those channels, since a scope reset
+//! would release every shared knob with them.
 //!
 //! The rules (states, next/prev passing over skipped and failed entries,
 //! the step ladder) are [`super::pattern_picker_derivation`]'s; this file
@@ -29,13 +34,13 @@
 use lpc_model::{PlaylistCycle, ToLpValue};
 
 use super::pattern_picker_derivation::{
-    PatternPickerFacts, StepDirection, adjacent_enabled_key, format_step_seconds, longer_step,
-    shorter_step, skip_list_with, started_cycle,
+    PatternPickerFacts, StepDirection, format_step_seconds, longer_step, shorter_step,
+    skip_list_with, started_cycle,
 };
 use crate::{
     ControllerId, OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferPath,
-    PanelWriteOp, PlaylistActivateOp, ProjectController, ProjectNodeAddress, UiAction, UiOffer,
-    UiPanelTarget,
+    PanelBatchOp, PanelWriteOp, PlaylistPickOp, ProjectController, ProjectNodeAddress, UiAction,
+    UiOffer, UiPanelTarget,
 };
 
 /// Play one entry of the set now.
@@ -52,6 +57,8 @@ pub const PLAYLIST_STEP_SHORTER_VERB: &str = "step-shorter";
 pub const PLAYLIST_STEP_LONGER_VERB: &str = "step-longer";
 /// Switch an entry off (or back on) in the cycle.
 pub const PLAYLIST_SKIP_VERB: &str = "skip";
+/// Let the pick, the cycle and the skip list go, back to what was authored.
+pub const PLAYLIST_RESET_VERB: &str = "reset";
 
 /// The entry `play` and `skip` act on: its key in the playlist's entries
 /// map, as text (`2`).
@@ -62,7 +69,7 @@ pub const PLAYLIST_CYCLING_PARAM: &str = "cycling";
 pub const PLAYLIST_SKIPPED_PARAM: &str = "skipped";
 
 /// Every verb this file publishes, by its path's last segment.
-pub const PLAYLIST_VERBS: [&str; 7] = [
+pub const PLAYLIST_VERBS: [&str; 8] = [
     PLAYLIST_PLAY_VERB,
     PLAYLIST_PREV_VERB,
     PLAYLIST_NEXT_VERB,
@@ -70,22 +77,26 @@ pub const PLAYLIST_VERBS: [&str; 7] = [
     PLAYLIST_STEP_SHORTER_VERB,
     PLAYLIST_STEP_LONGER_VERB,
     PLAYLIST_SKIP_VERB,
+    PLAYLIST_RESET_VERB,
 ];
 
 /// Every offer one playlist makes, in the order the instrument reads:
-/// prev, next, play, cycle, the step pair, skip. None for an empty set.
+/// prev, next, play, cycle, the step pair, skip, reset. None for an empty
+/// set.
 pub fn playlist_offers(facts: &PatternPickerFacts) -> Vec<UiOffer> {
     let at = OfferPath::project_node(&facts.playlist);
     let mut offers = Vec::new();
     if facts.entries.is_empty() {
         return offers;
     }
-    for direction in [StepDirection::Previous, StepDirection::Next] {
-        if let Some(offer) = step_offer(&at, facts, direction) {
-            offers.push(offer);
+    if let Some(target) = &facts.entry_target {
+        for direction in [StepDirection::Previous, StepDirection::Next] {
+            if let Some(offer) = step_offer(&at, facts, target, direction) {
+                offers.push(offer);
+            }
         }
+        offers.push(play_offer(&at, facts, target));
     }
-    offers.push(play_offer(&at, facts));
     if let Some(target) = &facts.cycle_target {
         offers.push(cycle_offer(&at, facts, target));
         if let Some(step) = facts.cycle.running_step_seconds() {
@@ -103,6 +114,9 @@ pub fn playlist_offers(facts: &PatternPickerFacts) -> Vec<UiOffer> {
     if let Some(target) = &facts.skip_target {
         offers.push(skip_offer(&at, facts, target));
     }
+    if let Some(offer) = reset_offer(&at, facts) {
+        offers.push(offer);
+    }
     offers
 }
 
@@ -111,18 +125,20 @@ pub fn is_playlist_verb(verb: &str) -> bool {
     PLAYLIST_VERBS.contains(&verb)
 }
 
-/// `…/prev` or `…/next`: the neighbouring enabled entry, wrapping, passing
-/// over skipped and failed ones. `None` when nothing plays or no other
-/// entry qualifies.
+/// `…/prev` or `…/next`: pick the neighbouring enabled entry, wrapping,
+/// passing over skipped and failed ones ([`lpc_model::playlist_step`], the
+/// engine's own rule). `None` when nothing plays or no other entry
+/// qualifies.
 fn step_offer(
     at: &OfferPath,
     facts: &PatternPickerFacts,
+    target: &UiPanelTarget,
     direction: StepDirection,
 ) -> Option<UiOffer> {
     let keys: Vec<u32> = facts.entries.iter().map(|entry| entry.key).collect();
     let movable = |key: u32| !facts.skip.contains(&key) && !facts.failed.contains(&key);
-    let target = adjacent_enabled_key(&keys, facts.active?, direction, movable)?;
-    let name = entry_name(&entry_names(facts), target);
+    let entry = lpc_model::playlist_step(&keys, facts.stepping_from?, direction.steps(), movable)?;
+    let name = entry_name(&entry_names(facts), entry);
     let (verb, label) = match direction {
         StepDirection::Previous => (PLAYLIST_PREV_VERB, "Previous pattern"),
         StepDirection::Next => (PLAYLIST_NEXT_VERB, "Next pattern"),
@@ -130,26 +146,28 @@ fn step_offer(
     Some(UiOffer::new(
         at.clone().child(verb),
         "play",
-        activate_action(&facts.playlist, target, &format!("{label}: {name}"))
+        pick_action(&facts.playlist, target, entry, &format!("{label}: {name}"))
             .with_summary(format!("Play {name}, passing over patterns that are off.")),
     ))
 }
 
-/// `…/play`: one entry, by key. The playing entry is an option drawn
+/// `…/play`: pick one entry, by key. The playing entry is an option drawn
 /// disabled (playing it again does nothing); a skipped entry still plays,
 /// and a failed one is tried again.
-fn play_offer(at: &OfferPath, facts: &PatternPickerFacts) -> UiOffer {
+fn play_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarget) -> UiOffer {
     let playlist = facts.playlist.clone();
     let names = entry_names(facts);
+    let write_target = target.clone();
     let binder = OfferBinder::new(move |args: &OfferArgs| {
         let key = picked_entry(args, &names)?;
-        Ok(activate_action(
+        Ok(pick_action(
             &playlist,
+            &write_target,
             key,
             &format!("Play {}", entry_name(&names, key)),
         ))
     });
-    let unbound = activate_action(&facts.playlist, 0, "Play a pattern")
+    let unbound = pick_action(&facts.playlist, target, 0, "Play a pattern")
         .with_summary("Play one of the playlist's patterns now.");
     let options = facts
         .entries
@@ -183,7 +201,8 @@ fn play_offer(at: &OfferPath, facts: &PatternPickerFacts) -> UiOffer {
 
 /// `…/cycle`: run the cycle (at its authored step, or the default one) or
 /// hold on the playing pattern. Left out, `cycling` keeps the cycle as it
-/// is.
+/// is. Holding also picks the pattern playing when the pick is another, so
+/// the hold survives a reboot.
 fn cycle_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarget) -> UiOffer {
     let cycling = !facts.cycle.is_frozen();
     let running = if cycling {
@@ -192,13 +211,34 @@ fn cycle_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarge
         started_cycle(facts.authored_cycle, facts.default_fade)
     };
     let target = target.clone();
+    // The pick that goes with a hold: the playing entry, when it is not the
+    // pick already.
+    let hold_pick = match (&facts.entry_target, facts.active) {
+        (Some(entry_target), Some(active)) if facts.picked != Some(active) => {
+            Some(panel_write_op(entry_target, active.to_lp_value()))
+        }
+        _ => None,
+    };
     let write = move |on: bool| {
-        let (value, label) = if on {
-            (running, "Cycle the patterns")
-        } else {
-            (PlaylistCycle::Hold, "Stop the cycle")
-        };
-        panel_write_action(&target, value.to_lp_value(), label.to_string())
+        if on {
+            return panel_write_action(
+                &target,
+                running.to_lp_value(),
+                "Cycle the patterns".to_string(),
+            );
+        }
+        let hold = panel_write_op(&target, PlaylistCycle::Hold.to_lp_value());
+        match &hold_pick {
+            Some(pick) => UiAction::from_op(
+                ControllerId::new(ProjectController::NODE_ID),
+                PanelBatchOp {
+                    writes: vec![hold, pick.clone()],
+                    clears: Vec::new(),
+                },
+            )
+            .with_label("Stop the cycle".to_string()),
+            None => panel_write_action(&target, hold.value, "Stop the cycle".to_string()),
+        }
     };
     let unbound = write(!cycling);
     let binder = OfferBinder::new(move |args: &OfferArgs| {
@@ -290,6 +330,41 @@ fn skip_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarget
     )
 }
 
+/// `…/reset`: let the pick, the cycle and the skip list go, back to what
+/// was authored (vision D13). Offered while any of the three is held.
+fn reset_offer(at: &OfferPath, facts: &PatternPickerFacts) -> Option<UiOffer> {
+    let targets = [&facts.entry_target, &facts.cycle_target, &facts.skip_target];
+    if !targets
+        .iter()
+        .any(|target| target.as_ref().is_some_and(|target| target.engaged))
+    {
+        return None;
+    }
+    let clears = targets
+        .into_iter()
+        .flatten()
+        .map(|target| lpc_wire::WirePanelClearRequest::Channel {
+            scope: target.scope,
+            channel: target.channel.clone(),
+        })
+        .collect();
+    Some(UiOffer::new(
+        at.clone().child(PLAYLIST_RESET_VERB),
+        "reset",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            PanelBatchOp {
+                writes: Vec::new(),
+                clears,
+            },
+        )
+        .with_label("Back to the authored patterns".to_string())
+        .with_summary(
+            "Let the picked pattern, the cycle and the patterns switched off go back to what the project says.",
+        ),
+    ))
+}
+
 /// The set's `(key, display name)` pairs, for a binder to name its pick.
 fn entry_names(facts: &PatternPickerFacts) -> Vec<(u32, String)> {
     facts
@@ -319,15 +394,30 @@ fn picked_entry(args: &OfferArgs, names: &[(u32, String)]) -> Result<u32, OfferA
         })
 }
 
-fn activate_action(playlist: &ProjectNodeAddress, entry: u32, label: &str) -> UiAction {
+fn pick_action(
+    playlist: &ProjectNodeAddress,
+    target: &UiPanelTarget,
+    entry: u32,
+    label: &str,
+) -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        PlaylistActivateOp {
+        PlaylistPickOp {
             node: playlist.clone(),
             entry,
+            scope: target.scope,
         },
     )
     .with_label(label.to_string())
+}
+
+fn panel_write_op(target: &UiPanelTarget, value: lpc_model::LpValue) -> PanelWriteOp {
+    PanelWriteOp {
+        scope: target.scope,
+        channel: target.channel.clone(),
+        value: value.into(),
+        ttl_ms: None,
+    }
 }
 
 fn panel_write_action(
@@ -337,12 +427,7 @@ fn panel_write_action(
 ) -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        PanelWriteOp {
-            scope: target.scope,
-            channel: target.channel.clone(),
-            value: value.into(),
-            ttl_ms: None,
-        },
+        panel_write_op(target, value),
     )
     .with_label(label)
 }
@@ -374,6 +459,16 @@ mod tests {
                 "skip"
             ]
         );
+        let held = playlist_offers(&facts(|facts| {
+            if let Some(target) = &mut facts.entry_target {
+                target.engaged = true;
+            }
+        }));
+        assert_eq!(
+            paths(&held).last(),
+            Some(&PLAYLIST_RESET_VERB),
+            "reset comes last, when held"
+        );
         assert!(
             offers
                 .iter()
@@ -394,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn play_activates_any_entry_but_the_playing_one() {
+    fn play_picks_any_entry_but_the_playing_one() {
         let offers = playlist_offers(&facts(|facts| facts.active = Some(2)));
         let play = offer(&offers, PLAYLIST_PLAY_VERB);
         let played: Vec<Option<u32>> = (1..=5)
@@ -409,12 +504,16 @@ mod tests {
             .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "1"))
             .expect("Noise plays");
         assert_eq!(action.meta().label, "Play Noise");
+        let pick = action.op_as::<PlaylistPickOp>().expect("a pick");
         assert_eq!(
-            action
-                .op_as::<PlaylistActivateOp>()
-                .map(|op| op.node.clone()),
-            Some(playlist_address()),
+            pick.node,
+            playlist_address(),
             "the playlist node is addressed"
+        );
+        assert_eq!(
+            pick.scope,
+            facts(|_| {}).entry_target.expect("target").scope,
+            "the write lands where the playlist reads playlist.entry"
         );
         assert!(
             !play.is_enabled(),
@@ -423,9 +522,10 @@ mod tests {
     }
 
     #[test]
-    fn next_and_prev_are_activates_of_the_neighbouring_enabled_keys() {
+    fn next_and_prev_pick_the_neighbouring_enabled_keys() {
         let offers = playlist_offers(&facts(|facts| {
             facts.active = Some(1);
+            facts.stepping_from = Some(1);
             facts.skip = vec![2];
             facts.failed = vec![5];
         }));
@@ -440,7 +540,18 @@ mod tests {
             "wraps, passes failed 5"
         );
 
-        let nothing_playing = playlist_offers(&facts(|facts| facts.active = None));
+        // A pick still on its way: the next step goes on from it, not from
+        // the entry still playing.
+        let in_flight = playlist_offers(&facts(|facts| facts.stepping_from = Some(3)));
+        assert_eq!(
+            activated(&offer(&in_flight, PLAYLIST_NEXT_VERB).action),
+            Some(4)
+        );
+
+        let nothing_playing = playlist_offers(&facts(|facts| {
+            facts.active = None;
+            facts.stepping_from = None;
+        }));
         assert!(
             !paths(&nothing_playing)
                 .iter()
@@ -519,7 +630,33 @@ mod tests {
         assert_eq!(
             PlaylistCycle::from_lp_value(&written(&off).1).expect("cycle"),
             PlaylistCycle::Hold,
-            "switching off holds"
+            "switching off holds; the playing entry is the pick already"
+        );
+
+        // The cycle walked on from the pick: holding also picks the entry
+        // playing, so the hold survives a reboot.
+        let walked_on = playlist_offers(&facts(|facts| {
+            facts.cycle = PlaylistCycle::Cycle {
+                step_seconds: 20.0,
+                fade_seconds: 1.5,
+            };
+            facts.active = Some(3);
+        }));
+        let off = offer(&walked_on, PLAYLIST_CYCLE_VERB)
+            .press(&OfferArgs::new().with(PLAYLIST_CYCLING_PARAM, "false"))
+            .expect("switch off");
+        let batch = off.op_as::<PanelBatchOp>().expect("a hold and a pick");
+        let channels: Vec<(&str, &LpValue)> = batch
+            .writes
+            .iter()
+            .map(|write| (write.channel.as_str(), &write.value))
+            .collect();
+        assert_eq!(
+            channels,
+            [
+                ("playlist.cycle", &PlaylistCycle::Hold.to_lp_value()),
+                ("playlist.entry", &LpValue::U32(3)),
+            ]
         );
         assert_eq!(
             PlaylistCycle::from_lp_value(
@@ -553,6 +690,34 @@ mod tests {
             !paths(&shortest).contains(&PLAYLIST_STEP_SHORTER_VERB),
             "the ladder's end offers no shorter step"
         );
+    }
+
+    #[test]
+    fn reset_lets_the_pick_the_cycle_and_the_skip_list_go() {
+        assert!(
+            !paths(&playlist_offers(&facts(|_| {}))).contains(&PLAYLIST_RESET_VERB),
+            "nothing held, nothing to reset"
+        );
+        let offers = playlist_offers(&facts(|facts| {
+            if let Some(target) = &mut facts.skip_target {
+                target.engaged = true;
+            }
+        }));
+        let action = &offer(&offers, PLAYLIST_RESET_VERB).action;
+        let batch = action.op_as::<PanelBatchOp>().expect("a batch of clears");
+        let channels: Vec<String> = batch
+            .clears
+            .iter()
+            .map(|clear| match clear {
+                lpc_wire::WirePanelClearRequest::Channel { channel, .. } => channel.clone(),
+                other => panic!("only channel clears: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            channels,
+            ["playlist.entry", "playlist.cycle", "playlist.skip"]
+        );
+        assert!(batch.writes.is_empty());
     }
 
     fn paths(offers: &[UiOffer]) -> Vec<&str> {
@@ -596,6 +761,9 @@ mod tests {
             failed: Vec::new(),
             cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
             skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
+            entry_target: Some(target(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+            picked: Some(1),
+            stepping_from: Some(1),
         };
         edit(&mut facts);
         facts
@@ -606,7 +774,7 @@ mod tests {
     }
 
     fn activated(action: &UiAction) -> Option<u32> {
-        Some(action.op_as::<PlaylistActivateOp>()?.entry)
+        Some(action.op_as::<PlaylistPickOp>()?.entry)
     }
 
     fn written(action: &UiAction) -> (&'static str, LpValue) {

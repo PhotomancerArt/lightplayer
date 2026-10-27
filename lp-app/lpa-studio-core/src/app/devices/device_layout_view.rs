@@ -747,6 +747,7 @@ mod tests {
                 awaiting_consent: true,
             }),
             update: None,
+            flash_step: None,
         });
         let mut offers = UiOfferTree::new();
         device_layout_view(

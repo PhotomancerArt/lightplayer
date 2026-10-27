@@ -357,7 +357,10 @@ The rules:
 - **Work in progress shows in the row doing it,** as its state. The row
   goes neutral, the conic spinner takes its icon's place, its name stays,
   and the work's words are the state ("sending · 40%", one number for an
-  update), with the iridescent fill along its foot. The fill sweeps when the percent is unknown, and it lives
+  update), with the iridescent fill along its foot — unless the card's top
+  says the same work: then the top has the one bar and the one number, and
+  the row keeps its verb and its spinner, with no fill. A check nobody asked
+  for (access, a project not said yet) is a still word, never a spinner. The fill sweeps when the percent is unknown, and it lives
   in a clipped track the bar's width: the bar and the card clip nothing, so
   the details that float over a bar and the corner's notch are never cut,
   and no pixel of the fill leaves the card. When it's done, the row is green

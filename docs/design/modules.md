@@ -108,13 +108,25 @@ Entries are *alternatives* (isolated from one another); module children
 are *collaborators* (share one scope). That is why there are exactly two
 scope-introduction primitives and "container ⇒ scope" is wrong.
 
+> **Amendment (2026-10-20, declared inputs pass up).** A sink hides its
+> child's writers and channels, **except the channels its loaded child
+> declares as inputs** (`module.json` `inputs`, R7), which list in the
+> sink's enclosing scope. Reads only: writes never cross a sink (R4), and
+> R5 already let the child's consumers walk out. No demand (2) holds: only
+> a *loaded* child declares anything, so a dormant entry lists nothing, and
+> the enclosing scope shows a shared control while the playing pattern
+> takes it (or while it is set). See
+> `docs/adr/2026-10-20-patterns-declare-their-inputs.md`.
+
 ### R3 — Binding is publicity
 
 A slot is **public iff it has a bus binding** (authored, or a declared
 `default_bind`). Public means: its channel exists in the slot's scope,
 which is what makes it appear on that scope's panel (R8). Private slots
 are simply unbound. There is no other promotion mechanism — no promoted
-control defs, no alias slots, no module-side declaration required. A novel
+control defs, no alias slots, no module-side declaration required. (A
+module's declared `inputs`, R7, are not a promotion: they say which of its
+channels it takes from its host, so they list there.) A novel
 shader param becomes a panel knob by being bound to a channel; that's the
 whole gesture.
 
@@ -180,8 +192,18 @@ public input is an *invitation*, not an error.
   author picks*. The pick is authorable — module nodes carry bindings —
   and Studio should make it a one-gesture choice at drop time.
 
-Inputs need no counterpart: consumed inheritance (R5) already lets a host
-feed a module's inner consumers with zero authoring (see E6).
+Inputs need no counterpart *for resolution*: consumed inheritance (R5)
+already lets a host feed a module's inner consumers with zero authoring
+(see E6). What they need for *presentation* is a declaration, which is the
+mirror of an export (2026-10-20): **`"inputs": ["palette", "detail"]`** in
+a module's `module.json` names the channels the module takes from wherever
+it is placed. A declared input lists in the module's host scope — through a
+playlist entry's sink (R2's amendment) — so the host's panel offers one
+control that every module declaring it follows until a module's own value
+cuts it loose (E4). The author of a pattern is the one who knows whether a
+knob means the same thing in every pattern ("1× is my chosen size");
+opting out is not declaring. Names only: the control's meta follows the
+binding (R9).
 
 > Status: implemented 2026-08-01 (engine C1–C3) — structural scopes,
 > scoped resolver keys with writer-shadowing, the module mirror runtime
@@ -228,7 +250,10 @@ promoted between levels.
   as a **nested group** (presentation recursion). Two embedded instances
   of the same effect present two independent groups.
 - An **isolating node's** panel (playlist) presents the *active* sink
-  child's panel (R2); inactive siblings surface nowhere.
+  child's panel (R2); inactive siblings surface nowhere. The active child's
+  declared inputs (R7) list in the playlist's own scope, so they surface on
+  the enclosing module's panel as shared controls, and the child's group
+  shows its own control for one only while it holds its own value.
 - The **root module's panel is the end-user surface**. Play mode renders
   panels only — no faces.
 - A **face** is a different concept: the kind-specific card presentation
@@ -247,8 +272,10 @@ A control's display meta derives from the slot(s) **currently bound** to
 the channel in that scope, re-derived whenever bindings change — a
 playlist switch re-derives the control (E2). Ranges union on conflict; a
 module-level authored per-channel override (label/unit/min/max, **no
-value**) beats derivation — the curation escape hatch, and the only
-module-side declaration in the model.
+value**) beats derivation — the curation escape hatch. (Since 2026-10-20
+it is not the only module-side declaration: `inputs`, R7, names channels a
+module takes from its host.) A shared control for a declared input takes
+its meta from the declaring module's bound slot.
 
 ### R10 — Panel state: lazy, unauthored runtime writers *(summary — normative: panel.md P1–P3)*
 
@@ -323,7 +350,10 @@ M (root module)
 ```
 
 Scopes: Scope(M) ⊃ sink(a), sink(b). `speed` lists separately in each
-sink scope (R2); neither surfaces on M's panel directly.
+sink scope (R2); neither surfaces on M's panel directly — unless the entry's
+module declares `speed` as an input (R7), in which case it lists in
+Scope(M) while that entry plays, and a write there drives every entry that
+declares it.
 
 - P's face presents the **active** entry's panel (R2.1): with `a` active,
   one knob, range 0–1, label "Drift". Switch to `b`: the control
@@ -412,7 +442,9 @@ H (root module): audio-input node (samples → bus:audio.in)
 ```
 
 - **Inputs are free:** A's inner `audio.in` consumer inherits H's
-  audio-input writer by R5 — zero authoring on either side.
+  audio-input writer by R5 — zero authoring on either side. (Declaring
+  `"inputs": ["audio.in"]` on A would add only presentation: H's panel
+  would list `audio.in`.)
 - **Outputs are curated:** `audio.energy`/`audio.beat` write Scope(A)
   (R4) and reach Scope(H) only via A's authored exports (R7). plasma's
   shader then inherits `audio.energy` from Scope(H) — **modules compose
@@ -680,7 +712,10 @@ somebody owes. Recorded 2026-08-03 at the close of
   `docs/debt/clock-transport-has-no-transport-ui.md`.
 - **Playlist edit-vs-play, and entry progress.** A playlist card is both
   an authoring surface and a live transport; the two readings collide,
-  and an entry's progress has no presentation. Spun off at GV2.
+  and an entry's progress has no presentation. Spun off at GV2. Since
+  2026-10-20 a picked entry holds (the pick is `bus:playlist.entry`), which
+  the parked spike's direction A needed; `entry_progress` is progress
+  through a trigger's excursion.
 - **Parenthood rules.** Add-node should only offer kinds that make sense
   at the site — one `can_attach(parent_kind, child_kind)` legality
   function shared by the picker, drag-reparent, and wrap. Belongs with
@@ -689,10 +724,20 @@ somebody owes. Recorded 2026-08-03 at the close of
   (the closed #218 spike's `controls{}`), as an additive override on the
   derived default. See the rejected-alternatives section of
   `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
-- **Data-driven playlist activation** (R2.2 carve-out), an **input
+- **Data-driven playlist activation** — DONE 2026-10-20 as ordinary
+  wiring: the pick is the playlist's `idle_entry` on `bus:playlist.entry`,
+  so a node that writes that channel picks the pattern, the panel takes it
+  over and Clear hands it back
+  (`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`). An **input
   design doc** (R13's external sources), **vocabulary lock-down** (§7),
   and a **module registry** (§6 import/vendor flows) — carried from the
   predecessor plan's register, unchanged.
+
+- **One playlist per module** (2026-10-20). Two playlists reading one
+  scope share its `playlist.entry`, `playlist.cycle` and `playlist.skip`;
+  the engine warns at load and Studio's save check names the second. A
+  piece that wants two puts each in its own module. Per-node channel names
+  would lift the limit.
 
 **Known gaps in what shipped**
 

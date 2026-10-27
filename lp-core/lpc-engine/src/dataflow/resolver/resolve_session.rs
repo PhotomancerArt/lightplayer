@@ -29,6 +29,9 @@ pub struct EngineSession<'a> {
     revision: Revision,
     resolver: &'a mut Resolver,
     trace: ResolveTrace,
+    /// The engine's frame-plan state for this frame, when the session is a
+    /// tick's ([`Self::with_frame_plans`]).
+    plans: Option<&'a mut crate::frame_plan::FramePlanState>,
 }
 
 /// Transitional alias while resolver tests and call sites still use the older
@@ -41,11 +44,25 @@ impl<'a> EngineSession<'a> {
             revision: frame_id,
             resolver,
             trace,
+            plans: None,
         }
+    }
+
+    /// This session, carrying the engine's frame-plan state to every node
+    /// context it serves.
+    pub fn with_frame_plans(mut self, plans: &'a mut crate::frame_plan::FramePlanState) -> Self {
+        self.plans = Some(plans);
+        self
     }
 
     pub fn revision(&self) -> Revision {
         self.revision
+    }
+
+    /// End the session, handing back its trace for reuse
+    /// ([`ResolveTrace::recycled`]).
+    pub fn into_trace(self) -> ResolveTrace {
+        self.trace
     }
 
     pub fn trace(&self) -> &ResolveTrace {
@@ -92,6 +109,48 @@ impl<'a> EngineSession<'a> {
         self.resolve_id(host, id)
     }
 
+    /// The id of `node`'s consumed slot at a constant path, interned this
+    /// epoch; `None` for a path that does not parse (the keyed read reports
+    /// it).
+    pub fn intern_static_consumed_id(
+        &mut self,
+        node: NodeId,
+        path: &'static str,
+    ) -> Option<QueryId> {
+        self.resolver.intern_static_consumed(node, path).ok()
+    }
+
+    /// The id of `node`'s consumed slot read through `accessor`, interned
+    /// this epoch.
+    pub fn intern_consumed_accessor_id(
+        &mut self,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> QueryId {
+        self.resolver.intern_consumed_accessor(node, accessor)
+    }
+
+    /// Resolve a query by an id interned this epoch.
+    pub fn resolve_query_id<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        id: QueryId,
+    ) -> Result<Production, SessionResolveError> {
+        self.resolve_id(host, id)
+    }
+
+    /// Resolve `node`'s consumed slot through a compiled `accessor`, without
+    /// rebuilding the key each read ([`Resolver::intern_consumed_accessor`]).
+    pub fn resolve_consumed_accessor<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        node: NodeId,
+        accessor: &lpc_model::SlotAccessor,
+    ) -> Result<Production, SessionResolveError> {
+        let id = self.resolver.intern_consumed_accessor(node, accessor);
+        self.resolve_id(host, id)
+    }
+
     /// Resolve the bus `channel` in `scope` at a compile-time-constant
     /// channel name, building the [`ChannelName`] at most once per epoch.
     pub fn resolve_static_bus<H: ResolveHost + ?Sized>(
@@ -119,6 +178,12 @@ impl<'a> EngineSession<'a> {
     /// [`Resolver::structure_epoch`].
     pub fn structure_epoch(&self) -> u64 {
         self.resolver.structure_epoch()
+    }
+
+    /// The frame plans' state, on a tick's session — see
+    /// [`crate::Engine::frame_plan_counters`].
+    pub fn frame_plans_mut(&mut self) -> Option<&mut crate::frame_plan::FramePlanState> {
+        self.plans.as_deref_mut()
     }
 
     /// Resolve an already-interned query, fetching its key from the intern
@@ -199,7 +264,13 @@ impl<'a> EngineSession<'a> {
     ///
     /// Failures are deliberately not cached: an ambiguous channel or a cyclic
     /// graph is a broken project, and it should keep reporting itself rather
-    /// than be remembered as a decision.
+    /// than be remembered as a decision. The one exception is a bus read with
+    /// no provider at all ([`ResolvedRoute::NoBusProvider`]): that is the
+    /// normal answer for an optional channel nobody writes (a clock's
+    /// `clock.rate`, a fixture's `brightness`, a shader parameter), only a
+    /// binding or panel edit can change it, and both move the epoch. It still
+    /// reports itself — every frame gets the same error — without walking the
+    /// providers again.
     fn route_for<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
@@ -209,7 +280,16 @@ impl<'a> EngineSession<'a> {
         if let Some(route) = self.resolver.cache().route(id) {
             return Ok(Rc::clone(route));
         }
-        let route = Rc::new(self.compute_route(host, query)?);
+        let route = match self.compute_route(host, query) {
+            Ok(route) => route,
+            Err(SessionResolveError::NoBusProvider { .. })
+                if matches!(query, QueryKey::Bus { .. }) =>
+            {
+                ResolvedRoute::NoBusProvider
+            }
+            Err(err) => return Err(err),
+        };
+        let route = Rc::new(route);
         self.resolver
             .cache_mut()
             .insert_route(id, Rc::clone(&route));
@@ -435,6 +515,14 @@ impl<'a> EngineSession<'a> {
                 }
             }
             ResolvedRoute::Produce => self.produce_through_host(host, query),
+            ResolvedRoute::NoBusProvider => match query {
+                QueryKey::Bus { channel, .. } => Err(SessionResolveError::NoBusProvider {
+                    channel: channel.clone(),
+                }),
+                _ => Err(SessionResolveError::other(format!(
+                    "a no-provider route cached for a non-bus query {query:?}"
+                ))),
+            },
             ResolvedRoute::MergeByKey { inputs } => {
                 let mut productions = Vec::with_capacity(inputs.len());
                 for (binding_ref, target) in inputs.iter() {

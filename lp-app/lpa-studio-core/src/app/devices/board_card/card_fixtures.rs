@@ -426,6 +426,7 @@ pub(crate) fn activity(kind: ActivityKind, label: &str, percent: Option<u8>) -> 
         cancellable: true,
         cancel_requested: false,
         layout: None,
+        flash_step: None,
         update: None,
     }
 }

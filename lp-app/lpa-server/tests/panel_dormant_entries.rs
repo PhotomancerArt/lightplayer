@@ -170,6 +170,78 @@ fn a_writer_for_an_entry_the_playlist_no_longer_authors_is_dropped() {
     assert_eq!(engine.panel_writers().parked().count(), 0);
 }
 
+/// A pick saved in `.lp/panel.json` (a panel write on `playlist.entry`)
+/// decides what boot loads: the restored pick is loaded by the very first
+/// tick, and the authored entry is gone — never rendered, never compiled
+/// (playlists-on-the-bus D1, Q3). The settle needs no produce: this project
+/// has nothing that renders the playlist, so only boot can have moved it.
+/// The pick's runtime behaviour (holding, Clear) is the engine's tests'.
+#[test]
+fn a_restored_pick_is_loaded_by_the_first_tick() {
+    let mut harness = Harness::new("panel-dormant-entry");
+    let file = PanelStateFile {
+        version: panel_state::PANEL_STATE_VERSION,
+        auto_save: true,
+        entries: vec![PanelStateEntry {
+            scope: String::from("/panel_dormant_entry.show"),
+            channel: String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL),
+            value: LpValue::U32(PULSE),
+        }],
+    };
+    harness.write_state_file(lpc_wire::json::to_string(&file).expect("encode").as_bytes());
+    harness.load();
+    let pick = ChannelName(String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL));
+    let scope = harness.pick_scope();
+    assert_eq!(
+        harness
+            .project()
+            .engine()
+            .panel_writers()
+            .get(scope, &pick)
+            .map(|writer| &writer.value),
+        Some(&LpValue::U32(PULSE)),
+        "the pick is restored where the playlist reads it"
+    );
+
+    harness.advance(16);
+    assert!(
+        harness.entry_child(PULSE).is_some(),
+        "the restored pick is loaded by the first tick"
+    );
+    assert!(
+        harness.entry_child(IDLE).is_none(),
+        "the authored entry is not loaded after the first tick"
+    );
+    assert!(
+        panel_state::snapshot(harness.project().engine(), true)
+            .entries
+            .iter()
+            .any(|entry| entry.channel == lpc_model::PLAYLIST_ENTRY_CHANNEL),
+        "and the pick is saved again"
+    );
+}
+
+/// A restored pick naming an entry the playlist no longer authors plays the
+/// authored entry.
+#[test]
+fn a_restored_pick_of_a_removed_entry_plays_the_authored_entry() {
+    let mut harness = Harness::new("panel-dormant-entry");
+    let file = PanelStateFile {
+        version: panel_state::PANEL_STATE_VERSION,
+        auto_save: true,
+        entries: vec![PanelStateEntry {
+            scope: String::from("/panel_dormant_entry.show"),
+            channel: String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL),
+            value: LpValue::U32(9),
+        }],
+    };
+    harness.write_state_file(lpc_wire::json::to_string(&file).expect("encode").as_bytes());
+    harness.load();
+    harness.advance(16);
+    harness.advance(160);
+    assert!(harness.entry_child(IDLE).is_some());
+}
+
 // --- harness ---
 
 struct Harness {
@@ -231,6 +303,16 @@ impl Harness {
             .project_runtime_index()
             .node_id(&location)
             .expect("playlist projected")
+    }
+
+    /// The scope the playlist reads `playlist.entry` in.
+    fn pick_scope(&mut self) -> ScopeRef {
+        let playlist = self.playlist();
+        self.project()
+            .engine()
+            .tree()
+            .bus_read_scope(playlist)
+            .expect("the playlist reads a scope")
     }
 
     fn entry_child(&mut self, entry: u32) -> Option<NodeId> {

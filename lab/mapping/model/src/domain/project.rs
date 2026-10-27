@@ -24,7 +24,7 @@ use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{self, Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
-use crate::domain::patch::PatchRule;
+use crate::domain::patch_place::{PatchTarget, Wire};
 use crate::domain::pattern::Pattern;
 use crate::domain::placement::{Carried, Frame};
 use crate::domain::render_source::RenderSource;
@@ -215,10 +215,10 @@ impl Project {
         Some(id)
     }
 
-    /// Patch a fixture's lamps to an output with the auto rule.
+    /// Patch a fixture's lamps to an output: its own wire, auto onto it.
     pub fn auto_patch(&mut self, fixture: &NodeId, output: &NodeId) {
         if let Some(f) = self.fixture_mut(fixture) {
-            f.rules.push(PatchRule::Auto {
+            f.place_mut(&PatchTarget::Fixture).wire = Some(Wire::Auto {
                 output: output.clone(),
             });
         }

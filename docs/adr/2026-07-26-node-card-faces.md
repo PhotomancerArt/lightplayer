@@ -170,7 +170,8 @@ color.
 > as the **activate-by-click** op this ADR's Consequences list as missing
 > (`PlaylistActivateOp`): a non-active chip now activates its entry
 > through the runtime command channel, which makes it active, which
-> renders its card. The active chip keeps the child's select action, since
+> renders its card. (2026-10-20: the chip's `play` is now a pick, a panel write
+> on `playlist.entry`; `2026-10-20-the-picked-pattern-is-a-bus-setting.md`.) The active chip keeps the child's select action, since
 > re-activating it would be a no-op.
 >
 > The single-rendered-child rule below is therefore **unchanged** — it

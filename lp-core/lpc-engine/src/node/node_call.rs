@@ -12,9 +12,17 @@ use crate::products::visual::VisualProduct;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeCall {
     Tick,
-    ProduceSlot { slot: SlotPath },
-    Visual { product: VisualProduct },
-    Control { product: ControlProduct },
+    /// The resolver's interned handle for the produced path: a dispatch
+    /// copies a pointer, not the path.
+    ProduceSlot {
+        slot: alloc::rc::Rc<SlotPath>,
+    },
+    Visual {
+        product: VisualProduct,
+    },
+    Control {
+        product: ControlProduct,
+    },
 }
 
 impl NodeCall {

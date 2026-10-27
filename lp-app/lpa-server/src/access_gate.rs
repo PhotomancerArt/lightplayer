@@ -109,7 +109,6 @@ fn classify_project_command(command: &WireProjectCommand) -> Required {
         | WireProjectCommand::CommitOverlay { .. }
         | WireProjectCommand::CreateNode { .. }
         | WireProjectCommand::RemoveNode { .. }
-        | WireProjectCommand::NodeCommand { .. }
         | WireProjectCommand::PanelAutoSave { .. } => Required::Edit,
     }
 }

@@ -21,10 +21,10 @@ pub struct UiPlaylistEntry {
     /// gesture — activating what already plays is a no-op), `None` for
     /// every other entry and when the active child is not mounted. A
     /// non-active chip presses the playlist's `play` offer
-    /// (`project/<playlist>/play`, `entry` = [`Self::key`]): a
-    /// `PlaylistActivateOp` runtime poke through the wire command channel
-    /// (`docs/adr/2026-07-27-runtime-node-command-channel.md`), nothing
-    /// staged in the overlay.
+    /// (`project/<playlist>/play`, `entry` = [`Self::key`]): a pick, the
+    /// panel write of the entry's key on `playlist.entry`
+    /// (`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`),
+    /// nothing staged in the overlay.
     ///
     /// Still a core-built action on a DTO field: focus is a view gesture,
     /// which stays web-local navigation until the roadmap's M9 decides how

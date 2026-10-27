@@ -53,7 +53,9 @@ pub(crate) fn highlight_of(
                 };
                 subjects.push(breath(lamps));
             }
-            Target::Port { output, key } | Target::Pixel { output, key, .. } => {
+            Target::Port { output, key }
+            | Target::Pixel { output, key, .. }
+            | Target::Span { output, key, .. } => {
                 let (Some(&node), Some(start)) = (
                     nodes.get(output),
                     project.output(output).and_then(|o| o.port_start(key)),
@@ -62,6 +64,10 @@ pub(crate) fn highlight_of(
                 };
                 let range = match t {
                     Target::Pixel { index, .. } => (start + index, 1),
+                    Target::Span { .. } => match project.span_of(t) {
+                        Some(s) => (start + s.pixels.start, s.pixels.len() as u32),
+                        None => continue,
+                    },
                     _ => (start, project.port_pixels(output, key)),
                 };
                 subjects.push(breath(PatchPulseLamps::Output {
@@ -154,7 +160,9 @@ pub(crate) fn board_selection(
     for t in selection {
         match t {
             Target::Node(id) if project.output(id).is_some() => output_side.push(t.clone()),
-            Target::Port { .. } | Target::Pixel { .. } => output_side.push(t.clone()),
+            Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
+                output_side.push(t.clone())
+            }
             Target::Lamp { object, index } => {
                 fixture_side = true;
                 if let Some(i) = placed.index_of(object) {

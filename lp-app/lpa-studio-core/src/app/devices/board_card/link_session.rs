@@ -391,7 +391,7 @@ mod tests {
             let card = board_card(&fixture.input());
             assert_eq!(
                 card.bar(layer).work,
-                Some(UiBarWork::running(CONNECTING, None)),
+                Some(UiBarWork::running(CONNECTING, None).carried_by_surface()),
                 "{layer:?}"
             );
             assert_eq!(card.bar(BarLayer::Usb).work, None);

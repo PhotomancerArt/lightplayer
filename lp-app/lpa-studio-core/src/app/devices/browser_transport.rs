@@ -104,8 +104,9 @@ impl DeviceTransport for BrowserSerialTransport {
             // The connector-level event stream becomes the progress sink the
             // effects layer turns into `ActivityMarker::Progress` — the ONE
             // road to the screen (the 2026-07-28 defect's lesson). Logs ride
-            // it too, as label-only progress, so the card's narration keeps
-            // moving between percent ticks.
+            // it too, as label-only progress, for the terminal's narration;
+            // once a step is counting, the cell keeps its percent through
+            // them (`ActivityCell::land_progress`, the 2026-10-25 defect).
             let events = LinkManagementEventSink::new(move |event| match event {
                 LinkManagementEvent::Log { message } => (progress)(message, None),
                 LinkManagementEvent::Progress(update) => (progress)(

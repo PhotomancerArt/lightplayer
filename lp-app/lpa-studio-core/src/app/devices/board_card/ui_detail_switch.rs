@@ -27,6 +27,12 @@ pub struct UiDetailSwitch {
     /// refused ("Bluetooth can only be turned off by USB…"). `None` where
     /// this link may not change it: the switch is drawn, dimmed.
     pub flip: Option<UiCardAction>,
+    /// A change is on its way to the board (this switch's, or a neighbour's
+    /// in the same settings): the flip is refused for a moment. The switch
+    /// is dimmed and its hover says why; nothing is added under the line,
+    /// so the details hold still (P3). A standing refusal, which is not
+    /// waiting, is said under the line.
+    pub waiting: bool,
 }
 
 impl UiDetailSwitch {
@@ -43,6 +49,12 @@ impl UiDetailSwitch {
             icon: icon.into(),
             on,
             flip,
+            waiting: false,
         }
+    }
+
+    /// The same switch, `waiting` on a change ([`Self::waiting`]).
+    pub fn waiting(self, waiting: bool) -> Self {
+        Self { waiting, ..self }
     }
 }

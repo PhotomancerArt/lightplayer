@@ -274,6 +274,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                flash_step: None,
                 update: None,
             }),
             can_receive_project: false,

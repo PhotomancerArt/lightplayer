@@ -314,13 +314,28 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                flash_step: None,
                 update: None,
             }),
             ..porch_view()
         };
         let (card, tree) = card_and_tree(&view);
-        let html = render_card(card, tree, None);
+        // The surface says "Identifying this board.": the row is carried,
+        // its spinner and no track (P2).
+        let html = render_card(card.clone(), tree.clone(), None);
         assert_eq!(attribute_values(&html, "data-bar-work"), vec!["running"]);
+        assert!(
+            attribute_values(&html, "data-work-track").is_empty(),
+            "{html}"
+        );
+        // A row's own work (one the surface does not say) draws the track.
+        let mut card = card;
+        for bar in &mut card.bars {
+            if let Some(work) = &mut bar.work {
+                work.carried = false;
+            }
+        }
+        let html = render_card(card, tree, None);
         assert_eq!(
             attribute_values(&html, "data-work-track").len(),
             1,

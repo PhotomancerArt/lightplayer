@@ -5,6 +5,9 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Extended by:** `2026-10-24-frame-plan-once-per-edit.md` (node-held frame
+  plans under the same invalidation contract; a missing bus provider is now
+  a cached decision)
 
 ## Context
 

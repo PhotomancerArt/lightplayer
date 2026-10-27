@@ -3610,12 +3610,14 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
 
     // The gesture adopts: the pending card becomes a device card, busy
     // flashing, with the effect's progress visibly on it (the 2026-07-28
-    // defect's regression: progress must REACH the projection).
+    // defect's regression: progress must REACH the projection). The fake
+    // write ends in the same turn it counts, and a step's percent ends
+    // with it (the 2026-10-25 defect), so what stays to read is its line.
     bench.run_until(&tasks, "flash progress to reach the card", |bench| {
         bench.view().devices.first().is_some_and(|card| {
-            card.activity
-                .as_ref()
-                .is_some_and(|activity| activity.percent == Some(100))
+            card.terminal
+                .iter()
+                .any(|line| line.text == "Firmware written")
         })
     });
     assert!(bench.view().pending.is_empty(), "adopted, not duplicated");

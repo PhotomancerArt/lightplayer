@@ -164,6 +164,72 @@ fn a_scan_asked_while_the_status_read_is_out_goes_after_it() {
     assert_eq!(names, [SSID]);
 }
 
+/// A read never holds the controls (P3: the card's Wi‑Fi box held still,
+/// Yona 10-25). With a read out — the box opening asks the board again, and
+/// a test asks every second — the switch is still offered; a flip pressed
+/// then waits for the read's answer and goes after it, and an add shows its
+/// row and its test from the press.
+#[test]
+fn a_change_pressed_while_a_read_is_out_goes_after_it() {
+    let device = wifi_light_player("dev000000wifiread1");
+    let (mut bench, tasks) = identified(&device, "usb-wifi-read");
+    let target = bench.view().devices[0].id;
+    assert!(wifi_status(&mut bench, &tasks, target).wifi);
+
+    bench
+        .controller
+        .apply_network_command(crate::NetworkCommand::Refresh { device: target });
+    assert!(
+        bench.controller.device_roster_view().wifi[&target].reading,
+        "the read is out"
+    );
+    let enabled = wifi_verb(&mut bench, target, "enabled");
+    assert!(bench.offered(&enabled).is_enabled(), "a read holds nothing");
+    bench
+        .press(
+            enabled,
+            OfferArgs::new().with(crate::WIFI_ENABLED_PARAM, "false"),
+        )
+        .expect("the switch starts");
+    assert!(
+        bench.controller.device_roster_view().wifi[&target].writing,
+        "the flip is on its way"
+    );
+    let status = wifi_status(&mut bench, &tasks, target);
+    assert!(!status.wifi, "it went once the read answered");
+    assert_eq!(
+        bench.controller.device_roster_view().wifi[&target].error,
+        None
+    );
+
+    // An add pressed behind a read: its row and its test show at once.
+    bench
+        .controller
+        .apply_network_command(crate::NetworkCommand::Refresh { device: target });
+    let add = wifi_verb(&mut bench, target, "add");
+    bench
+        .press(
+            &add,
+            OfferArgs::new()
+                .with(crate::WIFI_NETWORK_PARAM, SSID)
+                .with(crate::WIFI_PASSWORD_PARAM, PASSWORD),
+        )
+        .expect("the add starts");
+    let wifi = bench.controller.device_roster_view().wifi[&target].clone();
+    let rows: Vec<(String, String)> = wifi
+        .rows()
+        .into_iter()
+        .map(|row| (row.ssid, row.word))
+        .collect();
+    assert_eq!(rows, [(SSID.to_string(), "Saving…".to_string())]);
+    assert_eq!(wifi.test().map(|test| test.ssid).as_deref(), Some(SSID));
+    let status = wifi_status(&mut bench, &tasks, target);
+    assert_eq!(status.networks.len(), 1, "saved once the read answered");
+    let wifi = bench.controller.device_roster_view().wifi[&target].clone();
+    assert_eq!(wifi.test().map(|test| test.ssid).as_deref(), Some(SSID));
+    assert_no_password_anywhere(&mut bench);
+}
+
 /// A password the board would refuse is refused by the offer first, in the
 /// board's own words, without quoting it; nothing reaches the board.
 #[test]

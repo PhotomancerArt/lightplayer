@@ -49,11 +49,11 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, Controller, ControllerContext, ModuleExportOp,
     NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp,
-    NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState, SlotEditOp,
-    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    NodeRevertOp, PanelAutoSaveOp, PanelBatchOp, PanelClearOp, PanelWriteOp, PatchPulseOp,
+    PlaylistPickOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
@@ -1035,7 +1035,11 @@ impl StudioController {
             self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         }
         let connected = result.is_ok();
-        self.wifi_connects.finish(target, host, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish(target, host, result, now);
+        // The board may have said hello before its socket's answer came
+        // back here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         if let crate::WifiConnectTarget::Board(board) = target {
             match connected {
                 true => {
@@ -1107,8 +1111,16 @@ impl StudioController {
         }
         self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
-        self.wifi_connects
-            .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish_relay(
+            crate::WifiConnectTarget::Relay(board),
+            RELAY_HOST,
+            result,
+            now,
+        );
+        // The board may have said hello before the relay's answer came back
+        // here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         self.fall_through_ended(board, !connected);
         if connected {
             self.device_sweep_pending = true;
@@ -1958,13 +1970,14 @@ impl StudioController {
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
-        if own_now.as_ref() != self.update_build_facts.own() {
+        if own_now.as_slice() != self.update_build_facts.own_builds() {
             self.update_build_facts_mut().set_own(own_now);
         }
         let now = self.device_now();
-        let own = self.update_build_facts.own().cloned();
         let store_latest = self.update_build_facts.store_latest().cloned();
-        let mut target = own.as_ref().map(|own| own.identity.target.clone());
+        // The store is asked about one target at a time: the first board's,
+        // or, with no board, this Studio's first own build's.
+        let mut target = None;
         let mut actions = Vec::new();
         for device in self.devices.roster().devices() {
             let evidence = &device.evidence;
@@ -1987,10 +2000,11 @@ impl StudioController {
             }
             let view = lpa_devices::view::device_view(device, now);
             let derived = auto_start::board_build_facts(facts);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
             let inputs = crate::UpdateStandingInputs {
                 view: &view,
                 facts: Some(facts),
-                own: own.as_ref().or(derived.as_ref()),
+                own: own.or(derived.as_ref()),
                 tier,
                 link,
                 store_latest: store_latest.as_ref(),
@@ -2018,7 +2032,8 @@ impl StudioController {
             {
                 continue;
             }
-            let verdict = auto_start::auto_update_for_board(facts, own.as_ref(), None);
+            let own = self.update_build_facts.own_for(facts.target.as_deref());
+            let verdict = auto_start::auto_update_for_board(facts, own, None);
             actions.extend(auto_start::auto_action(
                 &host,
                 pending.device_id(),
@@ -2035,6 +2050,12 @@ impl StudioController {
             }
         }
         self.devices.effects_mut().set_update_watches(watches);
+        let target = target.or_else(|| {
+            self.update_build_facts
+                .own_builds()
+                .first()
+                .map(|own| own.identity.target.clone())
+        });
         if let Some(target) = target {
             self.devices.effects_mut().want_store_latest(&target);
             self.devices.effects_mut().want_store_releases(&target);
@@ -2089,7 +2110,9 @@ impl StudioController {
         let inputs = crate::UpdateStandingInputs {
             view,
             facts,
-            own: self.update_build_facts.own(),
+            own: self
+                .update_build_facts
+                .own_for(facts.and_then(|facts| facts.target.as_deref())),
             tier: link.update_tier(self.access.granted_tier(view.id)),
             link,
             store_latest: self.update_build_facts.store_latest(),
@@ -2164,7 +2187,7 @@ impl StudioController {
         // A failed Connect's words go once the board is reached by any
         // road, and so do a failed Wi‑Fi or lightplayer.app connect's.
         self.settle_connect_failure();
-        self.settle_wifi_connect_failures();
+        self.settle_wifi_connects();
         // One tab holds a board: a refused open is read against the claims
         // standing now, at this batch's reconcile.
         if let Some(link) = link_error {
@@ -4814,6 +4837,9 @@ impl StudioController {
         Cancel: CancelSignal + ?Sized,
     {
         self.try_pending_device_lens().await;
+        // A card's connect whose board never said hello gives up, here as
+        // a held Connect does.
+        self.settle_wifi_connects();
         self.try_resume_held_lens().await;
         // A session through lightplayer.app moves onto Wi‑Fi, and back.
         self.drive_lan_moves().await;
@@ -5077,9 +5103,13 @@ impl StudioController {
                 self.mark_dirty();
                 return Ok(crate::core::notice::UiNotices::new());
             }
-            if action.op_as::<PlaylistActivateOp>().is_some() {
-                let op = action.into_op::<PlaylistActivateOp>()?;
-                return self.execute_playlist_activate_op(op).await;
+            if action.op_as::<PlaylistPickOp>().is_some() {
+                let op = action.into_op::<PlaylistPickOp>()?;
+                return self.execute_playlist_pick_op(op).await;
+            }
+            if action.op_as::<PanelBatchOp>().is_some() {
+                let op = action.into_op::<PanelBatchOp>()?;
+                return self.execute_panel_batch_op(op).await;
             }
             if action.op_as::<PanelWriteOp>().is_some() {
                 let op = action.into_op::<PanelWriteOp>()?;
@@ -9639,16 +9669,34 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Playlist entry-strip click: dispatch the activate-entry runtime
-    /// command (the non-overlay command channel). Quiet on acceptance —
-    /// the ACTIVE placard follows via the tightened refresh ticks; a
-    /// rejection comes back as a warning notice.
-    async fn execute_playlist_activate_op(&mut self, op: PlaylistActivateOp) -> UiResult {
+    /// A pattern pick (tap, next, prev, the entry strip): a panel write on
+    /// the playlist's `playlist.entry`. Quiet on acceptance — the playing
+    /// mark follows via the tightened refresh ticks.
+    async fn execute_playlist_pick_op(&mut self, op: PlaylistPickOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.activate_playlist_entry(server, op).await
+            self.project.pick_playlist_entry(server, op).await
         };
         self.record_project_edit_run(run)
+    }
+
+    /// Several panel writes, then clears, in order (the Pattern zone's
+    /// reset; the cycle switched off with the playing pattern picked).
+    async fn execute_panel_batch_op(&mut self, op: PanelBatchOp) -> UiResult {
+        let mut notices = crate::core::notice::UiNotices::new();
+        for write in op.writes {
+            notices
+                .notices
+                .extend(self.execute_panel_write_op(write).await?.notices);
+        }
+        for request in op.clears {
+            notices.notices.extend(
+                self.execute_panel_clear_op(PanelClearOp { request })
+                    .await?
+                    .notices,
+            );
+        }
+        Ok(notices)
     }
 
     /// Panel-control gesture: dispatch the `(scope, channel)` panel write

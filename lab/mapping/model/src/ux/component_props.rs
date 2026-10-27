@@ -228,7 +228,7 @@ impl Project {
                     _ => Vec::new(),
                 },
             },
-            Target::Lamp { .. } | Target::Pixel { .. } => Vec::new(),
+            Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => Vec::new(),
         }
     }
 
@@ -337,7 +337,7 @@ impl Project {
                     _ => return false,
                 }
             }
-            Target::Lamp { .. } | Target::Pixel { .. } => return false,
+            Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => return false,
         }
         true
     }

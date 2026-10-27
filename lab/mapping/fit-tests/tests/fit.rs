@@ -29,7 +29,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lab_mapping_files::{DirFiles, Opened};
-use lab_mapping_model::{ComponentKind, NodeId, NodeKind, ObjectId, PatchRule, Project};
+use lab_mapping_model::{
+    ComponentKind, NodeId, NodeKind, ObjectId, PatchPlace, PatchTarget, Project,
+};
 use lpc_engine::{ButtonService, EngineServices, ProjectLoader, RadioService};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_mapping::{Map2dDoc, PatchDoc, object_instance_spans, resolve};
@@ -82,6 +84,7 @@ macro_rules! fit {
 fit!(radiance_dome, radiance());
 fit!(whole_shapes, lab_project("whole-shapes"));
 fit!(eaves, lab_project("eaves"));
+fit!(eaves_wired, lab_project("eaves-wired"));
 
 // catalog/projects/
 fit!(fiber_headband, catalog("fiber-headband"));
@@ -197,16 +200,41 @@ fn an_edited_zook_dome_still_fits() {
         {
             *lamps = 290;
         }
-        p.fixture_mut(&fixture).unwrap().rules.insert(
+        p.fixture_mut(&fixture).unwrap().places.insert(
             0,
-            PatchRule::Place {
-                object: ObjectId::new(&sector, "3"),
+            placed_at(ObjectId::new(&sector, "3"), "output", "4", 0, true, 7),
+        );
+    });
+}
+
+/// The zook dome's repeat placed whole on its last port, reversed, with one
+/// copy turned back the way it was drawn: placements today's patch rows
+/// can't say (plan D14), so the save writes every copy at its address, and
+/// the product lights every lamp where the lab does.
+#[test]
+fn a_placed_repeat_still_fits() {
+    placed_still_fits(&catalog("zook-dome"), |p| {
+        let fixture = NodeId::new("fixture");
+        let sector = p.fixture(&fixture).unwrap().components[0].id.clone();
+        let target = PatchTarget::Component(sector.clone());
+        p.set_wire(
+            &fixture,
+            &target,
+            Some(lab_mapping_model::Wire::At {
                 output: NodeId::new("output"),
-                port: "4".into(),
-                pixel: 0,
-                reversed: true,
-                rotation: 7,
-            },
+                port: "0".into(),
+                pixel: 10,
+            }),
+        );
+        p.set_direction(
+            &fixture,
+            &target,
+            Some(lab_mapping_model::Direction::Reversed),
+        );
+        p.set_direction(
+            &fixture,
+            &PatchTarget::Object(ObjectId::new(&sector, "2")),
+            Some(lab_mapping_model::Direction::AsDrawn),
         );
     });
 }
@@ -220,16 +248,9 @@ fn an_edited_choker_still_fits() {
         let a = p.fixture(&fixture).unwrap().components[2].id.clone();
         let f = p.fixture_mut(&fixture).unwrap();
         f.color_order = lab_mapping_model::ColorOrder::Grb;
-        f.rules.insert(
+        f.places.insert(
             0,
-            PatchRule::Place {
-                object: ObjectId::new(&a, "path"),
-                output: NodeId::new("output"),
-                port: "0".into(),
-                pixel: 90,
-                reversed: true,
-                rotation: 2,
-            },
+            placed_at(ObjectId::new(&a, "path"), "output", "0", 90, true, 2),
         );
     });
 }
@@ -240,26 +261,19 @@ fn an_edited_choker_still_fits() {
 #[test]
 fn an_edited_radiance_dome_still_fits() {
     edited_still_fits(&radiance(), |p| {
-        let rules = &mut p.fixture_mut(&NodeId::new("dome")).unwrap().rules;
-        if let PatchRule::Place {
-            reversed, rotation, ..
-        } = &mut rules[10]
-        {
-            *reversed = !*reversed;
-            *rotation = 13;
-        }
-        rules.remove(20);
-        if let PatchRule::Place {
-            output,
-            port,
-            pixel,
-            ..
-        } = &mut rules[30]
-        {
-            *output = NodeId::new("out_10");
-            *port = "31".into();
-            *pixel = 0;
-        }
+        let places = &mut p.fixture_mut(&NodeId::new("dome")).unwrap().places;
+        let flipped = match places[10].direction {
+            Some(lab_mapping_model::Direction::Reversed) => None,
+            _ => Some(lab_mapping_model::Direction::Reversed),
+        };
+        places[10].direction = flipped;
+        places[10].turn = Some(13);
+        places.remove(20);
+        places[30].wire = Some(lab_mapping_model::Wire::At {
+            output: NodeId::new("out_10"),
+            port: "31".into(),
+            pixel: 0,
+        });
     });
 }
 
@@ -334,6 +348,27 @@ fn edited_still_fits(dir: &Path, edit: impl Fn(&mut Project)) {
     // It opens again as the project the lab saved…
     assert_eq!(open(&copy).project, p);
     // …and the product agrees with it, lamp for lamp and on every wire.
+    lamps_are_the_products(&copy);
+    every_output_carries_the_same_lamps(&copy);
+}
+
+/// The same, for placements today's rows can't say (plan D14): it opens
+/// again with every lamp where the lab had it (the placements themselves
+/// come back as each object's own address), and the product agrees.
+fn placed_still_fits(dir: &Path, edit: impl Fn(&mut Project)) {
+    let copy = scratch_copy(dir, "placed");
+    let opened = open(&copy);
+    let mut p = opened.project.clone();
+    edit(&mut p);
+    let saved = opened.files.save(&p).unwrap();
+    assert!(!saved.writes.is_empty());
+    for (path, text) in &saved.writes {
+        std::fs::write(copy.join(path), text).unwrap();
+    }
+    assert_eq!(
+        open(&copy).project.effective_patch().pixel_runs,
+        p.effective_patch().pixel_runs
+    );
     lamps_are_the_products(&copy);
     every_output_carries_the_same_lamps(&copy);
 }
@@ -583,7 +618,7 @@ fn lab_wire(opened: &Opened) -> Wire {
         }
     }
     let mut wire = Wire::new();
-    for s in &p.effective_patch().spans {
+    for s in &p.effective_patch().pixel_runs {
         let out = p.output(&s.output).unwrap();
         let port_start = out.port_start(&s.port).unwrap();
         let first = starts[&(s.fixture.clone(), s.object.clone())];
@@ -743,4 +778,25 @@ fn scratch_copy(dir: &Path, why: &str) -> PathBuf {
         std::fs::copy(&f, dest).unwrap();
     }
     to
+}
+
+/// An object at an address of its own, reversed and turned.
+fn placed_at(
+    object: ObjectId,
+    output: &str,
+    port: &str,
+    pixel: u32,
+    reversed: bool,
+    rotation: u32,
+) -> PatchPlace {
+    PatchPlace {
+        on: PatchTarget::Object(object),
+        wire: Some(lab_mapping_model::Wire::At {
+            output: NodeId::new(output),
+            port: port.into(),
+            pixel,
+        }),
+        direction: reversed.then_some(lab_mapping_model::Direction::Reversed),
+        turn: (rotation != 0).then_some(rotation),
+    }
 }

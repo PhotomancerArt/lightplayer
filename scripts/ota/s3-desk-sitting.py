@@ -6,7 +6,8 @@ image and USB updates on silicon, and the spike's five silicon questions.
     scripts/ota/s3-desk-sitting.py cuts --as "<lease holder>" --images <dir> --out <dir> [--dry-run]
 
 <dir> of --images holds `scripts/ota/build-image.sh --chip esp32s3` outputs:
-`x`, `y` and `y-dies` (`fixture-trial-dies`). `--known-good` is the merged
+`x`, `y`, `y-dies` (`fixture-trial-dies`) and `y-engine-dies`
+(`fixture-engine-dies`). `--known-good` is the merged
 image main ships for the S3 (`lp-cli firmware package esp32s3-8mb`'s
 `*-merged.bin`; default: x's own package, a main build). The S3 boots
 through the ESP-IDF door only, so there is one door to walk.
@@ -20,7 +21,9 @@ Two halves, because FS3's power and its USB arrive at different times:
           (Q-S4: attempted/started/confirmed written); an engine-less board
           healed from the host's copy (Q-S1: a heal remaps); X -> Y-dies
           rolled back and refused (Q-S5: a panic's code); an RTS reset
-          (Q-S5); known-good again before the lease is dropped.
+          (Q-S5); Y -> Y-engine-dies: core-only "engine keeps crashing",
+          then a good build installed over it; known-good again before the
+          lease is dropped.
   cuts  — needs a port whose power `board power-*` really switches. It
           first proves the cut: power off, the MAC must leave the bus (an LED
           panel that back-powers the XIAO keeps it there, and the half
@@ -180,8 +183,13 @@ class Sitting:
     def records(self, step):
         port = self.board_port(step)
         out = self.out / f"{step}.records.bin"
+        # One packet in flight: espflash 3.3's default window (64) fails reads
+        # on FS3 (docs/defects/2026-10-25-espflash-pipelined-reads-fail-on-the-s3s-usb.md).
         self.run(["espflash", "read-flash", "--chip", "esp32s3", "--port", port,
-                  hex(RECORDS), "0x2000", out], check=True)
+                  "--max-in-flight", "1", hex(RECORDS), "0x2000", out], check=True)
+        # After a read FS3 has been seen sitting in the ROM, silent, until a
+        # host reset: put it back in its firmware.
+        self.run(["espflash", "reset", "--chip", "esp32s3", "--port", self.board_port(step)])
         if self.a.dry_run:
             return
         data = out.read_bytes()
@@ -208,6 +216,7 @@ class Sitting:
         x_dir, x_build, x_pkg = self.image("x")
         y_dir, y_build, _ = self.image("y")
         yd_dir, yd_build, _ = self.image("y-dies")
+        ye_dir, ye_build, _ = self.image("y-engine-dies") if "engine-dies" in steps else (None, None, None)
         known_good = Path(a.known_good) if a.known_good else x_pkg
         self.note(f"## The USB half — X {x_build}, Y {y_build}, Y-dies {yd_build}\n")
         self.leased()
@@ -221,9 +230,10 @@ class Sitting:
             self.note("\n### X, and its boot transcript (Q-S1, Q-S2, Q-S3, Q-S5 requested reboot)")
             self.flash("x", x_pkg)
             self.capture("x-first", 60, exit_on='"hello":{')
-            # A requested reboot: the whole boot from the ROM, on this console.
-            text = self.capture("x-reboot", 60, request="reboot",
-                                exit_on=f'"buildId":"{x_build}"')
+            # A requested reboot: the whole boot from the ROM, on this console
+            # (USB-Serial-JTAG stays up across a software reset). No --exit-on:
+            # the hello before the reboot would match any line about X.
+            text = self.capture("x-reboot", 25, request="reboot")
             self.expect("boot", text, "[LOADER] core @0x20000 (proven)", "the loader boots X's core")
             self.expect("boot", text, '"state":"running"', "an engine says hello (Q-S1, Q-S2)")
             for word in EMU_BOOTLOADER:
@@ -271,13 +281,26 @@ class Sitting:
                         "Y runs again after the heal")
             self.records("dies")
 
+        if "engine-dies" in steps:
+            self.note("\n### Y -> Y-engine-dies: an engine that keeps crashing stays reachable")
+            text = self.capture("y-to-engine-dies", 900, offer=ye_dir / "ota",
+                                exit_on="[host-ota] done:")
+            self.expect("engine-dies", text, "fixture-engine-dies", "the new engine panics")
+            self.expect("engine-dies", text, "engine keeps crashing (4 incomplete boots)",
+                        "the core stays core-only after four incomplete boots")
+            self.expect("engine-dies", text, "ReportCrashing", "the host reports it, no heal")
+            text = self.capture("engine-dies-offer-y", 900, offer=y_dir / "ota",
+                                exit_on="[host-ota] done:")
+            self.expect("engine-dies", text, "done: UpToDate", "a good build installs over it")
+
         if "rts" in steps:
             self.note("\n### An RTS reset from the host (Q-S5)")
             port = self.board_port("rts")
             self.run(["espflash", "reset", "--chip", "esp32s3", "--port", port])
-            text = self.capture("rts", 60, exit_on='"hello":{')
-            self.expect("Q-S5", text, "rst:0x15", "a host chip reset reads USB_UART_CHIP_RESET "
-                        "(cold; the ROM's line may come before the capture opens)")
+            text = self.capture("rts", 60, exit_on='"heartbeat"')
+            # The ROM's `rst:` line goes out before the capture opens the port.
+            self.expect("Q-S5", text, '"resetReason":"user-reset"',
+                        "a host chip reset reads user-reset (USB_UART/JTAG_CHIP_RESET, cold)")
 
         self.note("\n### Known-good again before the lease is dropped (fs3-queue.md rule 4)")
         self.flash("restore", known_good)
@@ -326,7 +349,7 @@ def main():
     ap.add_argument("--known-good", help="the main-built merged image to start and end on")
     ap.add_argument("--mac", default=FS3_MAC)
     ap.add_argument("--lp-cli", default=str(REPO / "target/release/lp-cli"))
-    ap.add_argument("--steps", default="boot,push,update,heal,dies,rts",
+    ap.add_argument("--steps", default="boot,push,update,heal,dies,engine-dies,rts",
                     help="the usb half's steps, comma-separated")
     ap.add_argument("--cuts", help="seconds after the update starts (the cuts half)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run none")

@@ -64,6 +64,16 @@ pub trait ResolveHost {
         None
     }
 
+    /// Which panel write supplies a consumed slot's value, when the writer
+    /// that wins it (after the R5 walk) is an engaged panel writer: its
+    /// [`crate::dataflow::panel_writers::PanelWriter::write`]. `None` when
+    /// the value comes from anything else. Lets a consumer treat a fresh
+    /// write of the same value as a new gesture (a re-tapped playlist
+    /// pick).
+    fn consumed_slot_panel_write(&self, _node: NodeId, _slot: &SlotPath) -> Option<u64> {
+        None
+    }
+
     /// The bus scope `node` writes into and reads from (its inhabited
     /// scope; the root module reads its own introduced scope). `None`
     /// means the host has no scope model — test fakes — and every read
@@ -139,14 +149,31 @@ pub trait ResolveHost {
 
     /// Record `node`'s authored output name for patch routing; answers a
     /// live sibling's colliding claim (see the engine implementation).
+    /// `structure_epoch` is the resolver's: an output can only die through
+    /// a structural edit, so the dead sweep runs once per epoch.
     fn register_output_identity(
         &mut self,
         node: NodeId,
-        name: Option<alloc::string::String>,
+        name: Option<&str>,
         revision: Revision,
+        structure_epoch: u64,
     ) -> Option<alloc::string::String> {
-        let _ = (node, name, revision);
+        let _ = (node, name, revision, structure_epoch);
         None
+    }
+
+    /// The producing node's patch generation for `product`
+    /// ([`crate::node::NodeRuntime::control_patch_generation`]); 0 where
+    /// nothing models patching.
+    fn control_patch_generation(&self, product: ControlProduct) -> u64 {
+        let _ = product;
+        0
+    }
+
+    /// The revision the registered output-name set last changed at, without
+    /// copying the names: what a plan keyed on the set reads every frame.
+    fn output_identity_revision(&self) -> Revision {
+        Revision::default()
     }
 
     /// The registered output-name set and the revision it last changed at.

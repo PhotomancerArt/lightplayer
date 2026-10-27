@@ -48,7 +48,8 @@ pub fn FixtureFace(
     let zoom = zoom * scale;
     let (w, h) = (size.x, size.y);
     let px = 1.0 / zoom;
-    let lamp_r = lamp_radius_px(zoom) * px;
+    let pitch = face.pitch;
+    let lamp_r = lamp_radius_px(zoom, pitch) * px;
     let dimmed: Vec<ObjectId> = face
         .objects
         .iter()
@@ -90,7 +91,7 @@ pub fn FixtureFace(
                 }
             }
         }
-        FixtureLamps { fixture: face.fixture.clone(), look: face.look, w, h, zoom, origin, revision, dimmed, frame, ed }
+        FixtureLamps { fixture: face.fixture.clone(), look: face.look, w, h, zoom, pitch, origin, revision, dimmed, frame, ed }
         if let Some(why) = face.not_shown.as_ref() {
             div { class: "not-shown", style: "font-size: {12.0 / zoom}px; padding: {10.0 / zoom}px", "{why}" }
         }
@@ -219,6 +220,9 @@ fn FixtureLamps(
     w: f64,
     h: f64,
     zoom: f64,
+    /// Its usual lamp spacing, in its own units: lamps are drawn a share
+    /// of it.
+    pitch: f64,
     /// Where it was placed: a move draws it again.
     origin: Vec2,
     revision: u64,
@@ -239,7 +243,7 @@ fn FixtureLamps(
         // The lamps in the fixture's own units, through the editor's own
         // frame for it: the same placement its lamps were put by.
         let units = e.project.frame(&fixture);
-        let r = lamp_radius_px(zoom) * crate::dense_canvas::device_pixel_ratio();
+        let r = lamp_radius_px(zoom, pitch) * crate::dense_canvas::device_pixel_ratio();
         let mut raster = Raster::new(w, h, zoom);
         if look == FixtureLook::Live {
             let mut seeds: Vec<(f64, f64)> = Vec::new();

@@ -22,6 +22,10 @@ pub const PRIMARY_CONTROL_CHANNEL: &str = "control.out";
 /// The scope's palette channel. The one place this name is written.
 pub const PALETTE_CHANNEL: &str = "palette";
 
+/// A pattern's detail (scale): 1× is the size its author chose. Shared
+/// across a piece's patterns that declare it (playlists-on-the-bus D3).
+pub const DETAIL_CHANNEL: &str = "detail";
+
 /// The clock transport's three leaf channels (D21: `clock.*` purpose-first
 /// namespacing, an amendment to the naming norm recorded by the tape-hero
 /// plan's ADR). One record in the model, three wires on the bus — the bus
@@ -39,6 +43,14 @@ pub const CLOCK_SCRUB_CHANNEL: &str = "clock.scrub";
 pub const PLAYLIST_CYCLE_CHANNEL: &str = "playlist.cycle";
 /// A playlist's skipped entry keys (`PlaylistDef::skip`), one whole list.
 pub const PLAYLIST_SKIP_CHANNEL: &str = "playlist.skip";
+
+/// The playlist's picked entry: the entry key it rests on and the cycle
+/// starts from. Consumed by `PlaylistDef::idle_entry`; a panel write holds
+/// and persists, Clear returns the authored entry.
+pub const PLAYLIST_ENTRY_CHANNEL: &str = "playlist.entry";
+
+/// The entry key playing now, produced by the playlist (read-only).
+pub const PLAYLIST_PLAYING_CHANNEL: &str = "playlist.playing";
 
 /// A touch set: the fingers on a drawable picture, `MapSlot<u32,
 /// lp::touch::Touch>` keyed by pointer id, in pattern space. Studio writes it
@@ -106,6 +118,12 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
     // where the picker reads them from, rather than in a kind that would
     // have to be invented per control.
     WellKnownChannel {
+        name: DETAIL_CHANNEL,
+        kind: Kind::Ratio,
+        doc: "Pattern detail (scale): 1× is the pattern author's chosen size.",
+        carries_product: false,
+    },
+    WellKnownChannel {
         name: CLOCK_RATE_CHANNEL,
         kind: Kind::Ratio,
         doc: "Clock speed multiplier (¼×–8×); the transport fader's channel.",
@@ -135,6 +153,18 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: PLAYLIST_SKIP_CHANNEL,
         kind: Kind::Choice,
         doc: "Playlist entry keys switched off in the cycle (one whole list).",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PLAYLIST_ENTRY_CHANNEL,
+        kind: Kind::Choice,
+        doc: "The playlist's picked entry key: where it rests and where the cycle starts; a panel write holds and persists.",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PLAYLIST_PLAYING_CHANNEL,
+        kind: Kind::Choice,
+        doc: "The entry key the playlist is playing now (read-only).",
         carries_product: false,
     },
     WellKnownChannel {

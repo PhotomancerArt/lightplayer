@@ -250,7 +250,19 @@ impl ProjectLoader {
 
         let projected_nodes =
             Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
-        Self::attach_projected_nodes(root, &mut registry, &mut runtime, &projected_nodes, frame)?;
+        // Every attach and demand root invalidates the resolver's structure,
+        // and nothing resolves until the load is done: one epoch for the
+        // whole phase.
+        runtime.resolver_mut().begin_structure_batch();
+        let attached = Self::attach_projected_nodes(
+            root,
+            &mut registry,
+            &mut runtime,
+            &projected_nodes,
+            frame,
+        );
+        runtime.resolver_mut().end_structure_batch();
+        attached?;
         Self::register_projected_bindings(&mut registry, &mut runtime, &projected_nodes, frame)?;
 
         Ok(LoadedProjectRuntime::new(runtime, registry))
@@ -909,6 +921,12 @@ impl ProjectLoader {
             }
         }
 
+        // One playlist per module (playlists-on-the-bus D10): two playlists
+        // reading one scope share its `playlist.entry`, `playlist.cycle` and
+        // `playlist.skip`. Said once at load, not as the playlist's status
+        // (Studio parses that for failed entries).
+        #[cfg(feature = "node-playlist")]
+        let mut playlist_scopes: Vec<crate::node::ScopeRef> = Vec::new();
         for node in projected_nodes {
             if !should_attach_projected_node(node, targets) {
                 continue;
@@ -918,6 +936,17 @@ impl ProjectLoader {
             }
             #[cfg(feature = "node-playlist")]
             {
+                if let Some(scope) = runtime.tree().bus_read_scope(node.id) {
+                    if playlist_scopes.contains(&scope) {
+                        log::warn!(
+                            "playlist {}: another playlist in the same module shares its \
+                             pick, cycle and skip list; put each playlist in its own module",
+                            node_label(node)
+                        );
+                    } else {
+                        playlist_scopes.push(scope);
+                    }
+                }
                 let (idle_entry, default_fade, entries, next_ids, prev_ids) = {
                     let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                         continue;
@@ -1700,6 +1729,22 @@ fn register_node_bindings(
     if node.kind == NodeKind::Module {
         if let Ok(NodeDef::Module(config)) = projected_node_config(registry, node) {
             let config = config.clone();
+            // A non-root module's declared inputs list in its host scope
+            // (playlists-on-the-bus D5). The root has no host.
+            let inputs: Vec<lpc_model::ChannelName> = config
+                .inputs
+                .data
+                .as_ref()
+                .map(|inputs| {
+                    inputs
+                        .value()
+                        .0
+                        .iter()
+                        .map(|name| lpc_model::ChannelName(name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            runtime.tree_mut().set_declared_inputs(node.id, inputs);
             for (key, entry) in config.bindings.entries().iter() {
                 let name = key.as_str();
                 entry

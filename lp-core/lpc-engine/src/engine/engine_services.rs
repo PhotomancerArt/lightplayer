@@ -246,6 +246,27 @@ impl EngineServices {
         &self.project_root
     }
 
+    /// The wires `config`'s ports cut the output's buffer into, as `(port
+    /// key, first sample, samples)` (`None`: the rest of the buffer), exactly
+    /// as [`Self::reconcile_wires`] registers them: a zero-lamp port dropped,
+    /// and NO wires at all when a port other than the last omits its count.
+    ///
+    /// For the upgrade landing goldens (`tests/upgrade_landing.rs`) only, which
+    /// must read where a lamp reaches a wire with the code the wires use, not
+    /// a copy of it. Nothing in production calls this, and it is a host-only
+    /// convenience (`std`), so no firmware image links it.
+    #[doc(hidden)]
+    #[must_use]
+    #[cfg(feature = "std")]
+    pub fn planned_wire_slices_for_landing(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
+        if remainder_offender(config).is_some() {
+            return Vec::new();
+        }
+        planned_wires(config)
+            .map(|wire| (wire.port, wire.start_samples, wire.len_samples))
+            .collect()
+    }
+
     /// Replace the optional [`OutputProvider`] used when flushing sinks after each tick.
     pub fn set_output_provider(&mut self, provider: Option<Box<dyn OutputProvider>>) {
         self.close_output_sinks();
@@ -325,23 +346,25 @@ impl EngineServices {
     /// nearly every call — must not allocate. The comparison walks the authored
     /// ports in key order against the wires already registered, borrowing
     /// each endpoint; only a genuine change pays for a copy of one.
+    ///
+    /// Returns whether anything changed.
     pub fn update_output_sink_config(
         &mut self,
         buffer_id: RuntimeBufferId,
         node: NodeId,
         config: &OutputDef,
-    ) {
+    ) -> bool {
         let display_options = display_options_from_output_config(config);
         let Some(existing) = self.output_sinks.get(&buffer_id) else {
             self.register_output_sink(buffer_id, node, config);
-            return;
+            return true;
         };
         // The display pipeline is built at open time, so a change to it
         // reopens every wire; the wires themselves are compared one by one.
         let options_unchanged = output_options_eq(&existing.display_options, &display_options);
         if options_unchanged && existing.node == node && wires_match_config(&existing.wires, config)
         {
-            return;
+            return false;
         }
 
         let mut set = self
@@ -352,6 +375,7 @@ impl EngineServices {
         set.display_options = display_options;
         self.reconcile_wires(&mut set, config, !options_unchanged);
         self.output_sinks.insert(buffer_id, set);
+        true
     }
 
     pub fn unregister_output_sink(&mut self, buffer_id: RuntimeBufferId) {

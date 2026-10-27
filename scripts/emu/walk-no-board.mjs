@@ -414,7 +414,14 @@ async function main() {
       // then FINISH: "the bar stopped saying `No firmware`" alone is
       // satisfied the instant the work starts, which screenshotted a
       // progress bar and called it a flash (`StudioDriver.flashBlank`).
-      await driver.flashBlank(BOARD_MODEL, { timeoutMs: STEP_DEADLINE_MS, flashTimeoutMs: FLASH_DEADLINE_MS });
+      // The picker narrowed to the chip: a blank board's chip comes off its
+      // ROM banner, which identify resets the board for when it opened
+      // mid boot loop and missed it.
+      await driver.flashBlank(BOARD_MODEL, {
+        timeoutMs: STEP_DEADLINE_MS,
+        flashTimeoutMs: FLASH_DEADLINE_MS,
+        expectChip: "esp32c6",
+      });
       // …and then the BACKING, which is the only party that can see the
       // reset vector. `flash` answers "does an image magic sit there",
       // recomputed rather than cached (DD34), so `loaded` means what Studio

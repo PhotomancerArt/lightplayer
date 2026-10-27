@@ -31,8 +31,15 @@
 //! its row shows the test ([`super::UiWifiTest`]) until
 //! [`NetworkCommand::DismissTest`].
 //!
+//! **A read never holds the controls** (P3, the card's Wi‑Fi box held
+//! still 10-25): the offers wait only while a change is out. A change
+//! pressed while a read is out is owed, and goes the moment that read
+//! answers — so the box's own re-reads (opening it, a test's steps) never
+//! dim a switch or add a line.
+//!
 //! **It never stores the password** (plan Q8): a change's password lives
-//! in its [`NetworkStep`] until the request leaves, and no state here holds
+//! in its [`NetworkStep`] until the request leaves — at most until the read
+//! ahead of it answers, when it is owed — and no other state here holds
 //! one.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -57,6 +64,9 @@ use crate::app::studio::studio_view_channel::CommandSender;
 /// How long the controller waits before asking a board again: after a scan
 /// answered `scanning`, and between status reads while a test runs.
 pub const ASK_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Why a change could not start (or, owed behind a read, could not go).
+const CANNOT_CHANGE_NOW: &str = "this device cannot be changed from here right now";
 
 /// How far a device's link reaches into its network settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,6 +124,9 @@ struct DeviceNetwork {
     scan_owed: bool,
     /// A status read is asked again after [`ASK_AGAIN`] (a test runs).
     read_again: bool,
+    /// A change pressed while a read was out: it goes when that read
+    /// answers. `writing` is already set, so the view says it is on its way.
+    change_owed: Option<NetworkStep>,
     /// The network an add in flight is saving.
     adding: Option<String>,
     /// The network whose test shows in its row.
@@ -326,6 +339,10 @@ impl NetworkController {
                         state.error = Some(error);
                     }
                 }
+                // The change pressed while this read was out goes now.
+                if kind == NetworkStepKind::Read {
+                    self.send_owed_change(device, roster, effects, &granted);
+                }
                 // The scan asked while this was out goes now.
                 let state = self.devices.entry(device).or_default();
                 if std::mem::take(&mut state.scan_owed)
@@ -335,6 +352,40 @@ impl NetworkController {
                     self.scan(device, reach, effects);
                 }
             }
+        }
+    }
+
+    /// Send the change owed behind the read that just answered, or drop it
+    /// with the reason it cannot go (said in the box, like any refusal).
+    fn send_owed_change(
+        &mut self,
+        device: DeviceId,
+        roster: &Roster,
+        effects: &DeviceEffects,
+        granted: &impl Fn(DeviceId) -> Option<Tier>,
+    ) {
+        let Some(state) = self.devices.get_mut(&device) else {
+            return;
+        };
+        let Some(step) = state.change_owed.take() else {
+            return;
+        };
+        if state.needs_author {
+            // The read was refused for want of author: the change would be.
+            state.writing = false;
+            state.adding = None;
+            return;
+        }
+        let window = roster
+            .device(device)
+            .and_then(|found| reach(found, granted(device)))
+            .map(|(window, _)| window);
+        let sent = window.is_some_and(|window| self.dispatch(device, window.link, step, effects));
+        if !sent {
+            let state = self.devices.entry(device).or_default();
+            state.writing = false;
+            state.adding = None;
+            state.error = Some(CANNOT_CHANGE_NOW.to_string());
         }
     }
 
@@ -439,10 +490,16 @@ impl NetworkController {
                 (NetworkStep::Switches { wifi, cloud_relay }, None)
             }
         };
+        if let Some(state) = self.devices.get_mut(&device).filter(|state| state.reading) {
+            // A read is out: the change goes when it answers, so the read
+            // never holds the controls.
+            state.change_owed = Some(step);
+            return Ok(adding);
+        }
         if self.dispatch(device, window.link, step, effects) {
             Ok(adding)
         } else {
-            Err("this device cannot be changed from here right now".to_string())
+            Err(CANNOT_CHANGE_NOW.to_string())
         }
     }
 
@@ -467,8 +524,14 @@ impl NetworkController {
             writing: state.is_some_and(|state| state.writing),
             error: state.and_then(|state| state.error.clone()),
             heard: state.and_then(|state| state.heard.clone()),
-            scanning: state.is_some_and(|state| state.scanning || state.scan_again),
+            // Owed counts: the connect page keeps saying it is looking while
+            // the scan waits behind a read.
+            scanning: state
+                .is_some_and(|state| state.scanning || state.scan_again || state.scan_owed),
             testing: state.and_then(|state| state.testing.clone()),
+            adding: state
+                .filter(|state| state.writing)
+                .and_then(|state| state.adding.clone()),
         })
     }
 }

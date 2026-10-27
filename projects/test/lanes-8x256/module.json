@@ -1,0 +1,59 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture1": {
+      "ref": "./fixture1.json"
+    },
+    "fixture2": {
+      "ref": "./fixture2.json"
+    },
+    "fixture3": {
+      "ref": "./fixture3.json"
+    },
+    "fixture4": {
+      "ref": "./fixture4.json"
+    },
+    "fixture5": {
+      "ref": "./fixture5.json"
+    },
+    "fixture6": {
+      "ref": "./fixture6.json"
+    },
+    "fixture7": {
+      "ref": "./fixture7.json"
+    },
+    "fixture8": {
+      "ref": "./fixture8.json"
+    },
+    "output1": {
+      "ref": "./output1.json"
+    },
+    "output2": {
+      "ref": "./output2.json"
+    },
+    "output3": {
+      "ref": "./output3.json"
+    },
+    "output4": {
+      "ref": "./output4.json"
+    },
+    "output5": {
+      "ref": "./output5.json"
+    },
+    "output6": {
+      "ref": "./output6.json"
+    },
+    "output7": {
+      "ref": "./output7.json"
+    },
+    "output8": {
+      "ref": "./output8.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}

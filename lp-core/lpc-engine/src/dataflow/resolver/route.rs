@@ -47,6 +47,10 @@ pub enum ResolvedRoute {
     },
     /// No binding answers this query; the host produces it.
     Produce,
+    /// A bus read no provider writes: answered with
+    /// [`super::SessionResolveError::NoBusProvider`] every frame, without
+    /// walking the providers again until the graph changes shape.
+    NoBusProvider,
     /// A mergeable receiver: merge these sources by key, in this order.
     ///
     /// Bus providers are already expanded into leaves here — the recursive

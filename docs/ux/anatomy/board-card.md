@@ -104,9 +104,11 @@ second     the primary's button said aloud: its verb and object, then what it
            ("Connect over USB or Bluetooth to install it.", "Studio doesn't have
            firmware for this board."). no dead ends (P7).
 progress   the work's bar and percent; the spinner in the icon's place when
-           it has no number. the percent is the one the working row carries
-           and says: an update is one number, the new firmware 0–49 %, its
-           last part 50–100 %, here, on the row and in the editor alike.
+           it has no number. the one bar and the one number the work has: the
+           row doing it is carried (its verb and its spinner, no fill, no
+           number). an update is one number, the new firmware 0–49 %, its
+           last part 50–100 %, here and in the editor alike, and it only
+           moves forward.
 picture    dims under the notice, fully covered: one dim, the cover's (never a
            stale picture's own as well). no picture: the notice on the dark.
 ```
@@ -121,6 +123,9 @@ moving here (take-over)     Moving this board to this tab.  + spinner           
 confirmation required       This update is waiting for your confirmation.                  (none: its details rise)
 updating                    This board is updating its firmware.  + bar                     (none)
 installing                  Installing the firmware on this board.  + bar                   (none)
+  …reading the board first  Reading this board before installing.  + spinner                (none)
+  …restarting on it         This board is restarting on its new firmware.  + spinner        (none)
+  …saving its board model   Saving the board model on this board.  + spinner                (none)
 erasing                     Erasing this board.  + bar                                      (none)
 sending                     Sending the project “studio” to this board.  + bar              (none)
 removing                    Removing the project from this board.  + bar                    (none)
@@ -336,6 +341,22 @@ pressed in a row's details is that road alone. A board this tab already
 reaches (USB, Bluetooth, Wi‑Fi or lightplayer.app) has no road: Connect
 opens its session on that link.
 
+The connecting state lasts from the press until the board says hello, on
+the card that was pressed. The socket answering (through lightplayer.app,
+the secure link coming up) is half-way: the board is still being
+identified, and the card keeps its spinner rather than going back to its
+Connect. A board never met here does not trade its card for a separate
+"Identifying" one meanwhile. A board that never says hello gives up after a
+minute, in a held Connect's words. A second press finds the button waiting
+and dials nothing.
+
+```text
+do:   Connecting to this board through lightplayer.app.  ◌   # press → hello, one state
+bad:  (its picture, no words)               │ ☁ Connect │   # the relay answered, the board
+                                                            #   has not said hello: it reads
+                                                            #   as a press that was lost
+```
+
 ```text
 do:   │ Fabric Test                │ ≋ Connect │   # one press: Wi‑Fi, else lightplayer.app
 bad:  │ Fabric Test                │ ☁ Connect │   # on your own network, through the cloud:
@@ -374,6 +395,11 @@ tone       none · orange: needs you · red (striped): broken · blue: live, the
            (ui.md's status families; the card adds none, P16).
            quiet while the surface says the row's problem.   # was: the row was the loud place
 working    ◌ takes the icon's place; progress runs along the row's foot ━━━━────
+carried    the surface says the row's work: ◌ in the icon's place, the verb alone
+           as the state ("updating"), no fill, no number: the surface has them.   # was: the bar and the number twice
+waiting    a check nobody asked for (access, a project not said yet): a dash and a
+           still word, never a spinner (P4)
+name       the value, plain in every state, "—" while it isn't known yet; never bold for work
 stale      the row dims; its words don't change
 ```
 
@@ -414,7 +440,10 @@ Off, the row says `disabled`, plain, with no button, and the same switch
 turns it back on. Where this link may not flip it the switch is dimmed, and
 a refusal says why under the line ("Bluetooth can only be turned off by
 USB…"); its hover says what a flip does, in the offer's words (Bluetooth's
-restarts the board).
+restarts the board). A switch waiting on a change on its way is dimmed and
+says why on its hover, with nothing under the line: the details never grow
+and shrink with routine work (P3), and Studio asking the board again holds
+nothing at all.
 
 ```text
 ᛒ Bluetooth        LP-3f2a                 › │   the row, which opened them
@@ -450,14 +479,14 @@ phone's two), the name is cut at its end and the details hold it whole:
 ◆ Project   none          │ Add │                    # it said it runs nothing: lit, the primary's pick. primary: + Add a project
 ◆ Project   none                                     # no LightPlayer on it: Install firmware is the primary
 ◆ Project   not known                                # an older LightPlayer, a board from before the hello, a core alone. was: none (the desk C6, 10-17)
-◌ Project   studio         sending · 40%             # bar along the foot
+◌ Project   studio         sending                   # carried: the surface has the bar. was: sending · 40%, a bar along the foot
 ◆ Project   studio         out of date │ Send latest │      # no tone (P16). was: Out of date · studio, orange
 ◆ Project   studio         error                     # red; quiet while the surface says it. details: the error
 ◆ Project   none           data lost  │ Restore │ Reset │   # O3; quiet while the surface says it
 ◆ Project   hidden                                   # locked. was: Project not known
 ◆ Project   studio                         (dim)     # offline. was: Project not known
 ◆ Project   not known                      (dim)     # offline, nothing known of it
-◌ Project                                            # a LightPlayer that hasn't said yet
+◆ Project   —                                        # a LightPlayer that hasn't said yet: still. was: ◌ Project
 ```
 
 ### USB ⏚: the board's cable
@@ -466,8 +495,8 @@ phone's two), the name is cut at its end and the details hold it whole:
 ⏚ USB              connected                 # this tab reaches it by its cable
 ⏚ USB              not connected             # port closed, unplugged, or reached another way. quiet: normal for a board on a house
 ⏚ USB              not connected     (dim)   # offline; the surface says since when
-◌ USB              connecting
-◌ USB              reconnecting
+◌ USB              —   connecting      # the name is never empty (U4). was: USB connecting, in the name's place
+◌ USB              —   reconnecting
 ⏚ USB              not responding    │ Retry │   # a board that said hello went quiet. orange; quiet while the surface says it
 ⏚ USB              connection failed │ Retry │   # red; quiet while the surface says it
 ⏚ USB              Open in another tab  editor open   # quiet: the surface says it
@@ -497,10 +526,35 @@ and its link counters.
 
 Its details: the switch line (Wi‑Fi and the board's switch), then the
 Wi‑Fi panel (its networks, adding one), and Connect over Wi‑Fi where the
-primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi is
-disabled on this board. It reaches Studio over USB and Bluetooth only."
+primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi
+is disabled on this board. It reaches Studio over USB and Bluetooth only."
 The panel draws no heading or switches of its own on the card: the switch
 line is both, and lightplayer.app's switch is its own row's.
+
+The panel holds still (P3): its line under the switch says how the board
+stands in every state ("Connected to Cedar Lane.", "Connecting to Cedar
+Lane…", "Not connected.", or the board's refusal in its place), and gives way to a test, which says it; a network
+being added is a row, "Saving…", with its test under it from the press;
+and the test's last line is held, "Testing · it takes a few seconds.",
+until its outcome takes the place.
+
+```text
+≋ Wi‑Fi                              (●━━)   the switch line
+Not connected.                               the line: how it stands, in every state
+▂▄▆  Cedar Lane      Not in range          › 
++ Connect to a network
+```
+
+```text
+≋ Wi‑Fi                              (●━━)   dimmed while the add is on its way
+▂▄▆  Cedar Lane      Not in range          ›   (no line: the test says it)
+▂▄▆  Starlink Apt    Saving…                 the add, from the press
+     ● Looking for Starlink Apt               its test: the steps…
+     ○ Checking the password
+     ○ Getting an address
+     Testing · it takes a few seconds.        …and the outcome's place, held
++ Connect to a network
+```
 
 ### Bluetooth ᛒ: the board's own radio
 
@@ -572,7 +626,8 @@ bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20:
 ○ Access    edit · no password             # quiet: open is the default. was: yellow, "anyone can edit"
 ○ Access    play only        │ Unlock │    # was: You can play · anyone can play
 ○ Access    locked                         # primary: Unlock
-◌ Access    checking                       # was: Access not known
+○ Access    —        checking              # still: the link's own check. was: ◌ Access checking, bold, a sweep along its foot
+◌ Access    —        unlocking             # a login you asked for: the row's work
 ○ Access    edit                   (dim)   # offline. was: Access not known · when it's back
 ○ Access    USB only · no password             ← orange   # was: No password here · set one over USB, yellow
                                                # no core offer sets a board's password: the fix is in the details
@@ -591,9 +646,9 @@ bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20:
             # the button says the verb, and the version it brings is the details' Newest
 ▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, the primary's board pick. primary: Install firmware
 ▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
-◌ Firmware  v2026.10.08-9   updating · 42%             # was: Updating · 1 of 2 · 42%
-◌ Firmware  v2026.10.08-9   backing up · 12% │ Cancel │
-◌ Firmware  installing · 30%                           # was: Flashing firmware…
+◌ Firmware  v2026.10.08-9   updating                   # carried: the surface has 42 %. was: updating · 42% and a rainbow fill
+◌ Firmware  v2026.10.08-9   backing up │ Cancel │
+◌ Firmware  —   installing                             # was: installing · 30%, in the name's place; Flashing firmware…
 ▲ Firmware  v2026.10.08-9   crashing     │ Reinstall │   # red; quiet while the surface says it
 ▲ Firmware  v2026.09.30-2   incomplete   │ Install │     # orange; quiet while the surface says it
 ▲ Firmware  v2026.10.08-9   confirmation required │ Review │   # was: Needs your answer
@@ -618,7 +673,7 @@ bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a 
 ■ Hardware  XIAO ESP32-C6
 ■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
 ■ Hardware  unknown                              # was: Board not known
-◌ Hardware  identifying                          # was: chip unknown
+◌ Hardware  —   identifying                      # was: identifying, in the name's place; chip unknown
 ■ Hardware  XIAO ESP32-S3 Plus                   # "simulated" is said once, on the USB row (P2)
 ```
 
@@ -727,7 +782,7 @@ screen reader.
 Yona, 2026-10-16 ("all leans"):
 
 ```text
-O1  sending stays in place: ◌ Project  Playful Choker  sending · 40%
+O1  sending stays in place: ◌ Project  Playful Choker  sending
 O2  the project's icon is layers (three stacked chevrons), wherever Studio marks a project
 O3  data lost moves to the Project row: Project  none  data lost  │ Restore │ Reset │
     (data unreadable stays on the Firmware row: it is the firmware that refused the store)
@@ -784,4 +839,15 @@ S5  the board is renamed where its name is, a faint pencil always shown   (Yona)
 S6  the primary is Install firmware, Add a project, Connect; Wi‑Fi and lightplayer.app ask through their rows   (Yona)
 S7  the struck cloud mark is gone: lightplayer.app's row says it   (Yona)
 S8  stand-ins keep the eight rows, "—" on the radio rows   (Yona)
+```
+
+The update feel pass, 2026-10-24 (FS3 over Bluefy; PR #1298):
+
+```text
+U1  one work, one bar, one number: the surface's; the row doing it is carried   (Yona)
+U2  a carried row keeps its spinner, not its fill: "some indicator on the row that something
+    is happening is nice … just the rainbow icon, but not the bar"              (Yona)
+U3  a check nobody asked for is still: Access  —  checking                      (Yona)
+U4  the name is the value in every state, never bold for work; the work's words are the state   (Yona)
+U5  an update's number only moves forward                                         (Yona)
 ```

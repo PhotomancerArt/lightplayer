@@ -3,20 +3,21 @@
 //! `(0, 0)` is the top-left of its box, wherever the layout puts it.
 //!
 //! A fixture is one kind of node (`node.rs`); its id and name live on the
-//! node. What it carries of its own is its drawing, its patch rules and
+//! node. What it carries of its own is its drawing, its placements and
 //! the visual channel it reads. Each frame it samples that channel's
 //! render product at its lamps and publishes their colours as its control
 //! product (`board.rs`), as the product's fixture node does.
 //!
-//! The control channel it writes is its auto rule, read the product's way:
-//! the fixture writes the channel its rule's output reads (fit-check §6,
-//! `bindings.rs`). So a fixture names no channel of its own for that.
+//! The control channel it writes follows its placements, read the
+//! product's way: the fixture writes the channel the outputs they name
+//! read (fit-check §6, `bindings.rs`). So a fixture names no channel of its
+//! own for that.
 
 use crate::domain::channel::Channel;
 use crate::domain::color_order::ColorOrder;
 use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
-use crate::domain::patch::PatchRule;
+use crate::domain::patch_place::{PatchPlace, PatchTarget};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fixture {
@@ -25,9 +26,10 @@ pub struct Fixture {
     pub size: Vec2,
     /// Top-level components, in authoring order.
     pub components: Vec<Component>,
-    /// Where its lamps go, in order. The patch they make is derived
-    /// (`patch.rs`), never stored.
-    pub rules: Vec<PatchRule>,
+    /// Where its lamps go: at most one placement for itself, each
+    /// component and each object (`patch_place.rs`). The patch they make is
+    /// derived (`patch.rs`), never stored.
+    pub places: Vec<PatchPlace>,
     /// Which byte of each of its pixels is red, green and blue.
     pub color_order: ColorOrder,
     /// The visual channel whose render product it samples (the product's
@@ -69,7 +71,7 @@ impl Fixture {
         Self {
             size,
             components: Vec::new(),
-            rules: Vec::new(),
+            places: Vec::new(),
             color_order: ColorOrder::default(),
             reads: Channel::visual_out(),
             unsupported: None,
@@ -103,6 +105,27 @@ impl Fixture {
     }
 
     /// Remove a component (and everything under it) wherever it lives.
+    /// The placement on `target`, if it has one.
+    pub fn place(&self, target: &PatchTarget) -> Option<&PatchPlace> {
+        self.places.iter().find(|p| &p.on == target)
+    }
+
+    /// The placement on `target`, made empty if it has none.
+    pub fn place_mut(&mut self, target: &PatchTarget) -> &mut PatchPlace {
+        match self.places.iter().position(|p| &p.on == target) {
+            Some(i) => &mut self.places[i],
+            None => {
+                self.places.push(PatchPlace::on(target.clone()));
+                self.places.last_mut().expect("just pushed")
+            }
+        }
+    }
+
+    /// Drop placements that set nothing any more.
+    pub fn tidy_places(&mut self) {
+        self.places.retain(|p| !p.is_empty());
+    }
+
     pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
         remove_from(&mut self.components, id)
     }

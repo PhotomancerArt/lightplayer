@@ -3,6 +3,8 @@
 
 use crate::domain::notice::Notice;
 use crate::domain::target::Target;
+use crate::ux::graph_verb::GraphVerb;
+use crate::ux::patch_section::PatchField;
 use crate::ux::props::Prop;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,4 +53,47 @@ pub enum UiItem {
     },
     /// A quiet line saying what to do.
     Hint(String),
+    /// A fact with the verb that changes it beside it, as a button that
+    /// presses the verb (`GraphInput::Verb`): "On D10 at 0 · Unpatch".
+    Action {
+        text: String,
+        verb: GraphVerb,
+    },
+    /// A Patch row with a value of its own, as a choice
+    /// (`patch_section.rs`): `chosen` is `None` when the selection doesn't
+    /// share one. `reset` names what it would follow again, when it can
+    /// (Reset); a fixture has nothing above it.
+    PatchChoice {
+        label: &'static str,
+        options: Vec<String>,
+        chosen: Option<usize>,
+        reset: Option<String>,
+        field: PatchField,
+    },
+    /// A Patch row whose value comes from above: the value in words, where
+    /// it is set (a link that selects it; `None` for a default nothing
+    /// sets), and Override, which makes it the thing's own.
+    PatchInherited {
+        label: &'static str,
+        value: String,
+        from: Option<(String, Target)>,
+        field: PatchField,
+    },
+    /// A button that selects something else: a span's object.
+    Select {
+        text: String,
+        target: Target,
+    },
+    /// A gap's "Patch here": the objects not on the wire, the chosen one put
+    /// at the gap's start.
+    PatchHere {
+        options: Vec<String>,
+    },
+    /// A Patch row with a number and − + (`None` when mixed).
+    PatchNumber {
+        label: &'static str,
+        value: Option<i64>,
+        note: Option<String>,
+        field: PatchField,
+    },
 }

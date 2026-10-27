@@ -22,17 +22,18 @@
 //! | port key | port key (a number) |
 //! | output label | output `name` |
 //!
-//! Rules: a fixture's patch rows become place rules, the port and pixel
-//! worked out from the row's flat wire position; unless its patch says
-//! `flow: manual`, an auto rule follows, naming the default output of the
-//! channel it writes (`channels.rs`).
+//! Placements: a fixture's patch rows become placements on their objects
+//! (a wire at the port and pixel worked out from the row's flat wire
+//! position, reversed and turned as the row says); unless its patch says
+//! `flow: manual`, the fixture's own wire is auto, onto the default output
+//! of the channel it writes (`channels.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    Channel, ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind,
-    ObjectId, OtherNode, Output, PatchRule, Pattern, Port, Project, RenderSource, Unsupported,
-    Vec2,
+    Channel, ColorOrder, Component, ComponentId, ComponentKind, Direction, Fixture, Node, NodeId,
+    NodeKind, ObjectId, OtherNode, Output, PatchPlace, PatchTarget, Pattern, Port, Project,
+    RenderSource, Unsupported, Vec2, Wire,
 };
 use serde_json::Value;
 
@@ -164,7 +165,7 @@ impl Opened {
                 Err(RulesRefusal::Broken(what)) => return Err(FilesError::new(&path, what)),
             };
             if let Some(f) = project.fixture_mut(&fixture) {
-                f.rules = rules;
+                f.places = rules;
             }
         }
         let unpatched: Vec<NodeId> = project
@@ -180,7 +181,7 @@ impl Opened {
                 RulesRefusal::Broken(what) => FilesError::new("", what),
             })?;
             if let Some(f) = project.fixture_mut(&fixture) {
-                f.rules = rules;
+                f.places = rules;
             }
         }
         Ok(Opened { project, files })
@@ -524,7 +525,7 @@ pub(crate) fn rules_of(
     files: &ProductProject,
     fixture: &NodeId,
     patch: Option<&PatchDoc>,
-) -> Result<(Vec<PatchRule>, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
+) -> Result<(Vec<PatchPlace>, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
     let default = default_output(project, files, fixture);
     let mut rules = Vec::new();
     let mut ranges = BTreeMap::new();
@@ -587,17 +588,27 @@ pub(crate) fn rules_of(
                 (last.key.clone(), e.lamp - start)
             }
         };
-        rules.push(PatchRule::Place {
-            object,
-            output,
-            port,
-            pixel,
-            reversed: e.reversed,
-            rotation: e.offset,
+        // One placement per object: the first row wins.
+        let target = PatchTarget::Object(object);
+        if rules.iter().any(|r: &PatchPlace| r.on == target) {
+            continue;
+        }
+        rules.push(PatchPlace {
+            on: target,
+            wire: Some(Wire::At {
+                output,
+                port,
+                pixel,
+            }),
+            direction: e.reversed.then_some(Direction::Reversed),
+            turn: (e.offset != 0).then_some(e.offset),
         });
     }
     if !manual && let Some(output) = default {
-        rules.push(PatchRule::Auto { output });
+        rules.push(PatchPlace {
+            wire: Some(Wire::Auto { output }),
+            ..PatchPlace::on(PatchTarget::Fixture)
+        });
     }
     Ok((rules, ranges))
 }

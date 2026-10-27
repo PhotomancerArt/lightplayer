@@ -53,6 +53,85 @@ Use an `Engine*` prefix only when ambiguity with another layer remains high.
 Conversion helpers should name both sides of the boundary (for example functions
 that mention `lp_value` / `LpType` vs `LpsValueF32` / `LpsType`).
 
+## The frame plan
+
+Resolution persists across frames until a structural edit
+(`docs/adr/2026-07-31-resolver-persistent-resolution.md`). The frame plan
+carries the same idea one step further: graph work a node (or the engine)
+re-derived every frame — binding topology, parsed paths, spans, fragments,
+uniform slots — is built **once per edit** and replayed every frame after
+(`docs/adr/2026-10-24-frame-plan-once-per-edit.md`).
+
+**The contract:** any engine mutation that can change what a plan holds must
+move a key the plan reads. Keys are the resolver's structure epoch plus a few
+node-local revisions; `attach_runtime_node` and `add_demand_root` move the
+epoch too, and the debug shape guard in `Engine::tick_nodes` counts demand
+roots and attaches as well as nodes and bindings.
+
+**`frame_plan::PlanSlot<K, T>`** is the only home of a plan: `get_or_build(key,
+host, build)` replays while the key holds, builds when it moves. Its checker
+is the reason it is the only home: in `PlanMode::Check` a replay also
+rebuilds the plan and compares, and a difference names the owner, the plan
+type and the first differing line of their `Debug` forms. `clear()` drops a
+plan (memory pressure: plans are rebuildable state, dropped on `High`).
+
+**Modes** (`Engine::set_plan_mode`):
+
+| mode | where | what |
+|---|---|---|
+| `Check { every: 1, strict: true }` | this crate's own tests | rebuild and compare every frame; panic on a difference |
+| `Check { every: 32, strict: false }` | other debug builds (Studio dev, emulator debug) | compare every 32nd frame; log once, count, serve the fresh plan |
+| `Replay` | release | replay; the comparison is not linked |
+| `RebuildEveryFrame` | the differential | build every frame, as if every key moved |
+
+Allocation and counter tests that price the product set `Replay`.
+
+**Counters:** `Engine::frame_plan_counters()` (`builds`, `replays`, `checks`,
+`check_mismatches`, `default_fragments_reads`), reset per frame like
+`ResolveFrameCounters`. A steady frame has `structural_work() == 0` on both.
+A check's own rebuild is not counted as work.
+
+**The oracles:** `tests/frame_plan_differential.rs` runs every corpus project
+through one edit of each kind, frame for frame in four modes (cached,
+forced-invalidate, rebuild-every-frame, strict-checked) and against a fresh
+load of each edit; `engine::steady_frame_alloc_tests` ratchets steady-frame
+allocations per lane on the real nodes (`scripts/perf/README.md`).
+
+What each plan holds and its key:
+
+| owner | plan | key |
+|---|---|---|
+| engine | `LaneTopology`: per node, whether it is the default fragments consumer of its bus channel (where unaddressed patch runs and auto-flow land) | structure epoch |
+| engine | output sink configurations, re-read from the defs | structure epoch (checked like a plan in `Check` mode) |
+| output | `OutputFramePlan`: the fragments planned from its producers' placements, their coverage and its status (and the products it was built for) | structure epoch, `output_identity_revision` (a change count), the producers' summed `control_patch_generation` |
+| fixture | `FixtureFramePlan`: the lamp count, the control extent and the full-write control spans | structure epoch, `mapping_version`, the colour order |
+| engine | per dispatch: the recovery-frame name (`RuntimeNodeEntry::recovery_name`, the path rendered once) and the produce call key (the resolver's interned path handle) | the node's path / the epoch's intern table |
+
+**Reads a node makes every frame** keep their query id in a
+`frame_plan::PlannedRead` (tagged with the epoch it was interned in) and
+resolve by id (`TickContext::resolve_planned_static`, `read_planned_accessor`,
+`read_planned_option_or`): the value is still resolved per frame — a bus
+writer stays live, a default is a cache hit — but no key is built and no
+memo searched. The fixture's settings reads and the output's go through it.
+
+**A Direct lane is a work item.** `nodes::fixture::direct_lane_job::DirectLaneJob`
+is the per-frame render once the engine is done deciding: the coordinate
+source and the lamp writer (encoding, power pass, selection, destination),
+plain data with no `Rc`, `RefCell`, resolver or context, because a second
+core will run lanes. Today the shader's sample stream drives its batches;
+its test runs one from a hand-built job and a fake sampler, allocating
+nothing.
+
+Reads through a compiled def view (`reader.get(ctx)`) resolve by an id the
+resolver interns once per epoch per `(node, accessor)`
+(`Resolver::intern_consumed_accessor`) instead of cloning the accessor into
+a key on every read.
+
+The resolver's own share: a bus read nobody provides is cached as a
+`ResolvedRoute::NoBusProvider` decision (it still answers the same error
+every frame), so an optional channel nobody writes costs no provider walk
+per frame.
+
 ## Node-kind feature gates (M2)
 
 > **This gate set is provisional and expected to be revisited.** It was sized

@@ -1,0 +1,20 @@
+{
+  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "project_format": 11,
+  "fixtures": {
+    "/disc.json": {
+      "lamps": 241,
+      "runs": [
+        [0, 241, "/disc_out.json", "0", 0, 3]
+      ],
+      "dark": []
+    },
+    "/grid.json": {
+      "lamps": 256,
+      "runs": [
+        [0, 256, "/grid_out.json", "0", 0, 3]
+      ],
+      "dark": []
+    }
+  }
+}

@@ -747,7 +747,7 @@ fn the_connected_card_carries_the_panel() {
         [
             crate::MASTER_CHANNEL,
             "clock.rate",
-            "playlist.cycle",
+            "playlist.entry",
             "glow",
             "palette"
         ]
