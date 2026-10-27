@@ -1,0 +1,40 @@
+{
+  "format": 5,
+  "sample_diameter": 1.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "objects": [
+    {
+      "id": "spoke",
+      "name": "spoke",
+      "shape": {
+        "repeat": {
+          "center": [
+            50.0,
+            50.0
+          ],
+          "count": 64,
+          "shape": {
+            "path": {
+              "points": [
+                [
+                  50.0,
+                  40.0
+                ],
+                [
+                  50.0,
+                  4.0
+                ]
+              ],
+              "count": 8
+            }
+          }
+        }
+      }
+    }
+  ]
+}

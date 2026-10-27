@@ -1,0 +1,84 @@
+{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "next": {
+    "circle": 2
+  },
+  "start": {
+    "output": {
+      "set": "main"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "circle1",
+      "name": "display",
+      "kind": {
+        "circle": {
+          "center": [
+            50.0,
+            50.0
+          ],
+          "start_angle_deg": -90.0,
+          "dir": "cw",
+          "drawn_from": "outside",
+          "next_ring": 6,
+          "rings": [
+            {
+              "key": "r1",
+              "radius": 42.0,
+              "count": 24
+            },
+            {
+              "key": "r2",
+              "radius": 32.0,
+              "count": 16
+            },
+            {
+              "key": "r3",
+              "radius": 22.0,
+              "count": 12
+            },
+            {
+              "key": "r4",
+              "radius": 12.0,
+              "count": 8
+            },
+            {
+              "key": "r5",
+              "radius": 0.0,
+              "count": 1
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "circle1/r3": {
+      "port": {
+        "set": 1
+      },
+      "channel": {
+        "set": {
+          "lamps": 0
+        }
+      },
+      "direction": "reverse"
+    }
+  }
+}

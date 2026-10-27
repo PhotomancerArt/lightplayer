@@ -1,0 +1,42 @@
+{
+  "format": 6,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "start": {
+    "output": {
+      "set": "lane1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "lane-1",
+      "name": "lane-1",
+      "kind": {
+        "grid": {
+          "origin": [
+            1.0,
+            2.0
+          ],
+          "cols": 8,
+          "rows": 16,
+          "pitch": 1.8333,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
+      }
+    }
+  ]
+}

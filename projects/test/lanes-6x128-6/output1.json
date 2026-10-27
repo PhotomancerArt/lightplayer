@@ -1,0 +1,24 @@
+{
+  "kind": "Output",
+  "name": "lane1",
+  "ports": {
+    "0": {
+      "endpoint": "ws281x:local:D0"
+    }
+  },
+  "bindings": {
+    "input": {
+      "source": "bus:control.out/ch1"
+    }
+  },
+  "options": {
+    "white_point": [
+      0.9,
+      1,
+      1
+    ],
+    "interpolation_enabled": true,
+    "dithering_enabled": false,
+    "lut_enabled": true
+  }
+}
