@@ -8,9 +8,10 @@
 //! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` container
 //!   manifests validate against `schemas/project.schema.json`, `module.json`
 //!   root modules validate against `schemas/module.schema.json`,
-//!   `*.map2d.json` files are fixture mapping documents, `*.patch.json`
-//!   files are fixture patch documents, and a project-level `editor.json`
-//!   is the editor-metadata document — all three validate by parsing with
+//!   `*.map2d.json` files are fixture mapping documents (format 6 since
+//!   project format 12; there are no `*.patch.json` patch documents any
+//!   more, and one is a failure), and a project-level `editor.json`
+//!   is the editor-metadata document — both validate by parsing with
 //!   the real `lpc-mapping` parser (which owns those formats) — and every
 //!   other `*.json` is a node artifact and validates against
 //!   `schemas/node.schema.json`. Non-JSON
@@ -30,9 +31,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-/// Workspace-relative roots that hold authored project/node artifacts.
-/// `lpc-mapping`'s format-6 examples are walked too: until M3 migrates the
-/// projects, they are the only format-6 map2d documents in the repo.
+/// Workspace-relative roots that hold authored project/node artifacts, and
+/// `lpc-mapping`'s format-6 examples.
 const ARTIFACT_ROOTS: &[&str] = &[
     "projects",
     "catalog",
@@ -84,7 +84,10 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             }
             if rel.ends_with(".patch.json") {
                 patches += 1;
-                validate_patch_file(file, &rel, &mut failures)?;
+                failures.push(format!(
+                    "{rel}: a patch document; since project format 12 a fixture's \
+                     map2d holds its patching"
+                ));
                 continue;
             }
             if file.file_name().is_some_and(|name| name == "editor.json") {
@@ -115,6 +118,46 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             failures.len(),
             failures.join("\n")
         );
+    }
+    Ok(())
+}
+
+/// Every project root the format-12 upgrade migrated (M3 P4): each map2d in
+/// them is format 6, and no patch document remains (one file holds a
+/// fixture's patching).
+const MIGRATED_ROOTS: &[&str] = &[
+    "projects",
+    "catalog",
+    "lab/mapping/projects",
+    "lp-fw/fw-browser/www/smoke-project",
+    "lp-app/lpa-studio-core/tests/fixtures",
+];
+
+#[test]
+fn every_migrated_map2d_is_format_6_and_no_patch_document_remains() -> Result<()> {
+    let workspace = workspace_dir();
+    let mut mappings = 0usize;
+    let mut failures = Vec::new();
+    for root in MIGRATED_ROOTS {
+        for file in walk_json_files(&workspace, root)? {
+            let rel = relative(&workspace, &file);
+            if rel.ends_with(".patch.json") {
+                failures.push(format!("{rel}: a patch document remains"));
+            }
+            if rel.ends_with(".map2d.json") {
+                mappings += 1;
+                let text =
+                    std::fs::read_to_string(&file).with_context(|| format!("reading {rel}"))?;
+                let format = lpc_mapping::map2d6::peek_format(&text);
+                if format != Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
+                    failures.push(format!("{rel}: map2d format {format:?}, not 6"));
+                }
+            }
+        }
+    }
+    assert!(mappings > 100, "only {mappings} map2d documents walked");
+    if !failures.is_empty() {
+        bail!("{}", failures.join("\n"));
     }
     Ok(())
 }
@@ -306,43 +349,32 @@ fn validate_file(
 }
 
 /// Validate a `*.map2d.json` mapping document with the owning parser —
-/// stricter than a JSON Schema: it enforces the format gate and resolves.
-/// The peeked format picks the parser: 6 is the parts-and-patching document
-/// (`lpc_mapping::map2d6`), read and rendered; 1 to 5 (and anything else,
-/// refused by name) go to today's `Map2dDoc`.
+/// stricter than a JSON Schema: it enforces the format gate and renders.
+/// A project at format 12 holds map2d format 6 only (the parts-and-patching
+/// document, `lpc_mapping::map2d6`), read and rendered; any other format is
+/// a failure, named.
 fn validate_map2d_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
-    if lpc_mapping::map2d6::peek_format(&text) == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
-        match lpc_mapping::map2d6::read(&text) {
-            Ok(mapping) => {
-                if let Err(error) = lpc_mapping::part::render(&mapping) {
-                    failures.push(format!("{rel}: does not render: {error}"));
-                }
-            }
-            Err(error) => failures.push(format!("{rel}: {error}")),
+    match lpc_mapping::map2d6::peek_format(&text) {
+        Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) => {}
+        Ok(format) => {
+            failures.push(format!(
+                "{rel}: map2d format {format}; a format-12 project holds format 6"
+            ));
+            return Ok(());
         }
-        return Ok(());
+        Err(error) => {
+            failures.push(format!("{rel}: {error}"));
+            return Ok(());
+        }
     }
-    match lpc_mapping::Map2dDoc::from_json(&text) {
-        Ok(doc) => {
-            if let Err(error) = lpc_mapping::resolve(&doc) {
-                failures.push(format!("{rel}: does not resolve: {error}"));
+    match lpc_mapping::map2d6::read(&text) {
+        Ok(mapping) => {
+            if let Err(error) = lpc_mapping::part::render(&mapping) {
+                failures.push(format!("{rel}: does not render: {error}"));
             }
         }
         Err(error) => failures.push(format!("{rel}: {error}")),
-    }
-    Ok(())
-}
-
-/// Patch documents validate by PARSING with the real `lpc-mapping` parser,
-/// which owns that format. They are not resolved here: resolution is
-/// fixture-relative (it needs the lamp count the fixture's mapping produces),
-/// and the document alone does not carry it — the loader does that, and
-/// reports it on the fixture.
-fn validate_patch_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
-    let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
-    if let Err(error) = lpc_mapping::PatchDoc::from_json(&text) {
-        failures.push(format!("{rel}: {error}"));
     }
     Ok(())
 }
