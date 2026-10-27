@@ -3428,8 +3428,12 @@ build-xt-fixtures:
 # without it that module is not compiled and its tests silently do not run.
 # CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
 # the single most expensive test compile); locally it is part of `test-rust`.
+# The mapping lab's crates ride along: Studio's Graph mounts them, they are
+# not default members, and nothing else runs their statements. Not
+# `lab-mapping-fit-tests` (slow, and retired with the old patch path).
 test-studio-host:
-    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories \
+        -p lab-mapping-model -p lab-mapping-files -p lab-layout -p lab-arrows
 
 # The browser CPU tier's shader frontend, on the engine's own palette suite.
 #
