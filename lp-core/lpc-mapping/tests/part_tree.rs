@@ -32,6 +32,26 @@ fn a_path_is_its_own_segment() {
     assert_eq!(tree.segments()[0].count(), 5);
 }
 
+/// Taking a tree's positions moves them out whole, in lamp order, and
+/// leaves its segments as they were.
+#[test]
+fn taking_the_positions_moves_them_out_and_keeps_the_segments() {
+    let mut m = Mapping::new();
+    add(&mut m, circle(&[(40.0, 24), (20.0, 12)]));
+    let mut tree = render(&m).unwrap();
+    let expected = tree.positions().to_vec();
+    let segments = tree.segments().to_vec();
+    let taken = tree.take_positions();
+    assert_eq!(taken, expected);
+    assert_eq!(
+        taken.capacity(),
+        taken.len(),
+        "still the one exact-size buffer"
+    );
+    assert!(tree.positions().is_empty(), "nothing else holds them");
+    assert_eq!(tree.segments(), segments.as_slice());
+}
+
 /// A circle renders one segment per ring, `circle1/r1`, `circle1/r2`,
 /// generated under the circle's own node.
 #[test]

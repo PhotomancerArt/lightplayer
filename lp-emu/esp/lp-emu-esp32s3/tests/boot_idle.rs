@@ -172,13 +172,15 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// `fw-esp32s3/hot_iram/`) the arena is 43 KiB smaller again: `.rwtext`
 /// carries ~40 KB of engine code and takes the bytes from the same span.
 /// Since `two-core` (2026-10-24) it is 8 KiB smaller once more: core 1's
-/// stack is a `.bss` static.
+/// stack is a `.bss` static. Since the mapping patcher joined the engine (PR
+/// #1314, 2026-10-27) the static RAM is 48 bytes larger and the arena and the
+/// radio region start 0x30 higher.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
 [INIT] chip=esp32s3 arch=xtensa heap=83968+73744=157712 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fcade68+83968 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fcade98+83968 (dram_seg arena, Internal)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
-[INIT] heap region: 0x3fca1e50+49152 (radio)
+[INIT] heap region: 0x3fca1e80+49152 (radio)
 [INIT] psram: on, 8388608 bytes at 0x3c800000 (MMU entries 0x80..0x100), self-test passed
 [INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
@@ -190,7 +192,7 @@ const HELLO: &str = "\
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
 const HELLO_BYTES: usize = 670;
-const HELLO_SHA: &str = "462124b8e1e122638d290231d147032cc8b3df9854d5e5cd19f285a60217ad94";
+const HELLO_SHA: &str = "684bc75d59852e295a1b83daf250f5aca097af8e87fd67a2c8b45f4c13cc0154";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();

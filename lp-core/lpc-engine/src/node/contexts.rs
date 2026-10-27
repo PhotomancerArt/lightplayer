@@ -635,6 +635,28 @@ impl<'r> TickContext<'r> {
         self.resolver.known_output_names()
     }
 
+    /// What the port tables [`Self::control_patch_outputs`] gives this node
+    /// were read under: cheap, read every frame; ask for the tables only
+    /// when it moved ([`crate::node::PortTablesKey`]).
+    pub fn port_tables_key(&self) -> crate::node::PortTablesKey {
+        crate::node::PortTablesKey {
+            structure_epoch: self.structure_epoch(),
+            output_identities: self.output_identity_revision(),
+        }
+    }
+
+    /// The named outputs that read this node's bus channel, with their port
+    /// tables, and the key they were read under. Allocates: ask only when
+    /// [`Self::port_tables_key`] moved.
+    pub fn control_patch_outputs(
+        &self,
+    ) -> (crate::node::ReachableOutputs, crate::node::PortTablesKey) {
+        (
+            self.resolver.control_patch_outputs(self.node_id),
+            self.port_tables_key(),
+        )
+    }
+
     /// Publishes this node's timebase for the current tick.
     ///
     /// A node that produces a [`lpc_model::TimeProduct`] calls this from its

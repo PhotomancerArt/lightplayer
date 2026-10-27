@@ -49,6 +49,15 @@ impl Tree {
         &self.positions
     }
 
+    /// Move every lamp's position out, leaving the tree without them: the
+    /// engine keeps them once, in its own carrier, and the tree (nodes and
+    /// segments, which patching reads) without a second copy. Afterwards
+    /// [`Tree::positions`] is empty and [`Tree::lamps_of`] must not be
+    /// called.
+    pub fn take_positions(&mut self) -> Vec<[f32; 2]> {
+        core::mem::take(&mut self.positions)
+    }
+
     /// One segment's lamp positions, lamp 0 first.
     #[must_use]
     pub fn lamps_of(&self, segment: &Segment) -> &[[f32; 2]] {

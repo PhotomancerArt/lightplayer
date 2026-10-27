@@ -222,6 +222,13 @@ pub trait TickResolver {
         (Vec::new(), Revision::default())
     }
 
+    /// The named outputs that read `producer`'s bus channel, with their port
+    /// tables ([`ResolveHost::control_patch_outputs`]). Empty on a fake.
+    fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
+        let _ = producer;
+        crate::node::ReachableOutputs::default()
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: RuntimeBufferId,
@@ -410,6 +417,10 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
 
     fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
         self.host.known_output_names()
+    }
+
+    fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
+        self.host.control_patch_outputs(producer)
     }
 
     fn output_identity_revision(&self) -> Revision {
