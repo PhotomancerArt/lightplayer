@@ -27,7 +27,11 @@ pub enum Map2d6Error {
         reason: String,
     },
     /// A circle's `next_ring` would mint a key a ring already has.
-    RingCounterBelowKey { part: String, next: u32, key: String },
+    RingCounterBelowKey {
+        part: String,
+        next: u32,
+        key: String,
+    },
     /// An override keyed by text that is not a node id.
     MalformedOverrideId { id: String },
     /// A repeat of more copies than [`crate::MAX_REPEAT_COUNT`].

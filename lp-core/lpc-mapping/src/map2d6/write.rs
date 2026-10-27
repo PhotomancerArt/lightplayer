@@ -75,10 +75,9 @@ pub fn write(mapping: &Mapping) -> Result<String, Map2d6Error> {
             .collect::<Result<Vec<_>, _>>()?,
         overrides,
     };
-    let mut json = serde_json::to_string_pretty(&doc)
-        .map_err(|e| Map2d6Error::NotWritable {
-            reason: e.to_string(),
-        })?;
+    let mut json = serde_json::to_string_pretty(&doc).map_err(|e| Map2d6Error::NotWritable {
+        reason: e.to_string(),
+    })?;
     json.push('\n');
     Ok(json)
 }
@@ -110,7 +109,12 @@ fn write_part(part: &Part) -> Result<PartDoc, Map2d6Error> {
             finite(id, filled.points.as_flattened())?;
             finite(
                 id,
-                &[filled.pitch, filled.angle_deg, filled.origin[0], filled.origin[1]],
+                &[
+                    filled.pitch,
+                    filled.angle_deg,
+                    filled.origin[0],
+                    filled.origin[1],
+                ],
             )?;
             KindDoc::FilledPolygon(filled.clone())
         }
@@ -145,7 +149,10 @@ fn write_part(part: &Part) -> Result<PartDoc, Map2d6Error> {
 }
 
 fn write_circle(id: &str, circle: &Circle) -> Result<CircleDoc, Map2d6Error> {
-    finite(id, &[circle.center[0], circle.center[1], circle.start_angle_deg])?;
+    finite(
+        id,
+        &[circle.center[0], circle.center[1], circle.start_angle_deg],
+    )?;
     let mut next_ring = circle.next_ring.max(1);
     let mut rings = Vec::with_capacity(circle.rings.len());
     for ring in &circle.rings {
