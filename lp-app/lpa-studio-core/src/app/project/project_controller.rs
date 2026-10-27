@@ -6852,7 +6852,7 @@ impl ProjectController {
                 PanelWriteOp {
                     scope: op.scope,
                     channel: lpc_model::PLAYLIST_ENTRY_CHANNEL.to_string(),
-                    value,
+                    value: value.into(),
                     ttl_ms: None,
                 },
             )

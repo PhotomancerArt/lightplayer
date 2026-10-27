@@ -198,7 +198,7 @@ fn a_restored_pick_is_loaded_by_the_first_tick() {
             .engine()
             .panel_writers()
             .get(scope, &pick)
-            .map(|writer| &writer.value),
+            .and_then(|writer| writer.value.as_value()),
         Some(&LpValue::U32(PULSE)),
         "the pick is restored where the playlist reads it"
     );

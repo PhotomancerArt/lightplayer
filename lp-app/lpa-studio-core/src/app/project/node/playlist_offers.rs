@@ -227,7 +227,8 @@ fn cycle_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarge
                 "Cycle the patterns".to_string(),
             );
         }
-        let hold = panel_write_op(&target, PlaylistCycle::Hold.to_lp_value());
+        let hold_value = PlaylistCycle::Hold.to_lp_value();
+        let hold = panel_write_op(&target, hold_value.clone());
         match &hold_pick {
             Some(pick) => UiAction::from_op(
                 ControllerId::new(ProjectController::NODE_ID),
@@ -237,7 +238,7 @@ fn cycle_offer(at: &OfferPath, facts: &PatternPickerFacts, target: &UiPanelTarge
                 },
             )
             .with_label("Stop the cycle".to_string()),
-            None => panel_write_action(&target, hold.value, "Stop the cycle".to_string()),
+            None => panel_write_action(&target, hold_value, "Stop the cycle".to_string()),
         }
     };
     let unbound = write(!cycling);
@@ -649,7 +650,7 @@ mod tests {
         let channels: Vec<(&str, &LpValue)> = batch
             .writes
             .iter()
-            .map(|write| (write.channel.as_str(), &write.value))
+            .filter_map(|write| Some((write.channel.as_str(), write.value.as_value()?)))
             .collect();
         assert_eq!(
             channels,
