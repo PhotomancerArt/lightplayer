@@ -31,7 +31,14 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 /// Workspace-relative roots that hold authored project/node artifacts.
-const ARTIFACT_ROOTS: &[&str] = &["projects", "catalog", "lp-fw/fw-browser/www/smoke-project"];
+/// `lpc-mapping`'s format-6 examples are walked too: until M3 migrates the
+/// projects, they are the only format-6 map2d documents in the repo.
+const ARTIFACT_ROOTS: &[&str] = &[
+    "projects",
+    "catalog",
+    "lp-fw/fw-browser/www/smoke-project",
+    "lp-core/lpc-mapping/tests/format6",
+];
 
 /// Workspace-relative roots that hold hardware board manifests.
 const HARDWARE_ROOTS: &[&str] = &["lp-core/lpc-hardware/boards"];
@@ -300,8 +307,22 @@ fn validate_file(
 
 /// Validate a `*.map2d.json` mapping document with the owning parser —
 /// stricter than a JSON Schema: it enforces the format gate and resolves.
+/// The peeked format picks the parser: 6 is the parts-and-patching document
+/// (`lpc_mapping::map2d6`), read and rendered; 1 to 5 (and anything else,
+/// refused by name) go to today's `Map2dDoc`.
 fn validate_map2d_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
+    if lpc_mapping::map2d6::peek_format(&text) == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
+        match lpc_mapping::map2d6::read(&text) {
+            Ok(mapping) => {
+                if let Err(error) = lpc_mapping::part::render(&mapping) {
+                    failures.push(format!("{rel}: does not render: {error}"));
+                }
+            }
+            Err(error) => failures.push(format!("{rel}: {error}")),
+        }
+        return Ok(());
+    }
     match lpc_mapping::Map2dDoc::from_json(&text) {
         Ok(doc) => {
             if let Err(error) = lpc_mapping::resolve(&doc) {
