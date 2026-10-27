@@ -219,13 +219,14 @@ mod tests {
     fn a_port_edit_re_patches() {
         // The fixture starts on port 1, which begins where port 0 ends.
         let mut parts = parts_patch(Start::at("main", 1, Amount::lamps(0)));
+        // path1 and path2 land end to end: one run of both.
         parts.ensure_with(key(1, 1), || reachable(&[3, 10]), ColorOrder::Rgb);
-        assert_eq!(lamps_of(&parts.runs), vec![(0, 3, 3), (3, 1, 6)]);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 4, 3)]);
         // Port 0 grows to 5 lamps: the edit moved the tables' key (P1).
         assert!(parts.ensure_with(key(1, 2), || reachable(&[5, 10]), ColorOrder::Rgb));
         assert_eq!(
             lamps_of(&parts.runs),
-            vec![(0, 3, 5), (3, 1, 8)],
+            vec![(0, 4, 5)],
             "everything on port 1 moved with its start"
         );
         // Port 1 shrinks to 3 lamps: path2 no longer fits and wraps to port 2,
@@ -289,7 +290,57 @@ mod tests {
         let mut parts = parts_patch(Start::at("main", 0, Amount::lamps(0)));
         parts.ensure_with(key(1, 1), || reachable(&[10, 10]), ColorOrder::Rgb);
         assert_eq!(parts.status, None);
-        assert_eq!(parts.runs.len(), 2);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 4, 0)]);
+    }
+
+    /// A fixture whose segments land end to end publishes one run, and every
+    /// lamp of it lands where `Patching::landing` says.
+    #[test]
+    fn a_fixture_whose_segments_are_contiguous_publishes_one_run() {
+        use lpc_mapping::part::{Repeat, render};
+        use lpc_mapping::patching::patch_mapping;
+        use lpc_mapping::{PatchedRange, patched_wire_lamp};
+
+        // segments-64-6's shape: 64 copies of an 8-lamp spoke, from lamp 0
+        // of port 0 of `main`.
+        let spoke = Part::new(
+            PartId::new("path1").unwrap(),
+            PartKind::Shape(Shape::Path(Path::through(&[[50.0, 40.0], [50.0, 4.0]], 8))),
+        );
+        let mut mapping = Mapping::new();
+        mapping.parts.push(Part::new(
+            PartId::new("spoke").unwrap(),
+            PartKind::Repeat(Repeat::new(spoke, [50.0, 50.0], 64)),
+        ));
+        mapping.start = Start::at("main", 0, Amount::lamps(0));
+        let mut parts = FixturePartsPatch::new(mapping.clone());
+        let lamps = reachable(&[512]);
+        parts.ensure_with(key(1, 1), || lamps.clone(), ColorOrder::Rgb);
+        assert_eq!(parts.status, None);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 512, 0)], "one run, not 64");
+
+        let tree = render(&mapping).unwrap();
+        let patching = patch_mapping(&mapping, &tree, &patcher_ports(&lamps));
+        let run = &parts.runs[0];
+        let range = PatchedRange {
+            start: run.start,
+            count: run.count,
+            lamp: run.lamp,
+            reversed: run.reversed,
+            offset: run.offset,
+            output: run.output.clone(),
+        };
+        for segment in tree.segments() {
+            for j in 0..segment.lamps.len() as u32 {
+                let landed = patching.landing(&segment.id, j).unwrap();
+                assert_eq!(
+                    patched_wire_lamp(&range, segment.lamps.start + j - run.start),
+                    landed.channel / 3,
+                    "{} lamp {j}",
+                    segment.id
+                );
+            }
+        }
     }
 
     // --- helpers ---
