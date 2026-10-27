@@ -404,7 +404,9 @@ fn counters_are_written_honest() {
 
 /// Every layout in the catalog, the test projects and the lab's projects,
 /// written as format 6 and read back, renders today's lamps bit for bit:
-/// ring sets as circles split one, gaps as moves.
+/// ring sets as circles split one, gaps as moves. A document already at
+/// format 6 (the engine's test projects, `projects/test/*-6`) has no
+/// "today's lamps": it reads, renders, and writes back byte for byte.
 #[test]
 fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
     let mut files = Vec::new();
@@ -414,7 +416,14 @@ fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
     files.sort();
     assert!(files.len() >= 100, "found {} documents", files.len());
     for file in files {
-        let doc = Map2dDoc::from_json(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let source = std::fs::read_to_string(&file).unwrap();
+        if map2d6::peek_format(&source) == Ok(map2d6::MAP2D6_FORMAT) {
+            let m = map2d6::read(&source).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            render(&m).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            assert_eq!(map2d6::write(&m).unwrap(), source, "{}", file.display());
+            continue;
+        }
+        let doc = Map2dDoc::from_json(&source).unwrap();
         let today = resolve(&doc).unwrap();
         let text = map2d6::write(&today_as_mapping(&doc)).unwrap();
         let m = map2d6::read(&text).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
