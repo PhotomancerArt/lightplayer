@@ -1,0 +1,17 @@
+{
+  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "project_format": 11,
+  "fixtures": {
+    "/fixture.json": {
+      "lamps": 80,
+      "runs": [
+        [0, 16, "/output.json", "0", 0, 3],
+        [16, 16, "/output.json", "1", 0, 3],
+        [32, 16, "/output.json", "2", 0, 3],
+        [48, 16, "/output.json", "3", 0, 3],
+        [64, 16, "/output.json", "4", 0, 3]
+      ],
+      "dark": []
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "recorded_at": "c2b9c9573289b34f169bcadcc050aaf14a564217",
+  "project_format": 11,
+  "refused": "ProjectParse { file: \"/module.json\", error: \"parse error: uid: unknown field \\\"uid\\\". Expected one of: nodes, bindings, inputs, exports, meta, provenance.\" }",
+  "fixtures": {}
+}
