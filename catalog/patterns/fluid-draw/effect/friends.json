@@ -1,0 +1,87 @@
+{
+  "kind": "ComputeShader",
+  "source": "friends.glsl",
+  "bindings": {
+    "touches": {
+      "source": "bus:touches"
+    },
+    "emitters": {
+      "target": "bus:fluid.emitters"
+    }
+  },
+  "consumed": {
+    "touches": {
+      "kind": "map",
+      "value": "lp::touch::Touch",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "Touches",
+      "description": "Fingers on the board's picture, in pattern space"
+    },
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Seconds from the scope's time product"
+    },
+    "wave_a": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 20.2683403,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Friend A",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_b": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 27.3181977,
+        "waveform": "ramp",
+        "phase_offset": 0.3342254
+      },
+      "default": 0,
+      "label": "Friend B",
+      "description": "Cycle position (0-1)"
+    },
+    "wave_c": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 33.0693973,
+        "waveform": "ramp",
+        "phase_offset": 0.6684507
+      },
+      "default": 0,
+      "label": "Friend C",
+      "description": "Cycle position (0-1)"
+    }
+  },
+  "produced": {
+    "emitters": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 3,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

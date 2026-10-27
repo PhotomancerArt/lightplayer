@@ -800,3 +800,9 @@ hours), and neither is an exit path on its own.
   job. Twice in two days on the full capture makes the 2026-10-23 question
   (is 180 s too tight for 2,519 stories on a loaded runner) a recurring
   burden, not a one-off.
+- 2026-10-27 — **`oxipng` hit its 180 s bound a third time**, on #1219
+  (drawing on the picture; Studio files touched). "Validate story baselines",
+  run 40561719850 attempt 1: all 2,549 stories captured, then `optimizing
+  PNGs (oxipng) — 2549/2549 captured` at `[+17:30]` and `Error: oxipng did
+  not exit within 180000 ms — killed.` Re-ran the failed job. Three in five
+  days.

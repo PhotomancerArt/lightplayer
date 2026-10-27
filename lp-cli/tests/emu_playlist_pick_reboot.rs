@@ -111,7 +111,7 @@ fn a_picked_pattern_survives_a_power_cut_on_the_emulated_c6() {
             WirePanelWriteRequest {
                 scope,
                 channel: lpc_model::PLAYLIST_ENTRY_CHANNEL.to_string(),
-                value: LpValue::U32(AURORA),
+                value: LpValue::U32(AURORA).into(),
                 ttl_ms: None,
             },
         ))

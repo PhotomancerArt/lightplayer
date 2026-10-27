@@ -54,7 +54,7 @@ fn panel_write_engages_shadows_and_clears_through_the_probe() {
     let response = project.panel_write(&WirePanelWriteRequest {
         scope,
         channel: "time".to_string(),
-        value: LpValue::F32(123.5),
+        value: LpValue::F32(123.5).into(),
         ttl_ms: None,
     });
     assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
@@ -103,7 +103,7 @@ fn panel_writes_touch_nothing_authored() {
     project.panel_write(&WirePanelWriteRequest {
         scope,
         channel: "time".to_string(),
-        value: LpValue::F32(9.0),
+        value: LpValue::F32(9.0).into(),
         ttl_ms: None,
     });
 
@@ -131,7 +131,7 @@ fn concurrent_writes_converge_on_the_last_writer() {
         let response = project.panel_write(&WirePanelWriteRequest {
             scope,
             channel: "time".to_string(),
-            value: LpValue::F32(value),
+            value: LpValue::F32(value).into(),
             ttl_ms: None,
         });
         assert_eq!(
@@ -159,7 +159,7 @@ fn a_stale_scope_rejects_normally() {
             owner: lpc_model::NodeId::new(9999),
         },
         channel: "time".to_string(),
-        value: LpValue::F32(1.0),
+        value: LpValue::F32(1.0).into(),
         ttl_ms: None,
     });
     assert!(
@@ -395,7 +395,7 @@ fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
     let response = project.panel_write(&WirePanelWriteRequest {
         scope,
         channel: "palette".to_string(),
-        value: picked.to_lp_value(),
+        value: picked.to_lp_value().into(),
         ttl_ms: None,
     });
     assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
@@ -447,7 +447,7 @@ fn a_gradient_panel_write_survives_a_wire_project_read() {
     let response = project.panel_write(&WirePanelWriteRequest {
         scope,
         channel: "palette".to_string(),
-        value: picked.to_lp_value(),
+        value: picked.to_lp_value().into(),
         ttl_ms: None,
     });
     assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });

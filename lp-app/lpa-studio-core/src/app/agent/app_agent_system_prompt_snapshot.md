@@ -237,6 +237,7 @@ A playlist plays one entry at a time. Its `cycle` is optional an object {kind: a
 - `comet` — Comet: A bright head sweeping the strip with a trail fading behind it, as a true 1D shader. Ported from WLED's Lighthouse.
 - `fire2012` — Fire 2012: Fire climbing the strip: white-hot at the base, tongues cooling as they rise, sparks thrown clear. Ported from WLED as a stateless shader.
 - `fireflies` — Fireflies: A few soft glows drift slowly over near-black, each pulsing on its own rhythm.
+- `fluid-draw` — Fluid: A fluid you draw in: drag on the board's picture and dye swirls after your finger; leave it and three drifting emitters stir it alone.
 - `heartbeat` — Heartbeat: The whole piece beats lub-dub, each beat spreading out from the centre, drifting slowly through the palette.
 - `linear-gradient` — Linear Gradient: The palette laid across the piece at an angle and scrolling, mirrored so it never jumps.
 - `meteor` — Meteor: A compute/render pair: the sim integrates meteor heads into a persistent map and the render shader draws their tails from it.

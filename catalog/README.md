@@ -129,7 +129,9 @@ source and size/motion rulers in its shader header, binds `bus:detail` and
 `noise-hard`, `veins`, `aurora` (fields); `linear-gradient`,
 `radial-gradient`, `spiral` (gradients); `color-wipe`, `scanner`,
 `ripples` (fronts); `twinkle`, `fireflies` (points); `heartbeat` (whole
-piece).
+piece). `fluid-draw` (name "Fluid") is the one to draw on: it reads
+`touches`, so a connected board's picture takes a finger, and it runs the
+native Fluid node in pattern space; see its README.
 
 Not here on purpose: `projects/test/fault-demo`, the shader that faults
 every frame to demonstrate "a fault is never black". Its loop never ends

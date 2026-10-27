@@ -850,7 +850,7 @@ async fn panel_time<Io: ClientIo>(client: &mut LpClient<Io>, value: f32) -> Resu
     let request = lpc_wire::WirePanelWriteRequest {
         scope: serde_json::from_value(scope).map_err(|e| e.to_string())?,
         channel: "time".to_string(),
-        value: LpValue::F32(value),
+        value: LpValue::F32(value).into(),
         ttl_ms: None,
     };
     client

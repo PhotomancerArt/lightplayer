@@ -1,6 +1,7 @@
+use crate::nodes::shader::ShaderCoords;
 use crate::{
-    BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, PositiveF32, PositiveF32Slot, Ratio,
-    RatioSlot, Slotted, TimeProductSlot, ValueSlot,
+    BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, OptionSlot, PositiveF32, PositiveF32Slot,
+    Ratio, RatioSlot, Slotted, TimeProductSlot, ValueSlot,
 };
 
 /// Authored fluid simulation node definition.
@@ -43,6 +44,15 @@ pub struct FluidDef {
         map(key = "u32", value_ref = "lp::fluid::Emitter")
     )]
     pub emitters: MapSlot<u32, FluidEmitter>,
+
+    /// Optional opt-in to pattern space (`"coords": "pattern"`), the same
+    /// key and values as the shader def's (ADR
+    /// `docs/adr/2026-09-24-pattern-space.md`). Absent (the state of every
+    /// fluid authored before the key existed) is [`ShaderCoords::Pixels`]:
+    /// the grid stretched over the render request and emitters normalized
+    /// over the grid, y down — byte-identical to before. Pattern: the grid
+    /// spans the lamps' box and emitters are read in pattern units, y up.
+    pub coords: OptionSlot<ValueSlot<ShaderCoords>>,
 }
 
 impl Default for FluidDef {
@@ -56,6 +66,7 @@ impl Default for FluidDef {
             viscosity: default_viscosity(),
             time: default_time(),
             emitters: MapSlot::default(),
+            coords: OptionSlot::none(),
         }
     }
 }
@@ -65,6 +76,16 @@ impl FluidDef {
 
     pub fn kind(&self) -> crate::NodeKind {
         crate::NodeKind::Fluid
+    }
+
+    /// The authored coordinate frame; absent reads as
+    /// [`ShaderCoords::Pixels`].
+    #[must_use]
+    pub fn coords(&self) -> ShaderCoords {
+        self.coords
+            .data
+            .as_ref()
+            .map_or(ShaderCoords::Pixels, |slot| *slot.value())
     }
 }
 
@@ -99,7 +120,8 @@ fn default_time() -> TimeProductSlot {
 mod tests {
     use super::*;
     use crate::{
-        NodeDef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape, StaticSlotShapeDescriptor,
+        NodeDef, SlotDirection, SlotMerge, SlotShape, SlotShapeRegistry, StaticSlotShape,
+        StaticSlotShapeDescriptor,
     };
 
     #[test]
@@ -165,6 +187,55 @@ mod tests {
                 id: FluidEmitter::SHAPE_ID
             }
         );
+    }
+
+    /// The pattern-space opt-in parses from `"coords": "pattern"`, and a def
+    /// without the key reads as Pixels (the old frame).
+    #[test]
+    fn fluid_def_parses_the_pattern_space_opt_in() {
+        let NodeDef::Fluid(def) =
+            NodeDef::from_json_str(r#"{ "kind": "Fluid", "coords": "pattern" }"#).expect("fluid")
+        else {
+            panic!("fluid def");
+        };
+        assert_eq!(def.coords(), ShaderCoords::Pattern);
+
+        let NodeDef::Fluid(def) = NodeDef::from_json_str(r#"{ "kind": "Fluid" }"#).expect("fluid")
+        else {
+            panic!("fluid def");
+        };
+        assert!(def.coords.is_none());
+        assert_eq!(def.coords(), ShaderCoords::Pixels);
+    }
+
+    /// Additive and optional: a fluid authored before the key existed writes
+    /// back without it (old files round-trip unchanged — no format bump),
+    /// and an authored one writes back as the string it was read from.
+    #[test]
+    fn coords_key_is_written_only_when_authored() {
+        let registry = SlotShapeRegistry::default();
+        let without = NodeDef::Fluid(FluidDef::default())
+            .write_json(&registry)
+            .expect("write");
+        assert!(!without.contains("coords"), "{without}");
+        let old = include_str!("../../../../../projects/test/fluid/fluid.json");
+        let written = NodeDef::from_json_str(old)
+            .expect("the shipped test fluid parses")
+            .write_json(&registry)
+            .expect("write");
+        assert!(!written.contains("coords"), "{written}");
+
+        let with = NodeDef::Fluid(FluidDef {
+            coords: OptionSlot::some(ValueSlot::new(ShaderCoords::Pattern)),
+            ..FluidDef::default()
+        })
+        .write_json(&registry)
+        .expect("write");
+        assert!(with.contains(r#""coords": "pattern""#), "{with}");
+        let NodeDef::Fluid(back) = NodeDef::from_json_str(&with).expect("read back") else {
+            panic!("fluid def");
+        };
+        assert_eq!(back.coords(), ShaderCoords::Pattern);
     }
 
     #[test]

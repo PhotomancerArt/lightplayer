@@ -95,6 +95,18 @@ pub trait ResolveHost {
         Vec::new()
     }
 
+    /// The held value of the engaged panel writer at `(scope, channel)`, for
+    /// a [`crate::dataflow::binding::BindingSource::PanelWriter`] route:
+    /// stamped with the writer's own write revision, so a value nobody
+    /// re-wrote reads as unchanged. `None` when nothing is engaged there.
+    fn panel_writer_production(
+        &self,
+        _scope: ScopeRef,
+        _channel: &ChannelName,
+    ) -> Option<crate::dataflow::resolver::Production> {
+        None
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,

@@ -517,6 +517,20 @@ impl DeviceLensAttachment {
         }
     }
 
+    /// The same stub over Bluetooth: a board the editor reaches by radio,
+    /// whose Play lens has an idle read budget.
+    pub(crate) fn ble_stub_for_test(uid: &str) -> Self {
+        Self {
+            device: lpa_devices::DeviceId(1),
+            link: lpa_devices::LinkId(1),
+            uid: uid.to_string(),
+            name: "XIAO ESP32-C6 · Bluetooth".to_string(),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            transport: LinkTransport::Ble,
+            features: None,
+        }
+    }
+
     /// The same stub over an EMU's tab link — the C6's own image on an
     /// emulated SoC in this page.
     pub(crate) fn emu_stub_for_test(uid: &str) -> Self {

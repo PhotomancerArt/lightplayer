@@ -1159,6 +1159,29 @@ impl ProjectController {
         choices
     }
 
+    /// Where a stroke's touches go on the open project: the innermost
+    /// loaded module scope with a `touches` reader (plan D12,
+    /// [`crate::app::draw::touches_draw_target`]). `None` before the first
+    /// binding-graph read, and when nothing reads touches.
+    pub fn touches_draw_target(&self) -> Option<crate::UiDrawTarget> {
+        let graph = self.binding_graph()?;
+        crate::app::draw::touches_draw_target(graph, |id| self.runtime_node_depth(id))
+    }
+
+    /// How deep the node carrying runtime id `id` sits in the loaded tree
+    /// (a root node is 0); `None` for a node the tree does not hold.
+    fn runtime_node_depth(&self, id: lpc_model::NodeId) -> Option<usize> {
+        fn walk(node: &NodeController, id: lpc_model::NodeId, depth: usize) -> Option<usize> {
+            if node.target().node_id == id {
+                return Some(depth);
+            }
+            node.children()
+                .iter()
+                .find_map(|child| walk(child, id, depth + 1))
+        }
+        self.root_nodes.iter().find_map(|node| walk(node, id, 0))
+    }
+
     /// Find the node controller currently carrying a runtime node id.
     pub(super) fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
         fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
@@ -4939,6 +4962,8 @@ impl ProjectController {
                 .is_root_module(owner)
                 .then(|| self.panel_auto_save())
                 .flatten(),
+            // The studio controller decides (it knows the session).
+            drawable: None,
             // Designation is a property of one module, so the popup row
             // rides every card but the root (an export must never point at
             // the root — vision Q3). The CONTAINER's own exports are not on
@@ -6827,7 +6852,7 @@ impl ProjectController {
                 PanelWriteOp {
                     scope: op.scope,
                     channel: lpc_model::PLAYLIST_ENTRY_CHANNEL.to_string(),
-                    value,
+                    value: value.into(),
                     ttl_ms: None,
                 },
             )

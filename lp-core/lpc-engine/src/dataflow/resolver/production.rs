@@ -70,6 +70,10 @@ pub enum ProductionSource {
     BusBinding {
         binding: BindingRef,
     },
+    /// An engaged panel writer's held value. Not structural: it is read from
+    /// the writer store every frame, because a write changes the value
+    /// without changing the graph.
+    PanelWriter,
 }
 
 #[cfg(test)]

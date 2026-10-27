@@ -417,13 +417,23 @@ impl Project {
         let scope = lpc_engine::node::ScopeRef::from_wire(request.scope);
         // A write to a scope no node introduces is a stale gesture from a
         // client racing an edit — reject normally, never poison.
+        // A set (a touch set) is gesture state: it rides a momentary write
+        // only, so it can never reach `.lp/panel.json`, which is leaf-only.
+        if request.value.is_map() && request.ttl_ms.is_none() {
+            return lpc_wire::WirePanelCommandResponse::Rejected {
+                reason: alloc::format!(
+                    "a set can only be written momentarily (with ttl_ms) on {:?}",
+                    request.channel
+                ),
+            };
+        }
         let engine = self.engine_mut();
         if engine.tree().get(scope.owner()).is_none() {
             return lpc_wire::WirePanelCommandResponse::Rejected {
                 reason: alloc::format!("unknown scope owner {:?}", scope.owner()),
             };
         }
-        engine.panel_write(
+        engine.panel_write_value(
             scope,
             lpc_model::ChannelName(request.channel.clone()),
             request.value.clone(),

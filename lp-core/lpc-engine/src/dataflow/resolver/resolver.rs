@@ -384,6 +384,22 @@ pub(crate) fn materialize_literal_product(
     WithRevision::new(frame, value.clone())
 }
 
+/// Materialize a literal `u32`-keyed set as map slot data: every entry and
+/// the key set stamped with `frame`, the way a leaf literal is.
+pub(crate) fn materialize_literal_map(
+    entries: &[(u32, lpc_model::LpValue)],
+    frame: Revision,
+) -> lpc_model::SlotData {
+    let mut map = lp_collection::VecMap::new();
+    for (key, value) in entries {
+        map.insert(
+            lpc_model::SlotMapKey::U32(*key),
+            lpc_model::SlotData::Value(WithRevision::new(frame, value.clone())),
+        );
+    }
+    lpc_model::SlotData::Map(lpc_model::SlotMapDyn::with_revision(frame, map))
+}
+
 /// Convert [`lpc_model::LpValue`] to [`LpsValueF32`] for shader-compatible literals.
 ///
 /// Not every runtime domain maps 1:1 into `LpsValueF32`; products and resources

@@ -138,6 +138,9 @@ pub(crate) fn device_roster_config_for_test() -> crate::DeviceRosterConfig {
 /// Connected: the home page holds the open session (Connect, Done, Edit,
 /// and which surface the session shows on).
 mod connect_flow;
+/// Drawing on the picture: which live pictures are drawable, a reported
+/// stroke into paced touch writes, and the picture's pace meanwhile.
+mod draw_flow;
 
 pub struct StudioController {
     /// The rebuilt device layer (M3): the `lpa-devices` roster plus the
@@ -277,6 +280,12 @@ pub struct StudioController {
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
     play_views: u32,
+    /// The stroke on a drawable picture, if one is live, and what the
+    /// picture's feed still owes it (`draw_flow`).
+    strokes: crate::StrokeController,
+    /// The lamp layout's frame the live stroke converts through, read once
+    /// when the stroke starts.
+    stroke_frame: Option<crate::LampPictureFrame>,
     /// How many times a card's Sign in was pressed: the shell leaves for
     /// sign-in when the count it sees advances (`UiStudioView::sign_in_requests`).
     sign_in_seq: u64,
@@ -603,6 +612,8 @@ impl StudioController {
             place: None,
             graph: crate::app::graph::GraphController::default(),
             play_views: 0,
+            strokes: crate::StrokeController::default(),
+            stroke_frame: None,
             sign_in_seq: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
@@ -3008,6 +3019,12 @@ impl StudioController {
         if let Some(feed) = self.device_feed_due_in(now) {
             delay = Some(delay.map_or(feed, |current| current.min(feed)));
         }
+        // A live stroke owes the board a write on its own clock (the
+        // newest positions, a resting finger's renewal): the timer must
+        // fire by then, whatever the lens's gap.
+        if let Some(stroke) = self.stroke_due_in(now) {
+            delay = Some(delay.map_or(stroke, |current| current.min(stroke)));
+        }
         // A held lens looks for its board often: the reconnect should
         // show the moment it lands, not a Play-mode idle gap later.
         if self.lens_hold.is_some() {
@@ -3032,10 +3049,20 @@ impl StudioController {
         // feed (`DEVICE_CARD_FEED_BLE_INTERVAL`); the Play budget stays the
         // play page's.
         let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
+        // A stroke tightens the gap like a verdict chase does: the picture
+        // catches up with the finger while it draws and for a second after
+        // (drawing-on-the-picture Q8), then the gap is the session's own.
+        let chase = match (
+            self.project.verdict_chase_interval(),
+            self.stroke_feed_gap((self.now_secs)()),
+        ) {
+            (Some(verdict), Some(stroke)) => Some(verdict.min(stroke)),
+            (verdict, stroke) => verdict.or(stroke),
+        };
         crate::app::studio::lens_refresh_gap_policy(
             session.cadence_interval(),
             ble_play,
-            self.project.verdict_chase_interval(),
+            chase,
             session.backoff_delay(),
         )
     }
@@ -3534,6 +3561,15 @@ impl StudioController {
                 &offers,
                 panel.as_ref().map(|(device, panel)| (*device, panel)),
             ));
+            // The connected card's picture, while its panel is up and a
+            // `touches` reader is loaded: a finger on it draws.
+            if let Some((device, drawable)) = self.board_drawable() {
+                for card in &mut home.devices.cards {
+                    if card.device == device && card.panel.is_some() {
+                        card.picture.drawable = Some(drawable.clone());
+                    }
+                }
+            }
             offers.set_focus(self.offer_focus(true));
             let app_agent = self.app_agent_view_placed(&mut offers);
             // A connected session on its card still has an address: the
@@ -3589,6 +3625,17 @@ impl StudioController {
                 lens.and_then(|session| session.output_wire_status()),
                 None,
             );
+            // The root hero is drawable when it draws the board's own
+            // composed output (the picture strokes convert through) — not a
+            // texture mirror, nor a control product of the scope's.
+            let drawable = self.project_drawable();
+            if let Some(face) = editor.root_module_face_mut() {
+                let hero_is_the_output = face.preview.as_ref().is_some_and(|hero| {
+                    hero.product.is_none()
+                        && matches!(hero.preview, crate::UiProductPreview::ControlNative(_))
+                });
+                face.drawable = drawable.filter(|_| hero_is_the_output);
+            }
         }
         // Hoist the project's edit state to the shell: the web edge arms the
         // unload gate from here rather than walking the pane tree.
@@ -9266,8 +9313,8 @@ impl StudioController {
     /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, home_lines, looking_at_lines, opening_line,
-            page_line, project_lines,
+            AppReadoutSnapshot, device_lines, drawable_line, home_lines, looking_at_lines,
+            opening_line, page_line, project_lines,
         };
         let home_view = self.home_view();
         let home = home_view.is_some();
@@ -9327,6 +9374,35 @@ impl StudioController {
         // pane offers none once the project is ready, and every other state
         // shows home. Tree focus actions stay out too.
         let view = self.view();
+        // A picture a finger can draw on, in one line, read off the view the
+        // web draws: the connected board's card on the home page, the
+        // project's picture (the editor's hero, Play's banner) elsewhere.
+        let drawable_card = view.home.as_ref().and_then(|home| {
+            home.devices
+                .cards
+                .iter()
+                .find(|card| card.picture.drawable.is_some())
+        });
+        let project_drawable = view.panes.iter().any(|pane| match &pane.body {
+            UiViewContent::ProjectEditor(editor) => editor
+                .root_module_face()
+                .is_some_and(|face| face.drawable.is_some()),
+            _ => false,
+        });
+        if let Some(card) = drawable_card {
+            let title = roster
+                .roster
+                .devices
+                .iter()
+                .find(|board| board.id == card.device)
+                .map_or_else(
+                    || "the connected board".to_string(),
+                    |board| format!("{:?}", board.title),
+                );
+            text.push_str(&drawable_line(&title));
+        } else if project_drawable {
+            text.push_str(&drawable_line("the project"));
+        }
         // Show (`show/…`) is the chat's link for the user, never a verb the
         // agent presses: it moves the user's view.
         let show = crate::OfferPath::root(crate::OfferPath::SHOW);
@@ -9630,9 +9706,16 @@ impl StudioController {
     /// has no edit buffer behind it, so without the echo its only feedback
     /// was the probe round trip and drags moved at probe cadence; the echo
     /// retires as soon as a snapshot shows the engine holding the writer.
+    ///
+    /// A momentary write (a stroke's touch set) is never echoed: it is not
+    /// a held value, and it lets go by itself.
     async fn execute_panel_write_op(&mut self, op: PanelWriteOp) -> UiResult {
-        self.project
-            .note_panel_write(op.scope, &op.channel, op.value.clone());
+        if op.echoes_locally()
+            && let Some(value) = op.value.as_value()
+        {
+            self.project
+                .note_panel_write(op.scope, &op.channel, value.clone());
+        }
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.panel_write(server, op).await
@@ -10465,6 +10548,38 @@ impl StudioController {
             .project
             .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         studio
+    }
+
+    /// [`Self::connected_with_client_for_test`] over a Bluetooth lens
+    /// instead of a sim's: the session whose Play surface reads once a
+    /// minute while idle.
+    pub(crate) fn connected_over_bluetooth_with_client_for_test(
+        client: crate::StudioServerClient,
+    ) -> Self {
+        use crate::ProjectInventorySummary;
+
+        let clock = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+        let mut studio = Self::new({
+            let clock = std::rc::Rc::clone(&clock);
+            move || clock.get()
+        });
+        studio.test_clock = Some(clock);
+        studio.pool.install(crate::RuntimePayload::Device(
+            crate::DeviceLensAttachment::ble_stub_for_test("devble"),
+        ));
+        studio.set_server_client_for_test(client);
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        studio
+    }
+
+    /// The Play surfaces mounted on the lens, as their `PlayViewOp` leases
+    /// would leave them: the one mode with an idle read budget over
+    /// Bluetooth. A lease is a mount fact the web reports, with no offer to
+    /// press.
+    pub(crate) fn set_play_views_for_test(&mut self, views: u32) {
+        self.play_views = views;
     }
 
     /// Advance the injected test clock (no-op for controllers built with a

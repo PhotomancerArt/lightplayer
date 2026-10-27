@@ -98,10 +98,12 @@ pub fn snapshot(engine: &Engine, auto_save: bool) -> PanelStateFile {
         .iter()
         .filter(|(_, writer)| writer.expires_at_ms.is_none())
         .filter_map(|((scope, channel), writer)| {
+            // A map is momentary by construction (the server refuses a
+            // latched one); a leaf is the only thing this file holds.
             Some(PanelStateEntry {
                 scope: engine.tree().scope_persist_path(*scope)?,
                 channel: channel.0.clone(),
-                value: writer.value.clone(),
+                value: writer.value.as_value()?.clone(),
             })
         });
     let parked = engine

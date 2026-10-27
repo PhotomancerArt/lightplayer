@@ -219,6 +219,7 @@ pub fn pending_board_card(
             frame: None,
             dim: false,
             light: None,
+            drawable: None,
         },
         surface,
         status: UiStatusCorner {

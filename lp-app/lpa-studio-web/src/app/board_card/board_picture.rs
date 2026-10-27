@@ -42,7 +42,7 @@ pub fn BoardPicture(
             "data-picture-frame": "{drawn}",
             if let Some(frame) = frame {
                 div { class: "ux-play-lamps",
-                    LampView { preview: frame }
+                    LampView { preview: frame, drawable: picture.drawable.clone() }
                 }
             }
         }

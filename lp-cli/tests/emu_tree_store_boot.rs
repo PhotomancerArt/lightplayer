@@ -477,7 +477,7 @@ fn panel_write_time(
     let request = lpc_wire::WirePanelWriteRequest {
         scope: serde_json::from_value(scope).expect("a scope"),
         channel: "time".to_string(),
-        value: LpValue::F32(value),
+        value: LpValue::F32(value).into(),
         ttl_ms: None,
     };
     block_on(client.project_panel_write(handle, request)).expect("the panel write");

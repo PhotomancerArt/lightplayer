@@ -1357,6 +1357,16 @@ pub fn App() -> Element {
     // (SetAgentModel / RequestModels) from deep inside the node tree;
     // context spares threading a handler through every layer. Stories
     // provide no context, so the chip renders inert there.
+    // A drawable picture reports its fingers from deep inside a card or a
+    // face (plan `drawing-on-the-picture`, D11): a fact, like Place.
+    let stroke_bridge = bridge.clone();
+    use_context_provider(|| {
+        crate::app::node::lamp_draw::StrokeReporter(Callback::new(
+            move |stroke: lpa_studio_core::UiStroke| {
+                stroke_bridge.tx.send(StudioCommand::Stroke(stroke));
+            },
+        ))
+    });
     let chip_settings_bridge = bridge.clone();
     use_context_provider(|| {
         Callback::new(move |command: SettingsCommand| {

@@ -517,12 +517,46 @@ impl Engine {
         value: lpc_model::LpValue,
         ttl_ms: Option<u32>,
     ) {
+        self.panel_write_value(
+            scope,
+            channel,
+            lpc_model::PanelWriteValue::Value(value),
+            ttl_ms,
+        );
+    }
+
+    /// [`Self::panel_write`] for either form of [`lpc_model::PanelWriteValue`].
+    /// A map materializes on the bus as `SlotData::Map` (a touch set). The
+    /// caller enforces that a map rides a momentary write only: the engine
+    /// holds what it is given.
+    pub fn panel_write_value(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::PanelWriteValue,
+        ttl_ms: Option<u32>,
+    ) {
         // Momentary liveness (panel.md P14): the deadline is an engine-time
         // instant; renewal is just another write with a fresh TTL.
         let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
+        // Engaging a writer changes the winning provider set; re-writing an
+        // engaged momentary one does not — its route reads the store, so a
+        // finger moving costs no rebuild of the graph (on the C6 that rebuild
+        // cost ~40 ms a write, halving a drawing pattern's fps). A latched
+        // write still moves the structure epoch, every time: readers that
+        // cache a value until the graph changes (the playlist's pick) count
+        // on it, and a latched write is a user's deliberate setting, not a
+        // gesture's stream.
+        let gesture_rewrite = expires_at_ms.is_some()
+            && self
+                .panel_writers
+                .get(scope, &channel)
+                .is_some_and(|held| held.expires_at_ms.is_some());
         self.panel_writers
             .set(scope, channel, value, self.revision, expires_at_ms);
-        self.resolver.invalidate_structure();
+        if !gesture_rewrite {
+            self.resolver.invalidate_structure();
+        }
     }
 
     /// Clear every engaged writer everywhere — sink scopes included
@@ -799,8 +833,11 @@ impl Engine {
                 else {
                     continue;
                 };
-                if let Some(writer) = self.panel_writers.get(scope, &channel) {
-                    settled.push((entry.id, slot, writer.value.clone(), writer.write));
+                // A map write (a touch set) is momentary, never load-deciding.
+                if let Some(writer) = self.panel_writers.get(scope, &channel)
+                    && let Some(value) = writer.value.as_value()
+                {
+                    settled.push((entry.id, slot, value.clone(), writer.write));
                 }
             }
         }
@@ -1679,7 +1716,10 @@ fn panel_provider(
     (
         BindingRef::new(scope.owner(), usize::MAX),
         crate::dataflow::binding::BindingEntry {
-            source: crate::dataflow::binding::BindingSource::Literal(writer.value.clone()),
+            source: crate::dataflow::binding::BindingSource::PanelWriter {
+                scope,
+                channel: channel.clone(),
+            },
             target: crate::dataflow::binding::BindingTarget::BusChannel(channel.clone()),
             priority: crate::dataflow::binding::BindingPriority::panel(),
             kind,
@@ -2147,6 +2187,26 @@ impl ResolveHost for EngineResolveHost<'_> {
                 None => return Vec::new(),
             }
         }
+    }
+
+    fn panel_writer_production(
+        &self,
+        scope: crate::node::ScopeRef,
+        channel: &lpc_model::ChannelName,
+    ) -> Option<crate::dataflow::resolver::Production> {
+        use crate::dataflow::resolver::{Production, ProductionSource};
+        let writer = self.panel_writers.get(scope, channel)?;
+        let at = writer.written_at;
+        Some(match &writer.value {
+            lpc_model::PanelWriteValue::Value(value) => Production::leaf(
+                lpc_model::WithRevision::new(at, value.clone()),
+                ProductionSource::PanelWriter,
+            ),
+            lpc_model::PanelWriteValue::Map(entries) => Production::new(
+                crate::dataflow::resolver::resolver::materialize_literal_map(entries, at),
+                ProductionSource::PanelWriter,
+            ),
+        })
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {

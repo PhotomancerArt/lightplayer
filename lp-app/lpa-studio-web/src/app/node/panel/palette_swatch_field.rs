@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(write.ttl_ms, None);
         assert_eq!(
             write.value,
-            config.to_lp_value(),
+            config.to_lp_value().into(),
             "the config rides whole, never field by field"
         );
     }

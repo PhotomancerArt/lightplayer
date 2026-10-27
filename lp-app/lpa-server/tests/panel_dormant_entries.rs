@@ -108,7 +108,7 @@ fn a_dormant_entrys_knobs_survive_a_reboot_and_come_back_with_the_entry() {
         engine
             .panel_writers()
             .get(sink_scope, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.75)),
         "the sink writer of a dormant entry is restored"
     );
@@ -136,7 +136,7 @@ fn a_dormant_entrys_knobs_survive_a_reboot_and_come_back_with_the_entry() {
         engine
             .panel_writers()
             .get(ScopeRef::Module { owner: pulse }, &speed)
-            .map(|w| &w.value),
+            .and_then(|w| w.value.as_value()),
         Some(&LpValue::F32(0.25)),
         "the module knob is back on the reloaded pattern"
     );
@@ -198,7 +198,7 @@ fn a_restored_pick_is_loaded_by_the_first_tick() {
             .engine()
             .panel_writers()
             .get(scope, &pick)
-            .map(|writer| &writer.value),
+            .and_then(|writer| writer.value.as_value()),
         Some(&LpValue::U32(PULSE)),
         "the pick is restored where the playlist reads it"
     );

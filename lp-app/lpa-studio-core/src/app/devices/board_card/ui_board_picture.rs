@@ -20,6 +20,11 @@ pub struct UiBoardPicture {
     /// The board's own lights while an update holds them (one solid
     /// colour), drawn as the light strip instead of the frame.
     pub light: Option<UpdateLight>,
+    /// The picture is drawable (plan `drawing-on-the-picture`, D12): only on
+    /// the connected board's card (its panel is up), while a `touches`
+    /// reader is loaded. A watched card never is. A fact, not a verb: a
+    /// stroke is reported as `StudioCommand::Stroke`.
+    pub drawable: Option<crate::UiDrawable>,
 }
 
 /// Where the picture comes from.

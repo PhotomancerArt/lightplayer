@@ -826,7 +826,7 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
         crate::PanelWriteOp {
             scope: target.scope,
             channel: target.channel.clone(),
-            value: LpValue::F32(0.9),
+            value: LpValue::F32(0.9).into(),
             ttl_ms: None,
         },
     )));
@@ -1000,7 +1000,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
         crate::PanelWriteOp {
             scope: target.scope,
             channel: target.channel.clone(),
-            value: LpValue::F32(0.9),
+            value: LpValue::F32(0.9).into(),
             ttl_ms: None,
         },
     )));
@@ -1221,7 +1221,7 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
         crate::PanelWriteOp {
             scope: target.scope,
             channel: target.channel.clone(),
-            value: LpValue::F32(0.9),
+            value: LpValue::F32(0.9).into(),
             ttl_ms: None,
         },
     )));
@@ -1363,7 +1363,7 @@ fn the_panel_speed_knob_and_the_clock_tape_drive_the_clock_channels() {
             crate::PanelWriteOp {
                 scope,
                 channel: channel.to_string(),
-                value,
+                value: value.into(),
                 ttl_ms: None,
             },
         )));
@@ -2786,7 +2786,7 @@ fn a_palette_panel_write_reads_back_on_the_swatch_that_wrote_it() {
         crate::PanelWriteOp {
             scope: target.scope,
             channel: target.channel.clone(),
-            value: lpc_model::ToLpValue::to_lp_value(&picked),
+            value: lpc_model::ToLpValue::to_lp_value(&picked).into(),
             ttl_ms: None,
         },
     )));
@@ -2887,7 +2887,7 @@ fn successive_palette_writes_compose_instead_of_clobbering() {
             crate::PanelWriteOp {
                 scope: target.scope,
                 channel: target.channel.clone(),
-                value: lpc_model::ToLpValue::to_lp_value(&next),
+                value: lpc_model::ToLpValue::to_lp_value(&next).into(),
                 ttl_ms: None,
             },
         )));

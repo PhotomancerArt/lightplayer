@@ -119,6 +119,10 @@ pub(crate) fn ProductPreview(
     /// paints the neutral lamp colour — the layout without the output.
     #[props(default = true)]
     live: bool,
+    /// Core says this picture is drawable (plan `drawing-on-the-picture`):
+    /// a control product's lamps take fingers. `None` everywhere else.
+    #[props(default)]
+    drawable: Option<lpa_studio_core::UiDrawable>,
 ) -> Element {
     // A time product is metadata-only BY DESIGN (nothing to draw behind the
     // handle — the phasor cards below are its real face), so it never gets
@@ -156,7 +160,7 @@ pub(crate) fn ProductPreview(
                     ProductPreviewCanvas { width, height, revision, bytes }
                 },
                 UiProductPreview::ControlNative(preview) => rsx! {
-                    ControlProductPreview { preview, live }
+                    ControlProductPreview { preview, live, drawable: drawable.clone() }
                 },
                 UiProductPreview::Pending => rsx! {
                     ProductSkeleton {
@@ -247,6 +251,7 @@ fn product_frame_class(kind: UiProductKind) -> &'static str {
 fn ControlProductPreview(
     preview: UiControlProductPreview,
     #[props(default = true)] live: bool,
+    #[props(default)] drawable: Option<lpa_studio_core::UiDrawable>,
 ) -> Element {
     let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return rsx! {
@@ -273,7 +278,7 @@ fn ControlProductPreview(
             // edge-mapped lamps read fully instead of half-clipping (M3 gate:
             // "zoom it out a bit"). Geometry inside stays texture-faithful.
             div { class: "ux-map-inset",
-                LampView { preview: preview.clone(), live }
+                LampView { preview: preview.clone(), live, drawable }
             }
             if empty {
                 ProductMessage {

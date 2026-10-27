@@ -194,6 +194,8 @@ mod chooser_failure_tests;
 /// Connected: Connect, Edit and Done by path, the home page and an open
 /// session side by side, and the surface following the place.
 mod connected_tests;
+/// Drawing on the picture: only the connected board's card is drawable.
+mod draw_tests;
 /// The home page's sections over this bench: a board plugged in is
 /// online, a detached one is offline, and the Connect a board section's
 /// offers are all published.

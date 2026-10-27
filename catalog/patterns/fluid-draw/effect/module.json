@@ -1,0 +1,20 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "draw": {
+      "ref": "./draw.json"
+    },
+    "fluid": {
+      "ref": "./fluid.json"
+    },
+    "friends": {
+      "ref": "./friends.json"
+    }
+  },
+  "provenance": {
+    "author": "Photomancer",
+    "version": "1",
+    "license": "CC0-1.0",
+    "created": "2026-10-20"
+  }
+}

@@ -30,6 +30,10 @@ pub fn PlayModeSurface(
     /// The root module's output mirror, as a slim banner.
     #[props(default = None)]
     preview: Option<UiProducedProduct>,
+    /// The banner is drawable (plan `drawing-on-the-picture`): the root
+    /// face's `drawable`.
+    #[props(default)]
+    drawable: Option<lpa_studio_core::UiDrawable>,
     /// Panel-state auto-save (P11): an end user owns this, so it stays
     /// reachable in play mode. `None` hides the switch.
     #[props(default = Some(true))]
@@ -81,6 +85,7 @@ pub fn PlayModeSurface(
                         frame: preview.frame,
                         focus_action: preview.show_live.clone(),
                         on_action,
+                        drawable: drawable.clone(),
                     }
                 }
             }
