@@ -18,6 +18,10 @@ serde_json = { workspace = true }
 # The one `Deserialize` impl the order-preserving document tree needs. No
 # derives: nothing here is a typed model.
 serde = { workspace = true }
+# The frozen format-11 landing's filled-polygon cell count is copied verbatim
+# from `lpc-mapping`'s resolver, trig included: the same `libm` it calls, so a
+# turned lattice lands on the resolver's exact floats.
+libm = "0.2"
 
 [dev-dependencies]
 # The real reader, so a migrated project is proved loadable rather than
