@@ -32,6 +32,10 @@ mod probe_read_backs;
 // false`) is served the previous probe's frame one probe late.
 #[cfg(all(test, feature = "node-shader"))]
 mod probe_read_back_tests;
+// A format-6 fixture through a real engine (mapping rebuild M2 P3): the
+// journeys, painted by a shader, read through real outputs.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+mod parts_patch_tests;
 mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,
