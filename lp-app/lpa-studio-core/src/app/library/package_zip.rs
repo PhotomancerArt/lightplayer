@@ -462,6 +462,53 @@ mod tests {
         assert!(!text.contains("vec4 render("), "bare entry must be gone");
     }
 
+    /// The v11→v12 step removes a patch document and adds a map2d for
+    /// hand-placed lamps; the installed package is the step's file set, so
+    /// it has the one and not the other (lean Q60).
+    #[test]
+    fn a_format_11_archive_installs_the_files_the_step_added_and_not_those_it_removed() {
+        let source: Vec<(String, Vec<u8>)> = [
+            ("project.json", r#"{"format":11,"name":"Demo"}"#),
+            (
+                "module.json",
+                r#"{"kind":"Module","nodes":{"strip":{"ref":"./strip.json"},"lamps":{"ref":"./lamps.json"},"out":{"ref":"./out.json"}}}"#,
+            ),
+            (
+                "strip.json",
+                r#"{"kind":"Fixture","mapping":{"kind":"Map2d","source":"strip.map2d.json"},"patch":{"kind":"File","source":"strip.patch.json"}}"#,
+            ),
+            (
+                "strip.map2d.json",
+                r#"{"format":3,"objects":[{"id":"a","shape":{"path":{"points":[[0,0],[10,0]],"count":4}}}]}"#,
+            ),
+            ("strip.patch.json", r#"{"format":2,"entries":[["/a",-1,0]]}"#),
+            (
+                "lamps.json",
+                r#"{"kind":"Fixture","render_size":{"width":4,"height":4},"mapping":{"kind":"PathPoints","paths":{"0":{"kind":"PointList","first_channel":0,"points":{"0":[0.25,0.25],"1":[0.75,0.75]}}},"sample_diameter":1.0}}"#,
+            ),
+            ("out.json", r#"{"kind":"Output","ports":{"0":{}}}"#),
+        ]
+        .into_iter()
+        .map(|(path, text)| (path.to_string(), text.as_bytes().to_vec()))
+        .collect();
+        let store = store();
+        let outcome = import_zip(&store, &zip_of(&source), 2.0).unwrap();
+        assert_eq!(outcome.upgraded_from, Some(11));
+
+        let paths: Vec<String> = installed(&store, &outcome.summary)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert!(
+            !paths.iter().any(|path| path == "strip.patch.json"),
+            "{paths:?}"
+        );
+        assert!(
+            paths.iter().any(|path| path == "lamps.map2d.json"),
+            "{paths:?}"
+        );
+    }
+
     #[test]
     fn an_archive_below_the_floor_is_refused_loudly_and_installs_nothing() {
         let store = store();
