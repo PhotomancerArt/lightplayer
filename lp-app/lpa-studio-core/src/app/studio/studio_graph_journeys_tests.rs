@@ -19,8 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use lab_mapping_model::{
-    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, PropEdit, Target, Vec2,
-    port_value,
+    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Vec2, port_value,
 };
 use lpc_mapping::part::{Mapping, TreeId, render};
 use lpc_mapping::patching::{
@@ -427,25 +426,22 @@ fn the_circular_display_from_nothing() {
     j.press("delete", OfferArgs::new().with("subject", "fixture:strip"));
     assert!(j.mapping().parts.is_empty(), "nothing left to map");
 
-    // The box made room for a circle (the inspector's Width and Height:
-    // page input, as a person types them).
-    j.graph
-        .handle
-        .input(GraphInput::Select(vec![Target::Node(j.fixture.clone())]));
-    j.graph.handle.input(GraphInput::MoveDraw(true));
-    for id in ["width", "height"] {
-        j.graph.handle.input(GraphInput::EditProp {
-            id,
-            edit: PropEdit::SetNumber(100.0),
-        });
-    }
+    // The box made room for a circle (the offer the inspector's Width and
+    // Height rows press).
+    j.press(
+        "set-fixture-size",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("width", "100")
+            .with("height", "100"),
+    );
     // The page lays the canvas out again and says where everything went.
     let placement = {
         let e = j.graph.handle.editor().borrow();
         lab_layout::canvas_layout(&e.layout_input())
     };
+    // (Where things sit is not an edit: nothing to send the actor.)
     j.graph.handle.input(GraphInput::Placement(placement));
-    j.graph.batch();
     j.graph.refresh();
 
     // The circle tool (an offer), and a circle drawn from the box's middle
@@ -586,7 +582,12 @@ fn the_layout_verbs_are_offered_with_their_levels() {
     let mut listed = Vec::new();
     for verb in GraphVerb::LAYOUT {
         let path = format!("project/graph/{}", verb.name());
-        if verb == GraphVerb::AddCentreLamp {
+        // Nothing to take them: the circle has its centre, and the
+        // display holds no grid or filled polygon.
+        if matches!(
+            verb,
+            GraphVerb::AddCentreLamp | GraphVerb::SetLattice | GraphVerb::SetRouting
+        ) {
             j.not_offered(verb.name());
             continue;
         }

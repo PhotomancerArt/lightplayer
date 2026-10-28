@@ -269,6 +269,224 @@ fn the_split_row_presses_set_split() {
     assert_eq!(landings(&e.project), before);
 }
 
+/// Every inspector row presses its verb (P08): a ring's Radius, a circle's
+/// Counter-clockwise, a grid's Columns, Rows, Spacing and Snake, a filled
+/// polygon's Spacing and Angle, a fixture's Width, Height and Colour order
+/// and a port's Pixels each leave the project exactly as the verb pressed
+/// through `Editor::edit` leaves it, in one undo step.
+#[test]
+fn every_row_presses_its_verb() {
+    let (base, f, out) = lattices();
+    let display = Project::circular_display_wired();
+    let ring = TreeRef::parse(&circle(&display).fixture, "circle1/r3").unwrap();
+    let part = |id: &str| PartRef::parse(&f, id).unwrap();
+    let rows: Vec<(Project, Target, &str, PropEdit, GraphEdit)> = vec![
+        (
+            display.clone(),
+            Target::Generated(ring.clone()),
+            "radius",
+            PropEdit::SetNumber(36.0),
+            GraphEdit::SetRadius {
+                ring: ring.clone(),
+                radius: Units(36.0),
+            },
+        ),
+        (
+            display.clone(),
+            Target::Part(circle(&display)),
+            "ccw",
+            PropEdit::SetFlag(true),
+            GraphEdit::SetWayRound {
+                circle: circle(&display),
+                dir: lpc_mapping::RingDir::Ccw,
+            },
+        ),
+        (
+            base.clone(),
+            Target::Part(part("grid1")),
+            "columns",
+            PropEdit::SetCount(5),
+            GraphEdit::SetLattice {
+                part: part("grid1"),
+                values: LatticeValues {
+                    columns: Some(5),
+                    ..LatticeValues::default()
+                },
+            },
+        ),
+        (
+            base.clone(),
+            Target::Part(part("grid1")),
+            "rows",
+            PropEdit::SetCount(4),
+            GraphEdit::SetLattice {
+                part: part("grid1"),
+                values: LatticeValues {
+                    rows: Some(4),
+                    ..LatticeValues::default()
+                },
+            },
+        ),
+        (
+            base.clone(),
+            Target::Part(part("grid1")),
+            "pitch",
+            PropEdit::SetNumber(6.0),
+            GraphEdit::SetLattice {
+                part: part("grid1"),
+                values: LatticeValues {
+                    spacing: Some(Units(6.0)),
+                    ..LatticeValues::default()
+                },
+            },
+        ),
+        (
+            base.clone(),
+            Target::Part(part("grid1")),
+            "snake",
+            PropEdit::SetFlag(false),
+            GraphEdit::SetRouting {
+                part: part("grid1"),
+                routing: lpc_mapping::GridRouting::Raster,
+            },
+        ),
+        (
+            base.clone(),
+            Target::Part(part("filled1")),
+            "angle",
+            PropEdit::SetNumber(30.0),
+            GraphEdit::SetLattice {
+                part: part("filled1"),
+                values: LatticeValues {
+                    angle: Some(Units(30.0)),
+                    ..LatticeValues::default()
+                },
+            },
+        ),
+        (
+            base.clone(),
+            Target::Node(f.clone()),
+            "width",
+            PropEdit::SetNumber(120.0),
+            GraphEdit::SetFixtureSize {
+                fixture: f.clone(),
+                width: Some(Length(120.0)),
+                height: None,
+            },
+        ),
+        (
+            base.clone(),
+            Target::Node(f.clone()),
+            "colour-order",
+            PropEdit::SetChoice(0),
+            GraphEdit::SetColourOrder {
+                fixture: f.clone(),
+                order: ColorOrder::Rgb,
+            },
+        ),
+        (
+            base.clone(),
+            Target::Port {
+                output: out.clone(),
+                key: "0".to_string(),
+            },
+            "pixels",
+            PropEdit::SetCount(80),
+            GraphEdit::SetPortLamps {
+                output: out.clone(),
+                port: "0".to_string(),
+                lamps: 80,
+            },
+        ),
+    ];
+    for (project, target, id, edit, verb) in rows {
+        let mut by_row = Editor::new(project.clone());
+        by_row.input(GraphInput::Select(vec![target]));
+        by_row.input(GraphInput::MoveDraw(true));
+        by_row.input(GraphInput::EditProp { id, edit });
+        let mut by_verb = Editor::new(project.clone());
+        by_verb.edit(&[verb.clone()]).unwrap();
+        assert_ne!(by_verb.project, project, "{id}: the verb changes something");
+        assert_eq!(by_row.project, by_verb.project, "{id}: the row is the verb");
+        by_row.undo();
+        assert_eq!(by_row.project, project, "{id}: one undo step");
+    }
+}
+
+/// `r` on a circle, Move & draw on, presses `set-way-round`: its rings run
+/// the other way, and ring 3's override still lands it on port 1.
+#[test]
+fn r_on_a_circle_turns_its_way_round() {
+    let mut e = Editor::new(Project::circular_display_wired());
+    let circle = circle(&e.project);
+    let r3 = TreeRef::parse(&circle.fixture, "circle1/r3").unwrap();
+    e.input(GraphInput::Select(vec![Target::Part(circle.clone())]));
+    e.input(GraphInput::MoveDraw(true));
+    assert!(e.press(GraphVerb::Reverse));
+    let mut by_verb = Editor::new(Project::circular_display_wired());
+    by_verb
+        .edit(&[GraphEdit::SetWayRound {
+            circle: circle.clone(),
+            dir: lpc_mapping::RingDir::Ccw,
+        }])
+        .unwrap();
+    assert_eq!(e.project, by_verb.project);
+    assert_eq!(landing(&e.project, &r3, 0).map(|l| l.0), Some("1".into()));
+}
+
+/// The row-numbers' verbs refuse, in words, what can't be: a lattice with
+/// nothing given, a grid turned, a filled polygon given columns, a fixture
+/// side under its least, and a ring at the centre with more than one lamp.
+#[test]
+fn the_row_numbers_verbs_refuse_what_cant_be() {
+    let (base, f, _) = lattices();
+    let bind = |verb: GraphVerb, args: &[(&str, &str)]| {
+        let args: Vec<(String, String)> = args
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        GraphEdit::bind(verb, &|name| {
+            args.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        })
+    };
+    let grid = format!("{f}:grid1");
+    let fill = format!("{f}:filled1");
+    assert!(
+        bind(GraphVerb::SetLattice, &[("subject", &grid)])
+            .is_err_and(|w| w.contains("give columns, rows"))
+    );
+    let fixture = format!("{f}:");
+    assert!(
+        bind(
+            GraphVerb::SetFixtureSize,
+            &[("subject", &fixture), ("width", "2")]
+        )
+        .is_err_and(|w| w.contains("at least 4"))
+    );
+    let mut e = Editor::new(base);
+    for (subject, field, value, why) in [
+        (&grid, "angle", "10", "isn't turned"),
+        (&fill, "columns", "3", "come from its outline"),
+    ] {
+        let edit = bind(
+            GraphVerb::SetLattice,
+            &[("subject", subject), (field, value)],
+        )
+        .unwrap();
+        let before = e.project.clone();
+        assert!(e.edit(&[edit]).is_err_and(|w| w.contains(why)), "{field}");
+        assert_eq!(e.project, before, "nothing changed");
+    }
+    let mut d = Editor::new(Project::circular_display_wired());
+    let r2 = format!("{}:circle1/r2", circle(&d.project).fixture);
+    assert!(
+        bind(GraphVerb::SetRadius, &[("subject", &r2), ("radius", "0")])
+            .is_err_and(|w| w.contains("Add centre lamp"))
+    );
+    let fine = bind(GraphVerb::SetRadius, &[("subject", &r2), ("radius", "40")]).unwrap();
+    d.edit(&[fine]).unwrap();
+}
+
 // ---- helpers ------------------------------------------------------------------
 
 /// Every segment's id and where each of its lamps lands, in tree order.
@@ -294,6 +512,41 @@ fn landing(p: &Project, segment: &TreeRef, lamp: u32) -> Option<(String, u32)> {
 fn circle(p: &Project) -> PartRef {
     let display = p.named("display").unwrap().id.clone();
     PartRef::parse(&display, "circle1").unwrap()
+}
+
+/// A fixture holding a 3 × 2 grid and a filled square, on one 64-lamp port.
+fn lattices() -> (Project, NodeId, NodeId) {
+    let mut p = Project::new("t");
+    let f = p
+        .add_fixture_sized(None, "f", Vec2::new(100.0, 100.0))
+        .unwrap();
+    let out = p.add_output(None, "out", &[("D0", 64)]).unwrap();
+    p.add(
+        &f,
+        PartKind::Shape(Shape::Grid(lpc_mapping::GridShape {
+            origin: [10.0, 10.0],
+            cols: 3,
+            rows: 2,
+            pitch: 4.0,
+            routing: lpc_mapping::GridRouting::Snake,
+            start_corner: Default::default(),
+        })),
+    )
+    .unwrap();
+    p.add(
+        &f,
+        PartKind::Shape(Shape::FilledPolygon(lpc_mapping::FilledPolygonShape {
+            points: vec![[50.0, 50.0], [80.0, 50.0], [80.0, 80.0], [50.0, 80.0]],
+            pitch: 5.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: lpc_mapping::GridRouting::Snake,
+            start_corner: Default::default(),
+        })),
+    )
+    .unwrap();
+    p.start_at(&f, &out, "0", 0);
+    (p, f, out)
 }
 
 /// A wheel: a repeat of four copies of a 3-lamp arm about the box's

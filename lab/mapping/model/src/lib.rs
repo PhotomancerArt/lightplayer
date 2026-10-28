@@ -131,8 +131,8 @@ pub use ux::graph_edit::{
 };
 pub use ux::graph_input::GraphInput;
 pub use ux::graph_layout_edit::{
-    DRAWN_FROM, DeleteSubject, Split, Units, delete_value, drawn_from_label, drawn_from_name,
-    part_value,
+    DRAWN_FROM, DeleteSubject, LatticeValues, Length, ROUTINGS, Split, Units, WAYS_ROUND,
+    delete_value, drawn_from_label, drawn_from_name, part_value, routing_name, way_round_name,
 };
 pub use ux::graph_verb::GraphVerb;
 pub use ux::graph_verb_choices::VerbChoice;

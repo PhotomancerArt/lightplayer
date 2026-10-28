@@ -1,12 +1,13 @@
 //! Commands on the selection: delete, nudge a count, reverse, edit a
 //! property. Each one does what it can and says why it didn't do the rest.
 
+use lpc_mapping::RingDir;
 use lpc_mapping::edit::DrawnFrom;
 use lpc_mapping::part::{PartKind, Shape};
 use lpc_mapping::patching::Direction;
 
 use crate::domain::notice::Notice;
-use crate::domain::part_geometry::{has_drawn_direction, reverse_drawn};
+use crate::domain::part_geometry::has_drawn_direction;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
 use crate::ux::graph_edit::{BackField, GraphEdit};
@@ -337,8 +338,8 @@ impl Editor {
         // A repeat's copies share one shape: reverse it once. A path's
         // drawing turns by `set-drawn-from` and one ring by its direction
         // on the line (`set-direction`, or back to the flow when it is
-        // reversed there), the verbs' own function; a circle's way round
-        // has no verb yet and turns its field.
+        // reversed there), and a circle's way round by `set-way-round`:
+        // the verbs' own function.
         let mut whole: Vec<crate::PartRef> = Vec::new();
         for t in &targets {
             match t {
@@ -404,34 +405,33 @@ impl Editor {
         )));
     }
 
-    /// Reverse one part's drawing: a path's by `set-drawn-from` (a
-    /// repeat's by the part it holds), a circle's way round by its field.
+    /// Reverse one part's drawing (a repeat's by the part it holds): a
+    /// path's by `set-drawn-from`, a circle's way round by
+    /// `set-way-round`, the verbs' own function.
     fn reverse_part(&mut self, id: &crate::PartRef) {
         let held = match self.project.part(id).map(|c| &c.kind) {
             Some(PartKind::Repeat(r)) => crate::PartRef::new(&id.fixture, &r.part.id),
             _ => id.clone(),
         };
-        let path = match self.project.part(&held).map(|c| &c.kind) {
-            Some(PartKind::Shape(Shape::Path(path))) => Some(path.reversed),
-            _ => None,
+        let edit = match self.project.part(&held).map(|c| &c.kind) {
+            Some(PartKind::Shape(Shape::Path(path))) => GraphEdit::SetDrawnFrom {
+                from: if path.reversed {
+                    DrawnFrom::FirstPoint
+                } else {
+                    DrawnFrom::LastPoint
+                },
+                part: held,
+            },
+            Some(PartKind::Shape(Shape::Circle(circle))) => GraphEdit::SetWayRound {
+                dir: match circle.dir {
+                    RingDir::Cw => RingDir::Ccw,
+                    RingDir::Ccw => RingDir::Cw,
+                },
+                circle: held,
+            },
+            _ => return,
         };
-        match path {
-            Some(reversed) => {
-                let _ = self.project.apply_graph_edit(&GraphEdit::SetDrawnFrom {
-                    part: held,
-                    from: if reversed {
-                        DrawnFrom::FirstPoint
-                    } else {
-                        DrawnFrom::LastPoint
-                    },
-                });
-            }
-            None => {
-                if let Some(c) = self.project.part_mut(&held) {
-                    reverse_drawn(&mut c.kind);
-                }
-            }
-        }
+        let _ = self.project.apply_graph_edit(&edit);
     }
 
     /// The inspector's edit: one property, every selected thing.
@@ -451,20 +451,12 @@ impl Editor {
     }
 
     fn edit_selected(&mut self, targets: &[Target], prop_id: &str, edit: PropEdit) {
-        // A row that is a verb presses it, as its offer does: one undo step.
-        if let Some(edits) = self
+        // Every row is a verb: it presses it, as its offer does, one undo
+        // step for the whole selection.
+        let edits = self
             .project
-            .prop_edits(targets, prop_id, edit, self.spacing)
-        {
-            let _ = self.edit(&edits);
-            return;
-        }
-        self.checkpoint();
-        let spacing = self.spacing;
-        for t in targets {
-            self.project.edit_prop(t, prop_id, edit, spacing);
-        }
-        self.after_edit();
+            .prop_edits(targets, prop_id, edit, self.spacing);
+        let _ = self.edit(&edits);
     }
 }
 

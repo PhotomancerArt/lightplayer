@@ -30,7 +30,14 @@
 //! `add-ring` (`count` and `radius`, text), `add-centre-lamp`,
 //! `remove-ring`, `set-split` (`split`, a choice), `set-drawn-from`
 //! (`from`, a choice) and `delete`, whose ⌫ key deletes the selection and
-//! whose offer takes a node, a part or a ring. A verb is offered whenever
+//! whose offer takes a node, a part or a ring; and the numbers the
+//! inspector's rows set (P08): `set-radius` (a ring, `radius` text),
+//! `set-way-round` (a circle, `way` a choice), `set-lattice` (a grid or a
+//! filled polygon; `columns`, `rows`, `spacing`, `angle`, each optional
+//! text, at least one), `set-routing` (`run` a choice), `set-fixture-size`
+//! (a fixture `<fixture>:`; `width`, `height`, optional text, at least
+//! one), `set-colour-order` (`order` a choice) and `set-port-lamps` (a
+//! port `<output>:<key>`, `lamps` text). A verb is offered whenever
 //! something can take it, never because of the selection (ruling DD37),
 //! which only preselects the subject.
 //!
@@ -182,6 +189,47 @@ fn value_offer(editor: &Editor, verb: GraphVerb, subjects: Vec<VerbChoice>) -> U
             options(editor.drawn_from_choices()),
             None,
         )),
+        GraphVerb::SetRadius => params.push(OfferParam::text(
+            "radius",
+            "radius",
+            "how far from the centre, in the layout's units",
+        )),
+        GraphVerb::SetWayRound => params.push(OfferParam::choice(
+            "way",
+            "way round",
+            options(editor.way_round_choices()),
+            None,
+        )),
+        GraphVerb::SetLattice => {
+            let number = |name: &str, label: &str, placeholder: &str| {
+                OfferParam::text(name, label, placeholder).optional()
+            };
+            params.push(number("columns", "columns", "a grid's, a whole number"));
+            params.push(number("rows", "rows", "a grid's, a whole number"));
+            params.push(number("spacing", "spacing", "lamp to lamp, more than 0"));
+            params.push(number(
+                "angle",
+                "angle",
+                "a filled polygon's lattice turned, in degrees",
+            ));
+        }
+        GraphVerb::SetRouting => params.push(OfferParam::choice(
+            "run",
+            "rows run",
+            options(editor.routing_choices()),
+            None,
+        )),
+        GraphVerb::SetFixtureSize => {
+            params.push(OfferParam::text("width", "width", "in the layout's units").optional());
+            params.push(OfferParam::text("height", "height", "in the layout's units").optional());
+        }
+        GraphVerb::SetColourOrder => params.push(OfferParam::choice(
+            "order",
+            "colour order",
+            options(editor.colour_order_choices()),
+            None,
+        )),
+        GraphVerb::SetPortLamps => params.push(lamps()),
         _ => {}
     }
     // A count that drops copies an override is on takes something away.
@@ -232,8 +280,11 @@ fn subject_label(verb: GraphVerb) -> &'static str {
         }
         GraphVerb::Unrepeat | GraphVerb::Expand => "repeat",
         GraphVerb::SetCount => "repeat, path or ring",
-        GraphVerb::AddRing | GraphVerb::AddCentreLamp => "circle",
-        GraphVerb::RemoveRing => "ring",
+        GraphVerb::AddRing | GraphVerb::AddCentreLamp | GraphVerb::SetWayRound => "circle",
+        GraphVerb::RemoveRing | GraphVerb::SetRadius => "ring",
+        GraphVerb::SetLattice | GraphVerb::SetRouting => "grid or filled polygon",
+        GraphVerb::SetFixtureSize | GraphVerb::SetColourOrder => "fixture",
+        GraphVerb::SetPortLamps => "port",
         GraphVerb::Delete => "node, part or ring",
         _ => "node",
     }

@@ -86,22 +86,6 @@ pub fn has_drawn_direction(kind: &PartKind) -> bool {
     }
 }
 
-/// Reverse a part's drawn direction: a path's end, a circle's way round.
-pub fn reverse_drawn(kind: &mut PartKind) {
-    use lpc_mapping::RingDir;
-    match kind {
-        PartKind::Shape(Shape::Path(path)) => path.reversed = !path.reversed,
-        PartKind::Shape(Shape::Circle(circle)) => {
-            circle.dir = match circle.dir {
-                RingDir::Cw => RingDir::Ccw,
-                RingDir::Ccw => RingDir::Cw,
-            }
-        }
-        PartKind::Repeat(repeat) => reverse_drawn(&mut repeat.part.kind),
-        _ => {}
-    }
-}
-
 /// The points you drag, for a path or a polygon. A filled polygon's
 /// outline is moved whole (plan M4), so it has none here.
 pub fn part_points(kind: &PartKind) -> Option<Vec<Vec2>> {

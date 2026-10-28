@@ -128,10 +128,25 @@ pub enum GraphVerb {
     /// Where a shape's own lamp order starts: a circle's outside or
     /// inside, a path's first or last point.
     SetDrawnFrom,
+    /// How far a ring is from its circle's centre.
+    SetRadius,
+    /// Which way round a circle's rings run.
+    SetWayRound,
+    /// A grid's columns, rows and spacing, a filled polygon's spacing and
+    /// angle.
+    SetLattice,
+    /// Whether a grid's or a filled polygon's rows run back and forth.
+    SetRouting,
+    /// A fixture's box: its width and height.
+    SetFixtureSize,
+    /// Which byte of each lamp is red, green and blue.
+    SetColourOrder,
+    /// How many lamps a port's strip has.
+    SetPortLamps,
 }
 
 impl GraphVerb {
-    pub const ALL: [GraphVerb; 52] = [
+    pub const ALL: [GraphVerb; 59] = [
         GraphVerb::Up,
         GraphVerb::GoIn,
         GraphVerb::Previous,
@@ -184,11 +199,18 @@ impl GraphVerb {
         GraphVerb::RemoveRing,
         GraphVerb::SetSplit,
         GraphVerb::SetDrawnFrom,
+        GraphVerb::SetRadius,
+        GraphVerb::SetWayRound,
+        GraphVerb::SetLattice,
+        GraphVerb::SetRouting,
+        GraphVerb::SetFixtureSize,
+        GraphVerb::SetColourOrder,
+        GraphVerb::SetPortLamps,
     ];
 
     /// Every verb that takes values, offered with its parameters: the
     /// patching verbs, then the layout verbs.
-    pub const WITH_VALUES: [GraphVerb; 23] = [
+    pub const WITH_VALUES: [GraphVerb; 30] = [
         GraphVerb::SetOutput,
         GraphVerb::SetPort,
         GraphVerb::SetStartsAt,
@@ -211,12 +233,19 @@ impl GraphVerb {
         GraphVerb::RemoveRing,
         GraphVerb::SetSplit,
         GraphVerb::SetDrawnFrom,
+        GraphVerb::SetRadius,
+        GraphVerb::SetWayRound,
+        GraphVerb::SetLattice,
+        GraphVerb::SetRouting,
+        GraphVerb::SetFixtureSize,
+        GraphVerb::SetColourOrder,
+        GraphVerb::SetPortLamps,
         GraphVerb::Delete,
     ];
 
     /// The layout verbs that take values (Delete among them; its key
     /// deletes the selection).
-    pub const LAYOUT: [GraphVerb; 11] = [
+    pub const LAYOUT: [GraphVerb; 18] = [
         GraphVerb::Rename,
         GraphVerb::Repeat,
         GraphVerb::Unrepeat,
@@ -227,6 +256,13 @@ impl GraphVerb {
         GraphVerb::RemoveRing,
         GraphVerb::SetSplit,
         GraphVerb::SetDrawnFrom,
+        GraphVerb::SetRadius,
+        GraphVerb::SetWayRound,
+        GraphVerb::SetLattice,
+        GraphVerb::SetRouting,
+        GraphVerb::SetFixtureSize,
+        GraphVerb::SetColourOrder,
+        GraphVerb::SetPortLamps,
         GraphVerb::Delete,
     ];
 
@@ -308,6 +344,13 @@ impl GraphVerb {
             GraphVerb::RemoveRing => "remove-ring",
             GraphVerb::SetSplit => "set-split",
             GraphVerb::SetDrawnFrom => "set-drawn-from",
+            GraphVerb::SetRadius => "set-radius",
+            GraphVerb::SetWayRound => "set-way-round",
+            GraphVerb::SetLattice => "set-lattice",
+            GraphVerb::SetRouting => "set-routing",
+            GraphVerb::SetFixtureSize => "set-fixture-size",
+            GraphVerb::SetColourOrder => "set-colour-order",
+            GraphVerb::SetPortLamps => "set-port-lamps",
         }
     }
 
@@ -374,6 +417,13 @@ impl GraphVerb {
             GraphVerb::RemoveRing => "Remove ring",
             GraphVerb::SetSplit => "Split",
             GraphVerb::SetDrawnFrom => "Drawn from",
+            GraphVerb::SetRadius => "Radius",
+            GraphVerb::SetWayRound => "Way round",
+            GraphVerb::SetLattice => "Lattice",
+            GraphVerb::SetRouting => "Rows run",
+            GraphVerb::SetFixtureSize => "Size",
+            GraphVerb::SetColourOrder => "Colour order",
+            GraphVerb::SetPortLamps => "Port lamps",
         }
     }
 
@@ -432,7 +482,14 @@ impl GraphVerb {
             | GraphVerb::AddCentreLamp
             | GraphVerb::RemoveRing
             | GraphVerb::SetSplit
-            | GraphVerb::SetDrawnFrom => "",
+            | GraphVerb::SetDrawnFrom
+            | GraphVerb::SetRadius
+            | GraphVerb::SetWayRound
+            | GraphVerb::SetLattice
+            | GraphVerb::SetRouting
+            | GraphVerb::SetFixtureSize
+            | GraphVerb::SetColourOrder
+            | GraphVerb::SetPortLamps => "",
         }
     }
 

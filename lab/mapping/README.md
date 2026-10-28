@@ -392,15 +392,19 @@ A 2D canvas with selection, and the start of the whole node graph on it
   `set-count` (a repeat's copies, a path's, a polygon's or a ring's lamps),
   `add-ring`, `add-centre-lamp`, `remove-ring`, `set-split` (one segment,
   or one per subpath or ring), `set-drawn-from` (a circle's outside or
-  inside, a path's first or last point) and `delete` (a node, a part or a
-  ring; ⌫ deletes the selection through the same function). Each mutation
-  is `lpc_mapping::edit`'s, so a rename's and an expand's references are
+  inside, a path's first or last point), `set-radius` (a ring),
+  `set-way-round` (a circle's rings clockwise or counter-clockwise),
+  `set-lattice` (a grid's columns, rows and spacing, a filled polygon's
+  spacing and angle), `set-routing` (a lattice's rows back and forth or
+  all the same way), `set-fixture-size`, `set-colour-order`,
+  `set-port-lamps` and `delete` (a node, a part or a ring; ⌫ deletes the
+  selection through the same function). Each mutation of a mapping is
+  `lpc_mapping::edit`'s, so a rename's and an expand's references are
   rewritten by the model's rules (D6), and what an edit leaves kept and
   gone is said ("1 override on repeat1's copies is kept; it shows as a
-  problem"). The Lamps, Copies, Rings and Inner ring first rows and the
-  `r` key on a path or a ring press them; a radius, a grid's or a filled
-  polygon's numbers, a circle's way round and a fixture's box still set
-  their field. A verb is offered whenever something can take it; the
+  problem"). Every inspector row and the `r` key on a path, a circle or a
+  ring press them (`component_props.rs`); no row sets its field another
+  way. A verb is offered whenever something can take it; the
   selection only preselects its subject (ruling DD37). Drawing stays a
   gesture; one click of the path tool is a single lamp (Q94).
 - **A hint bar** that says what every key does in the current state, each

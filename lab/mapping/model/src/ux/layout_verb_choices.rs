@@ -10,14 +10,17 @@
 
 use lpc_mapping::part::{Part, PartKind, Shape};
 
+use crate::domain::color_order::ColorOrder;
 use crate::domain::node::NodeId;
 use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
-use crate::ux::graph_edit::node_value;
+use crate::ux::graph_edit::{node_value, port_value};
 use crate::ux::graph_layout_edit::{
-    DRAWN_FROM, DeleteSubject, Split, delete_value, drawn_from_label, drawn_from_name, part_value,
+    DRAWN_FROM, DeleteSubject, ROUTINGS, Split, WAYS_ROUND, delete_value, drawn_from_label,
+    drawn_from_name, part_value, routing_label, routing_name, way_round_label, way_round_name,
 };
+
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::graph_verb_choices::VerbChoice;
 
@@ -69,6 +72,48 @@ impl Editor {
                 .map(part)
                 .collect(),
             GraphVerb::RemoveRing => self.removable_rings().into_iter().map(node).collect(),
+            GraphVerb::SetRadius => self.rings().into_iter().map(node).collect(),
+            GraphVerb::SetWayRound => parts.iter().filter(|(_, p)| circle(p)).map(part).collect(),
+            GraphVerb::SetLattice | GraphVerb::SetRouting => parts
+                .iter()
+                .filter(|(_, p)| {
+                    matches!(
+                        p.kind,
+                        PartKind::Shape(Shape::Grid(_) | Shape::FilledPolygon(_))
+                    )
+                })
+                .map(part)
+                .collect(),
+            GraphVerb::SetFixtureSize | GraphVerb::SetColourOrder => {
+                let p = &self.project;
+                p.fixtures()
+                    .iter()
+                    .filter(|n| p.fixture(&n.id).is_some_and(|f| f.unsupported.is_none()))
+                    .map(|n| {
+                        VerbChoice::new(
+                            fixture_value(&n.id),
+                            format!("{} (the fixture)", p.node_name(&n.id)),
+                        )
+                    })
+                    .collect()
+            }
+            GraphVerb::SetPortLamps => {
+                let p = &self.project;
+                let mut out = Vec::new();
+                for n in p.outputs() {
+                    let Some(o) = p.output(&n.id) else {
+                        continue;
+                    };
+                    out.extend(o.ports.iter().map(|port| {
+                        let t = Target::Port {
+                            output: n.id.clone(),
+                            key: port.key.clone(),
+                        };
+                        VerbChoice::new(port_value(&n.id, &port.key), p.long_label(&t))
+                    }));
+                }
+                out
+            }
             GraphVerb::SetSplit | GraphVerb::SetDrawnFrom => parts
                 .iter()
                 .filter(|(_, p)| circle(p) || matches!(p.kind, PartKind::Shape(Shape::Path(_))))
@@ -107,7 +152,11 @@ impl Editor {
         subjects: &[VerbChoice],
     ) -> Option<String> {
         let candidates: Vec<String> = match t {
-            Target::Node(id) => vec![delete_value(&DeleteSubject::Node(id.clone()))],
+            Target::Node(id) => vec![
+                delete_value(&DeleteSubject::Node(id.clone())),
+                fixture_value(id),
+            ],
+            Target::Port { output, key } => vec![port_value(output, key)],
             Target::Part(part) => vec![part_value(part)],
             Target::Generated(o)
             | Target::Lamp { segment: o, .. }
@@ -138,6 +187,30 @@ impl Editor {
         DRAWN_FROM
             .into_iter()
             .map(|f| VerbChoice::new(drawn_from_name(f), drawn_from_label(f)))
+            .collect()
+    }
+
+    /// `set-way-round`'s choices.
+    pub fn way_round_choices(&self) -> Vec<VerbChoice> {
+        WAYS_ROUND
+            .into_iter()
+            .map(|d| VerbChoice::new(way_round_name(d), way_round_label(d)))
+            .collect()
+    }
+
+    /// `set-routing`'s choices.
+    pub fn routing_choices(&self) -> Vec<VerbChoice> {
+        ROUTINGS
+            .into_iter()
+            .map(|r| VerbChoice::new(routing_name(r), routing_label(r)))
+            .collect()
+    }
+
+    /// `set-colour-order`'s choices: `rgb` read as "RGB".
+    pub fn colour_order_choices(&self) -> Vec<VerbChoice> {
+        ColorOrder::ALL
+            .into_iter()
+            .map(|o| VerbChoice::new(o.key(), o.word()))
             .collect()
     }
 
@@ -189,13 +262,23 @@ impl Editor {
         out
     }
 
+    /// Every ring of every circle.
+    fn rings(&self) -> Vec<TreeRef> {
+        self.rings_where(|_| true)
+    }
+
     /// Every ring of a circle with more than one: a circle's last ring
     /// goes with the circle.
     fn removable_rings(&self) -> Vec<TreeRef> {
+        self.rings_where(|c| c.rings.len() > 1)
+    }
+
+    /// Every ring of the circles `keep` keeps.
+    fn rings_where(&self, keep: impl Fn(&lpc_mapping::part::Circle) -> bool) -> Vec<TreeRef> {
         let mut out = Vec::new();
         for (f, p) in self.every_part() {
             if let PartKind::Shape(Shape::Circle(c)) = &p.kind
-                && c.rings.len() > 1
+                && keep(c)
             {
                 out.extend(c.rings.iter().map(|r| {
                     TreeRef::new(
@@ -222,4 +305,9 @@ fn held_parts(parts: &[(NodeId, &Part)]) -> Vec<lpc_mapping::part::PartId> {
             _ => None,
         })
         .collect()
+}
+
+/// A fixture as a value: `<fixture>:`.
+fn fixture_value(id: &NodeId) -> String {
+    format!("{id}:")
 }

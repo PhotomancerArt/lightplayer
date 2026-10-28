@@ -7,13 +7,17 @@
 //! way round the rings run is the circle's (every ring's); one ring runs
 //! the other way on the wire by its own override (`r`).
 //!
-//! **Rows that are verbs** (mapping rebuild M4 P07). Lamps, Copies, Rings,
-//! Inner ring first and A segment per subpath / per ring press the layout
-//! verbs (`set-count`, `add-ring`, `remove-ring`, `set-drawn-from`,
-//! `set-split`) through [`Project::prop_edits`] and
-//! `Editor::edit`, the function their offers run; the other rows (a
-//! radius, a grid's columns, a fixture's size…) still set their field.
+//! **Every row is a verb** (mapping rebuild M4 P07, P08). Each row presses
+//! a layout verb through [`Project::prop_edits`] and `Editor::edit`, the
+//! function its offer runs: Lamps and Copies `set-count`, Rings
+//! `add-ring` / `remove-ring`, Inner ring first `set-drawn-from`, A segment
+//! per subpath / per ring `set-split`, Radius `set-radius`,
+//! Counter-clockwise `set-way-round`, Columns, Rows, Spacing and Angle
+//! `set-lattice`, Snake `set-routing`, Width and Height
+//! `set-fixture-size`, Colour order `set-colour-order`, a port's Pixels
+//! `set-port-lamps`. No row sets its field another way.
 
+use lpc_mapping::edit::DrawnFrom;
 use lpc_mapping::part::{Circle, CircleSplit, PartKind, PathSplit, Shape};
 use lpc_mapping::{GridRouting as Routing, RingDir, RingOrder};
 
@@ -22,7 +26,7 @@ use crate::domain::fixture::Fixture;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::graph_edit::GraphEdit;
-use crate::ux::graph_layout_edit::{Split, Units};
+use crate::ux::graph_layout_edit::{LatticeValues, Length, Split, Units};
 use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 
 pub const LAMPS: PropDesc = PropDesc {
@@ -257,22 +261,17 @@ impl Project {
         }
     }
 
-    /// The verbs a row that is one presses for `targets` (module docs):
-    /// `None` for a row that sets its field. `spacing` is the lamp spacing
-    /// new rings are drawn with.
+    /// The verbs a row presses for `targets` (module docs): one edit for
+    /// each target that has the row, worked out from its value now (a
+    /// Rings row may make several). `spacing` is the lamp spacing new
+    /// rings are drawn with.
     pub(crate) fn prop_edits(
         &self,
         targets: &[Target],
         prop_id: &str,
         edit: PropEdit,
         spacing: f64,
-    ) -> Option<Vec<GraphEdit>> {
-        if !matches!(
-            prop_id,
-            "lamps" | "copies" | "rings" | "inner-first" | "split-subpaths" | "split-rings"
-        ) {
-            return None;
-        }
+    ) -> Vec<GraphEdit> {
         let mut out = Vec::new();
         for t in targets {
             let Some((desc, current)) = self.props_of(t).into_iter().find(|(d, _)| d.id == prop_id)
@@ -285,139 +284,134 @@ impl Project {
                 Target::Generated(o) if o.id.key.is_none() => Some(o.part()),
                 _ => None,
             };
-            match (t, prop_id, new) {
-                (Target::Generated(o), "lamps", PropRaw::Count(n)) if o.id.key.is_some() => out
-                    .push(GraphEdit::SetCount {
+            let lattice = |values: LatticeValues| {
+                part.clone()
+                    .map(|part| GraphEdit::SetLattice { part, values })
+            };
+            let made = match (t, prop_id, new) {
+                (Target::Generated(o), "lamps", PropRaw::Count(n)) if o.id.key.is_some() => {
+                    Some(GraphEdit::SetCount {
                         subject: o.clone(),
                         count: n as u32,
-                    }),
-                (_, "lamps", PropRaw::Count(n)) => {
-                    let part = part?;
+                    })
+                }
+                (_, "lamps", PropRaw::Count(n)) => part.as_ref().map(|part| {
                     // A repeat's lamps are the part it holds.
-                    let subject = match self.part(&part).map(|p| &p.kind) {
+                    let subject = match self.part(part).map(|p| &p.kind) {
                         Some(PartKind::Repeat(r)) => {
                             crate::PartRef::new(&part.fixture, &r.part.id).node()
                         }
                         _ => part.node(),
                     };
-                    out.push(GraphEdit::SetCount {
+                    GraphEdit::SetCount {
                         subject,
                         count: n as u32,
-                    });
-                }
-                (_, "copies", PropRaw::Count(n)) => out.push(GraphEdit::SetCount {
-                    subject: part?.node(),
+                    }
+                }),
+                (_, "copies", PropRaw::Count(n)) => part.as_ref().map(|p| GraphEdit::SetCount {
+                    subject: p.node(),
                     count: n as u32,
                 }),
-                (_, "inner-first", PropRaw::Flag(inside)) => out.push(GraphEdit::SetDrawnFrom {
-                    part: part?,
-                    from: if inside {
-                        lpc_mapping::edit::DrawnFrom::Inside
-                    } else {
-                        lpc_mapping::edit::DrawnFrom::Outside
-                    },
-                }),
-                (_, "split-subpaths", PropRaw::Flag(apart)) => out.push(GraphEdit::SetSplit {
-                    part: part?,
-                    split: if apart { Split::Subpaths } else { Split::One },
-                }),
-                (_, "split-rings", PropRaw::Flag(apart)) => out.push(GraphEdit::SetSplit {
-                    part: part?,
-                    split: if apart { Split::Rings } else { Split::One },
-                }),
+                (_, "inner-first", PropRaw::Flag(inside)) => {
+                    part.clone().map(|part| GraphEdit::SetDrawnFrom {
+                        part,
+                        from: if inside {
+                            DrawnFrom::Inside
+                        } else {
+                            DrawnFrom::Outside
+                        },
+                    })
+                }
+                (_, "split-subpaths", PropRaw::Flag(apart)) => {
+                    part.clone().map(|part| GraphEdit::SetSplit {
+                        part,
+                        split: if apart { Split::Subpaths } else { Split::One },
+                    })
+                }
+                (_, "split-rings", PropRaw::Flag(apart)) => {
+                    part.clone().map(|part| GraphEdit::SetSplit {
+                        part,
+                        split: if apart { Split::Rings } else { Split::One },
+                    })
+                }
                 (_, "rings", PropRaw::Count(n)) => {
-                    let part = part?;
-                    let circle = self.circle(&part)?;
-                    out.extend(ring_count_edits(&part, circle, n.max(1) as usize, spacing));
-                }
-                _ => {}
-            }
-        }
-        Some(out)
-    }
-
-    /// Apply an edit to one target's property, for a row that sets its
-    /// field ([`Project::prop_edits`] says which rows are verbs). Returns
-    /// whether it had it.
-    pub fn edit_prop(&mut self, t: &Target, prop_id: &str, edit: PropEdit, spacing: f64) -> bool {
-        let Some((desc, current)) = self.props_of(t).into_iter().find(|(d, _)| d.id == prop_id)
-        else {
-            return false;
-        };
-        let new = edited(&desc, current, edit);
-        match t {
-            Target::Port { output, key } => {
-                let Some(p) = self.output_mut(output).and_then(|o| o.port_mut(key)) else {
-                    return false;
-                };
-                match (prop_id, new) {
-                    ("pixels", PropRaw::Count(n)) => p.pixels = Some(n as u32),
-                    _ => return false,
-                }
-            }
-            Target::Node(id) => {
-                let Some(f) = self.fixture_mut(id) else {
-                    return false;
-                };
-                match (prop_id, new) {
-                    ("width", PropRaw::Number(v)) => f.size.x = v,
-                    ("height", PropRaw::Number(v)) => f.size.y = v,
-                    ("colour-order", PropRaw::Choice(i)) => {
-                        f.color_order = ColorOrder::ALL.get(i).copied().unwrap_or_default()
+                    if let Some(part) = &part
+                        && let Some(circle) = self.circle(part)
+                    {
+                        out.extend(ring_count_edits(part, circle, n.max(1) as usize, spacing));
                     }
-                    _ => return false,
+                    None
                 }
-            }
-            Target::Part(id) => match (self.part_mut(id).map(|c| &mut c.kind), prop_id, new) {
-                (Some(PartKind::Shape(Shape::Circle(circle))), _, new) => match (prop_id, new) {
-                    ("ccw", PropRaw::Flag(v)) => {
-                        circle.dir = if v { RingDir::Ccw } else { RingDir::Cw }
-                    }
-                    _ => return false,
-                },
-                (Some(PartKind::Shape(Shape::Grid(g))), _, new) => match (prop_id, new) {
-                    ("columns", PropRaw::Count(n)) => g.cols = n as u32,
-                    ("rows", PropRaw::Count(n)) => g.rows = n as u32,
-                    ("pitch", PropRaw::Number(v)) => g.pitch = v as f32,
-                    ("snake", PropRaw::Flag(v)) => g.routing = routing(v),
-                    _ => return false,
-                },
-                (Some(PartKind::Shape(Shape::FilledPolygon(f))), _, new) => match (prop_id, new) {
-                    ("pitch", PropRaw::Number(v)) => f.pitch = v as f32,
-                    ("angle", PropRaw::Number(v)) => f.angle_deg = v as f32,
-                    ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
-                    _ => return false,
-                },
-                _ => return false,
-            },
-            Target::Generated(o) => {
-                if self.ring_of(o).is_none() {
-                    // A copy's edits land on its part (D11).
-                    return o.id.key.is_none()
-                        && self.edit_prop(&Target::Part(o.part()), prop_id, edit, spacing);
+                (_, "ccw", PropRaw::Flag(ccw)) => {
+                    part.clone().map(|circle| GraphEdit::SetWayRound {
+                        circle,
+                        dir: if ccw { RingDir::Ccw } else { RingDir::Cw },
+                    })
                 }
-                let Some(key) = o.id.key.clone() else {
-                    return false;
-                };
-                let Some(r) = self.ring_mut(&o.part(), key.as_str()) else {
-                    return false;
-                };
-                match (prop_id, new) {
-                    ("radius", PropRaw::Number(v)) => r.radius = v as f32,
-                    _ => return false,
+                (_, "columns", PropRaw::Count(n)) => lattice(LatticeValues {
+                    columns: Some(n as u32),
+                    ..LatticeValues::default()
+                }),
+                (_, "rows", PropRaw::Count(n)) => lattice(LatticeValues {
+                    rows: Some(n as u32),
+                    ..LatticeValues::default()
+                }),
+                (_, "pitch", PropRaw::Number(v)) => lattice(LatticeValues {
+                    spacing: Some(Units(v as f32)),
+                    ..LatticeValues::default()
+                }),
+                (_, "angle", PropRaw::Number(v)) => lattice(LatticeValues {
+                    angle: Some(Units(v as f32)),
+                    ..LatticeValues::default()
+                }),
+                (_, "snake", PropRaw::Flag(snake)) => {
+                    part.clone().map(|part| GraphEdit::SetRouting {
+                        part,
+                        routing: if snake {
+                            Routing::Snake
+                        } else {
+                            Routing::Raster
+                        },
+                    })
                 }
-            }
-            Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => return false,
+                (Target::Generated(o), "radius", PropRaw::Number(v)) => {
+                    Some(GraphEdit::SetRadius {
+                        ring: o.original(),
+                        radius: Units(v as f32),
+                    })
+                }
+                (Target::Node(id), "width", PropRaw::Number(v)) => {
+                    Some(GraphEdit::SetFixtureSize {
+                        fixture: id.clone(),
+                        width: Some(Length(v)),
+                        height: None,
+                    })
+                }
+                (Target::Node(id), "height", PropRaw::Number(v)) => {
+                    Some(GraphEdit::SetFixtureSize {
+                        fixture: id.clone(),
+                        width: None,
+                        height: Some(Length(v)),
+                    })
+                }
+                (Target::Node(id), "colour-order", PropRaw::Choice(i)) => {
+                    Some(GraphEdit::SetColourOrder {
+                        fixture: id.clone(),
+                        order: ColorOrder::ALL.get(i).copied().unwrap_or_default(),
+                    })
+                }
+                (Target::Port { output, key }, "pixels", PropRaw::Count(n)) => {
+                    Some(GraphEdit::SetPortLamps {
+                        output: output.clone(),
+                        port: key.clone(),
+                        lamps: n as u32,
+                    })
+                }
+                _ => None,
+            };
+            out.extend(made);
         }
-        true
-    }
-}
-
-fn routing(snake: bool) -> Routing {
-    if snake {
-        Routing::Snake
-    } else {
-        Routing::Raster
+        out
     }
 }
 

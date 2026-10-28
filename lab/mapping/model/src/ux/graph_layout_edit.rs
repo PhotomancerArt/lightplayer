@@ -3,7 +3,10 @@
 //! reached from [`Project::apply_graph_edit`] like the patching verbs.
 //!
 //! Rename, repeat, unrepeat, expand, a count, a ring added or removed, a
-//! centre lamp, a split, where a shape is drawn from, and delete. Each is a
+//! centre lamp, a split, where a shape is drawn from, and delete; and the
+//! numbers the inspector's rows set (P08): a ring's radius, a circle's way
+//! round, a lattice's numbers and how its rows run, a fixture's size and
+//! colour order, a port's lamps. Each is a
 //! [`GraphEdit`] the offer (`project/graph/<verb>`), the inspector's rows
 //! and the keys all make with [`Editor::edit`], one undo step. Every
 //! mutation is `lpc_mapping::edit`'s, so the references an edit rewrites
@@ -18,17 +21,29 @@
 //!
 //! **Values as text** (`graph_edit.rs`): a part is `<fixture>:<part id>`,
 //! a ring `<fixture>:<part id>/<key>`, a node by its id alone (`power`), a
-//! number of lamps or copies a whole number, a radius a number.
+//! fixture `<fixture>:`, a port `<output>:<key>`, a number of lamps or
+//! copies a whole number, a radius, a spacing, an angle or a side a
+//! number.
+//!
+//! A fixture's size and colour order and a port's lamps are the project's,
+//! not its mappings': they are set on the fixture and the output; the rest
+//! go through `lpc_mapping::edit`.
 
-use lpc_mapping::edit::{self, DrawnFrom};
+use lpc_mapping::edit::{self, DrawnFrom, LatticeEdit};
 use lpc_mapping::part::{CircleSplit, PartId, PartKind, PathSplit, Shape};
+use lpc_mapping::{GridRouting, RingDir};
+
+use crate::domain::color_order::ColorOrder;
+use crate::domain::fixture::Fixture;
 
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
 use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::project::Project;
 use crate::ux::editor::Editor;
-use crate::ux::graph_edit::{GraphEdit, parse_lamps, parse_node};
+use crate::ux::graph_edit::{
+    GraphEdit, PortChoice, RuleSubject, parse_lamps, parse_node, parse_port, parse_rule_subject,
+};
 use crate::ux::graph_verb::GraphVerb;
 
 /// A length in the layout's units (a ring's radius). Equal when its bits
@@ -43,6 +58,82 @@ impl PartialEq for Units {
 }
 
 impl Eq for Units {}
+
+/// A length on the canvas (a fixture's side). Equal when its bits are.
+#[derive(Debug, Clone, Copy)]
+pub struct Length(pub f64);
+
+impl PartialEq for Length {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for Length {}
+
+/// A lattice's numbers, as `set-lattice` takes them: each `None` stays.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LatticeValues {
+    /// A grid's columns.
+    pub columns: Option<u32>,
+    /// A grid's rows.
+    pub rows: Option<u32>,
+    /// Lamp to lamp.
+    pub spacing: Option<Units>,
+    /// A filled polygon's lattice turned, in degrees.
+    pub angle: Option<Units>,
+}
+
+impl LatticeValues {
+    /// As `lpc_mapping::edit` takes it.
+    fn edit(self) -> LatticeEdit {
+        LatticeEdit {
+            columns: self.columns,
+            rows: self.rows,
+            pitch: self.spacing.map(|u| u.0),
+            angle_deg: self.angle.map(|u| u.0),
+            routing: None,
+        }
+    }
+}
+
+/// Every way round, in the order `set-way-round` offers them.
+pub const WAYS_ROUND: [RingDir; 2] = [RingDir::Cw, RingDir::Ccw];
+
+/// A way round as a value.
+pub fn way_round_name(dir: RingDir) -> &'static str {
+    match dir {
+        RingDir::Cw => "clockwise",
+        RingDir::Ccw => "counter-clockwise",
+    }
+}
+
+/// A way round in words.
+pub fn way_round_label(dir: RingDir) -> &'static str {
+    match dir {
+        RingDir::Cw => "Clockwise",
+        RingDir::Ccw => "Counter-clockwise",
+    }
+}
+
+/// How a lattice's rows can run, in the order `set-routing` offers them.
+pub const ROUTINGS: [GridRouting; 2] = [GridRouting::Snake, GridRouting::Raster];
+
+/// How rows run, as a value.
+pub fn routing_name(routing: GridRouting) -> &'static str {
+    match routing {
+        GridRouting::Snake => "back-and-forth",
+        GridRouting::Raster => "same-way",
+    }
+}
+
+/// How rows run, in words.
+pub fn routing_label(routing: GridRouting) -> &'static str {
+    match routing {
+        GridRouting::Snake => "Back and forth (snake)",
+        GridRouting::Raster => "All the same way",
+    }
+}
 
 /// How a shape splits into segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +273,76 @@ pub(crate) fn bind_layout(
         GraphVerb::Delete => GraphEdit::Delete {
             subject: parse_delete(&need("subject")?)?,
         },
+        GraphVerb::SetRadius => GraphEdit::SetRadius {
+            ring: parse_ring(&need("subject")?)?,
+            radius: parse_radius(&need("radius")?)?,
+        },
+        GraphVerb::SetWayRound => GraphEdit::SetWayRound {
+            circle: part()?,
+            dir: {
+                let text = need("way")?;
+                WAYS_ROUND
+                    .into_iter()
+                    .find(|d| way_round_name(*d) == text)
+                    .ok_or_else(|| format!("no way round {text}"))?
+            },
+        },
+        GraphVerb::SetLattice => {
+            let given = |name: &str| arg(name).filter(|t| !t.trim().is_empty());
+            let values = LatticeValues {
+                columns: given("columns").map(|t| parse_count(&t)).transpose()?,
+                rows: given("rows").map(|t| parse_count(&t)).transpose()?,
+                spacing: given("spacing").map(|t| parse_spacing(&t)).transpose()?,
+                angle: given("angle").map(|t| parse_angle(&t)).transpose()?,
+            };
+            if values == LatticeValues::default() {
+                return Err("give columns, rows, a spacing or an angle".into());
+            }
+            GraphEdit::SetLattice {
+                part: part()?,
+                values,
+            }
+        }
+        GraphVerb::SetRouting => GraphEdit::SetRouting {
+            part: part()?,
+            routing: {
+                let text = need("run")?;
+                ROUTINGS
+                    .into_iter()
+                    .find(|r| routing_name(*r) == text)
+                    .ok_or_else(|| format!("rows don't run {text}"))?
+            },
+        },
+        GraphVerb::SetFixtureSize => {
+            let given = |name: &str| arg(name).filter(|t| !t.trim().is_empty());
+            let width = given("width").map(|t| parse_side(&t)).transpose()?;
+            let height = given("height").map(|t| parse_side(&t)).transpose()?;
+            if width.is_none() && height.is_none() {
+                return Err("give a width, a height or both".into());
+            }
+            GraphEdit::SetFixtureSize {
+                fixture: fixture_of(&need("subject")?)?,
+                width,
+                height,
+            }
+        }
+        GraphVerb::SetColourOrder => GraphEdit::SetColourOrder {
+            fixture: fixture_of(&need("subject")?)?,
+            order: {
+                let text = need("order")?;
+                ColorOrder::from_key(&text).ok_or_else(|| format!("no colour order {text}"))?
+            },
+        },
+        GraphVerb::SetPortLamps => {
+            let PortChoice::At { output, port } = parse_port(&need("subject")?)? else {
+                return Err("a port is <output>:<port>".into());
+            };
+            GraphEdit::SetPortLamps {
+                output,
+                port,
+                lamps: parse_count(&need("lamps")?)?,
+            }
+        }
         other => return Err(format!("{} isn't a layout verb", other.name())),
     })
 }
@@ -288,6 +449,59 @@ impl Project {
                 }
                 DeleteSubject::Ring(ring) => self.remove_ring_of(ring),
             },
+            GraphEdit::SetRadius { ring, radius } => {
+                let key = ring
+                    .id
+                    .key
+                    .clone()
+                    .filter(|_| ring.id.copies.is_empty())
+                    .ok_or_else(|| format!("{} isn't a ring", ring.id))?;
+                let m = self.mapping_mut(&ring.fixture)?;
+                edit::set_ring_radius(m, &ring.id.part, &key, radius.0).map_err(said)
+            }
+            GraphEdit::SetWayRound { circle, dir } => {
+                let m = self.mapping_mut(&circle.fixture)?;
+                edit::set_circle_dir(m, &circle.part, *dir).map_err(said)
+            }
+            GraphEdit::SetLattice { part, values } => {
+                let m = self.mapping_mut(&part.fixture)?;
+                edit::set_lattice(m, &part.part, &values.edit()).map_err(said)
+            }
+            GraphEdit::SetRouting { part, routing } => {
+                let m = self.mapping_mut(&part.fixture)?;
+                let change = LatticeEdit {
+                    routing: Some(*routing),
+                    ..LatticeEdit::default()
+                };
+                edit::set_lattice(m, &part.part, &change).map_err(said)
+            }
+            GraphEdit::SetFixtureSize {
+                fixture,
+                width,
+                height,
+            } => {
+                let f = self.editable_fixture(fixture)?;
+                f.size.x = width.map_or(f.size.x, |w| w.0);
+                f.size.y = height.map_or(f.size.y, |h| h.0);
+                Ok(())
+            }
+            GraphEdit::SetColourOrder { fixture, order } => {
+                self.editable_fixture(fixture)?.color_order = *order;
+                Ok(())
+            }
+            GraphEdit::SetPortLamps {
+                output,
+                port,
+                lamps,
+            } => {
+                let words = self.output_words(output);
+                let p = self
+                    .output_mut(output)
+                    .and_then(|o| o.port_mut(port))
+                    .ok_or_else(|| format!("{words} has no port {port}"))?;
+                p.pixels = Some(*lamps);
+                Ok(())
+            }
             other => Err(format!("{} isn't a layout edit", other.verb().name())),
         }
     }
@@ -328,6 +542,19 @@ impl Project {
         edit::remove_ring(m, &circle.part, &key)
             .map(drop)
             .map_err(|e| e.to_string())
+    }
+
+    /// A fixture the Graph can edit: one it holds whole.
+    fn editable_fixture(&mut self, fixture: &NodeId) -> Result<&mut Fixture, String> {
+        let f = self
+            .fixture_mut(fixture)
+            .ok_or_else(|| format!("there is no fixture {fixture}"))?;
+        if f.unsupported.is_some() {
+            return Err(format!(
+                "{fixture} opens as its box alone here: edit it elsewhere"
+            ));
+        }
+        Ok(f)
     }
 
     /// The middle of a fixture's box, in its mapping's coordinates: where
@@ -454,6 +681,53 @@ fn parse_count(text: &str) -> Result<u32, String> {
         return Err("at least one".to_string());
     }
     Ok(n)
+}
+
+/// A fixture: `<fixture>:`.
+fn fixture_of(text: &str) -> Result<NodeId, String> {
+    match parse_rule_subject(text)? {
+        RuleSubject::Fixture(f) => Ok(f),
+        RuleSubject::Part(p) => Err(format!("{} is a part, not a fixture", p.part)),
+    }
+}
+
+/// A lamp-to-lamp spacing, more than 0.
+fn parse_spacing(text: &str) -> Result<Units, String> {
+    let v: f32 = text
+        .trim()
+        .parse()
+        .map_err(|_| format!("{text} isn't a spacing"))?;
+    if !v.is_finite() || v <= 0.0 {
+        return Err(format!("a spacing is more than 0, not {text}"));
+    }
+    Ok(Units(v))
+}
+
+/// An angle, in degrees.
+fn parse_angle(text: &str) -> Result<Units, String> {
+    let v: f32 = text
+        .trim()
+        .parse()
+        .map_err(|_| format!("{text} isn't a number of degrees"))?;
+    if !v.is_finite() {
+        return Err(format!("{text} isn't a number of degrees"));
+    }
+    Ok(Units(v))
+}
+
+/// A fixture's side, at least [`Fixture::MIN_SIDE`].
+fn parse_side(text: &str) -> Result<Length, String> {
+    let v: f64 = text
+        .trim()
+        .parse()
+        .map_err(|_| format!("{text} isn't a length"))?;
+    if !v.is_finite() || v < Fixture::MIN_SIDE {
+        return Err(format!(
+            "a fixture's side is at least {}, not {text}",
+            Fixture::MIN_SIDE
+        ));
+    }
+    Ok(Length(v))
 }
 
 fn parse_radius(text: &str) -> Result<Units, String> {

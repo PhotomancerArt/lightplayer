@@ -27,12 +27,16 @@ use lpc_mapping::part::TreeId;
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputOp, PatchTarget, PortKey, PortOp, Start,
 };
+use lpc_mapping::{GridRouting, RingDir};
 
+use crate::domain::color_order::ColorOrder;
 use crate::domain::node::NodeId;
 use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::project::Project;
 use crate::ux::editor::Editor;
-use crate::ux::graph_layout_edit::{DeleteSubject, Split, Units, bind_layout};
+use crate::ux::graph_layout_edit::{
+    DeleteSubject, LatticeValues, Length, Split, Units, bind_layout,
+};
 use crate::ux::graph_verb::GraphVerb;
 
 /// One patching verb, bound to what it acts on and the values it takes.
@@ -107,6 +111,32 @@ pub enum GraphEdit {
     SetDrawnFrom { part: PartRef, from: DrawnFrom },
     /// A node, a part or a ring deleted (overrides kept, D12).
     Delete { subject: DeleteSubject },
+    /// How far a ring is from its circle's centre.
+    SetRadius { ring: TreeRef, radius: Units },
+    /// Which way round a circle's rings run.
+    SetWayRound { circle: PartRef, dir: RingDir },
+    /// A grid's or a filled polygon's numbers; each one not given stays.
+    SetLattice {
+        part: PartRef,
+        values: LatticeValues,
+    },
+    /// A grid's or a filled polygon's rows back and forth, or all the same
+    /// way.
+    SetRouting { part: PartRef, routing: GridRouting },
+    /// A fixture's box; a side not given stays.
+    SetFixtureSize {
+        fixture: NodeId,
+        width: Option<Length>,
+        height: Option<Length>,
+    },
+    /// Which byte of each of a fixture's lamps is red, green and blue.
+    SetColourOrder { fixture: NodeId, order: ColorOrder },
+    /// How many lamps the strip on a port has.
+    SetPortLamps {
+        output: NodeId,
+        port: String,
+        lamps: u32,
+    },
 }
 
 /// A port, as `set-port` takes it (Q26).
@@ -180,6 +210,13 @@ impl GraphEdit {
             GraphEdit::SetSplit { .. } => GraphVerb::SetSplit,
             GraphEdit::SetDrawnFrom { .. } => GraphVerb::SetDrawnFrom,
             GraphEdit::Delete { .. } => GraphVerb::Delete,
+            GraphEdit::SetRadius { .. } => GraphVerb::SetRadius,
+            GraphEdit::SetWayRound { .. } => GraphVerb::SetWayRound,
+            GraphEdit::SetLattice { .. } => GraphVerb::SetLattice,
+            GraphEdit::SetRouting { .. } => GraphVerb::SetRouting,
+            GraphEdit::SetFixtureSize { .. } => GraphVerb::SetFixtureSize,
+            GraphEdit::SetColourOrder { .. } => GraphVerb::SetColourOrder,
+            GraphEdit::SetPortLamps { .. } => GraphVerb::SetPortLamps,
         }
     }
 
@@ -592,7 +629,7 @@ pub(crate) fn parse_node(text: &str) -> Result<TreeRef, String> {
     Ok(TreeRef::new(&NodeId::new(fixture), id))
 }
 
-fn parse_rule_subject(text: &str) -> Result<RuleSubject, String> {
+pub(crate) fn parse_rule_subject(text: &str) -> Result<RuleSubject, String> {
     let (fixture, part) = text
         .rsplit_once(':')
         .ok_or_else(|| format!("{text} isn't <fixture>: or <fixture>:<part>"))?;
@@ -605,7 +642,7 @@ fn parse_rule_subject(text: &str) -> Result<RuleSubject, String> {
         .ok_or_else(|| format!("{part} isn't a part's id"))
 }
 
-fn parse_port(text: &str) -> Result<PortChoice, String> {
+pub(crate) fn parse_port(text: &str) -> Result<PortChoice, String> {
     match text {
         "next-port" => Ok(PortChoice::NextPort),
         "stays-here" => Ok(PortChoice::StaysHere),
