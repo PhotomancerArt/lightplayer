@@ -17,6 +17,7 @@ use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 use super::push::PushActivity;
 use super::remove_project::RemoveProjectActivity;
+use super::set_board::SetBoardActivity;
 use super::update::UpdateActivity;
 use super::update_activity_view::UpdateActivityView;
 use super::update_outcome_facts::UpdateOutcomeFacts;
@@ -33,6 +34,8 @@ pub enum ActivityKind {
     RemoveProject,
     /// An over-the-air update, run in legs across the board's resets.
     Update,
+    /// Saving the board model on a running board ("Which board is this?").
+    SetBoard,
 }
 
 impl ActivityKind {
@@ -45,6 +48,7 @@ impl ActivityKind {
             Self::Erase => "Erasing the flash",
             Self::RemoveProject => "Removing the project",
             Self::Update => "Updating firmware",
+            Self::SetBoard => "Saving the board model",
         }
     }
 
@@ -73,6 +77,9 @@ impl ActivityKind {
             // An update's cancel is never held: it is accepted only while
             // nothing on the board has changed, and then it ends at once.
             Self::Update => config.cancel_grace_ms,
+            // A half-written manifest is the one state to avoid; the push's
+            // grace is the same physics (a short conversation on the wire).
+            Self::SetBoard => config.push_cancel_grace_ms,
         }
     }
 }
@@ -408,6 +415,7 @@ pub(crate) enum Reducer {
     Erase(EraseActivity),
     RemoveProject(RemoveProjectActivity),
     Update(UpdateActivity),
+    SetBoard(SetBoardActivity),
 }
 
 impl ActivityReducer for Reducer {
@@ -419,6 +427,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.kind(),
             Self::RemoveProject(reducer) => reducer.kind(),
             Self::Update(reducer) => reducer.kind(),
+            Self::SetBoard(reducer) => reducer.kind(),
         }
     }
 
@@ -430,6 +439,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.handle(now, input, ctx),
             Self::RemoveProject(reducer) => reducer.handle(now, input, ctx),
             Self::Update(reducer) => reducer.handle(now, input, ctx),
+            Self::SetBoard(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
@@ -441,6 +451,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.next_deadline(),
             Self::RemoveProject(reducer) => reducer.next_deadline(),
             Self::Update(reducer) => reducer.next_deadline(),
+            Self::SetBoard(reducer) => reducer.next_deadline(),
         }
     }
 }

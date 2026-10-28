@@ -743,6 +743,13 @@ impl Evidence {
                 self.push_output(TerminalKind::Studio, &line);
                 Vec::new()
             }
+            // So is the identification: which chip, which build, which
+            // board, and what it ran before — the terminal is where a wrong
+            // guess shows first.
+            ActivityMarker::BoardIdentified { identity } => {
+                self.push_output(TerminalKind::Studio, identity.terminal_line());
+                Vec::new()
+            }
             // An update LEG's end is not the activity's: the activity's own
             // (unstamped) bracket carries the outcome. A leg that ended with
             // its link is the board resetting — the card keeps "Updating…",

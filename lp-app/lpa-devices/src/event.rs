@@ -106,17 +106,24 @@ pub enum Action {
     Push {
         device: DeviceId,
     },
-    /// Flash firmware onto this board (round 2's first coarse effect). The
-    /// board is the user's pick from the chip-compatible list; the build id
-    /// was resolved by the app from (board, detected chip) — **no fallback
-    /// build** (Yona 2026-08-03), so an unresolvable pick never reaches the
-    /// model. Aimed at a pending link's provisional device, this gesture
-    /// adopts the link first: flashing a board is the strongest possible
-    /// "keep this one".
+    /// Flash firmware onto this board (round 2's first coarse effect).
+    /// Aimed at a pending link's provisional device, this gesture adopts the
+    /// link first: flashing a board is the strongest possible "keep this
+    /// one".
+    ///
+    /// Nobody picks a board first (plan
+    /// `lp2025/2026-10-28-0025-install-without-board-pick`): `build` is the
+    /// app's table of which chip gets which build, answered inside the
+    /// bootloader session by the chip it hears — **no fallback build**
+    /// (Yona 2026-08-03): a chip the table lacks stops the install with
+    /// nothing written. `board_id` is the board model when the app already
+    /// knows it (Studio stamped it before); `None` lets the session's
+    /// fingerprint decide, and stamps nothing when it cannot.
     Flash {
         device: DeviceId,
-        board_id: String,
-        build_id: String,
+        #[serde(default)]
+        board_id: Option<String>,
+        build: crate::activity::FlashBuildChoice,
         /// Park the chip in its ROM downloader (UsbJtagDownload reset)
         /// before the effect: a blank native-USB chip boot-loops and
         /// re-enumerates, cutting esptool mid-connect; the downloader
@@ -145,6 +152,19 @@ pub enum Action {
     /// (or restore) the board's files — the layout-migration consent.
     ConfirmFlashLayout {
         device: DeviceId,
+    },
+    /// Continue a Flash activity that is waiting on the user's yes to
+    /// replace the firmware the board runs (somebody else's, or one that
+    /// does not say what it is) — the one question an install asks.
+    ConfirmFlashReplace {
+        device: DeviceId,
+    },
+    /// Save `board_id` as this running board's model (its `/hardware.json`)
+    /// and restart it so the pin map takes effect — "Which board is this?",
+    /// asked after an install that could not tell.
+    SetBoard {
+        device: DeviceId,
+        board_id: String,
     },
     /// Restart the board and read what boots.
     ///
@@ -236,6 +256,8 @@ impl Action {
             | Self::Push { device }
             | Self::Flash { device, .. }
             | Self::ConfirmFlashLayout { device }
+            | Self::ConfirmFlashReplace { device }
+            | Self::SetBoard { device, .. }
             | Self::Erase { device }
             | Self::RemoveProject { device }
             | Self::Update { device, .. }
@@ -397,6 +419,12 @@ pub enum ActivityMarker {
     LayoutVerdict {
         verdict: crate::activity::LayoutVerdict,
     },
+    /// What the inspection's session learned about the board — its chip,
+    /// the build it gets, its model when one fits, what it ran before —
+    /// reported by the effects layer before the layout verdict.
+    BoardIdentified {
+        identity: crate::activity::BoardIdentity,
+    },
     /// An update leg's progress (the driver's stage, or `Waiting` while
     /// another device holds the transfer): the card's stage and percent.
     UpdateStage {
@@ -489,19 +517,22 @@ pub enum EffectRequest {
     /// alone. The model never holds the plan — the same rule as [`Self::Push`].
     Flash {
         build_id: String,
-        board_id: String,
+        #[serde(default)]
+        board_id: Option<String>,
         #[serde(default)]
         carry: bool,
     },
     /// Read the board's partition table (and, when its files must move, its
     /// filesystem) in the bootloader, classify it against the package
-    /// `build_id` writes, and stage the plan — the C6 repartition's layout
-    /// step, run before every Flash. Leaves the chip in ROM download; the
-    /// effects layer reports an `ActivityMarker::LayoutVerdict` and then
-    /// `Ended`. `restore_backup` asks for a pending stored backup to be put
-    /// back even onto a board that mounts files of its own.
+    /// `build` resolves to for the chip the session hears, and stage the
+    /// plan — the C6 repartition's layout step, run before every Flash, and
+    /// the install's identification. Leaves the chip in ROM download; the
+    /// effects layer reports an `ActivityMarker::BoardIdentified`, an
+    /// `ActivityMarker::LayoutVerdict` and then `Ended`. `restore_backup`
+    /// asks for a pending stored backup to be put back even onto a board
+    /// that mounts files of its own.
     InspectLayout {
-        build_id: String,
+        build: crate::activity::FlashBuildChoice,
         #[serde(default)]
         restore_backup: bool,
     },
@@ -570,13 +601,18 @@ mod tests {
             Action::Push { device },
             Action::Flash {
                 device,
-                board_id: "seeed-xiao-esp32c6".to_string(),
-                build_id: "esp32c6-4mb".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
+                build: crate::activity::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
                 park_first: false,
                 name: None,
                 restore_backup: false,
             },
             Action::ConfirmFlashLayout { device },
+            Action::ConfirmFlashReplace { device },
+            Action::SetBoard {
+                device,
+                board_id: "seeed/xiao-esp32-c6".to_string(),
+            },
             Action::Update {
                 device,
                 intent: UpdateIntentFacts::Auto,
