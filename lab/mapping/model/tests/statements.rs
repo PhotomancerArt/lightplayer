@@ -1015,9 +1015,12 @@ fn deleting_an_output_leaves_problems_not_retargets() {
     // The notice says so.
     let n = e.notice.clone().unwrap();
     assert!(n.why.unwrap().contains("ring display and strip"));
-    // And so does the problem, in rustc style.
-    let pn = patch.problems[0].notice(p);
-    assert!(pn.text.contains("isn't there") && pn.help.is_some());
+    // And so does the problem, in one plain sentence.
+    let words = p.problems_of_fixture(&ring);
+    assert_eq!(
+        words[0].text,
+        "the fixture's start is on main, which this fixture can't reach: it isn't lit"
+    );
 }
 
 /// Selecting a port highlights exactly the lamps it carries.
@@ -2978,7 +2981,10 @@ fn an_override_on_a_gone_port_is_a_problem() {
         ProblemKind::GonePort { port, .. } if port == "7"
     ));
     assert!(patch.pixel_runs.is_empty(), "never moved to another port");
-    assert!(patch.problems[0].notice(&p).why.is_some());
+    assert_eq!(
+        p.problems_of_fixture(&f)[0].text,
+        "path1's own start is on port 7 of out, which isn't there: it isn't lit"
+    );
 }
 
 /// The colour order belongs to the fixture, as in the product; a port

@@ -48,14 +48,21 @@ impl Project {
             }
             let lamps = (x.channels.end - x.channels.start)
                 .div_ceil(crate::domain::port_tables::PORT_CHANNELS_PER_LAMP);
+            // Two fixtures' segments say whose they are.
+            let whose = |s: &TreeRef| {
+                if fixtures.len() > 1 {
+                    format!("{} of {}", self.segment_words(s), self.node_name(&s.fixture))
+                } else {
+                    self.segment_words(s)
+                }
+            };
+            let (wa, wb) = (whose(a), whose(b));
             out.push(ProblemLine {
                 fixtures,
                 names: vec![a.clone(), b.clone()],
                 problem: UiProblem {
                     text: format!(
-                        "{} and {} share {} on port {}: the board shows only one",
-                        self.segment_words(a),
-                        self.segment_words(b),
+                        "{wa} and {wb} share {} on port {}: the board shows only one",
                         lamps_words(lamps),
                         self.port_words(&output, &port)
                     ),

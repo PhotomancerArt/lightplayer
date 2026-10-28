@@ -27,7 +27,6 @@ use lpc_mapping::patching::{PatchTarget, Patching, Problem, patch_mapping};
 
 use crate::domain::color_order::ColorOrder;
 use crate::domain::node::{Node, NodeId};
-use crate::domain::notice::Notice;
 use crate::domain::part_ref::TreeRef;
 use crate::domain::project::Project;
 use crate::domain::walked::Walked;
@@ -548,70 +547,5 @@ impl Project {
             PatchTarget::Part(part) => part.to_string(),
             PatchTarget::Node(id) => id.to_string(),
         }
-    }
-}
-
-impl PatchProblem {
-    /// The problem in rustc style: what, why, what to do.
-    pub fn notice(&self, p: &Project) -> Notice {
-        let fixture = p.node_name(&self.fixture);
-        let on = |t: &PatchTarget| p.target_words(&self.fixture, t);
-        let (text, why, help) = match &self.kind {
-            ProblemKind::NoStart => (
-                format!("nothing says where {fixture} starts"),
-                "every fixture starts somewhere of its own: nothing flows in from another fixture"
-                    .to_string(),
-                "set its Start to a port of an output",
-            ),
-            ProblemKind::GoneOutput { on: t, output } => (
-                format!("{} is patched to {output}, which isn't there", on(t)),
-                format!(
-                    "no output named {output} reads this fixture, and patching is never pointed somewhere else on its own; ⌘Z brings a deleted one back"
-                ),
-                "until then it lands nowhere",
-            ),
-            ProblemKind::GonePort { on: t, output, port } => (
-                format!("{} is patched to port {port} of {output}, which is gone", on(t)),
-                "its port was deleted, and patching never moves to another port on its own"
-                    .to_string(),
-                "until then it lands nowhere",
-            ),
-            ProblemKind::GoneNode(o) => (
-                format!("{fixture} has an override for {o}, which no longer exists"),
-                "what it was on was deleted, or counted away; an override never moves to another one"
-                    .to_string(),
-                "it does nothing; it comes back into use if what it was on does",
-            ),
-            ProblemKind::DoesntFit { segment, port } => (
-                format!(
-                    "{} doesn't fit what is left of port {port}",
-                    p.segment_words(segment)
-                ),
-                "its start was set there, so it stays: ports are physical".to_string(),
-                "the lamps past the port's end light nothing",
-            ),
-            ProblemKind::PastLastPort { segment } => (
-                format!(
-                    "{} runs past the output's last port",
-                    p.segment_words(segment)
-                ),
-                "outputs have no order, so it never moves on to another output".to_string(),
-                "it, and everything after it that follows on, lights nothing until something sets a new start",
-            ),
-            ProblemKind::MidPixel { segment } => (
-                format!("{} starts part-way into a pixel", p.segment_words(segment)),
-                "the board speaks in whole pixels".to_string(),
-                "it lands nowhere until it starts on a pixel",
-            ),
-            ProblemKind::OrderMismatch { segment } => (
-                format!(
-                    "{}'s color order doesn't fit its colors",
-                    p.segment_words(segment)
-                ),
-                "an order names each of a lamp's colors once".to_string(),
-                "give it an order that fits",
-            ),
-        };
-        Notice::refused(text, why, help)
     }
 }
