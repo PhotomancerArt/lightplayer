@@ -13,13 +13,14 @@ mod journey_mappings;
 
 use journey_mappings::{Journey, choker, circular_display, dome_slice, eaves, journeys};
 use lpc_mapping::edit::{
-    EditError, OverrideField, OverrideFieldKind, add_ring, clear_override_field, expand_repeat,
-    insert_part, move_part, remove_part, remove_ring, rename_part, set_flow, set_override_field,
+    DrawnFrom, EditError, OverrideField, OverrideFieldKind, add_part, add_ring,
+    clear_override_field, expand_repeat, insert_part, move_part, remove_part, remove_ring,
+    rename_part, set_circle_split, set_drawn_from, set_flow, set_lamp_count, set_override_field,
     set_path_split, set_repeat_count, set_start, unrepeat, wrap_in_repeat,
 };
 use lpc_mapping::part::{
-    Mapping, Part, PartId, PartKind, Path, PathCommand, PathSplit, Repeat, SegmentKey, Shape,
-    TreeId, render,
+    Circle, CircleSplit, Mapping, Part, PartId, PartKind, Path, PathCommand, PathSplit, Repeat,
+    SegmentKey, Shape, TreeId, render,
 };
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputPorts, Override, PatchTarget, Patching, PortKey,
@@ -552,6 +553,147 @@ fn splitting_a_path_finds_its_subpaths_overrides() {
     assert_eq!(
         set_path_split(&mut m, &part("sector"), PathSplit::One),
         Err(EditError::NoSuchPart(part("sector")))
+    );
+}
+
+/// A new part never takes an id a kept override names: minted that way, it
+/// would quietly pick the override up.
+#[test]
+fn a_new_part_never_takes_an_id_a_kept_override_names() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    // An override left on a ring of a `circle2` the counter never passed
+    // (a hand-authored file: the reader checks counters against parts only).
+    m.overrides.insert(node("circle2/r1"), reversed());
+    let circle = || PartKind::Shape(Shape::Circle(Circle::new([10.0, 10.0], &[(5.0, 4)])));
+    assert_eq!(m.clone().new_part(circle()).id, part("circle2"), "the trap");
+
+    let id = add_part(&mut m, None, 1, circle()).unwrap();
+    assert_eq!(id, part("circle3"));
+    assert_eq!(m.parts[1].id, id, "at the place asked for");
+    let p = patch(&m, &journey.outputs);
+    assert!(p.problems.contains(&Problem::GoneNode(node("circle2/r1"))));
+    assert!(
+        !p.segment(&node("circle3/r1"))
+            .unwrap()
+            .direction
+            .is_reverse()
+    );
+    assert_eq!(m.clone().new_part(circle()).id, part("circle4"), "counted");
+
+    let next = m.next.clone();
+    assert_eq!(
+        add_part(&mut m, Some(&part("circle1")), 0, circle()),
+        Err(EditError::NotAGroup(part("circle1")))
+    );
+    assert_eq!(m.next, next, "a refused part mints nothing");
+}
+
+/// A circle made one segment loses its rings' overrides to "gone", and
+/// split into rings again finds them: every lamp lands where it did.
+#[test]
+fn a_circle_made_one_segment_finds_its_rings_overrides_again() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    set_circle_split(&mut m, &part("circle1"), CircleSplit::One).unwrap();
+    let p = patch(&m, &journey.outputs);
+    assert_eq!(p.segment(&node("circle1")).unwrap().lamps, 61);
+    assert!(p.problems.contains(&Problem::GoneNode(node("circle1/r3"))));
+
+    set_circle_split(&mut m, &part("circle1"), CircleSplit::Rings).unwrap();
+    lands_where_it_did(&journey, &m, Clone::clone);
+    assert_eq!(
+        set_circle_split(&mut choker().mapping, &part("u"), CircleSplit::One),
+        Err(EditError::NotACircle(part("u")))
+    );
+}
+
+/// A lamp count is a path's, a polygon's or one ring's: the lamps are
+/// spread again, and ids and overrides stay.
+#[test]
+fn a_lamp_count_is_a_paths_or_one_rings() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    let circle = part("circle1");
+    set_lamp_count(&mut m, &circle, Some(&key("r1")), 30).unwrap();
+    let p = patch(&m, &journey.outputs);
+    assert_eq!(p.segment(&node("circle1/r1")).unwrap().lamps, 30);
+    assert_eq!(
+        first_lamp(&p, "circle1/r2"),
+        Some((0, 30)),
+        "ring 2 follows"
+    );
+    assert_eq!(m.overrides, journey.mapping.overrides);
+    assert!(matches!(
+        set_lamp_count(&mut m, &circle, Some(&key("r5")), 2),
+        Err(EditError::BadRing(_))
+    ));
+    assert_eq!(
+        set_lamp_count(&mut m, &circle, None, 9),
+        Err(EditError::NoLampCount(circle.clone()))
+    );
+    assert_eq!(
+        set_lamp_count(&mut m, &circle, Some(&key("r1")), 0),
+        Err(EditError::NoLamps(circle.clone()))
+    );
+
+    let mut choker = choker().mapping;
+    set_lamp_count(&mut choker, &part("u"), None, 9).unwrap();
+    let tree = render(&choker).unwrap();
+    assert_eq!(tree.segment(&node("u")).unwrap().lamps.len(), 9);
+}
+
+/// Drawn from the inside, a circle's rings come inner first, each keeping
+/// its key and its override; a path drawn from its last point starts there.
+/// "Drawn from" is layout: no override changes.
+#[test]
+fn drawn_from_orders_a_circles_rings_and_starts_a_path() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    set_drawn_from(&mut m, &part("circle1"), DrawnFrom::Inside).unwrap();
+    let order: Vec<String> = render(&m)
+        .unwrap()
+        .segments()
+        .iter()
+        .map(|s| s.id.to_string())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "circle1/r5",
+            "circle1/r4",
+            "circle1/r3",
+            "circle1/r2",
+            "circle1/r1"
+        ]
+    );
+    assert_eq!(m.overrides, journey.mapping.overrides);
+    let p = patch(&m, &journey.outputs);
+    assert!(
+        p.segment(&node("circle1/r3"))
+            .unwrap()
+            .direction
+            .is_reverse()
+    );
+    set_drawn_from(&mut m, &part("circle1"), DrawnFrom::Outside).unwrap();
+    lands_where_it_did(&journey, &m, Clone::clone);
+
+    let mut choker = choker().mapping;
+    let first = |m: &Mapping| {
+        let tree = render(m).unwrap();
+        tree.lamps_of(tree.segment(&node("u")).unwrap())[0]
+    };
+    let from_first = first(&choker);
+    set_drawn_from(&mut choker, &part("u"), DrawnFrom::LastPoint).unwrap();
+    assert_eq!(from_first, [100.0, 0.0]);
+    assert_eq!(first(&choker), [100.0, 20.0], "lamp 0 at its last point");
+    assert_eq!(
+        set_drawn_from(&mut choker, &part("u"), DrawnFrom::Inside),
+        Err(EditError::NotACircle(part("u")))
+    );
+    assert_eq!(
+        set_drawn_from(&mut m, &part("circle1"), DrawnFrom::LastPoint),
+        Err(EditError::NotAPath(part("circle1")))
     );
 }
 

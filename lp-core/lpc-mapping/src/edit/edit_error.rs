@@ -38,6 +38,10 @@ pub enum EditError {
     BadCount(u32),
     /// A ring that can't be drawn (why, in words).
     BadRing(String),
+    /// A part holds at least one lamp.
+    NoLamps(PartId),
+    /// The part has no lamp count of its own (a group, a repeat, a grid…).
+    NoLampCount(PartId),
     /// The circle has no ring with this key.
     NoSuchRing {
         part: PartId,
@@ -83,6 +87,8 @@ impl core::fmt::Display for EditError {
                 crate::MAX_REPEAT_COUNT
             ),
             Self::BadRing(reason) => write!(f, "{reason}"),
+            Self::NoLamps(id) => write!(f, "{id} holds at least one lamp"),
+            Self::NoLampCount(id) => write!(f, "{id} has no lamp count of its own"),
             Self::NoSuchRing { part, key } => write!(f, "{part} has no ring {key}"),
             Self::WouldRetarget { part, overrides } => {
                 write!(f, "that would change which copies of {part} ")?;

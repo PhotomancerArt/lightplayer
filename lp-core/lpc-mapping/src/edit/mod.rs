@@ -22,6 +22,7 @@
 //!
 //! [`Problem::GoneNode`]: crate::patching::Problem::GoneNode
 
+mod add_part;
 mod add_ring;
 mod clear_override_field;
 mod copy_levels;
@@ -36,7 +37,10 @@ mod remove_part;
 mod remove_ring;
 mod rename_part;
 mod rotate_part;
+mod set_circle_split;
+mod set_drawn_from;
 mod set_flow;
+mod set_lamp_count;
 mod set_override_field;
 mod set_path_split;
 mod set_repeat_count;
@@ -44,6 +48,7 @@ mod set_start;
 mod unrepeat;
 mod wrap_in_repeat;
 
+pub use add_part::add_part;
 pub use add_ring::add_ring;
 pub use clear_override_field::clear_override_field;
 pub use edit_error::EditError;
@@ -54,7 +59,10 @@ pub use override_field::{OverrideField, OverrideFieldKind};
 pub use remove_part::{RemovedPart, remove_part};
 pub use remove_ring::remove_ring;
 pub use rename_part::rename_part;
+pub use set_circle_split::set_circle_split;
+pub use set_drawn_from::{DrawnFrom, set_drawn_from};
 pub use set_flow::set_flow;
+pub use set_lamp_count::set_lamp_count;
 pub use set_override_field::set_override_field;
 pub use set_path_split::set_path_split;
 pub use set_repeat_count::set_repeat_count;
