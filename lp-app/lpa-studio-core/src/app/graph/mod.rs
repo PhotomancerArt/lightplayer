@@ -1,9 +1,10 @@
 //! The Graph: the mapping lab's canvas on the open project, as a workbench
-//! tab beside Nodes, Map and Patch (plan
+//! tab beside Nodes (plan
 //! `lp2025/2026-10-17-0202-mapping-lab-into-studio`).
 //!
 //! The lab's crates are used as they are: `lab-mapping-files` opens the
-//! project's own files into the lab's model ([`GraphSource`] answers it
+//! project's own files into the lab's model, each fixture's mapping an
+//! `lpc_mapping` part tree patched by the engine's patcher ([`GraphSource`] answers it
 //! from Studio's asset cache), `lab-mapping-model`'s editor is the Graph's
 //! state and verbs, and `lab-layout` places the cards. The editor is core's
 //! ([`GraphController`]), shared with the page through a [`GraphHandle`]
@@ -20,6 +21,7 @@ mod graph_note;
 mod graph_offers;
 mod graph_op;
 mod graph_pictures;
+mod graph_port_tables;
 mod graph_source;
 mod ui_graph_view;
 
@@ -29,4 +31,4 @@ pub use graph_handle::GraphHandle;
 pub use graph_note::GraphNote;
 pub use graph_offers::{GRAPH_GROUP, graph_verb_path, publish_graph_offers};
 pub use graph_op::GraphOp;
-pub use ui_graph_view::{NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView};
+pub use ui_graph_view::{UiGraphFrame, UiGraphState, UiGraphView};

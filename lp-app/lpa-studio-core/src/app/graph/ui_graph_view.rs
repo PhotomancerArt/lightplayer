@@ -33,15 +33,7 @@ pub enum UiGraphState {
     },
     /// The project couldn't be opened on the Graph, and why.
     Refused { why: String },
-    /// A fixture's mapping is map2d format 6, which this Graph does not
-    /// edit yet (project format 12; the new Graph is M4's): one plain
-    /// sentence, and nothing that saves.
-    NewMappingFormat { sentence: String },
 }
-
-/// What the Graph says over a project whose mapping is map2d format 6.
-pub const NEW_MAPPING_FORMAT_SENTENCE: &str =
-    "This fixture uses the new mapping format. Its editor is coming soon.";
 
 /// The board's frame, shared: a refcount bump to clone, and equal only to
 /// itself, so a new frame is always a change.

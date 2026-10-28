@@ -5650,6 +5650,7 @@ version = "40.0.0"
 dependencies = [
  "lab-layout",
  "lab-mapping-model",
+ "lpc-mapping",
  "serde_json",
 ]
 
@@ -5659,6 +5660,7 @@ version = "40.0.0"
 dependencies = [
  "lab-layout",
  "libm",
+ "lpc-mapping",
 ]
 
 [[package]]

@@ -38,7 +38,7 @@ fn j1_the_dome_one_panel_at_a_time() {
     }]);
     let mut keys_per_panel = Vec::new();
     let mut walk_per_panel = Vec::new();
-    let mut crossed: Vec<ObjectId> = Vec::new();
+    let mut crossed: Vec<TreeRef> = Vec::new();
     for port in 0..ports {
         let mut keys = 0;
         let mut walk = 0;
@@ -60,7 +60,7 @@ fn j1_the_dome_one_panel_at_a_time() {
             // Object first, for once: the panel, then where it goes.
             let segment = e.selected_end().unwrap();
             key(&mut e, Key::Escape, none());
-            e.select(vec![e.project.object_target(&want)]);
+            e.select(vec![e.project.tree_target(&want)]);
             key(&mut e, Key::Char('a'), none());
             keys += 2;
             while e.focused_candidate().as_ref() != Some(&segment) {
@@ -88,14 +88,14 @@ fn j1_the_dome_one_panel_at_a_time() {
 
     // The two crossed panels: select one, S, walk to the other, Enter.
     let [a, b] = [crossed[0].clone(), crossed[1].clone()];
-    e.select(vec![e.project.object_target(&a)]);
+    e.select(vec![e.project.tree_target(&a)]);
     key(&mut e, Key::Char('s'), none());
     while e.focused_candidate() != Some(PairEnd::Object(b.clone())) {
         key(&mut e, Key::Right, none());
     }
     key(&mut e, Key::Enter, none());
     for o in [&a, &b] {
-        e.select(vec![e.project.object_target(o)]);
+        e.select(vec![e.project.tree_target(o)]);
         line_up(&mut e, &piece, o);
     }
 
@@ -129,9 +129,9 @@ fn j2_seans_eaves_across_two_ports() {
     let mut e = editor_of(opened.project.clone());
     let fixture = e.project.fixtures()[0].id.clone();
     let output = e.project.outputs()[0].id.clone();
-    let objects: Vec<ObjectId> = e
+    let objects: Vec<TreeRef> = e
         .project
-        .objects_in(&fixture)
+        .segments_in(&fixture)
         .iter()
         .map(|o| o.id.clone())
         .collect();
@@ -143,13 +143,13 @@ fn j2_seans_eaves_across_two_ports() {
     );
 
     key(&mut e, Key::Char('d'), none());
-    e.select(vec![e.project.object_target(&front)]);
+    e.select(vec![e.project.tree_target(&front)]);
     key(&mut e, Key::Char('r'), none());
     assert!(piece.matches(&e.project), "{:?}", kinds(&piece, &e.project));
 
     // The side run onto D9 by hand: A, then the first candidate is D9's
     // first pixel.
-    e.select(vec![e.project.object_target(&side)]);
+    e.select(vec![e.project.tree_target(&side)]);
     key(&mut e, Key::Char('a'), none());
     let d9 = PairEnd::Segment {
         output: output.clone(),
@@ -197,10 +197,10 @@ fn j2_seans_eaves_across_two_ports() {
 
 /// What a person sees on the piece with the selection lit on the board: the
 /// object whose lamps shine brightest.
-fn look(e: &Editor, piece: &Piece) -> ObjectId {
+fn look(e: &Editor, piece: &Piece) -> TreeRef {
     let frame = e.project.board_frame(&e.selection, BREATH_SECONDS / 2.0);
-    let mut best: Option<(f64, ObjectId)> = None;
-    for (_, o) in e.project.placed_objects() {
+    let mut best: Option<(f64, TreeRef)> = None;
+    for (_, o) in e.project.placed_segments() {
         let n = o.lamps.len().max(1) as f64;
         let light: f64 = (0..o.lamps.len() as u32)
             .filter_map(|j| piece.lamp(&frame, &o.id, j))
@@ -216,7 +216,7 @@ fn look(e: &Editor, piece: &Piece) -> ObjectId {
 
 /// R and the turn keys until the object's chase on the canvas runs as it
 /// does on the piece. Returns how many keys it took.
-fn line_up(e: &mut Editor, piece: &Piece, o: &ObjectId) -> usize {
+fn line_up(e: &mut Editor, piece: &Piece, o: &TreeRef) -> usize {
     let mut keys = 0;
     loop {
         let kind = piece.difference(&e.project, o).map(|d| d.kind);
@@ -239,8 +239,8 @@ fn line_up(e: &mut Editor, piece: &Piece, o: &ObjectId) -> usize {
 }
 
 /// How many single-lamp turns (K) bring an object's entry to the piece's.
-fn turn_off(e: &Editor, piece: &Piece, o: &ObjectId) -> i64 {
-    let n = e.project.object(o).unwrap().lamps.len() as i64;
+fn turn_off(e: &Editor, piece: &Piece, o: &TreeRef) -> i64 {
+    let n = e.project.segment(o).unwrap().lamps.len() as i64;
     let first = piece.landing(o, 0).unwrap();
     // Which lamp lands where the piece's lamp 0 is, now.
     let now = (0..n as u32)
@@ -252,8 +252,8 @@ fn turn_off(e: &Editor, piece: &Piece, o: &ObjectId) -> i64 {
 }
 
 /// The objects the piece has on an output.
-fn truly_on(piece: &Piece, p: &Project, output: &NodeId) -> Vec<ObjectId> {
-    p.placed_objects()
+fn truly_on(piece: &Piece, p: &Project, output: &NodeId) -> Vec<TreeRef> {
+    p.placed_segments()
         .iter()
         .filter(|(_, o)| piece.landing(&o.id, 0).is_some_and(|l| &l.output == output))
         .map(|(_, o)| o.id.clone())
@@ -261,8 +261,8 @@ fn truly_on(piece: &Piece, p: &Project, output: &NodeId) -> Vec<ObjectId> {
 }
 
 /// The object the piece has on one port.
-fn truly_at(piece: &Piece, p: &Project, output: &NodeId, port: &str) -> ObjectId {
-    p.placed_objects()
+fn truly_at(piece: &Piece, p: &Project, output: &NodeId, port: &str) -> TreeRef {
+    p.placed_segments()
         .iter()
         .find(|(_, o)| {
             (0..o.lamps.len() as u32).any(|j| {
@@ -275,7 +275,7 @@ fn truly_at(piece: &Piece, p: &Project, output: &NodeId, port: &str) -> ObjectId
         .unwrap()
 }
 
-fn kinds(piece: &Piece, p: &Project) -> Vec<(ObjectId, DifferenceKind)> {
+fn kinds(piece: &Piece, p: &Project) -> Vec<(TreeRef, DifferenceKind)> {
     piece
         .differences(p)
         .into_iter()

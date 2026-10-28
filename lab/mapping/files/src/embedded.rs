@@ -1,10 +1,8 @@
 //! The test projects, baked into the binary: the page runs in a browser
 //! with no disk, so it opens these (fit-check §7).
 //!
-//! Each is the format-11 copy frozen in `lab/mapping/fixtures-v11/` (see
-//! its README): the repo's own projects are at project format 12 with map2d
-//! format 6, which the lab does not read. The list below names where each
-//! copy came from.
+//! Each is the repo's own project, at project format 12 with its mappings
+//! in map2d format 6, read straight from where it lives:
 //!
 //! - the PLAYFUL choker (`catalog/projects/playful-choker`): 73 lamps on
 //!   12 paths, one output whose one port takes the rest;
@@ -15,9 +13,9 @@
 //!   22,000 lamps, 10 outputs × 32 ports, patched by hand.
 //!
 //! - Sean's eaves (`lab/mapping/projects/eaves`): two runs turning their
-//!   corners on jumpers, auto-flowing across D10 and D9; its piece is
-//!   wired as `eaves-wired` says (the house: the front run reversed on
-//!   D10, the side run on D9), for the hand-patching walk.
+//!   corners on jumpers, end to end across D10 and D9; its piece is wired
+//!   as `eaves-wired` says (the house: the front run reversed on D10, the
+//!   side run on D9), for the hand-patching walk.
 //!
 //! Only what the lab reads is baked in: the JSON, and each shader's GLSL,
 //! which the inspector shows (the lab never runs it).
@@ -49,7 +47,7 @@ macro_rules! files {
 pub const CHOKER: Embedded = Embedded {
     key: "playful-choker",
     title: "PLAYFUL choker",
-    files: files!("../../fixtures-v11/playful-choker":
+    files: files!("../../../../catalog/projects/playful-choker":
         "project.json", "module.json", "clock.json", "fixture.json", "output.json",
         "power.json", "shader.json", "shader.glsl", "playful.map2d.json"),
     wired_as: None,
@@ -58,7 +56,7 @@ pub const CHOKER: Embedded = Embedded {
 pub const ZOOK_DOME: Embedded = Embedded {
     key: "zook-dome",
     title: "Zook dome",
-    files: files!("../../fixtures-v11/zook-dome":
+    files: files!("../../../../catalog/projects/zook-dome":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "shader.json", "shader.glsl"),
     wired_as: None,
@@ -67,9 +65,9 @@ pub const ZOOK_DOME: Embedded = Embedded {
 pub const RADIANCE_DOME: Embedded = Embedded {
     key: "radiance-dome",
     title: "Radiance dome",
-    files: files!("../../fixtures-v11/radiance-dome":
+    files: files!("../../projects/radiance-dome":
         "project.json", "module.json", "clock.json", "shader.json", "shader.glsl", "dome.json",
-        "dome.map2d.json", "dome.patch.json", "out_1.json", "out_2.json", "out_3.json",
+        "dome.map2d.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),
     wired_as: None,
@@ -78,7 +76,7 @@ pub const RADIANCE_DOME: Embedded = Embedded {
 pub const EAVES: Embedded = Embedded {
     key: "eaves",
     title: "Sean's eaves",
-    files: files!("../../fixtures-v11/eaves":
+    files: files!("../../projects/eaves":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
     wired_as: Some(&EAVES_WIRED),
@@ -88,9 +86,9 @@ pub const EAVES: Embedded = Embedded {
 pub const EAVES_WIRED: Embedded = Embedded {
     key: "eaves-wired",
     title: "Sean's eaves, as wired",
-    files: files!("../../fixtures-v11/eaves-wired":
+    files: files!("../../projects/eaves-wired":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
-        "fixture.patch.json", "output.json", "effect/module.json", "effect/shader.json",
+        "output.json", "effect/module.json", "effect/shader.json",
         "effect/shader.glsl"),
     wired_as: None,
 };
@@ -101,21 +99,20 @@ pub const EAVES_WIRED: Embedded = Embedded {
 pub const PLASMA: Embedded = Embedded {
     key: "plasma",
     title: "Plasma",
-    files: files!("../../fixtures-v11/plasma":
+    files: files!("../../../../catalog/patterns/plasma":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
     wired_as: None,
 };
 
 /// The fiber headband (`catalog/projects/fiber-headband`): hand-placed
-/// lamps (point lists), which the lab shows as its box. Not in the picker;
-/// Studio's Graph stories open it.
+/// lamps, a points part. Not in the picker; Studio's Graph stories open it.
 pub const FIBER_HEADBAND: Embedded = Embedded {
     key: "fiber-headband",
     title: "Fiber headband",
-    files: files!("../../fixtures-v11/fiber-headband":
-        "project.json", "module.json", "clock.json", "fixture.json", "output.json",
-        "shader.json", "shader.glsl"),
+    files: files!("../../../../catalog/projects/fiber-headband":
+        "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
+        "output.json", "shader.json", "shader.glsl"),
     wired_as: None,
 };
 

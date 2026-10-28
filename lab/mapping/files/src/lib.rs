@@ -4,31 +4,25 @@
 //!
 //! - [`Opened::open`] reads `project.json`, the root module and every node
 //!   it refers to into a lab [`Project`](lab_mapping_model::Project) —
-//!   fixtures with their mappings and patches, outputs with their ports,
+//!   fixtures with their mappings (parts and patching), outputs with their ports,
 //!   modules, and every other node as a plain card — and keeps what the lab
 //!   doesn't model in a [`ProductProject`], untouched.
-//! - [`ProductProject::save`] writes the lab's project back: only the files
-//!   it owns, only those that changed, each starting from the JSON it was
-//!   read from.
-//! - [`embedded`] — the three test projects, baked in for the page.
+//! - Saving comes back with map2d format 6 written (mapping rebuild M4
+//!   P05); until then the Graph reads and edits but saves nothing.
+//! - [`embedded`] — the test projects, baked in for the page.
 //!
-//! **The fence:** this crate depends on the lab model and `serde_json`
-//! only — no product crate. The product's document shapes are re-created
-//! here ([`map2d_doc`], [`patch_doc`], [`channels`]), at project format 11;
-//! a format-12 project (map2d format 6) is refused by name.
+//! A fixture's mapping is `lpc-mapping`'s own (`map2d6::read`), the reader
+//! the engine runs; a project at another project format, or a mapping in an
+//! older map2d format, is refused by name.
 
 pub mod channels;
 pub mod embedded;
 pub mod error;
 pub mod json;
-pub mod map2d_doc;
-pub mod patch_doc;
 pub mod product_project;
-pub mod save;
 pub mod source;
 pub mod stand_in_shader;
 
 pub use error::FilesError;
 pub use product_project::{Opened, ProductProject};
-pub use save::Saved;
 pub use source::{DirFiles, MemFiles, Source};

@@ -75,7 +75,10 @@ pub(crate) fn highlight_of(
                     range: Some(range),
                 }));
             }
-            Target::Lamp { object, index } => {
+            Target::Lamp {
+                segment: object,
+                index,
+            } => {
                 if let Some((node, first, _)) = fixture_lamps(project, nodes, object) {
                     subjects.push(breath(PatchPulseLamps::Fixture {
                         node,
@@ -83,10 +86,10 @@ pub(crate) fn highlight_of(
                     }));
                 }
             }
-            Target::Component(_) | Target::Object(_) => {
+            Target::Part(_) | Target::Generated(_) => {
                 // Every object under it, once.
                 for (i, (_, o)) in placed.list.iter().enumerate() {
-                    if project.chain(&project.object_target(&o.id)).contains(t)
+                    if project.chain(&project.tree_target(&o.id)).contains(t)
                         && !objects.contains(&i)
                     {
                         objects.push(i);
@@ -120,7 +123,7 @@ pub(crate) fn highlight_of(
 fn fixture_lamps(
     project: &Project,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
-    object: &lab_mapping_model::ObjectId,
+    object: &lab_mapping_model::TreeRef,
 ) -> Option<(lpc_model::NodeId, u32, u32)> {
     let placed = project.placed();
     let i = placed.index_of(object)?;
@@ -163,7 +166,10 @@ pub(crate) fn board_selection(
             Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
                 output_side.push(t.clone())
             }
-            Target::Lamp { object, index } => {
+            Target::Lamp {
+                segment: object,
+                index,
+            } => {
                 fixture_side = true;
                 if let Some(i) = placed.index_of(object) {
                     let (fixture, _) = &placed.list[i];
@@ -176,12 +182,12 @@ pub(crate) fn board_selection(
                     }
                 }
             }
-            Target::Node(_) | Target::Component(_) | Target::Object(_) => {
+            Target::Node(_) | Target::Part(_) | Target::Generated(_) => {
                 fixture_side = true;
                 for (i, (fixture, o)) in placed.list.iter().enumerate() {
                     let under = match t {
                         Target::Node(id) => fixture == id,
-                        _ => project.chain(&project.object_target(&o.id)).contains(t),
+                        _ => project.chain(&project.tree_target(&o.id)).contains(t),
                     };
                     if !under {
                         continue;

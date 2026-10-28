@@ -14,8 +14,8 @@ use lab_mapping_model::*;
 fn the_circular_display() {
     let mut e = editor_of(Project::circular_display());
     let display = e.project.named("display").unwrap().id.clone();
-    let circle = ComponentId::new("circle1");
-    let ring = |k: &str| ObjectId::new(&circle, k);
+    let circle = PartRef::new("circle1");
+    let ring = |k: &str| TreeRef::new(&circle, k);
     let truth = Piece::of(&Project::circular_display_wired(), "as soldered");
 
     // 1. The display starts at D0's first pixel, and its rings run end to
@@ -28,7 +28,7 @@ fn the_circular_display() {
     assert_eq!(span(p, &ring("r5")), Some(("0".into(), 60, 60)));
 
     // 2. The centre is one lamp, at the circle's centre.
-    let centre = p.object(&ring("r5")).unwrap();
+    let centre = p.segment(&ring("r5")).unwrap();
     assert_eq!(centre.lamps.len(), 1);
     let origin = p.origin(&display);
     assert!((centre.lamps[0].pos - origin).distance(Vec2::new(50.0, 50.0)) < 1e-6);
@@ -40,7 +40,7 @@ fn the_circular_display() {
     // 4. Ring 3 was soldered counter-clockwise: select it, give it a
     //    direction of its own, Reversed. Only ring 3 changes, in its slot.
     let before_r4 = span(&e.project, &ring("r4"));
-    e.select(vec![Target::Object(ring("r3"))]);
+    e.select(vec![Target::Generated(ring("r3"))]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Direction,
     });
@@ -79,7 +79,7 @@ fn the_circular_display() {
     e.patch_input(PatchInput::Reset {
         field: PatchField::Port,
     });
-    e.select(vec![Target::Component(circle.clone())]);
+    e.select(vec![Target::Part(circle.clone())]);
     choose(
         &mut e,
         PatchField::Children,
@@ -105,6 +105,6 @@ fn the_circular_display() {
     let w = p.effective_patch().walked(&ring("r4")).unwrap();
     assert_eq!(
         w.sources[1],
-        StepSource::Children(PatchTarget::Component(circle.clone()))
+        StepSource::Flow(PatchTarget::Part(circle.clone()))
     );
 }

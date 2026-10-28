@@ -3,48 +3,45 @@
 //!
 //! What is read (fit-check §6): `project.json` → the root `module.json` →
 //! every node file it refers to, recursively. For a fixture, its mapping
-//! (`*.map2d.json`), its patch (`*.patch.json`, if any), the channels it
-//! reads and writes and its colour order; for an output, its ports, its
-//! name and the channel it reads; for a module, its nodes and exports; for
-//! a shader (or another node writing a `visual.*` channel), the channel
-//! it writes and its GLSL, which the lab shows and never runs — it gets a
-//! stand-in pattern picked from its GLSL. Every other node (a clock, a
-//! button) opens as a plain card, and every file keeps its JSON — fields
-//! the lab knows nothing about included.
+//! (`*.map2d.json`, map2d format 6, read by `lpc_mapping::map2d6::read`
+//! into the fixture's `Mapping`: its parts and its patching), the channels
+//! it reads and its colour order; for an output, its ports, its name and
+//! the channel it reads; for a module, its nodes and exports; for a shader
+//! (or another node writing a `visual.*` channel), the channel it writes
+//! and its GLSL, which the lab shows and never runs — it gets a stand-in
+//! pattern picked from its GLSL. Every other node (a clock, a button)
+//! opens as a plain card, and every file keeps its JSON — fields the lab
+//! knows nothing about included.
 //!
 //! Ids:
 //!
 //! | Lab | Product |
 //! |---|---|
 //! | node id | the node's name (its key in its module), made unique in the project |
-//! | component id | the mapping object's `id`, minted from its name when it has none (the product's `slugify`), made unique in the project |
-//! | object `sector` / `2` | object path `/sector/2` |
+//! | part id | the map2d's part id, as it is (a part is named with its fixture) |
 //! | port key | port key (a number) |
 //! | output label | output `name` |
 //!
-//! Placements: a fixture's patch rows become placements on their objects
-//! (a wire at the port and pixel worked out from the row's flat wire
-//! position, reversed and turned as the row says); unless its patch says
-//! `flow: manual`, the fixture's own wire is auto, onto the default output
-//! of the channel it writes (`channels.rs`).
+//! **Only format 6.** A project at another project format, or a mapping in
+//! an older map2d format, is refused by name: Studio upgrades a project
+//! when it opens it, so neither reaches here from Studio.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    Channel, ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind,
-    ObjectId, OtherNode, Output, Pattern, Port, ProductPatch, ProductRow, Project, RenderSource,
-    Unsupported, Vec2,
+    Channel, ColorOrder, Fixture, Node, NodeId, NodeKind, OtherNode, Output, Pattern, Port,
+    Project, RenderSource, Unsupported, Vec2,
 };
+use lpc_mapping::map2d6::{self, MAP2D6_FORMAT};
+use lpc_mapping::part::render;
 use serde_json::Value;
 
 use crate::channels::{exports, fixture_reads, fixture_writes, output_reads, visual_writes};
 use crate::error::FilesError;
-use crate::map2d_doc::{Map2dDoc, unsupported_shape};
-use crate::patch_doc::{PatchDoc, PatchSource, valid_object_id};
 use crate::source::{Source, join};
 
-/// The project format this copy reads (`PROJECT_FORMAT_VERSION`).
-pub const PROJECT_FORMAT: u64 = 11;
+/// The project format this reads (`PROJECT_FORMAT_VERSION`).
+pub const PROJECT_FORMAT: u64 = 12;
 
 /// A project opened from the product's files.
 #[derive(Debug, Clone)]
@@ -71,49 +68,18 @@ pub struct NodeFile {
     /// Its name in its module (the key in `nodes`).
     pub name: String,
     pub value: Value,
-    /// A fixture's mapping.
+    /// A fixture's mapping file.
     pub map: Option<MapFile>,
-    /// A fixture's patch, if it has one.
-    pub patch: Option<PatchFile>,
-    /// A fixture's patch in the product's terms as it opened (its rows, and
-    /// the output it flows onto on auto): what the lab froze into a Start
-    /// and overrides, and what a save checks the walker against before it
-    /// keeps the file as it is.
-    pub product_patch: Option<ProductPatch>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MapFile {
     pub path: String,
-    pub doc: Map2dDoc,
-    /// Each component it opened as, and the object it came from.
-    pub objects: BTreeMap<ComponentId, MapObjectFile>,
-    /// The box's corner in the document (its canvas's `min_x, min_y`).
-    pub canvas_min: Vec2,
+    /// The file as it was read.
+    pub text: String,
     /// The box the lab gave a document with no canvas (none is written
     /// back while the box stays this size).
     pub derived_size: Option<Vec2>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MapObjectFile {
-    /// Its id in the document: the file's, or the one the product would
-    /// mint from its name.
-    pub product_id: String,
-    /// The file gave it an id (so saving writes one).
-    pub had_id: bool,
-    pub value: Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct PatchFile {
-    pub path: String,
-    pub doc: PatchDoc,
-    /// Rows written as a plain lamp range (`"range": {start, count}`) that
-    /// cover one whole object, by that object: the lab places it as the
-    /// object, and writes the row back as the same range while the object
-    /// still covers exactly those lamps, so an unedited save changes nothing.
-    pub ranges: BTreeMap<ObjectId, (u32, Option<u32>)>,
 }
 
 impl Opened {
@@ -121,21 +87,24 @@ impl Opened {
     pub fn open(src: &dyn Source) -> Result<Opened, FilesError> {
         let manifest = read_json(src, "project.json")?;
         let format = manifest.get("format").and_then(Value::as_u64);
-        if format.is_some_and(|format| format > PROJECT_FORMAT) {
-            return Err(FilesError::new(
-                "project.json",
-                format!(
-                    "this project is at project format {} and its mappings are map2d \
-                     format 6, the new mapping format, which the lab doesn't read (the lab \
-                     reads project format {PROJECT_FORMAT}); Studio's new Graph will edit it",
-                    format.unwrap_or_default()
-                ),
-            ));
-        }
         if format != Some(PROJECT_FORMAT) {
             return Err(FilesError::new(
                 "project.json",
-                format!("the lab reads project format {PROJECT_FORMAT}, not {format:?}"),
+                match format {
+                    Some(f) if f < PROJECT_FORMAT => format!(
+                        "this project is at project format {f}, from an older LightPlayer; \
+                         the Graph reads project format {PROJECT_FORMAT} (Studio upgrades a \
+                         project when it opens it)"
+                    ),
+                    Some(f) => format!(
+                        "this project is at project format {f}, from a newer LightPlayer; \
+                         the Graph reads project format {PROJECT_FORMAT}"
+                    ),
+                    None => format!(
+                        "this project says no format; the Graph reads project format \
+                         {PROJECT_FORMAT}"
+                    ),
+                },
             ));
         }
         let root = read_json(src, "module.json")?;
@@ -149,78 +118,12 @@ impl Opened {
             root: root.clone(),
             nodes: BTreeMap::new(),
         };
-        let mut patches: Vec<(NodeId, String, PatchDoc)> = Vec::new();
         let mut reader = Reader {
             src,
             files: &mut files,
-            patches: &mut patches,
-            taken_components: BTreeSet::new(),
             taken_nodes: BTreeSet::new(),
         };
         *project.nodes_mut() = reader.module("module.json", &root, None)?;
-        // Rules, now that every output is known. A patch with a row the
-        // lab can't place leaves its fixture as its box alone, and the rest
-        // of the project opens round it (plan M4). Each fixture's patch is
-        // read in the product's terms, then frozen into the walker's: a
-        // Start, and overrides where the walk would go elsewhere.
-        let mut product: BTreeMap<NodeId, ProductPatch> = BTreeMap::new();
-        for (fixture, path, doc) in patches {
-            let rules = match rules_of(&project, &files, &fixture, Some(&doc)) {
-                Ok((rules, ranges)) => {
-                    if let Some(patch) =
-                        files.nodes.get_mut(&fixture).and_then(|f| f.patch.as_mut())
-                    {
-                        patch.ranges = ranges;
-                    }
-                    rules
-                }
-                Err(RulesRefusal::Unsupported(why)) => {
-                    if let Some(f) = project.fixture_mut(&fixture) {
-                        f.components.clear();
-                        f.unsupported = Some(why);
-                    }
-                    continue;
-                }
-                Err(RulesRefusal::Broken(what)) => return Err(FilesError::new(&path, what)),
-            };
-            product.insert(fixture, rules);
-        }
-        let unpatched: Vec<NodeId> = project
-            .fixtures()
-            .iter()
-            .filter(|n| files.nodes.get(&n.id).is_some_and(|f| f.patch.is_none()))
-            .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_none()))
-            .map(|n| n.id.clone())
-            .collect();
-        for fixture in unpatched {
-            let (rules, _) = rules_of(&project, &files, &fixture, None).map_err(|r| match r {
-                RulesRefusal::Unsupported(why) => FilesError::new("", why.what),
-                RulesRefusal::Broken(what) => FilesError::new("", what),
-            })?;
-            product.insert(fixture, rules);
-        }
-        // An object the product lays across two ports can't be said in the
-        // walker's terms (a leaf makes one span, on one port): its fixture
-        // opens as its box alone, and says why.
-        for object in project.freeze_product_patches(&product) {
-            let Some(fixture) = project.fixture_of(&object.component).map(|n| n.id.clone()) else {
-                continue;
-            };
-            if let Some(f) = project.fixture_mut(&fixture) {
-                f.components.clear();
-                f.overrides.clear();
-                f.rules.clear();
-                f.unsupported = Some(Unsupported {
-                    what: format!("an object the patch lays across two ports ({object})"),
-                    edit_in: "Patch".into(),
-                });
-            }
-        }
-        for (fixture, patch) in product {
-            if let Some(f) = files.nodes.get_mut(&fixture) {
-                f.product_patch = Some(patch);
-            }
-        }
         Ok(Opened { project, files })
     }
 }
@@ -228,8 +131,6 @@ impl Opened {
 struct Reader<'a> {
     src: &'a dyn Source,
     files: &'a mut ProductProject,
-    patches: &'a mut Vec<(NodeId, String, PatchDoc)>,
-    taken_components: BTreeSet<ComponentId>,
     taken_nodes: BTreeSet<NodeId>,
 }
 
@@ -271,15 +172,13 @@ impl Reader<'_> {
                 name: name.clone(),
                 value: node_value.clone(),
                 map: None,
-                patch: None,
-                product_patch: None,
             };
             let kind = match kind.as_str() {
                 "Module" => NodeKind::Module {
                     children: self.module(&node_path, &node_value, Some(&id))?,
                 },
                 "Fixture" => {
-                    let fixture = self.fixture(&id, &node_path, &node_value, &mut file)?;
+                    let fixture = self.fixture(&node_path, &node_value, &mut file)?;
                     NodeKind::Fixture(fixture)
                 }
                 "Output" => NodeKind::Output(output_of(&node_value)),
@@ -330,17 +229,15 @@ impl Reader<'_> {
 
     fn fixture(
         &mut self,
-        id: &NodeId,
         path: &str,
         value: &Value,
         file: &mut NodeFile,
     ) -> Result<Fixture, FilesError> {
         let mapping = value.get("mapping");
-        // A fixture mapped some other way (the product's older inline point
-        // lists, or none yet): its box alone, edited in Nodes.
+        // A fixture mapped some other way (none yet): its box alone,
+        // edited in Nodes.
         if mapping.and_then(|m| m.get("kind")).and_then(Value::as_str) != Some("Map2d") {
             let what = match mapping.and_then(|m| m.get("kind")).and_then(Value::as_str) {
-                Some("PathPoints") => "its point-list mapping".to_string(),
                 None | Some("Unset") => "a fixture with no mapping".to_string(),
                 Some(other) => format!("its {other} mapping"),
             };
@@ -359,130 +256,97 @@ impl Reader<'_> {
             .ok_or_else(|| FilesError::new(path, "mapping has no source"))?;
         let map_path = join(path, source);
         let text = read_text(self.src, &map_path)?;
-        // A drawing the lab can't hold yet: the fixture is its box alone,
-        // and its files are kept as they are (no map, no patch read).
-        if let Some(what) = unsupported_shape(&text) {
-            let mut fixture = Fixture::new(canvas_size(&text));
-            fixture.unsupported = Some(Unsupported {
-                what: format!("its {what} shape"),
-                edit_in: "Map".into(),
-            });
-            fixture.color_order = color_order_of(value);
-            fixture.reads = Channel::new(fixture_reads(value));
-            return Ok(fixture);
+        match map2d6::peek_format(&text) {
+            Ok(MAP2D6_FORMAT) => {}
+            Ok(older) => {
+                return Err(FilesError::new(
+                    &map_path,
+                    format!(
+                        "this mapping is map2d format {older}, from an older LightPlayer; the \
+                         Graph reads map2d format {MAP2D6_FORMAT} (Studio upgrades a project \
+                         when it opens it)"
+                    ),
+                ));
+            }
+            Err(why) => return Err(FilesError::new(&map_path, why.to_string())),
         }
-        let doc = Map2dDoc::parse(&text).map_err(|e| FilesError::new(&map_path, e))?;
-        let render_size = render_size_of(value);
-
-        // Ids: the file's, else the product's slug of the name, unique in
-        // the document — then unique in the project for the lab.
-        let mut doc_ids: BTreeSet<String> =
-            doc.objects.iter().filter_map(|o| o.id.clone()).collect();
-        let mut components = Vec::new();
-        let mut objects = BTreeMap::new();
-        for (i, o) in doc.objects.iter().enumerate() {
-            let product_id = match &o.id {
-                Some(id) if valid_object_id(id) => id.clone(),
-                Some(id) => {
-                    return Err(FilesError::new(
-                        &map_path,
-                        format!("object id {id:?} isn't a valid id"),
-                    ));
-                }
-                None => {
-                    let base = slugify(&o.name).unwrap_or_else(|| format!("obj-{}", i + 1));
-                    let id = uniquify(&base, &doc_ids);
-                    doc_ids.insert(id.clone());
-                    id
-                }
-            };
-            let lab_id = self.component_id(&product_id);
-            objects.insert(
-                lab_id.clone(),
-                MapObjectFile {
-                    product_id,
-                    had_id: o.id.is_some(),
-                    value: o.value.clone(),
-                },
-            );
-            let mut kind = o.kind.clone();
-            self.name_repeat_children(&mut kind);
-            components.push(Component { id: lab_id, kind });
-        }
+        let mapping = map2d6::read(&text).map_err(|e| FilesError::new(&map_path, e.to_string()))?;
 
         // The box: the canvas, from (0, 0). A canvas that starts elsewhere
         // keeps its corner on disk; the lab's box reaches back to (0, 0).
-        let (size, canvas_min, derived_size) = match doc.canvas {
-            Some([x, y, w, h]) => (Vec2::new(x + w, y + h), Vec2::new(x, y), None),
+        let (size, derived_size) = match mapping.canvas {
+            Some([x, y, w, h]) => (Vec2::new(f64::from(x + w), f64::from(y + h)), None),
             None => {
-                let size = derived_box(&components);
-                (size, Vec2::default(), Some(size))
+                let size = derived_box(&mapping);
+                (size, Some(size))
             }
         };
         let mut fixture = Fixture::new(size);
-        fixture.render_size = render_size;
-        fixture.components = components;
+        fixture.render_size = render_size_of(value);
+        fixture.mapping = mapping;
         fixture.color_order = color_order_of(value);
         fixture.reads = Channel::new(fixture_reads(value));
         file.map = Some(MapFile {
             path: map_path,
-            doc,
-            objects,
-            canvas_min,
+            text,
             derived_size,
         });
-
-        // The patch is read now and turned into rules once every output
-        // is known.
-        if let Some(patch) = value.get("patch")
-            && patch.get("kind").and_then(Value::as_str) == Some("File")
-            && let Some(source) = patch.get("source").and_then(Value::as_str)
-        {
-            let patch_path = join(path, source);
-            let text = read_text(self.src, &patch_path)?;
-            let doc = PatchDoc::parse(&text).map_err(|e| FilesError::new(&patch_path, e))?;
-            self.patches
-                .push((id.clone(), patch_path.clone(), doc.clone()));
-            file.patch = Some(PatchFile {
-                ranges: BTreeMap::new(),
-                path: patch_path,
-                doc,
-            });
-        }
         Ok(fixture)
     }
+}
 
-    /// A product repeat copies a bare shape; the lab's holds a component
-    /// with its own id, minted here (`polygon3`) the way the lab mints any
-    /// (theory "Ids"). The product's files can't hold it, so it is minted
-    /// again, the same, each time the project opens.
-    fn name_repeat_children(&mut self, kind: &mut ComponentKind) {
-        if let ComponentKind::Repeat { child, .. } = kind {
-            if child.id.as_str().is_empty() {
-                let word = child.kind.id_word();
-                let mut n = 1;
-                while self
-                    .taken_components
-                    .contains(&ComponentId::new(format!("{word}{n}")))
-                {
-                    n += 1;
-                }
-                child.id = ComponentId::new(format!("{word}{n}"));
-                self.taken_components.insert(child.id.clone());
-            }
-            self.name_repeat_children(&mut child.kind);
-        }
+impl ProductProject {
+    /// The outputs a fixture's product reaches: every output, in attach
+    /// order, reading the bus channel the fixture writes — in its module,
+    /// or in a parent its module exports the channel to. What its port
+    /// tables are made of (only the named ones can be patched to).
+    pub fn reachable_outputs(&self, project: &Project, fixture: &NodeId) -> Vec<NodeId> {
+        let Some(value) = self.nodes.get(fixture).map(|f| &f.value) else {
+            return Vec::new();
+        };
+        let scopes = self.scopes(project, fixture, fixture_writes(value));
+        project
+            .attach_order()
+            .into_iter()
+            .filter(|n| n.output().is_some())
+            .filter(|n| {
+                let reads = self
+                    .nodes
+                    .get(&n.id)
+                    .map_or_else(|| "control.out".to_string(), |f| output_reads(&f.value));
+                let module = project.parent_module(&n.id).cloned();
+                scopes.contains(&(module, reads))
+            })
+            .map(|n| n.id.clone())
+            .collect()
     }
 
-    fn component_id(&mut self, product_id: &str) -> ComponentId {
-        let mut id = ComponentId::new(product_id);
-        let mut n = 2;
-        while self.taken_components.contains(&id) {
-            id = ComponentId::new(format!("{product_id}-{n}"));
-            n += 1;
+    /// Where a node's channel can be read: (module, channel name there),
+    /// its own module first, then up through every module that exports it.
+    fn scopes(
+        &self,
+        project: &Project,
+        node: &NodeId,
+        channel: String,
+    ) -> Vec<(Option<NodeId>, String)> {
+        let mut out = Vec::new();
+        let mut module = project.parent_module(node).cloned();
+        let mut channel = channel;
+        loop {
+            out.push((module.clone(), channel.clone()));
+            let Some(m) = module else { break };
+            let exported = self
+                .nodes
+                .get(&m)
+                .map(|f| exports(&f.value))
+                .unwrap_or_default()
+                .into_iter()
+                .find(|(_, inside)| *inside == channel);
+            let Some((outside, _)) = exported else { break };
+            channel = outside;
+            module = project.parent_module(&m).cloned();
         }
-        self.taken_components.insert(id.clone());
-        id
+        out
     }
 }
 
@@ -493,22 +357,6 @@ fn color_order_of(value: &Value) -> ColorOrder {
         .and_then(Value::as_str)
         .and_then(ColorOrder::from_key)
         .unwrap_or_default()
-}
-
-/// A mapping document's box, from `(0, 0)` to its canvas's far corner;
-/// the default square when it says none.
-fn canvas_size(text: &str) -> Vec2 {
-    let canvas = serde_json::from_str::<Value>(text)
-        .ok()
-        .and_then(|v| v.get("canvas").cloned());
-    let n = |c: &Value, i: usize| c.get(i).and_then(Value::as_f64);
-    match canvas {
-        Some(c) => match (n(&c, 0), n(&c, 1), n(&c, 2), n(&c, 3)) {
-            (Some(x), Some(y), Some(w), Some(h)) => Vec2::new(x + w, y + h),
-            _ => Fixture::square().size,
-        },
-        None => Fixture::square().size,
-    }
 }
 
 /// A fixture's `render_size`, when it gives one.
@@ -556,281 +404,15 @@ fn output_of(value: &Value) -> Output {
     }
 }
 
-/// Why a fixture's patch didn't become rules.
-pub(crate) enum RulesRefusal {
-    /// A row the lab can't place yet: the fixture opens as its box.
-    Unsupported(Unsupported),
-    /// A patch that doesn't hold together: the project doesn't open.
-    Broken(String),
-}
-
-impl From<String> for RulesRefusal {
-    fn from(what: String) -> Self {
-        RulesRefusal::Broken(what)
-    }
-}
-
-impl From<&str> for RulesRefusal {
-    fn from(what: &str) -> Self {
-        RulesRefusal::Broken(what.to_string())
-    }
-}
-
-/// A fixture's rules from its patch (or its lack of one), and the rows
-/// that were plain lamp ranges covering one whole object
-/// ([`PatchFile::ranges`]).
-pub(crate) fn rules_of(
-    project: &Project,
-    files: &ProductProject,
-    fixture: &NodeId,
-    patch: Option<&PatchDoc>,
-) -> Result<(ProductPatch, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
-    let default = default_output(project, files, fixture);
-    let mut rules: Vec<ProductRow> = Vec::new();
-    let mut ranges = BTreeMap::new();
-    let spans = object_lamp_ranges(project, fixture);
-    let manual = patch.is_some_and(|d| d.manual);
-    for (i, e) in patch
-        .map(|d| d.entries.as_slice())
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-    {
-        let part = || {
-            RulesRefusal::Unsupported(Unsupported {
-                what: format!("patch row {} (it places part of an object)", i + 1),
-                edit_in: "Patch".into(),
-            })
-        };
-        let object = match &e.source {
-            PatchSource::Path { path, range: None } => {
-                object_of(project, files, fixture, &path.id, &path.instances).ok_or_else(|| {
-                    format!("row {i}: {} names no object the lab opened", path.text())
-                })?
-            }
-            // A plain range is the object it covers, when it covers one
-            // whole object exactly.
-            PatchSource::Range(start, count) => {
-                let total: u32 = spans.iter().map(|(_, _, n)| n).sum();
-                let end = count.map_or(total, |c| start + c);
-                let (object, _, _) = spans
-                    .iter()
-                    .find(|(_, s, n)| s == start && s + n == end)
-                    .ok_or_else(part)?;
-                ranges.insert(object.clone(), (*start, *count));
-                object.clone()
-            }
-            PatchSource::Path { .. } => return Err(part()),
-        };
-        let output = match &e.output {
-            Some(name) => project
-                .attach_order()
-                .into_iter()
-                .find(|n| n.output().is_some_and(|o| o.label.as_deref() == Some(name)))
-                .map(|n| n.id.clone())
-                .ok_or_else(|| format!("row {i}: no output is named {name:?}"))?,
-            None => default
-                .clone()
-                .ok_or_else(|| format!("row {i}: the default output, but there is none"))?,
-        };
-        let out = project.output(&output).ok_or("an output that isn't one")?;
-        let (port, pixel) = match out.port_at(e.lamp) {
-            Some((p, pixel)) => (out.ports[p].key.clone(), pixel),
-            // Past every port: on the last one, off its end (dark on the
-            // device too).
-            None => {
-                let last = out
-                    .ports
-                    .last()
-                    .ok_or_else(|| format!("row {i}: an output with no ports"))?;
-                let start = out.port_start(&last.key).unwrap_or(0);
-                (last.key.clone(), e.lamp - start)
-            }
-        };
-        // One row per object: the first wins.
-        if rules.iter().any(|r| r.object == object) {
-            continue;
-        }
-        rules.push(ProductRow {
-            object,
-            output,
-            port,
-            pixel,
-            reversed: e.reversed,
-            rotation: e.offset,
-        });
-    }
-    let patch = ProductPatch {
-        auto: (!manual).then_some(default).flatten(),
-        rows: rules,
-    };
-    Ok((patch, ranges))
-}
-
-/// Each of a fixture's objects, with where its lamps start in the
-/// fixture's own numbering and how many it has, in wiring order.
-pub(crate) fn object_lamp_ranges(project: &Project, fixture: &NodeId) -> Vec<(ObjectId, u32, u32)> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    if let Some(f) = project.fixture(fixture) {
-        for c in &f.components {
-            for o in lab_mapping_model::domain::object::objects_of(c) {
-                let n = o.lamps.len() as u32;
-                out.push((o.id, start, n));
-                start += n;
-            }
-        }
-    }
-    out
-}
-
-/// The object a patch path names: `/door` (a path, a polygon, a
-/// one-ring circle, a grid, a ring set, a filled polygon), `/sector/2` (a
-/// copy of a repeat).
-fn object_of(
-    project: &Project,
-    files: &ProductProject,
-    fixture: &NodeId,
-    product_id: &str,
-    instances: &[u32],
-) -> Option<ObjectId> {
-    let map = files.nodes.get(fixture)?.map.as_ref()?;
-    let (id, _) = map
-        .objects
-        .iter()
-        .find(|(_, o)| o.product_id == product_id)?;
-    let c = project.component(id)?;
-    match (&c.kind, instances) {
-        (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => {
-            Some(ObjectId::new(id, rings[0].key.clone()))
-        }
-        (_, []) if c.is_single_object() => Some(ObjectId::of(id)),
-        // `/sector/2`: copy 2 of the repeat's child, `<child>@2`.
-        (ComponentKind::Repeat { child, count, .. }, [k])
-            if *k < *count && child.is_single_object() =>
-        {
-            Some(ObjectId::of(&child.id).in_copy(*k).canonical())
-        }
-        _ => None,
-    }
-}
-
-/// The output a fixture auto-flows onto: the first output, in attach
-/// order, reading the channel it writes — in its module, or in a parent
-/// its module exports the channel to.
-pub(crate) fn default_output(
-    project: &Project,
-    files: &ProductProject,
-    fixture: &NodeId,
-) -> Option<NodeId> {
-    let value = &files.nodes.get(fixture)?.value;
-    let scopes = scopes(project, files, fixture, fixture_writes(value));
-    project
-        .attach_order()
-        .into_iter()
-        .filter(|n| n.output().is_some())
-        .find(|n| {
-            let reads = files
-                .nodes
-                .get(&n.id)
-                .map_or_else(|| "control.out".to_string(), |f| output_reads(&f.value));
-            let module = project.parent_module(&n.id).cloned();
-            scopes.contains(&(module, reads))
-        })
-        .map(|n| n.id.clone())
-}
-
-/// Where a node's channel can be read: (module, channel name there), its
-/// own module first, then up through every module that exports it.
-pub(crate) fn scopes(
-    project: &Project,
-    files: &ProductProject,
-    node: &NodeId,
-    channel: String,
-) -> Vec<(Option<NodeId>, String)> {
-    let mut out = Vec::new();
-    let mut module = project.parent_module(node).cloned();
-    let mut channel = channel;
-    loop {
-        out.push((module.clone(), channel.clone()));
-        let Some(m) = module else { break };
-        let exported = files
-            .nodes
-            .get(&m)
-            .map(|f| exports(&f.value))
-            .unwrap_or_default()
-            .into_iter()
-            .find(|(_, inside)| *inside == channel);
-        let Some((outside, _)) = exported else { break };
-        channel = outside;
-        module = project.parent_module(&m).cloned();
-    }
-    out
-}
-
 /// A box for a document with no canvas: from (0, 0) out past its lamps.
-fn derived_box(components: &[Component]) -> Vec2 {
+fn derived_box(mapping: &lpc_mapping::part::Mapping) -> Vec2 {
     let mut max = Vec2::new(1.0, 1.0);
-    for c in components {
-        for o in lab_mapping_model::domain::object::objects_of(c) {
-            for l in o.lamps {
-                max = Vec2::new(max.x.max(l.pos.x), max.y.max(l.pos.y));
-            }
+    if let Ok(tree) = render(mapping) {
+        for p in tree.positions() {
+            max = Vec2::new(max.x.max(f64::from(p[0])), max.y.max(f64::from(p[1])));
         }
     }
     max
-}
-
-/// The product's `slugify`: lowercased, runs of anything else one `-`,
-/// starting with a letter, at most 24 bytes.
-pub fn slugify(name: &str) -> Option<String> {
-    let mut slug = String::new();
-    let mut dash = false;
-    for c in name.chars() {
-        let c = c.to_ascii_lowercase();
-        let keep = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-';
-        if slug.is_empty() {
-            if c.is_ascii_lowercase() {
-                slug.push(c);
-            }
-            continue;
-        }
-        if keep {
-            if dash {
-                slug.push('-');
-                dash = false;
-            }
-            slug.push(c);
-        } else {
-            dash = true;
-        }
-    }
-    slug.truncate(24);
-    while slug.ends_with('-') {
-        slug.pop();
-    }
-    valid_object_id(&slug).then_some(slug)
-}
-
-/// The product's `uniquify`: `base`, else `base-2`, `base-3`, … within 24
-/// bytes.
-pub fn uniquify(base: &str, taken: &BTreeSet<String>) -> String {
-    if !taken.contains(base) {
-        return base.to_string();
-    }
-    for n in 2u32.. {
-        let suffix = format!("-{n}");
-        let mut stem = base.to_string();
-        stem.truncate(24usize.saturating_sub(suffix.len()));
-        while stem.ends_with('-') {
-            stem.pop();
-        }
-        let id = format!("{stem}{suffix}");
-        if !taken.contains(&id) {
-            return id;
-        }
-    }
-    unreachable!("more objects than u32")
 }
 
 fn read_text(src: &dyn Source, path: &str) -> Result<String, FilesError> {

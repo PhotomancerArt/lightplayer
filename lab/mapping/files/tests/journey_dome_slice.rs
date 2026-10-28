@@ -20,7 +20,7 @@ fn a_dome_slice() {
     let arm = e.project.component(&sector).unwrap().children()[0]
         .id
         .clone();
-    let copy = |k: u32| ObjectId::of(&arm).in_copy(k).canonical();
+    let copy = |k: u32| TreeRef::of(&arm).in_copy(k).canonical();
 
     // 1. Opened, copy k is on port k: each copy fills its port, and the
     //    next one starts the next port.
@@ -30,7 +30,7 @@ fn a_dome_slice() {
 
     // 2. Under end to end, give copy 3 port 4: copy 4 follows it there,
     //    after it (the last port has no count: it takes the rest).
-    e.select(vec![Target::Object(copy(3))]);
+    e.select(vec![Target::Generated(copy(3))]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Port,
     });
@@ -45,7 +45,7 @@ fn a_dome_slice() {
     // 3. Set the repeat's Children to one per port from the first port:
     //    copy 4 is back on its own port, port 4 — sharing it with copy 3,
     //    which keeps the port it was given (an overlap, reported).
-    e.select(vec![Target::Component(sector.clone())]);
+    e.select(vec![Target::Part(sector.clone())]);
     choose(
         &mut e,
         PatchField::Children,
@@ -62,7 +62,7 @@ fn a_dome_slice() {
     assert!(!p.effective_patch().overlaps.is_empty());
 
     // 4. Copy 3's port back to its rule: it takes its own slot again.
-    e.select(vec![Target::Object(copy(3))]);
+    e.select(vec![Target::Generated(copy(3))]);
     e.patch_input(PatchInput::Reset {
         field: PatchField::Port,
     });

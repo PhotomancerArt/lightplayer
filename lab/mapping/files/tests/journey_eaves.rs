@@ -15,8 +15,8 @@ use lab_mapping_model::*;
 fn seans_eaves() {
     let mut e = editor_of(open(&EAVES).project);
     let truth = Piece::of(&open(&EAVES_WIRED).project, "the house");
-    let front = ObjectId::of(&ComponentId::new("front"));
-    let side = ObjectId::of(&ComponentId::new("side"));
+    let front = TreeRef::of(&PartRef::new("front"));
+    let side = TreeRef::of(&PartRef::new("side"));
 
     // 1. The front fills D10 from its first pixel; the side doesn't fit
     //    what is left of D10, so it starts on the next port, D9.
@@ -29,7 +29,7 @@ fn seans_eaves() {
     //    give the front a direction of its own, Reversed, and the patch is
     //    the house's wiring.
     assert!(!truth.matches(&e.project));
-    e.select(vec![Target::Component(ComponentId::new("front"))]);
+    e.select(vec![Target::Part(PartRef::new("front"))]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Direction,
     });

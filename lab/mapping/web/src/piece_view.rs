@@ -6,11 +6,11 @@
 //!
 //! The lab's page mounts it at the foot of the right column, under the
 //! inspector; Studio has the real install instead. It
-//! shows the selection's fixture (a span's object's), or the first
+//! shows the selection's fixture (a span's segment's), or the first
 //! fixture the piece wires.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, NodeId, PatchTarget, Target};
+use lab_mapping_model::{BoardFrame, NodeId, Target};
 
 use crate::dense_canvas::{Raster, canvas_id, put_when_mounted};
 use crate::faces::{DRAFT_PITCH, lamp_radius_px, rgb};
@@ -33,17 +33,17 @@ pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
         .selection
         .first()
         .and_then(|t| match t {
-            // A span shows the fixture of the object on it.
+            // A span shows the fixture of the segment on it.
             Target::Span {
-                object: Some(o), ..
-            } => p.fixture_of_place(&PatchTarget::Object(o.clone())),
+                segment: Some(o), ..
+            } => Some(o.fixture.clone()),
             t => p.fixture_of_target(t),
         })
         .or_else(|| {
             p.fixtures()
                 .iter()
                 .find(|n| {
-                    p.objects_in(&n.id)
+                    p.segments_in(&n.id)
                         .iter()
                         .any(|o| piece.landing(&o.id, 0).is_some())
                 })
@@ -74,7 +74,7 @@ pub fn PieceView(ed: GraphEditor, frame: ReadSignal<BoardFrame>) -> Element {
         let mut raster = Raster::new(size.x, size.y, zoom);
         let mut seeds = Vec::new();
         let mut colours = Vec::new();
-        for o in e.project.objects_in(&fixture) {
+        for o in e.project.segments_in(&fixture) {
             for (i, l) in o.lamps.iter().enumerate() {
                 let at = units.to_local(l.pos);
                 seeds.push((at.x * raster.k, at.y * raster.k));

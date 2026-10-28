@@ -110,13 +110,6 @@ pub fn GraphCenter(
                 div { class: "tw:text-xs tw:text-subtle-foreground", "{why}" }
             }
         },
-        // A map2d format 6 mapping (project format 12): core's one plain
-        // sentence, and nothing that saves.
-        Some(UiGraphState::NewMappingFormat { sentence }) => rsx! {
-            div { class: "tw:m-auto tw:max-w-md tw:text-center tw:text-sm tw:text-muted-foreground",
-                "{sentence}"
-            }
-        },
         Some(UiGraphState::Open { live }) => rsx! {
             GraphCanvas { page: page.clone(), live, on_action }
         },

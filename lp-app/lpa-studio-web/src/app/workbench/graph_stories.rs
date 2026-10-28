@@ -3,19 +3,14 @@
 //! attached in a story, so the lab's simulated board stands in for the
 //! board's frames.
 //!
-//! The projects are the lab's format-11 copies (`lab/mapping/fixtures-v11`):
-//! the catalog itself is at project format 12 (map2d format 6), which the
-//! lab behind today's Graph does not read, so in the app the Graph shows
-//! its new-format sentence there (`graph_new_mapping_format`) until M4's
-//! Graph replaces these stories.
+//! The projects are the catalog's own, at project format 12 with their
+//! mappings in map2d format 6 (baked into `lab_mapping_files::embedded`).
 
 use dioxus::prelude::*;
 use lab_mapping_files::Opened;
 use lab_mapping_files::embedded::{CHOKER, Embedded, FIBER_HEADBAND, PLASMA};
-use lab_mapping_model::{Editor, GraphInput, LayoutKind, NodeId, Target, Vec2};
-use lpa_studio_core::app::graph::{
-    GraphHandle, NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView,
-};
+use lab_mapping_model::{Editor, GraphInput, LayoutKind, NodeId, PartRef, Target, Vec2};
+use lpa_studio_core::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
 use lpa_studio_web_story_macros::story;
 
 use super::graph_view::{GraphCenter, GraphPropsPanel, GraphTreePanel, use_graph_page_with};
@@ -49,7 +44,7 @@ fn graph_pattern_whole_shapes() -> Element {
 }
 
 #[story(
-    description = "A fixture mapped with the product's older point lists: the Graph opens the project round it and draws the fixture as its box alone, saying where to edit it (Nodes)."
+    description = "A fixture of hand-placed lamps (a points part): the Graph opens it as its part, every lamp where the board puts it."
 )]
 fn graph_point_list_box() -> Element {
     rsx! { GraphStory { example: "catalog/fiber-headband", setup: Setup::Nothing } }
@@ -60,13 +55,6 @@ fn graph_point_list_box() -> Element {
 )]
 fn graph_refused() -> Element {
     rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::Refused } }
-}
-
-#[story(
-    description = "A project whose fixture mapping is the new format (map2d format 6, project format 12): one plain sentence, centred, with no button and nothing that saves — the new mapping's editor is coming."
-)]
-fn graph_new_mapping_format() -> Element {
-    rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::NewMappingFormat } }
 }
 
 #[story(
@@ -85,8 +73,6 @@ enum Setup {
     Stack,
     /// The project refused whole.
     Refused,
-    /// A fixture's mapping is map2d format 6.
-    NewMappingFormat,
 }
 
 #[component]
@@ -100,9 +86,6 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
                 Setup::Refused => UiGraphState::Refused {
                     why: "fixture.json: the mapping names a file that isn't in the project"
                         .to_string(),
-                },
-                Setup::NewMappingFormat => UiGraphState::NewMappingFormat {
-                    sentence: NEW_MAPPING_FORMAT_SENTENCE.to_string(),
                 },
                 _ => UiGraphState::Open { live: true },
             },
@@ -140,10 +123,10 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
 /// depends on whether that report lands before the shot. A chosen layout
 /// is never undone by a size report (`Editor::layout`).
 fn story_handle(example: &str, setup: Setup) -> GraphHandle {
-    if matches!(setup, Setup::Refused | Setup::NewMappingFormat) {
+    if matches!(setup, Setup::Refused) {
         return GraphHandle::default();
     }
-    let opened = Opened::open(&lab_copy(example).files()).expect("the example opens on the Graph");
+    let opened = Opened::open(&embedded(example).files()).expect("the example opens on the Graph");
     let handle = GraphHandle::default();
     {
         let mut e = handle.editor().borrow_mut();
@@ -170,22 +153,22 @@ fn story_handle(example: &str, setup: Setup) -> GraphHandle {
                 .borrow()
                 .project
                 .fixture(&fixture)
-                .map(|f| f.components[0].id.clone());
+                .map(|f| PartRef::new(&fixture, &f.parts()[0].id));
             if let Some(id) = first {
-                handle.input(GraphInput::Select(vec![Target::Component(id)]));
+                handle.input(GraphInput::Select(vec![Target::Part(id)]));
             }
         }
-        Setup::Stack | Setup::Refused | Setup::NewMappingFormat => {}
+        Setup::Stack | Setup::Refused => {}
     }
     handle
 }
 
-/// The lab's format-11 copy of a catalog example.
-fn lab_copy(example: &str) -> &'static Embedded {
+/// A catalog example, as baked in.
+fn embedded(example: &str) -> &'static Embedded {
     match example {
         "catalog/playful-choker" => &CHOKER,
         "catalog/plasma" => &PLASMA,
         "catalog/fiber-headband" => &FIBER_HEADBAND,
-        other => panic!("no format-11 copy of {other} in lab/mapping/fixtures-v11"),
+        other => panic!("{other} isn't baked into lab_mapping_files::embedded"),
     }
 }

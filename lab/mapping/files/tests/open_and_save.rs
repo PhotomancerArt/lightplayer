@@ -36,7 +36,7 @@ fn the_choker_opens() {
         Start::At {
             output: out.clone(),
             port: "0".into(),
-            channel: Amount::px(0)
+            channel: Amount::lamps(0)
         }
     );
     assert!(f.overrides.is_empty());
@@ -79,7 +79,7 @@ fn the_zook_dome_opens() {
     for k in 0..5 {
         assert_eq!(p.port_fill(&out, &k.to_string()), (300, 300), "port {k}");
     }
-    let sector = Target::Component(f.components[0].id.clone());
+    let sector = Target::Part(f.components[0].id.clone());
     assert_eq!(p.children(Some(&sector)).len(), 5);
 }
 
@@ -107,7 +107,7 @@ fn the_radiance_dome_opens() {
     assert_eq!(
         f.overrides
             .values()
-            .filter(|o| o.direction == Some(Direction::Reversed))
+            .filter(|o| o.direction == Some(Direction::Reverse))
             .count(),
         1
     );
@@ -179,7 +179,7 @@ fn a_count_the_product_would_flow_differently_writes_the_patch() {
         .id
         .clone();
     assert!(p.edit_prop(
-        &Target::Component(sector),
+        &Target::Part(sector),
         "lamps",
         lab_mapping_model::PropEdit::SetCount(299),
         2.4
@@ -206,7 +206,7 @@ fn a_written_mapping_gives_every_object_an_id() {
         .id
         .clone();
     assert!(p.edit_prop(
-        &Target::Component(first),
+        &Target::Part(first),
         "lamps",
         lab_mapping_model::PropEdit::Nudge(1),
         2.4
@@ -261,8 +261,8 @@ fn an_override_writes_the_patch_expanded() {
     let out = NodeId::new("output");
     let fixture = NodeId::new("fixture");
     let a = p.fixture(&fixture).unwrap().components[2].id.clone();
-    let object = lab_mapping_model::ObjectId::of(&a);
-    p.patch_object(&object, &out, "0", 100).unwrap();
+    let object = lab_mapping_model::TreeRef::of(&a);
+    p.patch_segment(&object, &out, "0", 100).unwrap();
     p.reverse_placement(&object).unwrap();
     let saved = o.files.save(&p).unwrap();
     let paths: Vec<&str> = saved.writes.iter().map(|(p, _)| p.as_str()).collect();
@@ -302,7 +302,7 @@ fn the_desk_saves_as_a_new_project() {
         let mut w: Vec<(String, String, u32, String, i64, i64)> = Vec::new();
         for s in &p.effective_patch().pixel_runs {
             let origin = p.origin(&s.fixture);
-            let lamps = &p.object(&s.object).unwrap().lamps;
+            let lamps = &p.segment(&s.object).unwrap().lamps;
             for lamp in s.lamps.clone() {
                 let at = lamps[lamp as usize].pos - origin;
                 w.push((
@@ -327,21 +327,21 @@ fn the_desk_saves_as_a_new_project() {
     let mut placed = Project::seed();
     let ring_display = placed.named("ring display").unwrap().id.clone();
     let main = placed.named("main").unwrap().id.clone();
-    let circle = lab_mapping_model::ComponentId::new("circle1");
+    let circle = lab_mapping_model::PartRef::new("circle1");
     placed.set_start(
         &ring_display,
-        &PatchTarget::Component(circle.clone()),
+        &PatchTarget::Part(circle.clone()),
         Start::At {
             output: main.clone(),
             port: "0".into(),
-            channel: Amount::px(5),
+            channel: Amount::lamps(5),
         },
     );
-    placed.edit_override(&lab_mapping_model::ObjectId::of(&circle), |o| {
-        o.direction = Some(Direction::Reversed)
+    placed.edit_override(&lab_mapping_model::TreeRef::of(&circle), |o| {
+        o.direction = Some(Direction::Reverse)
     });
-    placed.edit_override(&lab_mapping_model::ObjectId::new(&circle, "r2"), |o| {
-        o.direction = Some(Direction::AsDrawn)
+    placed.edit_override(&lab_mapping_model::TreeRef::new(&circle, "r2"), |o| {
+        o.direction = Some(Direction::Forward)
     });
     let saved = empty.save(&placed).unwrap();
     let mut files = MemFiles::new(saved.writes.clone());
@@ -374,7 +374,7 @@ fn a_grid_and_a_ring_set_open_whole() {
     let mut p = o.project.clone();
     let grid = fixture.components[0].id.clone();
     assert!(p.edit_prop(
-        &Target::Component(grid),
+        &Target::Part(grid),
         "columns",
         lab_mapping_model::PropEdit::SetCount(3),
         2.0

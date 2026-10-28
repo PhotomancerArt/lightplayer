@@ -8,11 +8,12 @@ rust-version.workspace = true
 publish = false
 description = "Mapping design lab: opens and saves real LightPlayer projects in the product's own formats"
 
-# The fence: the lab model and serde only — NO product crate. The product's
-# document shapes (project format 11, map2d 1–5, patch files) are
-# re-created here (fit-check §6).
+# A fixture's mapping is read by `lpc-mapping` (map2d format 6), the reader
+# the engine runs (mapping rebuild M4 P03); the rest of the product's
+# documents are read here as JSON.
 [dependencies]
 lab-mapping-model = { path = "../model" }
+lpc-mapping = { path = "../../../lp-core/lpc-mapping", features = ["std"] }
 # Never `preserve_order`: Studio builds this crate (the Graph tab), and cargo
 # unifies features per build, so it would flip serde_json's map order for
 # every crate in Studio — and the committed schema corpus (see lpa-upgrade's

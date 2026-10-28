@@ -22,7 +22,7 @@ pub fn editor_of(p: Project) -> Editor {
 }
 
 /// Where one lamp lands: (port key, pixel).
-pub fn landing(p: &Project, object: &ObjectId, lamp: u32) -> Option<(String, u32)> {
+pub fn landing(p: &Project, object: &TreeRef, lamp: u32) -> Option<(String, u32)> {
     p.effective_patch()
         .landing(object, lamp)
         .map(|l| (l.port, l.pixel))
@@ -30,8 +30,8 @@ pub fn landing(p: &Project, object: &ObjectId, lamp: u32) -> Option<(String, u32
 
 /// The port an object starts on and its first and last pixels, in lamp
 /// order (a reversed object's first pixel is its highest).
-pub fn span(p: &Project, object: &ObjectId) -> Option<(String, u32, u32)> {
-    let n = p.object(object)?.lamps.len() as u32;
+pub fn span(p: &Project, object: &TreeRef) -> Option<(String, u32, u32)> {
+    let n = p.segment(object)?.lamps.len() as u32;
     let first = landing(p, object, 0)?;
     let last = landing(p, object, n - 1)?;
     Some((first.0, first.1, last.1))

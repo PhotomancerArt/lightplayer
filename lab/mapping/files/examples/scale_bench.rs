@@ -62,7 +62,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
         let _ = lab_layout::canvas_layout(&input);
     });
     both("placed objects", &|p| {
-        let _ = p.placed_objects();
+        let _ = p.placed_segments();
     });
     both("effective patch", &|p| {
         let _ = p.effective_patch();
@@ -73,7 +73,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     let first_component = project
         .objects()
         .first()
-        .map(|o| Target::Component(o.id.component.clone()));
+        .map(|o| Target::Part(o.id.component.clone()));
     if let Some(t) = &first_component {
         let sel = vec![t.clone()];
         both("device frame (a repeat selected)", &|p| {

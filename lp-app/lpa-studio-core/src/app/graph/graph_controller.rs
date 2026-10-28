@@ -15,13 +15,16 @@
 //! again from the files, keeping the camera and whatever of the selection
 //! still exists.
 //!
-//! **Saving.** After an edit (not mid-drag, not mid-drawing) the lab's
-//! writer says which of the project's files changed, in today's formats,
-//! and each is written as an ordinary asset edit — the same path the Map
-//! view's edits take — so Studio's dirty state, Save and the push to the
-//! board work unchanged. The written files are then the baseline the next
-//! save compares against. Undo is the Graph's own (the lab's project
-//! snapshots); what it puts back is saved the same way.
+//! **Patching.** Each fixture is patched by `lpc-mapping`'s patcher
+//! against port tables core builds with the engine's own walk over each
+//! output's authored ports (`graph_port_tables.rs`), handed to the editor
+//! when it opens, so the Graph and the board can't disagree.
+//!
+//! **Saving.** Not yet (mapping rebuild M4 P05 writes map2d format 6): an
+//! edit on the Graph changes the editor only, and no mapping file is
+//! written. The one thing still written is where pinned nodes sit
+//! (`editor.json`'s `canvas` surface, Debug's Pinning), which is not
+//! mapping data. Undo is the Graph's own (the lab's project snapshots).
 //!
 //! **Colours.** [`GraphController::view`] carries the board's frame, built
 //! from the frames the board published (`graph_frame.rs`) and kept until
@@ -32,16 +35,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use lab_mapping_files::{Opened, ProductProject};
+use lab_mapping_model::Project;
 use lab_mapping_model::{BoardFrame, Editor, NodeId};
 
 use crate::StudioServerClient;
 use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
 use crate::app::graph::graph_pictures;
+use crate::app::graph::graph_port_tables::port_tables;
 use crate::app::graph::graph_source::{GraphSource, location};
-use crate::app::graph::{
-    GraphHandle, NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView,
-};
+use crate::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
 use crate::app::project::ProjectController;
 
 /// How many rounds of "open, fetch what it asked for" an open may take: a
@@ -72,10 +75,9 @@ pub struct GraphController {
     frame: RefCell<Option<(FrameKey, Rc<BoardFrame>)>>,
 }
 
-/// What the open read, and what saving starts from.
+/// What the open read.
 #[derive(Debug)]
 struct GraphOpened {
-    files: ProductProject,
     /// Every path the open asked for, and what it said.
     read: BTreeMap<String, Option<String>>,
     /// The lab's nodes, as Studio's.
@@ -218,39 +220,23 @@ impl GraphController {
         used
     }
 
-    /// Write what the editor changed to the project's files. Returns
-    /// whether the Graph's view changed (a notice).
+    /// Write where pinned nodes sit, after an edit (mapping files are not
+    /// written until M4 P05). Returns whether the Graph's view changed (a
+    /// notice).
     async fn save(
         &mut self,
         project: &mut ProjectController,
         server: &mut StudioServerClient,
     ) -> bool {
-        let (saved, revision) = {
-            let Some(opened) = self.opened.as_ref() else {
+        {
+            if self.opened.is_none() {
                 return false;
-            };
+            }
             let e = self.handle.editor().borrow();
             if e.dragging() || e.drawing() || e.project.revision() == self.saved {
                 return false;
             }
-            (opened.files.save(&e.project), e.project.revision())
-        };
-        self.saved = revision;
-        let saved = match saved {
-            Ok(saved) => saved,
-            Err(why) => {
-                self.refuse_save(why.to_string());
-                return true;
-            }
-        };
-        for (path, text) in &saved.writes {
-            let written = project
-                .apply_asset_body(server, location(path), text.clone().into_bytes())
-                .await;
-            if let Err(why) = written {
-                self.refuse_save(format!("{path}: {why}"));
-                return true;
-            }
+            self.saved = e.project.revision();
         }
         // Pins: editor.json's `canvas` surface.
         let paths = [EDITOR_JSON.to_string()];
@@ -273,20 +259,13 @@ impl GraphController {
                 return true;
             }
             self.absent.remove(EDITOR_JSON);
-        }
-        // What was written is what the next save compares against.
-        let source = GraphSource::new(project, &self.absent);
-        if let Ok(reopened) = Opened::open(&source)
-            && source.misses().is_empty()
-            && let Some(opened) = self.opened.as_mut()
-        {
-            opened.files = reopened.files;
-            let mut read = source.into_read();
-            read.insert(
-                EDITOR_JSON.to_string(),
-                GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
-            );
-            opened.read = read;
+            // What was written is what the open read now.
+            if let Some(opened) = self.opened.as_mut() {
+                opened.read.insert(
+                    EDITOR_JSON.to_string(),
+                    GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
+                );
+            }
         }
         false
     }
@@ -408,14 +387,8 @@ impl GraphController {
                 }
                 Err(why) => {
                     self.opened = None;
-                    self.state = Some(if holds_a_format_6_mapping(&read) {
-                        UiGraphState::NewMappingFormat {
-                            sentence: NEW_MAPPING_FORMAT_SENTENCE.to_string(),
-                        }
-                    } else {
-                        UiGraphState::Refused {
-                            why: why.to_string(),
-                        }
+                    self.state = Some(UiGraphState::Refused {
+                        why: why.to_string(),
                     });
                 }
             }
@@ -440,6 +413,8 @@ impl GraphController {
         } = opened;
         {
             let mut editor = self.handle.editor().borrow_mut();
+            let mut lab: Project = lab;
+            lab.set_port_tables(port_tables(&lab, &files));
             let mut e = Editor::new(lab).with_view_of(&editor);
             // The board (or the preview host) runs the project: its
             // shaders' pictures are their own.
@@ -459,7 +434,7 @@ impl GraphController {
             *editor = e;
             self.saved = editor.project.revision();
         }
-        self.opened = Some(GraphOpened { files, read, nodes });
+        self.opened = Some(GraphOpened { read, nodes });
         self.state = Some(UiGraphState::Open { live: false });
         self.generation += 1;
         *self.frame.borrow_mut() = None;
@@ -521,29 +496,3 @@ fn address_of(
 ) -> Option<String> {
     project.graph_node_address(*nodes.get(id)?)
 }
-
-/// Whether what the Graph read is in the new mapping format: a project at
-/// project format 12 or later (every fixture's mapping is map2d format 6
-/// there; the engine refuses older ones), or any mapping document at map2d
-/// format 6. The lab's reader behind today's Graph reads neither; the new
-/// Graph (M4) will.
-fn holds_a_format_6_mapping(read: &BTreeMap<String, Option<String>>) -> bool {
-    read.iter().any(|(path, text)| {
-        let Some(text) = text.as_deref() else {
-            return false;
-        };
-        if path.ends_with(".map2d.json") {
-            return lpc_mapping::map2d6::peek_format(text)
-                == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT);
-        }
-        path.trim_start_matches('/') == "project.json"
-            && lpc_model::ProjectManifest::read_json(text).is_ok_and(|manifest| {
-                manifest
-                    .format
-                    .is_some_and(|format| format >= FIRST_FORMAT_6_PROJECT_FORMAT)
-            })
-    })
-}
-
-/// The project format whose mappings are all map2d format 6.
-const FIRST_FORMAT_6_PROJECT_FORMAT: u32 = 12;

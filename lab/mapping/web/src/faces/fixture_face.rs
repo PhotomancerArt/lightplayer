@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lab_mapping_model::{
-    BoardFrame, Emphasis, FixtureLook, NodeId, ObjectId, Rect, UiFixtureFace, UiObject, UiShape,
+    BoardFrame, Emphasis, FixtureLook, NodeId, Rect, TreeRef, UiFixtureFace, UiObject, UiShape,
     UiWire, Vec2, picture_rect,
 };
 
@@ -50,7 +50,7 @@ pub fn FixtureFace(
     let px = 1.0 / zoom;
     let pitch = face.pitch;
     let lamp_r = lamp_radius_px(zoom, pitch) * px;
-    let dimmed: Vec<ObjectId> = face
+    let dimmed: Vec<TreeRef> = face
         .objects
         .iter()
         .filter(|o| o.emphasis == Emphasis::Dimmed)
@@ -226,7 +226,7 @@ fn FixtureLamps(
     /// Where it was placed: a move draws it again.
     origin: Vec2,
     revision: u64,
-    dimmed: Vec<ObjectId>,
+    dimmed: Vec<TreeRef>,
     frame: ReadSignal<BoardFrame>,
     ed: GraphEditor,
 ) -> Element {
@@ -248,7 +248,7 @@ fn FixtureLamps(
         if look == FixtureLook::Live {
             let mut seeds: Vec<(f64, f64)> = Vec::new();
             let mut colours: Vec<[f64; 4]> = Vec::new();
-            for o in e.project.objects_in(&fixture) {
+            for o in e.project.segments_in(&fixture) {
                 let dim = if dimmed.contains(&o.id) {
                     emphasis_alpha(Emphasis::Dimmed)
                 } else {
@@ -291,7 +291,7 @@ fn FixtureLamps(
         }
         let stamp = Stamp::disc(r, Some([255.0, 255.0, 255.0, 0.3]));
         let dark = [156.0, 156.0, 171.0, 1.0];
-        for o in e.project.objects_in(&fixture) {
+        for o in e.project.segments_in(&fixture) {
             let dim = if dimmed.contains(&o.id) {
                 emphasis_alpha(Emphasis::Dimmed)
             } else {

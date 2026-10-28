@@ -13,7 +13,7 @@ use lab_mapping_model::*;
 #[test]
 fn the_playful_choker() {
     let mut e = editor_of(open(&CHOKER).project);
-    let part = |id: &str| ObjectId::of(&ComponentId::new(id));
+    let part = |id: &str| TreeRef::of(&PartRef::new(id));
 
     // 1. Opened, the letters run end to end from D10's first pixel:
     //    P (13), L (8), A (10), its bar (2), Y's three strokes (3 each),
@@ -31,7 +31,7 @@ fn the_playful_choker() {
     // 2. Anchor F at pixel 60: select its first stroke, make its pixel its
     //    own, and step it up 18. F's other strokes, U and L flow on after
     //    it (a restart); everything before F keeps its pixels.
-    e.select(vec![Target::Component(ComponentId::new("f-lower"))]);
+    e.select(vec![Target::Part(PartRef::new("f-lower"))]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Pixel,
     });
