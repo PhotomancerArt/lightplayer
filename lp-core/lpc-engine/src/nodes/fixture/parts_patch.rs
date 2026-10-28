@@ -99,8 +99,7 @@ impl FixturePartsPatch {
     /// `read_frame_settings`, which every fixture runs every frame on the
     /// C6's main stack. Inlined there, the patcher's working set became part
     /// of that function's frame (6,736 B on the C6 against 3,296 B without
-    /// it, measured in M2 P3), paid by every fixture, format ≤ 5 included,
-    /// on every frame. Out of line, it is paid only while re-patching.
+    /// it, measured in M2 P3), paid by every fixture on every frame. Out of line, it is paid only while re-patching.
     #[cold]
     #[inline(never)]
     fn repatch(
@@ -237,26 +236,6 @@ mod tests {
         assert!(status.contains("path2 runs past the last port"), "{status}");
     }
 
-    /// A format-6 fixture never asks to be auto-flowed: it is manual, and it
-    /// answers its placement even before it has a run.
-    #[test]
-    fn a_format_6_fixture_never_asks_to_be_auto_flowed() {
-        use crate::node::NodeRuntime;
-        use lpc_model::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
-
-        let mapping = parts_patch(Start::at("main", 0, Amount::lamps(0))).mapping;
-        let fixture = crate::nodes::FixtureNode::new(
-            lpc_model::NodeId::new(1),
-            MappingConfig::path_points_vec(Vec::new(), 1.0),
-            FixtureSamplingConfig::default(),
-            Revision::new(1),
-        )
-        .with_parts_mapping(mapping, 10, 2);
-        assert!(fixture.control_patch_manual());
-        assert_eq!(fixture.control_patch_placement(), Some(&[][..]));
-        assert_eq!(fixture.runtime_status(), None);
-    }
-
     /// A fixture with no start places nothing and says so.
     #[test]
     fn a_fixture_with_no_start_places_nothing_and_says_so() {
@@ -299,7 +278,6 @@ mod tests {
     fn a_fixture_whose_segments_are_contiguous_publishes_one_run() {
         use lpc_mapping::part::{Repeat, render};
         use lpc_mapping::patching::patch_mapping;
-        use lpc_mapping::{PatchedRange, patched_wire_lamp};
 
         // segments-64-6's shape: 64 copies of an 8-lamp spoke, from lamp 0
         // of port 0 of `main`.
@@ -322,19 +300,11 @@ mod tests {
         let tree = render(&mapping).unwrap();
         let patching = patch_mapping(&mapping, &tree, &patcher_ports(&lamps));
         let run = &parts.runs[0];
-        let range = PatchedRange {
-            start: run.start,
-            count: run.count,
-            lamp: run.lamp,
-            reversed: run.reversed,
-            offset: run.offset,
-            output: run.output.clone(),
-        };
         for segment in tree.segments() {
             for j in 0..segment.lamps.len() as u32 {
                 let landed = patching.landing(&segment.id, j).unwrap();
                 assert_eq!(
-                    patched_wire_lamp(&range, segment.lamps.start + j - run.start),
+                    run.wire_lamp(segment.lamps.start + j - run.start),
                     landed.channel / 3,
                     "{} lamp {j}",
                     segment.id

@@ -13,7 +13,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec};
+use lpc_model::nodes::fixture::ColorOrder;
 use lpc_model::{
     ControlDisplayLayout, Dim2u, Kind, LpValue, NodeId, Revision, ShaderState, SlotAccess,
     SlotPath, SlotShapeRegistry, SlotShapeRegistryError, ToLpValue, TreePath,
@@ -28,11 +28,13 @@ use lpc_wire::{
 };
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+use crate::engine::placed_fixture_test_support::{PlacedFixture, bind_output_name};
 use crate::engine::test_support::read_probe_results;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, RuntimeStateShape, TickContext, test_placeholder_spine,
 };
+use crate::nodes::fixture::fixture_node::{compact_paths, test_path};
 use crate::nodes::{
     FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
 };
@@ -581,17 +583,21 @@ impl Harness {
         engine
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    MappingConfig::path_points_vec(
-                        vec![PathSpec::point_list(
-                            0,
-                            (0..lamps).map(|lamp| [(lamp as f32 + 0.5) / lamps as f32, 0.5]),
-                        )],
-                        2.0,
+                Box::new(PlacedFixture::new(
+                    FixtureNode::new(
+                        fix_id,
+                        compact_paths(
+                            vec![test_path(
+                                0,
+                                (0..lamps).map(|lamp| [(lamp as f32 + 0.5) / lamps as f32, 0.5]),
+                            )],
+                            2.0,
+                        ),
+                        lpc_model::FixtureSamplingConfig::TextureArea,
+                        frame,
                     ),
-                    lpc_model::FixtureSamplingConfig::TextureArea,
-                    frame,
+                    lamps,
+                    "out",
                 )),
                 frame,
             )
@@ -645,8 +651,10 @@ impl Harness {
     }
 
     /// Register the chain's whole binding set: the fixture's literal
-    /// settings, shader → fixture, fixture → output.
+    /// settings, shader → fixture, fixture → output, and the output's name
+    /// (the one the fixture's run lands on, [`PlacedFixture`]).
     fn bind_all(&mut self, frame: Revision) {
+        bind_output_name(&mut self.engine, self.out_id, "out", frame);
         for (slot, value) in self.fixture_literals.clone() {
             bind_literal(&mut self.engine, self.fix_id, slot, value, frame);
         }

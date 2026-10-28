@@ -6,19 +6,15 @@
 //!
 //! An output consumes N control products, not one. Each becomes one or more
 //! [`OutputFragment`]s — a `(product, source offset, offset, len, reversed)`
-//! placement — rendered into its OWN sub-slice of the channel buffer. With a
-//! single unpatched producer (every checked-in example) the one fragment
-//! covers the whole buffer and the path is byte-identical to the pre-fragment
-//! one; that identity is pinned by
-//! `tests/output_control_samples_golden.rs`.
+//! placement — rendered into its OWN sub-slice of the channel buffer. A
+//! fragment that takes its producer's whole product renders straight into
+//! its sub-slice; `tests/output_control_samples_golden.rs` pins the bytes.
 //!
-//! Placement default is **auto-flow**: fragments follow the resolver's
-//! provider order, each starting where the previous one ended (D17v, the
-//! map2d "object order is wiring order" rule scaled up to fixtures). A
-//! producer that authored a **patch** replaces its own auto-flow placement
-//! with the runs that patch resolved to — several ranges of its lamps, at
-//! authored wire offsets, forward or reversed — while everything unpatched
-//! keeps flowing, after every anchor. See [`plan_fragments`].
+//! Placement is the **producer's**: each producer says where its lamps land
+//! — runs of its lamps, at wire offsets, forward or reversed or rotated, each
+//! naming its output (a fixture's patching, `parts_patch.rs`) — and this
+//! output lays the runs naming it. Nothing flows by default: a producer with
+//! no run here places nothing here. See [`plan_fragments`].
 //!
 //! Overlap and gaps are **degraded and reported**, never fatal: contested
 //! samples go dark and [`OutputNode::runtime_status`] names the lamp range,
@@ -189,9 +185,8 @@ pub struct OutputFragment {
     pub product: ControlProduct,
     /// First sample OF THE PRODUCT this range takes.
     ///
-    /// Zero for every auto-flowed producer — a fixture with no patch
-    /// contributes its whole product as one run. A patched fixture splits
-    /// into several runs of its own lamps, and this is which run.
+    /// Zero for a run that starts at the producer's first lamp. A fixture
+    /// patched in several runs of its own lamps says here which run.
     pub source_offset_samples: u32,
     /// First sample of the range, in the output's buffer.
     pub offset_samples: u32,
@@ -205,8 +200,7 @@ pub struct OutputFragment {
     /// strand plugged in at the far end needs.
     pub reversed: bool,
     /// Rotate the placed lamps within the fragment's window, in SAMPLES
-    /// (always a whole number of lamps). Applied after `reversed` — the
-    /// kernel's canonical order (`lpc_mapping::patched_wire_lamp`): source
+    /// (always a whole number of lamps). Applied after `reversed`: source
     /// lamp `j` lands at window slot `(j' + k) mod N`. Rotation permutes
     /// *within* the window, so coverage/collision math is untouched.
     pub rotation_samples: u32,
@@ -222,8 +216,8 @@ impl OutputFragment {
     /// Does this fragment take the producer's whole product?
     ///
     /// The yes case renders straight into its sub-slice of the output buffer
-    /// through a contiguous target — the path every unpatched project takes
-    /// and the one whose bytes the golden oracle pins. A partial run renders
+    /// through a contiguous target — the path a fixture placed in one run
+    /// takes, and the one whose bytes the golden oracle pins. A partial run renders
     /// through a SCATTERED target instead: the producer still renders whole,
     /// and the target routes each sample to the run that claims it
     /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
@@ -234,14 +228,14 @@ impl OutputFragment {
     }
 }
 
-/// One producer as the placement planner sees it: the product plus the patch
-/// it resolved to, if it has one.
+/// One producer as the placement planner sees it: the product plus the runs
+/// of it that land on this output.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FragmentPlacement {
     pub product: ControlProduct,
-    /// The producer's resolved patch, in LAMPS. `None` — the ordinary case —
-    /// means "auto-flow me".
-    pub patch: Option<Vec<PatchedRun>>,
+    /// The producer's runs naming this output, in LAMPS. Empty: nothing of
+    /// it lands here.
+    pub patch: Vec<PatchedRun>,
 }
 
 /// What a fragment set covers, and where it disagrees with itself.
@@ -806,9 +800,8 @@ impl OutputNode {
 
     /// Take, render, publish — the whole frame for a planned fragment set.
     ///
-    /// Separate from [`Self::consume`] so tests can drive placements that
-    /// auto-flow cannot yet produce (reversal, overlap, gaps): those arrive
-    /// with the patch file, and the engine must already be right when they do.
+    /// Separate from [`Self::consume`] so tests can drive fragment sets
+    /// directly (reversal, overlap, gaps) without a producer's patching.
     #[cfg(test)]
     fn render_fragments(
         &mut self,
@@ -1093,67 +1086,28 @@ fn control_product(value: &LpValue) -> Result<ControlProduct, NodeError> {
     }
 }
 
-/// The whole placement policy: anchors land where they say, everyone else
-/// auto-flows after every anchor (D17v, D5).
+/// The whole placement policy: every run lands where it says.
 ///
-/// **Auto-flow** is the unpatched rule and the base case: each producer starts
-/// where the previous one ended, in provider order — which is the resolver's,
-/// and the resolver's is deterministic (binding priority first, then binding
-/// ref, which is owner node id, which is the order the loader attached the
-/// nodes, which is the order the module lists them; its `nodes` map is
-/// key-sorted). "The second fixture starts where the first one ended" is a
-/// property of the project document, not of a hash iteration;
-/// `tests/output_fragments.rs` pins it.
-///
-/// **Partial patching is first-class** — patching one fixture of five must not
-/// require patching the other four — so unpatched producers keep the
-/// running-sum rule among themselves and simply start past the highest
-/// anchored end.
-/// A producer whose run list is present but EMPTY contributes no fragment
-/// and no gap: its lamps are patched onto some other output (D40's
-/// zero-runs-here case), which is not the same thing as `None` — auto-flow
-/// me. The engine's placement query documents the distinction.
+/// A producer whose run list is EMPTY contributes no fragment and no gap:
+/// its lamps land on some other output, or on none.
 pub(crate) fn plan_fragments(placements: &[FragmentPlacement]) -> Vec<OutputFragment> {
-    let mut cursor = 0u32;
-    for placement in placements {
-        for range in placement.patch.iter().flatten() {
-            cursor = cursor.max(lamps_to_samples(range.lamp_end()));
-        }
-    }
-
     let mut fragments = Vec::with_capacity(placements.len());
     for placement in placements {
-        match &placement.patch {
-            Some(ranges) => {
-                for range in ranges {
-                    fragments.push(OutputFragment {
-                        product: placement.product,
-                        source_offset_samples: lamps_to_samples(range.start),
-                        offset_samples: lamps_to_samples(range.lamp),
-                        len_samples: lamps_to_samples(range.count),
-                        reversed: range.reversed,
-                        rotation_samples: lamps_to_samples(range.offset),
-                    });
-                }
-            }
-            None => {
-                let len = placement.product.preferred_extent().sample_count();
-                fragments.push(OutputFragment {
-                    product: placement.product,
-                    source_offset_samples: 0,
-                    offset_samples: cursor,
-                    len_samples: len,
-                    reversed: false,
-                    rotation_samples: 0,
-                });
-                cursor = cursor.saturating_add(len);
-            }
+        for range in &placement.patch {
+            fragments.push(OutputFragment {
+                product: placement.product,
+                source_offset_samples: lamps_to_samples(range.start),
+                offset_samples: lamps_to_samples(range.lamp),
+                len_samples: lamps_to_samples(range.count),
+                reversed: range.reversed,
+                rotation_samples: lamps_to_samples(range.offset),
+            });
         }
     }
     fragments
 }
 
-/// Patch documents count in lamps; buffers count in samples.
+/// Runs count in lamps; buffers count in samples.
 const fn lamps_to_samples(lamps: u32) -> u32 {
     lamps.saturating_mul(SAMPLES_PER_LAMP)
 }
@@ -1957,8 +1911,10 @@ mod tests {
         /// `graph_color`, so a fragment's identity AND its internal order are
         /// both legible in the published buffer.
         paint_by_product: bool,
-        /// Resolved patches, per product — what the engine's host answers
-        /// from the producing node.
+        /// Runs, per product — what the engine's host answers from the
+        /// producing node. A product with none listed here is placed whole,
+        /// end to end after the products ahead of it (the placement the
+        /// upgrade froze auto-flow into).
         patches: Vec<(ControlProduct, Vec<PatchedRun>)>,
         /// Make `render_control` fail, standing in for a producer that traps
         /// mid-render (the fuel case) — the failure that used to take the
@@ -2137,11 +2093,31 @@ mod tests {
             &self,
             product: ControlProduct,
             _consumer: NodeId,
-        ) -> Option<Vec<PatchedRun>> {
-            self.patches
-                .iter()
-                .find(|(patched, _)| *patched == product)
-                .map(|(_, runs)| runs.clone())
+        ) -> Vec<PatchedRun> {
+            if let Some((_, runs)) = self.patches.iter().find(|(patched, _)| *patched == product) {
+                return runs.clone();
+            }
+            let products = if self.graph_products.is_empty() {
+                vec![ControlProduct::new(node_id(), 0, self.graph_extent)]
+            } else {
+                self.graph_products.clone()
+            };
+            let mut lamp = 0;
+            for placed in products {
+                let count = placed.preferred_extent().sample_count() / SAMPLES_PER_LAMP;
+                if placed == product {
+                    return vec![PatchedRun {
+                        start: 0,
+                        count,
+                        lamp,
+                        reversed: false,
+                        offset: 0,
+                        output: String::from("out"),
+                    }];
+                }
+                lamp += count;
+            }
+            Vec::new()
         }
 
         fn runtime_buffer_mut(
@@ -3210,25 +3186,33 @@ mod tests {
         ControlProduct::new(node_id(), output, extent)
     }
 
-    /// The unpatched placement of a producer list: what [`plan_fragments`]
-    /// does when nobody authored a patch, which is the base case every
-    /// checked-in project takes.
-    fn auto_flow_fragments(products: &[ControlProduct]) -> Vec<OutputFragment> {
-        let placements: Vec<FragmentPlacement> = products
+    /// Products laid whole, end to end in order: the fragments of producers
+    /// each placed right after the one before.
+    fn end_to_end_fragments(products: &[ControlProduct]) -> Vec<OutputFragment> {
+        let mut offset = 0;
+        products
             .iter()
-            .map(|product| FragmentPlacement {
-                product: *product,
-                patch: None,
+            .map(|product| {
+                let len = product.preferred_extent().sample_count();
+                let fragment = OutputFragment {
+                    product: *product,
+                    source_offset_samples: 0,
+                    offset_samples: offset,
+                    len_samples: len,
+                    reversed: false,
+                    rotation_samples: 0,
+                };
+                offset += len;
+                fragment
             })
-            .collect();
-        plan_fragments(&placements)
+            .collect()
     }
 
-    /// A patched producer, for the planner tests.
+    /// A placed producer, for the planner tests.
     fn patched(product: ControlProduct, runs: &[PatchedRun]) -> FragmentPlacement {
         FragmentPlacement {
             product,
-            patch: Some(runs.to_vec()),
+            patch: runs.to_vec(),
         }
     }
 
@@ -3275,7 +3259,7 @@ mod tests {
             lamp,
             reversed,
             offset: 0,
-            output: None,
+            output: String::from("out"),
         }
     }
 
@@ -3290,45 +3274,6 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let mut ctx = TickContext::new(node_id(), frame, resolver, &shapes);
         node.render_fragments(&mut ctx, fragments)
-    }
-
-    #[test]
-    fn auto_flow_lays_products_end_to_end_in_provider_order() {
-        let fragments = auto_flow_fragments(&[
-            product(1, TWO_LAMPS),
-            product(2, ONE_LAMP),
-            product(3, TWO_LAMPS),
-        ]);
-
-        assert_eq!(
-            fragments
-                .iter()
-                .map(|f| (
-                    f.product.output(),
-                    f.offset_samples,
-                    f.len_samples,
-                    f.reversed
-                ))
-                .collect::<Vec<_>>(),
-            vec![(1, 0, 6, false), (2, 6, 3, false), (3, 9, 6, false)],
-            "each fragment starts where the previous one ended, forward",
-        );
-    }
-
-    /// The order is the *input* order, not a sort of anything the fragments
-    /// carry: swap the providers and the offsets swap with them. This is what
-    /// makes "the second fixture in the document is the second strand on the
-    /// wire" a property of the project text.
-    #[test]
-    fn auto_flow_offsets_follow_provider_order_not_product_identity() {
-        let forward = auto_flow_fragments(&[product(1, TWO_LAMPS), product(2, ONE_LAMP)]);
-        let reversed_order = auto_flow_fragments(&[product(2, ONE_LAMP), product(1, TWO_LAMPS)]);
-
-        assert_eq!(forward[0].product.output(), 1);
-        assert_eq!(forward[0].offset_samples, 0);
-        assert_eq!(reversed_order[0].product.output(), 2);
-        assert_eq!(reversed_order[0].offset_samples, 0);
-        assert_eq!(reversed_order[1].offset_samples, 3);
     }
 
     /// The A1 claim at the node's own grain: one producer still renders as one
@@ -3430,7 +3375,7 @@ mod tests {
                 lamp: 9,
                 reversed: false,
                 offset: 0,
-                output: None,
+                output: String::from("out"),
             }],
         )];
         consume_at(&mut node, &mut resolver, Revision::new(3)).expect("repatched frame");
@@ -3720,7 +3665,7 @@ mod tests {
             &mut node,
             &mut resolver,
             Revision::new(2),
-            &auto_flow_fragments(&[product(1, ONE_LAMP), product(2, ONE_LAMP)]),
+            &end_to_end_fragments(&[product(1, ONE_LAMP), product(2, ONE_LAMP)]),
         )
         .expect("clean frame");
 
@@ -3774,8 +3719,8 @@ mod tests {
     }
 
     #[test]
-    fn auto_flow_coverage_is_always_clean() {
-        let coverage = fragment_coverage(&auto_flow_fragments(&[
+    fn end_to_end_coverage_is_clean() {
+        let coverage = fragment_coverage(&end_to_end_fragments(&[
             product(1, TWO_LAMPS),
             product(2, ONE_LAMP),
             product(3, TWO_LAMPS),
@@ -3821,40 +3766,17 @@ mod tests {
 
     // --- Patched placement -------------------------------------------------
 
-    /// The equivalence the whole design leans on: with nobody patched, the
-    /// planner IS auto-flow. Every checked-in project is this case.
+    /// A producer with no run here contributes nothing: no fragment, no gap.
+    /// Nothing flows by default.
     #[test]
-    fn an_unpatched_plan_is_exactly_auto_flow() {
-        let products = [product(1, TWO_LAMPS), product(2, ONE_LAMP)];
-        let placements: Vec<FragmentPlacement> = products
-            .iter()
-            .map(|product| FragmentPlacement {
-                product: *product,
-                patch: None,
-            })
-            .collect();
-
-        assert_eq!(
-            plan_fragments(&placements),
-            vec![
-                OutputFragment {
-                    product: product(1, TWO_LAMPS),
-                    source_offset_samples: 0,
-                    offset_samples: 0,
-                    len_samples: 6,
-                    reversed: false,
-                    rotation_samples: 0,
-                },
-                OutputFragment {
-                    product: product(2, ONE_LAMP),
-                    source_offset_samples: 0,
-                    offset_samples: 6,
-                    len_samples: 3,
-                    reversed: false,
-                    rotation_samples: 0,
-                },
-            ]
-        );
+    fn a_producer_with_no_runs_places_nothing() {
+        let fragments = plan_fragments(&[
+            patched(product(1, TWO_LAMPS), &[]),
+            patched(product(2, ONE_LAMP), &[run(0, 1, 0, false)]),
+        ]);
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].product, product(2, ONE_LAMP));
+        assert!(fragment_coverage(&fragments).gaps.is_empty());
     }
 
     /// A patched producer contributes one fragment per resolved run, at the
@@ -3887,25 +3809,6 @@ mod tests {
                 },
             ]
         );
-    }
-
-    /// Partial patching (D5): the unpatched fixture is not required to declare
-    /// anything, and it lands past every anchor rather than under one.
-    #[test]
-    fn unpatched_producers_flow_after_the_highest_anchored_end() {
-        let body = product(1, ControlExtent::new(1, 12));
-        let leaf = product(2, ONE_LAMP);
-
-        let fragments = plan_fragments(&[
-            patched(body, &[run(0, 4, 8, false)]),
-            FragmentPlacement {
-                product: leaf,
-                patch: None,
-            },
-        ]);
-
-        assert_eq!(fragments[1].offset_samples, 36, "past lamp 12, not at 0");
-        assert!(fragment_coverage(&fragments).contested.is_empty());
     }
 
     /// The patched fixture's own runs are what the buffer gets — the lamps in

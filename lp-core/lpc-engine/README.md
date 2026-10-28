@@ -87,7 +87,7 @@ plan (memory pressure: plans are rebuildable state, dropped on `High`).
 Allocation and counter tests that price the product set `Replay`.
 
 **Counters:** `Engine::frame_plan_counters()` (`builds`, `replays`, `checks`,
-`check_mismatches`, `default_fragments_reads`), reset per frame like
+`check_mismatches`), reset per frame like
 `ResolveFrameCounters`. A steady frame has `structural_work() == 0` on both.
 A check's own rebuild is not counted as work.
 
@@ -101,19 +101,18 @@ What each plan holds and its key:
 
 | owner | plan | key |
 |---|---|---|
-| engine | `LaneTopology`: per node, whether it is the default fragments consumer of its bus channel (where unaddressed patch runs and auto-flow land) | structure epoch |
 | engine | output sink configurations, re-read from the defs | structure epoch (checked like a plan in `Check` mode) |
 | output | `OutputFramePlan`: the fragments planned from its producers' placements, their coverage and its status (and the products it was built for) | structure epoch, `output_identity_revision` (a change count), the producers' summed `control_patch_generation` |
 | fixture | `FixtureFramePlan`: the lamp count, the control extent and the full-write control spans | structure epoch, `mapping_version`, the colour order |
-| fixture (format 6) | `FixturePartsPatch`: the mapping, the runs its patching places and its status (the tree and the `Patching` are transient) | `mapping_version`, the port tables' key (structure epoch, `output_identity_revision`), the colour order |
+| fixture | `FixturePartsPatch`: the mapping, the runs its patching places and its status (the tree and the `Patching` are transient) | `mapping_version`, the port tables' key (structure epoch, `output_identity_revision`), the colour order |
 | engine | per dispatch: the recovery-frame name (`RuntimeNodeEntry::recovery_name`, the path rendered once) and the produce call key (the resolver's interned path handle) | the node's path / the epoch's intern table |
 
-**A format-6 fixture patches itself** (mapping rebuild M2,
-`nodes/fixture/parts_*.rs`, `patching_runs.rs`). The loader and the asset
-refresh read a fixture's map2d with today's reader first and hand only a
-document it refuses as newer to `lpc_mapping::map2d6::read`
-(`nodes/fixture/map2d_document.rs`); a format-6 fixture that also names a
-patch document is refused by name. Built with
+**A fixture patches itself** (mapping rebuild M2–M3,
+`nodes/fixture/parts_*.rs`, `patching_runs.rs`): it is the engine's one
+patching path. The loader and the asset refresh read a fixture's map2d with
+`lpc_mapping::map2d6::read`, which reads format 6 and refuses anything else
+in its own words (a format 5 or older is "the older layout document"; the
+upgrade to format 6 is Studio's and lp-cli's, never the board's). Built with
 `FixtureNode::with_parts_mapping` from the `lpc_mapping::part::Mapping`, it
 renders its parts into the compact carrier (the positions moved out of the
 tree, held once, the rest of the tree dropped), asks the engine for the
@@ -124,12 +123,10 @@ with `lpc_mapping::patching::patch_mapping_placed` (no walk record), and
 publishes `PatchedRun`s that each name their output. Between patches it
 holds only the mapping, its runs and its status. A live edit that changes
 only the patching (`Mapping::same_layout`) re-patches and renders nothing.
-It is manual: never auto-flowed, never on the default output. A segment
-part-way into a lamp, of colors other than RGB or of an order other than
-the fixture's is refused by name in its status; the rest light where the
-patcher put them. Format ≤ 5 fixtures keep the patch-document path
-(`PatchDoc`, auto-flow) until project format 12 (M3). The test projects
-`projects/test/*-6` are the format-6 fixtures on disk.
+Nothing flows by default: an output lays only the runs that name it, and a
+lamp no run places is on no wire. A segment part-way into a lamp, of colors
+other than RGB or of an order other than the fixture's is refused by name in
+its status; the rest light where the patcher put them.
 
 **Reads a node makes every frame** keep their query id in a
 `frame_plan::PlannedRead` (tagged with the epoch it was interned in) and

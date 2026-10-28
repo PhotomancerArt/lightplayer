@@ -66,8 +66,8 @@ fn an_edit_to_the_layout_renders_it_again() {
 }
 
 /// A live edit back to an older map2d format inside a format-12 project
-/// (a hand edit, or an older writer) is refused by name: the last good
-/// mapping keeps lighting, and a format-6 edit clears the refusal.
+/// (a hand edit, or an older writer) is refused in the reader's words: the
+/// last good mapping keeps lighting, and a format-6 edit clears the refusal.
 #[test]
 fn a_live_edit_to_an_older_format_is_refused_by_name() {
     let mut rig = Rig::load(&strip_6(3, 5));
@@ -75,13 +75,13 @@ fn a_live_edit_to_an_older_format_is_refused_by_name() {
 
     rig.edit(&strip_5(3));
     assert_eq!(rig.wire(), lit_at(&[5, 6, 7]), "the last good mapping");
-    assert!(rig.manual(), "still placed by its own patching");
     let Some(NodeRuntimeStatus::Error(message)) = rig.status() else {
         panic!("the refusal is the fixture's status");
     };
     assert_eq!(
         message,
-        crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL
+        "parse fixture map2d document: map2d format 5 is the older layout document; this \
+         reader reads format 6"
     );
 
     rig.edit(&strip_6(3, 2));
@@ -282,10 +282,6 @@ impl Rig {
 
     fn status(&self) -> Option<NodeRuntimeStatus> {
         self.runtime(|runtime| runtime.runtime_status())
-    }
-
-    fn manual(&self) -> bool {
-        self.runtime(|runtime| runtime.control_patch_manual())
     }
 
     /// The fixture's display-layout revision: keyed on its mapping version,

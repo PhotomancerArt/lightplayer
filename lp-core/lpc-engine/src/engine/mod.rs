@@ -76,6 +76,9 @@ mod shader_palette_tests;
 mod shader_timebase_tests;
 mod state_root_stamps;
 mod state_root_values_hash;
+// A fixture placed whole on a named output, for the hand-wired scenes above.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+pub(crate) mod placed_fixture_test_support;
 #[cfg(test)]
 pub(crate) mod test_support;
 // Every project here drives a clock through an output → fixture → shader →

@@ -4,7 +4,6 @@ pub(crate) mod fixture_frame_plan;
 pub mod fixture_node;
 pub(crate) mod fixture_selection;
 pub mod gamma;
-pub(crate) mod map2d_document;
 pub mod mapping;
 pub mod parts_carrier;
 pub(crate) mod parts_patch;

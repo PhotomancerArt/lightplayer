@@ -119,9 +119,8 @@ pub trait ResolveHost {
     }
 
     /// Where a control product's producer says its lamps land on
-    /// `consumer`'s wire (its resolved patch runs, filtered to that
-    /// output), or `None` for auto-flow — `Some(vec![])` = patched,
-    /// nothing here (D40).
+    /// `consumer`'s wire: its runs, filtered to the ones naming that output.
+    /// Empty when none does.
     ///
     /// A READ of the producing node, not a call into it: it answers from what
     /// its own tick already resolved, so the output can ask while it is
@@ -130,9 +129,9 @@ pub trait ResolveHost {
         &self,
         product: ControlProduct,
         consumer: NodeId,
-    ) -> Option<Vec<PatchedRun>> {
+    ) -> Vec<PatchedRun> {
         let _ = (product, consumer);
-        None
+        Vec::new()
     }
 
     /// Record `node`'s authored output name for patch routing; answers a
@@ -162,11 +161,6 @@ pub trait ResolveHost {
     /// copying the names: what a plan keyed on the set reads every frame.
     fn output_identity_revision(&self) -> Revision {
         Revision::default()
-    }
-
-    /// The registered output-name set and the revision it last changed at.
-    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
-        (Vec::new(), Revision::default())
     }
 
     /// The named outputs that read `producer`'s bus channel, each with its

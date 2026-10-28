@@ -174,20 +174,19 @@ pub trait TickResolver {
     ) -> Result<ControlLayout, ResolveError>;
 
     /// Where a control product's producer says its lamps land on
-    /// `consumer`'s wire — the resolved patch runs addressed to that
-    /// output — or `None` for auto-flow (`Some(vec![])` = patched, nothing
-    /// here; see the engine implementation for the D40 contract).
+    /// `consumer`'s wire: the runs naming that output (see the engine
+    /// implementation).
     ///
-    /// Defaulted to `None` so a node-level test fake need not model patching
+    /// Defaulted to none so a node-level test fake need not model patching
     /// to tick a node that asks; the engine's own resolver forwards to the
     /// producing node.
     fn control_patch_placement(
         &self,
         product: ControlProduct,
         consumer: NodeId,
-    ) -> Option<Vec<PatchedRun>> {
+    ) -> Vec<PatchedRun> {
         let _ = (product, consumer);
-        None
+        Vec::new()
     }
 
     /// Record `node`'s authored output name for patch routing; answers a
@@ -215,11 +214,6 @@ pub trait TickResolver {
     /// copying the names: what a plan keyed on the set reads every frame.
     fn output_identity_revision(&self) -> Revision {
         Revision::default()
-    }
-
-    /// The registered output-name set and the revision it last changed at.
-    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
-        (Vec::new(), Revision::default())
     }
 
     /// The named outputs that read `producer`'s bus channel, with their port
@@ -400,7 +394,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         &self,
         product: ControlProduct,
         consumer: NodeId,
-    ) -> Option<Vec<PatchedRun>> {
+    ) -> Vec<PatchedRun> {
         self.host.control_patch_placement(product, consumer)
     }
 
@@ -413,10 +407,6 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         let epoch = self.session.structure_epoch();
         self.host
             .register_output_identity(node, name, revision, epoch)
-    }
-
-    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
-        self.host.known_output_names()
     }
 
     fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
