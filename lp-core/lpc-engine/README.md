@@ -111,7 +111,8 @@ What each plan holds and its key:
 `nodes/fixture/parts_*.rs`, `patching_runs.rs`): it is the engine's one
 patching path. The loader and the asset refresh read a fixture's map2d with
 `lpc_mapping::map2d6::read`, which reads format 6 and refuses anything else
-in its own words (a format 5 or older is "the older layout document"; the
+(on a host in its own words — a format 5 or older is "the older layout
+document"; on a device in one sentence, `map2d6::DEVICE_REFUSAL`, DD25; the
 upgrade to format 6 is Studio's and lp-cli's, never the board's). Built with
 `FixtureNode::with_parts_mapping` from the `lpc_mapping::part::Mapping`, it
 renders its parts into the compact carrier (the positions moved out of the

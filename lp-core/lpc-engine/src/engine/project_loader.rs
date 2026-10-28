@@ -1356,7 +1356,8 @@ enum FixtureMappingRead {
 
 /// Read a fixture's mapping: a map2d document of format 6
 /// (`lpc_mapping::map2d6`). One this build can't read fails the fixture's
-/// load in the reader's words; that includes a map2d of format 5 or older
+/// load in the reader's words (a host's; a device says one sentence,
+/// `map2d6::DEVICE_REFUSAL`); that includes a map2d of format 5 or older
 /// inside a format-12 project (a hand edit, or an older writer), refused as
 /// the older layout document: the upgrade is Studio's and lp-cli's, never
 /// the board's.

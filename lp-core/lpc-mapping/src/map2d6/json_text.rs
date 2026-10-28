@@ -21,6 +21,7 @@
 //! narrows), so `1e39` reads as infinity and `1e400` is refused.
 
 use alloc::borrow::Cow;
+#[cfg(feature = "std")]
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -552,6 +553,7 @@ impl<'a> JsonText<'a> {
     }
 
     /// Fail here, with the line and column.
+    #[cfg(feature = "std")]
     #[cold]
     pub fn fail(&mut self, what: &str) -> Fail {
         let before = &self.text.as_bytes()[..self.at.min(self.text.len())];
@@ -561,9 +563,25 @@ impl<'a> JsonText<'a> {
         Fail
     }
 
+    #[cfg(feature = "std")]
     #[cold]
     fn fail_naming(&mut self, what: &str, name: &str) -> Fail {
         self.fail(&format!("{what} {name:?}"))
+    }
+
+    /// Fail, saying nothing: a device's refusal is one generic sentence
+    /// (DD25; [`Map2d6Error`]'s `Display`), so the words, the line and the
+    /// column are host-only.
+    #[cfg(not(feature = "std"))]
+    #[inline(always)]
+    pub fn fail(&mut self, _what: &str) -> Fail {
+        Fail
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[inline(always)]
+    fn fail_naming(&mut self, _what: &str, _name: &str) -> Fail {
+        Fail
     }
 }
 

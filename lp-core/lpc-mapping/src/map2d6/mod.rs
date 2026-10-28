@@ -50,6 +50,6 @@ mod path_data;
 mod read;
 mod write;
 
-pub use map2d6_error::Map2d6Error;
+pub use map2d6_error::{DEVICE_REFUSAL, Map2d6Error};
 pub use read::{MAP2D6_FORMAT, peek_format, read};
 pub use write::write;
