@@ -266,9 +266,85 @@ fn a_refused_project_is_named_and_the_others_are_upgraded() {
     );
 }
 
+/// Over Wi‑Fi the stage runs at the tier Studio's access login holds on the
+/// link — a real login against the board's server after each reset — and
+/// the update ends with the projects upgraded, the board coming back by
+/// itself across each reset.
+#[test]
+fn an_update_over_wifi_ends_with_every_project_upgraded() {
+    let mut bench = Bench::new(wifi_board_with_projects(), Some(y_late()));
+    bench.cache_engine(&x_late());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y_late());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(
+        bench.said("upgraded \u{201c}eaves\u{201d}, \u{201c}headband\u{201d} to project format 12"),
+        "lines: {:#?}",
+        bench.lines
+    );
+    let channel = channel_of(&bench);
+    assert_eq!(
+        channel.project_format(STARTUP),
+        Some(PROJECT_FORMAT_VERSION)
+    );
+    assert_eq!(channel.project_format(SECOND), Some(PROJECT_FORMAT_VERSION));
+    drop(channel);
+    assert_eq!(bench.presses, 1);
+}
+
+/// Over a Bluetooth link that holds no tier when the update is up to date
+/// (its access login never completes after the last reset), the stage
+/// cannot read the board: the update waits a moment for the login, then
+/// ends rather than hang, and says the projects are checked once the link
+/// can read the board. Nothing is written.
+#[test]
+fn over_a_link_with_no_tier_the_update_ends_without_hanging_and_says_why() {
+    let mut board = board_with_projects(old_projects());
+    board.endpoint = "ble:QkxFLWlk".to_string();
+    board.reconnects_itself = true;
+    if let Some(channel) = board.channel1.as_mut() {
+        channel.answers_access = false;
+    }
+    let mut bench = Bench::new(board, Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(
+        bench.said("its projects are checked once this link can read the board, with no click"),
+        "lines: {:#?}",
+        bench.lines
+    );
+    let channel = channel_of(&bench);
+    assert_eq!(
+        channel.project_format(STARTUP),
+        Some(PROJECT_FORMAT_VERSION - 1)
+    );
+    assert_eq!(
+        channel.project_format(SECOND),
+        Some(PROJECT_FORMAT_VERSION - 1)
+    );
+}
+
 // ---------------------------------------------------------------------
 // The board's channel 1
 // ---------------------------------------------------------------------
+
+/// A board on the LAN running `x_late` (format 11) and able to boot
+/// `y_late`, coming back by itself after each reset.
+fn wifi_board_with_projects() -> Board {
+    let mut board = Board::with_catalog(vec![x_late(), y_late()]);
+    board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+    board.reconnects_itself = true;
+    board.channel1 = Some(Box::new(old_projects_for(&x_late(), &y_late())));
+    board
+}
 
 /// A model board running X (format 11) and able to boot Y (format 12),
 /// whose channel 1 is `channel`.
@@ -281,7 +357,16 @@ fn board_with_projects(channel: ChannelOne) -> Board {
 /// The board's channel 1 holding two format-11 projects, `eaves` the
 /// startup choice, as engine Y finds them (it refused `eaves` at boot).
 fn old_projects() -> ChannelOne {
-    let mut channel = ChannelOne::new([(x().version, 11), (y().version, PROJECT_FORMAT_VERSION)]);
+    old_projects_for(&x(), &y())
+}
+
+/// The same, on a board whose `old` build reads format 11 and `new` this
+/// Studio's format.
+fn old_projects_for(old: &ModelBuild, new: &ModelBuild) -> ChannelOne {
+    let mut channel = ChannelOne::new([
+        (old.version.clone(), PROJECT_FORMAT_VERSION - 1),
+        (new.version.clone(), PROJECT_FORMAT_VERSION),
+    ]);
     channel.write_project(STARTUP, &corpus("v11/eaves-wired"));
     channel.write_project(SECOND, &corpus("v11/fiber-headband"));
     channel.write(
@@ -313,6 +398,10 @@ pub(super) struct ChannelOne {
     /// Drop the link instead of forwarding the `n`th `CommitBatch` (the
     /// batch never lands; the board drops a batch whose link closes).
     pub(super) drop_at_commit: Option<u32>,
+    /// Answer the access conversation's `Hello`, `LoginBegin` and
+    /// `LoginAnswer` (`false`: they go unanswered — a link whose access
+    /// login never completes, so Studio never holds a tier on it).
+    pub(super) answers_access: bool,
     commits: u32,
     drop_now: bool,
 }
@@ -341,6 +430,7 @@ impl ChannelOne {
             transport: VecTransport::default(),
             formats: formats.into_iter().collect(),
             drop_at_commit: None,
+            answers_access: true,
             commits: 0,
             drop_now: false,
         }
@@ -357,6 +447,16 @@ impl ChannelOne {
         let Ok(message) = lpc_wire::json::from_str::<ClientMessage>(json) else {
             return Vec::new();
         };
+        if !self.answers_access
+            && matches!(
+                message.msg,
+                ClientRequest::Hello
+                    | ClientRequest::LoginBegin
+                    | ClientRequest::LoginAnswer { .. }
+            )
+        {
+            return Vec::new();
+        }
         if matches!(
             message.msg,
             ClientRequest::Filesystem(FsRequest::CommitBatch)

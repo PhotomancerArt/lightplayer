@@ -45,6 +45,17 @@ use super::project_stage_status::{ProjectStageStatus, project_name};
 use crate::app::studio::studio_command::StudioCommand;
 use crate::app::studio::studio_view_channel::CommandSender;
 
+/// How long an update's project stage waits for a wireless link to hold a
+/// tier (its access login, after the update's last reset) before the update
+/// ends without it. The stage then runs with no click once the link holds
+/// one.
+pub const GRANT_GRACE_MS: u64 = 10_000;
+
+/// What the terminal says when an update ends before its link could read
+/// the board's projects.
+const NO_TIER_LINE: &str =
+    "its projects are checked once this link can read the board, with no click";
+
 /// See the module doc.
 #[derive(Default)]
 pub struct ProjectStageController {
@@ -55,6 +66,9 @@ pub struct ProjectStageController {
     /// The link window (and engine format) a no-click stage last ran on,
     /// per device: it runs once per window.
     tried: BTreeMap<DeviceId, StageKey>,
+    /// Since when each update's stage has waited for its wireless link to
+    /// hold a tier (bench/host ms).
+    waiting_for_tier: BTreeMap<DeviceId, u64>,
     next_generation: u64,
     tx: Option<CommandSender>,
     spawner: Option<Rc<dyn Fn(DeviceTaskFuture)>>,
@@ -129,6 +143,7 @@ impl ProjectStageController {
         effects: &DeviceEffects,
         granted: impl Fn(DeviceId) -> Option<Tier>,
         updates: &[(DeviceId, LinkId)],
+        now_ms: u64,
     ) -> Vec<ProjectStageFollowUp> {
         let mut follow_ups = Vec::new();
         // A board with a card, and a link still pending adoption (whose
@@ -156,8 +171,28 @@ impl ProjectStageController {
                 .iter()
                 .find(|(wanted, _)| *wanted == device)
                 .map(|(_, link)| *link);
-            match due(&board, granted(device), update_link) {
+            let due = due(&board, granted(device), update_link);
+            if !matches!(due, Due::NoTier) {
+                self.waiting_for_tier.remove(&device);
+            }
+            match due {
                 Due::No => {}
+                Due::NoTier => {
+                    // Only an update waits on it (a no-click stage simply
+                    // runs once the link holds a tier); not forever, so an
+                    // update never hangs on a login that does not come.
+                    if update_link.is_none() || self.runs.contains_key(&device) {
+                        continue;
+                    }
+                    let since = *self.waiting_for_tier.entry(device).or_insert(now_ms);
+                    if now_ms.saturating_sub(since) >= GRANT_GRACE_MS {
+                        self.waiting_for_tier.remove(&device);
+                        follow_ups.push(ProjectStageFollowUp::UpdateDone {
+                            device,
+                            lines: vec![NO_TIER_LINE.to_string()],
+                        });
+                    }
+                }
                 Due::NoFormat => {
                     if update_link.is_some() && !self.runs.contains_key(&device) {
                         // A board that does not say its engine's format (a
@@ -185,6 +220,8 @@ impl ProjectStageController {
         self.runs.retain(|device, _| live.contains(device));
         self.status.retain(|device, _| live.contains(device));
         self.tried.retain(|device, _| live.contains(device));
+        self.waiting_for_tier
+            .retain(|device, _| live.contains(device));
         follow_ups
     }
 
@@ -357,6 +394,8 @@ struct Board<'a> {
 /// Whether a stage is due on a board now.
 enum Due {
     No,
+    /// A wireless link that holds no tier yet: nothing can be read.
+    NoTier,
     /// The board is reached, but its hello says no engine format to check.
     NoFormat,
     Yes {
@@ -391,7 +430,7 @@ fn due(board: &Board<'_>, granted: Option<Tier>, update_link: Option<LinkId>) ->
     let tier = match (wireless, granted) {
         (false, _) => Tier::Edit,
         (true, Some(tier)) => tier,
-        (true, None) => return Due::No,
+        (true, None) => return Due::NoTier,
     };
     Due::Yes {
         key: StageKey {

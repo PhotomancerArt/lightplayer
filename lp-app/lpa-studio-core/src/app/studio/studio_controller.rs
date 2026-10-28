@@ -1766,12 +1766,14 @@ impl StudioController {
     /// board found with older projects needs (M3 P11, Q107).
     pub(crate) fn drive_project_stages(&mut self) {
         let updates = self.devices.effects().update_host().projects_wanted();
+        let now_ms = self.device_now().0;
         let access = &self.access;
         let follow_ups = self.project_stages.drive(
             self.devices.roster(),
             self.devices.effects(),
             |device| access.granted_tier(device),
             &updates,
+            now_ms,
         );
         for follow_up in follow_ups {
             self.project_stage_follow_up(follow_up);
