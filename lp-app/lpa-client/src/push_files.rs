@@ -335,7 +335,7 @@ fn expect_stopped(body: WireServerMsgBody) -> ClientResult<()> {
     }
 }
 
-fn expect_written(request: &ClientRequest, body: WireServerMsgBody) -> ClientResult<()> {
+pub(crate) fn expect_written(request: &ClientRequest, body: WireServerMsgBody) -> ClientResult<()> {
     let path = match request {
         ClientRequest::Filesystem(
             FsRequest::Write { path, .. }

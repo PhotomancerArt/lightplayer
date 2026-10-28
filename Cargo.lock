@@ -6567,6 +6567,8 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-tree-store",
+ "lpa-update",
+ "lpa-upgrade",
  "lpc-access",
  "lpc-hardware",
  "lpc-model",

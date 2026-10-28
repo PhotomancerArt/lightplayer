@@ -20,6 +20,8 @@ pub mod link_reset;
 pub mod local;
 pub mod project_deploy;
 pub mod project_read_stream;
+#[cfg(feature = "project-stage")]
+pub mod project_stage_run;
 pub mod protocol_session;
 pub mod pull_loop;
 pub mod push_files;
@@ -64,6 +66,8 @@ pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
 };
 pub use project_deploy::ProjectDeployFile;
+#[cfg(feature = "project-stage")]
+pub use project_stage_run::{ProjectStageProgress, run_project_stage};
 pub use protocol_session::{BORROWED_WIRE_REQUEST_ID_BASE, next_borrowed_wire_request_id_base};
 pub use pull_loop::{
     BackoffPolicy, CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
