@@ -7,7 +7,10 @@
 //! what a builder reads is a change to its key in the same file's
 //! neighbourhood.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use lpc_mapping::patching::OutputPorts;
 
 use crate::domain::node::NodeId;
 use crate::domain::placement::Placement;
@@ -30,6 +33,22 @@ pub struct NodesKey {
     layout: LayoutKind,
     armed: Option<Armed>,
     grouping: PortGrouping,
+    /// A card says its fixture's problems, which the host's port tables
+    /// decide as much as what the project holds.
+    tables: Tables,
+}
+
+/// The port tables a host handed over (`Project::set_port_tables`): new
+/// ones re-patch without an edit, so the revision alone would keep a
+/// problem the new tables cleared (Yona at G3, 2026-10-28).
+type Tables = Option<Arc<BTreeMap<NodeId, Vec<OutputPorts>>>>;
+
+fn same_tables(a: &Tables, b: &Tables) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 /// What the edges depend on (`Editor::view_edges`).
@@ -52,6 +71,9 @@ pub struct PanelsKey {
     /// Debug's Presentation and Cursor ops: what the inspector shows.
     presentation: Presentation,
     cursor_ops: bool,
+    /// The inspector and the tree say the problems, and where segments
+    /// land: the port tables decide both.
+    tables: Tables,
 }
 
 impl PartialEq for NodesKey {
@@ -65,6 +87,7 @@ impl PartialEq for NodesKey {
             && self.layout == o.layout
             && self.armed == o.armed
             && self.grouping == o.grouping
+            && same_tables(&self.tables, &o.tables)
     }
 }
 
@@ -76,6 +99,7 @@ impl PartialEq for PanelsKey {
             && self.move_draw == o.move_draw
             && self.presentation == o.presentation
             && self.cursor_ops == o.cursor_ops
+            && same_tables(&self.tables, &o.tables)
     }
 }
 
@@ -91,6 +115,7 @@ impl Editor {
             layout: self.layout(),
             armed: self.armed.clone(),
             grouping: self.grouping,
+            tables: self.project.port_tables.0.clone(),
         }
     }
 
@@ -111,6 +136,7 @@ impl Editor {
             move_draw: self.move_draw,
             presentation: self.debug.presentation,
             cursor_ops: self.debug.cursor_ops,
+            tables: self.project.port_tables.0.clone(),
         }
     }
 }

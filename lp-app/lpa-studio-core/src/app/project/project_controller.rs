@@ -6938,6 +6938,83 @@ impl ProjectController {
         }))
     }
 
+    /// Before a Save: each body held as slot edits goes back to the board
+    /// whole, so the commit writes the body's own bytes (what the Graph
+    /// read stays what the file says, and its undo stays). Returns the
+    /// Debug slot edits that sat beside them, for
+    /// [`Self::put_back_debug_edits`] once the commit is done: a selected
+    /// node breathes again after Save with no selection change.
+    async fn unhold_bodies_for_save(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<(ArtifactLocation, SlotEdit)>, UiError> {
+        if self.held_bodies.is_empty() {
+            return Ok(Vec::new());
+        }
+        let held: Vec<(ArtifactLocation, Vec<u8>)> = self
+            .held_bodies
+            .iter()
+            .map(|(artifact, held)| (artifact.clone(), held.text.clone()))
+            .collect();
+        let mut debug = Vec::new();
+        for (artifact, _) in &held {
+            debug.extend(
+                self.debug_slot_edits_at(artifact)
+                    .into_iter()
+                    .map(|edit| (artifact.clone(), edit)),
+            );
+        }
+        let batch = MutationCmdBatch::new(
+            held.into_iter()
+                .map(|(artifact, text)| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::SetArtifactBody {
+                        artifact,
+                        edit: AssetBodyOverlay::ReplaceBody(text),
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        for rejection in self.apply_mutation_acks(&batch, &mutation, &[]) {
+            log::warn!(
+                "a held body wasn't put back whole before Save: {}",
+                rejection_text(&rejection)
+            );
+        }
+        Ok(debug)
+    }
+
+    /// After a Save: the Debug slot edits [`Self::unhold_bodies_for_save`]
+    /// took off, put back on their (now saved) files.
+    async fn put_back_debug_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        debug: Vec<(ArtifactLocation, SlotEdit)>,
+    ) -> Result<(), UiError> {
+        if debug.is_empty() {
+            return Ok(());
+        }
+        let batch = MutationCmdBatch::new(
+            debug
+                .into_iter()
+                .map(|(artifact, edit)| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit { artifact, edit },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        self.apply_mutation_acks(&batch, &mutation, &[]);
+        Ok(())
+    }
+
     /// The Debug (transient) slot edits the board holds on a node file.
     fn debug_slot_edits_at(&self, artifact: &ArtifactLocation) -> Vec<SlotEdit> {
         let Some(slots) = self
@@ -7371,6 +7448,7 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
+        let debug = self.unhold_bodies_for_save(server, handle_id).await?;
         let commit = server.project_overlay_commit(handle_id).await?;
         let mut logs = commit.logs;
         let read = server.project_overlay_read(handle_id).await?;
@@ -7380,9 +7458,10 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
-        // A body held as slot edits is on disk now (its Debug slots stay
-        // pending, as the commit keeps them).
+        // A body held as slot edits went whole before the commit, and is on
+        // disk now; its Debug slots come back on it.
         self.held_bodies.clear();
+        self.put_back_debug_edits(server, handle_id, debug).await?;
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();

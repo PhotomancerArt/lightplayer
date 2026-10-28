@@ -753,6 +753,75 @@ fn a_slot_edit_to_a_file_with_an_unsaved_body_keeps_both_on_the_board() {
     assert_eq!(get(saved, "wire_reversed"), reversed, "both");
 }
 
+/// The fixture's problems follow every edit (Yona at G3, 2026-10-28: the
+/// start moved to "D0 of output 1", and "can't reach" stayed while the
+/// lamps landed). The walk's start names an output that has no name yet:
+/// one problem. Naming it by choosing its port clears it at once (the
+/// starter strip then overflows D0, which is said instead), and it
+/// stays clear across a selection, a Save and a fresh look; undo brings it
+/// back, redo clears it again.
+#[test]
+fn the_fixtures_problems_follow_every_edit() {
+    let mut j = Journey::new_board_with_display_output();
+    let shown = |j: &Journey| -> Vec<String> {
+        j.graph
+            .handle
+            .editor()
+            .borrow()
+            .project
+            .problem_lines()
+            .into_iter()
+            .map(|l| l.problem.text)
+            .collect()
+    };
+    let unreachable = |j: &Journey| shown(j).iter().any(|p| p.contains("can't reach"));
+    assert!(
+        unreachable(&j),
+        "the walk opens with its start unreachable: {:?}",
+        shown(&j)
+    );
+
+    let d0 = j.offered_option(
+        "set-fixture-start",
+        "port",
+        "D0 of output (names it output 1)",
+    );
+    j.press(
+        "set-fixture-start",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("port", d0)
+            .with("lamps", "0"),
+    );
+    // The starter strip (256 lamps) doesn't fit D0's 64: that problem is
+    // real, and is the only one.
+    let fits = vec!["strip doesn't fit on port D0: it lands as far as the port goes".to_string()];
+    assert_eq!(shown(&j), fits, "named: it reaches the output");
+
+    let output = NodeId::new("output");
+    for targets in [vec![Target::Node(output)], Vec::new()] {
+        j.graph.handle.input(GraphInput::Select(targets));
+        j.graph.batch();
+        j.graph.refresh();
+        assert_eq!(shown(&j), fits, "a selection changes nothing");
+    }
+    actor_clicks(&mut j.graph.actor, &j.graph.tx).press("project/save", OfferArgs::new());
+    j.graph.refresh();
+    j.graph.refresh();
+    assert_eq!(shown(&j), fits, "saved: still reached");
+
+    j.press("undo", OfferArgs::new());
+    j.graph.refresh();
+    assert!(
+        unreachable(&j),
+        "undone, the problem is back: {:?}",
+        shown(&j)
+    );
+    j.press("redo", OfferArgs::new());
+    j.graph.refresh();
+    assert_eq!(shown(&j), fits, "redone, it is gone again");
+}
+
 /// The same for a fixture: the Graph writes its file as a body (its
 /// colour order), and selecting it writes its `selection` Debug slot,
 /// which must not take the colour order off the board.

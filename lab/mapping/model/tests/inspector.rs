@@ -299,6 +299,25 @@ fn switching_the_presentation_draws_the_inspector_again() {
     assert!(e.view_panels_key() != b, "and with Cursor ops");
 }
 
+/// New port tables from the host re-patch without an edit (the revision
+/// stays), so the inspector, the tree and the cards must be built again
+/// with them: a problem the new tables clear goes at once (Yona at G3,
+/// 2026-10-28: "can't reach" stayed while the lamps landed).
+#[test]
+fn new_port_tables_draw_the_problems_again() {
+    let mut e = Editor::new(Project::circular_display_wired());
+    let panels = e.view_panels_key();
+    let nodes = e.view_nodes_key();
+    let fixtures: Vec<NodeId> = e.project.fixtures().iter().map(|n| n.id.clone()).collect();
+    let tables = fixtures.iter().map(|f| (f.clone(), Vec::new())).collect();
+    assert!(e.project.set_port_tables(tables), "the tables changed");
+    assert!(
+        e.view_panels_key() != panels,
+        "the panels key moves with the tables"
+    );
+    assert!(e.view_nodes_key() != nodes, "and the cards' key");
+}
+
 // ---- ports as rows of spans ----------------------------------------------------
 
 /// A port row lists its segments and the gaps between them, across every
