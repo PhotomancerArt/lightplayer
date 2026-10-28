@@ -19,8 +19,9 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 > `output_port_slices`). The lab's components, objects, walker, cursor ops,
 > rules and overrides are gone (`domain/part_ref.rs`, `drawn_segment.rs`,
 > `patch.rs`, `walked.rs`, `port_tables.rs` replace them), the files crate
-> reads map2d format 6 with `lpc-mapping`'s reader and saves nothing until
-> P05, and the model no longer stands behind a fence. Sections below that
+> reads map2d format 6 with `lpc-mapping`'s reader (and, since P05, saves
+> it with `lpc-mapping`'s writer: `files/src/save.rs`, only what changed),
+> and the model no longer stands behind a fence. Sections below that
 > describe components, objects and the walker are the spike's design, kept
 > until M4 P10 folds this README into the crates' own.
 

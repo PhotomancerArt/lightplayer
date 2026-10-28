@@ -80,6 +80,9 @@ pub struct MapFile {
     pub path: String,
     /// The file as it was read.
     pub text: String,
+    /// The mapping it holds, as read: what saving compares the fixture's
+    /// against (a mapping that is the same is not written).
+    pub mapping: lpc_mapping::part::Mapping,
     /// The box the lab gave a document with no canvas (none is written
     /// back while the box stays this size).
     pub derived_size: Option<Vec2>,
@@ -298,12 +301,13 @@ impl Reader<'_> {
         };
         let mut fixture = Fixture::new(size);
         fixture.render_size = render_size_of(value);
-        fixture.mapping = mapping;
+        fixture.mapping = mapping.clone();
         fixture.color_order = color_order_of(value);
         fixture.reads = Channel::new(fixture_reads(value));
         file.map = Some(MapFile {
             path: map_path,
             text,
+            mapping,
             derived_size,
         });
         Ok(fixture)

@@ -2,7 +2,7 @@
 //! project format 12, each fixture's mapping read by `lpc-mapping`'s
 //! map2d format 6 reader into its parts and patching, and what each opens
 //! as. A project at another format, or a mapping in an older map2d format,
-//! is refused by name. (Saving returns in M4 P05.)
+//! is refused by name. Saving is `save.rs`'s.
 
 mod common;
 
