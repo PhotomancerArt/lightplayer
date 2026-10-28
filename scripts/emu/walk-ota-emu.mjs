@@ -1701,7 +1701,7 @@ async function main() {
             if (!(proto < y.wireProto)) {
               throw new Error(`the board's hello is not from an older wire than Y's ${y.wireProto}: ${JSON.stringify(helloLine)} (WALK_OTA_X=${process.env.WALK_OTA_X ?? "unset"})`);
             }
-            const xBuild = boardWords(board).match(/\[CORE\][^\n]*build (\S+)/)?.[1] ?? null;
+            const xBuild = boardWords(board).match(/\[CORE\][^\n]*build (\S+)/)?.[1] ?? `${x.version}+${x.commit.slice(0, 12)}`;
             // What the card says before the press, once it offers the update:
             // the over-the-air update, never "Firmware updates need USB" on
             // its face; a hello this Studio could not read is old firmware.
@@ -1741,7 +1741,7 @@ async function main() {
               new RegExp(`hello · proto ${y.wireProto} `),
               `Y's hello at wire ${y.wireProto}`,
             ).catch(() => null);
-            const yBuild = [...boardWords(board).slice(ran.from).matchAll(/\[CORE\][^\n]*build (\S+)/g)].pop()?.[1] ?? null;
+            const yBuild = [...boardWords(board).slice(ran.from).matchAll(/\[CORE\][^\n]*build (\S+)/g)].pop()?.[1] ?? `${y.version}+${y.commit.slice(0, 12)}`;
             // E14: the project survived — the card runs it on Y.
             const kept = await liveCardPath();
             await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
@@ -2399,13 +2399,18 @@ function git(args) {
 /// `emulated` bounds the run (a single image never records a status light,
 /// so its seeding ends there).
 function seedChip(image, chip, emulated = "60s", requests = []) {
-  // Reused while it is newer than its image: seeding is a minute of
-  // emulated boot, and the chip never changes for the same image.
-  if (existsSync(chip) && statSync(chip).mtimeMs > statSync(image).mtimeMs) return;
+  // Reused while it was seeded from this same image, unchanged: seeding is
+  // a minute of emulated boot, and the chip never changes for the same
+  // image. The image is named in a sidecar, so a run with another X
+  // (`WALK_OTA_X`) never boards the last run's chip.
+  const from = `${path.resolve(image)} ${statSync(image).mtimeMs}`;
+  const seededFrom = existsSync(`${chip}.from`) ? readFileSync(`${chip}.from`, "utf8") : null;
+  if (existsSync(chip) && seededFrom === from) return;
   const bytes = readFileSync(image);
   const whole = Buffer.alloc(FLASH_BYTES, 0xff);
   bytes.copy(whole, 0);
   writeFileSync(chip, whole);
+  rmSync(`${chip}.from`, { force: true });
   execFileSync(
     LP_CLI,
     ["emu", "run", ...(S3 ? ["--chip", "esp32s3"] : []), "--rom-up-flash", chip, "--host-link", "--timeout", emulated, "--exit-on", "status light: GPIO",
@@ -2417,6 +2422,7 @@ function seedChip(image, chip, emulated = "60s", requests = []) {
       ...requests.flatMap((request) => ["--request", request])],
     { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
   );
+  writeFileSync(`${chip}.from`, from);
 }
 
 /// The Network row's address field and its Connect (the `studio-lan` walk's
