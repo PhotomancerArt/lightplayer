@@ -435,6 +435,8 @@ impl LpServer {
                 // particular link is recomputed for that link.
                 auth: lpc_wire::HelloAuth::TRUSTED,
                 firmware: None,
+                // Until the boot's startup load says otherwise.
+                startup_refused: None,
             },
             tick_failures: HashMap::new(),
             access: AccessState::new(),
@@ -1258,6 +1260,19 @@ impl LpServer {
                     // A hello answers with THIS link's auth.
                     let link_hello =
                         matches!(msg, ClientRequest::Hello).then(|| self.hello_for_link(link));
+                    // Anything asked of the engine's projects, whatever its
+                    // outcome, ends the boot's refusal report
+                    // (`ServerHello::startup_refused`): from then on, what
+                    // runs is someone's choice. (A request the link's tier
+                    // does not cover never gets here.)
+                    if matches!(
+                        msg,
+                        ClientRequest::LoadProject { .. }
+                            | ClientRequest::UnloadProject { .. }
+                            | ClientRequest::StopAllProjects
+                    ) {
+                        self.hello.startup_refused = None;
+                    }
                     let link_state = handlers::EngineLinkState {
                         display_layout_budget: self.engine_display_layout_budget(),
                         safe_output_clamp: self.safe_output_clamp,
@@ -1630,6 +1645,9 @@ impl LpServer {
         &mut self,
         path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
+        // Any load ends the boot's refusal report (the startup load sets it
+        // again when it is refused for its format).
+        self.hello.startup_refused = None;
         let handle = self.project_manager.load_project(
             path,
             &mut *self.base_fs,
@@ -1670,9 +1688,30 @@ impl LpServer {
         match &loaded {
             // Done once its first frames ran (`ProjectManager::frame_survived`).
             Ok(handle) => self.project_manager.await_load_commit(*handle, false),
-            Err(_) => lp_recovery::end_project_load(),
+            Err(_) => {
+                lp_recovery::end_project_load();
+                self.hello.startup_refused = self.refused_for_format(path);
+            }
         }
         loaded
+    }
+
+    /// `project` as a refusal for its format: its `project.json` names
+    /// another format than this engine reads (or none). `None` when the
+    /// manifest reads at this engine's format, or cannot be read at all —
+    /// the load failed for another reason, which the hello does not report.
+    fn refused_for_format(
+        &self,
+        project: &lpfs::lp_path::LpPath,
+    ) -> Option<lpc_wire::StartupRefusal> {
+        let manifest = project.to_path_buf().join("project.json");
+        let bytes = self.base_fs.read_file(manifest.as_path()).ok()?;
+        let text = core::str::from_utf8(&bytes).ok()?;
+        let found = lpc_model::ProjectManifest::read_json(text).ok()?.format;
+        (found != Some(lpc_model::PROJECT_FORMAT_VERSION)).then(|| lpc_wire::StartupRefusal {
+            project: project.as_str().to_string(),
+            found,
+        })
     }
 
     /// Inject (or clear) the latent readback for a graphics backend whose

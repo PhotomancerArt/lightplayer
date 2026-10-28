@@ -239,6 +239,7 @@ impl FakeBoardIo {
                     required: !self.trusted,
                     granted: held,
                 },
+                startup_refused: None,
                 firmware: None,
             }),
             ClientRequest::LoginBegin => {

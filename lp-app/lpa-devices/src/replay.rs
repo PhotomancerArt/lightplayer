@@ -555,6 +555,7 @@ impl Step {
                         version: None,
                         update: update.map(update_facts),
                         project_format: None,
+                        startup_refused: false,
                     },
                 )),
             ),

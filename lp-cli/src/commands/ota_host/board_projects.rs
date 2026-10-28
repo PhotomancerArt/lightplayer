@@ -54,13 +54,14 @@ pub struct BoardProjects {
 }
 
 /// Bring the board's stored projects to its engine's project format over
-/// `client`, the channel-1 client of the link `hello` was said on.
-/// `startup_refused`: the board said it refused its startup project for its
-/// format (`ProjectStage::startup_refused`, DD27).
+/// `client`, the channel-1 client of the link `hello` was said on. The
+/// hello's `startupRefused` — the board refused its startup project at boot
+/// for its format, and nothing ran since — is passed to the stage
+/// (`ProjectStage::startup_refused`, DD27): only then is a current startup
+/// project loaded.
 pub async fn finish_board_projects<Io: ClientIo>(
     client: &mut LpClient<Io>,
     hello: &BoardHello,
-    startup_refused: bool,
 ) -> BoardProjects {
     let hello = match hello {
         BoardHello::Ours(hello) => hello,
@@ -72,7 +73,7 @@ pub async fn finish_board_projects<Io: ClientIo>(
         }
     };
     let mut stage = ProjectStage::new(hello.build.project_format, hello.auth.granted)
-        .startup_refused(startup_refused);
+        .startup_refused(hello.startup_refused.is_some());
     let mut sink = LpClientSink::new(client);
     let report = run_project_stage(&mut sink, &mut stage, &mut |_| {}).await;
     BoardProjects {

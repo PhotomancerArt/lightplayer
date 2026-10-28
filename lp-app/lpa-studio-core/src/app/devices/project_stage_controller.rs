@@ -22,10 +22,13 @@
 //! board with nothing to upgrade says nothing. At play (Q103) it reads and
 //! writes nothing, and the card says someone who can edit can finish.
 //!
-//! **The board's report of a refused startup project** (DD27) is not on the
-//! wire: the engine logs the refusal and says nothing on channel 1, so every
-//! stage here runs with `startup_refused(false)` — a current startup project
-//! is never loaded by the stage. See the phase's Implementation Result.
+//! **The board's report of a refused startup project** (DD27, DD30) is its
+//! hello's `startupRefused` (wire 46), mirrored as
+//! `HelloFacts::startup_refused`: the engine refused its startup project at
+//! boot for its format, and nothing was loaded or stopped since. Every stage
+//! here passes it on ([`ProjectStage::startup_refused`]), so a startup
+//! project a dropped link left current and not running is loaded, and one a
+//! person stopped stays stopped.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -204,14 +207,25 @@ impl ProjectStageController {
                         });
                     }
                 }
-                Due::Yes { key, tier } => {
+                Due::Yes {
+                    key,
+                    tier,
+                    startup_refused,
+                } => {
                     let for_update = update_link.is_some();
                     if self.runs.contains_key(&device)
                         || (!for_update && self.tried.get(&device) == Some(&key))
                     {
                         continue;
                     }
-                    if self.dispatch(device, key.clone(), tier, for_update, effects) {
+                    if self.dispatch(
+                        device,
+                        key.clone(),
+                        tier,
+                        startup_refused,
+                        for_update,
+                        effects,
+                    ) {
                         self.tried.insert(device, key);
                     }
                 }
@@ -231,6 +245,7 @@ impl ProjectStageController {
         device: DeviceId,
         key: StageKey,
         tier: Tier,
+        startup_refused: bool,
         for_update: bool,
         effects: &DeviceEffects,
     ) -> bool {
@@ -262,9 +277,10 @@ impl ProjectStageController {
         spawner(Box::pin(async move {
             let mut client = io.into_client();
             let mut sink = LpClientSink::new(&mut client);
-            // The board says nothing of a refused startup project (module
-            // doc), so the stage never loads a current one.
-            let mut stage = ProjectStage::new(engine_format, Some(tier)).startup_refused(false);
+            // The board's own word that it refused its startup project for
+            // its format (module doc): only then is a current one loaded.
+            let mut stage =
+                ProjectStage::new(engine_format, Some(tier)).startup_refused(startup_refused);
             let mut last = None;
             let progress_tx = tx.clone();
             let report = run_project_stage(
@@ -401,6 +417,9 @@ enum Due {
     Yes {
         key: StageKey,
         tier: Tier,
+        /// The board's hello says it refused its startup project for its
+        /// format, and nothing ran since.
+        startup_refused: bool,
     },
 }
 
@@ -439,6 +458,7 @@ fn due(board: &Board<'_>, granted: Option<Tier>, update_link: Option<LinkId>) ->
             engine_format,
         },
         tier,
+        startup_refused: hello.startup_refused,
     }
 }
 

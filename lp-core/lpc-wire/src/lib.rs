@@ -121,8 +121,8 @@ pub use server::{
     HardwareIdentity, HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt,
     LinkCounters, LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus,
     ProjectFaultWire, RelayRefusal, RelayState, SampleStats, SavedNetworkInfo, ServerConfig,
-    ServerHello, ServerMsgBody, StationFailure, StationState, WIRE_PROTO_VERSION, hello_board_id,
-    hello_proto,
+    ServerHello, ServerMsgBody, StartupRefusal, StationFailure, StationState, WIRE_PROTO_VERSION,
+    hello_board_id, hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

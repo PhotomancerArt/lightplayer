@@ -1135,6 +1135,7 @@ mod tests {
                 device_uid: None,
                 pack_format,
                 auth: crate::HelloAuth::TRUSTED,
+                startup_refused: None,
                 firmware: None,
             }),
         )

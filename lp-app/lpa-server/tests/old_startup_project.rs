@@ -82,6 +82,72 @@ fn a_newer_engine_refuses_an_old_startup_project_and_keeps_serving_over_the_tree
     );
 }
 
+/// DD30: the hello names a startup project the boot refused for its format,
+/// with the format it found, until anything is loaded, unloaded or stopped
+/// (whatever came of it); a startup load that fails for any other reason is
+/// not reported, and a board that refused nothing says nothing.
+#[test]
+fn the_hello_names_a_startup_project_refused_for_its_format_until_anything_runs() {
+    let project = format!("/projects/{STARTUP}");
+    let refused = || {
+        let fs = LpFsMemory::new();
+        old_board(&fs);
+        let board = Board::over(Box::new(fs));
+        assert_eq!(hello(&board).startup_refused, None, "nothing refused yet");
+        board
+            .server
+            .borrow_mut()
+            .load_startup_project(project.as_str().as_path())
+            .expect_err("refused");
+        assert_eq!(
+            hello(&board).startup_refused,
+            Some(lpc_wire::StartupRefusal {
+                project: project.clone(),
+                found: Some(11),
+            })
+        );
+        board
+    };
+
+    // Frames go by and channel 1 is read: the report stays.
+    let board = refused();
+    board.frames(8);
+    board.request(ClientRequest::ListAvailableProjects);
+    assert!(hello(&board).startup_refused.is_some());
+
+    // A stop ends it.
+    board.request(ClientRequest::StopAllProjects);
+    assert_eq!(hello(&board).startup_refused, None, "a stop ends it");
+
+    // So does a load, even one that fails.
+    let board = refused();
+    board.request(ClientRequest::LoadProject {
+        path: project.clone(),
+    });
+    assert_eq!(hello(&board).startup_refused, None, "a load ends it");
+
+    // A startup project at this engine's format that fails for another
+    // reason (its files are missing) is not a refusal for its format.
+    let fs = LpFsMemory::new();
+    let manifest = expected_files()
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .expect("a manifest")
+        .1;
+    fs.write_file(
+        format!("{project}/project.json").as_str().as_path(),
+        &manifest,
+    )
+    .expect("write");
+    let board = Board::over(Box::new(fs));
+    board
+        .server
+        .borrow_mut()
+        .load_startup_project(project.as_str().as_path())
+        .expect_err("a project with no files does not load");
+    assert_eq!(hello(&board).startup_refused, None);
+}
+
 /// End to end, the design's whole loop on this server: engine Y boots with
 /// two format-11 projects and refuses its startup one; the update's project
 /// stage (`lpa-update`, driven here over the real wire messages) reads the
@@ -571,6 +637,14 @@ impl lpc_shared::transport::ServerTransport for VecTransport {
 
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
+    }
+}
+
+/// The hello the board answers on its primary link.
+fn hello(board: &Board) -> lpc_wire::ServerHello {
+    match board.request(ClientRequest::Hello) {
+        WireServerMsgBody::Hello(hello) => hello,
+        other => panic!("expected a hello, got {other:?}"),
     }
 }
 

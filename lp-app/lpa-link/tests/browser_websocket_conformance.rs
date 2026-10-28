@@ -1264,6 +1264,7 @@ fn hello(granted: Option<Tier>) -> lpc_wire::WireServerMessage {
                 required: true,
                 granted,
             },
+            startup_refused: None,
             firmware: None,
         }),
     )

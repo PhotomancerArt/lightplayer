@@ -264,6 +264,9 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
         // its stored projects need the update's project stage, and whether a
         // project may be pushed to it (M3 P11).
         project_format: Some(hello.build.project_format),
+        // The board refused its startup project for its format and nothing
+        // ran since (wire 46): the project stage may load it once current.
+        startup_refused: hello.startup_refused.is_some(),
     }
 }
 
@@ -791,6 +794,7 @@ mod tests {
             device_uid: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }
     }
@@ -815,6 +819,7 @@ mod tests {
             device_uid: Some(uid.to_string()),
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         };
         lpc_wire::json::to_string(&WireServerMessage::new(7, ServerMsgBody::Hello(hello)))

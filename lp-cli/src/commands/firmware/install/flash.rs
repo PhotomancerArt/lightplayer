@@ -198,8 +198,7 @@ pub fn wait_for_hello(port: &str, expected_version: &str, expected_target: &str)
             return Err(error);
         }
         let mut client = lpa_client::LpClient::new(connection.client_io());
-        let finished =
-            finish_board_projects(&mut client, &BoardHello::from_hello(hello), false).await;
+        let finished = finish_board_projects(&mut client, &BoardHello::from_hello(hello)).await;
         drop(client);
         connection.close().await;
         for line in &finished.lines {

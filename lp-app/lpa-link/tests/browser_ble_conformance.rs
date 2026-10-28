@@ -1157,6 +1157,7 @@ fn hello() -> lpc_wire::WireServerMessage {
             // is the board's plain JSON.
             pack_format: 0,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }),
     )

@@ -167,6 +167,88 @@ fn a_link_dropped_mid_stage_finishes_on_the_next_link_with_no_click() {
     );
 }
 
+/// DD27/DD30, end to end through the board's real server: the link goes
+/// after the startup project's batch commits and before its load. The
+/// board's next hello says it refused that project for its format and
+/// nothing ran since, so the next leg's stage loads it — though nothing is
+/// left to rewrite in it — and the update ends with it running.
+#[test]
+fn a_startup_project_left_unloaded_by_a_drop_is_loaded_when_the_board_says_it_refused_it() {
+    let mut channel = old_projects();
+    channel.drop_at_load = true;
+    let mut bench = Bench::new(board_with_projects(channel), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until("the link to drop before the load", |bench| {
+        bench.board().unplugged
+    });
+    {
+        let channel = channel_of(&bench);
+        assert_eq!(
+            channel.project_format(STARTUP),
+            Some(PROJECT_FORMAT_VERSION)
+        );
+        assert!(channel.running().is_empty(), "the load never arrived");
+        assert!(
+            channel.startup_refused(),
+            "the board still says it refused its startup project"
+        );
+    }
+    bench.steps(2_000);
+    bench.board_mut().replug();
+    bench.run_until_update_ends(device);
+
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    let channel = channel_of(&bench);
+    assert_eq!(channel.project_format(SECOND), Some(PROJECT_FORMAT_VERSION));
+    assert_eq!(channel.running(), [format!("/projects/{STARTUP}")]);
+    assert!(!channel.startup_refused(), "a load ends the report");
+    drop(channel);
+    assert_eq!(bench.presses, 1, "no click after the drop");
+}
+
+/// The other half: the same drop, then someone stops the board on purpose
+/// before it is back. The stop ends the board's report, so the next leg's
+/// stage finishes the other project and loads nothing: a stopped board
+/// stays stopped.
+#[test]
+fn a_startup_project_the_board_did_not_refuse_is_never_loaded_by_the_stage() {
+    let mut channel = old_projects();
+    channel.drop_at_load = true;
+    let mut bench = Bench::new(board_with_projects(channel), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until("the link to drop before the load", |bench| {
+        bench.board().unplugged
+    });
+    bench
+        .board_mut()
+        .channel1
+        .as_mut()
+        .expect("the board has a channel 1")
+        .request(ClientRequest::StopAllProjects);
+    assert!(
+        !channel_of(&bench).startup_refused(),
+        "a stop ends the report"
+    );
+    bench.steps(2_000);
+    bench.board_mut().replug();
+    bench.run_until_update_ends(device);
+
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    let channel = channel_of(&bench);
+    assert_eq!(
+        channel.project_format(STARTUP),
+        Some(PROJECT_FORMAT_VERSION)
+    );
+    assert_eq!(channel.project_format(SECOND), Some(PROJECT_FORMAT_VERSION));
+    assert!(channel.running().is_empty(), "nothing was loaded");
+}
+
 /// Q107/Q108: a board found already running Y with older projects (a cut
 /// inside the window, an update by a host that predates the stage, a USB
 /// flash) has them upgraded on connect over a link holding edit, with no
@@ -398,6 +480,9 @@ pub(super) struct ChannelOne {
     /// Drop the link instead of forwarding the `n`th `CommitBatch` (the
     /// batch never lands; the board drops a batch whose link closes).
     pub(super) drop_at_commit: Option<u32>,
+    /// Drop the link instead of forwarding the first `LoadProject` (the
+    /// load never reaches the board).
+    pub(super) drop_at_load: bool,
     /// Answer the access conversation's `Hello`, `LoginBegin` and
     /// `LoginAnswer` (`false`: they go unanswered — a link whose access
     /// login never completes, so Studio never holds a tier on it).
@@ -430,6 +515,7 @@ impl ChannelOne {
             transport: VecTransport::default(),
             formats: formats.into_iter().collect(),
             drop_at_commit: None,
+            drop_at_load: false,
             answers_access: true,
             commits: 0,
             drop_now: false,
@@ -470,6 +556,11 @@ impl ChannelOne {
                 return Vec::new();
             }
         }
+        if self.drop_at_load && matches!(message.msg, ClientRequest::LoadProject { .. }) {
+            self.drop_at_load = false;
+            self.drop_now = true;
+            return Vec::new();
+        }
         let id = message.id;
         self.transport.sent.clear();
         block_on(self.server.tick_and_send(
@@ -490,6 +581,15 @@ impl ChannelOne {
                 ),
             })
             .collect()
+    }
+
+    /// The server's hello says it refused its startup project for its
+    /// format, and nothing ran since (`ServerHello::startup_refused`).
+    pub(super) fn startup_refused(&self) -> bool {
+        self.server
+            .hello_for_link(lpc_shared::transport::Link::PRIMARY)
+            .startup_refused
+            .is_some()
     }
 
     /// Whether the link should drop now (once).

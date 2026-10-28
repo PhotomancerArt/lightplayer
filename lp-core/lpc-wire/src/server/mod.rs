@@ -16,6 +16,7 @@ pub mod output_wire_status;
 pub mod recovery_status;
 pub mod relay_state;
 pub mod saved_network_info;
+pub mod startup_refusal;
 pub mod station_failure;
 pub mod station_state;
 
@@ -42,5 +43,6 @@ pub use output_wire_status::OutputWireStatus;
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};
 pub use relay_state::{RelayRefusal, RelayState};
 pub use saved_network_info::SavedNetworkInfo;
+pub use startup_refusal::StartupRefusal;
 pub use station_failure::StationFailure;
 pub use station_state::StationState;

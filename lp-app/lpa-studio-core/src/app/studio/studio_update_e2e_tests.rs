@@ -1845,6 +1845,13 @@ impl Board {
                     .channel1
                     .as_ref()
                     .and_then(|channel| channel.engine_format(&version)),
+                // The board's own report, from the real server behind
+                // channel 1: its boot refused the startup project for its
+                // format, and nothing ran since (DD30).
+                startup_refused: self
+                    .channel1
+                    .as_ref()
+                    .is_some_and(|channel| channel.startup_refused()),
                 version: Some(version),
                 update,
             },

@@ -419,6 +419,13 @@ pub struct HelloFacts {
     /// (an older wire, a core with no engine, tests).
     #[serde(default)]
     pub project_format: Option<u32>,
+    /// The board's engine refused its startup project at boot for its
+    /// project format, and nothing has been loaded or stopped since (its
+    /// hello's `startupRefused`, wire 46). What lets the update's project
+    /// stage load a startup project a dropped link left current and not
+    /// running (DD27); without it a stopped board stays stopped.
+    #[serde(default)]
+    pub startup_refused: bool,
 }
 
 /// How a board's filesystem came up at boot — the model's copy of the

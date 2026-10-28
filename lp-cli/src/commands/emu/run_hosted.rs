@@ -189,10 +189,7 @@ async fn finish_projects_after_update<B: EmuUsbBoard>(
     };
     host.set_queue_messages(true);
     let mut client = LpClient::new(&mut *host).with_request_ids_from(STAGE_REQUEST_ID_BASE);
-    // No board report says it refused its startup project for its format
-    // (DD27) on this link yet, so a current startup project is never loaded
-    // by the stage here.
-    let finished = finish_board_projects(&mut client, &hello, false).await;
+    let finished = finish_board_projects(&mut client, &hello).await;
     drop(client);
     host.set_queue_messages(false);
     for line in &finished.lines {

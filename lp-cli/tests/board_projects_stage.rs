@@ -48,7 +48,6 @@ fn an_install_ends_with_the_boards_projects_upgraded_and_its_startup_project_run
     let finished = block_on(finish_board_projects(
         &mut client,
         &BoardHello::from_hello(hello),
-        false,
     ));
 
     assert_eq!(
@@ -72,9 +71,8 @@ fn a_rerun_finishes_a_board_left_mid_stage() {
     // The link goes right after the startup project is loaded: the other
     // project is still at 11.
     let mut client = LpClient::new(BoardIo::cut_after_the_load(&board));
-    let hello = block_on(client.hello()).expect("hello").into_value();
-    let hello = BoardHello::from_hello(hello);
-    let first = block_on(finish_board_projects(&mut client, &hello, false));
+    let hello = board_hello(&mut client);
+    let first = block_on(finish_board_projects(&mut client, &hello));
     assert!(!first.ok);
     assert_eq!(first.lines[0], "projects: upgraded “eaves” to format 12");
     assert!(
@@ -89,16 +87,85 @@ fn a_rerun_finishes_a_board_left_mid_stage() {
     // Run again (an install or an update run again on a board already at
     // the build): only what is left is done.
     let mut client = LpClient::new(BoardIo::healthy(&board));
-    let again = block_on(finish_board_projects(&mut client, &hello, false));
+    let hello = board_hello(&mut client);
+    let again = block_on(finish_board_projects(&mut client, &hello));
     assert_eq!(again.lines, ["projects: upgraded “headband” to format 12"]);
     assert!(again.ok);
     board.assert_project_is_the_expected_upgrade(OTHER, "fiber-headband");
 
     // And once more: nothing is older, nothing is written.
     let mut client = LpClient::new(BoardIo::healthy(&board));
-    let third = block_on(finish_board_projects(&mut client, &hello, false));
+    let hello = board_hello(&mut client);
+    let third = block_on(finish_board_projects(&mut client, &hello));
     assert_eq!(third.lines, ["projects: every project is at format 12"]);
     assert!(third.ok);
+}
+
+/// DD27/DD30 end to end: the link goes after the startup project's batch
+/// commits and before its load. The board says, in its next hello, that it
+/// refused that project for its format and nothing ran since, so the rerun
+/// loads it — though there is nothing left to rewrite in it.
+#[test]
+fn a_startup_project_left_unloaded_by_a_drop_is_loaded_when_the_board_says_it_refused_it() {
+    let board = Board::updated();
+    let mut client = LpClient::new(BoardIo::cut_before_the_load(&board));
+    let hello = board_hello(&mut client);
+    let first = block_on(finish_board_projects(&mut client, &hello));
+    assert!(!first.ok);
+    board.assert_project_is_the_expected_upgrade(STARTUP, "eaves-wired");
+    assert!(
+        board.running().is_empty(),
+        "the load never reached the board"
+    );
+
+    let mut client = LpClient::new(BoardIo::healthy(&board));
+    let hello: ServerHello = block_on(client.hello()).expect("hello").into_value();
+    assert_eq!(
+        hello.startup_refused,
+        Some(lpc_wire::StartupRefusal {
+            project: format!("/projects/{STARTUP}"),
+            found: Some(lpc_model::PROJECT_FORMAT_VERSION - 1),
+        }),
+        "the board says it refused its startup project for its format"
+    );
+    let again = block_on(finish_board_projects(
+        &mut client,
+        &BoardHello::from_hello(hello),
+    ));
+    assert!(again.ok, "{:?}", again.lines);
+    assert_eq!(again.lines, ["projects: upgraded “headband” to format 12"]);
+    board.frames(8);
+    assert_eq!(board.running(), [format!("/projects/{STARTUP}")]);
+    let mut client = LpClient::new(BoardIo::healthy(&board));
+    let after: ServerHello = block_on(client.hello()).expect("hello").into_value();
+    assert_eq!(after.startup_refused, None, "a load ends the report");
+}
+
+/// The other half: the same drop, then someone stops the board on purpose.
+/// The stop ends the board's report, so the rerun finishes the other
+/// project and loads nothing: a stopped board stays stopped.
+#[test]
+fn a_startup_project_the_board_did_not_refuse_is_never_loaded_by_the_stage() {
+    let board = Board::updated();
+    let mut client = LpClient::new(BoardIo::cut_before_the_load(&board));
+    let hello = board_hello(&mut client);
+    let _ = block_on(finish_board_projects(&mut client, &hello));
+    board.tick(ClientMessage {
+        id: 900,
+        msg: ClientRequest::StopAllProjects,
+    });
+
+    let mut client = LpClient::new(BoardIo::healthy(&board));
+    let hello: ServerHello = block_on(client.hello()).expect("hello").into_value();
+    assert_eq!(hello.startup_refused, None, "a stop ends the report");
+    let again = block_on(finish_board_projects(
+        &mut client,
+        &BoardHello::from_hello(hello),
+    ));
+    assert!(again.ok, "{:?}", again.lines);
+    assert_eq!(again.lines, ["projects: upgraded “headband” to format 12"]);
+    board.frames(8);
+    assert!(board.running().is_empty(), "nothing was loaded");
 }
 
 #[test]
@@ -111,7 +178,6 @@ fn a_link_that_cannot_edit_names_the_projects_and_writes_nothing() {
     let finished = block_on(finish_board_projects(
         &mut client,
         &BoardHello::from_hello(hello),
-        false,
     ));
 
     assert_eq!(
@@ -137,7 +203,6 @@ fn a_board_on_another_wire_is_not_asked_anything() {
     let finished = block_on(finish_board_projects(
         &mut client,
         &BoardHello::OtherWire { proto: other },
-        false,
     ));
 
     assert!(!finished.ok);
@@ -150,6 +215,11 @@ fn a_board_on_another_wire_is_not_asked_anything() {
             lpc_wire::WIRE_PROTO_VERSION
         )]
     );
+}
+
+/// The hello `client`'s link says, as the stage reads it.
+fn board_hello<Io: ClientIo>(client: &mut LpClient<Io>) -> BoardHello {
+    BoardHello::from_hello(block_on(client.hello()).expect("hello").into_value())
 }
 
 // --- the board ---------------------------------------------------------------------
@@ -285,11 +355,13 @@ impl Board {
 
 /// The board's channel 1 as a client's IO: each request is one tick of the
 /// engine, its answer queued for `receive`. `cut_after_load`: the link goes
-/// once a `LoadProject` has been answered.
+/// once a `LoadProject` has been answered; `cut_before_load`: the link goes
+/// as a `LoadProject` is sent, which never reaches the board.
 struct BoardIo<'a> {
     board: &'a Board,
     answers: VecDeque<WireServerMessage>,
     cut_after_load: bool,
+    cut_before_load: bool,
     cut: bool,
     refuse_all: bool,
 }
@@ -300,6 +372,7 @@ impl<'a> BoardIo<'a> {
             board,
             answers: VecDeque::new(),
             cut_after_load: false,
+            cut_before_load: false,
             cut: false,
             refuse_all: false,
         }
@@ -308,6 +381,13 @@ impl<'a> BoardIo<'a> {
     fn cut_after_the_load(board: &'a Board) -> Self {
         Self {
             cut_after_load: true,
+            ..Self::healthy(board)
+        }
+    }
+
+    fn cut_before_the_load(board: &'a Board) -> Self {
+        Self {
+            cut_before_load: true,
             ..Self::healthy(board)
         }
     }
@@ -321,6 +401,10 @@ impl ClientIo for BoardIo<'_> {
             return Err(TransportError::ConnectionLost);
         }
         let is_load = matches!(message.msg, ClientRequest::LoadProject { .. });
+        if is_load && self.cut_before_load {
+            self.cut = true;
+            return Err(TransportError::ConnectionLost);
+        }
         let id = message.id;
         for frame in self.board.tick(message) {
             if frame.id == id {
