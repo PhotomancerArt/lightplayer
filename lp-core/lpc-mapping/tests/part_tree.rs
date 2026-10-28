@@ -13,6 +13,7 @@ use support::{bits, today_as_mapping};
 use lpc_mapping::part::{
     Circle, CircleSplit, Colors, Mapping, NodeKind, Order, Part, PartId, PartKind, Path,
     PathCommand, PathSplit, Points, RenderError, Repeat, SegmentKey, Shape, Tree, TreeId, render,
+    render_layout,
 };
 use lpc_mapping::{
     GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathAlign, PathShape, RingDir,
@@ -645,6 +646,45 @@ fn the_upgrade_corpus_renders_todays_lamps_bit_for_bit() {
         checked += 1;
     }
     assert!(checked >= 30, "found {checked} corpus documents");
+}
+
+/// A layout is the render's tree with its lamps unplaced: the same nodes,
+/// the same segments over the same lamp ranges, every lamp at `[0, 0]` —
+/// for every map2d in the repo's projects and catalog, and every document
+/// of the upgrade corpus as parts.
+#[test]
+fn a_layout_is_the_renders_tree_with_its_lamps_unplaced() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = Vec::new();
+    for dir in ["projects", "catalog", "lp-app/lpa-upgrade/tests/corpus"] {
+        collect_map2d(&repo.join(dir), &mut files);
+    }
+    files.sort();
+    let mut checked = 0usize;
+    for file in files {
+        let json = std::fs::read_to_string(&file).unwrap();
+        let mapping = match lpc_mapping::map2d6::peek_format(&json) {
+            Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) => lpc_mapping::map2d6::read(&json).unwrap(),
+            _ => match Map2dDoc::from_json(&json) {
+                Ok(doc) => today_as_mapping(&doc),
+                Err(_) => continue,
+            },
+        };
+        let Ok(placed) = render(&mapping) else {
+            continue;
+        };
+        let name = file.display().to_string();
+        let laid = render_layout(&mapping).expect("a mapping that renders lays out");
+        assert_eq!(laid.nodes(), placed.nodes(), "{name}: the nodes");
+        assert_eq!(laid.segments(), placed.segments(), "{name}: the segments");
+        assert_eq!(laid.positions().len(), placed.positions().len(), "{name}");
+        assert!(
+            laid.positions().iter().all(|p| *p == [0.0; 2]),
+            "{name}: unplaced"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 150, "laid out {checked} documents");
 }
 
 /// Every grid routing and corner, reversed paths with and without jumpers,

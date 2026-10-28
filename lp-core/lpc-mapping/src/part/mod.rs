@@ -44,7 +44,7 @@ pub use path::Path;
 pub use path_command::PathCommand;
 pub use path_split::PathSplit;
 pub use points::Points;
-pub use render::render;
+pub use render::{render, render_layout};
 pub use render_error::RenderError;
 pub use repeat::Repeat;
 pub use segment::Segment;

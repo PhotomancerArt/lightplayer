@@ -16,7 +16,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Mapping, render};
+use lpc_mapping::part::{Mapping, render_layout};
 use lpc_mapping::patching::{
     OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping_placed,
 };
@@ -110,8 +110,10 @@ impl FixturePartsPatch {
     ) -> bool {
         self.key = Some(key);
         // The same mapping rendered at load, so only memory can refuse it
-        // now; then nothing lands, and the status says why.
-        let mut tree = match render(&self.mapping) {
+        // now; then nothing lands, and the status says why. Laid out, not
+        // placed: the patch walks the tree's structure and never reads a
+        // position (a circle's `sinf`/`cosf` per lamp, again, for nothing).
+        let mut tree = match render_layout(&self.mapping) {
             Ok(tree) => tree,
             Err(error) => {
                 self.status = Some(alloc::format!("render fixture mapping: {error}"));
