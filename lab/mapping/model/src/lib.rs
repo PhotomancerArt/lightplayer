@@ -122,8 +122,6 @@ pub use ux::area::Area;
 pub use ux::camera::Camera;
 pub use ux::data_path::{DataEntry, DataPath};
 pub use ux::debug_flags::{DebugFlags, Presentation};
-pub use ux::port_rows::{PortRow, RowOverlap, RowSpan};
-pub use ux::problem_words::ProblemLine;
 pub use ux::edges::Edge;
 pub use ux::editor::{
     Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
@@ -137,6 +135,8 @@ pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
 pub use ux::port_grouping::PortGrouping;
+pub use ux::port_rows::{PortRow, RowOverlap, RowSpan};
+pub use ux::problem_words::ProblemLine;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use ux::tree_rows::TreeRow;
 pub use ux::ui::*;

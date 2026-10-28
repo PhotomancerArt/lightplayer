@@ -318,7 +318,8 @@ fn an_overlap_is_marked_on_the_port_and_listed_on_both_fixtures() {
     let row = p.port_row(&out, "0");
     assert_eq!(row.overlaps.len(), 1);
     assert_eq!(row.overlaps[0].channels, 6..15);
-    let words = "path1 of f1 and path1 of f2 share 3 lamps on port D0 of out: the board shows only one";
+    let words =
+        "path1 of f1 and path1 of f2 share 3 lamps on port D0 of out: the board shows only one";
     for f in [&f1, &f2] {
         let texts: Vec<String> = p
             .problems_of_fixture(f)
@@ -376,7 +377,10 @@ fn each_problem_reads_as_one_sentence_naming_its_segment_or_port() {
         ]
     );
     for t in &texts {
-        assert!(!t.contains('\n') && !t.trim_end_matches('.').contains(". "), "{t}");
+        assert!(
+            !t.contains('\n') && !t.trim_end_matches('.').contains(". "),
+            "{t}"
+        );
     }
     // A segment's own problem shows in its section too.
     e.select(vec![Target::Generated(ring(&e.project, "r4"))]);

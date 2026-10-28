@@ -104,12 +104,7 @@ fn the_circular_display() {
         field: PatchField::Port,
     });
     e.select(vec![Target::Part(circle.clone())]);
-    choose(
-        &mut e,
-        PatchField::Children,
-        "Flow",
-        "One per port from D0",
-    );
+    choose(&mut e, PatchField::Children, "Flow", "One per port from D0");
     let p = &e.project;
     for (k, port) in [
         ("r1", "0"),

@@ -17,8 +17,8 @@ use lab_mapping_model::{
     Tool,
 };
 use lab_mapping_web::{
-    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, PieceView, TreePane,
-    input, use_remembered_inspector_debug, use_simulated_frame, use_view,
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, PieceView, TreePane, input,
+    use_remembered_inspector_debug, use_simulated_frame, use_view,
 };
 
 const LAB_CSS: &str = include_str!("lab.css");

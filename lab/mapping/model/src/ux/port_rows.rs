@@ -94,9 +94,9 @@ impl Project {
                     if *channels == 0 {
                         continue;
                     }
-                    let lamps = patching.segment(id).map_or(0, |s| {
-                        (*channels).div_ceil(s.channels_per_lamp.max(1))
-                    });
+                    let lamps = patching
+                        .segment(id)
+                        .map_or(0, |s| (*channels).div_ceil(s.channels_per_lamp.max(1)));
                     segments.push(RowSpan {
                         channels: *at..at + channels,
                         lamps,
@@ -111,7 +111,8 @@ impl Project {
         let mut overlaps = Vec::new();
         for (i, a) in segments.iter().enumerate() {
             for b in &segments[i + 1..] {
-                let shared = a.channels.start.max(b.channels.start)..a.channels.end.min(b.channels.end);
+                let shared =
+                    a.channels.start.max(b.channels.start)..a.channels.end.min(b.channels.end);
                 if shared.is_empty() {
                     continue;
                 }

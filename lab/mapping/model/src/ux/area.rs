@@ -578,7 +578,9 @@ impl Project {
 pub fn title_width(name: &str, pinned: bool, problems: Option<&str>) -> f64 {
     14.0 + 7.0 * name.chars().count() as f64
         + if pinned { PIN_MARK_PX } else { 0.0 }
-        + problems.map_or(0.0, |p| PROBLEM_GAP_PX + 6.5 * (p.chars().count() + 2) as f64)
+        + problems.map_or(0.0, |p| {
+            PROBLEM_GAP_PX + 6.5 * (p.chars().count() + 2) as f64
+        })
 }
 
 /// The room between a title and its problems' count, in pixels.

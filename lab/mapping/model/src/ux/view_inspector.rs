@@ -268,7 +268,10 @@ impl Editor {
         let w = p.effective_patch().walked(node)?;
         Some(UiSection::titled(
             "Cursor ops",
-            p.cursor_ops_lines(w).into_iter().map(UiItem::Hint).collect(),
+            p.cursor_ops_lines(w)
+                .into_iter()
+                .map(UiItem::Hint)
+                .collect(),
         ))
     }
 }

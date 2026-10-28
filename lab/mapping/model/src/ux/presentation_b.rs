@@ -51,9 +51,8 @@ fn set_here_word(field: PatchField) -> Option<&'static str> {
         PatchField::Direction => "Direction",
         PatchField::Offset => "Offset",
         PatchField::OnWire => "Off",
-        PatchField::Output
-        | PatchField::Start
-        | PatchField::StartPixel
-        | PatchField::Children => return None,
+        PatchField::Output | PatchField::Start | PatchField::StartPixel | PatchField::Children => {
+            return None;
+        }
     })
 }

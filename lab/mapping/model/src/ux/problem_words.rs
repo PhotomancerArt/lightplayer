@@ -51,7 +51,11 @@ impl Project {
             // Two fixtures' segments say whose they are.
             let whose = |s: &TreeRef| {
                 if fixtures.len() > 1 {
-                    format!("{} of {}", self.segment_words(s), self.node_name(&s.fixture))
+                    format!(
+                        "{} of {}",
+                        self.segment_words(s),
+                        self.node_name(&s.fixture)
+                    )
                 } else {
                     self.segment_words(s)
                 }

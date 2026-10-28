@@ -740,8 +740,7 @@ impl Editor {
     /// A problem's Remove: take away an override whose node isn't there
     /// any more, as one undo step. Nothing for a node that is.
     pub fn remove_gone_override(&mut self, node: &TreeRef) {
-        if self.project.placed().node(node).is_some() || self.project.override_of(node).is_none()
-        {
+        if self.project.placed().node(node).is_some() || self.project.override_of(node).is_none() {
             return;
         }
         self.checkpoint();
