@@ -89,6 +89,16 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   later (24 min 38 s against 22 min) and the budget fell inside it. No figure
   moved and no patch was posted for the job. Not split here (the PR is a
   mapping change); a rerun is the evidence either way.
+- 2026-10-28 — PR #1319 again, runs 40739992412 (`9d40dc21c`) and
+  40749890608 (`434a757d1`): the same job cancelled at its 30-minute budget in
+  the same step, the S3 heap ratchet (started at 24 min 22 s: seams 2.6 min,
+  PSRAM 9.9 min, Wi-Fi 6.4 min, relay 3.3 min), every earlier step passed.
+  So the S3's heap ratchet has **never completed on this PR in CI**. Run
+  locally on run 40739992412's own images instead
+  (`LP_CI_IMAGES=… just heap-budget-check-chips-s3`): every figure `ok`
+  (largestFreeBlock 73,744; stackHighWater 12,208 B in its band). The job
+  wants the split this entry prescribes (the ratchet into its own job, or
+  PSRAM's 10 minutes out); not done here.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that
