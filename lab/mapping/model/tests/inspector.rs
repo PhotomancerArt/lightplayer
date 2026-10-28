@@ -278,6 +278,27 @@ fn presentation_b_shows_only_what_is_set_here_under_the_flows_start() {
     assert!(segment_fields(&e).len() > 1);
 }
 
+/// Switching Debug's Presentation (or Cursor ops) draws the inspector again:
+/// the key the page's inspector is drawn from moves with it, and nothing
+/// else about the project need change for that.
+#[test]
+fn switching_the_presentation_draws_the_inspector_again() {
+    let mut e = Editor::new(Project::circular_display_wired());
+    let r3 = ring(&e.project, "r3");
+    e.input(GraphInput::Select(vec![Target::Generated(r3)]));
+    let a = e.view_panels_key();
+    let shown_a = e.view_inspector();
+    e.input(GraphInput::Presentation(Presentation::B));
+    assert!(
+        e.view_panels_key() != a,
+        "the key moves with the presentation"
+    );
+    assert_ne!(e.view_inspector(), shown_a, "and B shows something else");
+    let b = e.view_panels_key();
+    e.input(GraphInput::CursorOps(true));
+    assert!(e.view_panels_key() != b, "and with Cursor ops");
+}
+
 // ---- ports as rows of spans ----------------------------------------------------
 
 /// A port row lists its segments and the gaps between them, across every

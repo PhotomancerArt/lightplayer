@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::domain::node::NodeId;
 use crate::domain::placement::Placement;
 use crate::domain::target::Target;
+use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::Editor;
 use crate::ux::patching::Armed;
 use crate::ux::port_grouping::PortGrouping;
@@ -48,6 +49,9 @@ pub struct PanelsKey {
     placement: Arc<Placement>,
     selection: Vec<Target>,
     move_draw: bool,
+    /// Debug's Presentation and Cursor ops: what the inspector shows.
+    presentation: Presentation,
+    cursor_ops: bool,
 }
 
 impl PartialEq for NodesKey {
@@ -70,6 +74,8 @@ impl PartialEq for PanelsKey {
             && Arc::ptr_eq(&self.placement, &o.placement)
             && self.selection == o.selection
             && self.move_draw == o.move_draw
+            && self.presentation == o.presentation
+            && self.cursor_ops == o.cursor_ops
     }
 }
 
@@ -103,6 +109,8 @@ impl Editor {
             placement: self.project.placement.0.clone(),
             selection: self.selection.clone(),
             move_draw: self.move_draw,
+            presentation: self.debug.presentation,
+            cursor_ops: self.debug.cursor_ops,
         }
     }
 }
