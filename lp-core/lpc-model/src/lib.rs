@@ -132,7 +132,7 @@ pub use nodes::{
     MirrorMode, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OUTPUT_NAME_MAX_LEN,
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, OutputName,
     OutputNameError, OutputPortDef, OutputPortDefView, PATTERN_EXPORT_FOLDER,
-    PLAYLIST_CYCLE_SHAPE_NAME, PathSpec, PlayState, PlaylistCycle, PlaylistDef, PlaylistDefView,
+    PLAYLIST_CYCLE_SHAPE_NAME, PlayState, PlaylistCycle, PlaylistDef, PlaylistDefView,
     PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView, PowerButtonDef,
     PowerButtonDefView, PowerButtonMode, PowerButtonState, PowerButtonStateView, ProjectionShape,
     ProvenanceDef, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView,

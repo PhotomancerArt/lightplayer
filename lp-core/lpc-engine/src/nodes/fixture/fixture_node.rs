@@ -61,14 +61,12 @@ pub struct FixtureMap2dSource {
     pub render_height: u32,
 }
 
-/// A fixture's resolved mapping, in whichever representation it was built
-/// from — the node's single source of truth for its geometry.
+/// A fixture's resolved mapping — the node's single source of truth for its
+/// geometry.
 ///
-/// Hand-authored `PathPoints` stay `Slots`: Studio's generic slot UI edits
-/// individual lamps there, and overlay mutations address them by slot path.
-/// Document-sourced geometry (a `.map2d.json`, or a legacy SVG import
-/// through the same resolver) is `Compact`: derived data nobody addresses
-/// per-point, carried at 8 B/lamp instead of the slot form's 41 B/LED live.
+/// A map2d document's geometry is `Compact`: derived data nobody addresses
+/// per-point, carried at 8 B/lamp. `Slots` is the authored slot form with no
+/// lamps (unset, or a map2d source before it is read).
 ///
 /// Consumers take the borrowed [`MappingRef`] view rather than matching on
 /// this, so the two representations share one set of ordering rules.
@@ -147,12 +145,9 @@ pub struct FixtureNode {
     sample_batch: Option<SampleBatch>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
-    /// Channel list for Direct sampling — the ONLY per-lamp data that stays
-    /// resident, and for every document-resolved mapping it is the identity
-    /// `0..n` encoded as one `u32` ([`DirectChannels::Identity`]); only a
-    /// hand-authored `PathPoints` with offset or sparse keys keeps the
-    /// 4 B/lamp list. Coordinates are regenerated transiently from the
-    /// mapping when the sample-point buffer needs rewriting.
+    /// Channel list for Direct sampling: the identity `0..n`, held as its
+    /// count ([`DirectChannels`]). Coordinates are regenerated transiently
+    /// from the mapping when the sample-point buffer needs rewriting.
     direct_channels: Option<(Revision, DirectChannels)>,
     /// The mapping's scope geometry (lamp box, pitch, count) in render-target
     /// pixels, keyed on `(mapping_version, width, height)`: computed once per
@@ -484,7 +479,7 @@ impl FixtureNode {
     /// The mapping's scope geometry at `width` × `height`, computed once per
     /// `(mapping_version, width, height)` — the load-time pass, deferred to
     /// the first render that needs it so every load path (map2d document,
-    /// hand-authored `PathPoints`, def sync, asset refresh) gets it by
+    /// asset refresh) gets it by
     /// bumping the one version it already bumps.
     fn scope_geometry(&mut self, width: u32, height: u32) -> Option<ScopeGeometry> {
         let version = self.mapping_version;
@@ -1589,18 +1584,7 @@ fn accumulate_fixture_channels_from_strip(
         b: alloc::vec![Q32::ZERO; len],
         max_channel,
     };
-    // One match on the channel encoding, one monomorphized loop per form.
-    match channels {
-        DirectChannels::Identity(count) => {
-            accumulate_strip_lamps(0..*count, bytes, wire_reversed, &mut accumulators)
-        }
-        DirectChannels::Explicit(list) => accumulate_strip_lamps(
-            list.iter().copied(),
-            bytes,
-            wire_reversed,
-            &mut accumulators,
-        ),
-    }
+    accumulate_strip_lamps(0..channels.0, bytes, wire_reversed, &mut accumulators);
     Ok(accumulators)
 }
 
@@ -1734,8 +1718,7 @@ fn render_direct_fixture_control(
     // that fills the whole target needs no zero-fill first: the tail it does
     // not reach (a short stream, a batch that traps) is zeroed after, which
     // leaves exactly the bytes clear-then-write did.
-    let writes_in_order_to_the_end = matches!(channels, DirectChannels::Identity(n)
-        if (*n as usize).saturating_mul(3) == expected_samples)
+    let writes_in_order_to_the_end = channels.len().saturating_mul(3) == expected_samples
         && target.product_len() == expected_samples;
     if !writes_in_order_to_the_end {
         target.clear();
@@ -1784,61 +1767,30 @@ fn render_direct_fixture_control(
         settings.gamma_correction,
         settings.brightness,
     );
-    // One match on the channel encoding, then a lane monomorphized on that
-    // form's iterator — the identity case walks `0..n` with no per-lamp
-    // branch and no list to read.
-    let (streamed, written_samples) = match channels {
-        DirectChannels::Identity(count) => {
-            let mut job = DirectLaneJob {
-                coords,
-                lamps: DirectLaneLamps {
-                    channels: 0..*count,
-                    target: &mut target,
-                    expected_samples,
-                    encoding,
-                    power,
-                    selection,
-                    written_samples: 0,
-                },
-            };
-            let streamed = stream_direct_lane(
-                &mut job,
-                batch,
-                visual_product,
-                (output_width, output_height),
-                space,
-                settings.consume_policy,
-                scope,
-                ctx,
-            );
-            (streamed, job.lamps.written_samples)
-        }
-        DirectChannels::Explicit(list) => {
-            let mut job = DirectLaneJob {
-                coords,
-                lamps: DirectLaneLamps {
-                    channels: list.iter().copied(),
-                    target: &mut target,
-                    expected_samples,
-                    encoding,
-                    power,
-                    selection,
-                    written_samples: 0,
-                },
-            };
-            let streamed = stream_direct_lane(
-                &mut job,
-                batch,
-                visual_product,
-                (output_width, output_height),
-                space,
-                settings.consume_policy,
-                scope,
-                ctx,
-            );
-            (streamed, job.lamps.written_samples)
-        }
+    // The lane walks `0..n`: no per-lamp branch and no list to read.
+    let mut job = DirectLaneJob {
+        coords,
+        lamps: DirectLaneLamps {
+            channels: 0..channels.0,
+            target: &mut target,
+            expected_samples,
+            encoding,
+            power,
+            selection,
+            written_samples: 0,
+        },
     };
+    let streamed = stream_direct_lane(
+        &mut job,
+        batch,
+        visual_product,
+        (output_width, output_height),
+        space,
+        settings.consume_policy,
+        scope,
+        ctx,
+    );
+    let written_samples = job.lamps.written_samples;
     if writes_in_order_to_the_end {
         target.clear_product_from(written_samples);
     }
@@ -4154,7 +4106,7 @@ mod tests {
             mapping_version,
             vec![PixelMappingEntry::new(0, Q32::ONE, false)],
         ));
-        node.direct_channels = Some((mapping_version, DirectChannels::Identity(1)));
+        node.direct_channels = Some((mapping_version, DirectChannels(1)));
         node.display_layout_revision = Some((
             FixtureDisplayLayoutKey {
                 mapping_version,
@@ -4181,7 +4133,7 @@ mod tests {
         node.mapping_version = Revision::new(7);
         seed_derived_caches(&mut node, Revision::new(7));
         let precomputed_before = node.precomputed.clone();
-        let direct_channels_before = node.direct_channels.clone();
+        let direct_channels_before = node.direct_channels;
         let display_layout_before = node.display_layout_revision;
 
         for level in [
@@ -4716,7 +4668,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         // too, reversed or not.
         assert_eq!(
             fixture.direct_channels,
-            Some((Revision::new(1), DirectChannels::Identity(COUNT as u32))),
+            Some((Revision::new(1), DirectChannels(COUNT as u32))),
         );
     }
 
@@ -4852,7 +4804,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         // reversed document-resolved fixture still carries the identity.
         assert_eq!(
             fixture.direct_channels,
-            Some((Revision::new(1), DirectChannels::Identity(COUNT as u32))),
+            Some((Revision::new(1), DirectChannels(COUNT as u32))),
             "wire_reversed must not materialize a channel list"
         );
     }

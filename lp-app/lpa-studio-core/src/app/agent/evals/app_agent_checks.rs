@@ -895,7 +895,7 @@ fn binding<'a>(def: &'a Value, name: &str, side: &str) -> Option<&'a str> {
 
 /// The fixture's lamp positions in render order (map2d format 6; the
 /// agent's projects are one strip from port 0, so render order is wiring
-/// order), or its PathPoints paths.
+/// order).
 fn fixture_lamps(project: &ProjectTree, fixture: &TreeNode) -> Result<Vec<[f32; 2]>, String> {
     let mapping = &fixture.def["mapping"];
     match mapping["kind"].as_str() {
@@ -913,43 +913,6 @@ fn fixture_lamps(project: &ProjectTree, fixture: &TreeNode) -> Result<Vec<[f32; 
             let mut tree = lpc_mapping::part::render(&mapping)
                 .map_err(|error| format!("{path} does not render: {error}"))?;
             Ok(tree.take_positions())
-        }
-        Some("PathPoints") => {
-            let mut lamps = Vec::new();
-            let paths = mapping["paths"]
-                .as_object()
-                .ok_or("PathPoints has no paths")?;
-            let mut keys: Vec<(u64, &Value)> = paths
-                .iter()
-                .map(|(k, v)| (k.parse().unwrap_or(u64::MAX), v))
-                .collect();
-            keys.sort_by_key(|(k, _)| *k);
-            for (_, path) in keys {
-                let points = &path["points"];
-                let list: Vec<&Value> = match points {
-                    Value::Object(map) => {
-                        let mut pts: Vec<(u64, &Value)> = map
-                            .iter()
-                            .map(|(k, v)| (k.parse().unwrap_or(u64::MAX), v))
-                            .collect();
-                        pts.sort_by_key(|(k, _)| *k);
-                        pts.into_iter().map(|(_, v)| v).collect()
-                    }
-                    Value::Array(list) => list.iter().collect(),
-                    _ => Vec::new(),
-                };
-                for point in list {
-                    let xy = |i: usize| {
-                        point
-                            .get(i)
-                            .or_else(|| point.get(if i == 0 { "x" } else { "y" }))
-                            .and_then(Value::as_f64)
-                            .unwrap_or(0.0) as f32
-                    };
-                    lamps.push([xy(0), xy(1)]);
-                }
-            }
-            Ok(lamps)
         }
         other => Err(format!("unsupported fixture mapping kind {other:?}")),
     }

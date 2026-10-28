@@ -25,7 +25,7 @@ pub use clock::{
 pub use fixture::{
     Brightness, ColorOrder, ConsumerCell2, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
     FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig,
-    PathSpec, VisualConsumerSpace,
+    VisualConsumerSpace,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use module::{ChannelMetaDef, ChannelMetaDefView, ModuleDef, ModuleDefView};

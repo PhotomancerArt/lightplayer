@@ -18,6 +18,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_client::ClientIo;
 use lpa_server::{LpGraphics, LpServer};
+use lpc_model::nodes::starter::STARTER_FIXTURE_MAP2D;
 use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
@@ -1252,13 +1253,13 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
 
 #[test]
 fn composite_gesture_cycle_ends_clean_end_to_end() {
-    // The M3 composite gesture cycle on the fixture `mapping` slot, driven
-    // through the same actor command path the web shell uses: switch the
-    // enum variant (EnsurePresent mapping.PathPoints), add a map entry
-    // (EnsurePresent mapping.PathPoints.paths[0]), remove it again
+    // The M3 composite gesture cycle, driven through the same actor command
+    // path the web shell uses: switch the fixture `mapping` enum variant
+    // (EnsurePresent mapping.Unset, away from the authored Map2d), add an
+    // output port map entry (EnsurePresent ports[1]), remove it again
     // (RemoveValue — the server normalizes the add-then-remove away, D2),
     // then revert the variant switch — the project must end clean.
-    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -1276,17 +1277,21 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let mapping = find_slot(&snapshot, "mapping");
     assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
-    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(mapping.detail.as_deref(), Some("variant Map2d"));
     let mapping_address = mapping
         .address
         .clone()
         .expect("mapping slot carries an address");
+    let ports_address = find_slot(&snapshot, "ports")
+        .address
+        .clone()
+        .expect("ports slot carries an address");
     assert_eq!(editor_dirty(&snapshot), (0, 0));
 
     // Switch the variant. The overlay edit is stored at a path with no row
-    // yet (the base variant is still Unset until the refresh applies), so
+    // yet (the base variant is still Map2d until the refresh applies), so
     // the enum row reads dirty through the prefix join immediately.
-    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
+    let variant_address = child_address(&mapping_address, "mapping.Unset");
     handle
         .tx
         .send(ensure_present_action(variant_address.clone()));
@@ -1298,7 +1303,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
         UiNodeDirtyState::Dirty,
         "the acked variant switch surfaces on the enum row before any refresh"
     );
-    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(mapping.detail.as_deref(), Some("variant Map2d"));
     assert_eq!(
         mapping.edit_entry_address,
         Some(variant_address.clone()),
@@ -1311,7 +1316,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("refresh emits a snapshot");
     let mapping = find_slot(&snapshot, "mapping");
-    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
     assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(
         mapping.edit_entry_address,
@@ -1320,8 +1325,8 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
          Revert (the entry lives at the variant child path, not the row's own)"
     );
 
-    // Add a path entry with server-built defaults, then pull the new row.
-    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    // Add a port entry with server-built defaults, then pull the new row.
+    let entry_address = child_address(&ports_address, "ports[1]");
     handle.tx.send(ensure_present_action(entry_address.clone()));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
@@ -1329,7 +1334,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     let snapshot = view
         .try_recv()
         .expect("entry add + refresh emit a snapshot");
-    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    let entry = find_slot(&snapshot, "ports[1]");
     assert_eq!(
         entry.state.dirty,
         UiNodeDirtyState::Dirty,
@@ -1344,7 +1349,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     handle.tx.send(remove_value_action(entry_address));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("entry remove emits a snapshot");
-    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    let entry = find_slot(&snapshot, "ports[1]");
     assert_eq!(
         entry.state.dirty,
         UiNodeDirtyState::Saving,
@@ -1357,7 +1362,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
         .try_recv()
         .expect("entry remove + refresh emit a snapshot");
     assert!(
-        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        try_find_slot(&snapshot, "ports[1]").is_none(),
         "the removed entry has no surviving row"
     );
     assert_eq!(
@@ -1369,7 +1374,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     // Revert the variant switch from the enum row itself, exactly as the UI
     // would: dispatch Revert at the row's projected `edit_entry_address`.
     // The overlay empties and the project is clean again, back on the
-    // authored Unset variant.
+    // authored Map2d variant.
     let mapping = find_slot(&snapshot, "mapping");
     let row_revert_target = mapping
         .edit_entry_address
@@ -1383,7 +1388,7 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
     let mapping = find_slot(&snapshot, "mapping");
     assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
-    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(mapping.detail.as_deref(), Some("variant Map2d"));
     assert_eq!(
         editor_dirty(&snapshot),
         (0, 0),
@@ -1394,12 +1399,12 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
 #[test]
 fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
     // The dropdown repro: switch the mapping enum away from its base variant
-    // (EnsurePresent mapping.PathPoints), then re-select the base variant
+    // (EnsurePresent mapping.Map2d), then re-select the base variant
     // (EnsurePresent mapping.Unset). The switch-back normalizes away on the
     // server *and* clears the pending sibling switch; the Materialized ack
     // is the mirror's only source — no ReadOverlay may fire. Without the
-    // sibling clearing, the stored mapping.PathPoints entry would survive
-    // and the dropdown would stay stuck on PathPoints forever.
+    // sibling clearing, the stored mapping.Map2d entry would survive and
+    // the dropdown would stay stuck on Map2d forever.
     let server = Rc::new(RefCell::new(edit_e2e_server()));
     let sent = Rc::new(RefCell::new(Vec::new()));
     let io = InProcessServerIo {
@@ -1430,14 +1435,14 @@ fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
     // the pending variant before switching back.
     handle.tx.send(ensure_present_action(child_address(
         &mapping_address,
-        "mapping.PathPoints",
+        "mapping.Map2d",
     )));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("switch + refresh emit a snapshot");
     let mapping = find_slot(&snapshot, "mapping");
-    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.detail.as_deref(), Some("variant Map2d"));
     assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(editor_dirty(&snapshot), (1, 0));
 
@@ -1661,7 +1666,7 @@ fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     // removed overlay entry) is the mirror's only source — no ReadOverlay
     // may fire. If either side kept the stranded edit, re-applying it would
     // resurrect the entry and the project could never read clean again.
-    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
     let sent = Rc::new(RefCell::new(Vec::new()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -1678,53 +1683,49 @@ fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let mapping = find_slot(&snapshot, "mapping");
-    let mapping_address = mapping
+    let ports = find_slot(&snapshot, "ports");
+    let ports_address = ports
         .address
         .clone()
-        .expect("mapping slot carries an address");
+        .expect("ports slot carries an address");
     assert_eq!(editor_dirty(&snapshot), (0, 0));
     let overlay_reads_before = count_overlay_reads(&sent);
 
-    // Switch the variant, add an entry, edit a leaf under the added entry.
-    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
-    handle
-        .tx
-        .send(ensure_present_action(variant_address.clone()));
-    drive(actor.run_one_batch_for_test());
-    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    // Add an output port entry, then edit a leaf under the added entry
+    // (its `count` option's interior).
+    let entry_address = child_address(&ports_address, "ports[1]");
     handle.tx.send(ensure_present_action(entry_address.clone()));
     drive(actor.run_one_batch_for_test());
-    let leaf_address = child_address(
-        &mapping_address,
-        "mapping.PathPoints.paths[0].PointList.first_channel",
-    );
+    let leaf_address = child_address(&ports_address, "ports[1].count.some");
     handle
         .tx
         .send(set_value_action(leaf_address, LpValue::U32(7)));
     drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("entry add + leaf edit emit a snapshot");
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (2, 0),
+        "the entry add and the leaf edit under it both landed"
+    );
 
     // Remove the entry again: the server clears the entry *and* the
-    // stranded leaf edit, and the mirror follows from the Materialized ack.
+    // stranded leaf edits, and the mirror follows from the Materialized
+    // ack, which empties the overlay entirely.
     handle.tx.send(remove_value_action(entry_address));
-    drive(actor.run_one_batch_for_test());
-
-    // Revert the remaining variant switch: with the subtree really gone on
-    // both sides this empties the overlay entirely.
-    handle.tx.send(revert_action(variant_address));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("refresh emits a snapshot");
-    let mapping = find_slot(&snapshot, "mapping");
-    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    let ports = find_slot(&snapshot, "ports");
     assert_eq!(
-        mapping.state.dirty,
+        ports.state.dirty,
         UiNodeDirtyState::Clean,
-        "no stranded edit may keep the mapping dirty or resurrect the entry"
+        "no stranded edit may keep the ports map dirty or resurrect the entry"
     );
     assert!(
-        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        try_find_slot(&snapshot, "ports[1]").is_none(),
         "the removed entry has no surviving row"
     );
     assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
@@ -2319,7 +2320,8 @@ const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render_2
 
 /// Find the shader node's inline asset editor anywhere in the editor DTO
 /// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
-/// node's) asset slot sections.
+/// node's) asset slot sections, and it is the GLSL one (the fixture's
+/// mapping document rides an inline editor too).
 pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     let editor = view
         .panes
@@ -2332,7 +2334,10 @@ pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
 
     fn in_slots(slots: &[crate::UiConfigSlot]) -> Option<crate::UiAssetEditor> {
         slots.iter().find_map(|slot| match &slot.body {
-            crate::UiConfigSlotBody::Asset(asset) => asset.inline_editor.clone(),
+            crate::UiConfigSlotBody::Asset(asset) => asset
+                .inline_editor
+                .clone()
+                .filter(|editor| editor.kind == crate::UiAssetEditorKind::Glsl),
             crate::UiConfigSlotBody::Record(record) => in_slots(&record.fields),
             _ => None,
         })
@@ -2404,9 +2409,13 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     }
   }
 }"#;
+    // An output renders only the fixtures whose patching places runs on
+    // it by name, so the fixture carries the starter's map2d (its `start`
+    // names output `"1"`) and the output carries that name.
     let fixture_json = r#"{
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
+  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" },
   "bindings": {
     "input": { "source": "bus:visual.out" },
     "output": { "target": "bus:control.out" }
@@ -2417,6 +2426,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
+  "name": "1",
   "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
@@ -2450,6 +2460,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
         ("output.json", output_json),
+        ("fixture.map2d.json", STARTER_FIXTURE_MAP2D),
         ("shader.glsl", ASSET_SHADER_V1),
     ];
     for (name, body) in files {

@@ -2682,10 +2682,10 @@ mod tests {
         // subtree and the ack must list every cleared entry so ack-mirroring
         // clients land on the same overlay without a fetch.
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let entry = SlotPath::parse("mapping.PathPoints.paths[5]").unwrap();
-        let leaf = SlotPath::parse("mapping.PathPoints.paths[5].PointList.first_channel").unwrap();
+        let (fs, mut registry) = output_project(&shapes);
+        let output = output_artifact();
+        let entry = SlotPath::parse("ports[5]").unwrap();
+        let leaf = SlotPath::parse("ports[5].endpoint").unwrap();
 
         let results = mutate_batch(
             &fs,
@@ -2693,15 +2693,18 @@ mod tests {
             &shapes,
             vec![
                 MutationOp::PutSlotEdit {
-                    artifact: fixture.clone(),
+                    artifact: output.clone(),
                     edit: SlotEdit::ensure_present(entry.clone()),
                 },
                 MutationOp::PutSlotEdit {
-                    artifact: fixture.clone(),
-                    edit: SlotEdit::assign_value(leaf.clone(), LpValue::U32(7)),
+                    artifact: output.clone(),
+                    edit: SlotEdit::assign_value(
+                        leaf.clone(),
+                        LpValue::String("ws281x:local:IO7".into()),
+                    ),
                 },
                 MutationOp::PutSlotEdit {
-                    artifact: fixture.clone(),
+                    artifact: output.clone(),
                     edit: SlotEdit::remove(entry.clone()),
                 },
             ],
@@ -2726,21 +2729,18 @@ mod tests {
         );
 
         // No resurrection: the effective def is back to the authored keys.
-        let def = effective_fixture_def(&registry);
-        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
-            panic!("expected PathPoints mapping");
-        };
-        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        let ports = &effective_output_def(&registry).ports;
+        let keys: Vec<u32> = ports.entries.iter().map(|(key, _)| *key).collect();
         assert_eq!(keys, vec![0, 3], "the removed entry must not resurrect");
     }
 
     #[test]
     fn singular_mutate_clears_stranded_descendants_of_a_normalized_remove() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let entry = SlotPath::parse("mapping.PathPoints.paths[5]").unwrap();
-        let leaf = SlotPath::parse("mapping.PathPoints.paths[5].PointList.first_channel").unwrap();
+        let (fs, mut registry) = output_project(&shapes);
+        let output = output_artifact();
+        let entry = SlotPath::parse("ports[5]").unwrap();
+        let leaf = SlotPath::parse("ports[5].endpoint").unwrap();
         let ctx = ParseCtx { shapes: &shapes };
         let mut mutate = |mutation: MutationOp, frame: i64| {
             registry
@@ -2750,21 +2750,21 @@ mod tests {
 
         mutate(
             MutationOp::PutSlotEdit {
-                artifact: fixture.clone(),
+                artifact: output.clone(),
                 edit: SlotEdit::ensure_present(entry.clone()),
             },
             10,
         );
         mutate(
             MutationOp::PutSlotEdit {
-                artifact: fixture.clone(),
-                edit: SlotEdit::assign_value(leaf, LpValue::U32(7)),
+                artifact: output.clone(),
+                edit: SlotEdit::assign_value(leaf, LpValue::String("ws281x:local:IO7".into())),
             },
             11,
         );
         let result = mutate(
             MutationOp::PutSlotEdit {
-                artifact: fixture,
+                artifact: output,
                 edit: SlotEdit::remove(entry),
             },
             12,
@@ -3069,26 +3069,26 @@ mod tests {
             Revision::new(12),
             vec![MutationOp::PutSlotEdit {
                 artifact: fixture.clone(),
-                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Map2d").unwrap()),
             }],
         );
         assert_accepted(&results[0], true);
         assert!(matches!(
             effective_fixture_def(&registry).mapping.value(),
-            lpc_model::MappingConfig::PathPoints { .. }
+            lpc_model::MappingConfig::Map2d { .. }
         ));
     }
 
     #[test]
     fn switching_back_to_the_base_variant_clears_the_pending_switch_subtree() {
-        // The dropdown repro: base authors PathPoints. Switch to Map2d
-        // (stores at mapping.Map2d, plus an edit under it), then switch
-        // BACK to PathPoints. The EnsurePresent at mapping.PathPoints
-        // normalizes away (base is already PathPoints) — but it must also
-        // clear the sibling variant subtree, or the stored mapping.SvgPath
-        // entry survives and the effective def stays stuck on Map2d.
+        // The dropdown repro: base is Unset. Switch to Map2d (stores at
+        // mapping.Map2d, plus an edit under it), then switch BACK to Unset.
+        // The EnsurePresent at mapping.Unset normalizes away (base is
+        // already Unset) — but it must also clear the sibling variant
+        // subtree, or the stored mapping.Map2d entry survives and the
+        // effective def stays stuck on Map2d.
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let (fs, mut registry) = fixture_project(&shapes);
         let fixture = fixture_artifact();
         let map2d_path = SlotPath::parse("mapping.Map2d").unwrap();
         let map2d_leaf = SlotPath::parse("mapping.Map2d.source").unwrap();
@@ -3127,7 +3127,7 @@ mod tests {
             Revision::new(12),
             vec![MutationOp::PutSlotEdit {
                 artifact: fixture.clone(),
-                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Unset").unwrap()),
             }],
         );
         let edits = assert_materialized(&results[0], true);
@@ -3135,7 +3135,7 @@ mod tests {
             edits,
             &[
                 StoredSlotEdit::Removed {
-                    path: SlotPath::parse("mapping.PathPoints").unwrap(),
+                    path: SlotPath::parse("mapping.Unset").unwrap(),
                 },
                 StoredSlotEdit::Removed { path: map2d_path },
                 StoredSlotEdit::Removed { path: map2d_leaf },
@@ -3150,7 +3150,7 @@ mod tests {
         assert!(
             matches!(
                 effective_fixture_def(&registry).mapping.value(),
-                lpc_model::MappingConfig::PathPoints { .. }
+                lpc_model::MappingConfig::Unset
             ),
             "the effective def is back on the base variant"
         );
@@ -3158,13 +3158,15 @@ mod tests {
 
     #[test]
     fn switching_through_a_third_variant_leaves_exactly_one_pending_switch() {
-        // A → B → C on the mapping enum (base PathPoints): selecting a new
-        // variant replaces the previous pending switch, so after Map2d
-        // then Unset exactly one entry remains — at mapping.Unset.
+        // A → B → C on the projection-shape enum under the fixture's
+        // consume policy (base Radial): selecting a new variant replaces the
+        // previous pending switch, so after Angular then ExtrudeY exactly
+        // one entry remains — at the ExtrudeY variant path.
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let (fs, mut registry) = consume_policy_fixture_project(&shapes);
         let fixture = fixture_artifact();
-        let unset = SlotPath::parse("mapping.Unset").unwrap();
+        let shape = "consume.Policy.from_1d.Project.shape";
+        let extrude_y = SlotPath::parse(&format!("{shape}.ExtrudeY")).unwrap();
 
         let results = mutate_batch(
             &fs,
@@ -3172,7 +3174,9 @@ mod tests {
             &shapes,
             vec![MutationOp::PutSlotEdit {
                 artifact: fixture.clone(),
-                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Map2d").unwrap()),
+                edit: SlotEdit::ensure_present(
+                    SlotPath::parse(&format!("{shape}.Angular")).unwrap(),
+                ),
             }],
         );
         assert_accepted(&results[0], true);
@@ -3184,10 +3188,10 @@ mod tests {
             Revision::new(12),
             vec![MutationOp::PutSlotEdit {
                 artifact: fixture.clone(),
-                edit: SlotEdit::ensure_present(unset.clone()),
+                edit: SlotEdit::ensure_present(extrude_y.clone()),
             }],
         );
-        // The stored switch replaces the pending SvgPath switch through
+        // The stored switch replaces the pending Angular switch through
         // `SlotOverlay::put_edit`'s parent-scope canonicalization (which the
         // mirror shares, so the plain ack keeps both sides aligned).
         assert_accepted(&results[0], true);
@@ -3198,11 +3202,11 @@ mod tests {
             .and_then(ArtifactOverlay::as_slot)
             .expect("slot overlay");
         assert_eq!(overlay.edits.len(), 1, "exactly one pending switch");
-        assert!(overlay.contains_path(&unset));
-        assert!(matches!(
-            effective_fixture_def(&registry).mapping.value(),
-            lpc_model::MappingConfig::Unset
-        ));
+        assert!(overlay.contains_path(&extrude_y));
+        assert_eq!(
+            effective_consume_shape(&registry),
+            lpc_model::ProjectionShape::ExtrudeY
+        );
     }
 
     #[test]
@@ -3250,7 +3254,7 @@ mod tests {
     #[test]
     fn singular_mutate_clears_sibling_variant_entries_like_the_batch_path() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let (fs, mut registry) = fixture_project(&shapes);
         let fixture = fixture_artifact();
         let ctx = ParseCtx { shapes: &shapes };
 
@@ -3272,7 +3276,7 @@ mod tests {
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: fixture,
-                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Unset").unwrap()),
                 },
                 Revision::new(12),
                 &ctx,
@@ -3286,7 +3290,7 @@ mod tests {
         );
         assert!(matches!(
             effective_fixture_def(&registry).mapping.value(),
-            lpc_model::MappingConfig::PathPoints { .. }
+            lpc_model::MappingConfig::Unset
         ));
     }
 
@@ -3371,18 +3375,18 @@ mod tests {
     #[test]
     fn move_of_a_leaf_valued_map_entry_materializes_ensure_assign_remove() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].PointList.points";
+        let (fs, mut registry) = fluid_project(&shapes);
+        let fluid = fluid_artifact();
+        let emitters = "emitters";
 
         let results = mutate_batch(
             &fs,
             &mut registry,
             &shapes,
             vec![MutationOp::MoveSlotEntry {
-                artifact: fixture.clone(),
-                from: SlotPath::parse(&format!("{counts}[1]")).unwrap(),
-                to: SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                artifact: fluid.clone(),
+                from: SlotPath::parse(&format!("{emitters}[1]")).unwrap(),
+                to: SlotPath::parse(&format!("{emitters}[2]")).unwrap(),
             }],
         );
 
@@ -3393,17 +3397,25 @@ mod tests {
         // paths carry none; the removed source key exists in base, so its
         // stored remove carries the base leaf's display string.
         use lpc_model::ToLpValue as _;
-        let moved = lpc_model::Xy([0.6, 0.4]);
+        let moved = lpc_model::FluidEmitter {
+            id: 1,
+            pos: [0.6, 0.4],
+            dir: [0.0, 1.0],
+            radius: 0.1,
+            color: [1.0, 0.25, 0.0],
+            velocity: 0.4,
+            intensity: 0.8,
+        };
         let edits = assert_materialized(&results[0], true);
         assert_eq!(edits.len(), 3, "{edits:?}");
         assert_eq!(
             &edits[..2],
             &[
                 StoredSlotEdit::put(SlotEdit::ensure_present(
-                    SlotPath::parse(&format!("{counts}[2]")).unwrap()
+                    SlotPath::parse(&format!("{emitters}[2]")).unwrap()
                 )),
                 StoredSlotEdit::put(SlotEdit::assign_value(
-                    SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                    SlotPath::parse(&format!("{emitters}[2]")).unwrap(),
                     moved.to_lp_value(),
                 )),
             ]
@@ -3415,32 +3427,27 @@ mod tests {
             } => {
                 assert_eq!(
                     edit,
-                    &SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap())
+                    &SlotEdit::remove(SlotPath::parse(&format!("{emitters}[1]")).unwrap())
                 );
                 assert!(display.contains("0.6"), "{display}");
             }
             other => panic!("expected annotated remove of the source entry, got {other:?}"),
         }
 
-        let def = effective_fixture_def(&registry);
-        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
-            panic!("expected PathPoints mapping");
-        };
-        let lpc_model::PathSpec::PointList { points, .. } =
-            paths.entries.get(&0).expect("path 0").value();
-        let points_by_key: Vec<(u32, [f32; 2])> = points
+        let pos_by_key: Vec<(u32, [f32; 2])> = effective_fluid_def(&registry)
+            .emitters
             .entries
             .iter()
-            .map(|(key, value)| (*key, value.value().0))
+            .map(|(key, emitter)| (*key, emitter.pos))
             .collect();
-        assert_eq!(points_by_key, vec![(0, [0.1, 0.9]), (2, [0.6, 0.4])]);
+        assert_eq!(pos_by_key, vec![(0, [0.1, 0.9]), (2, [0.6, 0.4])]);
 
         // A move is an overlay change like any other: revision advances.
         assert_eq!(registry.overlay().changed_at(), Revision::new(10));
         assert_eq!(
             registry
-                .def(&NodeDefLocation::artifact_root(fixture))
-                .expect("fixture def")
+                .def(&NodeDefLocation::artifact_root(fluid))
+                .expect("fluid def")
                 .revision,
             Revision::new(10)
         );
@@ -3449,45 +3456,51 @@ mod tests {
     #[test]
     fn move_of_a_composite_map_entry_preserves_variant_selection_and_diverged_leaves() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let paths = "mapping.PathPoints.paths";
+        let (fs, mut registry) = output_project(&shapes);
+        let ports = "ports";
 
         let results = mutate_batch(
             &fs,
             &mut registry,
             &shapes,
             vec![MutationOp::MoveSlotEntry {
-                artifact: fixture_artifact(),
-                from: SlotPath::parse(&format!("{paths}[3]")).unwrap(),
-                to: SlotPath::parse(&format!("{paths}[1]")).unwrap(),
+                artifact: output_artifact(),
+                from: SlotPath::parse(&format!("{ports}[3]")).unwrap(),
+                to: SlotPath::parse(&format!("{ports}[1]")).unwrap(),
             }],
         );
 
         // The materialization must carry the diverged leaves and the nested
-        // map add. (PointList is the sole PathSpec variant since the
-        // parametric-shape retirement, so an explicit variant-selection
-        // edit may normalize away — multi-variant move preservation is
-        // covered by the mapping-enum switch tests above.)
+        // option body. (No map entry in the model today holds an enum
+        // variant, so variant-selection preservation is covered by the
+        // enum switch tests above.)
         let edits = assert_materialized(&results[0], true);
         let put = StoredSlotEdit::put;
         assert_eq!(
             edits.first(),
             Some(&put(SlotEdit::ensure_present(
-                SlotPath::parse(&format!("{paths}[1]")).unwrap()
+                SlotPath::parse(&format!("{ports}[1]")).unwrap()
             )))
         );
         assert!(
             edits.contains(&put(SlotEdit::assign_value(
-                SlotPath::parse(&format!("{paths}[1].PointList.first_channel")).unwrap(),
-                LpValue::U32(5),
+                SlotPath::parse(&format!("{ports}[1].endpoint")).unwrap(),
+                LpValue::String("ws281x:local:IO5".into()),
             ))),
             "diverged leaf must be re-assigned: {edits:?}"
         );
         assert!(
             edits.contains(&put(SlotEdit::ensure_present(
-                SlotPath::parse(&format!("{paths}[1].PointList.points[0]")).unwrap()
+                SlotPath::parse(&format!("{ports}[1].count.some")).unwrap()
             ))),
-            "nested map entries must be re-created: {edits:?}"
+            "nested option bodies must be re-created: {edits:?}"
+        );
+        assert!(
+            edits.contains(&put(SlotEdit::assign_value(
+                SlotPath::parse(&format!("{ports}[1].count.some")).unwrap(),
+                LpValue::U32(5),
+            ))),
+            "a diverged leaf inside a nested option must be re-assigned: {edits:?}"
         );
         // The removed source entry exists in base as a composite subtree, so
         // its stored remove carries the capped compact-JSON base display.
@@ -3498,38 +3511,28 @@ mod tests {
             }) => {
                 assert_eq!(
                     edit,
-                    &SlotEdit::remove(SlotPath::parse(&format!("{paths}[3]")).unwrap())
+                    &SlotEdit::remove(SlotPath::parse(&format!("{ports}[3]")).unwrap())
                 );
-                assert!(display.contains("PointList"), "{display}");
+                assert!(display.contains("ws281x:local:IO5"), "{display}");
             }
             other => panic!("expected annotated remove of the source entry, got {other:?}"),
         }
 
-        let def = effective_fixture_def(&registry);
-        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
-            panic!("expected PathPoints mapping");
-        };
-        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        let ports = &effective_output_def(&registry).ports;
+        let keys: Vec<u32> = ports.entries.iter().map(|(key, _)| *key).collect();
         assert_eq!(keys, vec![0, 1], "entry moved from key 3 to key 1");
-        let lpc_model::PathSpec::PointList {
-            first_channel,
-            points,
-        } = paths.entries.get(&1).expect("path 1").value();
-        assert_eq!(*first_channel.value(), 5);
-        assert_eq!(
-            points.entries.get(&0).map(|xy| xy.value().0),
-            Some([0.25, 0.75])
-        );
+        let port = ports.entries.get(&1).expect("port 1");
+        assert_eq!(port.endpoint().as_str(), "ws281x:local:IO5");
+        assert_eq!(port.count(), Some(5));
     }
 
     #[test]
     fn move_rejections_cover_absent_source_occupied_target_and_non_map_paths() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].PointList.points";
+        let (fs, mut registry) = fluid_project(&shapes);
+        let fluid = fluid_artifact();
         let move_op = |from: &str, to: &str| MutationOp::MoveSlotEntry {
-            artifact: fixture.clone(),
+            artifact: fluid.clone(),
             from: SlotPath::parse(from).unwrap(),
             to: SlotPath::parse(to).unwrap(),
         };
@@ -3540,15 +3543,15 @@ mod tests {
             &shapes,
             vec![
                 // Source absent in the effective def.
-                move_op("mapping.PathPoints.paths[9]", "mapping.PathPoints.paths[8]"),
+                move_op("emitters[9]", "emitters[8]"),
                 // Target occupied in the effective def.
-                move_op(&format!("{counts}[0]"), &format!("{counts}[1]")),
+                move_op("emitters[0]", "emitters[1]"),
                 // Keyed path under a value leaf: not a map.
-                move_op("color_order[0]", "color_order[1]"),
+                move_op("solver_iterations[0]", "solver_iterations[1]"),
                 // Endpoints in different maps.
-                move_op(&format!("{counts}[0]"), "mapping.PathPoints.paths[5]"),
+                move_op("emitters[0]", "bindings[speed]"),
                 // Endpoint that is not a map-entry path at all.
-                move_op("mapping", "mapping.PathPoints.paths[5]"),
+                move_op("size", "emitters[5]"),
             ],
         );
 
@@ -3583,17 +3586,17 @@ mod tests {
     #[test]
     fn move_back_to_the_source_key_normalizes_the_overlay_clean() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let paths = "mapping.PathPoints.paths";
-        let entry = |key: u32| SlotPath::parse(&format!("{paths}[{key}]")).unwrap();
+        let (fs, mut registry) = output_project(&shapes);
+        let output = output_artifact();
+        let ports = "ports";
+        let entry = |key: u32| SlotPath::parse(&format!("{ports}[{key}]")).unwrap();
 
         let results = mutate_batch(
             &fs,
             &mut registry,
             &shapes,
             vec![MutationOp::MoveSlotEntry {
-                artifact: fixture.clone(),
+                artifact: output.clone(),
                 from: entry(3),
                 to: entry(1),
             }],
@@ -3611,7 +3614,7 @@ mod tests {
             &shapes,
             Revision::new(12),
             vec![MutationOp::MoveSlotEntry {
-                artifact: fixture.clone(),
+                artifact: output.clone(),
                 from: entry(1),
                 to: entry(3),
             }],
@@ -3625,7 +3628,7 @@ mod tests {
         );
         assert!(
             edits.contains(&StoredSlotEdit::Removed {
-                path: SlotPath::parse(&format!("{paths}[1].PointList.first_channel")).unwrap(),
+                path: SlotPath::parse(&format!("{ports}[1].endpoint")).unwrap(),
             }),
             "stranded descendants of the removed entry are cleared: {edits:?}"
         );
@@ -3633,40 +3636,36 @@ mod tests {
         assert_eq!(registry.overlay().changed_at(), Revision::new(12));
         assert_eq!(
             registry
-                .def(&NodeDefLocation::artifact_root(fixture))
-                .expect("fixture def")
+                .def(&NodeDefLocation::artifact_root(output))
+                .expect("output def")
                 .revision,
             Revision::new(12),
             "the cancelling move must advance the def revision"
         );
 
-        let def = effective_fixture_def(&registry);
-        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
-            panic!("expected PathPoints mapping");
-        };
-        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        let ports = &effective_output_def(&registry).ports;
+        let keys: Vec<u32> = ports.entries.iter().map(|(key, _)| *key).collect();
         assert_eq!(keys, vec![0, 3], "effective def is back to base");
-        assert!(matches!(
-            paths.entries.get(&3).expect("path 3").value(),
-            lpc_model::PathSpec::PointList { .. }
-        ));
+        let port = ports.entries.get(&3).expect("port 3");
+        assert_eq!(port.endpoint().as_str(), "ws281x:local:IO5");
+        assert_eq!(port.count(), Some(5));
     }
 
     #[test]
     fn singular_mutate_applies_moves_and_errors_on_invalid_ones() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
-        let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].PointList.points";
+        let (fs, mut registry) = fluid_project(&shapes);
+        let fluid = fluid_artifact();
+        let emitters = "emitters";
         let ctx = ParseCtx { shapes: &shapes };
 
         let result = registry
             .mutate(
                 &fs,
                 MutationOp::MoveSlotEntry {
-                    artifact: fixture.clone(),
-                    from: SlotPath::parse(&format!("{counts}[1]")).unwrap(),
-                    to: SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                    artifact: fluid.clone(),
+                    from: SlotPath::parse(&format!("{emitters}[1]")).unwrap(),
+                    to: SlotPath::parse(&format!("{emitters}[2]")).unwrap(),
                 },
                 Revision::new(10),
                 &ctx,
@@ -3679,9 +3678,9 @@ mod tests {
             .mutate(
                 &fs,
                 MutationOp::MoveSlotEntry {
-                    artifact: fixture,
-                    from: SlotPath::parse(&format!("{counts}[9]")).unwrap(),
-                    to: SlotPath::parse(&format!("{counts}[5]")).unwrap(),
+                    artifact: fluid,
+                    from: SlotPath::parse(&format!("{emitters}[9]")).unwrap(),
+                    to: SlotPath::parse(&format!("{emitters}[5]")).unwrap(),
                 },
                 Revision::new(12),
                 &ctx,
@@ -3754,7 +3753,7 @@ mod tests {
     #[test]
     fn structural_remove_of_a_base_present_entry_annotates_composite_json() {
         let shapes = SlotShapeRegistry::default();
-        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let (fs, mut registry) = output_project(&shapes);
 
         // Removing a base-present composite map entry stores a Remove edit;
         // the annotation is the entry's compact-JSON base rendering.
@@ -3763,15 +3762,15 @@ mod tests {
             &mut registry,
             &shapes,
             vec![MutationOp::PutSlotEdit {
-                artifact: fixture_artifact(),
-                edit: SlotEdit::remove(SlotPath::parse("mapping.PathPoints.paths[0]").unwrap()),
+                artifact: output_artifact(),
+                edit: SlotEdit::remove(SlotPath::parse("ports[0]").unwrap()),
             }],
         );
 
         assert_accepted(&results[0], true);
         let display = accepted_base_display(&results[0]).expect("composite base display");
         assert!(display.starts_with('{'), "{display}");
-        assert!(display.contains("PointList"), "{display}");
+        assert!(display.contains("ws281x:local:D10"), "{display}");
     }
 
     #[test]
@@ -3926,46 +3925,97 @@ mod tests {
         ArtifactLocation::file("/fixture.json")
     }
 
-    /// Fixture project whose `mapping` authors a `PathPoints` variant with a
-    /// leaf-valued nested map (`paths[0].PointList.points`) and a composite
-    /// entry (`paths[3]`: `PointList` with a diverged leaf and a nested map
-    /// entry) — the move-op fixtures.
-    fn path_points_fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+    /// Fixture project whose `consume` authors a `Policy` whose
+    /// `from_1d.Project.shape` is the non-default `Radial` variant of the
+    /// four-variant projection-shape enum — the multi-variant switch fixture.
+    fn consume_policy_fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+        one_node_project(
+            shapes,
+            "pixels",
+            "/fixture.json",
+            r#"{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "consume": {
+    "kind": "Policy",
+    "from_1d": { "kind": "Project", "shape": { "kind": "Radial" } }
+  }
+}"#,
+        )
+    }
+
+    /// Output project whose `ports` map holds a minimal entry (`ports[0]`)
+    /// and a composite entry with a diverged leaf and a present option body
+    /// (`ports[3]`: its own endpoint and `count` 5) — the composite move-op
+    /// fixture.
+    fn output_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+        one_node_project(
+            shapes,
+            "strip",
+            "/output.json",
+            r#"{
+  "kind": "Output",
+  "ports": {
+    "0": { "endpoint": "ws281x:local:D10" },
+    "3": { "endpoint": "ws281x:local:IO5", "count": 5 }
+  }
+}"#,
+        )
+    }
+
+    fn output_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/output.json")
+    }
+
+    /// Fluid project whose `emitters` map is leaf-valued (each entry is one
+    /// whole `FluidEmitter` value) — the leaf-valued move-op fixture.
+    fn fluid_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+        one_node_project(
+            shapes,
+            "smoke",
+            "/fluid.json",
+            r#"{
+  "kind": "Fluid",
+  "emitters": {
+    "0": {
+      "id": 0, "pos": [0.1, 0.9], "dir": [1.0, 0.0], "radius": 0.05,
+      "color": [1.0, 1.0, 1.0], "velocity": 0.0, "intensity": 1.0
+    },
+    "1": {
+      "id": 1, "pos": [0.6, 0.4], "dir": [0.0, 1.0], "radius": 0.1,
+      "color": [1.0, 0.25, 0.0], "velocity": 0.4, "intensity": 0.8
+    }
+  }
+}"#,
+        )
+    }
+
+    fn fluid_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/fluid.json")
+    }
+
+    /// A module holding one node, `name`, whose def is `json` at `file`.
+    fn one_node_project(
+        shapes: &SlotShapeRegistry,
+        name: &str,
+        file: &str,
+        json: &str,
+    ) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
         crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
             "/module.json",
-            r#"{
+            &format!(
+                r#"{{
   "kind": "Module",
-  "nodes": {
-    "pixels": { "ref": "./fixture.json" }
-  }
-}"#,
+  "nodes": {{
+    "{name}": {{ "ref": ".{file}" }}
+  }}
+}}"#
+            ),
         );
-        crate::test::fixtures::write_file(
-            &mut fs,
-            "/fixture.json",
-            r#"{
-  "kind": "Fixture",
-  "color_order": "rgb",
-  "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 1.5,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "points": { "0": [0.1, 0.9], "1": [0.6, 0.4] }
-      },
-      "3": {
-        "kind": "PointList",
-        "first_channel": 5,
-        "points": { "0": [0.25, 0.75] }
-      }
-    }
-  }
-}"#,
-        );
+        crate::test::fixtures::write_file(&mut fs, file, json);
 
         let mut registry = ProjectRegistry::new();
         registry
@@ -4066,6 +4116,39 @@ mod tests {
             .expect("fixture def loaded")
             .as_fixture()
             .expect("fixture def")
+    }
+
+    fn effective_output_def(registry: &ProjectRegistry) -> &lpc_model::OutputDef {
+        registry
+            .def(&NodeDefLocation::artifact_root(output_artifact()))
+            .expect("output def entry")
+            .state
+            .loaded_def()
+            .expect("output def loaded")
+            .as_output()
+            .expect("output def")
+    }
+
+    fn effective_fluid_def(registry: &ProjectRegistry) -> &lpc_model::FluidDef {
+        registry
+            .def(&NodeDefLocation::artifact_root(fluid_artifact()))
+            .expect("fluid def entry")
+            .state
+            .loaded_def()
+            .expect("fluid def loaded")
+            .as_fluid()
+            .expect("fluid def")
+    }
+
+    /// The effective `consume.Policy.from_1d.Project.shape` of the fixture.
+    fn effective_consume_shape(registry: &ProjectRegistry) -> lpc_model::ProjectionShape {
+        let lpc_model::VisualConsumerSpace::Policy { from_1d, .. } =
+            effective_fixture_def(registry).consume.value()
+        else {
+            panic!("expected a Policy consume");
+        };
+        let lpc_model::ConsumerCell2::Project { shape, .. } = from_1d.value();
+        *shape.value()
     }
 
     fn assert_accepted(result: &MutationCmdResult, expected_changed: bool) {

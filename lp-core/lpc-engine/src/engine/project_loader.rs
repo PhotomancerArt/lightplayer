@@ -1391,12 +1391,6 @@ fn resolve_fixture_mapping(
             let mapping = lpc_mapping::map2d6::read(&text.text).map_err(|e| refused(&e))?;
             Ok(FixtureMappingRead::Parts { mapping, source })
         }
-        MappingConfig::PathPoints { .. } => Err(ProjectLoadError::InvalidProjectReference {
-            path: node_label(node),
-            reason: String::from(
-                "resolve fixture mapping: hand-placed PathPoints lamps are not read",
-            ),
-        }),
         MappingConfig::Unset => Ok(FixtureMappingRead::Unset {
             mapping: FixtureMapping::Slots(MappingConfig::Unset),
         }),
@@ -2822,10 +2816,11 @@ mod tests {
     }
 
     /// Hand-placed `PathPoints` lamps inside a format-12 project (they became
-    /// a map2d of `points` parts) fail the fixture's load by the same name.
+    /// a map2d of `points` parts): format 12 has no such mapping, so the
+    /// fixture def does not parse.
     #[cfg(feature = "node-fixture")]
     #[test]
-    fn hand_placed_path_points_in_a_format_12_project_are_refused_by_name() {
+    fn hand_placed_path_points_in_a_format_12_project_do_not_parse() {
         let fs = fixture_project_fs();
         fs.write_file(
             "/fixture.json".as_path(),
@@ -2838,7 +2833,7 @@ mod tests {
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        assert_fixture_node_error(&rt, "hand-placed PathPoints lamps are not read");
+        assert_fixture_node_error(&rt, "PathPoints");
     }
 
     /// A one-path format-6 document: three lamps from lamp 0 of `main`.
@@ -3915,20 +3910,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,
@@ -4380,20 +4362,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,
@@ -4453,20 +4422,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,

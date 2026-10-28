@@ -1165,19 +1165,19 @@ fn a_panel_clear_is_a_coalescing_barrier_between_writes() {
 #[test]
 fn structural_ops_never_coalesce_even_for_one_address() {
     let plan = CommandPlan::from_batch(vec![
-        ensure_present_action("mapping.PathPoints.paths[0]"),
-        ensure_present_action("mapping.PathPoints.paths[0]"),
-        remove_value_action("mapping.PathPoints.paths[0]"),
-        remove_value_action("mapping.PathPoints.paths[0]"),
+        ensure_present_action("ports[0]"),
+        ensure_present_action("ports[0]"),
+        remove_value_action("ports[0]"),
+        remove_value_action("ports[0]"),
     ]);
 
     assert_eq!(
         planned_slot_ops(&plan),
         vec![
-            ("ensure:mapping.PathPoints.paths[0]".to_string(), None),
-            ("ensure:mapping.PathPoints.paths[0]".to_string(), None),
-            ("remove:mapping.PathPoints.paths[0]".to_string(), None),
-            ("remove:mapping.PathPoints.paths[0]".to_string(), None),
+            ("ensure:ports[0]".to_string(), None),
+            ("ensure:ports[0]".to_string(), None),
+            ("remove:ports[0]".to_string(), None),
+            ("remove:ports[0]".to_string(), None),
         ],
         "structural gestures are dispatched one mutation each, in order"
     );

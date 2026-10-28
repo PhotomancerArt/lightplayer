@@ -768,7 +768,7 @@ impl Rig {
             let id = node_id(&rt, node);
             let runtime = FixtureNode::new(
                 id,
-                MappingConfig::path_points_vec(Vec::new(), 1.0),
+                MappingConfig::Unset,
                 FixtureSamplingConfig::Direct,
                 Revision::new(1),
             )

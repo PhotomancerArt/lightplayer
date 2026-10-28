@@ -9613,7 +9613,8 @@ impl StudioController {
     /// Gather every fixture's mapping points (union, labeled by fixture
     /// name — plan decision: v1 targets all fixtures) plus the compact
     /// fixture summary for the system prompt. Unreadable or unparsable
-    /// fixture defs are skipped; SvgPath mappings contribute no points.
+    /// fixture defs are skipped; a map2d mapping is read here only as its
+    /// source reference, so it contributes no points.
     async fn agent_fixture_context(
         &mut self,
     ) -> (Vec<lps_probe::LedPoint>, Option<lpa_agent::FixtureSummary>) {
@@ -10577,7 +10578,6 @@ fn mapping_kind_label(mapping: &lpc_model::nodes::fixture::MappingConfig) -> &'s
     use lpc_model::nodes::fixture::MappingConfig;
     match mapping {
         MappingConfig::Unset => "unset",
-        MappingConfig::PathPoints { .. } => "path points",
         MappingConfig::Map2d { .. } => "map2d document",
     }
 }
