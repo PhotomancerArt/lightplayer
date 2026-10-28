@@ -987,20 +987,42 @@ fn display_walk_files() -> Vec<(String, Vec<u8>)> {
         .iter_mut()
         .find(|(path, _)| path == "output.json")
         .expect("its output");
-    let mut def: serde_json::Value = serde_json::from_slice(&output.1).expect("json");
-    def.as_object_mut().expect("an object").remove("name");
-    def["ports"] = (0..5)
+    // Edited as text: a node file's keys keep their authored order (`kind`
+    // first), which the engine's slot reader needs; serde_json's map would
+    // sort them.
+    let text = String::from_utf8(output.1.clone()).expect("utf-8");
+    let lines: Vec<&str> = text.lines().collect();
+    let name = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("\"name\""))
+        .expect("the starter's output is named");
+    let ports = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("\"ports\""))
+        .expect("its ports");
+    let bindings = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("\"bindings\""))
+        .expect("its bindings");
+    let five: Vec<String> = (0..5)
         .map(|k| {
-            (
-                k.to_string(),
-                serde_json::json!({"endpoint": format!("ws281x:local:D{k}"), "count": 64}),
+            let comma = if k < 4 { "," } else { "" };
+            format!(
+                "    \"{k}\": {{\n      \"endpoint\": \"ws281x:local:D{k}\",\n      \"count\": 64\n    }}{comma}"
             )
         })
-        .collect::<serde_json::Map<_, _>>()
-        .into();
-    let mut text = serde_json::to_vec_pretty(&def).expect("it writes");
-    text.push(b'\n');
-    output.1 = text;
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i == name || (i > ports && i < bindings - 1) {
+            continue;
+        }
+        out.push(line.to_string());
+        if i == ports {
+            out.extend(five.iter().cloned());
+        }
+    }
+    output.1 = (out.join("\n") + "\n").into_bytes();
     project.files
 }
 
