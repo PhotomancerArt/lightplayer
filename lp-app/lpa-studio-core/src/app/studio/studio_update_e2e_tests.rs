@@ -285,12 +285,21 @@ fn an_older_wire_board_is_updated_over_the_update_channel_on_every_link() {
         bench.press(device, "update-firmware", OfferArgs::new());
 
         let mut rode = false;
-        for _ in 0..MAX_STEPS {
+        // The card's Firmware row says the update's work as it goes (its
+        // verb; the surface carries the number).
+        let mut work = Vec::new();
+        for n in 0..MAX_STEPS {
             bench.step();
             rode |= matches!(
                 bench.standing(device),
                 UpdateStanding::Updating { link: l, .. } if l == link
             );
+            if n % 50 == 0
+                && let Some(words) = bench.firmware_work(device)
+                && !work.iter().any(|seen: &String| seen == &words)
+            {
+                work.push(words);
+            }
             if bench.outcome(device).is_some() {
                 break;
             }
@@ -303,6 +312,10 @@ fn an_older_wire_board_is_updated_over_the_update_channel_on_every_link() {
             "[{endpoint}]"
         );
         assert!(rode, "[{endpoint}] the update rode {link:?}");
+        assert!(
+            work.iter().any(|seen| seen.starts_with("updating")),
+            "[{endpoint}] the Firmware row never said updating: {work:?}"
+        );
         assert!(
             bench.said(&format!(
                 "update v2026.10.09-1 → v2026.10.09-2 over {}",
@@ -2736,6 +2749,20 @@ impl Bench {
             .pending()
             .first()
             .map(lpa_devices::PendingLink::device_id)
+    }
+
+    /// The words of the work the card's Firmware row shows, when any.
+    fn firmware_work(&self, device: DeviceId) -> Option<String> {
+        let home = self.controller.view().home?;
+        let card = home
+            .devices
+            .cards
+            .into_iter()
+            .find(|card| card.device == device)?;
+        card.bar(crate::BarLayer::Firmware)
+            .work
+            .as_ref()
+            .map(|work| work.words.clone())
     }
 
     fn firmware_face(&self, device: DeviceId) -> lpa_devices::view::FirmwareFace {

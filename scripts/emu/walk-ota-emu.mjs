@@ -48,6 +48,20 @@
 //                nothing in the list, so the press reads "Look up r1"; the
 //                store finds it by version, it joins the list, arms (older)
 //                and installs on the second press. `--steps install-lookup`
+//   older-wire   a board whose JSON wire is OLDER than this Studio's (X from
+//                `WALK_OTA_X`: a published release fetched by
+//                `scripts/ota/fetch-release-image.sh`, or a desk image built at
+//                an older wire), whose hello this Studio may not even decode:
+//                the card offers the over-the-air update all the same (never
+//                "Firmware updates need USB"), and one press takes it to Y
+//                over this lane's link — the update rides lp-link's update
+//                channel, which the wire never changes. Asserts the hello's
+//                older proto (Studio's terminal) before the press, the
+//                board's own `[OTA]`/`[LOADER]` words, Studio's "over <link>"
+//                narration, the project kept, and Y's hello at this wire
+//                after. Every lane but `--tab`; not in the default steps:
+//                `WALK_OTA_X=<dir> just walk-ota-emu [--lan|--relay|--ble]
+//                --steps older-wire`
 //   install-file  "From a file…" (`install-firmware-file`, in the same
 //                details): only r2 in the store; r1's `ota/` folder
 //                (its manifest, core, engine and .z files) is put into the
@@ -236,7 +250,7 @@ const RELAY_LANE = ARGS.includes("--relay");
 const ON_LAN = LAN_LANE || RELAY_LANE;
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop", "older-wire"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
@@ -256,8 +270,8 @@ if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
   process.exit(2);
 }
-if (RELAY_LANE && STEPS.some((step) => !RELAY_STEPS.includes(step))) {
-  console.error(`walk-ota-emu: --relay walks ${RELAY_STEPS.join(", ")}`);
+if (RELAY_LANE && STEPS.some((step) => ![...RELAY_STEPS, "older-wire"].includes(step))) {
+  console.error(`walk-ota-emu: --relay walks ${[...RELAY_STEPS, "older-wire"].join(", ")}`);
   process.exit(2);
 }
 if (!RELAY_LANE && STEPS.includes("relay-drop")) {
@@ -272,8 +286,12 @@ if (!LAN_LANE && STEPS.some((step) => step === "renumber" || step === "second-cl
   console.error("walk-ota-emu: renumber and second-client are Wi-Fi steps (--lan)");
   process.exit(2);
 }
-if (LAN_LANE && STEPS.some((step) => !LAN_STEPS.includes(step))) {
-  console.error(`walk-ota-emu: --lan walks ${LAN_STEPS.join(", ")}`);
+if (LAN_LANE && STEPS.some((step) => ![...LAN_STEPS, "older-wire"].includes(step))) {
+  console.error(`walk-ota-emu: --lan walks ${[...LAN_STEPS, "older-wire"].join(", ")}`);
+  process.exit(2);
+}
+if (TAB && STEPS.includes("older-wire")) {
+  console.error("walk-ota-emu: older-wire boards WALK_OTA_X on the door (USB, --ble, --lan, --relay), not --tab");
   process.exit(2);
 }
 if (TAB && BLE) {
@@ -779,7 +797,16 @@ async function main() {
         path: pathOf(card),
         corner: cornerOf(card),
         offlineBoards: Boolean(card.closest('#home-offline-boards')),
-        firmware: bar('firmware', 'Firmware'),
+        // Since the card's one-work-in-one-place pass (5c7b786ef) the row says
+        // its verb alone ("backing up") and the surface carries the update's
+        // one number (data-surface-progress): the row's line is read with
+        // that number put back, the way CARD_LINES reads it.
+        firmware: (() => {
+          const row = bar('firmware', 'Firmware');
+          const percent = card.querySelector('[data-surface-progress]')?.getAttribute('data-surface-progress');
+          if (row && row.work === 'running' && percent && !/%/.test(row.line ?? '')) row.line = row.line + ' · ' + percent + '%';
+          return row;
+        })(),
         connection: inUse,
         offers: { 'update-firmware': face('update-firmware'), 'install-firmware': face('install-firmware'), edit: face('edit') },
         state: links.map((row) => fact(row.layer, 'State')).find(Boolean) ?? null,
@@ -815,6 +842,19 @@ async function main() {
     const update = card.offers["update-firmware"];
     if (update?.enabled && !update.arms && card.firmware?.work !== "running") seen.available = card.firmware?.line ?? "update-firmware";
     return seen;
+  };
+  /// The first row of the terminal of the card at `cardPath` (every row:
+  /// the board's lines, the wire's reads and Studio's own) that matches
+  /// `pattern`, waited for.
+  const terminalRow = async (cardPath, pattern, what) => {
+    const deadline = Date.now() + STEP_MS;
+    for (;;) {
+      const rows = await driver.terminalLines({ board: cardPath, timeoutMs: STEP_MS }).catch(() => []);
+      const row = rows.find((line) => pattern.test(line));
+      if (row) return row;
+      if (Date.now() > deadline) throw new Error(`never saw ${what} (${pattern}) in the card's terminal`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   };
   /// Studio's own lines in the board's terminal — the status corner's
   /// details (`data-board-terminal`), where `DeviceTerminal` starts each of
@@ -865,7 +905,7 @@ async function main() {
         pageSeen = pageLines.length;
         writeFileSync(path.join(out, "page-console.log"), pageLines.join("\n"));
       }
-      const now = JSON.stringify({ card: snap.board?.path ?? null, link: snap.board?.connection?.line ?? null, lines });
+      const now = JSON.stringify({ card: snap.board?.path ?? null, link: snap.board?.connection?.line ?? null, firmware: snap.board?.firmware ?? null, lines });
       if (now !== lastTrail) {
         lastTrail = now;
         appendFileSync(trail, `${((Date.now() - began) / 1000).toFixed(1)} s ${now}\n`);
@@ -1645,6 +1685,77 @@ async function main() {
             };
           });
           break;
+        case "older-wire": {
+          // An empty cache, so the update must back the board up first.
+          await clearEngineCache();
+          await openDoor(name, [xBoard]);
+          await step(name, `a board on an older wire → Y with one press over ${LINK_WORD}, by the update channel`, async () => {
+            await nameThisBoard();
+            await connect(board);
+            const cardPath = await liveCardPath();
+            // The board's hello, as Studio's terminal reads it: its wire is
+            // older than this Studio's (Y's). Studio's own words, the read
+            // of a board's.
+            const helloLine = await terminalRow(cardPath, /hello · proto \d+/, "the board's hello in its terminal");
+            const proto = Number(String(helloLine ?? "").match(/hello · proto (\d+)/)?.[1] ?? NaN);
+            if (!(proto < y.wireProto)) {
+              throw new Error(`the board's hello is not from an older wire than Y's ${y.wireProto}: ${JSON.stringify(helloLine)} (WALK_OTA_X=${process.env.WALK_OTA_X ?? "unset"})`);
+            }
+            const xBuild = boardWords(board).match(/\[CORE\][^\n]*build (\S+)/)?.[1] ?? null;
+            // What the card says before the press, once it offers the update:
+            // the over-the-air update, never "Firmware updates need USB" on
+            // its face; a hello this Studio could not read is old firmware.
+            await driver.waitOffer("update-firmware", { board: cardPath, timeoutMs: STEP_MS });
+            const face = await driver.evaluate(
+              `(document.querySelector(${JSON.stringify(`[data-board-card="${cardPath}"]`)})?.innerText || '')`,
+            );
+            const faceLines = face.split("\n").map((l) => l.trim()).filter(Boolean);
+            const surface = faceLines.slice(0, 3).join(" · ");
+            if (face.includes("Firmware updates need USB")) {
+              throw new Error(`the card's face says "Firmware updates need USB": ${JSON.stringify(faceLines.slice(0, 12))}`);
+            }
+            if (/another wire/.test(helloLine) && !face.includes("This board is running old firmware.")) {
+              throw new Error(`the card of a board on another wire does not say it runs old firmware: ${JSON.stringify(faceLines.slice(0, 12))}`);
+            }
+            const air0 = await bleStats(board);
+            const ran = await runUpdate(board);
+            const air1 = await bleStats(board);
+            await settle(board, ran.from);
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            for (const need of ["core offer", "core on trial", "core confirmed", "engine offer", "engine committed"]) {
+              if (!said[need]) throw new Error(`the board never said ${need}`);
+            }
+            if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up");
+            // The link it rode, in Studio's own narration: an older board
+            // answers no network status on this wire, so its link rows may
+            // name no link until Y does.
+            const terminal = await terminalLines();
+            const over = terminal.find((line) => new RegExp(`^update .+ → .+ over ${LINK_WORD}$`).test(line));
+            if (!over) throw new Error(`Studio's terminal never said the update went over ${LINK_WORD}: ${JSON.stringify(terminal.slice(-20))}`);
+            const reconnects = ON_LAN
+              ? checkWifiReconnects(terminal, 2)
+              : checkReconnects(terminal, air0, air1, 0);
+            // Y says hello at this Studio's wire now.
+            const yHello = await terminalRow(
+              await liveCardPath(),
+              new RegExp(`hello · proto ${y.wireProto} `),
+              `Y's hello at wire ${y.wireProto}`,
+            ).catch(() => null);
+            const yBuild = [...boardWords(board).slice(ran.from).matchAll(/\[CORE\][^\n]*build (\S+)/g)].pop()?.[1] ?? null;
+            // E14: the project survived — the card runs it on Y.
+            const kept = await liveCardPath();
+            await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
+            await driver.closeDetails({ board: kept });
+            const pictures = RELAY_LANE ? await picturesOnY(board) : null;
+            return {
+              summary: `X ${xBuild} said ${JSON.stringify(helloLine)}; the card read ${JSON.stringify(surface)}; ${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; Studio: "${over}"; Y ${yBuild}${yHello ? ` said ${yHello}` : ""}; project kept${reconnects ? (reconnects.resets === undefined ? `; ${reconnects.timed.length} reconnects timed` : `; ${reconnects.resets} resets → ${reconnects.timed.length} reconnects timed`) : ""}${pictures ? `; then pictures: ${pictures.summary}` : ""}`,
+              x: { build: xBuild, hello: helloLine, proto, face: faceLines.slice(0, 12) },
+              y: { build: yBuild, hello: yHello },
+              card: ran.order, board: said, over, reconnects, pictures, air: air1,
+            };
+          });
+          break;
+        }
         case "store-backup": {
           if (!xr) throw new Error(`store-backup needs XR: scripts/ota/build-image.sh ${path.relative(ROOT, XR)} 2026.10.07-77`);
           await clearEngineCache();
