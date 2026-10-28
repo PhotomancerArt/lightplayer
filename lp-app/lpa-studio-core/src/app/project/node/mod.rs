@@ -8,6 +8,8 @@
 pub mod add_node_offers;
 pub mod import_pattern;
 pub mod module_export_op;
+pub(in crate::app::project) mod new_fixture_start;
+pub(in crate::app::project) mod new_output_name;
 pub mod node_clear_debug_op;
 pub mod node_controller;
 pub mod node_create_op;

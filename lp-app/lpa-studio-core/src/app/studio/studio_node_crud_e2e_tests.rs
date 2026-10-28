@@ -17,8 +17,10 @@ use lpfs::LpFsMemory;
 
 use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{
-    InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, project_action, workspace_cards,
+    InProcessServerIo, device_e2e_server, drive, edit_e2e_files, edit_e2e_server, project_action,
+    workspace_cards,
 };
+use crate::app::studio::studio_face_e2e_tests::connect_running_project;
 use crate::{
     ControllerId, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, OfferArgs,
     ProjectController, ProjectNodeAddress, ProjectOp, StudioActor, StudioCommand, StudioController,
@@ -611,6 +613,82 @@ fn create_records_a_saved_library_event_and_copies_match() {
     );
 }
 
+/// DD28: an output Studio makes is named when it is made — the lowest
+/// number no output in the project carries — so a fixture's mapping can
+/// name it. A pasted output is a new output too: its copied name is taken
+/// here, so it gets the next free number.
+#[test]
+fn a_new_output_is_named_the_lowest_free_number() {
+    let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
+    let mut view = handle.view;
+    connect_running_project(&handle.tx);
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    for _ in 0..2 {
+        actor_clicks(&mut actor, &handle.tx).press(
+            "project/add-node",
+            OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, "output"),
+        );
+        view.try_recv().expect("create emits a snapshot");
+    }
+    assert_eq!(
+        output_name_on_disk(&server, "output.json").as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        output_name_on_disk(&server, "output_2.json").as_deref(),
+        Some("2")
+    );
+
+    let first = crate::OfferPath::project_node(
+        &ProjectNodeAddress::parse("/edit_e2e.show/output.output").expect("node address"),
+    )
+    .child(crate::COPY_NODE_VERB);
+    actor_clicks(&mut actor, &handle.tx).press(&first, OfferArgs::new());
+    let envelope = clipboard
+        .borrow()
+        .clone()
+        .expect("copy writes the envelope to the clipboard sink");
+    actor_clicks(&mut actor, &handle.tx).press(
+        "project/paste-node",
+        OfferArgs::new().with(crate::PASTE_NODE_CLIPBOARD_PARAM, &envelope),
+    );
+    view.try_recv().expect("paste emits a snapshot");
+    assert_eq!(
+        output_name_on_disk(&server, "output_3.json").as_deref(),
+        Some("3"),
+        "the pasted copy of output 1 is a new output, named the next free number"
+    );
+}
+
+/// DD28: a fixture added in Studio starts on the first named output its
+/// bus channel reaches, not on the starter's `"1"`, so it lights. Here
+/// output `"1"` listens on another channel and output `"front"` on
+/// `control.out`, where a new fixture publishes.
+#[test]
+fn a_new_fixture_starts_on_the_first_named_output_its_channel_reaches() {
+    let (server, mut actor, handle, _) = connected_actor_on(two_outputs_server());
+    let mut view = handle.view;
+    connect_running_project(&handle.tx);
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    actor_clicks(&mut actor, &handle.tx).press(
+        "project/add-node",
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, "fixture"),
+    );
+    view.try_recv().expect("create emits a snapshot");
+
+    let mapping = lpc_mapping::map2d6::read(&read_file(&server, "fixture_2.map2d.json"))
+        .expect("the new fixture's mapping is map2d format 6");
+    assert_eq!(
+        mapping.start.output,
+        lpc_mapping::patching::OutputOp::Set(lpc_mapping::patching::OutputName::new("front")),
+        "the new fixture starts on the output its control channel reaches"
+    );
+}
+
 // --- helpers -----------------------------------------------------------------
 
 /// The tests' no-op quiet-gap timer factory, as a nameable fn-pointer type so
@@ -908,7 +986,19 @@ fn connected_actor_with_clipboard() -> (
     crate::StudioHandle,
     Rc<RefCell<Option<String>>>,
 ) {
-    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    connected_actor_on(edit_e2e_server())
+}
+
+/// The clipboard harness over a server the test built.
+fn connected_actor_on(
+    server: lpa_server::LpServer,
+) -> (
+    Rc<RefCell<lpa_server::LpServer>>,
+    StudioActor<TestTimer>,
+    crate::StudioHandle,
+    Rc<RefCell<Option<String>>>,
+) {
+    let server = Rc::new(RefCell::new(server));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -921,6 +1011,61 @@ fn connected_actor_with_clipboard() -> (
     controller.set_on_copy_text(move |text| *sink.borrow_mut() = Some(text.to_string()));
     let (actor, handle) = StudioActor::new(controller, test_timer as TestTimer);
     (server, actor, handle, clipboard)
+}
+
+/// The edit-e2e project with two named outputs: `"1"` (listed first) on
+/// `bus:control.side`, and `"front"` on `control.out` by its default
+/// binding — the channel the project's fixture publishes to.
+fn two_outputs_server() -> lpa_server::LpServer {
+    let mut server = device_e2e_server();
+    let module = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "side": { "ref": "./side.json" },
+    "front": { "ref": "./front.json" }
+  }
+}"#;
+    let side = r#"{
+  "kind": "Output",
+  "name": "1",
+  "ports": { "0": { "endpoint": "ws281x:local:D9" } },
+  "bindings": { "input": { "source": "bus:control.side" } }
+}"#;
+    let front = r#"{
+  "kind": "Output",
+  "name": "front",
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } }
+}"#;
+    let files = edit_e2e_files()
+        .iter()
+        .map(|(name, body)| match *name {
+            "module.json" => (*name, module),
+            _ => (*name, *body),
+        })
+        .chain([("side.json", side), ("front.json", front)]);
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(format!("{PROJECT_DIR}/{name}").as_path(), body.as_bytes())
+            .expect("write project file");
+    }
+    server
+        .load_project(PROJECT_DIR.as_path())
+        .expect("load the two-outputs project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+/// The authored name of the output definition in `file`.
+fn output_name_on_disk(server: &Rc<RefCell<lpa_server::LpServer>>, file: &str) -> Option<String> {
+    match lpc_model::NodeDef::from_json_str(&read_file(server, file)) {
+        Ok(lpc_model::NodeDef::Output(output)) => {
+            output.output_name().map(|name| name.as_str().to_string())
+        }
+        other => panic!("{file} is an output definition, got {other:?}"),
+    }
 }
 
 fn copy_action(node: &str) -> StudioCommand {

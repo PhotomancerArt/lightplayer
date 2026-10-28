@@ -4502,10 +4502,11 @@ impl ProjectController {
         // first verb naming one applies this alongside its patch write.
         // Numeric defaults skip names already in use ANYWHERE on the
         // surface, including other pending assigns this pass hands out.
-        let mut known: Vec<String> = surface
+        let mut known: Vec<lpc_model::OutputName> = surface
             .outputs
             .iter()
-            .filter_map(|output| output.name.clone())
+            .filter_map(|output| output.name.as_deref())
+            .filter_map(|name| lpc_model::OutputName::parse(name).ok())
             .collect();
         for output in &mut surface.outputs {
             if output.name.is_some() {
@@ -4514,15 +4515,9 @@ impl ProjectController {
             let Some(Ok(node)) = output.address.as_deref().map(ProjectNodeAddress::parse) else {
                 continue;
             };
-            let mut candidate = 1u32;
-            let name = loop {
-                let text = candidate.to_string();
-                if !known.iter().any(|used| *used == text) {
-                    break text;
-                }
-                candidate += 1;
-            };
+            let name = lpc_model::next_output_name(known.iter());
             known.push(name.clone());
+            let name = name.as_str().to_string();
             output.name_assign = Some((
                 ProjectSlotAddress::new(
                     node,
@@ -7387,12 +7382,13 @@ impl ProjectController {
 
         // Starter bytes: the kind's starter template (bare default when the
         // table has no entry), stem-substituted, canonically serialized.
-        let starter = starter_for_kind(kind)
+        let mut starter = starter_for_kind(kind)
             .unwrap_or_else(|| NodeStarter {
                 def: lpc_model::NodeDef::default_for_kind(kind),
                 assets: Vec::new(),
             })
             .for_stem(&name);
+        self.wire_new_node_to_outputs(&mut starter, &parent)?;
         let body = starter.def.write_json(&self.slot_shapes).map_err(|err| {
             UiError::Project(format!("cannot serialize the new node definition: {err}"))
         })?;
@@ -7418,6 +7414,61 @@ impl ProjectController {
         let shape_guided = kind == NodeKind::Fixture;
         self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
+    }
+
+    /// Wire a new node's starter to the project's outputs (DD28): a new
+    /// output is named the lowest free number
+    /// ([`super::node::new_output_name`]), and a new fixture's mapping starts
+    /// on the first named output its control channel reaches in the scope
+    /// `parent` holds it in ([`super::node::new_fixture_start`]); left on the
+    /// starter's `"1"` when it reaches none.
+    fn wire_new_node_to_outputs(
+        &self,
+        starter: &mut NodeStarter,
+        parent: &ProjectNodeAddress,
+    ) -> Result<(), UiError> {
+        use super::node::new_fixture_start::{first_reached_output_name, map2d_starting_on};
+        use super::node::new_output_name::new_output_name;
+
+        match &mut starter.def {
+            lpc_model::NodeDef::Output(output) => {
+                output.name = lpc_model::OptionSlot::some(lpc_model::ValueSlot::new(
+                    new_output_name(&self.root_nodes),
+                ));
+            }
+            lpc_model::NodeDef::Fixture(_) => {
+                let reached =
+                    self.binding_graph()
+                        .zip(self.node(parent))
+                        .and_then(|(graph, scope)| {
+                            first_reached_output_name(
+                                &self.root_nodes,
+                                graph,
+                                scope.target().node_id,
+                            )
+                        });
+                let Some(output) = reached else {
+                    return Ok(());
+                };
+                for (file, bytes) in &mut starter.assets {
+                    if !file.ends_with(".map2d.json") {
+                        continue;
+                    }
+                    let text = core::str::from_utf8(bytes).map_err(|_| {
+                        UiError::Project("the starter mapping is not text".to_string())
+                    })?;
+                    *bytes = map2d_starting_on(text, &output)
+                        .map_err(|err| {
+                            UiError::Project(format!(
+                                "cannot start the new fixture on {output}: {err}"
+                            ))
+                        })?
+                        .into_bytes();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Vendor one pattern export — a library package's, or a built-in
@@ -7840,6 +7891,32 @@ impl ProjectController {
                         envelope.label
                     ))));
                 }
+            }
+        }
+
+        // A pasted output is a new output: it keeps its name where no output
+        // here carries it, and otherwise (or unnamed) gets the lowest free
+        // number, as a created one does — output names are project-unique.
+        if let Ok(text) = core::str::from_utf8(&body)
+            && let Ok(lpc_model::NodeDef::Output(mut output)) =
+                lpc_model::NodeDef::from_json_str(text)
+        {
+            let taken = super::node::new_output_name::output_names(&self.root_nodes);
+            if output
+                .output_name()
+                .is_none_or(|pasted| taken.contains(pasted))
+            {
+                output.name = lpc_model::OptionSlot::some(lpc_model::ValueSlot::new(
+                    lpc_model::next_output_name(taken.iter()),
+                ));
+                body = lpc_model::NodeDef::Output(output)
+                    .write_json(&self.slot_shapes)
+                    .map_err(|err| {
+                        UiError::Project(format!(
+                            "cannot serialize the pasted node definition: {err}"
+                        ))
+                    })?
+                    .into_bytes();
             }
         }
 
@@ -9465,7 +9542,10 @@ fn without_unheld_inputs(mut group: crate::UiPanelGroup, inputs: &[String]) -> c
     group
 }
 
-fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc_model::LpValue> {
+pub(in crate::app::project) fn def_slot_value<'a>(
+    node: &'a NodeController,
+    path: &[&str],
+) -> Option<&'a lpc_model::LpValue> {
     fn descend<'a>(slots: &'a [SlotController], path: &[&str]) -> Option<&'a SlotController> {
         let (head, rest) = path.split_first()?;
         let slot = slots.iter().find(|slot| {
