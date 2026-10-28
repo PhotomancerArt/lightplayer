@@ -143,6 +143,10 @@ const OLD_MAPPING_DOCUMENTS: &[(&str, &str)] = &[
         "the old reader's corpus, which the Map tab and its stories read until M4 deletes them",
     ),
     (
+        "lp-cli/tests/fixtures/ota-cross-format/",
+        "the crossing walk's format-11 projects, as a board on the last format-11 release holds them before its update",
+    ),
+    (
         "lab/mapping/fixtures-v11/",
         "the mapping lab's frozen format-11 copies, which it reads until M4 retires it",
     ),

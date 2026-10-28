@@ -16,7 +16,10 @@
 //! - `y` — the same tree at `b1b1b1b1`;
 //! - `y-dies` — `y` with `fixture-trial-dies`, at `c1c1c1c1`: a build id of its
 //!   own, so refusing it never refuses `y` (U19 heals `y` after it);
-//! - `x-untrusted` — `x` with `fixture-usb-untrusted`.
+//! - `x-untrusted` — `x` with `fixture-usb-untrusted`;
+//! - `x-release` — a PUBLISHED release before the last project-format bump
+//!   (`scripts/ota/fetch-release-image.sh`, its own bytes, one door): X1/X2,
+//!   the project stage across the bump.
 //!
 //! A **power cut** after request N is the flash as it stood when the host had
 //! answered the board's Nth request: one update is run and the flash
@@ -28,12 +31,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost, EmuUsbBoard};
-use lp_cli::commands::ota_host::{OtaArgs, OtaHost};
+use lp_cli::commands::ota_host::{BoardHello, OtaArgs, OtaHost, finish_board_projects};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::machine::{AppSource, BootMode, Esp32C6Builder, UsbHost};
+use lpa_client::LpClient;
 use lpa_update::{Finish, StopReason, board_matches_release};
 use lpc_firmware_release::OtaManifest;
 use lpc_update::{BoardManifest, BoardMessage, BoardState, Refusal};
+use lpc_wire::{ClientMessage, ClientRequest, TransportError, WireServerMessage};
 
 /// The emulated host's link nonce (any fixed value: runs repeat).
 const NONCE: u32 = 0x07A0_0001;
@@ -874,6 +879,436 @@ fn u15_a_corrupted_raw_chunk_fails_its_piece_which_is_sent_again() {
         "U15",
         "a flipped byte in engine chunk 0x40000: N/H at the piece end, the engine sent again, Y runs",
     );
+}
+
+// --- X1, X2: across a project-format bump (the update's project stage) ----------------------
+//
+// X is a PUBLISHED release before the bump (`x-release`, fetched by
+// `scripts/ota/fetch-release-image.sh`, never rebuilt from this tree), its
+// chip holding two projects at its own format (`tests/fixtures/
+// ota-cross-format/v11`, written over its own wire). Y is this tree. The
+// update ends with the project stage (`finish_board_projects`, what
+// `emu run --ota-offer` and `firmware install` run), and the frames decoded
+// off the eaves' two pads after it equal the frames before it.
+// `docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`.
+
+#[test]
+#[ignore = "needs the OTA images; `just test-emu-c6-ota`"]
+fn x1_a_board_on_the_last_release_keeps_its_lamps_across_a_format_bump() {
+    let (Some(xr), Some(y)) = (release_image(), image("y")) else {
+        return;
+    };
+    let chip = with_v11_projects(&xr);
+    let before = lit_before(&chip, &xr);
+
+    let mut host = hosted(chip, Some(offer(&y, |_| {})));
+    let finish = run_to_done(&mut host, None);
+    assert_eq!(finish, Finish::UpToDate, "{}", tail(&host));
+    expect_last_core(&host, &y, true);
+    // The board's own word: engine Y refused the old startup project by name.
+    let refused = wait_line(&mut host, "Boot: auto-load failed for /projects/eaves")
+        .expect("engine Y refused the format-11 startup project");
+    let mark = frame_marks(&host);
+    let (hello, finished) = stage(&mut host, 2_000_000);
+    assert_eq!(
+        hello.startup_refused,
+        Some(lpc_wire::StartupRefusal {
+            project: "/projects/eaves".into(),
+            found: Some(11),
+        }),
+        "the hello names the refused startup project"
+    );
+    assert_eq!(
+        hello.build.project_format,
+        lpc_model::PROJECT_FORMAT_VERSION
+    );
+    assert_eq!(
+        finished.lines,
+        [
+            "projects: upgraded “eaves” to format 12",
+            "projects: upgraded “headband” to format 12",
+        ],
+        "{}",
+        tail(&host)
+    );
+    assert!(finished.ok);
+    let after = steady_frames(&mut host, &mark).expect("Y lights the eaves");
+    assert_eq!(after, before, "the same lamps, the same colours");
+    // A fresh host's stage finds nothing older.
+    let (_, again) = stage(&mut host, 3_000_000);
+    assert_eq!(again.lines, ["projects: every project is at format 12"]);
+    report(
+        "X1",
+        &format!(
+            "{} (format 11) -> Y with the stage: `{}`; {}; frames on GPIO18 ({} B) and GPIO20 ({} B) equal before and after; a second stage: `{}`",
+            release_name(&xr),
+            refused.trim(),
+            finished.lines.join(" · "),
+            after[0].len(),
+            after[1].len(),
+            again.lines.join(""),
+        ),
+    );
+}
+
+/// A power cut at every request of the stage: (a) after engine Y's first
+/// start and before the first batch, (b) inside the startup project's batch,
+/// (c) between the two projects' batches, and every other one. The flash as
+/// it stood before each request is sent is the flash a cut there leaves (the
+/// run is deterministic); each boots cold, refuses what is still old by
+/// name, and a fresh host's run finishes it with no other input.
+#[test]
+#[ignore = "needs the OTA images; `just test-emu-c6-ota`"]
+fn x2_a_power_cut_anywhere_in_the_project_stage_is_finished_by_the_next_host() {
+    let (Some(xr), Some(y)) = (release_image(), image("y")) else {
+        return;
+    };
+    let chip = with_v11_projects(&xr);
+    let before = lit_before(&chip, &xr);
+
+    let mut host = hosted(chip, Some(offer(&y, |_| {})));
+    let finish = run_to_done(&mut host, None);
+    assert_eq!(finish, Finish::UpToDate, "{}", tail(&host));
+    let hello = host
+        .wait_for_hello(60_000_000)
+        .expect("the run")
+        .expect("Y says hello");
+    host.set_queue_messages(true);
+    let mut cuts = CutPoints {
+        host: &mut host,
+        snaps: Vec::new(),
+    };
+    let finished = runtime().block_on(async {
+        let mut client = LpClient::new(&mut cuts).with_request_ids_from(2_000_000);
+        finish_board_projects(&mut client, &hello).await
+    });
+    let snaps = std::mem::take(&mut cuts.snaps);
+    host.set_queue_messages(false);
+    assert!(finished.ok, "{:?}", finished.lines);
+    let requests = snaps.len();
+    let snaps = distinct_flashes(snaps);
+    assert!(
+        snaps.len() >= 3,
+        "{:?}",
+        snaps.iter().map(|s| &s.0).collect::<Vec<_>>()
+    );
+
+    let y_dir = y.dir.clone();
+    let rows: Vec<String> = std::thread::scope(|s| {
+        let handles: Vec<_> = snaps
+            .chunks(snaps.len().div_ceil(threads()))
+            .map(|batch| {
+                let y_dir = y_dir.clone();
+                let before = before.clone();
+                s.spawn(move || {
+                    batch
+                        .iter()
+                        .map(|(at, flash)| recover_stage(at, flash.clone(), &y_dir, &before))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    });
+    for row in &rows {
+        println!("X2 {row}");
+    }
+    let failed: Vec<&String> = rows.iter().filter(|r| r.starts_with("FAIL")).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    for class in ["(a)", "(b)", "(c)"] {
+        assert!(
+            rows.iter().any(|r| r.contains(class)),
+            "no cut in class {class}: {rows:#?}"
+        );
+    }
+    report(
+        "X2",
+        &format!(
+            "{} distinct flashes cut across the stage's {} requests ({}): every one boots Y, refuses what is old by name, and a fresh host finishes it with the frames equal",
+            rows.len(),
+            requests,
+            release_name(&xr),
+        ),
+    );
+}
+
+/// One cut's recovery: boot `flash` cold with Y offered (already running),
+/// then a fresh host's stage; the frames after it against `before`. A row.
+fn recover_stage(at: &str, flash: Vec<u8>, y_dir: &Path, before: &[Vec<u8>]) -> String {
+    let y = load(y_dir).unwrap();
+    let mut host = hosted(flash, Some(offer(&y, |_| {})));
+    let finish = run_to_done(&mut host, None);
+    let hello = host.wait_for_hello(60_000_000).ok().flatten();
+    let mark = frame_marks(&host);
+    let (said, finished) = stage(&mut host, 2_000_000);
+    let refused = said
+        .startup_refused
+        .as_ref()
+        .map(|r| format!("refused {} (format {:?})", r.project, r.found))
+        .unwrap_or_else(|| "refused nothing".into());
+    let after = steady_frames(&mut host, &mark);
+    let (_, again) = stage(&mut host, 3_000_000);
+    let ok = finish == Finish::UpToDate
+        && hello.is_some()
+        && finished.ok
+        && after.as_deref() == Some(before)
+        && again.lines == ["projects: every project is at format 12"];
+    format!(
+        "{}\tcut-before={at}\tboot: {refused}\tstage: {}\tframes {}",
+        if ok { "PASS" } else { "FAIL" },
+        if finished.lines.is_empty() {
+            "nothing".to_string()
+        } else {
+            finished.lines.join(" · ")
+        },
+        match &after {
+            Some(a) if a.as_slice() == before => "equal".to_string(),
+            Some(_) => "DIFFER".to_string(),
+            None => "NONE".to_string(),
+        },
+    )
+}
+
+/// A `ClientIo` over the emulated host that snapshots the flash before each
+/// request goes: the flash a power cut right there leaves.
+struct CutPoints<'a> {
+    host: &'a mut EmuLinkHost<C6Board>,
+    /// `(request number and kind, flash)`, in order.
+    snaps: Vec<(String, Vec<u8>)>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl lpa_client::ClientIo for &mut CutPoints<'_> {
+    async fn send(&mut self, message: ClientMessage) -> Result<(), TransportError> {
+        let n = self.snaps.len() + 1;
+        let label = format!("{n}:{}", request_kind(&message.msg));
+        self.snaps.push((label, flash_of(self.host)));
+        let mut io = &mut *self.host;
+        lpa_client::ClientIo::send(&mut io, message).await
+    }
+
+    async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+        let mut io = &mut *self.host;
+        lpa_client::ClientIo::receive(&mut io).await
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        Ok(())
+    }
+}
+
+/// `filesystem.beginBatch`, `loadProject`, …: the request's variant path.
+fn request_kind(request: &ClientRequest) -> String {
+    match serde_json::to_value(request).unwrap() {
+        serde_json::Value::String(s) => s,
+        serde_json::Value::Object(o) => {
+            let (outer, inner) = o.into_iter().next().unwrap();
+            match inner {
+                serde_json::Value::Object(i) if outer == "filesystem" => {
+                    format!("{outer}.{}", i.keys().next().cloned().unwrap_or_default())
+                }
+                serde_json::Value::String(i) if outer == "filesystem" => format!("{outer}.{i}"),
+                _ => outer,
+            }
+        }
+        _ => "?".into(),
+    }
+}
+
+/// The snapshots with every run of identical flashes folded into its first,
+/// each labelled with its class: (a) before the first batch begins, (b)
+/// inside the startup project's batch, (c) between the first batch's commit
+/// and the second's begin, (d) later.
+fn distinct_flashes(snaps: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut begins = 0;
+    let mut commits = 0;
+    for (label, flash) in snaps {
+        // The class of a cut before this request: what has been sent so far.
+        let class = match (begins, commits) {
+            (0, _) => "(a)",
+            (1, 0) => "(b)",
+            (1, 1) => "(c)",
+            _ => "(d)",
+        };
+        if label.ends_with("filesystem.beginBatch") {
+            begins += 1;
+        }
+        if label.ends_with("filesystem.commitBatch") {
+            commits += 1;
+        }
+        if out.last().is_some_and(|(_, last)| *last == flash) {
+            continue;
+        }
+        out.push((format!("{label} {class}"), flash));
+    }
+    out
+}
+
+/// `img`'s chip holding the crossing's format-11 projects, written as plain
+/// `filesystem` `write` requests over the image's own wire (unchanged across
+/// the bump), with no project loaded yet: the next boot loads the startup
+/// one (first by path, `eaves`).
+fn with_v11_projects(img: &Image) -> Vec<u8> {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = repo.join("tests/fixtures/ota-cross-format/v11");
+    let mut requests = Vec::new();
+    for project in ["eaves", "headband"] {
+        let mut files = Vec::new();
+        collect_files(&root.join(project), &mut files);
+        files.sort();
+        for file in files {
+            let rel = file
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let data = std::fs::read_to_string(&file).unwrap();
+            requests.push(
+                serde_json::json!({ "filesystem": { "write": { "path": format!("/projects/{rel}"), "data": data } } })
+                    .to_string(),
+            );
+        }
+    }
+    let last = format!("M!{{\"id\":{},", 1_000_000 + requests.len() - 1);
+    let mut extra: Vec<&str> = Vec::new();
+    for request in &requests {
+        extra.push("--request");
+        extra.push(request);
+    }
+    seeded(img, &extra, &last)
+}
+
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            collect_files(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
+/// The eaves' frames on X, booted cold from `chip`: its startup load, then
+/// the frames once they settle. Asserts X loaded it (the board's word).
+fn lit_before(chip: &[u8], xr: &Image) -> Vec<Vec<u8>> {
+    let mut host = hosted(chip.to_vec(), None);
+    let mark = frame_marks(&host);
+    wait_line(&mut host, "Boot: auto-loaded project /projects/eaves").unwrap_or_else(|| {
+        panic!(
+            "{} never loaded the format-11 eaves:\n{}",
+            release_name(xr),
+            tail(&host)
+        )
+    });
+    let before = steady_frames(&mut host, &mark).expect("X lights the eaves");
+    assert_eq!(
+        before.iter().map(Vec::len).collect::<Vec<_>>(),
+        [60 * 3, 50 * 3],
+        "the front run's 60 lamps on GPIO18, the side's 50 on GPIO20"
+    );
+    assert!(
+        before.iter().all(|f| f.iter().any(|b| *b != 0)),
+        "both runs lit, not black: {before:?}"
+    );
+    before
+}
+
+/// The crossing's pads: the eaves' front run on D10 (GPIO18), its side run
+/// on D9 (GPIO20).
+const EAVES_PADS: [u8; 2] = [18, 20];
+
+/// How many frames each eaves pad has decoded so far: frames after this are
+/// the run's from here on.
+fn frame_marks(host: &EmuLinkHost<C6Board>) -> Vec<usize> {
+    EAVES_PADS
+        .iter()
+        .map(|p| host.board.machine.frames(*p).len())
+        .collect()
+}
+
+/// Step (at most 30 emulated seconds) until each eaves pad's last three
+/// complete frames since `mark` are equal; those frames' bytes, per pad.
+fn steady_frames(host: &mut EmuLinkHost<C6Board>, mark: &[usize]) -> Option<Vec<Vec<u8>>> {
+    let settled = |host: &EmuLinkHost<C6Board>| -> Option<Vec<Vec<u8>>> {
+        EAVES_PADS
+            .iter()
+            .zip(mark)
+            .map(|(pad, from)| {
+                let frames: Vec<_> = host.board.machine.frames(*pad)[*from..]
+                    .iter()
+                    .filter(|f| f.is_complete() && !f.wire.is_empty())
+                    .collect();
+                let last = frames.len().checked_sub(3).map(|k| &frames[k..])?;
+                (last[0].wire == last[1].wire && last[1].wire == last[2].wire)
+                    .then(|| last[2].wire.clone())
+            })
+            .collect()
+    };
+    let until = host.board.machine.micros() + 30_000_000;
+    while host.board.machine.micros() < until {
+        host.step().expect("the run");
+        if let Some(frames) = settled(host) {
+            return Some(frames);
+        }
+    }
+    None
+}
+
+/// A fresh host's project stage on the link: a hello asked for, then
+/// `finish_board_projects` (the code `emu run --ota-offer` and `firmware
+/// install` run), its request ids from `ids`.
+fn stage(
+    host: &mut EmuLinkHost<C6Board>,
+    ids: u64,
+) -> (
+    lpc_wire::ServerHello,
+    lp_cli::commands::ota_host::board_projects::BoardProjects,
+) {
+    host.wait_for_hello(60_000_000)
+        .expect("the run")
+        .expect("the board says hello");
+    host.set_queue_messages(true);
+    let out = runtime().block_on(async {
+        let mut client = LpClient::new(&mut *host).with_request_ids_from(ids);
+        let hello = client.hello().await.expect("the hello").into_value();
+        let finished =
+            finish_board_projects(&mut client, &BoardHello::from_hello(hello.clone())).await;
+        (hello, finished)
+    });
+    host.set_queue_messages(false);
+    out
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+/// The published release before the bump (`x-release`), when this door can
+/// boot it: a release ships one door (its own bootloader), so the IDF door's
+/// run skips it.
+fn release_image() -> Option<Image> {
+    let xr = image("x-release")?;
+    if !xr.dir.join(merged_name()).exists() {
+        println!(
+            "SKIP: {} has no {} — a release ships one door",
+            release_name(&xr),
+            merged_name()
+        );
+        return None;
+    }
+    Some(xr)
+}
+
+fn release_name(img: &Image) -> String {
+    format!("release {} ({})", img.manifest.version, img.build_id)
 }
 
 // --- the images -------------------------------------------------------------------------------

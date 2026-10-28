@@ -3863,7 +3863,12 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
 #   read-back equals engine.bin · U14 a host gone mid-core, resumed by the
 #   next · U15 a corrupted raw chunk fails its piece, sent again · U16 the
 #   update light (dark yellow / dark red) off the pad · U17 the board's `M`
-#   equals its package's ota-manifest.json. U7 is a named skip.
+#   equals its package's ota-manifest.json. U7 is a named skip. Across a
+#   project-format bump (the update's project stage): X1 a board on the last
+#   published format-11 release, holding format-11 projects, updated to this
+#   tree lights the same frames after; X2 a power cut before every request of
+#   the stage is finished by the next host. Their X is fetched (needs the
+#   network once), and only the `lp` door boots it.
 #
 # NOT in CI (DM26): four packaged split builds (X, Y, Y with
 # `fixture-trial-dies`, X with `fixture-usb-untrusted`; ~2 min each on an
@@ -3881,6 +3886,13 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y" b1b1b1b1
         scripts/ota/build-image.sh "$out/y-dies" c1c1c1c1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
+    fi
+    # X1/X2, the crossing: the newest PUBLISHED release before the last
+    # project-format bump (2026.10.27-5 is format 11; bump this with the next
+    # format), fetched from the firmware store, never rebuilt here.
+    release="${LP_OTA_CROSS_RELEASE:-2026.10.27-5}"
+    if [[ "$(jq -r .version "$out/x-release/ota/ota-manifest.json" 2>/dev/null)" != "$release" ]]; then
+        scripts/ota/fetch-release-image.sh "$out/x-release" "$release"
     fi
     # Through both front doors, as test-emu-c6-split-boot.
     for door in lp idf; do
