@@ -554,6 +554,52 @@ mod tests {
         words
     }
 
+    /// M3 P11: the project stage's words — running, counted in projects;
+    /// and each reason older projects were left, in plain words.
+    #[test]
+    fn the_project_stage_says_what_it_does_and_why_it_stopped() {
+        let words = says(
+            &UpdateStanding::UpgradingProjects {
+                board: y(),
+                done: 0,
+                total: 3,
+            },
+            "Upgrading projects · 1 of 3",
+            "Upgrading its projects to the new format — 1 of 3",
+            None,
+            "Upgrading projects",
+        );
+        assert_eq!(words.kind, UpdateRowKind::Progress);
+        let held = |why| UpdateStanding::ProjectsUnfinished { board: y(), why };
+        let words = says(
+            &held(ProjectsHeldBack::NeedsEdit),
+            "Projects need upgrading",
+            "Its projects need upgrading for this firmware. Someone who can edit this board can \
+             finish it.",
+            None,
+            "Ready",
+        );
+        assert_eq!(words.kind, UpdateRowKind::NeedsYou);
+        says(
+            &held(ProjectsHeldBack::StudioTooOld),
+            "Reload Studio to finish",
+            "This board's firmware reads projects newer than this Studio can write. Reload \
+             Studio to finish.",
+            None,
+            "Ready",
+        );
+        says(
+            &held(ProjectsHeldBack::Refused {
+                project: "eaves".to_string(),
+                why: "the step's sentence".to_string(),
+            }),
+            "Couldn't upgrade \u{201c}eaves\u{201d}",
+            "Couldn't upgrade \u{201c}eaves\u{201d}: the step's sentence",
+            None,
+            "Ready",
+        );
+    }
+
     #[test]
     fn up_to_date() {
         let words = says(

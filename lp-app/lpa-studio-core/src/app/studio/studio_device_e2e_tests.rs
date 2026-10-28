@@ -1273,6 +1273,9 @@ impl DeviceBench {
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
                     }
+                    crate::StudioCommand::ProjectStage(command) => {
+                        self.controller.apply_project_stage_command(command);
+                    }
                     // The hold edge's answers (one tab holds a board).
                     crate::StudioCommand::HoldEdge(event) => {
                         self.controller.on_hold_edge_event(event);

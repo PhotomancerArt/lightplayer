@@ -6737,6 +6737,8 @@ dependencies = [
  "log",
  "lp-app-version",
  "lp-gfx-lpvm",
+ "lp-nor-sim",
+ "lp-tree-store",
  "lpa-agent",
  "lpa-boards",
  "lpa-client",

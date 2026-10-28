@@ -103,6 +103,10 @@ fn z() -> ModelBuild {
 /// This Studio's wire protocol version.
 const PROTO: u32 = lpc_wire::WIRE_PROTO_VERSION;
 
+/// The update's project stage (M3 P11), over a board whose channel 1 is a
+/// real `lpa-server` on the tree store.
+mod project_stage_tests;
+
 // ---------------------------------------------------------------------
 // The tests
 // ---------------------------------------------------------------------
@@ -1645,6 +1649,10 @@ struct Board {
     pending_close: Option<(f64, String)>,
     /// How long the page's own redial takes after it hears the close.
     redial_secs: f64,
+    /// The board's channel 1 — a real server over its stored projects —
+    /// for the project stage's tests; `None`: the board answers nothing
+    /// there and its hello says no project format.
+    channel1: Option<Box<project_stage_tests::ChannelOne>>,
 }
 
 impl Board {
@@ -1678,6 +1686,7 @@ impl Board {
             silent_socket_secs: None,
             pending_close: None,
             redial_secs: 1.0,
+            channel1: None,
         }
     }
 
@@ -1830,11 +1839,14 @@ impl Board {
                 proto: lpc_wire::WIRE_PROTO_VERSION,
                 identity: Self::mac(),
                 firmware: Some(format!("fw-esp32c6 {version}")),
-                version: Some(version),
                 board_id: None,
                 fs: BoardFs::Mounted,
+                project_format: self
+                    .channel1
+                    .as_ref()
+                    .and_then(|channel| channel.engine_format(&version)),
+                version: Some(version),
                 update,
-                project_format: None,
             },
         )));
     }
@@ -1941,6 +1953,24 @@ impl Board {
         }
     }
 
+    /// One channel-1 request (an `M!` line from a Studio conversation),
+    /// answered by the board's server while its engine runs.
+    fn channel_one(&mut self, line: &str) {
+        if self.open.is_none() || !self.engine_running() {
+            return;
+        }
+        let Some(channel) = self.channel1.as_mut() else {
+            return;
+        };
+        let answers = channel.answer(line);
+        let drop = channel.take_drop();
+        self.events.extend(answers);
+        if drop {
+            self.unplugged = true;
+            self.close("the cable came out");
+        }
+    }
+
     /// The power is gone: the flash must still hold a bootable board.
     fn power_cut(&mut self) {
         self.cuts += 1;
@@ -1986,7 +2016,8 @@ impl Link for RigLink {
                 }
             }
             LinkCommand::SendUpdate(bytes) => board.deliver(&bytes),
-            LinkCommand::RunReset(_) | LinkCommand::SendLine(_) => {}
+            LinkCommand::SendLine(line) => board.channel_one(&line),
+            LinkCommand::RunReset(_) => {}
         }
     }
 
@@ -2641,8 +2672,14 @@ impl Bench {
         }
         while self.access_rx.peek_any(|_| true) {
             for command in block_on(self.access_rx.recv_coalesced()).unwrap_or_default() {
-                if let crate::StudioCommand::Access(command) = command {
-                    self.controller.apply_access_command(command);
+                match command {
+                    crate::StudioCommand::Access(command) => {
+                        self.controller.apply_access_command(command);
+                    }
+                    crate::StudioCommand::ProjectStage(command) => {
+                        self.controller.apply_project_stage_command(command);
+                    }
+                    _ => {}
                 }
             }
         }

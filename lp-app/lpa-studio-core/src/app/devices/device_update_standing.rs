@@ -654,6 +654,45 @@ pub(crate) mod tests {
         ));
     }
 
+    /// M3 P11: a board up to date whose project stage runs (no Update) or
+    /// was held back stands on its projects; anything its firmware still
+    /// needs comes first.
+    #[test]
+    fn a_boards_project_stage_outranks_up_to_date_and_nothing_else() {
+        use crate::app::devices::project_stage_status::{ProjectStageStatus, ProjectsHeldBack};
+        let view = ready_view();
+        let y = studio_y();
+        let on_y = facts_of(&board_y());
+        let running = ProjectStageStatus::Running { done: 1, total: 3 };
+        let mut inputs_on_y = inputs(&view, Some(&on_y), Some(&y));
+        inputs_on_y.projects = Some(&running);
+        assert!(matches!(
+            update_standing(&inputs_on_y),
+            UpdateStanding::UpgradingProjects {
+                done: 1,
+                total: 3,
+                ..
+            }
+        ));
+        let play = ProjectStageStatus::HeldBack(ProjectsHeldBack::NeedsEdit);
+        inputs_on_y.projects = Some(&play);
+        assert!(matches!(
+            update_standing(&inputs_on_y),
+            UpdateStanding::ProjectsUnfinished {
+                why: ProjectsHeldBack::NeedsEdit,
+                ..
+            }
+        ));
+        // An update on offer stays what the card leads with.
+        let on_x = facts_of(&board_x());
+        let mut inputs_on_x = inputs(&view, Some(&on_x), Some(&y));
+        inputs_on_x.projects = Some(&play);
+        assert!(matches!(
+            update_standing(&inputs_on_x),
+            UpdateStanding::Available { .. }
+        ));
+    }
+
     #[test]
     fn each_board_fact_lands_on_its_row() {
         let view = ready_view();

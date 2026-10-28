@@ -121,6 +121,10 @@ futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 jsonschema = { version = "0.46", default-features = false }
+# The update's project stage end to end (M3 P11): the model board's channel 1
+# is a real `lpa-server` over the tree store on simulated NOR flash.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["lpfs", "nor-sim"] }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 # The update host's end-to-end tests drive a model board (`BoardRig`).
 lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
