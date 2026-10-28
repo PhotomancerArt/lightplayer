@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-28      # how: the mapping rebuild's G3 walk (M4 P08), Studio's Graph on an emulated C6
-fixed: this change     # lands with the mapping rebuild's integration branch
+fixed: b87770d5d       # lands with the mapping rebuild's integration branch
 area: lpa-studio-core — the Graph's Debug writes to the board (`ProjectController::apply_patch_pulse` / `apply_fixture_selection`) over a node file the Graph wrote as a body
 class: state-conflation
 related:
