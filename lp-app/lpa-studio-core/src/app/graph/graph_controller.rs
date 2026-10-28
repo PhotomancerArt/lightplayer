@@ -31,8 +31,9 @@
 //! re-patch at once). Where pinned nodes sit is written too (`editor.json`'s
 //! `canvas` surface, Debug's Pinning). Undo is the Graph's own (the lab's
 //! project snapshots); what it puts back is saved the same way. A deleted
-//! node's files (`Saved::removed`) are left where they are: nothing refers
-//! to them any more.
+//! node's files (`Saved::removed`) are deleted through the same asset path
+//! (ruling DD36), so no file stays that nothing names; undoing the delete
+//! writes them again.
 //!
 //! **Colours.** [`GraphController::view`] carries the board's frame, built
 //! from the frames the board published (`graph_frame.rs`) and kept until
@@ -75,6 +76,9 @@ pub struct GraphController {
     /// The editor's project revision its files last said (opened or
     /// written): another one is an edit to save.
     saved: u64,
+    /// The files of nodes the Graph deleted, as they were (path, text), by
+    /// node: what its undo writes back when the node returns (DD36).
+    deleted: BTreeMap<NodeId, Vec<(String, String)>>,
     /// The selection the board last breathed, while it breathes one.
     pulsed: Option<Vec<lab_mapping_model::Target>>,
     /// The render sources whose pictures the Graph shows, with their
@@ -244,7 +248,7 @@ impl GraphController {
         project: &mut ProjectController,
         server: &mut StudioServerClient,
     ) -> bool {
-        let (saved, revision) = {
+        let (saved, revision, gone, back) = {
             let Some(opened) = self.opened.as_ref() else {
                 return false;
             };
@@ -252,7 +256,27 @@ impl GraphController {
             if e.dragging() || e.drawing() || e.project.revision() == self.saved {
                 return false;
             }
-            (opened.files.save(&e.project), e.project.revision())
+            // Nodes deleted since the files were read, with their files;
+            // and nodes deleted before that the editor holds again (undo).
+            let gone: Vec<(NodeId, Vec<String>)> = opened
+                .files
+                .nodes
+                .iter()
+                .filter(|(id, _)| e.project.node(id).is_none())
+                .map(|(id, f)| (id.clone(), f.own_files()))
+                .collect();
+            let back: Vec<NodeId> = self
+                .deleted
+                .keys()
+                .filter(|id| e.project.node(id).is_some())
+                .cloned()
+                .collect();
+            (
+                opened.files.save(&e.project),
+                e.project.revision(),
+                gone,
+                back,
+            )
         };
         self.saved = revision;
         let saved = match saved {
@@ -267,6 +291,38 @@ impl GraphController {
                 .apply_asset_body(server, location(path), text.clone().into_bytes())
                 .await;
             if let Err(why) = written {
+                self.refuse_save(format!("{path}: {why}"));
+                return true;
+            }
+        }
+        // A node the Graph deleted takes its files with it, in the same
+        // step (DD36): nothing stays on disk that nothing names. What they
+        // said is kept, so the Graph's undo writes them back as they were.
+        for (id, paths) in gone {
+            self.fetch(project, server, &paths).await;
+            let texts: Vec<(String, String)> = paths
+                .iter()
+                .filter_map(|path| {
+                    let text = GraphSource::text_of(project, &self.absent, path).flatten()?;
+                    Some((path.clone(), text))
+                })
+                .collect();
+            self.deleted.insert(id, texts);
+        }
+        for id in back {
+            for (path, text) in self.deleted.remove(&id).unwrap_or_default() {
+                let written = project
+                    .apply_asset_body(server, location(&path), text.into_bytes())
+                    .await;
+                if let Err(why) = written {
+                    self.refuse_save(format!("{path}: {why}"));
+                    return true;
+                }
+            }
+        }
+        for path in &saved.removed {
+            let deleted = project.apply_asset_delete(server, location(path)).await;
+            if let Err(why) = deleted {
                 self.refuse_save(format!("{path}: {why}"));
                 return true;
             }
@@ -300,7 +356,7 @@ impl GraphController {
                 );
             }
         }
-        if !saved.writes.is_empty() {
+        if !saved.writes.is_empty() || !saved.removed.is_empty() {
             self.rebase(project);
         }
         false
@@ -531,6 +587,7 @@ impl GraphController {
 
     fn close(&mut self) {
         self.opened = None;
+        self.deleted.clear();
         self.state = None;
         self.absent.clear();
         self.absent_root = None;

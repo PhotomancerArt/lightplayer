@@ -8996,6 +8996,36 @@ impl ProjectController {
         (self.verdict_chase_ticks > 0).then_some(VERDICT_CHASE_INTERVAL)
     }
 
+    /// Delete the file `artifact` from the project, as a pending edit like
+    /// any other: one `SetArtifactBody` (`Delete`) mutation, folded into the
+    /// overlay mirror on ack, so the file reads as deleted, Save removes it
+    /// and Revert brings it back. Any body staged for it is dropped. A
+    /// later [`Self::apply_asset_body`] for the same file replaces the
+    /// delete (the Graph's undo of a node it deleted).
+    pub async fn apply_asset_delete(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: ArtifactLocation,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        self.asset_edit_buffer.remove(&artifact);
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::SetArtifactBody {
+                artifact: artifact.clone(),
+                edit: AssetBodyOverlay::Delete,
+            },
+        }]);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_asset_mutation_acks(&batch, &mutation, &[]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
+    }
+
     /// Discard the pending asset edit for `artifact`: the local entry clears
     /// immediately (typically a parked Failed body) and a `ClearArtifact`
     /// mutation removes the server overlay entry (mirrored on ack). The

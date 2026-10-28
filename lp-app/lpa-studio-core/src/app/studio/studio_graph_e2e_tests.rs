@@ -481,6 +481,61 @@ fn a_port_count_edited_on_the_graph_re_patches_once_saved() {
     );
 }
 
+/// Deleting a node on the Graph deletes its files through Studio's asset
+/// path in the same step (ruling DD36): the module stops naming it and its
+/// file reads as deleted, so Save leaves nothing on disk that nothing
+/// names. Undo on the Graph writes them back: the node's file byte for
+/// byte, the module naming it again.
+#[test]
+fn deleting_a_node_deletes_its_files_and_undo_writes_them_back() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    graph.refresh();
+    let repo = |file: &str| {
+        let path = format!(
+            "{}/../../catalog/projects/playful-choker/{file}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        std::fs::read_to_string(path).expect("the choker's file")
+    };
+    let (module, power) = (repo("module.json"), repo("power.json"));
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Node(NodeId::new("power"))]));
+    graph.batch();
+    let delete =
+        actor_clicks(&mut graph.actor, &graph.tx).offered(graph_verb_path(GraphVerb::Delete));
+    assert_eq!(
+        delete.action.meta().consequence,
+        crate::ActionConsequence::Undoable
+    );
+    graph.press(GraphVerb::Delete);
+    graph.refresh();
+    let content = |graph: &mut Graph, path: &str| {
+        graph
+            .actor
+            .controller_mut_for_test()
+            .project_for_test()
+            .asset_content_cached(&ArtifactLocation::file(path))
+            .expect("Studio holds it")
+    };
+    let gone = content(&mut graph, "/power.json");
+    assert_eq!(gone.body, crate::UiAssetContentBody::Deleted, "deleted");
+    assert!(gone.dirty, "a pending edit, for Save");
+    assert!(
+        !graph.file_text("/module.json").contains("power"),
+        "the module no longer names it"
+    );
+
+    graph.press(GraphVerb::Undo);
+    graph.refresh();
+    assert_eq!(graph.file_text("/power.json"), power, "its own bytes again");
+    // The module names it again. (Its other keys come back in the files
+    // crate's sorted order, as any module the Graph writes does.)
+    let json = |text: &str| serde_json::from_str::<serde_json::Value>(text).expect("json");
+    assert_eq!(json(&graph.file_text("/module.json")), json(&module));
+}
+
 /// The choker's mapping file in the repo.
 const MAP: &str = "/playful.map2d.json";
 

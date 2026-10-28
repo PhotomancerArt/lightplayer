@@ -75,6 +75,21 @@ pub struct NodeFile {
     pub map: Option<MapFile>,
 }
 
+impl NodeFile {
+    /// The files this node alone stands for: its own, its mapping's, and a
+    /// shader's GLSL. Deleting the node deletes them (ruling DD36).
+    pub fn own_files(&self) -> Vec<String> {
+        let mut out = vec![self.path.clone()];
+        out.extend(self.map.iter().map(|m| m.path.clone()));
+        if self.value.get("kind").and_then(Value::as_str) == Some("Shader")
+            && let Some(glsl) = self.value.get("source").and_then(Value::as_str)
+        {
+            out.push(crate::source::join(&self.path, &format!("./{glsl}")));
+        }
+        out
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MapFile {
     pub path: String,

@@ -24,8 +24,9 @@
 //!   written as one it accepts (`tail_rig`).
 //!
 //! One mapping file holds a fixture's parts and its patching (G1, Q14), so
-//! no edit to a mapping removes a file. A deleted node's files are reported
-//! in [`Saved::removed`], for the caller to delete or leave.
+//! no edit to a mapping removes a file. A deleted node's files (its own, its
+//! mapping, a shader's GLSL: [`crate::NodeFile::own_files`]) are reported in
+//! [`Saved::removed`], for the caller to delete (Studio does, ruling DD36).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -89,10 +90,7 @@ impl<'a> Writer<'a> {
         self.nodes(self.project.nodes())?;
         for (id, f) in &self.files.nodes {
             if self.project.node(id).is_none() {
-                self.saved.removed.push(f.path.clone());
-                self.saved
-                    .removed
-                    .extend(f.map.iter().map(|m| m.path.clone()));
+                self.saved.removed.extend(f.own_files());
             }
         }
         self.saved.writes.sort();
