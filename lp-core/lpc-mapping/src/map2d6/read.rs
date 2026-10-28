@@ -1,9 +1,12 @@
 //! Reading a format-6 document into a [`Mapping`].
 //!
-//! The format is read first and on its own, as `Map2dDoc::from_json` does,
-//! so a newer document is refused as newer ("this build reads up to 6")
-//! rather than as malformed. Then the whole document, then its rules, each
-//! refusal naming what it is about:
+//! The format decides first, so a newer document is refused as newer ("this
+//! build reads up to 6") rather than as malformed: the whole document is
+//! read once, and only when that does not give a format-6 document is the
+//! format read again on its own to say which refusal it is — every input
+//! refused as reading the format first refused it, without a second pass
+//! over every document a board loads. Then its rules, each refusal naming
+//! what it is about:
 //!
 //! - a part id that breaks the id rule, holds `@` or `/`, or is used twice;
 //! - a `next` word that is no kind of part, or a counter that would mint an
@@ -58,12 +61,15 @@ fn whole<T>(json: &str, read: fn(&mut JsonText) -> Read<T>) -> Result<T, Map2d6E
 /// one caller cost the C6 engine 198 B.
 #[inline(never)]
 pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
-    match peek_format(json)? {
-        MAP2D6_FORMAT => {}
-        found @ 1..MAP2D6_FORMAT => return Err(Map2d6Error::OlderFormat { found }),
-        found => return Err(Map2d6Error::UnsupportedFormat { found }),
+    let doc = whole(json, read_doc);
+    if !matches!(&doc, Ok(doc) if doc.format == MAP2D6_FORMAT) {
+        match peek_format(json)? {
+            MAP2D6_FORMAT => {}
+            found @ 1..MAP2D6_FORMAT => return Err(Map2d6Error::OlderFormat { found }),
+            found => return Err(Map2d6Error::UnsupportedFormat { found }),
+        }
     }
-    let doc: DocText = whole(json, read_doc)?;
+    let doc: DocText = doc?;
 
     let mut ids = Vec::new();
     let parts = doc
