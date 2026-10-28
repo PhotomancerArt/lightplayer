@@ -116,6 +116,17 @@ impl Opened {
     pub fn open(src: &dyn Source) -> Result<Opened, FilesError> {
         let manifest = read_json(src, "project.json")?;
         let format = manifest.get("format").and_then(Value::as_u64);
+        if format.is_some_and(|format| format > PROJECT_FORMAT) {
+            return Err(FilesError::new(
+                "project.json",
+                format!(
+                    "this project is at project format {} and its mappings are map2d \
+                     format 6, the new mapping format, which the lab doesn't read (the lab \
+                     reads project format {PROJECT_FORMAT}); Studio's new Graph will edit it",
+                    format.unwrap_or_default()
+                ),
+            ));
+        }
         if format != Some(PROJECT_FORMAT) {
             return Err(FilesError::new(
                 "project.json",

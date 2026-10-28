@@ -9,7 +9,6 @@ just lab-mapping        # serves the canvas; the printed URL is the source of tr
 cargo test -p lab-mapping-model        # the statements
 cargo test -p lab-layout -p lab-arrows # the layout's and the arrows' statements
 cargo test -p lab-mapping-files        # opening and saving real projects
-cargo test -p lab-mapping-fit-tests    # the proof against the product (slow: runs its engine)
 cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 ```
 
@@ -55,13 +54,14 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
   through untouched, writes only the files it owns and
   only when what they say changed, so saving an unedited project writes
   nothing. It also bakes the three test projects in for the page.
-- **`fit-tests/`** (`lab-mapping-fit-tests`): the proof, and the only lab
-  crate that depends on product crates. For each test project: an
-  unedited save leaves every file byte for byte; every file the lab would
-  write reads back through the product's readers as the original does;
-  every lamp is `lpc_mapping::resolve`'s bit for bit; and every output
-  carries the same lamp on every wire lamp as the product's engine,
-  loaded headless from the same files. Plus edited-then-saved round trips.
+- **`fixtures-v11/`**: the format-11 copies the lab, its tests and Studio's
+  Graph stories open. Project format 12 (mapping rebuild M3) moved every
+  repo project to map2d format 6, which the lab does not read (it refuses
+  a format-12 project by name); its README lists where each copy came
+  from. `fit-tests/` (`lab-mapping-fit-tests`), the proof against the
+  product's old patch path, was deleted with project format 12: its oracle
+  was that path, and the upgrade's landing goldens
+  (`lpc-engine/tests/upgrade_landing.rs`) superseded it.
 - **`radiance-gen/`** (`lab-mapping-radiance-gen`): writes
   `projects/radiance-dome/`, the radiance dome in the product's formats,
   from lp2014's geodesic geometry. **Its lamp counts and patch are

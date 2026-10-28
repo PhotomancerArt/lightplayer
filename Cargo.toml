@@ -37,7 +37,6 @@ members = [
     "lab/mapping/model",
     "lab/mapping/web",
     "lab/mapping/files",
-    "lab/mapping/fit-tests",
     "lab/mapping/radiance-gen",
     "lab/mapping/arrows",
     "lab/mapping/layout",

@@ -9,8 +9,8 @@ publish = false
 description = "Mapping design lab: opens and saves real LightPlayer projects in the product's own formats"
 
 # The fence: the lab model and serde only — NO product crate. The product's
-# document shapes are re-created here (fit-check §6); the fit-tests crate
-# proves they agree with the product.
+# document shapes (project format 11, map2d 1–5, patch files) are
+# re-created here (fit-check §6).
 [dependencies]
 lab-mapping-model = { path = "../model" }
 # Never `preserve_order`: Studio builds this crate (the Graph tab), and cargo

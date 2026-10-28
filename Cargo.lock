@@ -5654,21 +5654,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-mapping-fit-tests"
-version = "40.0.0"
-dependencies = [
- "lab-mapping-files",
- "lab-mapping-model",
- "lp-gfx-lpvm",
- "lp-shader",
- "lpc-engine",
- "lpc-hardware",
- "lpc-mapping",
- "lpc-model",
- "lpfs",
-]
-
-[[package]]
 name = "lab-mapping-model"
 version = "40.0.0"
 dependencies = [

@@ -14,9 +14,8 @@
 //!
 //! **The fence:** this crate depends on the lab model and `serde_json`
 //! only — no product crate. The product's document shapes are re-created
-//! here ([`map2d_doc`], [`patch_doc`], [`channels`]); `lab-mapping-fit-tests`,
-//! which may depend on the product, proves they agree (same lamps, same
-//! wire, files untouched).
+//! here ([`map2d_doc`], [`patch_doc`], [`channels`]), at project format 11;
+//! a format-12 project (map2d format 6) is refused by name.
 
 pub mod channels;
 pub mod embedded;

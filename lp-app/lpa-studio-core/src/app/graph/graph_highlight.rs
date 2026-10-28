@@ -14,7 +14,7 @@
 //! - a module says nothing on its own (as in Patch).
 //!
 //! An object or a lamp counts in its fixture's own lamp numbering (the
-//! lab resolves lamps in the product's order, `lab-mapping-fit-tests`),
+//! lab resolves lamps in the product's order),
 //! which core maps through the board's own placements; an output, a port
 //! or a pixel counts on the output's wire.
 //!

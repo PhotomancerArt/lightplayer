@@ -1,6 +1,11 @@
 //! The test projects, baked into the binary: the page runs in a browser
 //! with no disk, so it opens these (fit-check §7).
 //!
+//! Each is the format-11 copy frozen in `lab/mapping/fixtures-v11/` (see
+//! its README): the repo's own projects are at project format 12 with map2d
+//! format 6, which the lab does not read. The list below names where each
+//! copy came from.
+//!
 //! - the PLAYFUL choker (`catalog/projects/playful-choker`): 73 lamps on
 //!   12 paths, one output whose one port takes the rest;
 //! - the zook dome (`catalog/projects/zook-dome`): a 5-way repeat of a
@@ -44,7 +49,7 @@ macro_rules! files {
 pub const CHOKER: Embedded = Embedded {
     key: "playful-choker",
     title: "PLAYFUL choker",
-    files: files!("../../../../catalog/projects/playful-choker":
+    files: files!("../../fixtures-v11/playful-choker":
         "project.json", "module.json", "clock.json", "fixture.json", "output.json",
         "power.json", "shader.json", "shader.glsl", "playful.map2d.json"),
     wired_as: None,
@@ -53,7 +58,7 @@ pub const CHOKER: Embedded = Embedded {
 pub const ZOOK_DOME: Embedded = Embedded {
     key: "zook-dome",
     title: "Zook dome",
-    files: files!("../../../../catalog/projects/zook-dome":
+    files: files!("../../fixtures-v11/zook-dome":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "shader.json", "shader.glsl"),
     wired_as: None,
@@ -62,9 +67,9 @@ pub const ZOOK_DOME: Embedded = Embedded {
 pub const RADIANCE_DOME: Embedded = Embedded {
     key: "radiance-dome",
     title: "Radiance dome",
-    files: files!("../../projects/radiance-dome":
+    files: files!("../../fixtures-v11/radiance-dome":
         "project.json", "module.json", "clock.json", "shader.json", "shader.glsl", "dome.json",
-        "dome.map2d.json", "out_1.json", "out_2.json", "out_3.json",
+        "dome.map2d.json", "dome.patch.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),
     wired_as: None,
@@ -73,7 +78,7 @@ pub const RADIANCE_DOME: Embedded = Embedded {
 pub const EAVES: Embedded = Embedded {
     key: "eaves",
     title: "Sean's eaves",
-    files: files!("../../projects/eaves":
+    files: files!("../../fixtures-v11/eaves":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
     wired_as: Some(&EAVES_WIRED),
@@ -83,10 +88,34 @@ pub const EAVES: Embedded = Embedded {
 pub const EAVES_WIRED: Embedded = Embedded {
     key: "eaves-wired",
     title: "Sean's eaves, as wired",
-    files: files!("../../projects/eaves-wired":
+    files: files!("../../fixtures-v11/eaves-wired":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
-        "output.json", "effect/module.json", "effect/shader.json",
+        "fixture.patch.json", "output.json", "effect/module.json", "effect/shader.json",
         "effect/shader.glsl"),
+    wired_as: None,
+};
+
+/// The plasma pattern (`catalog/patterns/plasma`): a one-lamp grid and a
+/// disc of eight rings on one strand. Not in the picker; Studio's Graph
+/// stories open it.
+pub const PLASMA: Embedded = Embedded {
+    key: "plasma",
+    title: "Plasma",
+    files: files!("../../fixtures-v11/plasma":
+        "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
+        "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
+    wired_as: None,
+};
+
+/// The fiber headband (`catalog/projects/fiber-headband`): hand-placed
+/// lamps (point lists), which the lab shows as its box. Not in the picker;
+/// Studio's Graph stories open it.
+pub const FIBER_HEADBAND: Embedded = Embedded {
+    key: "fiber-headband",
+    title: "Fiber headband",
+    files: files!("../../fixtures-v11/fiber-headband":
+        "project.json", "module.json", "clock.json", "fixture.json", "output.json",
+        "shader.json", "shader.glsl"),
     wired_as: None,
 };
 

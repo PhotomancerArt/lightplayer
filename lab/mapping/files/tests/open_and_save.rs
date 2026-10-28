@@ -1,6 +1,6 @@
 //! Opening the three test projects and saving them back, without the
 //! product: what each opens as, and that saving an unedited project writes
-//! nothing. (`lab-mapping-fit-tests` holds the proofs against the product.)
+//! nothing. They open the format-11 copies in `lab/mapping/fixtures-v11/`.
 
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
 use lab_mapping_files::{DirFiles, MemFiles, Opened};
@@ -340,10 +340,7 @@ fn the_desk_saves_as_a_new_project() {
 /// object is written back as it was.
 #[test]
 fn a_grid_and_a_ring_set_open_whole() {
-    let root = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../catalog/patterns/plasma"
-    );
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures-v11/plasma");
     let o = Opened::open(&DirFiles::new(root)).unwrap();
     let fixture = o.project.fixture(&NodeId::new("fixture")).unwrap();
     assert_eq!(fixture.unsupported, None);
@@ -375,6 +372,25 @@ fn a_grid_and_a_ring_set_open_whole() {
     assert_eq!(
         written["objects"][1]["shape"], original["objects"][1]["shape"],
         "the disc is written back as it was"
+    );
+}
+
+/// A project in the new mapping format (project format 12, map2d format 6)
+/// is refused by name: the lab says it doesn't read the new mapping format,
+/// rather than naming a version only.
+#[test]
+fn a_project_in_the_new_mapping_format_is_refused_by_name() {
+    let root = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../catalog/projects/playful-choker"
+    );
+    let Err(why) = Opened::open(&DirFiles::new(root)) else {
+        panic!("the lab opened a format-12 project");
+    };
+    let why = why.to_string();
+    assert!(
+        why.contains("map2d format 6, the new mapping format, which the lab doesn't read"),
+        "{why}"
     );
 }
 

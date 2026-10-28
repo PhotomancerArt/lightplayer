@@ -10,5 +10,3 @@ It is the truth the lab's piece is wired by when you open "Sean's eaves"
 in the lab (plan `lp2025/2026-10-18-2337-explicit-patching-spike`, J2): the
 canvas opens the plain eaves on auto, the piece shows the house, and the
 walk patches the one to match the other. Written by the lab's own save.
-
-`cargo test -p lab-mapping-fit-tests eaves_wired`
