@@ -419,23 +419,42 @@ fn every_offered_patching_verb_does_something() {
     }
 }
 
-// ---- rules and overrides on the walk (theory "Patching") ---------------------
+// ---- the patching verbs on the walk (theory "Patching") ----------------------
+//
+// The patcher's own rules are `lpc-mapping`'s statements
+// (`lp-core/lpc-mapping/tests/patcher.rs`); these say what the Graph's
+// verbs (`graph_edit.rs`) do with them.
 
-/// A fixture's segments run end to end from its start unless something says
-/// otherwise: nothing set their steps, the walk carried on.
+/// The part-start verb at a lamp puts a circle's rings there end to end, in
+/// order, as one undo step.
 #[test]
-fn segments_follow_the_fixtures_start() {
-    let (mut p, f, out, segments) = paths(&[("D0", 40)], &[3, 4]);
-    flow(&mut p, &f, &out);
-    assert_eq!(pixels(&p, &segments[0]), vec![0, 1, 2]);
-    assert_eq!(pixels(&p, &segments[1]), vec![3, 4, 5, 6]);
-    let w = p.effective_patch().walked(&segments[1]).unwrap();
-    assert!(w.sources.iter().all(|s| *s == StepSource::Follows));
+fn a_circles_start_at_a_lamp_puts_its_rings_there_in_order() {
+    let (p, _, out, circle) = circle(&[("D0", 40)]);
+    let mut e = editor_of(p);
+    e.edit(&[GraphEdit::SetPartStart {
+        part: circle.clone(),
+        start: PartStart::At {
+            output: out.clone(),
+            port: "0".into(),
+            lamps: 10,
+        },
+    }])
+    .unwrap();
+    let (r1, r2) = (ring(&circle, "r1"), ring(&circle, "r2"));
+    assert_eq!(pixels(&e.project, &r1), (10..18).collect::<Vec<_>>());
+    assert_eq!(pixels(&e.project, &r2), (18..22).collect::<Vec<_>>());
+    e.undo();
+    assert!(
+        e.project.part(&circle).unwrap().start.is_keep(),
+        "one step back"
+    );
 }
 
-/// A circle's Start at a pixel puts its rings there end to end, in order.
+/// The direction verb on a circle's own node runs each ring the other way
+/// in its own slot; the order the rings go in is the circle's layout, not
+/// its patch (theory "Direction").
 #[test]
-fn placing_a_circle_puts_its_rings_there_in_order() {
+fn reversing_a_circles_node_reverses_each_ring_in_its_slot() {
     let (mut p, f, out, circle) = circle(&[("D0", 40)]);
     place(
         &mut p,
@@ -445,30 +464,15 @@ fn placing_a_circle_puts_its_rings_there_in_order() {
         "0",
         10,
     );
+    let mut e = editor_of(p);
+    e.edit(&[GraphEdit::SetDirection {
+        subject: circle.node(),
+        direction: Direction::Reverse,
+    }])
+    .unwrap();
     let (r1, r2) = (ring(&circle, "r1"), ring(&circle, "r2"));
-    assert_eq!(pixels(&p, &r1), (10..18).collect::<Vec<_>>());
-    assert_eq!(pixels(&p, &r2), (18..22).collect::<Vec<_>>());
-}
-
-/// Reversing a circle's own node runs each ring the other way in its own
-/// slot; the order the rings go in is the circle's layout, not its patch
-/// (theory "Direction").
-#[test]
-fn reversing_a_circle_reverses_each_ring_in_its_slot() {
-    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
-    place(
-        &mut p,
-        &f,
-        &PatchTarget::Part(circle.part.clone()),
-        &out,
-        "0",
-        10,
-    );
-    p.edit_override(&circle.node(), |o| o.direction = Some(Direction::Reverse))
-        .unwrap();
-    let (r1, r2) = (ring(&circle, "r1"), ring(&circle, "r2"));
-    assert_eq!(pixels(&p, &r1), (10..18).rev().collect::<Vec<_>>());
-    assert_eq!(pixels(&p, &r2), vec![21, 20, 19, 18]);
+    assert_eq!(pixels(&e.project, &r1), (10..18).rev().collect::<Vec<_>>());
+    assert_eq!(pixels(&e.project, &r2), vec![21, 20, 19, 18]);
 }
 
 /// I can reverse the direction of the leds on one ring without manually
@@ -518,24 +522,6 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
     assert!(p.unpatch_segment(&r1));
     assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
     assert_eq!(pixels(&p, &r2), vec![8, 9, 10, 11]);
-}
-
-/// An offset is a leaf's alone: an offset on a container offsets nothing.
-#[test]
-fn an_offset_is_a_leafs_alone() {
-    let (mut p, f, out, circle) = circle(&[("D0", 40)]);
-    place(
-        &mut p,
-        &f,
-        &PatchTarget::Part(circle.part.clone()),
-        &out,
-        "0",
-        0,
-    );
-    p.edit_override(&circle.node(), |o| o.offset = Some(3))
-        .unwrap();
-    let r1 = ring(&circle, "r1");
-    assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
 }
 
 // ---- the patching rows ------------------------------------------------------

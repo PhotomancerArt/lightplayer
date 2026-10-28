@@ -234,6 +234,25 @@ fn reverse_and_offset_land_as_today() {
     assert_eq!(lamps(&p, &a), [11, 10, 14, 13, 12]);
 }
 
+/// An offset is a segment's alone: an offset on a container (a circle's own
+/// node) offsets none of its rings.
+#[test]
+fn an_offset_on_a_container_offsets_nothing() {
+    let mut m = Mapping::new();
+    circle(&mut m, &[(40.0, 8), (20.0, 4)]);
+    m.start = Start::at("out", 0, Amount::lamps(0));
+    m.overrides.insert(
+        id("circle1"),
+        Override {
+            offset: Some(3),
+            ..Override::default()
+        },
+    );
+    let p = patch(&m, &ports(&[Some(60)]));
+    assert_eq!(lamps(&p, &id("circle1/r1")), (0..8).collect::<Vec<_>>());
+    assert_eq!(lamps(&p, &id("circle1/r2")), [8, 9, 10, 11]);
+}
+
 /// An override for a node that's gone is kept and reported, never moved to
 /// another node.
 #[test]

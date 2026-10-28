@@ -14,8 +14,10 @@
 
 use std::path::{Path, PathBuf};
 
-use lab_mapping_model::{GraphVerb, NodeId, NodeKind, Output, port_value};
-use lpc_mapping::part::{Mapping, TreeId, render};
+use lab_mapping_model::{
+    GraphInput, GraphVerb, NodeId, NodeKind, Output, PartRef, PropEdit, Target, port_value,
+};
+use lpc_mapping::part::{Mapping, PartId, TreeId, render};
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, Override, Patching, PortKey, PortOp,
     Problem, patch_mapping,
@@ -295,6 +297,48 @@ fn seans_eaves() {
 
     j.not_offered("remove-override");
     j.a_port_of_an_unnamed_output_is_disabled("fixture:side");
+}
+
+/// An override whose node is gone — a copy counted away — is offered for
+/// removal (lean Q85, Undoable), named by its id; pressing it takes the
+/// override out of the saved file.
+#[test]
+fn a_gone_overrides_remove_is_an_offer() {
+    let mut j = Journey::catalog("catalog/zook-dome", "/fixture.map2d.json");
+    j.not_offered("remove-override");
+    j.press(
+        "set-direction",
+        OfferArgs::new()
+            .with("subject", "fixture:sector@4")
+            .with("direction", "reverse"),
+    );
+    // Five copies down to four, as the inspector's Copies row does it (a
+    // count is a layout verb of P07's, not an offer yet): copy 4 is gone,
+    // its override kept.
+    let repeat = PartRef::new(&j.fixture, &PartId::new("repeat1").expect("an id"));
+    j.graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(repeat)]));
+    j.graph.handle.input(GraphInput::MoveDraw(true));
+    j.graph.handle.input(GraphInput::EditProp {
+        id: "copies",
+        edit: PropEdit::SetCount(4),
+    });
+    // The page's inputs told the actor; it saves.
+    j.graph.batch();
+    j.graph.refresh();
+    assert!(j.saved().overrides.contains_key(&id("sector@4")), "kept");
+    let offer =
+        actor_clicks(&mut j.graph.actor, &j.graph.tx).offered("project/graph/remove-override");
+    assert_eq!(offer.action.meta().consequence, ActionConsequence::Undoable);
+    let value = j.offered_option(
+        "remove-override",
+        "subject",
+        "sector@4, which isn't there any more",
+    );
+    j.press("remove-override", OfferArgs::new().with("subject", value));
+    assert!(j.saved().overrides.is_empty());
+    j.not_offered("remove-override");
 }
 
 /// Every patching verb is offered at `project/graph/<verb>` with typed
