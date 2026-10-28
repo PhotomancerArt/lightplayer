@@ -102,6 +102,7 @@ pub(crate) fn update_work(standing: &UpdateStanding) -> Option<(&'static str, Op
         UpdateStanding::Updating { .. }
         | UpdateStanding::Finishing { .. }
         | UpdateStanding::AnotherDevice { .. } => "updating",
+        UpdateStanding::UpgradingProjects { .. } => "upgrading projects",
         _ => return None,
     };
     Some((verb, standing.whole_percent()))
@@ -119,9 +120,10 @@ pub(crate) fn whole_update_percent(stage: UpdateStageFacts, percent: u8) -> u8 {
     match stage {
         UpdateStageFacts::Updating => percent / 2,
         UpdateStageFacts::Finishing => percent / 2 + 50,
-        UpdateStageFacts::BackingUp | UpdateStageFacts::Restoring | UpdateStageFacts::Waiting => {
-            percent
-        }
+        UpdateStageFacts::BackingUp
+        | UpdateStageFacts::Restoring
+        | UpdateStageFacts::Waiting
+        | UpdateStageFacts::UpgradingProjects => percent,
     }
 }
 

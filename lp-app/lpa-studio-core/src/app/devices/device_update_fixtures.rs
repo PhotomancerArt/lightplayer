@@ -266,6 +266,7 @@ impl UpdateFixture {
             store_releases: self.releases.as_ref(),
             store_lookups: Some(&self.lookups),
             file_build: self.file.as_ref(),
+            projects: None,
         }
     }
 

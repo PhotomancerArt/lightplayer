@@ -2003,6 +2003,7 @@ impl StudioController {
                 // An automatic start waits for the hello: an unknown board
                 // is never started on its own.
                 board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
+                projects: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -2109,6 +2110,7 @@ impl StudioController {
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
             board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
+            projects: None,
         };
         crate::UpdateOfferFacts::read(
             &inputs,

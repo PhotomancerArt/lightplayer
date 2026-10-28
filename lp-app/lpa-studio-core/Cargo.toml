@@ -13,7 +13,9 @@ lpa-agent = { path = "../lpa-agent" }
 # Data-only (no `diagram` feature): the provisioning flow reads the
 # embedded runtime manifests + board↔build join; drawing stays web-side.
 lpa-boards = { path = "../lpa-boards" }
-lpa-client = { path = "../lpa-client", default-features = false }
+# `project-stage`: the update's project stage over a board's channel 1
+# (`lpa_client::run_project_stage`, M3 P11).
+lpa-client = { path = "../lpa-client", default-features = false, features = ["project-stage"] }
 # The device model the studio's effects layer drives (`app/devices`). Sans-IO
 # and serde-only, so every target pays the same nothing for it; the transport
 # that implements its `Link` contract is feature-gated below.

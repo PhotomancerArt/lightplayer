@@ -1834,6 +1834,7 @@ impl Board {
                 board_id: None,
                 fs: BoardFs::Mounted,
                 update,
+                project_format: None,
             },
         )));
     }

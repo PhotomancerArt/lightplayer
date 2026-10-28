@@ -554,6 +554,7 @@ impl Step {
                         fs: Default::default(),
                         version: None,
                         update: update.map(update_facts),
+                        project_format: None,
                     },
                 )),
             ),

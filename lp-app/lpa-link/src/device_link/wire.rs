@@ -260,6 +260,10 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             .firmware
             .as_ref()
             .map(crate::device_link::update_facts_mirror::update_facts_from_manifest),
+        // The project format the board's engine reads (wire 46): whether
+        // its stored projects need the update's project stage, and whether a
+        // project may be pushed to it (M3 P11).
+        project_format: Some(hello.build.project_format),
     }
 }
 

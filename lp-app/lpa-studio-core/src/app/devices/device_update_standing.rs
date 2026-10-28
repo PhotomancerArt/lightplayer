@@ -27,6 +27,9 @@
 //! | `ReportCrashing` | — | `KeepsCrashing` |
 //! | `RefusedBuild` | — | `RolledBack` |
 //! | `BoardIsNewer` | — | `Newer` |
+//! | any | an Update in its project stage | `UpgradingProjects` |
+//! | up to date (or no update story), its projects being upgraded with no Update running | — | `UpgradingProjects` |
+//! | up to date (or no update story), the project stage held back | — | `ProjectsUnfinished` |
 //!
 //! A pre-update board (no update channel at all, the roadmap's E9) has no
 //! facts, so it is `Nothing` too: its card keeps today's USB flash.
@@ -39,6 +42,7 @@ use lpc_update::BoardState;
 
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
+use super::project_stage_status::{ProjectStageStatus, ProjectsHeldBack};
 use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
 
@@ -79,6 +83,10 @@ pub struct UpdateStandingInputs<'a> {
     /// a tree-store build may go to it over the air. `false` for a board on
     /// littlefs — and for one that has not said hello this window.
     pub board_tree_store: bool,
+    /// Where the board's project stage stands when no Update runs it (M3
+    /// P11): running with no click, or how it was held back. `None` when
+    /// nothing is pending.
+    pub projects: Option<&'a ProjectStageStatus>,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -187,6 +195,21 @@ pub enum UpdateStanding {
         board: UpdateVersion,
         link: UpdateLink,
     },
+    /// The board's new engine reads a newer project format than projects it
+    /// stores, and this Studio is rewriting them (the update's last stage,
+    /// or one started with no click on a board found that way): `done` of
+    /// `total` projects.
+    UpgradingProjects {
+        board: UpdateVersion,
+        done: u32,
+        total: u32,
+    },
+    /// Projects older than the board's engine format are still on it, and
+    /// this Studio cannot finish them: `why`.
+    ProjectsUnfinished {
+        board: UpdateVersion,
+        why: ProjectsHeldBack,
+    },
     /// Over Wi‑Fi, the board's firmware is from before updates over Wi‑Fi:
     /// it announced the update channel, then said nothing on it when asked
     /// (the last update ended [`UpdateOutcomeFacts::NotOverWifi`]). It
@@ -218,7 +241,9 @@ impl UpdateStanding {
             | Self::Newer { board, .. }
             | Self::PlayOnly { board, .. }
             | Self::NoWirelessBuild { board, .. }
-            | Self::NotOverWifiYet { board, .. } => Some(board),
+            | Self::NotOverWifiYet { board, .. }
+            | Self::UpgradingProjects { board, .. }
+            | Self::ProjectsUnfinished { board, .. } => Some(board),
         }
     }
 
@@ -232,6 +257,7 @@ impl UpdateStanding {
                 | Self::Finishing { .. }
                 | Self::Restoring { .. }
                 | Self::AnotherDevice { .. }
+                | Self::UpgradingProjects { .. }
         )
     }
 
@@ -251,6 +277,7 @@ impl UpdateStanding {
             Self::BackingUp { percent, .. }
             | Self::Restoring { percent, .. }
             | Self::AnotherDevice { percent, .. } => percent.map(|percent| percent.min(100)),
+            Self::UpgradingProjects { done, total, .. } => percent_of(*done, *total),
             _ => None,
         }
     }
@@ -258,7 +285,7 @@ impl UpdateStanding {
     /// Whether this Studio is running an update on the board right now.
     pub fn is_running(&self) -> bool {
         match self {
-            Self::BackingUp { .. } | Self::Updating { .. } => true,
+            Self::BackingUp { .. } | Self::Updating { .. } | Self::UpgradingProjects { .. } => true,
             Self::Finishing { running, .. } | Self::Restoring { running, .. } => *running,
             _ => false,
         }
@@ -340,6 +367,12 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
                 to: Some(to),
                 percent,
             },
+            // The engine now running is the one the update installed.
+            Some(UpdateStageFacts::UpgradingProjects) => UpdateStanding::UpgradingProjects {
+                board: to,
+                done: update.done,
+                total: update.total,
+            },
             Some(UpdateStageFacts::Updating) | None => UpdateStanding::Updating {
                 board,
                 to,
@@ -349,6 +382,50 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
         };
     }
 
+    let firmware = firmware_standing(inputs, decision, board_version, own, board_view);
+    projects_standing(inputs, &firmware).unwrap_or(firmware)
+}
+
+/// The board's project stage, when no Update runs it: it outranks a board
+/// that is up to date or tells no update story, since it is what is left to
+/// do; anything the firmware still needs comes first.
+fn projects_standing(
+    inputs: &UpdateStandingInputs<'_>,
+    firmware: &UpdateStanding,
+) -> Option<UpdateStanding> {
+    let status = inputs.projects?;
+    if !matches!(
+        firmware,
+        UpdateStanding::Nothing | UpdateStanding::UpToDate { .. } | UpdateStanding::Newer { .. }
+    ) {
+        return None;
+    }
+    let board = firmware
+        .board()
+        .cloned()
+        .or_else(|| inputs.facts.and_then(board_version))
+        .unwrap_or_else(|| UpdateVersion::new(""));
+    Some(match status {
+        ProjectStageStatus::Running { done, total } => UpdateStanding::UpgradingProjects {
+            board,
+            done: *done,
+            total: *total,
+        },
+        ProjectStageStatus::HeldBack(why) => UpdateStanding::ProjectsUnfinished {
+            board,
+            why: why.clone(),
+        },
+    })
+}
+
+/// The board's firmware standing, from its facts (no Update running).
+fn firmware_standing(
+    inputs: &UpdateStandingInputs<'_>,
+    decision: Option<Decision>,
+    board_version: Option<UpdateVersion>,
+    own: Option<UpdateVersion>,
+    board_view: Option<BoardView>,
+) -> UpdateStanding {
     // Over Wi‑Fi, a board that announced the update channel and then said
     // nothing on it (or a known release from before the link's first one,
     // which would): nothing more is offered there that would only hang. A
@@ -809,6 +886,7 @@ pub(crate) mod tests {
             store_releases: None,
             store_lookups: None,
             file_build: None,
+            projects: None,
         }
     }
 

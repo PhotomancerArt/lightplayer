@@ -412,6 +412,13 @@ pub struct HelloFacts {
     /// that does not send one.
     #[serde(default)]
     pub update: Option<UpdateFacts>,
+    /// The project format the board's engine reads (its hello's
+    /// `build.projectFormat`, wire 46): what tells Studio whether the
+    /// board's stored projects need the update's project stage, and whether
+    /// a project may be pushed to it. `None` from a hello that did not say
+    /// (an older wire, a core with no engine, tests).
+    #[serde(default)]
+    pub project_format: Option<u32>,
 }
 
 /// How a board's filesystem came up at boot — the model's copy of the
