@@ -13,11 +13,12 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};
 use lab_mapping_model::{
-    Editor, GraphInput, LayoutKind, Notice, Piece, PortGrouping, Project, SizeClass, Tool,
+    Editor, GraphInput, LayoutKind, Notice, Piece, PortGrouping, Presentation, Project, SizeClass,
+    Tool,
 };
 use lab_mapping_web::{
-    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, PieceView, TreePane, input,
-    use_simulated_frame, use_view,
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, PieceView, TreePane,
+    input, use_remembered_inspector_debug, use_simulated_frame, use_view,
 };
 
 const LAB_CSS: &str = include_str!("lab.css");
@@ -35,6 +36,7 @@ fn App() -> Element {
         GraphEditor::owned(Rc::new(RefCell::new(e)), tick)
     });
     let mut project = use_signal(|| DESK.to_string());
+    use_remembered_inspector_debug(ed.clone());
     let view = use_view(ed.clone());
     let frame = use_simulated_frame(ed.clone());
     let toolbar = view.toolbar.read().clone();
@@ -218,7 +220,13 @@ fn App() -> Element {
                         "Tree"
                     }
                 }
-                DebugMenu { ed: e(), pinning: toolbar.pinning, forced: toolbar.forced_size_class }
+                DebugMenu {
+                    ed: e(),
+                    pinning: toolbar.pinning,
+                    forced: toolbar.forced_size_class,
+                    presentation: toolbar.presentation,
+                    cursor_ops: toolbar.cursor_ops,
+                }
             }
             match class {
                 SizeClass::Lg => rsx! {
@@ -449,7 +457,13 @@ fn remember_layout(kind: LayoutKind) {
 /// Debug, at the toolbar's right end: switches for things being tried,
 /// out of the way (D64). Open or shut is the page's own state.
 #[component]
-fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Element {
+fn DebugMenu(
+    ed: GraphEditor,
+    pinning: bool,
+    forced: Option<SizeClass>,
+    presentation: Presentation,
+    cursor_ops: bool,
+) -> Element {
     let pin = ed.clone();
     let mut open = use_signal(|| false);
     rsx! {
@@ -506,6 +520,7 @@ fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Eleme
                             }
                         }
                     }
+                    InspectorDebug { ed: ed.clone(), presentation, cursor_ops }
                 }
             }
         }

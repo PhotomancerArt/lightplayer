@@ -4,8 +4,9 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchInput, Prop, PropEdit,
-    PropKind, PropValue, UiInspector, UiItem, UiTree,
+    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchField, PatchInput, Prop,
+    PropEdit, PropKind, PropValue, UiField, UiFieldValue, UiInspector, UiItem, UiProblem, UiSource,
+    UiTree,
 };
 
 use crate::graph_editor::GraphEditor;
@@ -54,6 +55,9 @@ pub fn TreePane(ed: GraphEditor, tree: Memo<UiTree>) -> Element {
                         },
                         title: "{row.detail}",
                         span { class: "row-label", "{row.label}" }
+                        if let Some(problems) = row.problems.as_ref() {
+                            span { class: "row-problems", "⚠ {problems}" }
+                        }
                     }
                 }
             }
@@ -97,7 +101,13 @@ pub fn Inspector(ed: GraphEditor, inspector: Memo<UiInspector>) -> Element {
         for (i, section) in inspector.sections.into_iter().enumerate() {
             div { key: "s{i}",
                 if let Some(title) = section.title {
-                    div { class: "section-title", "{title}" }
+                    div { class: "section-title",
+                        "{title}"
+                        if let Some(id) = section.id {
+                            " · "
+                            span { class: "section-id", "{id}" }
+                        }
+                    }
                 }
                 for (j, item) in section.items.into_iter().enumerate() {
                     InspectorItem { key: "{j}", ed: ed.clone(), item }
@@ -122,98 +132,25 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 div { class: "port-fact-bar", div { class: "port-fact-bar-in", style: "width: {ratio * 100.0}%" } }
             }
         },
-        UiItem::Problem(pr) => rsx! {
-            div { class: "notice refused problem",
-                div { class: "notice-text", span { class: "notice-tag", "problem: " } "{pr.text}" }
-                if let Some(why) = pr.why {
-                    div { class: "notice-line", span { class: "notice-eq", "= why: " } "{why}" }
-                }
-                if let Some(help) = pr.help {
-                    div { class: "notice-line", span { class: "notice-eq", "= help: " } "{help}" }
-                }
-            }
-        },
+        UiItem::Problem(pr) => rsx! { ProblemRow { ed: ed.clone(), problem: pr } },
         UiItem::Prop { prop, locked } => rsx! { PropRow { ed: ed.clone(), prop, locked } },
-        UiItem::PatchChoice {
-            label,
-            options,
-            chosen,
-            reset,
-            field,
-        } => {
-            let choose = ed.clone();
+        UiItem::Field(field) => rsx! { FieldRow { ed: ed.clone(), field } },
+        UiItem::SetHere { options } => {
+            let fields: Vec<PatchField> = options.iter().map(|(_, f)| *f).collect();
             rsx! {
                 div { class: "prop",
-                    span { class: "prop-label", "{label}" }
-                    div { class: "patch-own",
-                        select {
-                            class: "choice",
-                            onkeydown: move |evt| evt.stop_propagation(),
-                            onchange: move |evt| {
-                                if let Ok(option) = evt.value().parse::<usize>() {
-                                    choose.input(GraphInput::Patch(PatchInput::Choose { field, option }));
-                                }
-                            },
-                            if chosen.is_none() {
-                                option { value: "", selected: true, disabled: true, "mixed" }
+                    span { class: "prop-label", "Set here" }
+                    select {
+                        class: "choice",
+                        onkeydown: move |evt| evt.stop_propagation(),
+                        onchange: move |evt| {
+                            if let Some(field) = evt.value().parse::<usize>().ok().and_then(|i| fields.get(i).copied()) {
+                                ed.input(GraphInput::Patch(PatchInput::Override { field }));
                             }
-                            for (i, word) in options.iter().enumerate() {
-                                option { value: "{i}", selected: chosen == Some(i), "{word}" }
-                            }
-                        }
-                        if let Some(parent) = reset {
-                            button {
-                                class: "patch-button",
-                                tabindex: "-1",
-                                title: "Follow {parent} again",
-                                onmousedown: move |evt| evt.prevent_default(),
-                                onclick: move |_| {
-                                    ed.input(GraphInput::Patch(PatchInput::Reset { field }));
-                                },
-                                "Reset"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        UiItem::PatchInherited {
-            label,
-            value,
-            from,
-            field,
-        } => {
-            let over = ed.clone();
-            rsx! {
-                div { class: "prop",
-                    span { class: "prop-label", "{label}" }
-                    div { class: "patch-inherited",
-                        div { class: "patch-inherited-line",
-                            span { class: "patch-value", "{value}" }
-                            button {
-                                class: "patch-button",
-                                tabindex: "-1",
-                                title: "Give it a {label} of its own",
-                                onmousedown: move |evt| evt.prevent_default(),
-                                onclick: move |_| {
-                                    over.input(GraphInput::Patch(PatchInput::Override { field }));
-                                },
-                                "Override"
-                            }
-                        }
-                        if let Some((words, target)) = from {
-                            button {
-                                class: "patch-from",
-                                tabindex: "-1",
-                                title: "Select {words}",
-                                onmousedown: move |evt| evt.prevent_default(),
-                                onclick: move |_| {
-                                    ed.input(GraphInput::Select(vec![target.clone()]));
-                                },
-                                "{words} ↗"
-                            }
-                        } else {
-                            span { class: "patch-from-default", "by default" }
+                        },
+                        option { value: "", selected: true, disabled: true, "Choose…" }
+                        for (i, (word, _)) in options.iter().enumerate() {
+                            option { value: "{i}", "{word}" }
                         }
                     }
                 }
@@ -250,55 +187,6 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 }
             }
         },
-        UiItem::PatchNumber {
-            label,
-            value,
-            note,
-            reset,
-            field,
-        } => {
-            let (down, up) = (ed.clone(), ed.clone());
-            let shown = value.map_or_else(|| "mixed".to_string(), |v| v.to_string());
-            rsx! {
-                div { class: "prop",
-                    span { class: "prop-label", "{label}" }
-                    div { class: "num",
-                        button {
-                            tabindex: "-1",
-                            onmousedown: move |evt| evt.prevent_default(),
-                            onclick: move |_| {
-                                down.input(GraphInput::Patch(PatchInput::Nudge { field, by: -1 }));
-                            },
-                            "−"
-                        }
-                        span { class: "num-value", "{shown}" }
-                        button {
-                            tabindex: "-1",
-                            onmousedown: move |evt| evt.prevent_default(),
-                            onclick: move |_| {
-                                up.input(GraphInput::Patch(PatchInput::Nudge { field, by: 1 }));
-                            },
-                            "+"
-                        }
-                        if let Some(note) = note {
-                            span { class: "num-note", "{note}" }
-                        }
-                        if let Some(back) = reset {
-                            button {
-                                class: "patch-button",
-                                tabindex: "-1",
-                                title: "Back to {back}",
-                                onmousedown: move |evt| evt.prevent_default(),
-                                onclick: move |_| {
-                                    ed.input(GraphInput::Patch(PatchInput::Reset { field }));
-                                },
-                                "Reset"
-                            }
-                        }
-                    }
-                }
-            }
-        }
         UiItem::Action { text, verb } => rsx! {
             div { class: "fact action-fact",
                 span { "{text}" }
@@ -315,6 +203,166 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 }
             }
         },
+    }
+}
+
+/// A problem: a mark and one sentence (never colour alone), the sentence
+/// selecting what it names, and Remove for an override whose node is gone.
+#[component]
+fn ProblemRow(ed: GraphEditor, problem: UiProblem) -> Element {
+    let UiProblem {
+        text,
+        about,
+        remove,
+    } = problem;
+    let pick = ed.clone();
+    rsx! {
+        div { class: "problem-line",
+            span { class: "problem-mark", "⚠" }
+            if let Some(target) = about {
+                button {
+                    class: "problem-text problem-link",
+                    tabindex: "-1",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| {
+                        pick.input(GraphInput::Select(vec![target.clone()]));
+                    },
+                    "{text}"
+                }
+            } else {
+                span { class: "problem-text", "{text}" }
+            }
+            if let Some(node) = remove {
+                button {
+                    class: "patch-button",
+                    tabindex: "-1",
+                    title: "Take this override away",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| {
+                        ed.input(GraphInput::RemoveOverride(node.clone()));
+                    },
+                    "Remove"
+                }
+            }
+        }
+    }
+}
+
+/// One patching row: its label, its value (a choice, a number, or words),
+/// then where the value came from — a link to it, or "set here" with Back
+/// to the flow — and what moves with it.
+#[component]
+fn FieldRow(ed: GraphEditor, field: UiField) -> Element {
+    let UiField {
+        label,
+        field: which,
+        value,
+        source,
+        note,
+    } = field;
+    let control = match value {
+        UiFieldValue::Choice { options, chosen } => {
+            let choose = ed.clone();
+            rsx! {
+                select {
+                    class: "choice",
+                    onkeydown: move |evt| evt.stop_propagation(),
+                    onchange: move |evt| {
+                        if let Ok(option) = evt.value().parse::<usize>() {
+                            choose.input(GraphInput::Patch(PatchInput::Choose { field: which, option }));
+                        }
+                    },
+                    if chosen.is_none() {
+                        option { value: "", selected: true, disabled: true, "—" }
+                    }
+                    for (i, word) in options.iter().enumerate() {
+                        option { value: "{i}", selected: chosen == Some(i), "{word}" }
+                    }
+                }
+            }
+        }
+        UiFieldValue::Number { value, unit, stays } => {
+            let (down, up, stay) = (ed.clone(), ed.clone(), ed.clone());
+            let shown = value.map_or_else(|| "mixed".to_string(), |v| v.to_string());
+            rsx! {
+                div { class: "num",
+                    button {
+                        tabindex: "-1",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| {
+                            down.input(GraphInput::Patch(PatchInput::Nudge { field: which, by: -1 }));
+                        },
+                        "−"
+                    }
+                    span { class: "num-value", "{shown}" }
+                    button {
+                        tabindex: "-1",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| {
+                            up.input(GraphInput::Patch(PatchInput::Nudge { field: which, by: 1 }));
+                        },
+                        "+"
+                    }
+                    span { class: "num-note", "{unit}" }
+                    if stays {
+                        button {
+                            class: "patch-button",
+                            tabindex: "-1",
+                            title: "Hold it where the walk is, whatever the flow says",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                stay.input(GraphInput::Patch(PatchInput::Stay { field: which }));
+                            },
+                            "Stays here"
+                        }
+                    }
+                }
+            }
+        }
+        UiFieldValue::Text(text) => rsx! { span { class: "patch-value", "{text}" } },
+    };
+    let back = ed.clone();
+    rsx! {
+        div { class: "prop field",
+            span { class: "prop-label", "{label}" }
+            {control}
+            match source {
+                Some(UiSource::From { words, target: Some(target) }) => rsx! {
+                    button {
+                        class: "patch-from",
+                        tabindex: "-1",
+                        title: "Select it",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| {
+                            ed.input(GraphInput::Select(vec![target.clone()]));
+                        },
+                        "{words} ↗"
+                    }
+                },
+                Some(UiSource::From { words, target: None }) => rsx! {
+                    span { class: "patch-from-default", "{words}" }
+                },
+                Some(UiSource::SetHere) => rsx! {
+                    div { class: "patch-set-here",
+                        span { class: "patch-set-here-word", "set here" }
+                        button {
+                            class: "patch-button",
+                            tabindex: "-1",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                back.input(GraphInput::Patch(PatchInput::Reset { field: which }));
+                            },
+                            "Back to the flow"
+                        }
+                    }
+                },
+                Some(UiSource::Mixed) => rsx! { span { class: "patch-from-default", "from different places" } },
+                None => rsx! {},
+            }
+            if let Some(note) = note {
+                span { class: "patch-note", "{note}" }
+            }
+        }
     }
 }
 

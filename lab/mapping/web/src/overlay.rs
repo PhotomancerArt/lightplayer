@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lab_arrows::Arrow;
-use lab_mapping_model::ux::area::FRAME_TITLE_PX;
+use lab_mapping_model::ux::area::{FRAME_TITLE_PX, PROBLEM_GAP_PX};
 use lab_mapping_model::ux::handle::HANDLE_PX;
 use lab_mapping_model::{
     Camera, Emphasis, FrameKind, GraphInput, NodeId, OutlineKind, Rect, UiCanvasEdge, UiCanvasNode,
@@ -55,7 +55,12 @@ pub fn Overlay(
                         width: "{n.header.title_px}", height: "{FRAME_TITLE_PX}",
                         rx: "3",
                     }
-                    text { class: "frame-title", x: "{r.min.x + 7.0}", y: "{r.min.y - 7.0}", "{n.header.name}" }
+                    text { class: "frame-title", x: "{r.min.x + 7.0}", y: "{r.min.y - 7.0}",
+                        "{n.header.name}"
+                        if let Some(problems) = n.header.problems.as_ref() {
+                            tspan { class: "frame-problems", dx: "{PROBLEM_GAP_PX}", "⚠ {problems}" }
+                        }
+                    }
                     if n.header.pinned {
                         {pin_mark(Vec2::new(r.min.x + n.header.title_px - 9.0, r.min.y - 11.0))}
                     }

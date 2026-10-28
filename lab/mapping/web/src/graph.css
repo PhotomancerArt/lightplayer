@@ -53,6 +53,11 @@
     .toggle-box { display: inline-block; width: 12px; height: 12px; line-height: 11px; font-size: 10px; text-align: center; border: 1px solid var(--border-strong); border-radius: 3px; vertical-align: -1px; }
     .tool.toggle.on .toggle-box { border-color: var(--selection); color: var(--text); }
     .tool.on { border-color: var(--selection); color: var(--text); background: var(--selection-bg); }
+    /* Debug, at a toolbar's right end: switches for things being tried. */
+    .debug { position: relative; }
+    .debug-row { display: flex; align-items: center; gap: 4px; }
+    .debug-label { color: var(--text-subtle); font-size: 12px; margin-right: 4px; }
+    .debug-menu { position: absolute; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 10; white-space: nowrap; }
     kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 
     .tree { grid-area: tree; overflow: auto; border-right: 1px solid var(--border); background: var(--surface); padding: 8px 0; }
@@ -224,6 +229,22 @@
     .port-fact-bar-in { height: 100%; background: var(--bound); border-radius: 2px; }
     .patch-rule { color: var(--bound); }
     .problem { padding: 6px 0; }
+    /* A problem: a mark and one plain sentence, loud (never colour alone). */
+    .problem-line { display: flex; align-items: baseline; gap: 6px; padding: 4px 0; color: var(--refused); }
+    .problem-mark { flex: none; font-weight: 700; }
+    .problem-text { flex: 1; min-width: 0; text-align: left; }
+    .problem-link { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
+    .problem-link:hover { text-decoration: underline; }
+    .row-problems { flex: none; color: var(--refused); font-size: 11px; font-weight: 600; }
+    .frame-problems { fill: var(--refused); font: 600 11px var(--font); }
+    /* An inspector section's id: monospaced, in its title only. */
+    .section-id { font: 11px var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+    /* A patching row: label and value, then (under the value) where the
+       value came from, and what moves with it. */
+    .prop.field > .patch-from, .prop.field > .patch-from-default, .prop.field > .patch-set-here, .prop.field > .patch-note { grid-column: 2; justify-self: end; text-align: right; }
+    .patch-set-here { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .patch-set-here-word { color: var(--text); font-weight: 600; }
+    .patch-note { font-size: 11px; color: var(--text-subtle); }
 
     .hints { grid-area: hints; border-top: 1px solid var(--border); background: var(--surface); }
     .bar { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px 10px; }

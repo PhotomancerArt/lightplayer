@@ -134,6 +134,8 @@ impl Editor {
             size_class: self.size_class(),
             forced_size_class: self.debug.size_class,
             pinning: self.debug.pinning,
+            presentation: self.debug.presentation,
+            cursor_ops: self.debug.cursor_ops,
             grouping: self.grouping,
             group_size: self.segment_size(),
         }

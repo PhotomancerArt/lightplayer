@@ -18,9 +18,12 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, GraphInput, GraphVerb, LayoutKind, SizeClass, Tool};
+use lab_mapping_model::{
+    BoardFrame, GraphInput, GraphVerb, LayoutKind, Presentation, SizeClass, Tool,
+};
 use lab_mapping_web::{
-    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, TreePane, View, use_view,
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, TreePane, View,
+    use_remembered_inspector_debug, use_view,
 };
 use lpa_studio_core::app::graph::{GraphHandle, UiGraphState, UiGraphView, graph_verb_path};
 use lpa_studio_core::{OfferPath, UiAction, UiOffer};
@@ -67,6 +70,8 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
     let mut published = use_signal(|| None::<lpa_studio_core::app::graph::UiGraphFrame>);
     let latest = graph.map(|g| g.frame);
     use_effect(use_reactive!(|latest| published.set(latest)));
+    // The inspector's Debug switches, as this browser last left them.
+    use_remembered_inspector_debug(ed.clone());
     let view = use_view(ed.clone());
     let drawing = use_memo({
         let ed = ed.clone();
@@ -198,11 +203,41 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
                 span { class: "tw:ml-auto tw:text-xs tw:text-subtle-foreground",
                     if live { "Colours from the board" } else { "Waiting for the board's first frame" }
                 }
+                GraphDebug {
+                    ed: ed.clone(),
+                    presentation: toolbar.presentation,
+                    cursor_ops: toolbar.cursor_ops,
+                }
             }
             div { class: "canvas-wrap tw:relative tw:min-h-0 tw:flex-1",
                 Canvas { ed: ed.clone(), view, frame }
             }
             footer { class: "hints", HintBar { hints: view.hints } }
+        }
+    }
+}
+
+/// Debug, at the toolbar's right end: the inspector's presentation and its
+/// cursor ops (view state, remembered per browser; never an offer). Open
+/// or shut is the page's own state.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn GraphDebug(ed: GraphEditor, presentation: Presentation, cursor_ops: bool) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        div { class: "debug",
+            button {
+                class: if open() { "tool on" } else { "tool" },
+                tabindex: "-1",
+                onmousedown: move |evt| evt.prevent_default(),
+                onclick: move |_| open.toggle(),
+                "Debug ▾"
+            }
+            if open() {
+                div { class: "debug-menu",
+                    InspectorDebug { ed, presentation, cursor_ops }
+                }
+            }
         }
     }
 }

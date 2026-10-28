@@ -54,7 +54,7 @@ pub fn OutputFace(
                                 x: "{w - font * 0.7}", y: "{p.row.min.y + p.row.height() * 0.28}",
                                 text_anchor: "end",
                                 if let Some(overlap) = p.overlap.as_ref() {
-                                    tspan { class: "port-overlap", "{overlap} · " }
+                                    tspan { class: "port-overlap", "⚠ {overlap} · " }
                                 }
                                 "{p.fill}"
                             }
@@ -70,6 +70,7 @@ pub fn OutputFace(
                     g { key: "{p.key}",
                         for (i, run) in p.runs.iter().enumerate() {
                             g { key: "{i}", class: "run {run_class(run.emphasis)}",
+                                title { "{run.label}" }
                                 for (j, r) in run.rects.iter().enumerate() {
                                     rect {
                                         key: "{j}",

@@ -1,6 +1,7 @@
 //! The toolbar: the tool, Move & draw, undo and redo, the layout, and the
 //! Debug switches at its right end.
 
+use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::Tool;
 use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::{LayoutKind, SizeClass};
@@ -21,6 +22,10 @@ pub struct UiToolbar {
     pub forced_size_class: Option<SizeClass>,
     /// Debug: dragging a node pins it (D64).
     pub pinning: bool,
+    /// Debug: how the inspector shows a start against its flow (Q82).
+    pub presentation: Presentation,
+    /// Debug: the patcher's steps under the inspector.
+    pub cursor_ops: bool,
     /// How output cards group a port's pixels, and the size of a group.
     pub grouping: PortGrouping,
     pub group_size: u32,
