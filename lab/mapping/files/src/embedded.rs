@@ -116,5 +116,32 @@ pub const FIBER_HEADBAND: Embedded = Embedded {
     wired_as: None,
 };
 
+/// The circular display as soldered (`projects/test/circular-display-6`):
+/// one circle of four rings and a centre lamp, ring 3 on port 1 and
+/// reversed, two ports of 64. Not in the picker; Studio's Graph stories
+/// open it.
+pub const CIRCULAR_DISPLAY: Embedded = Embedded {
+    key: "circular-display-6",
+    title: "Circular display",
+    files: files!("../../../../projects/test/circular-display-6":
+        "project.json", "module.json", "fixture.json", "fixture.map2d.json", "output.json",
+        "shader.json", "shader.glsl"),
+    wired_as: None,
+};
+
+/// The circular display's walk project (`projects/test/circular-display-walk`):
+/// a new board's project with the display's five ports of 64 on an output
+/// with no name, its starter strip still in place. Not in the picker;
+/// Studio's Graph stories map the display from nothing in it.
+pub const CIRCULAR_DISPLAY_WALK: Embedded = Embedded {
+    key: "circular-display-walk",
+    title: "Circular display, from nothing",
+    files: files!("../../../../projects/test/circular-display-walk":
+        "project.json", "module.json", "clock.json", "playlist.json", "fixture.json",
+        "fixture.map2d.json", "output.json", "effect/module.json", "effect/render.json",
+        "effect/render.glsl", "effect/sim.json", "effect/sim.glsl"),
+    wired_as: None,
+};
+
 /// Every baked-in project, in the picker's order.
 pub const ALL: [&Embedded; 4] = [&CHOKER, &ZOOK_DOME, &RADIANCE_DOME, &EAVES];
