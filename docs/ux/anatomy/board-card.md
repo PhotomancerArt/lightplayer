@@ -644,7 +644,7 @@ bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20:
 ▲ Firmware  unknown (pre-2026.07)   │ Install │          # was: Pre-hello firmware; no button when the primary is Install firmware
             # "Update to v2026.10.16-1" does not fit beside the version at the card's width:
             # the button says the verb, and the version it brings is the details' Newest
-▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, the primary's board pick. primary: Install firmware
+▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, one press (no board pick, 10-28). primary: Install firmware
 ▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating                   # carried: the surface has 42 %. was: updating · 42% and a rainbow fill
 ◌ Firmware  v2026.10.08-9   backing up │ Cancel │
@@ -671,6 +671,7 @@ bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a 
 
 ```text
 ■ Hardware  XIAO ESP32-C6
+▲ Hardware  ESP32-C6       which board?   │ Which board? │   # an install that could not tell: lit, a to-do; the pick opens on press (10-28)
 ■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
 ■ Hardware  unknown                              # was: Board not known
 ◌ Hardware  —   identifying                      # was: identifying, in the name's place; chip unknown
@@ -685,7 +686,7 @@ something. The name is renamed in the name bar, not here:
 │ Board      Model  XIAO ESP32-C6                 │
 │            Chip   ESP32-C6                      │
 │            Id     a0:f2:62:87:b4:8c             │
-│ Actions    ↻ Reset                              │
+│ Actions    ▦ Change board   ↻ Reset              │   Change board: the chip fits several boards
 │ Danger     ✕ Factory reset   ✕ Forget on this browser   ✕ Remove from your account │   Lasting: arm, then press again
 ```
 
@@ -825,6 +826,15 @@ Yona's C6 install walk, 2026-10-19:
 W1  Factory reset is the Hardware row's: it erases the board, not only its firmware (Yona)
 W2  a board Studio erased is the blank board at once, heard or not: Install firmware, no Retry (Yona)
 W3  the Firmware details say what is there in the row's words; the surface says the sentence (Yona)
+```
+
+Install without picking a board, 2026-10-28 (Sean and Yona; plan `lp2025/2026-10-28-0025-install-without-board-pick`):
+
+```text
+I1  Install is one press: the install reads the board in its bootloader, then writes   (Yona)
+I2  the board model is asked AFTER, on the Hardware row, only when several boards fit   (Yona, D1)
+I3  replacing somebody else's firmware is the one question, and it names what is there   (Yona, D2)
+    ("This board is running WLED 0.15.0." — an Arduino build says "an Arduino sketch")
 ```
 
 The setup rows, 2026-10-19 (plan `lp2025/2026-10-19-1350-board-setup-rows`, spike `spikes/install-network-setup`):

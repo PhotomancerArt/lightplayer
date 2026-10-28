@@ -26,6 +26,7 @@ use super::host_esp32_flash::{
     load_manifest, manifest_chip, read_flash_region, restore_lp_analog_i2c_clock, write_verified,
 };
 use crate::layout_migration::{LayoutProbe, embedded_manifest};
+use crate::provider::flash_build::FlashBuild;
 use crate::provider::flash_plan::{FlashPlan, FlashStepTarget, run_plan};
 use crate::{
     LinkError, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkFlashRegion,
@@ -48,20 +49,39 @@ pub enum LayoutSessionOutcome {
 
 /// Inspect the board on `port_name` against the package at `manifest_path`.
 /// Leaves the chip in ROM download (see the module docs).
+///
+/// A [`FlashBuild::ByChip`] build is resolved after the connect, by the chip
+/// espflash detected (`manifest_path_for` turns a build id into its
+/// manifest); a fixed one is loaded first and steers the connect, as before.
 pub(super) fn inspect_layout(
     port_name: &str,
-    manifest_path: &str,
+    build: &FlashBuild,
+    manifest_path_for: impl Fn(&str) -> Result<String, LinkError>,
     events: &LinkManagementEventSink,
 ) -> Result<LinkLayoutInspection, LinkError> {
     let mut recorder = EventRecorder::new(events);
-    let package = Package::load(manifest_path)?;
+    let fixed = build
+        .fixed()
+        .map(|build_id| Package::load(&manifest_path_for(build_id)?))
+        .transpose()?;
     let mut flasher = connect(
         port_name,
-        Some(package.chip),
+        fixed.as_ref().map(|package| package.chip),
         ResetAfterOperation::NoResetNoStub,
         &mut recorder,
     )?;
-    let inspection = inspect_in_session(&mut flasher, &package, &mut recorder)?;
+    let detected = flasher.chip().to_string();
+    let build_id = build.build_for_chip(&detected).ok_or_else(|| {
+        LinkError::other(format!(
+            "LightPlayer has no firmware for this chip ({detected})."
+        ))
+    })?;
+    let package = match fixed {
+        Some(package) => package,
+        None => Package::load(&manifest_path_for(build_id)?)?,
+    };
+    let mut inspection = inspect_in_session(&mut flasher, &package, &mut recorder)?;
+    inspection.build_id = Some(build_id.to_string());
     recorder.log("Layout read; the board stays in its bootloader for the write");
     Ok(inspection)
 }
@@ -268,9 +288,18 @@ fn inspect_in_session(
         probe.record(read, bytes.clone());
         reads.push((read, bytes));
     }
+    // What the board runs, after the layout: it reuses the table read.
+    while let Some(read) = crate::next_resident_read(&reads) {
+        let bytes = read_flash_region(flasher, read, "Reading the board's layout", recorder)?;
+        reads.push((read, bytes));
+    }
     Ok(LinkLayoutInspection {
         chip_name: chip,
         probed_mac,
+        build_id: None,
+        // espflash reads the id inside its own size detection and does not
+        // hand it out; the host path has no board to guess.
+        flash_id: None,
         target_table: package.target_table.clone(),
         target_image_len: package.image_len,
         target_fs: package.target_fs,

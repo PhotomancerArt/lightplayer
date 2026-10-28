@@ -255,6 +255,7 @@ fn account_board_view(cloud: &crate::UiCloudBoard) -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         update_blocked: None,
         held_elsewhere: None,
         escapes: Vec::new(),

@@ -15,6 +15,7 @@
 //! | `clear-faults` | the board reported it is degraded, linked, idle |
 //! | `remove-project` | the board reported something running, port open, idle |
 //! | `flash` | the needs-firmware faces ([`flash_device_offer`]); not on a board another tab holds over USB (this tab's port to it is that tab's) |
+//! | `set-board` | "Which board is this?": a running LightPlayer whose chip several catalog boards fit, idle, not held over USB by another tab ([`set_board_offer`]); its fits first when the last install could not tell |
 //! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting; not on a board another tab holds over USB) |
 //! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
 //! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `find` box over a `version` choice from the store's release index, or a look-up of a version the box names ([`update_offers`]) |
@@ -51,7 +52,7 @@ use super::device_reset_reach::{RESET_NEEDS_AUTHOR, ResetReach};
 /// reset under one, and Cancel is the way out.
 pub const RESET_WAITS_FOR_ACTIVITY: &str =
     "Reset waits until Studio finishes what it is doing; cancel it first";
-use super::device_flash_offer::{flash_device_offer, update_firmware_offer};
+use super::device_flash_offer::{flash_device_offer, set_board_offer, update_firmware_offer};
 use super::device_push_offer::push_device_offer;
 use super::device_update_offers::{UpdateOfferFacts, update_offers};
 use super::devices_op::{DeviceFace, DevicesOp};
@@ -87,6 +88,9 @@ pub struct DeviceOfferFacts<'a> {
     /// The board's update standing and route ([`update_offers`]); the
     /// default tells no story, and the card keeps today's firmware verbs.
     pub update: UpdateOfferFacts,
+    /// The catalog boards this board's last install found fit, when it could
+    /// not tell which it is ([`set_board_offer`]'s fits); empty otherwise.
+    pub which_board: &'a [String],
 }
 
 /// Every offer `view`'s card makes, in the order the card reads: the
@@ -157,6 +161,14 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
         offers.push(flash);
     }
     offers.extend(update.offers);
+    // Which board is this: on a running board whose chip fits several, any
+    // time; the card asks it outright after an install that could not tell.
+    if idle
+        && !port_elsewhere
+        && let Some(set_board) = set_board_offer(view, facts.prefix.clone(), facts.which_board)
+    {
+        offers.push(set_board);
+    }
     if update.keep_erase && idle && linked && !port_elsewhere && verb != Some(FirmwareVerb::Flash) {
         let erase = DevicesOp::action_for(Action::Erase { device });
         offers.push(UiOffer::new(
@@ -324,6 +336,7 @@ mod tests {
             [
                 "push",
                 "update-firmware",
+                "set-board",
                 "erase",
                 "identify",
                 "reset-board",
@@ -428,6 +441,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: None,
             update: None,
         });
@@ -660,6 +674,7 @@ mod tests {
             [
                 "push",
                 "update-firmware",
+                "set-board",
                 "erase",
                 "identify",
                 "reset-board",
@@ -763,6 +778,7 @@ mod tests {
             projects: &[],
             examples: &EXAMPLES,
             update: UpdateOfferFacts::default(),
+            which_board: &[],
         }
     }
 
@@ -800,6 +816,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,

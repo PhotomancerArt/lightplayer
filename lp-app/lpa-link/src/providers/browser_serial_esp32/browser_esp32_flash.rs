@@ -106,7 +106,7 @@ extern "C" {
     #[wasm_bindgen(js_name = inspectLayout)]
     fn js_inspect_layout(
         port_id: u32,
-        manifest_path: &str,
+        manifest_for: &Function,
         esptool_module_path: &str,
         known_chip_ids: &Array,
         next_read: &Function,
@@ -274,13 +274,17 @@ pub async fn read_raw_filesystem_with_events(
     })
 }
 
-/// Read what the board holds relative to the package at `manifest_path`
-/// (`LinkManagementRequest::InspectLayout`). The reads are DECIDED here, by
-/// a [`LayoutProbe`] the JS calls back into after each one; the bytes stay
-/// on this side. Leaves the chip in ROM download.
+/// Read what the board holds relative to the package `build` resolves to
+/// for the chip the session hears (`LinkManagementRequest::InspectLayout`).
+/// The package and the reads are DECIDED here: `manifestFor(chipName)` picks
+/// the package once the SYNC has named the chip, and a [`LayoutProbe`] —
+/// then [`crate::next_resident_read`], for what the board runs — answers
+/// each `nextRead`; the bytes stay on this side. Leaves the chip in ROM
+/// download.
 pub async fn inspect_layout_with_events(
     port_id: u32,
-    manifest_path: &str,
+    build: &crate::FlashBuild,
+    manifest_path: impl Fn(&str) -> String + 'static,
     esptool_module_path: &str,
     events: LinkManagementEventSink,
 ) -> Result<LinkLayoutInspection, LinkError> {
@@ -290,6 +294,7 @@ pub async fn inspect_layout_with_events(
         target_table: Vec<u8>,
         target_fs: crate::FsKind,
         reads: Vec<(LinkFlashRegion, Vec<u8>)>,
+        build_id: Option<String>,
         error: Option<String>,
     }
     let state = Rc::new(RefCell::new(ProbeState {
@@ -298,9 +303,24 @@ pub async fn inspect_layout_with_events(
         target_table: Vec::new(),
         target_fs: crate::FsKind::Littlefs,
         reads: Vec::new(),
+        build_id: None,
         error: None,
     }));
     let on_event = management_event_callback(events);
+    let manifest_for = {
+        let state = Rc::clone(&state);
+        let build = build.clone();
+        Closure::wrap(Box::new(move |chip: JsValue| -> JsValue {
+            let chip = chip.as_string().unwrap_or_default();
+            match build.build_for_chip(&chip) {
+                Some(build_id) => {
+                    state.borrow_mut().build_id = Some(build_id.to_string());
+                    JsValue::from_str(&manifest_path(build_id))
+                }
+                None => JsValue::NULL,
+            }
+        }) as Box<dyn FnMut(JsValue) -> JsValue>)
+    };
     let next_read = {
         let state = Rc::clone(&state);
         Closure::wrap(Box::new(
@@ -335,11 +355,19 @@ pub async fn inspect_layout_with_events(
                     if let Some(read) = state.asked.take() {
                         state.reads.push((read, bytes.clone()));
                         if let Some(probe) = state.probe.as_mut() {
-                            probe.record(read, bytes);
+                            if probe.next_read() == Some(read) {
+                                probe.record(read, bytes);
+                            }
                         }
                     }
                 }
-                let next = state.probe.as_ref().and_then(LayoutProbe::next_read);
+                // The layout's reads first; once it has settled, what the
+                // board runs (which reuses the layout's table read).
+                let next = state
+                    .probe
+                    .as_ref()
+                    .and_then(LayoutProbe::next_read)
+                    .or_else(|| crate::next_resident_read(&state.reads));
                 state.asked = next;
                 next.map(region_to_js).unwrap_or(JsValue::NULL)
             },
@@ -348,7 +376,7 @@ pub async fn inspect_layout_with_events(
     };
     let value = JsFuture::from(js_inspect_layout(
         port_id,
-        manifest_path,
+        manifest_for.as_ref().unchecked_ref(),
         esptool_module_path,
         &known_chip_ids(),
         next_read.as_ref().unchecked_ref(),
@@ -363,6 +391,8 @@ pub async fn inspect_layout_with_events(
     Ok(LinkLayoutInspection {
         chip_name: reflect_optional_string(&value, "chipName")?,
         probed_mac: reflect_optional_string(&value, "baseMac")?,
+        build_id: state.build_id.take(),
+        flash_id: reflect_optional_u32(&value, "flashId")?,
         target_table: std::mem::take(&mut state.target_table),
         target_image_len: reflect_u32(&value, "targetImageLen")?,
         target_fs: state.target_fs,

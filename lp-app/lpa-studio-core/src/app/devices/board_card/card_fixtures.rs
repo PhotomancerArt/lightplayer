@@ -58,6 +58,8 @@ pub(crate) struct CardFixture {
     /// The update standing the offers are published from.
     pub update_facts: UpdateOfferFacts,
     pub layout: Option<UiDeviceLayout>,
+    /// The boards an install found fit, when it could not tell which.
+    pub which_board: Vec<String>,
     pub plays: BoardPlays,
     pub sharing: usize,
     pub project: Option<UiPackageCard>,
@@ -121,6 +123,7 @@ impl CardFixture {
             sending: None,
             update_facts: UpdateOfferFacts::default(),
             layout: None,
+            which_board: Vec::new(),
             plays: BoardPlays::Running {
                 label: "porch".to_string(),
             },
@@ -257,6 +260,7 @@ impl CardFixture {
             update: self.update.as_ref(),
             sending: self.sending.as_deref(),
             layout: self.layout.as_ref(),
+            which_board: &self.which_board,
             plays: &self.plays,
             sharing: self.sharing,
             project: self.project.as_ref(),
@@ -316,6 +320,7 @@ impl CardFixture {
             projects: &projects,
             examples: &examples,
             update: self.update_facts.clone(),
+            which_board: &self.which_board,
         };
         let mut offers = device_offers(&self.view, &facts);
         let offline_wire = face == DeviceFace::Wire && self.view.status == DeviceStatus::Offline;
@@ -426,6 +431,7 @@ pub(crate) fn activity(kind: ActivityKind, label: &str, percent: Option<u8>) -> 
         cancellable: true,
         cancel_requested: false,
         layout: None,
+        replace: None,
         flash_step: None,
         update: None,
     }
@@ -474,6 +480,7 @@ fn ready_view() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         update_blocked: None,
         escapes: vec![Escape::Disconnect, Escape::Forget],

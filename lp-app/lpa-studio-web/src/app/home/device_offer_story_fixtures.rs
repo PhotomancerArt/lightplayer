@@ -179,6 +179,7 @@ fn card_tree_unlocked(
     let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
     let facts = DeviceOfferFacts {
         prefix: prefix.clone(),
+        which_board: &[],
         face,
         autoconnect: false,
         locked: unlock == Some(UiUnlockOffer::Locked),
@@ -726,6 +727,7 @@ pub(crate) fn StoryBoardCard(
     };
     let built = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
         view: &card,
+        which_board: &[],
         board: &prefix,
         offers: &verbs,
         link,
@@ -1034,6 +1036,7 @@ fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,

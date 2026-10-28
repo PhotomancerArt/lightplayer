@@ -79,6 +79,7 @@ fn relay_card() -> DeviceView {
         // As the model has it: the USB flash is blocked on every network
         // link; the update channel runs through the relay (OTA).
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        usb: None,
         update_blocked: None,
         ..usb_card()
     }

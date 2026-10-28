@@ -82,6 +82,7 @@ pub mod device_affordance;
 pub mod device_backup_import;
 pub mod device_backup_op;
 pub mod device_backup_store;
+pub mod device_board_identity;
 pub mod device_by_base_mac;
 pub mod device_card_feed_view;
 pub mod device_effects;
@@ -238,12 +239,14 @@ pub use device_firmware_face::{
 };
 pub use device_firmware_sources::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use device_flash::{
-    FirmwareVerb, FlashBoardChoice, FlashOffer, blocked_erase_action, derive_flash_name,
-    firmware_verb, flash_offer, flash_offer_for, reflash_choice, taken_device_titles,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, FlashTarget, blocked_erase_action,
+    chip_display_name, derive_flash_name, firmware_verb, flash_offer, flash_offer_for,
+    flash_target, flash_target_for, pending_flash_target, taken_device_titles,
 };
 pub use device_flash_offer::{
-    FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, flash_consequence,
-    flash_device_offer, flash_pending_offer, update_firmware_offer,
+    FLASH_NAME_PARAM, SET_BOARD, SET_BOARD_ALL_PARAM, SET_BOARD_PARAM, WHICH_BOARD_REASON,
+    asks_which_board, flash_device_offer, flash_pending_offer, set_board_offer,
+    update_firmware_offer,
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;

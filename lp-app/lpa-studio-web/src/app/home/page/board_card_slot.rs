@@ -176,6 +176,7 @@ mod tests {
     /// A roster of `devices`, with the cards core builds for them.
     fn roster(devices: Vec<DeviceView>) -> DeviceRosterView {
         let mut roster = DeviceRosterView {
+            which_board: Default::default(),
             roster: RosterView {
                 devices,
                 pending: Vec::new(),
@@ -261,6 +262,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![DeviceEscape::Forget],
             update_blocked: None,

@@ -8,10 +8,16 @@
 //! | Identifying | (work: "identifying") | — |
 //! | A stand-in | the board it stands in for ("XIAO ESP32-S3 Plus") | — |
 //! | Its board is known | the model ("XIAO ESP32-C6") | — |
+//! | Its install could not tell which board it is | the chip ("ESP32-C6") | "which board?" |
 //! | Only its chip is known | the chip ("ESP32-C6") | "model not set" |
 //! | Nothing | "unknown" | — |
 //!
-//! Neutral, with no action. "Simulated" is said once, on the USB row (P2):
+//! Neutral, with no action — but one: after an install that could not tell
+//! which catalog board this is (several fit what its bootloader said), the
+//! row asks "Which board is this?" (`set-board`, drawn as the board pick),
+//! a to-do until it is answered (plan
+//! `lp2025/2026-10-28-0025-install-without-board-pick`). The same verb sits
+//! in the details as "Change board" whenever the chip fits several. "Simulated" is said once, on the USB row (P2):
 //! the model is the model. A chip name looks like a model, so a board known
 //! only by its chip says so (P1). The details hold the model, the chip, the
 //! board's id (its MAC, shown here once and nowhere else), a stand-in's
@@ -24,17 +30,20 @@
 
 use lpa_devices::view::PendingLinkView;
 
-use super::bar_work::bar_work;
+use super::bar_work::{bar_work, board_pick};
 use super::board_card_input::{BoardCardInput, offer_at};
 use super::detail_sections::{danger, facts, verbs, without_empty};
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::UiCardAction;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use crate::app::devices::device_flash_offer::SET_BOARD;
 use crate::app::devices::device_identity::device_identity_line;
 use crate::{OfferPath, RichLine, UiOffer};
 
 /// The state of a board known only by its chip.
 pub const MODEL_NOT_SET: &str = "model not set";
+/// The state of a board whose install could not tell which board it is.
+pub const WHICH_BOARD: &str = "which board?";
 /// The name of a board nothing has named.
 const HARDWARE_UNKNOWN: &str = "unknown";
 
@@ -42,7 +51,13 @@ const HARDWARE_UNKNOWN: &str = "unknown";
 pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let identity = device_identity_line(input.view);
     let chip = identity.chip.as_deref().map(chip_words);
+    let set_board = input.offer(SET_BOARD);
+    // The hello names the firmware's compiled-in board until a saved model
+    // is read at the next boot: after an install that could not tell, the
+    // chip is what is known.
+    let asks = !input.which_board.is_empty() && set_board.is_some();
     let (summary, aside) = match (input.runtime, &identity.board, &chip) {
+        (None, _, Some(chip)) if asks => (chip.clone(), Some(WHICH_BOARD.to_string())),
         (Some(runtime), _, _) => (runtime.target.clone(), None),
         (None, Some(board), _) => (board.clone(), None),
         (None, None, Some(chip)) => (chip.clone(), Some(MODEL_NOT_SET.to_string())),
@@ -53,6 +68,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     if let Some(board) = identity
         .board
         .clone()
+        .filter(|_| !asks)
         .or_else(|| input.runtime.map(|runtime| runtime.target.clone()))
     {
         lines.push(RichLine::new("Model", board));
@@ -90,14 +106,31 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         true => String::new(),
         false => summary,
     };
+    let action = set_board.filter(|_| asks && work.is_none()).map(|offer| {
+        UiCardAction::press(offer, "Which board?")
+            .with_icon(offer.icon.clone())
+            .drawn(board_pick(input))
+    });
+    let change_board = set_board.filter(|_| !asks).map(|offer| {
+        UiCardAction::press(offer, "Change board")
+            .with_icon(offer.icon.clone())
+            .drawn(board_pick(input))
+    });
     UiStackBar {
         aside: aside.filter(|_| work.is_none()),
+        todo: action.is_some(),
+        action,
         work,
         details: UiBarDetails {
             switch: None,
             sections: without_empty(vec![
                 facts("Board", lines),
-                verbs(reset.map(own_words).into_iter().collect()),
+                verbs(
+                    change_board
+                        .into_iter()
+                        .chain(reset.map(own_words))
+                        .collect(),
+                ),
                 danger(
                     erase
                         .into_iter()
@@ -223,7 +256,15 @@ mod tests {
             .iter()
             .flat_map(|section| section.affordances.iter().map(|a| a.word.as_str()))
             .collect();
-        assert_eq!(verbs, ["Reset", "Factory reset", "Forget on this browser"]);
+        assert_eq!(
+            verbs,
+            [
+                "Change board",
+                "Reset",
+                "Factory reset",
+                "Forget on this browser"
+            ]
+        );
         let danger = bar.details.sections.last().unwrap();
         assert_eq!(danger.weight, crate::RichWeight::Danger);
         assert_eq!(

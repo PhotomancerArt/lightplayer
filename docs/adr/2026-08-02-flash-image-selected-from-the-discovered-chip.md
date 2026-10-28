@@ -5,6 +5,10 @@
 - Plan: `2026-08-02-1706-provisioning-firmware-build-selection`
 - Extends: `2026-08-01-firmware-manifest-architecture.md` (the three-store join)
 - Defect: `docs/defects/2026-08-02-provisioning-flashes-one-image-unchecked.md`
+- Refined by: `2026-10-28-install-identifies-the-board-first.md` (2026-10-28:
+  the chip is now learned in the flash's own bootloader session, which picks
+  the image; nobody picks a board first, and the board model is asked after
+  only when several fit)
 
 ## Context
 

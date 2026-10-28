@@ -409,19 +409,20 @@ async function main() {
       await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(options.board, { timeoutMs: STEP_DEADLINE_MS });
       // The blank board's card: its firmware bar says "No firmware", and
-      // core offers it `flash` — the name bar's Install, drawn as the board
-      // pick. The flash is the firmware bar's work, and it has to START and
-      // then FINISH: "the bar stopped saying `No firmware`" alone is
-      // satisfied the instant the work starts, which screenshotted a
-      // progress bar and called it a flash (`StudioDriver.flashBlank`).
-      // The picker narrowed to the chip: a blank board's chip comes off its
-      // ROM banner, which identify resets the board for when it opened
-      // mid boot loop and missed it.
-      await driver.flashBlank(BOARD_MODEL, {
+      // core offers it `flash` — the name bar's Install, one press: nobody
+      // picks a board first (plan 2026-10-28-0025). The flash is the
+      // firmware bar's work, and it has to START and then FINISH: "the bar
+      // stopped saying `No firmware`" alone is satisfied the instant the
+      // work starts, which screenshotted a progress bar and called it a
+      // flash (`StudioDriver.flashBlank`). The install identified the chip
+      // in the bootloader itself, and either recognised the board or asked
+      // which it is (answered with BOARD_MODEL) — the record says which.
+      const model = await driver.flashBlank(BOARD_MODEL, {
         timeoutMs: STEP_DEADLINE_MS,
         flashTimeoutMs: FLASH_DEADLINE_MS,
         expectChip: "esp32c6",
       });
+      console.log(`  board model: ${model === "recognised" ? "recognised by the install" : `asked after, answered ${BOARD_MODEL}`}`);
       // …and then the BACKING, which is the only party that can see the
       // reset vector. `flash` answers "does an image magic sit there",
       // recomputed rather than cached (DD34), so `loaded` means what Studio

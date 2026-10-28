@@ -63,7 +63,9 @@ impl UiDetailPanel {
             UiDetailPanel::OtherVersion { install, from_file } => {
                 std::iter::once(install).chain(from_file).collect()
             }
-            UiDetailPanel::Layout(panel) => std::iter::once(&panel.download)
+            UiDetailPanel::Layout(panel) => panel
+                .download
+                .iter()
                 .chain(&panel.continue_action)
                 .chain(&panel.cancel)
                 .collect(),

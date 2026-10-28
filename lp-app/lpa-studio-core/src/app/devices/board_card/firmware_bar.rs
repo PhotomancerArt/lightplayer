@@ -46,7 +46,7 @@
 use lpa_devices::view::{FirmwareFace, PendingLinkView};
 use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 
-use super::bar_work::{bar_work, board_pick, running_work, update_work};
+use super::bar_work::{bar_work, running_work, update_work};
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{facts, notice, verbs, without_empty};
 use super::primary_action::{install_firmware, pending_action};
@@ -157,7 +157,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 UiStatusKind::Neutral,
                 input
                     .offer("update-firmware")
-                    .map(|update| usb_update(input, update).with_icon("usb")),
+                    .map(|update| usb_update(update).with_icon("usb")),
             ),
             // Updates nearby once (a core from before updates through
             // Wi‑Fi or the relay): nothing to press here; its details say
@@ -182,7 +182,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         let action = match offer.consequence().arms() || !offer.params().is_empty() {
             // The flash path by USB: Lasting, arms in place; the board pick
             // when the board must be picked.
-            true => usb_update(input, offer),
+            true => usb_update(offer),
             // Over the air: one press.
             false => UiCardAction::press(offer, "Update").with_icon("download"),
         };
@@ -208,7 +208,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 };
                 UiCardAction {
                     word: word.to_string(),
-                    ..usb_update(input, update)
+                    ..usb_update(update)
                 }
             });
         let (name, state) = face_words(&view.firmware_face);
@@ -387,14 +387,9 @@ fn update_recommended(input: &BoardCardInput<'_>) -> bool {
     )
 }
 
-/// The update by USB: "Update", arming in place; the board pick when the
-/// board must be picked.
-fn usb_update(input: &BoardCardInput<'_>, offer: &UiOffer) -> UiCardAction {
-    let action = UiCardAction::press(offer, "Update").with_icon("download");
-    match offer.params().is_empty() {
-        true => action,
-        false => action.drawn(board_pick(input)),
-    }
+/// The update by USB: "Update", arming in place.
+fn usb_update(offer: &UiOffer) -> UiCardAction {
+    UiCardAction::press(offer, "Update").with_icon("download")
 }
 
 /// A face that wants a flash, as the row's name and state: "none" on a
@@ -534,7 +529,9 @@ fn details(
     let layout_panel = layout.and_then(|layout| layout.panel.clone());
     // The layout question presses Download backup itself: the verbs below
     // do not offer it a second time.
-    let panel_download = layout_panel.as_ref().map(|panel| panel.download.clone());
+    let panel_download = layout_panel
+        .as_ref()
+        .and_then(|panel| panel.download.clone());
     if let Some(panel) = layout_panel {
         panels.push(UiDetailPanel::Layout(panel));
     }
@@ -560,7 +557,7 @@ fn details(
     let drawn = action.map(|action| &action.offer);
     let update_verb = input.offer("update-firmware").map(|update| {
         match update.consequence().arms() || !update.params().is_empty() {
-            true => usb_update(input, update),
+            true => usb_update(update),
             false => UiCardAction::own_words(update).with_icon("download"),
         }
     });
@@ -962,16 +959,21 @@ mod tests {
             assert_eq!(bar.summary, name, "{face:?}");
             assert_eq!(bar.aside.as_deref(), state, "{face:?}");
             assert_eq!(bar.tone, UiStatusKind::Neutral, "{face:?}");
-            // A blank chip is a new board's to-do: "none · Install", the
-            // primary's own pick; the others leave Install firmware to the
-            // primary.
+            // A blank chip is a new board's to-do: "none · Install", one
+            // press; an older LightPlayer's row offers its Update; the
+            // others leave Install firmware to the primary.
             match face {
                 FirmwareFace::Blank => {
                     let install = bar.action.clone().expect("Install");
                     assert_eq!(install.word, "Install");
                     assert!(install.offer.to_string().ends_with("/flash"));
-                    assert!(matches!(install.draw, UiActionDraw::BoardPick { .. }));
+                    assert_eq!(install.draw, UiActionDraw::Press);
                     assert!(bar.todo);
+                }
+                FirmwareFace::OlderLightPlayer { .. } => {
+                    let update = bar.action.clone().expect("Update");
+                    assert!(update.offer.to_string().ends_with("/update-firmware"));
+                    assert_eq!(update.draw, UiActionDraw::Press);
                 }
                 _ => {
                     assert_eq!(bar.action, None, "Install firmware is the primary");
@@ -1129,7 +1131,7 @@ mod tests {
             title: "Move this board's files?".to_string(),
             body: String::new(),
             warning: None,
-            download: fixture.board.clone().child("download-backup"),
+            download: Some(fixture.board.clone().child("download-backup")),
             continue_action: None,
             cancel: None,
         });

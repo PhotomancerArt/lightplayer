@@ -305,6 +305,7 @@ mod tests {
     fn a_bar_at_work_draws_its_fill_in_a_clipped_track() {
         use lpa_studio_core::{DeviceActivityKind, DeviceActivityView, DeviceStatus, DeviceView};
         let view = DeviceView {
+            usb: None,
             status: DeviceStatus::Busy,
             state_label: "Identifying".to_string(),
             activity: Some(DeviceActivityView {
@@ -314,6 +315,7 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                replace: None,
                 flash_step: None,
                 update: None,
             }),

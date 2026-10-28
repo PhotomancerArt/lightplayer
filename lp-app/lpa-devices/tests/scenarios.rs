@@ -1285,8 +1285,8 @@ fn a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung() {
         Millis(2_000),
         Input::Action(Action::Flash {
             device,
-            board_id: "seeed-xiao-esp32c6".to_string(),
-            build_id: "esp32c6-4mb".to_string(),
+            board_id: Some("seeed-xiao-esp32c6".to_string()),
+            build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             park_first: true,
             name: None,
             restore_backup: false,

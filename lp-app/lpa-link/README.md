@@ -102,6 +102,16 @@ verified), and the device backup archive (format 2). The host and browser
 providers execute the plan (`InspectLayout`, `FlashFirmware { plan }`); see
 `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
 
+The same inspection is the install's identification
+(`docs/adr/2026-10-28-install-identifies-the-board-first.md`). It takes a
+`FlashBuild` (one build, or the chip table) and picks the package inside the
+session by the chip the bootloader's SYNC names. It reports the flash chip's
+JEDEC id (`flash_size_from_jedec_id` reads its size) and, after the layout's
+reads, what the board runs (`next_resident_read` / `ResidentFirmware`: an
+erased table, a LightPlayer layout by its `lpfs` partition, or somebody
+else's app by its `esp_app_desc_t`). One session, as before: nothing is
+written, and the chip stays parked.
+
 `lpa-link` does not parse the image. Turning littlefs bytes into files is the
 concern of the layer that builds the archive (`lpa-studio-core`'s
 `app/device/filesystem_backup`); this crate moves bytes off a board.
