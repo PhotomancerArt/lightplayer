@@ -718,16 +718,14 @@ fn a_slot_edit_to_a_file_with_an_unsaved_body_keeps_both_on_the_board() {
             lpc_model::SlotPath::parse("wire_reversed").expect("a path"),
         )
     };
-    super::studio_edit_e2e_tests::drive(j.graph.actor.controller_mut_for_test().dispatch(
-        crate::UiAction::from_op(
-            crate::ProjectController::NODE_ID,
-            crate::SlotEditOp::SetValue {
-                address,
-                value: lpc_model::LpValue::Bool(true),
-            },
-        ),
-    ))
-    .expect("the edit is taken");
+    // As the slot editor's field sends it: no offer carries a slot edit.
+    j.graph
+        .tx
+        .send(super::studio_edit_e2e_tests::set_value_action(
+            address,
+            lpc_model::LpValue::Bool(true),
+        ));
+    j.graph.batch();
     j.graph.refresh();
 
     let reversed = Some(serde_json::Value::from(true));

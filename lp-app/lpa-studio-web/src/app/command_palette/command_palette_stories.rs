@@ -54,6 +54,28 @@ fn disabled_row() -> Element {
 }
 
 #[story(
+    description = "On the Graph, the circular display's fixture selected, filtered by \"order\": Set colour order takes a colour order, so its row ends in \"…\" and opens its form instead of pressing (a verb that takes values is pressable from ⌘K, M4 P08b)."
+)]
+fn graph_value_verb() -> Element {
+    palette(graph_offers(), "order", false)
+}
+
+#[story(
+    description = "That row pressed: Set colour order's form in the palette — the fixture already picked as its subject (it is the selection), the colour orders to choose from, Back, and the press, which binds what the form holds through core's offer. Enter presses; esc goes back to the list."
+)]
+fn graph_value_verb_form() -> Element {
+    rsx! {
+        CommandPaletteDialog {
+            offers: graph_offers(),
+            on_action: |_| {},
+            on_close: |_| {},
+            inline: true,
+            initial_fill: Some("project/graph/set-colour-order".to_string()),
+        }
+    }
+}
+
+#[story(
     description = "The empty tree: a page that publishes nothing yet (Home before any project is open) says so instead of drawing an empty box."
 )]
 fn empty() -> Element {
@@ -94,6 +116,17 @@ fn palette(offers: UiOfferTree, query: &str, armed: bool) -> Element {
             armed_preview: armed,
         }
     }
+}
+
+/// What the Graph publishes with the circular display's fixture selected.
+fn graph_offers() -> UiOfferTree {
+    use lab_mapping_model::{Editor, GraphInput, Project, Target};
+    let mut editor = Editor::new(Project::circular_display_wired());
+    let fixture = editor.project.fixtures()[0].id.clone();
+    editor.input(GraphInput::Select(vec![Target::Node(fixture)]));
+    let mut offers = UiOfferTree::new();
+    lpa_studio_core::app::graph::publish_graph_offers(&mut offers, &editor);
+    offers
 }
 
 /// What a dirty project publishes: the header's Save and Revert to saved,

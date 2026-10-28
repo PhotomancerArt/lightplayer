@@ -7,6 +7,11 @@
 //! cursor keyed on an index would slide onto a different verb under the
 //! user's finger. A highlight whose row has gone falls back to the first
 //! row Enter can press.
+//!
+//! A row Enter can press is one that is enabled, or one only a value short
+//! ([`UiOffer::awaits_a_value`]: the Graph's "Set direction" with no
+//! direction chosen yet): Enter on it opens its form ([`PaletteOutcome::Fill`]),
+//! the way the Network square opens its address field.
 
 use lpa_studio_core::{OfferPath, UiAction, UiOffer};
 
@@ -29,6 +34,8 @@ pub(crate) enum PaletteOutcome {
     Armed,
     /// Press this action, then close.
     Press(UiAction),
+    /// Open this row's form: the offer takes values first.
+    Fill(OfferPath),
     /// Close without pressing.
     Close,
 }
@@ -48,9 +55,9 @@ impl PaletteCursor {
             .as_ref()
             .and_then(|path| {
                 rows.iter()
-                    .position(|row| &row.path == path && row.is_enabled())
+                    .position(|row| &row.path == path && is_stop(row))
             })
-            .or_else(|| rows.iter().position(|row| row.is_enabled()))
+            .or_else(|| rows.iter().position(|row| is_stop(row)))
     }
 
     /// Whether `path` is the armed row.
@@ -78,7 +85,7 @@ impl PaletteCursor {
     /// (Enter would skip it), and moving off an armed row stands it down,
     /// like a button losing focus.
     pub(crate) fn hover(&mut self, row: &UiOffer) {
-        if !row.is_enabled() || self.highlight.as_ref() == Some(&row.path) {
+        if !is_stop(row) || self.highlight.as_ref() == Some(&row.path) {
             return;
         }
         self.highlight = Some(row.path.clone());
@@ -98,9 +105,7 @@ impl PaletteCursor {
     /// Move to the next (or previous) pressable row, wrapping; disabled rows
     /// are passed over. Moving stands an armed row down.
     fn step(&mut self, rows: &[&UiOffer], forward: bool) {
-        let pressable: Vec<usize> = (0..rows.len())
-            .filter(|&at| rows[at].is_enabled())
-            .collect();
+        let pressable: Vec<usize> = (0..rows.len()).filter(|&at| is_stop(rows[at])).collect();
         if pressable.is_empty() {
             return;
         }
@@ -123,6 +128,11 @@ impl PaletteCursor {
             return PaletteOutcome::Stay;
         };
         self.highlight = Some(row.path.clone());
+        if !row.is_enabled() {
+            // Only a value short (`is_stop`): its form asks for it.
+            self.armed = None;
+            return PaletteOutcome::Fill(row.path.clone());
+        }
         if row.consequence().arms() && !self.is_armed(&row.path) {
             self.armed = Some(row.path.clone());
             return PaletteOutcome::Armed;
@@ -130,6 +140,11 @@ impl PaletteCursor {
         self.armed = None;
         PaletteOutcome::Press(row.action.clone())
     }
+}
+
+/// Whether the keys stop on `row`: it presses, or it opens its form.
+pub(crate) fn is_stop(row: &UiOffer) -> bool {
+    row.is_enabled() || row.awaits_a_value()
 }
 
 #[cfg(test)]
@@ -248,6 +263,36 @@ mod tests {
     }
 
     #[test]
+    fn a_row_only_a_value_short_is_a_stop_and_enter_opens_its_form() {
+        let rows = [
+            disabled("project/save"),
+            awaiting("project/graph/set-direction"),
+            routine("project/demo.module/revert"),
+        ];
+        let rows = refs(&rows);
+        let mut cursor = PaletteCursor::default();
+
+        assert_eq!(
+            cursor.highlighted(&rows),
+            Some(1),
+            "a verb waiting for its values is where the keys start"
+        );
+        assert_eq!(
+            cursor.key(PaletteKey::Enter, &rows),
+            PaletteOutcome::Fill(rows[1].path.clone()),
+            "Enter opens its form; nothing is pressed yet"
+        );
+        cursor.key(PaletteKey::Down, &rows);
+        assert_eq!(cursor.highlighted(&rows), Some(2));
+        cursor.key(PaletteKey::Down, &rows);
+        assert_eq!(
+            cursor.highlighted(&rows),
+            Some(1),
+            "a row disabled for its own sake is still passed over"
+        );
+    }
+
+    #[test]
     fn enter_with_nothing_pressable_does_nothing() {
         let rows = [disabled("project/save")];
         let mut cursor = PaletteCursor::default();
@@ -305,6 +350,29 @@ mod tests {
             "revert",
         ));
         offer
+    }
+
+    /// A verb that takes a segment, none chosen: disabled only because a
+    /// value is missing.
+    fn awaiting(path: &str) -> UiOffer {
+        use lpa_studio_core::{OfferBinder, OfferChoice, OfferParam};
+        UiOffer::with_params(
+            OfferPath::parse(path).unwrap(),
+            "edit",
+            vec![OfferParam::choice(
+                "subject",
+                "segment",
+                vec![OfferChoice::new("fixture:circle1/r3", "ring r3 of circle1")],
+                None,
+            )],
+            OfferBinder::new(|_| {
+                Ok(UiAction::from_op(
+                    ControllerId::new("studio|project"),
+                    ProjectOp::SaveOverlay,
+                ))
+            }),
+            routine(path).action,
+        )
     }
 
     fn disabled(path: &str) -> UiOffer {
