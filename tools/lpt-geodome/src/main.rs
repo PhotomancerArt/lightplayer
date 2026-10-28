@@ -1,10 +1,11 @@
-//! Generates the small-dome example's map2d, patch, and output documents
-//! from the real Small Dome's structure: a 2-frequency geodesic dome (16',
-//! 1" EMT struts) hoisted on a riser ring, glowing via 2'-tall triangular
-//! lucite panels — **50 of them, 119 LEDs each** — suspended inside the
-//! strut triangles, with one chevron door (a big triangle, no bottom edge).
-//! See `docs/use-cases/2026-08-09-mini-dome.md` ("The Small Dome, as
-//! built") and `docs/use-cases/2026-08-28-three-domes.md`.
+//! Generates the small-dome example's map2d documents (format 6: each
+//! fixture's layout and patching in one file), its output documents and its
+//! Arrange placements from the real Small Dome's structure: a 2-frequency
+//! geodesic dome (16', 1" EMT struts) hoisted on a riser ring, glowing via
+//! 2'-tall triangular lucite panels — **50 of them, 119 LEDs each** —
+//! suspended inside the strut triangles, with one chevron door (a big
+//! triangle, no bottom edge). See `docs/use-cases/2026-08-09-mini-dome.md`
+//! ("The Small Dome, as built") and `docs/use-cases/2026-08-28-three-domes.md`.
 //!
 //! The output is a **plan view** (azimuthal equidistant: azimuth preserved,
 //! radius proportional to polar angle from the zenith), the same projection
@@ -13,15 +14,16 @@
 //! x 4 = 20 cap + 5 + 15 = 40 per dome) plus TWO riser-band faces (the rung
 //! below the 2V shell keeps only its downward-pointing triangles — 10 per
 //! dome) each hold one panel — the host triangle shrunk toward its centroid
-//! at the physical ratio. Each panel is authored as one object (a 5-way
-//! repeat of a 119-lamp polygon), so the patch grain is the PANEL
-//! (`/band-a/3`), which is the unit the crew actually plugs.
+//! at the physical ratio. Each panel position is one part (a 5-way repeat of
+//! a 119-lamp polygon), so each copy is its own segment (`band-a@3`), the
+//! unit the crew actually plugs.
 //!
-//! The patch documents model an as-built install: each control box feeds
-//! half the dome through 13 ports (CNLINKO connectors in miniature, two
-//! chained panels per port), with the crew's quirks included — one panel
-//! seated reversed, one rotated by a panel side, the door run rotated by a
-//! leg and sharing the tail of a box-1 port.
+//! The patching models an as-built install: each control box feeds half the
+//! dome through 13 ports (CNLINKO connectors in miniature, two chained
+//! panels per port), with the crew's quirks included — one panel seated
+//! reversed, one rotated by a panel side, the door run rotated by a leg and
+//! sharing the tail of a box-1 port. A fixture's patching is its start plus
+//! an override on every segment that does not simply follow on.
 //!
 //! Run from anywhere in the workspace:
 //!
@@ -34,11 +36,15 @@
 //! until then the emitted JSON is the checked-in truth and this tool is how
 //! it regenerates.
 
-use lpc_mapping::{
-    EditorFootprint, EditorMetaDoc, Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape,
-    MapObjectPath, PatchDoc, PatchEntry, PatchResolveContext, PatchSource, PathAlign, PathShape,
-    PolygonShape, RepeatShape, object_instance_spans, resolve, resolve_patch,
+use lpc_mapping::part::{self, Mapping, Part, PartId, PartKind, Repeat, Shape, TreeId};
+use lpc_mapping::patching::{
+    self, Amount, Direction, OutputOp, OutputPorts, Override, PortOp, Start,
 };
+use lpc_mapping::{
+    EditorFootprint, EditorMetaDoc, Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, PathAlign,
+    PathShape, PolygonShape, RepeatShape, map2d6, object_instance_spans, resolve,
+};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Doc-space center of the dome's plan view.
@@ -54,13 +60,13 @@ const PANEL_SHRINK: f32 = 0.46;
 /// Lamps per panel: 5 mm WS2812B at 60 LED/m wrapped around the 2' lucite
 /// triangle — the real panel's count.
 const PANEL_LAMPS: u32 = 119;
-/// Authored rotation stride: one panel side. 119 does not divide by 3, so
-/// the polygon has no intrinsic per-side stride; 40 lamps is the closest
+/// The rotated panel's offset: one panel side. 119 does not divide by 3, so
+/// the polygon has no intrinsic per-side step; 40 lamps is the closest
 /// meaningful "re-seat one corner on" step.
 const PANEL_STRIDE: u32 = 40;
 /// Lamps on the door chevron: two ~10' strut legs of 60 LED/m strip.
 const DOOR_LAMPS: u32 = 360;
-/// Door rotation stride: one leg — the meaningful re-seat step for an open
+/// The door's offset: one leg — the meaningful re-seat step for an open
 /// chevron with no intrinsic period.
 const DOOR_STRIDE: u32 = 180;
 /// Lamp sample diameter in fixture texture space: panel lamps sit ~0.2 doc
@@ -75,6 +81,8 @@ const PANELS_PER_PORT: usize = 2;
 /// "Box 2" — the sheet labels the boxes 1 and 2).
 const OUT_A: &str = "1";
 const OUT_B: &str = "Box 2";
+/// Channels per lamp: the panels and the door are RGB strip.
+const CHANNELS_PER_LAMP: u32 = 3;
 
 /// 2V vertex rings as polar angles from the zenith, degrees. A/B are the
 /// sphere-projected midpoints of the icosahedron's zenith-to-upper and
@@ -82,6 +90,181 @@ const OUT_B: &str = "Box 2";
 const POLAR_A: f32 = 31.717_474;
 const POLAR_B: f32 = 58.282_526;
 const POLAR_U: f32 = 63.434_949;
+
+fn main() {
+    let generated = Generated::new();
+    generated.validate();
+
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("workspace root")
+        .join(EXAMPLE);
+    for (relative, text) in generated.files() {
+        let path = example.join(relative);
+        std::fs::write(&path, &text).expect("write artifact");
+        println!("wrote {} ({} bytes)", path.display(), text.len());
+    }
+}
+
+/// The example's directory, from the workspace root.
+const EXAMPLE: &str = "catalog/projects/small-dome";
+
+/// Everything the generator derives, before it is written.
+struct Generated {
+    /// The dome's layout in today's resolver's form: the geometry the
+    /// wiring plan and the Arrange footprints are measured on.
+    dome: Map2dDoc,
+    doors: Map2dDoc,
+    /// The documents written: layout plus patching.
+    dome_mapping: Mapping,
+    doors_mapping: Mapping,
+    /// Where every segment of both fixtures was plugged.
+    landings: BTreeMap<TreeId, Landing>,
+    ports_a: Vec<(String, u32)>,
+    ports_b: Vec<(String, u32)>,
+    editor: EditorMetaDoc,
+}
+
+impl Generated {
+    fn new() -> Self {
+        let dome = dome_doc();
+        let doors = doors_doc();
+        let instances = panel_instances(&dome);
+        let (box_a, box_b) = plan_boxes(&instances);
+        let ports_a = port_table('A', box_a.len(), true);
+        let ports_b = port_table('B', box_b.len(), false);
+        let mut landings = dome_landings(&instances, &box_a, &box_b);
+        landings.insert(door_id(), door_landing(box_a.len()));
+        let outputs = [(OUT_A, ports_a.as_slice()), (OUT_B, ports_b.as_slice())];
+        let dome_mapping = fixture_mapping(&dome, &landings, &outputs);
+        let doors_mapping = fixture_mapping(&doors, &landings, &outputs);
+        let editor = editor_doc(&dome, &doors);
+        Self {
+            dome,
+            doors,
+            dome_mapping,
+            doors_mapping,
+            landings,
+            ports_a,
+            ports_b,
+            editor,
+        }
+    }
+
+    /// Every file written, by its path inside the example, with its text.
+    fn files(&self) -> Vec<(&'static str, String)> {
+        let write = |mapping: &Mapping| map2d6::write(mapping).expect("mapping writes");
+        vec![
+            ("dome/dome.map2d.json", write(&self.dome_mapping)),
+            ("doors/doors.map2d.json", write(&self.doors_mapping)),
+            ("editor.json", self.editor.to_json_pretty() + "\n"),
+            ("out_a.json", output_json(OUT_A, &self.ports_a)),
+            ("out_b.json", output_json(OUT_B, &self.ports_b)),
+        ]
+    }
+
+    /// Every invariant the example depends on, checked against the real
+    /// resolver and patcher so a tweak here cannot silently break the
+    /// shipped panel grain or the wiring.
+    fn validate(&self) {
+        validate_layout(&self.dome, &self.doors);
+        self.validate_patching();
+        assert_eq!(
+            EditorMetaDoc::from_json(&self.editor.to_json_pretty()).expect("editor doc parses"),
+            self.editor,
+            "editor.json round-trips"
+        );
+    }
+
+    /// Both fixtures patch with no problems, every segment where the crew
+    /// plugged it, every run inside one port of its box, no two runs
+    /// overlapping (the dome and the door share box 1's last port), and
+    /// every port lamp claimed.
+    fn validate_patching(&self) {
+        let outputs = [
+            output_ports(OUT_A, &self.ports_a),
+            output_ports(OUT_B, &self.ports_b),
+        ];
+        let mut claimed: BTreeMap<(String, u32), Vec<(u32, u32)>> = BTreeMap::new();
+        for mapping in [&self.dome_mapping, &self.doors_mapping] {
+            let tree = part::render(mapping).expect("mapping renders");
+            let patched = patching::patch_mapping(mapping, &tree, &outputs);
+            assert!(
+                patched.problems.is_empty(),
+                "patching problems: {:?}",
+                patched.problems
+            );
+            assert_eq!(
+                patched.segments.len(),
+                tree.segments().len(),
+                "every segment lands"
+            );
+            for segment in &patched.segments {
+                let landing = &self.landings[&segment.id];
+                assert_eq!(
+                    (
+                        segment.address.output.as_str(),
+                        segment.address.port.0,
+                        segment.address.channel,
+                        segment.direction.is_reverse(),
+                        segment.offset,
+                    ),
+                    (
+                        landing.output,
+                        landing.port,
+                        landing.lamp * CHANNELS_PER_LAMP,
+                        landing.reversed,
+                        landing.rotation,
+                    ),
+                    "{} lands where the crew plugged it",
+                    segment.id
+                );
+                assert_eq!(segment.limit, None, "{} fits its port", segment.id);
+                let window = (
+                    segment.address.channel,
+                    segment.address.channel + segment.channels(),
+                );
+                let capacity = port_capacity(&outputs, landing.output, landing.port);
+                assert!(
+                    window.1 <= capacity,
+                    "run {window:?} does not sit inside port {} of box {:?}",
+                    landing.port,
+                    landing.output
+                );
+                let runs = claimed
+                    .entry((landing.output.to_string(), landing.port))
+                    .or_default();
+                for other in runs.iter() {
+                    assert!(
+                        window.1 <= other.0 || window.0 >= other.1,
+                        "run {window:?} overlaps {other:?} on port {} of box {:?}",
+                        landing.port,
+                        landing.output
+                    );
+                }
+                runs.push(window);
+            }
+        }
+        // Full occupancy: every port lamp is claimed (no dark wire).
+        for output in &outputs {
+            for port in &output.ports {
+                let key = (output.output.as_str().to_string(), port.key.0);
+                let total: u32 = claimed
+                    .get(&key)
+                    .map(|runs| runs.iter().map(|(start, end)| end - start).sum())
+                    .unwrap_or(0);
+                assert_eq!(
+                    Some(total),
+                    port.channels,
+                    "port {} of box {:?} not fully claimed",
+                    key.1,
+                    key.0
+                );
+            }
+        }
+    }
+}
 
 fn plan_r(polar_deg: f32) -> f32 {
     polar_deg / 90.0 * R_EQUATOR
@@ -238,7 +421,7 @@ fn dome_doc() -> Map2dDoc {
         doc.objects.push(Map2dObject {
             name: spec.name.to_string(),
             id: Some(Map2dObjectId::new(spec.id).expect("valid id")),
-            stride: Some(PANEL_STRIDE),
+            stride: None,
             shape: Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(Map2dShape::Polygon(PolygonShape {
                     points: panel_polygon(&spec.host),
@@ -261,9 +444,7 @@ fn doors_doc() -> Map2dDoc {
     doc.objects.push(Map2dObject {
         name: "door".to_string(),
         id: Some(Map2dObjectId::new("door").expect("valid id")),
-        // An open chevron has no intrinsic period; one leg is the
-        // meaningful re-seat step the patch rotates by.
-        stride: Some(DOOR_STRIDE),
+        stride: None,
         shape: Map2dShape::Path(PathShape {
             points: door_points(),
             count: DOOR_LAMPS,
@@ -276,16 +457,76 @@ fn doors_doc() -> Map2dDoc {
     doc
 }
 
-/// One panel instance in the as-built plan: which object path it is and
-/// where its plan-view centroid sits.
+/// A fixture's format-6 mapping: its layout's parts (each repeated object a
+/// minted `repeat<n>` holding the object's own part, id and name kept) and
+/// its patching, frozen from where the crew plugged each segment.
+fn fixture_mapping(
+    doc: &Map2dDoc,
+    landings: &BTreeMap<TreeId, Landing>,
+    outputs: &[(&str, &[(String, u32)])],
+) -> Mapping {
+    let mut mapping = Mapping::new();
+    mapping.sample_diameter = doc.sample_diameter;
+    mapping.canvas = doc.canvas;
+    for object in &doc.objects {
+        let id = object.id.as_ref().expect("every object carries an id");
+        let part = match &object.shape {
+            Map2dShape::Repeat(repeat) => {
+                let held = shape_part(id, &object.name, &repeat.shape);
+                mapping.new_part(PartKind::Repeat(Repeat::new(
+                    held,
+                    repeat.center,
+                    repeat.count,
+                )))
+            }
+            shape => shape_part(id, &object.name, shape),
+        };
+        mapping.parts.push(part);
+    }
+
+    let tree = part::render(&mapping).expect("mapping renders");
+    let segments: Vec<(TreeId, u32)> = tree
+        .segments()
+        .iter()
+        .map(|segment| (segment.id.clone(), segment.count()))
+        .collect();
+    let (start, overrides) = freeze_patching(&segments, landings, outputs);
+    mapping.start = start;
+    mapping.overrides = overrides;
+    mapping
+}
+
+/// One drawn object as a part with the object's id and name.
+fn shape_part(id: &Map2dObjectId, name: &str, shape: &Map2dShape) -> Part {
+    let shape = match shape {
+        Map2dShape::Polygon(polygon) => Shape::Polygon(polygon.clone()),
+        Map2dShape::Path(path) => {
+            assert!(path.gaps.is_empty(), "the generator draws no jumpers");
+            let mut drawn = part::Path::through(&path.points, path.count);
+            drawn.reversed = path.reversed;
+            drawn.align = path.align;
+            Shape::Path(drawn)
+        }
+        other => panic!("the generator draws no {other:?}"),
+    };
+    let mut part = Part::new(
+        PartId::new(id.as_str()).expect("object id is a part id"),
+        PartKind::Shape(shape),
+    );
+    part.name = name.to_string();
+    part
+}
+
+/// One panel instance in the as-built plan: which segment it is and where
+/// its plan-view centroid sits.
 struct PanelInstance {
-    path: MapObjectPath,
+    id: TreeId,
     centroid: [f32; 2],
 }
 
 /// Every panel instance with its centroid, derived from the RESOLVED
 /// document (so the repeat's rotation convention cannot be second-guessed
-/// here): span k of object i is instance path `/<id>/<k>`.
+/// here): span k of object `<id>` is segment `<id>@k`.
 fn panel_instances(dome: &Map2dDoc) -> Vec<PanelInstance> {
     let resolved = resolve(dome).expect("dome resolves");
     let spans = object_instance_spans(dome, &resolved);
@@ -297,11 +538,14 @@ fn panel_instances(dome: &Map2dDoc) -> Vec<PanelInstance> {
                 [acc[0] + lamp.pos[0], acc[1] + lamp.pos[1]]
             });
             let count = lamps.len() as f32;
+            let object = span.id.as_ref().expect("panel objects carry ids");
+            // Instances are outermost first; a tree id's copies innermost.
+            let id = span.instances.iter().rev().fold(
+                TreeId::of(&PartId::new(object.as_str()).expect("object id is a part id")),
+                |id, &copy| id.in_copy(copy),
+            );
             PanelInstance {
-                path: MapObjectPath {
-                    id: span.id.clone().expect("panel objects carry ids"),
-                    instances: span.instances.clone(),
-                },
+                id: id.canonical(),
                 centroid: [sum[0] / count, sum[1] / count],
             }
         })
@@ -371,61 +615,189 @@ fn port_table(prefix: char, panels: usize, door_tail: bool) -> Vec<(String, u32)
     ports
 }
 
-/// The dome patch: every panel assigned to its box and port anchor, with
-/// the as-built quirks — box 2's sixth panel seated reversed, box 1's
-/// tenth rotated one panel side.
-fn dome_patch(instances: &[PanelInstance], box_a: &[usize], box_b: &[usize]) -> PatchDoc {
-    let mut doc = PatchDoc::new();
-    let mut push = |output: &str, wire: &[usize], quirk_reversed: usize, quirk_rotated: usize| {
-        for (position, index) in wire.iter().enumerate() {
-            let port = position / PANELS_PER_PORT;
-            let lamp = (port * PANELS_PER_PORT * PANEL_LAMPS as usize
-                + (position % PANELS_PER_PORT) * PANEL_LAMPS as usize)
-                as u32;
-            doc.entries.push(PatchEntry {
-                source: PatchSource::Path {
-                    path: instances[*index].path.clone(),
-                    range: None,
-                },
-                output: Some(output.to_string()),
-                lamp,
-                reversed: position == quirk_reversed,
-                offset: if position == quirk_rotated {
-                    PANEL_STRIDE
-                } else {
-                    0
-                },
-            });
-        }
-    };
-    // usize::MAX = no quirk at that position in this box.
-    push(OUT_A, box_a, usize::MAX, 9);
-    push(OUT_B, box_b, 5, usize::MAX);
-    doc.normalize_format();
-    doc
+/// Where the crew plugged one segment: its output, the port (its index in
+/// the output's port table), the lamp its run starts at on that port, and
+/// how it is seated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Landing {
+    output: &'static str,
+    port: u32,
+    lamp: u32,
+    reversed: bool,
+    /// In lamps; 0 is none.
+    rotation: u32,
 }
 
-/// The doors patch: the door run shares the tail of box 1's last port,
+/// Every panel plugged into its box and port, with the as-built quirks —
+/// box 2's sixth panel seated reversed, box 1's tenth rotated one panel
+/// side.
+fn dome_landings(
+    instances: &[PanelInstance],
+    box_a: &[usize],
+    box_b: &[usize],
+) -> BTreeMap<TreeId, Landing> {
+    let mut landings = BTreeMap::new();
+    let mut plug =
+        |output: &'static str, wire: &[usize], quirk_reversed: usize, quirk_rotated: usize| {
+            for (position, index) in wire.iter().enumerate() {
+                landings.insert(
+                    instances[*index].id.clone(),
+                    Landing {
+                        output,
+                        port: (position / PANELS_PER_PORT) as u32,
+                        lamp: (position % PANELS_PER_PORT) as u32 * PANEL_LAMPS,
+                        reversed: position == quirk_reversed,
+                        rotation: if position == quirk_rotated {
+                            PANEL_STRIDE
+                        } else {
+                            0
+                        },
+                    },
+                );
+            }
+        };
+    // usize::MAX = no quirk at that position in this box.
+    plug(OUT_A, box_a, usize::MAX, 9);
+    plug(OUT_B, box_b, 5, usize::MAX);
+    landings
+}
+
+/// The door's segment id.
+fn door_id() -> TreeId {
+    TreeId::of(&PartId::new("door").expect("valid id"))
+}
+
+/// The door run shares the tail of box 1's last port, after its odd panel,
 /// plugged with its legs swapped (rotated by one leg).
-fn doors_patch(box_a_panels: usize) -> PatchDoc {
-    let mut doc = PatchDoc::new();
-    let full_ports = box_a_panels / PANELS_PER_PORT;
-    let tail_start = (full_ports * PANELS_PER_PORT + box_a_panels % PANELS_PER_PORT) as u32;
-    doc.entries.push(PatchEntry {
-        source: PatchSource::Path {
-            path: MapObjectPath {
-                id: Map2dObjectId::new("door").expect("valid id"),
-                instances: Vec::new(),
-            },
-            range: None,
-        },
-        output: Some(OUT_A.to_string()),
-        lamp: tail_start * PANEL_LAMPS,
+fn door_landing(box_a_panels: usize) -> Landing {
+    Landing {
+        output: OUT_A,
+        port: (box_a_panels / PANELS_PER_PORT) as u32,
+        lamp: (box_a_panels % PANELS_PER_PORT) as u32 * PANEL_LAMPS,
         reversed: false,
-        offset: DOOR_STRIDE,
-    });
-    doc.normalize_format();
-    doc
+        rotation: DOOR_STRIDE,
+    }
+}
+
+/// A fixture's patching, frozen from where each segment was plugged: the
+/// fixture's start and an override on every segment that does not simply
+/// follow on.
+///
+/// The segments (id and lamp count, in tree order) are walked with a
+/// predicted cursor that moves as the patcher's does, on ports of
+/// `count × 3` channels:
+///
+/// - The start is the first segment's address: output, port and channel
+///   (in lamps) Set.
+/// - A later segment whose address is where the cursor would lay it — at
+///   the cursor, or on the next port with room from its channel 0 when it
+///   does not fit what is left — gets no override for its address. Any
+///   other gets port Set and channel Set (in lamps), and output Set only
+///   when its output is not the cursor's.
+/// - Reversed adds `direction: reverse`; a rotation `k` adds `offset: k`.
+/// - The cursor then sits at the end of the segment's true address.
+///
+/// The upgrade step that froze the catalog's patching used the same rule
+/// (`lpa-upgrade`'s `v11/freeze_patching.rs`), so this writes its output.
+fn freeze_patching(
+    segments: &[(TreeId, u32)],
+    landings: &BTreeMap<TreeId, Landing>,
+    outputs: &[(&str, &[(String, u32)])],
+) -> (Start, BTreeMap<TreeId, Override>) {
+    let mut start = Start::default();
+    let mut overrides = BTreeMap::new();
+    let mut cursor: Option<Cursor<'_>> = None;
+    for (id, lamps) in segments {
+        let landing = landings
+            .get(id)
+            .unwrap_or_else(|| panic!("segment {id} is plugged"));
+        let ports = outputs
+            .iter()
+            .find(|(name, _)| *name == landing.output)
+            .map(|(_, ports)| *ports)
+            .unwrap_or_else(|| panic!("{id} lands on {}, an output", landing.output));
+        let index = landing.port as usize;
+        assert!(index < ports.len(), "{id} lands on a port its box has");
+        let first_channel = landing.lamp * CHANNELS_PER_LAMP;
+        let need = lamps * CHANNELS_PER_LAMP;
+
+        let mut entry = Override {
+            direction: landing.reversed.then_some(Direction::Reverse),
+            offset: (landing.rotation != 0).then_some(landing.rotation),
+            ..Override::default()
+        };
+        match &cursor {
+            None => start = Start::at(landing.output, landing.port, Amount::lamps(landing.lamp)),
+            Some(at) => {
+                let follows =
+                    at.output == landing.output && at.lay(need) == Some((index, first_channel));
+                if !follows {
+                    if at.output != landing.output {
+                        entry.output =
+                            Some(OutputOp::Set(patching::OutputName::new(landing.output)));
+                    }
+                    entry.port = Some(PortOp::set(landing.port));
+                    entry.channel = Some(patching::ChannelOp::Set(Amount::lamps(landing.lamp)));
+                }
+            }
+        }
+        if !entry.is_empty() {
+            overrides.insert(id.clone(), entry);
+        }
+        cursor = Some(Cursor {
+            output: landing.output,
+            ports,
+            port: index,
+            channel: first_channel + need,
+        });
+    }
+    (start, overrides)
+}
+
+/// Where the patcher's cursor stands after a laid segment.
+struct Cursor<'a> {
+    output: &'a str,
+    /// The output's ports: `(endpoint token, lamp count)`, in key order.
+    ports: &'a [(String, u32)],
+    /// The port's index.
+    port: usize,
+    /// In channels.
+    channel: u32,
+}
+
+impl Cursor<'_> {
+    /// Where the patcher lays the next segment of `need` channels when
+    /// nothing moves the cursor: here when it fits, else the next port
+    /// from its channel 0 that has room (`None`: past the last port).
+    fn lay(&self, need: u32) -> Option<(usize, u32)> {
+        if self.room(self.port, self.channel) >= need {
+            return Some((self.port, self.channel));
+        }
+        ((self.port + 1)..self.ports.len())
+            .find(|&index| self.room(index, 0) >= need)
+            .map(|index| (index, 0))
+    }
+
+    /// What is left of port `index` from `channel`.
+    fn room(&self, index: usize, channel: u32) -> u32 {
+        (self.ports[index].1 * CHANNELS_PER_LAMP).saturating_sub(channel)
+    }
+}
+
+/// One output's ports as the patcher is given them.
+fn output_ports(name: &str, ports: &[(String, u32)]) -> OutputPorts {
+    let lamps: Vec<Option<u32>> = ports.iter().map(|(_, count)| Some(*count)).collect();
+    OutputPorts::of_lamps(name, &lamps, CHANNELS_PER_LAMP)
+}
+
+/// A port's capacity in channels.
+fn port_capacity(outputs: &[OutputPorts], output: &str, port: u32) -> u32 {
+    outputs
+        .iter()
+        .find(|o| o.output.as_str() == output)
+        .and_then(|o| o.ports.iter().find(|p| p.key.0 == port))
+        .and_then(|p| p.channels)
+        .unwrap_or_else(|| panic!("box {output:?} has port {port}"))
 }
 
 /// The Arrange placements (`editor.json`): both fixtures at IDENTITY in the
@@ -487,21 +859,10 @@ fn output_json(name: &str, ports: &[(String, u32)]) -> String {
     text
 }
 
-/// Every invariant the example depends on, checked against the real
-/// resolvers so a tweak here cannot silently break the shipped patch grain.
-fn validate(
-    dome: &Map2dDoc,
-    doors: &Map2dDoc,
-    dome_patch: &PatchDoc,
-    doors_patch: &PatchDoc,
-    ports_a: &[(String, u32)],
-    ports_b: &[(String, u32)],
-) {
-    // Inside alignment (lamps line the panel/chevron form) stamps format 4;
-    // assert it directly so a generator edit that drops back to `On`
-    // (silently releasing the format) fails loudly here.
-    assert_eq!(dome.format, 4, "inside-aligned dome stamps format 4");
-    assert_eq!(doors.format, 4, "inside-aligned doors stamp format 4");
+/// The layout's invariants, checked against today's resolver: 50 one-strand
+/// panels and one door strand, every lamp on the canvas, panel lamp pitch in
+/// the band where the wrap reads as a strip, and the door's legs equal.
+fn validate_layout(dome: &Map2dDoc, doors: &Map2dDoc) {
     assert_eq!(dome.objects.len(), 10, "ten panel positions per sector");
 
     let resolved = resolve(dome).expect("dome resolves");
@@ -527,6 +888,12 @@ fn validate(
         let Map2dShape::Polygon(polygon) = repeat.shape.as_ref() else {
             panic!("panel object {:?} is not a polygon", object.name);
         };
+        assert_eq!(
+            polygon.align,
+            PathAlign::Inside,
+            "panel {:?} lamps line the panel's form",
+            object.name
+        );
         let mut closed = polygon.points.clone();
         closed.push(polygon.points[0]);
         let perimeter: f32 = closed.windows(2).map(|w| dist(w[0], w[1])).sum();
@@ -556,135 +923,6 @@ fn validate(
     let door = door_points();
     let legs = (dist(door[0], door[1]), dist(door[1], door[2]));
     assert!((legs.0 - legs.1).abs() < 0.15, "door legs uneven: {legs:?}");
-
-    // The patches resolve without refusals through the real resolver, and
-    // every run lands inside exactly one port of its box.
-    let outputs = [OUT_A.to_string(), OUT_B.to_string()];
-    let windows = |patch: &PatchDoc, doc: &Map2dDoc, resolved| {
-        let spans = object_instance_spans(doc, resolved);
-        let ctx = PatchResolveContext {
-            fixture_lamp_count: spans.iter().map(|span| span.count).sum(),
-            object_spans: &spans,
-            allowed_outputs: Some(&outputs),
-            default_output: None,
-        };
-        let resolution = resolve_patch(&ctx, patch).expect("patch resolves");
-        assert!(
-            resolution.refusals.is_empty(),
-            "patch refusals: {:?}",
-            resolution.refusals
-        );
-        resolution
-    };
-    let dome_resolution = windows(dome_patch, dome, &resolved);
-    let doors_resolution = windows(doors_patch, doors, &resolved_doors);
-
-    let port_bounds = |ports: &[(String, u32)]| -> Vec<(u32, u32)> {
-        let mut start = 0;
-        ports
-            .iter()
-            .map(|(_, count)| {
-                let bounds = (start, start + count);
-                start += count;
-                bounds
-            })
-            .collect()
-    };
-    let bounds = [port_bounds(ports_a), port_bounds(ports_b)];
-    let mut claimed: [Vec<(u32, u32)>; 2] = [Vec::new(), Vec::new()];
-    for range in dome_resolution
-        .ranges
-        .iter()
-        .chain(doors_resolution.ranges.iter())
-    {
-        let box_index = match range.output.as_deref() {
-            Some(OUT_A) => 0,
-            Some(OUT_B) => 1,
-            other => panic!("unexpected output: {other:?}"),
-        };
-        let window = (range.lamp, range.lamp_end());
-        assert!(
-            bounds[box_index]
-                .iter()
-                .any(|(start, end)| window.0 >= *start && window.1 <= *end),
-            "run {window:?} does not sit inside one box-{} port",
-            box_index + 1
-        );
-        for other in &claimed[box_index] {
-            assert!(
-                window.1 <= other.0 || window.0 >= other.1,
-                "run {window:?} overlaps {other:?} on box {}",
-                box_index + 1
-            );
-        }
-        claimed[box_index].push(window);
-    }
-    // Full occupancy: every port lamp is claimed (no dark wire).
-    for (box_index, claims) in claimed.iter().enumerate() {
-        let claimed_total: u32 = claims.iter().map(|(start, end)| end - start).sum();
-        let capacity: u32 = bounds[box_index].last().map(|(_, end)| *end).unwrap_or(0);
-        assert_eq!(
-            claimed_total,
-            capacity,
-            "box {} wire not fully claimed",
-            box_index + 1
-        );
-    }
-}
-
-fn main() {
-    let dome = dome_doc();
-    let doors = doors_doc();
-    let instances = panel_instances(&dome);
-    let (box_a, box_b) = plan_boxes(&instances);
-    let dome_patch_doc = dome_patch(&instances, &box_a, &box_b);
-    let doors_patch_doc = doors_patch(box_a.len());
-    let ports_a = port_table('A', box_a.len(), true);
-    let ports_b = port_table('B', box_b.len(), false);
-    let editor = editor_doc(&dome, &doors);
-    validate(
-        &dome,
-        &doors,
-        &dome_patch_doc,
-        &doors_patch_doc,
-        &ports_a,
-        &ports_b,
-    );
-    assert_eq!(
-        EditorMetaDoc::from_json(&editor.to_json_pretty()).expect("editor doc parses"),
-        editor,
-        "editor.json round-trips"
-    );
-
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("workspace root");
-    let example = root.join("catalog/projects/small-dome");
-    for (path, json) in [
-        (
-            example.join("dome/dome.map2d.json"),
-            dome.to_json_pretty() + "\n",
-        ),
-        (
-            example.join("doors/doors.map2d.json"),
-            doors.to_json_pretty() + "\n",
-        ),
-        (
-            example.join("dome/dome.patch.json"),
-            dome_patch_doc.to_json_pretty() + "\n",
-        ),
-        (
-            example.join("doors/doors.patch.json"),
-            doors_patch_doc.to_json_pretty() + "\n",
-        ),
-        (example.join("editor.json"), editor.to_json_pretty() + "\n"),
-        (example.join("out_a.json"), output_json(OUT_A, &ports_a)),
-        (example.join("out_b.json"), output_json(OUT_B, &ports_b)),
-    ] {
-        std::fs::write(&path, &json).expect("write artifact");
-        println!("wrote {} ({} bytes)", path.display(), json.len());
-    }
 }
 
 #[cfg(test)]
@@ -694,25 +932,33 @@ mod tests {
     /// The generator's invariants hold without touching the filesystem.
     #[test]
     fn generated_documents_validate() {
-        let dome = dome_doc();
-        let doors = doors_doc();
-        let instances = panel_instances(&dome);
-        let (box_a, box_b) = plan_boxes(&instances);
-        validate(
-            &dome,
-            &doors,
-            &dome_patch(&instances, &box_a, &box_b),
-            &doors_patch(box_a.len()),
-            &port_table('A', box_a.len(), true),
-            &port_table('B', box_b.len(), false),
-        );
+        Generated::new().validate();
     }
 
-    /// Both mapping documents round-trip through the parser they ship into.
+    /// The generator writes exactly the committed example, byte for byte.
     #[test]
-    fn generated_documents_parse_back() {
-        for doc in [dome_doc(), doors_doc()] {
-            assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+    fn the_generated_documents_are_the_catalogs() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(EXAMPLE);
+        for (relative, text) in Generated::new().files() {
+            let committed = std::fs::read_to_string(example.join(relative))
+                .unwrap_or_else(|e| panic!("read {relative}: {e}"));
+            assert!(
+                text == committed,
+                "{relative} differs from the catalog's; run `cargo run -p lpt-geodome`"
+            );
+        }
+    }
+
+    /// Both format-6 documents read back as the mapping they were written
+    /// from.
+    #[test]
+    fn generated_mappings_read_back() {
+        let generated = Generated::new();
+        for mapping in [&generated.dome_mapping, &generated.doors_mapping] {
+            let text = map2d6::write(mapping).unwrap();
+            assert_eq!(&map2d6::read(&text).unwrap(), mapping);
         }
     }
 
@@ -723,19 +969,5 @@ mod tests {
         let parsed = EditorMetaDoc::from_json(&doc.to_json_pretty()).unwrap();
         assert_eq!(parsed, doc);
         assert_eq!(parsed.nodes.len(), 2, "both fixtures arranged");
-    }
-
-    /// Both patch documents round-trip through the parser they ship into.
-    #[test]
-    fn generated_patches_parse_back() {
-        let dome = dome_doc();
-        let instances = panel_instances(&dome);
-        let (box_a, box_b) = plan_boxes(&instances);
-        for doc in [
-            dome_patch(&instances, &box_a, &box_b),
-            doors_patch(box_a.len()),
-        ] {
-            assert_eq!(PatchDoc::from_json(&doc.to_json()).unwrap(), doc);
-        }
     }
 }

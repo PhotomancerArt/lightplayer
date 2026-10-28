@@ -21,11 +21,12 @@ canvas, Direct sampling), one output (interpolation on, LUT on).
   each byte-identical to the parent's except:
   - `fixture{i}.json`: `mapping.source` → `fixture{i}.map2d.json`,
     `bindings.output.target` → `bus:control.out/ch{i}`;
-  - `output{i}.json`: port 0 `endpoint` → the XIAO ladder `D10, D9, D8, D7`
-    (pair 1 keeps the parent's `D10`), `bindings.input.source` →
-    `bus:control.out/ch{i}`;
-  - `fixture{i}.map2d.json`: the parent's map, with every ring count halved in
-    `basic-2n-half` (`[30,24,20,16,12,8,6,4]` = 120 + centre).
+  - `output{i}.json`: `name` → `"{i}"`, port 0 `endpoint` → the XIAO ladder
+    `D10, D9, D8, D7` (pair 1 keeps the parent's `D10`),
+    `bindings.input.source` → `bus:control.out/ch{i}`;
+  - `fixture{i}.map2d.json`: the parent's map (map2d format 6), its `start`
+    on output `"{i}"`, with every ring count halved in `basic-2n-half`
+    (`[30,24,20,16,12,8,6,4]` = 120 + centre).
 - Per-channel bus names follow [`../quad-strips`](../quad-strips).
 - `clock.json`, `shader.json` and `shader.glsl` are the parent's, copied once
   per project; `module.json` lists every node; `project.json` carries a

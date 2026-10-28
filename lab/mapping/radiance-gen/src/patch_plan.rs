@@ -1,16 +1,17 @@
 //! The placeholder patch: one panel per port, in sector order.
 //!
 //! Panel `n = sector·55 + class` goes to output `n / 32` (named `"1"` to
-//! `"10"`), port `n % 32`, wire lamp `port·80`. 275 panels fill outputs
-//! 1–8 and 19 ports of output 9; the rest of 9 and all of 10 stay empty.
-//! fit-check Q-E's lean, until the as-built patch is found.
+//! `"10"`), port `n % 32`, from the port's first lamp. 275 panels fill
+//! outputs 1–8 and 19 ports of output 9; the rest of 9 and all of 10 stay
+//! empty. fit-check Q-E's lean, until the as-built patch is found. The map
+//! saves it as format 6's patching ([`crate::frozen_patching`]).
 //!
 //! Two invented install quirks keep it from being a pure identity, the way
 //! `lpt-geodome`'s small dome has them: one panel plugged in reversed and
 //! one seated a third of the way round its own strip.
 
 use crate::dome_geometry::{CLASSES, SECTORS};
-use crate::{OUTPUTS, PANEL_LAMPS, PORTS_PER_OUTPUT};
+use crate::{OUTPUTS, PORTS_PER_OUTPUT};
 
 /// The panel seated reversed: class id and sector. Ring 6 is the first
 /// full-width band below the cap; sector 2 sits on output "5".
@@ -19,24 +20,24 @@ pub const REVERSED_PANEL: (&str, usize) = ("r6-p04", 2);
 /// lamps (a third of the 80-lamp strip, rounded).
 pub const ROTATED_PANEL: (&str, usize, u32) = ("r7-p05", 3, 27);
 
-/// One patch row: a panel instance and where its run lands.
+/// One patch row: a panel copy and where its run lands (from the port's
+/// first lamp).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatchRow {
-    /// The panel class's object id.
+    /// The panel class's part id.
     pub id: String,
+    /// The repeat copy.
     pub sector: usize,
-    /// 0-based output index; the output's name is `output + 1`.
+    /// 0-based output index; the output's name is [`output_name`].
     pub output: usize,
     pub port: usize,
-    /// Wire anchor in lamps on that output.
-    pub wire: u32,
     pub reversed: bool,
     /// Rotation within the run, in lamps.
     pub offset: u32,
 }
 
 /// Every panel's row, in panel order. `class_ids[class]` is each class's
-/// object id.
+/// part id.
 pub fn patch_rows(class_ids: &[String]) -> Vec<PatchRow> {
     assert_eq!(class_ids.len(), CLASSES);
     assert!(SECTORS * CLASSES <= OUTPUTS * PORTS_PER_OUTPUT);
@@ -58,10 +59,14 @@ pub fn patch_rows(class_ids: &[String]) -> Vec<PatchRow> {
                 sector,
                 output: panel / PORTS_PER_OUTPUT,
                 port,
-                wire: port as u32 * PANEL_LAMPS,
             }
         })
         .collect()
+}
+
+/// An output's name: its 1-based number (`"1"` to `"10"`).
+pub fn output_name(output: usize) -> String {
+    (output + 1).to_string()
 }
 
 #[cfg(test)]
@@ -81,10 +86,10 @@ mod tests {
     fn one_panel_per_port_in_sector_order() {
         let rows = patch_rows(&ids());
         assert_eq!(rows.len(), 275);
-        assert_eq!((rows[0].output, rows[0].port, rows[0].wire), (0, 0, 0));
+        assert_eq!((rows[0].output, rows[0].port), (0, 0));
         assert_eq!((rows[255].output, rows[255].port), (7, 31));
         let last = rows.last().unwrap();
-        assert_eq!((last.output, last.port, last.wire), (8, 18, 18 * 80));
+        assert_eq!((last.output, last.port), (8, 18));
     }
 
     #[test]

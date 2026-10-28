@@ -2,24 +2,25 @@
 //!
 //! Node files follow `catalog/projects/small-dome/` (fixture, output,
 //! shader, clock) but sit under ONE root module with no sub-modules or
-//! exports. The map is `lpc-mapping`'s `Map2dDoc` printed the way
-//! `to_json_pretty` prints it, stamped format 4 (ids and polygons need 3,
-//! `align` needs 4); the patch is `PatchDoc`'s canonical row form, format 3
-//! (`"flow": "manual"`).
+//! exports. The map is a `lpc_mapping::part::Mapping` written by
+//! `lpc_mapping::map2d6::write` (map2d format 6): the layout, and the
+//! placeholder patch frozen into its start and overrides
+//! ([`crate::frozen_patching`]). There is no patch file.
+
+use lpc_mapping::map2d6::{self, MAP2D6_FORMAT};
+use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Repeat, Shape, TreeId, render};
+use lpc_mapping::{PathAlign, PolygonShape};
 
 use crate::dome_geometry::{
     self, CLASSES, Dome, MARGIN, P2, RADIUS, SECTORS, panel_outline, rim_radius,
 };
-use crate::json_text::{Json, number, quoted};
-use crate::patch_plan::{PatchRow, ROTATED_PANEL, patch_rows};
+use crate::frozen_patching::freeze_patching;
+use crate::json_text::{Json, number};
+use crate::patch_plan::{PatchRow, ROTATED_PANEL, output_name, patch_rows};
 use crate::{OUTPUTS, PANEL_LAMPS, PORTS_PER_OUTPUT};
 
-/// The map document's format: polygons and ids need 3, `align` needs 4.
-const MAP2D_FORMAT: u32 = 4;
-/// The patch document's format: `"flow": "manual"` needs 3.
-const PATCH_FORMAT: u32 = 3;
 /// The project manifest's format (`PROJECT_FORMAT_VERSION`).
-const PROJECT_FORMAT: u32 = 11;
+const PROJECT_FORMAT: u32 = 12;
 /// Fixture render size, square. At 256 px over a ~760-inch plan one texel
 /// is about 3 inches; a panel spans roughly ten.
 const RENDER_SIZE: u32 = 256;
@@ -36,6 +37,7 @@ pub fn project_files() -> Vec<(String, String)> {
             .map(|c| c.id.clone())
             .collect::<Vec<_>>(),
     );
+    let mapping = dome_mapping(&plan, &rows);
     let mut files = vec![
         ("project.json".to_string(), project_json()),
         ("module.json".to_string(), module_json()),
@@ -46,13 +48,15 @@ pub fn project_files() -> Vec<(String, String)> {
         ("shader.json".to_string(), shader_json()),
         ("shader.glsl".to_string(), shader_glsl(&plan)),
         ("dome.json".to_string(), fixture_json()),
-        ("dome.map2d.json".to_string(), map2d_json(&plan)),
-        ("dome.patch.json".to_string(), patch_json(&rows)),
+        (
+            "dome.map2d.json".to_string(),
+            map2d6::write(&mapping).expect("the dome's mapping writes"),
+        ),
     ];
     for output in 0..OUTPUTS {
         files.push((format!("out_{}.json", output + 1), output_json(output)));
     }
-    files.push(("README.md".to_string(), readme(&plan, &rows)));
+    files.push(("README.md".to_string(), readme(&plan, &rows, &mapping)));
     files
 }
 
@@ -301,13 +305,6 @@ fn fixture_json() -> String {
                 ("source", Json::str("dome.map2d.json")),
             ]),
         ),
-        (
-            "patch",
-            Json::obj([
-                ("kind", Json::str("File")),
-                ("source", Json::str("dome.patch.json")),
-            ]),
-        ),
         ("color_order", Json::str("rgb")),
         ("brightness", Json::Num(1.0)),
         ("gamma_correction", Json::Bool(false)),
@@ -316,94 +313,49 @@ fn fixture_json() -> String {
         + "\n"
 }
 
-fn map2d_json(plan: &DomePlan) -> String {
-    let point = |p: &P2| Json::Arr(vec![Json::Num(p[0]), Json::Num(p[1])]);
-    let objects = plan
-        .classes
+/// The fixture's mapping: 55 repeats (`repeat1` …), each holding one
+/// panel class's sector-0 polygon as a part with the class's id, and the
+/// placeholder patch frozen into the fixture's start and overrides.
+fn dome_mapping(plan: &DomePlan, rows: &[PatchRow]) -> Mapping {
+    let point = |p: &P2| [p[0] as f32, p[1] as f32];
+    let mut mapping = Mapping::new();
+    mapping.sample_diameter = SAMPLE_DIAMETER as f32;
+    mapping.canvas = Some([0.0, 0.0, plan.size[0] as f32, plan.size[1] as f32]);
+    for class in &plan.classes {
+        // No `stride`: 80 lamps do not split evenly over the subdivided
+        // outline's sides, so there is no honest per-side count to write.
+        // A repeat's copies then follow each other whole (80 lamps each).
+        let polygon = PolygonShape {
+            points: class.points.iter().map(point).collect(),
+            count: PANEL_LAMPS,
+            align: PathAlign::Inside,
+        };
+        let id = PartId::new(&class.id).expect("a panel id is a part id");
+        let mut panel = Part::new(id, PartKind::Shape(Shape::Polygon(polygon)));
+        panel.name = class.name.clone();
+        let repeat = Repeat::new(panel, point(&plan.center), SECTORS as u32);
+        let part = mapping.new_part(PartKind::Repeat(repeat));
+        mapping.parts.push(part);
+    }
+
+    // The segments in lamp order, each with its plan row.
+    let tree = render(&mapping).expect("the dome's mapping renders");
+    let segments: Vec<(TreeId, u32, &PatchRow)> = tree
+        .segments()
         .iter()
-        .map(|class| {
-            let polygon = Json::obj([
-                (
-                    "points",
-                    Json::Arr(class.points.iter().map(point).collect()),
-                ),
-                ("count", Json::Int(PANEL_LAMPS.into())),
-                ("align", Json::str("inside")),
-            ]);
-            // No `stride`: 80 lamps do not split evenly over the subdivided
-            // outline's sides, so there is no honest per-side count to
-            // write. The product then derives a repeat's stride as one
-            // whole instance (80 lamps).
-            Json::obj([
-                ("name", Json::Str(class.name.clone())),
-                ("id", Json::Str(class.id.clone())),
-                (
-                    "shape",
-                    Json::obj([(
-                        "repeat",
-                        Json::obj([
-                            ("shape", Json::obj([("polygon", polygon)])),
-                            ("center", point(&plan.center)),
-                            ("count", Json::Int(SECTORS as i64)),
-                        ]),
-                    )]),
-                ),
-            ])
+        .map(|segment| {
+            let sector = segment.id.copies.first().copied().unwrap_or(0) as usize;
+            let row = rows
+                .iter()
+                .find(|r| r.id == segment.id.part.as_str() && r.sector == sector)
+                .expect("every panel copy has a row");
+            (segment.id.clone(), segment.count(), row)
         })
         .collect();
-    Json::obj([
-        ("format", Json::Int(MAP2D_FORMAT.into())),
-        ("sample_diameter", Json::Num(SAMPLE_DIAMETER)),
-        (
-            "canvas",
-            Json::Arr(vec![
-                Json::Num(0.0),
-                Json::Num(0.0),
-                Json::Num(plan.size[0]),
-                Json::Num(plan.size[1]),
-            ]),
-        ),
-        ("objects", Json::Arr(objects)),
-    ])
-    .pretty()
-        + "\n"
-}
-
-/// `PatchDoc`'s canonical pretty row form (`rows_pretty`): header fields
-/// inline, one compact row per line, outputs in first-use order.
-fn patch_json(rows: &[PatchRow]) -> String {
-    let mut outputs: Vec<usize> = Vec::new();
-    for row in rows {
-        if !outputs.contains(&row.output) {
-            outputs.push(row.output);
-        }
-    }
-    let names: Vec<String> = outputs.iter().map(|o| quoted(&output_name(*o))).collect();
-    let mut text = format!(
-        "{{\n  \"format\": {PATCH_FORMAT},\n  \"flow\": \"manual\",\n  \"outputs\": [{}],\n  \"entries\": [\n",
-        names.join(",")
-    );
-    for (index, row) in rows.iter().enumerate() {
-        let out = outputs
-            .iter()
-            .position(|o| *o == row.output)
-            .expect("listed");
-        let mut columns = vec![
-            quoted(&format!("/{}/{}", row.id, row.sector)),
-            out.to_string(),
-            row.wire.to_string(),
-        ];
-        if row.reversed || row.offset != 0 {
-            columns.push(quoted(if row.reversed { "r" } else { "" }));
-        }
-        if row.offset != 0 {
-            columns.push(row.offset.to_string());
-        }
-        text.push_str(&format!("    [{}]", columns.join(",")));
-        text.push_str(if index + 1 < rows.len() { ",\n" } else { "\n" });
-    }
-    text.push_str("  ]\n}\n");
-    text
+    let frozen = freeze_patching(&segments, PANEL_LAMPS);
+    mapping.start = frozen.start;
+    mapping.overrides = frozen.overrides;
+    mapping
 }
 
 fn output_json(output: usize) -> String {
@@ -434,10 +386,6 @@ fn output_json(output: usize) -> String {
         + "\n"
 }
 
-fn output_name(output: usize) -> String {
-    (output + 1).to_string()
-}
-
 /// `ws281x:box<N>:P<NN>`: box N's port NN, both 1-based like the labels on
 /// a box. It parses (`HwEndpointSpec` is any three non-empty ASCII parts,
 /// and nothing checks the target), but no board serves a `box` target yet.
@@ -445,13 +393,13 @@ fn endpoint(output: usize, port: usize) -> String {
     format!("ws281x:box{}:P{:02}", output + 1, port + 1)
 }
 
-fn readme(plan: &DomePlan, rows: &[PatchRow]) -> String {
+fn readme(plan: &DomePlan, rows: &[PatchRow], mapping: &Mapping) -> String {
     let quirk = |pred: &dyn Fn(&PatchRow) -> bool| {
         let row = rows.iter().find(|r| pred(r)).expect("quirk row");
+        let id = PartId::new(&row.id).expect("a panel id is a part id");
         format!(
-            "`/{}/{}` (panel {}, output \"{}\" port {}, wire {})",
-            row.id,
-            row.sector,
+            "`{}` (panel {}, output \"{}\" port {})",
+            TreeId::of(&id).in_copy(row.sector as u32).canonical(),
             row.sector * CLASSES
                 + plan
                     .classes
@@ -460,7 +408,6 @@ fn readme(plan: &DomePlan, rows: &[PatchRow]) -> String {
                     .expect("class"),
             output_name(row.output),
             row.port,
-            row.wire
         )
     };
     let reversed = quirk(&|r| r.reversed);
@@ -494,9 +441,9 @@ known is lp2014's geometry; what is not:
 - **Boxes and ports.** {OUTPUTS} outputs (`out_1` … `out_{OUTPUTS}`, named "1" … "{OUTPUTS}") of
   {PORTS_PER_OUTPUT} ports, every port `count: {PANEL_LAMPS}`.
 - **Patch.** One panel per port in sector order: panel `n = sector·55 +
-  class` goes to output `n / 32 + 1`, port `n % 32`, wire `port·80`.
-  Outputs 1–8 fill, output {used} takes {tail} panels, the rest of the ports are empty.
-  No as-built patch has been found.
+  class` goes to output `n / 32 + 1`, port `n % 32`, from the port's first
+  lamp. Outputs 1–8 fill, output {used} takes {tail} panels, the rest of the
+  ports are empty. No as-built patch has been found.
 
 Two invented install quirks keep the patch from being a pure identity:
 
@@ -525,12 +472,14 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
   lp2014's `expansionFactor` (2–5) great-circle segments so they curve.
   The polygon starts at the corner farthest from the zenith and winds
   clockwise.
-- **Objects.** 55 panel classes, one per object, each a 5-way `repeat` of
-  the sector-0 panel's polygon (`align: inside`). Ids are `r<ring>-p<NN>`:
-  ring 1–8 from the zenith, position in the ring clockwise. No `stride`:
-  {PANEL_LAMPS} lamps don't split evenly over a subdivided outline's sides, so
-  the product derives a repeat's stride as one whole instance ({PANEL_LAMPS}).
-- **Sectors.** Instance `k` is the product's `k·72°` clockwise turn, so
+- **Parts.** 55 panel classes, each a 5-way repeat (`repeat1` …
+  `repeat{CLASSES}`) holding the sector-0 panel's polygon as a part
+  (`align: inside`). Part ids are `r<ring>-p<NN>`: ring 1–8 from the
+  zenith, position in the ring clockwise; copy `k` of a panel is
+  `r<ring>-p<NN>@k` (copy 0 is the part's own id). No stride: {PANEL_LAMPS} lamps
+  don't split evenly over a subdivided outline's sides, so a repeat's
+  copies follow each other whole ({PANEL_LAMPS} lamps each).
+- **Sectors.** Copy `k` is the product's `k·72°` clockwise turn, so
   sectors are numbered clockwise; sector `k` is lp2014's fifth
   (`restrictToFifth`) `(1 − k) mod 5 + 1`. Sector 0 holds lp2014's panel 0.
 - **Not applied:** lp2014's per-fixture install transform (scale 0.867 ×
@@ -538,8 +487,10 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
 
 ## Files
 
-- `dome.map2d.json` — map2d format {MAP2D_FORMAT}, sample diameter {sd} (≈ one texel).
-- `dome.patch.json` — patch format {PATCH_FORMAT}, `"flow": "manual"`, {panels} rows.
+- `dome.map2d.json` — map2d format {MAP2D6_FORMAT}, sample diameter {sd} (≈ one texel):
+  the layout and the patch. The patch is the fixture's start (the first
+  panel's port) and {overrides} overrides, one on every other panel copy, since
+  none follows on from the one before it in lamp order.
 - `dome.json` — the fixture, {RENDER_SIZE}×{RENDER_SIZE}, reading `bus:visual.out`.
 - `shader.json`, `shader.glsl` — a five-petal bloom over falling rings.
 - `out_1.json` … `out_{OUTPUTS}.json`, `clock.json`, `module.json`, `project.json`.
@@ -553,7 +504,7 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
         cy = number(plan.center[1]),
         shrink = dome_geometry::PANEL_SHRINK,
         sd = number(SAMPLE_DIAMETER),
-        panels = rows.len(),
+        overrides = mapping.overrides.len(),
     )
 }
 
@@ -581,7 +532,7 @@ fn ceil2(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch_plan::REVERSED_PANEL;
+    use lpc_mapping::patching::{Direction, OutputPorts, patch_mapping};
 
     fn file(name: &str) -> String {
         project_files()
@@ -595,21 +546,82 @@ mod tests {
         serde_json::from_str(&file(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
+    /// What the generator writes is the checked-in project, file for file
+    /// and byte for byte, and nothing else is there.
     #[test]
-    fn map_declares_55_classes_of_five_80_lamp_panels() {
-        let map = json("dome.map2d.json");
-        assert_eq!(map["format"], 4);
-        let objects = map["objects"].as_array().unwrap();
-        assert_eq!(objects.len(), 55);
-        let mut lamps = 0;
-        for object in objects {
-            let repeat = &object["shape"]["repeat"];
-            let polygon = &repeat["shape"]["polygon"];
-            assert_eq!(polygon["align"], "inside");
-            assert!(object.get("stride").is_none());
-            lamps += repeat["count"].as_u64().unwrap() * polygon["count"].as_u64().unwrap();
+    fn the_generated_files_are_the_checked_in_project() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../projects/radiance-dome");
+        let files = project_files();
+        for (name, text) in &files {
+            let on_disk =
+                std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(on_disk == *text, "{name} differs from the checked-in file");
         }
-        assert_eq!(lamps, 22_000);
+        let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        on_disk.sort();
+        let mut written: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
+        written.sort();
+        assert_eq!(on_disk, written);
+    }
+
+    #[test]
+    fn map_holds_55_repeats_of_five_80_lamp_panels() {
+        let text = file("dome.map2d.json");
+        assert_eq!(map2d6::peek_format(&text).unwrap(), MAP2D6_FORMAT);
+        let mapping = map2d6::read(&text).unwrap();
+        assert_eq!(mapping, dome_mapping_built());
+        assert_eq!(mapping.parts.len(), 55);
+        let tree = render(&mapping).unwrap();
+        assert_eq!(tree.segments().len(), 275);
+        assert!(tree.segments().iter().all(|s| s.count() == PANEL_LAMPS));
+        assert_eq!(tree.positions().len(), 22_000);
+    }
+
+    /// Patched by the product's patcher, every panel copy lands where the
+    /// plan puts it — its row's output, port and first lamp, reversed and
+    /// rotated as the row says — with no problem.
+    #[test]
+    fn every_panel_lands_where_the_plan_puts_it() {
+        let mapping = map2d6::read(&file("dome.map2d.json")).unwrap();
+        let tree = render(&mapping).unwrap();
+        let outputs: Vec<OutputPorts> = (0..OUTPUTS)
+            .map(|o| {
+                OutputPorts::of_lamps(&output_name(o), &[Some(PANEL_LAMPS); PORTS_PER_OUTPUT], 3)
+            })
+            .collect();
+        let patching = patch_mapping(&mapping, &tree, &outputs);
+        assert!(patching.problems.is_empty(), "{:?}", patching.problems);
+        let ids: Vec<String> = DomePlan::build()
+            .classes
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        let rows = patch_rows(&ids);
+        assert_eq!(patching.segments.len(), rows.len());
+        for row in &rows {
+            let id = TreeId::of(&PartId::new(&row.id).unwrap())
+                .in_copy(row.sector as u32)
+                .canonical();
+            let landed = patching
+                .segment(&id)
+                .unwrap_or_else(|| panic!("{id} is not laid"));
+            assert_eq!(
+                landed.address.output.as_str(),
+                output_name(row.output),
+                "{id}"
+            );
+            assert_eq!(landed.address.port.0 as usize, row.port, "{id}");
+            assert_eq!(landed.address.channel, 0, "{id}");
+            assert_eq!(landed.direction == Direction::Reverse, row.reversed, "{id}");
+            assert_eq!(landed.offset, row.offset, "{id}");
+            assert_eq!(landed.limit, None, "{id}");
+        }
+        assert_eq!(rows.iter().filter(|r| r.reversed).count(), 1);
+        assert_eq!(rows.iter().filter(|r| r.offset != 0).count(), 1);
     }
 
     #[test]
@@ -642,69 +654,6 @@ mod tests {
             }
         }
         assert_eq!(ports, 320);
-    }
-
-    #[test]
-    fn every_panel_is_patched_exactly_once() {
-        let patch = json("dome.patch.json");
-        assert_eq!(
-            (patch["format"].clone(), patch["flow"].clone()),
-            (3.into(), "manual".into())
-        );
-        let ids: Vec<String> = DomePlan::build()
-            .classes
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
-        let mut paths: Vec<String> = patch["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| row[0].as_str().unwrap().to_string())
-            .collect();
-        paths.sort();
-        let mut expected: Vec<String> = (0..SECTORS)
-            .flat_map(|s| ids.iter().map(move |id| format!("/{id}/{s}")))
-            .collect();
-        expected.sort();
-        assert_eq!(paths, expected);
-    }
-
-    #[test]
-    fn runs_sit_in_one_port_and_never_overlap() {
-        let patch = json("dome.patch.json");
-        let names: Vec<String> = patch["outputs"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|n| n.as_str().unwrap().to_string())
-            .collect();
-        let mut claimed: std::collections::BTreeMap<String, Vec<(u64, u64)>> = Default::default();
-        for row in patch["entries"].as_array().unwrap() {
-            let output = names[row[1].as_u64().unwrap() as usize].clone();
-            let start = row[2].as_u64().unwrap();
-            let window = (start, start + u64::from(PANEL_LAMPS));
-            assert_eq!(start % u64::from(PANEL_LAMPS), 0, "run starts mid-port");
-            assert!(window.1 <= (PORTS_PER_OUTPUT as u64) * u64::from(PANEL_LAMPS));
-            let runs = claimed.entry(output).or_default();
-            assert!(
-                runs.iter().all(|r| window.1 <= r.0 || window.0 >= r.1),
-                "overlap"
-            );
-            runs.push(window);
-        }
-    }
-
-    #[test]
-    fn quirk_rows_are_in_the_patch() {
-        let patch = file("dome.patch.json");
-        let (id, sector) = REVERSED_PANEL;
-        assert!(
-            patch.contains(&format!("[\"/{id}/{sector}\",4,800,\"r\"]")),
-            "{patch}"
-        );
-        let (id, sector, offset) = ROTATED_PANEL;
-        assert!(patch.contains(&format!("[\"/{id}/{sector}\",6,960,\"\",{offset}]")));
     }
 
     #[test]
@@ -749,7 +698,13 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
             }
         }
-        assert_eq!(first.len(), 9 + OUTPUTS);
+        assert_eq!(first.len(), 8 + OUTPUTS);
+    }
+
+    fn dome_mapping_built() -> Mapping {
+        let plan = DomePlan::build();
+        let ids: Vec<String> = plan.classes.iter().map(|c| c.id.clone()).collect();
+        dome_mapping(&plan, &patch_rows(&ids))
     }
 
     /// The product's `Rotation2d::about(center, degrees).apply(point)`:

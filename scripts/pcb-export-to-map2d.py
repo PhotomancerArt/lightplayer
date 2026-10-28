@@ -6,7 +6,7 @@ design files: the PCB knows where every LED sits and the netlist knows the
 order the data line visits them. This script reads both and writes the two
 files a catalog entry carries:
 
-  <out-dir>/<map2d>   the map2d document (format 1)
+  <out-dir>/<map2d>   the map2d document (format 6)
   <out-dir>/<svg>     every lamp numbered in wire order and labelled with its
                       PCB designator, one group per mapping object
 
@@ -36,10 +36,12 @@ One strokes table per board; `just pcb-map2d <table> <design-folder>` is the
 front door.
 
 Doc space is millimetres, y-down, origin at the board outline's top-left, and
-the outline's bounding box is the canvas. Each object is a `path` shape whose
-points are its pads and whose `count` is its lamp count; the resolver spreads
-`count` lamps evenly along the polyline, so the summary line reports the worst
-distance between an even sample and the pad it stands for.
+the outline's bounding box is the canvas. Each stroke is a `path` part whose
+`d` visits its pads, whose `count` is its lamp count and whose id is the
+stroke name's slug (`A-bar` -> `a-bar`); the document's `start` puts the first
+lamp on output "1", the name the project's output.json carries. The resolver
+spreads `count` lamps evenly along the polyline, so the summary line reports
+the worst distance between an even sample and the pad it stands for.
 
   scripts/pcb-export-to-map2d.py --strokes playful-choker --exports <design-folder>
   scripts/pcb-export-to-map2d.py --strokes playful-choker --exports <design-folder> --check
@@ -65,8 +67,14 @@ import sys
 import tempfile
 import zipfile
 
-MIL_TO_MM = 0.0254
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPTS_DIR)
+import map2d6  # noqa: E402  (scripts/map2d6.py: format 6 as the Rust writer spells it)
+
+MIL_TO_MM = 0.0254
+# The output the fixture's first lamp goes to: the catalog project's
+# output.json carries this "name".
+OUTPUT_NAME = "1"
 REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
 TABLES_DIR = os.path.join(SCRIPTS_DIR, "pcb-export-strokes")
 
@@ -281,12 +289,15 @@ def read_chain(netlist_text: str, prefix: str, din_pin: int, dout_pin: int) -> l
 
 
 def render_map2d(table: dict, canvas: list, pos: dict, runs: list) -> str:
-    objects = [{"name": name, "shape": {"path": {
-        "points": [list(pos[d]) for d in run], "count": len(run), "reversed": False}}}
-        for name, run in runs]
-    doc = {"format": 1, "sample_diameter": table["sample_diameter"], "canvas": canvas,
-           "objects": objects}
-    return json.dumps(doc, indent=2) + "\n"
+    """The map2d, format 6: one path part per stroke, its id the stroke name's
+    slug (`A-bar` -> `a-bar`), and the fixture's `start` on output "1"."""
+    ids = map2d6.part_ids([(name, "path", 0) for name, _ in runs])
+    parts = [map2d6.part(held, name, "path",
+                         map2d6.path(map2d6.path_d([pos[d] for d in run]), len(run)))
+             for (_, held), (name, run) in zip(ids.objects, runs)]
+    doc = map2d6.document(sample_diameter=table["sample_diameter"], canvas=canvas,
+                          next_ids=ids.next, output=OUTPUT_NAME, parts=parts)
+    return map2d6.dumps(doc)
 
 
 def render_svg(table: dict, canvas: list, pos: dict, runs: list) -> str:
@@ -414,9 +425,14 @@ def self_test() -> int:
 
     outputs, summary = generate(table, pcb, netlist)
     doc = json.loads(outputs["t.map2d.json"])
-    expect([o["name"] for o in doc["objects"]] == ["one", "two"], "one object per stroke, in order")
-    expect(doc["objects"][0]["shape"]["path"] == {
-        "points": [[0.254, 0.254], [1.27, 0.254]], "count": 2, "reversed": False}, "path shape")
+    expect(doc["format"] == 6, f"format {doc['format']}")
+    expect(doc["start"]["output"] == {"set": "1"}, f"start {doc['start']}")
+    expect([(p["id"], p["name"]) for p in doc["parts"]] == [("one", "one"), ("two", "two")],
+           "one part per stroke, in order")
+    expect(doc["parts"][0]["kind"] == {"path": {"d": "M 0.254 0.254 L 1.27 0.254", "count": 2}},
+           f"path part {doc['parts'][0]['kind']}")
+    expect(doc["parts"][1]["kind"] == {"path": {"d": "M 2.286 1.016", "count": 1}},
+           f"one-lamp path part {doc['parts'][1]['kind']}")
     svg = outputs["t-mapping.svg"]
     expect("  <!-- first line\n       last line -->\n" in svg, "comment block")
     expect(">3</text>" in svg and ">LED9</text>" in svg, "each lamp carries its wire index and designator")

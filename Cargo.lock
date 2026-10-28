@@ -5680,6 +5680,7 @@ dependencies = [
 name = "lab-mapping-radiance-gen"
 version = "40.0.0"
 dependencies = [
+ "lpc-mapping",
  "serde_json",
 ]
 

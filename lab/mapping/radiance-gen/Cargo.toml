@@ -8,9 +8,10 @@ rust-version.workspace = true
 publish = false
 description = "Mapping design lab: generates the radiance dome test project (placeholder lamp counts and patch)"
 
-# No product crates: it writes the product's formats by hand, like the
-# lab's files crate reads them.
+# The map2d document is written by lpc-mapping's format-6 writer; the node
+# files are written by hand (`json_text.rs`).
 [dependencies]
+lpc-mapping = { path = "../../../lp-core/lpc-mapping" }
 serde_json = { workspace = true, features = ["std"] }
 
 [lints]

@@ -9,7 +9,7 @@ cargo run -p lab-mapping-radiance-gen -- <dir>   # or writes elsewhere
 ```
 
 A test project for the mapping design lab at the radiance dome's scale,
-in the product's own formats: `project.json` (format 11), one root
+in the product's own formats: `project.json` (format 12), one root
 module, a clock, a shader, the `dome` fixture, and ten outputs.
 
 ## Placeholders (fit-check Q-E)
@@ -25,14 +25,14 @@ known is lp2014's geometry; what is not:
 - **Boxes and ports.** 10 outputs (`out_1` … `out_10`, named "1" … "10") of
   32 ports, every port `count: 80`.
 - **Patch.** One panel per port in sector order: panel `n = sector·55 +
-  class` goes to output `n / 32 + 1`, port `n % 32`, wire `port·80`.
-  Outputs 1–8 fill, output 9 takes 19 panels, the rest of the ports are empty.
-  No as-built patch has been found.
+  class` goes to output `n / 32 + 1`, port `n % 32`, from the port's first
+  lamp. Outputs 1–8 fill, output 9 takes 19 panels, the rest of the
+  ports are empty. No as-built patch has been found.
 
 Two invented install quirks keep the patch from being a pure identity:
 
-- reversed: `/r6-p04/2` (panel 138, output "5" port 10, wire 800)
-- rotated by 27 lamps (about a third of the strip): `/r7-p05/3` (panel 204, output "7" port 12, wire 960)
+- reversed: `r6-p04@2` (panel 138, output "5" port 10)
+- rotated by 27 lamps (about a third of the strip): `r7-p05@3` (panel 204, output "7" port 12)
 
 They are `REVERSED_PANEL` and `ROTATED_PANEL` in the generator's `src/patch_plan.rs`.
 
@@ -56,12 +56,14 @@ A frequency-5 geodesic icosahedral dome, 228 in (19 ft) radius, zenith up; the t
   lp2014's `expansionFactor` (2–5) great-circle segments so they curve.
   The polygon starts at the corner farthest from the zenith and winds
   clockwise.
-- **Objects.** 55 panel classes, one per object, each a 5-way `repeat` of
-  the sector-0 panel's polygon (`align: inside`). Ids are `r<ring>-p<NN>`:
-  ring 1–8 from the zenith, position in the ring clockwise. No `stride`:
-  80 lamps don't split evenly over a subdivided outline's sides, so
-  the product derives a repeat's stride as one whole instance (80).
-- **Sectors.** Instance `k` is the product's `k·72°` clockwise turn, so
+- **Parts.** 55 panel classes, each a 5-way repeat (`repeat1` …
+  `repeat55`) holding the sector-0 panel's polygon as a part
+  (`align: inside`). Part ids are `r<ring>-p<NN>`: ring 1–8 from the
+  zenith, position in the ring clockwise; copy `k` of a panel is
+  `r<ring>-p<NN>@k` (copy 0 is the part's own id). No stride: 80 lamps
+  don't split evenly over a subdivided outline's sides, so a repeat's
+  copies follow each other whole (80 lamps each).
+- **Sectors.** Copy `k` is the product's `k·72°` clockwise turn, so
   sectors are numbered clockwise; sector `k` is lp2014's fifth
   (`restrictToFifth`) `(1 − k) mod 5 + 1`. Sector 0 holds lp2014's panel 0.
 - **Not applied:** lp2014's per-fixture install transform (scale 0.867 ×
@@ -69,8 +71,10 @@ A frequency-5 geodesic icosahedral dome, 228 in (19 ft) radius, zenith up; the t
 
 ## Files
 
-- `dome.map2d.json` — map2d format 4, sample diameter 3.0 (≈ one texel).
-- `dome.patch.json` — patch format 3, `"flow": "manual"`, 275 rows.
+- `dome.map2d.json` — map2d format 6, sample diameter 3.0 (≈ one texel):
+  the layout and the patch. The patch is the fixture's start (the first
+  panel's port) and 274 overrides, one on every other panel copy, since
+  none follows on from the one before it in lamp order.
 - `dome.json` — the fixture, 256×256, reading `bus:visual.out`.
 - `shader.json`, `shader.glsl` — a five-petal bloom over falling rings.
 - `out_1.json` … `out_10.json`, `clock.json`, `module.json`, `project.json`.

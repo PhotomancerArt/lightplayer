@@ -1,7 +1,8 @@
 //! Generates the **radiance dome** test project
 //! (`lab/mapping/projects/radiance-dome/`) in the product's own on-disk
 //! formats: a project manifest, one root module, a clock, a shader, one
-//! fixture with a `map2d` mapping and a manual patch, and ten outputs.
+//! fixture whose `map2d` mapping (format 6) holds its layout and its patch,
+//! and ten outputs.
 //!
 //! Why it exists: the mapping design lab needs a project at the radiance
 //! dome's scale (275 panels, tens of thousands of lamps, ten control boxes)
@@ -13,8 +14,8 @@
 //! top 8 face rings lit (275 panels), drawn as a plan view in the
 //! azimuthal equidistant projection (`GeodesicIcosahedralFixture.remap()`;
 //! see [`dome_geometry`]). The plan is exactly 5-fold symmetric about the
-//! zenith, so the map is 55 panel classes, each a 5-way `repeat` of one
-//! polygon.
+//! zenith, so the map is 55 panel classes, each a 5-way repeat of one
+//! polygon part.
 //!
 //! **The lamp counts, the port counts and the patch are PLACEHOLDERS**
 //! (fit-check Q-E). The real unknowns: how many LEDs each panel carries
@@ -35,6 +36,7 @@
 //! Deterministic: the same source writes the same bytes.
 
 mod dome_geometry;
+mod frozen_patching;
 mod json_text;
 mod patch_plan;
 mod project_files;

@@ -25,18 +25,19 @@ proportionally to arc length (largest remainder), matching fixed-pitch
 strip cut at the hubs.
 
 Usage:
-  python3 scripts/zook-dome/convert.py            # per-channel form: 10 path objects, format 1
-  python3 scripts/zook-dome/convert.py --repeat   # 1 gapped sector x repeat 5, format 2 (the shipped form)
+  python3 scripts/zook-dome/convert.py            # per-channel form: 10 path parts
+  python3 scripts/zook-dome/convert.py --repeat   # 1 sector x repeat 5 (the shipped form)
 
-Both modes write catalog/projects/zook-dome/fixture.map2d.json and
-scripts/zook-dome/validation.svg. `--repeat` authors channel 1 as a single
-gapped path wrapped in a 5-count rotational repeat, and runs a fidelity
+Both modes write catalog/projects/zook-dome/fixture.map2d.json (map2d
+format 6: the parts, and a `start` on output "1", the name output.json
+gives the project's output) and scripts/zook-dome/validation.svg.
+`--repeat` authors channel 1 as a single path whose jumper is a move in its
+`d`, wrapped in a 5-count rotational repeat, and runs a fidelity
 check against the per-channel form: per-lamp deviation instance-by-instance,
 plus how far each hand-drawn sector sits from an exact 72-degree copy of
 sector 1 (the number the G2 gate needs for rotational-vs-hand-drawn).
 """
 
-import json
 import math
 import re
 import sys
@@ -45,11 +46,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
+sys.path.insert(0, str(HERE.parent))
+import map2d6  # noqa: E402  (scripts/map2d6.py: format 6 as the Rust writer spells it)
+
 SVG_PATH = HERE / "mapping-attempt.svg"
 OUT_DOC = REPO / "catalog" / "projects" / "zook-dome" / "fixture.map2d.json"
 OUT_VALIDATION = HERE / "validation.svg"
 
 LAMPS_PER_CHANNEL = 300
+
+# The output the fixture's first lamp goes to: output.json's "name".
+OUTPUT_NAME = "1"
 
 # Style classes per sector, transcribed from the SVG's <style> block.
 # (channel name, solid line classes, dashed jumper classes, arrowhead fill
@@ -325,19 +332,20 @@ def rounded(points):
     return [[round(x, 1), round(y, 1)] for x, y in points]
 
 
-def doc_skeleton(view_box, fmt, objects):
-    return {
-        "format": fmt,
-        "sample_diameter": 2.0,
-        "canvas": [view_box[0], view_box[1], round(view_box[2], 1),
-                   round(view_box[3], 1)],
-        "objects": objects,
-    }
+def doc_skeleton(view_box, parts, next_ids):
+    return map2d6.document(
+        sample_diameter=2.0,
+        canvas=[view_box[0], view_box[1], round(view_box[2], 1),
+                round(view_box[3], 1)],
+        next_ids=next_ids,
+        output=OUTPUT_NAME,
+        parts=parts,
+    )
 
 
 def write_doc(doc, objects_desc):
     OUT_DOC.parent.mkdir(parents=True, exist_ok=True)
-    OUT_DOC.write_text(json.dumps(doc, indent=1) + "\n")
+    OUT_DOC.write_text(map2d6.dumps(doc))
     print(f"wrote {OUT_DOC.relative_to(REPO)} ({objects_desc})")
 
 
@@ -355,7 +363,7 @@ def channel_lamps_per_channel_form(trail_edges):
 
 
 def emit_per_channel(view_box, structure, channels):
-    """The P1 form: one path object per stretch, 10 objects, format 1."""
+    """The P1 form: one path part per stretch, 10 parts."""
     objects = []
     validation_runs = []
     print(f"{'ch':<4}{'runs':>5}{'jumpers':>9}{'stretches':>11}"
@@ -369,24 +377,24 @@ def emit_per_channel(view_box, structure, channels):
               f"{len(stretches):>11}{sum(lengths):>9.0f}"
               f"{sum(counts):>7}")
         for s_index, (pts, count) in enumerate(zip(stretches, counts)):
-            objects.append({
-                "name": f"ch{ch_index + 1}-{chr(ord('a') + s_index)}",
-                "shape": {"path": {
-                    "points": rounded(pts),
-                    "count": count,
-                }},
-            })
+            objects.append((f"ch{ch_index + 1}-{chr(ord('a') + s_index)}",
+                            rounded(pts), count))
         validation_runs.append(
             (color, [sample_polyline(pts, n)
                      for pts, n in zip(stretches, counts)]))
 
-    total = sum(o["shape"]["path"]["count"] for o in objects)
+    total = sum(count for _, _, count in objects)
     assert total == LAMPS_PER_CHANNEL * len(SECTORS), total
-    for o in objects:
-        assert len(o["shape"]["path"]["points"]) >= 2
+    for _, pts, _ in objects:
+        assert len(pts) >= 2
 
-    write_doc(doc_skeleton(view_box, 1, objects),
-              f"{len(objects)} objects, {total} lamps")
+    ids = map2d6.part_ids([(name, "path", 0) for name, _, _ in objects])
+    parts = [
+        map2d6.part(held, name, "path", map2d6.path(map2d6.path_d(pts), count))
+        for (_, held), (name, pts, count) in zip(ids.objects, objects)
+    ]
+    write_doc(doc_skeleton(view_box, parts, ids.next),
+              f"{len(parts)} parts, {total} lamps")
     write_validation_svg(view_box, structure, validation_runs)
     print(f"wrote {OUT_VALIDATION.relative_to(REPO)}")
 
@@ -536,19 +544,15 @@ def emit_repeat(view_box, structure, channels):
     print(f"sector: {len(trail_edges)} runs, {len(gaps)} jumpers, "
           f"gaps at {gaps}")
 
-    doc = doc_skeleton(view_box, 2, [{
-        "name": "sector",
-        "shape": {"repeat": {
-            "shape": {"path": {
-                "points": points,
-                "count": LAMPS_PER_CHANNEL,
-                "gaps": gaps,
-            }},
-            "center": [REPEAT_CENTER[0], REPEAT_CENTER[1]],
-            "count": len(SECTORS),
-        }},
-    }])
-    write_doc(doc, f"1 repeat object, {len(SECTORS)}x{LAMPS_PER_CHANNEL} lamps")
+    # One object, "sector": the repeat takes `repeat1`, and the path it holds
+    # keeps the object's name and id. The jumper is a move in the path's `d`.
+    ids = map2d6.part_ids([("sector", "path", 1)])
+    (repeat_id,), held = ids.objects[0]
+    sector = map2d6.part(held, "sector", "path", map2d6.path(
+        map2d6.path_d(points, gaps), LAMPS_PER_CHANNEL))
+    doc = doc_skeleton(view_box, [map2d6.repeat(
+        repeat_id, REPEAT_CENTER, len(SECTORS), sector)], ids.next)
+    write_doc(doc, f"1 repeat part, {len(SECTORS)}x{LAMPS_PER_CHANNEL} lamps")
 
     fidelity_check(channels, points, inert, REPEAT_CENTER)
 
