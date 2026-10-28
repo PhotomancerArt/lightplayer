@@ -1,5 +1,5 @@
-//! Writing a downloaded package to a board, and reading its target and
-//! hello back.
+//! Writing a downloaded package to a board, reading its target and hello
+//! back, and finishing its projects for the new engine (the project stage).
 //!
 //! Reuses `lpa_link::layout_migration`'s `layout_session` + `decide` — the
 //! same path `lp-cli hardware lpfs migrate` uses — but, unlike that
@@ -19,10 +19,14 @@ use lpa_link::layout_migration::{
 use lpa_link::providers::host_serial_esp32::{LayoutSessionOutcome, layout_session};
 use lpa_link::{LinkError, LinkLayoutInspection, PartitionTable, normalize_base_mac};
 
+use crate::client::cli_connect::{CliConnection, cli_connect, stderr_device_events};
+use crate::client::device_not_ready::DeviceNotReady;
 use crate::commands::hardware::lpfs::lpfs_target::{
     BackupFacts, default_backup_dir, kb, stderr_events, store_backup,
 };
 use crate::commands::hardware::lpfs::migrate::refusal_text;
+use crate::commands::ota_host::board_projects::other_wire_line;
+use crate::commands::ota_host::{BoardHello, finish_board_projects};
 
 /// What writing the package did.
 pub enum WriteOutcome {
@@ -154,40 +158,98 @@ pub fn read_target(port: &str) -> Result<String> {
 /// state it reports — `lp-cli hardware lpfs migrate`'s own hello check
 /// (`fs: mounted`), with the version and target made explicit: this
 /// command's whole point is "is the board now running what was asked for".
+///
+/// Then, on the same connection, the update's last leg: the board's stored
+/// projects brought to the project format its engine reads (the project
+/// stage, [`finish_board_projects`]), one line per project. A board that
+/// came back on another wire than this lp-cli's is told apart from one
+/// that did not answer: its projects need a host that speaks its wire, and
+/// the command fails saying so.
 pub fn wait_for_hello(port: &str, expected_version: &str, expected_target: &str) -> Result<()> {
-    with_hello(port, |hello| {
-        if hello.hardware.fs == lpc_wire::FsBootState::Refused {
-            bail!(
-                "{}",
-                crate::commands::hardware::lpfs::refused_store_words(&hello)
-            );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let local = tokio::task::LocalSet::new();
+    runtime.block_on(local.run_until(async move {
+        let connection = match connect(port).await {
+            Ok(connection) => connection,
+            Err(error) => {
+                if let Some(proto) = error
+                    .downcast_ref::<DeviceNotReady>()
+                    .and_then(DeviceNotReady::other_wire)
+                {
+                    println!("The board restarted speaking wire {proto}.");
+                    println!("{}", other_wire_line(proto));
+                    bail!(
+                        "the board's projects were not checked: its firmware speaks wire \
+                         {proto}, this lp-cli speaks wire {}",
+                        lpc_wire::WIRE_PROTO_VERSION
+                    );
+                }
+                return Err(error.context("the board did not answer"));
+            }
+        };
+        let Some(hello) = connection.hello() else {
+            connection.close().await;
+            bail!("the board came back without a hello");
+        };
+        if let Err(error) = verify_hello(&hello, expected_version, expected_target) {
+            connection.close().await;
+            return Err(error);
         }
-        if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
-            bail!(
-                "the board came back with its filesystem {:?}, not mounted — its files are in \
-                 the backup; put them back with `lp-cli hardware lpfs restore`",
-                hello.hardware.fs
-            );
+        let mut client = lpa_client::LpClient::new(connection.client_io());
+        let finished =
+            finish_board_projects(&mut client, &BoardHello::from_hello(hello), false).await;
+        drop(client);
+        connection.close().await;
+        for line in &finished.lines {
+            println!("{line}");
         }
-        if hello.build.version.as_ref() != expected_version {
-            bail!(
-                "the board came back running version {}, expected {expected_version}",
-                hello.build.version
-            );
+        if !finished.ok {
+            bail!("the board's projects were not all upgraded");
         }
-        let target = hello
-            .firmware
-            .as_ref()
-            .map_or(expected_target, |m| m.target.as_str());
-        if target != expected_target {
-            bail!("the board came back as target `{target}`, expected `{expected_target}`");
-        }
-        println!(
-            "Verified: version {}, target {}, fs mounted.",
-            hello.build.version, target
-        );
         Ok(())
-    })
+    }))
+}
+
+/// The hello says the board runs `expected_version` as `expected_target`,
+/// with its filesystem mounted.
+fn verify_hello(
+    hello: &lpc_wire::ServerHello,
+    expected_version: &str,
+    expected_target: &str,
+) -> Result<()> {
+    if hello.hardware.fs == lpc_wire::FsBootState::Refused {
+        bail!(
+            "{}",
+            crate::commands::hardware::lpfs::refused_store_words(hello)
+        );
+    }
+    if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
+        bail!(
+            "the board came back with its filesystem {:?}, not mounted — its files are in \
+             the backup; put them back with `lp-cli hardware lpfs restore`",
+            hello.hardware.fs
+        );
+    }
+    if hello.build.version.as_ref() != expected_version {
+        bail!(
+            "the board came back running version {}, expected {expected_version}",
+            hello.build.version
+        );
+    }
+    let target = hello
+        .firmware
+        .as_ref()
+        .map_or(expected_target, |m| m.target.as_str());
+    if target != expected_target {
+        bail!("the board came back as target `{target}`, expected `{expected_target}`");
+    }
+    println!(
+        "Verified: version {}, target {}, fs mounted.",
+        hello.build.version, target
+    );
+    Ok(())
 }
 
 /// Classify the session's reads (mirrors
@@ -245,14 +307,7 @@ fn with_hello<T>(port: &str, f: impl FnOnce(lpc_wire::ServerHello) -> Result<T>)
         .build()?;
     let local = tokio::task::LocalSet::new();
     runtime.block_on(local.run_until(async move {
-        let spec = crate::client::HostSpecifier::parse(&format!("serial:{port}"))
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let connection = crate::client::cli_connect::cli_connect(
-            spec,
-            crate::client::cli_connect::stderr_device_events(false),
-        )
-        .await
-        .context("the board did not answer")?;
+        let connection = connect(port).await.context("the board did not answer")?;
         let hello = connection.hello();
         connection.close().await;
         let Some(hello) = hello else {
@@ -260,4 +315,11 @@ fn with_hello<T>(port: &str, f: impl FnOnce(lpc_wire::ServerHello) -> Result<T>)
         };
         f(hello)
     }))
+}
+
+/// The board on `port`, attached to as it runs.
+async fn connect(port: &str) -> Result<CliConnection> {
+    let spec = crate::client::HostSpecifier::parse(&format!("serial:{port}"))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    cli_connect(spec, stderr_device_events(false)).await
 }

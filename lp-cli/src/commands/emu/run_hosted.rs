@@ -7,6 +7,10 @@
 //! the heap ratchet need since the image went onto lp-link: a client that
 //! uploads and leaves takes the link's host with it, and the board's log
 //! lines after that point would never leave the board.
+//!
+//! With `--ota-offer` the run is also an update host on channel 3, and when
+//! the update ends up to date it finishes the board's projects on channel 1
+//! (the project stage, [`crate::commands::ota_host::board_projects`]).
 
 use std::time::Duration;
 
@@ -18,10 +22,20 @@ use lpfs::LpFsStd;
 use super::args::RunArgs;
 use super::link_host::{EmuLinkHost, EmuUsbBoard, describe_link_counters, fresh_nonce};
 use crate::commands::dev::{collect_project_deploy_files, validation};
+use crate::commands::ota_host::ota_host::OTA_LINE_PREFIX;
+use crate::commands::ota_host::{OtaHost, finish_board_projects};
 use crate::commands::upload::wait::wait_for_project_running;
 
 /// First id of the `--request` requests: far from any the client counts.
 const REQUEST_ID_BASE: u64 = 1_000_000;
+
+/// First id of the project stage's requests: far from the upload's client
+/// and from `--request`'s.
+const STAGE_REQUEST_ID_BASE: u64 = 2_000_000;
+
+/// How long an updated board has to say hello on its link before its
+/// projects are given up on, in emulated microseconds.
+const HELLO_AFTER_UPDATE_US: u64 = 60_000_000;
 
 pub(super) fn run_hosted<B: EmuUsbBoard>(
     board: B,
@@ -77,7 +91,7 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     } else if host.ota_cut {
         ended = Some("cut the power (--ota-cut-after)".to_string());
     } else if failures.is_empty() && host.board.micros() < micros {
-        match host.run_until(micros, args.exit_on.as_deref()) {
+        match run_to_deadline(&mut host, micros, args.exit_on.as_deref(), &mut failures).await {
             Ok(true) => ended = Some("stopped on --exit-on".to_string()),
             Ok(false) if host.ota_cut => {
                 ended = Some("cut the power (--ota-cut-after)".to_string());
@@ -117,6 +131,78 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     );
     if !failures.is_empty() {
         bail!("{}", failures.join("; "));
+    }
+    Ok(())
+}
+
+/// Step to the deadline, or until a new console line contains `exit_on`
+/// (`Ok(true)`). With `--ota-offer`, the moment the update ends up to date
+/// (an update finished, or the board already ran the offered build), the
+/// board's projects are brought to its engine's format
+/// ([`finish_projects_after_update`]) before anything else is read off the
+/// console — so a run that stops on the update host's `done` line still
+/// runs the stage, and its lines come before the stop. A stage that leaves a
+/// project unfinished is a failure of the run.
+async fn run_to_deadline<B: EmuUsbBoard>(
+    host: &mut EmuLinkHost<B>,
+    micros: u64,
+    exit_on: Option<&str>,
+    failures: &mut Vec<String>,
+) -> Result<bool> {
+    let mut stage_ran = false;
+    while host.board.micros() < micros && !host.ota_cut {
+        let seen = host.console().len();
+        host.step()?;
+        if !stage_ran && host.ota.as_ref().is_some_and(OtaHost::up_to_date) && !host.ota_cut {
+            stage_ran = true;
+            if let Err(error) = finish_projects_after_update(host, micros).await {
+                failures.push(format!("{error:#}"));
+            }
+        }
+        if let Some(needle) = exit_on
+            && host.console()[seen..]
+                .iter()
+                .any(|line| line.contains(needle))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The update's last leg on an emulated board: wait for the engine's hello
+/// on the link, then run the project stage over this host's channel-1
+/// client (`finish_board_projects`, the code `firmware install` runs too),
+/// its lines onto the console as the update host's.
+async fn finish_projects_after_update<B: EmuUsbBoard>(
+    host: &mut EmuLinkHost<B>,
+    micros: u64,
+) -> Result<()> {
+    let budget = micros
+        .saturating_sub(host.board.micros())
+        .min(HELLO_AFTER_UPDATE_US);
+    let Some(hello) = host.wait_for_hello(budget)? else {
+        let line = "projects: the board never said hello after the update, so its projects were \
+                    not checked";
+        host.host_line(format!("{OTA_LINE_PREFIX} {line}"));
+        bail!("{line}");
+    };
+    host.set_queue_messages(true);
+    let mut client = LpClient::new(&mut *host).with_request_ids_from(STAGE_REQUEST_ID_BASE);
+    // No board report says it refused its startup project for its format
+    // (DD27) on this link yet, so a current startup project is never loaded
+    // by the stage here.
+    let finished = finish_board_projects(&mut client, &hello, false).await;
+    drop(client);
+    host.set_queue_messages(false);
+    for line in &finished.lines {
+        host.host_line(format!("{OTA_LINE_PREFIX} {line}"));
+    }
+    if !finished.ok {
+        bail!(
+            "the board's projects were not all upgraded: {}",
+            finished.lines.join("; ")
+        );
     }
     Ok(())
 }

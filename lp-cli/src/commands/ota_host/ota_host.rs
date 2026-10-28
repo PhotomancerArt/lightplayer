@@ -14,6 +14,11 @@
 //! the store is offline (lp-cli has no store client yet); the read-back the
 //! driver does itself. Credentials are `--ota-password`, passed to the
 //! driver each time and never logged.
+//!
+//! This host speaks channel 3 only. When the driver ends up to date
+//! ([`OtaHost::up_to_date`]), the caller that holds the link's channel-1
+//! client finishes the board's projects
+//! ([`super::board_projects::finish_board_projects`]).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -212,6 +217,12 @@ impl OtaHost {
     /// Whether the driver has ended.
     pub fn done(&self) -> bool {
         self.finish.is_some()
+    }
+
+    /// Whether the driver ended with the board running the offered build
+    /// (or it already did): the project stage's turn.
+    pub fn up_to_date(&self) -> bool {
+        self.finish == Some(Finish::UpToDate)
     }
 
     /// Bytes served, across links.

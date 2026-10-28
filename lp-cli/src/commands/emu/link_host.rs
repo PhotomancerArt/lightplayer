@@ -32,7 +32,7 @@ use lpc_wire::{
     ClientMessage, LinkCounters, PortRead, TransportError, WireLinkPort, WireServerMessage,
 };
 
-use crate::commands::ota_host::OtaHost;
+use crate::commands::ota_host::{BoardHello, OtaHost};
 
 /// Emulated microseconds per slice: the host services its link between
 /// slices, so this bounds its reaction time (the comms lab's own figure).
@@ -399,6 +399,10 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     /// `--ota-cut-after`'s request was answered: the run is to end here, as
     /// a power cut (the flash written back).
     pub ota_cut: bool,
+    /// The hello the board said on the link's current session, if it has
+    /// (cleared when the link comes up again or resets): a running engine's
+    /// word that it serves channel 1.
+    pub hello: Option<BoardHello>,
     /// Called with the board after every slice ([`Self::set_slice_observer`]).
     slice_observer: Option<Box<dyn FnMut(&B)>>,
     /// The host application's read rate, in bytes per emulated second
@@ -433,6 +437,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             wall_deadline: None,
             ota: None,
             ota_cut: false,
+            hello: None,
             slice_observer: None,
             read_rate: None,
             read_backlog: VecDeque::new(),
@@ -552,19 +557,33 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                             json_len: payload.json.len(),
                             at_us: self.board.micros(),
                         });
+                        if let lpc_wire::WireServerMsgBody::Hello(hello) = &message.msg {
+                            self.hello = Some(BoardHello::from_hello(hello.clone()));
+                        }
                         if self.queue_messages {
                             self.pending.push_back(message);
                         }
                     }
-                    Err(_) => self.link_errors += 1,
+                    Err(_) => {
+                        // A hello this build cannot decode is still a hello:
+                        // its wire is the one field read alone.
+                        if let Some(proto) = lpc_wire::hello_proto(&payload.json)
+                            && proto != lpc_wire::WIRE_PROTO_VERSION
+                        {
+                            self.hello = Some(BoardHello::OtherWire { proto });
+                        }
+                        self.link_errors += 1;
+                    }
                 },
                 PortRead::Log(_) => {}
                 PortRead::Up { .. } => {
+                    self.hello = None;
                     if let Some(ota) = self.ota.as_mut() {
                         ota.link_up(now / 1_000);
                     }
                 }
                 PortRead::Reset { .. } => {
+                    self.hello = None;
                     self.link_errors += 1;
                     if let Some(ota) = self.ota.as_mut() {
                         ota.link_down(now / 1_000);
@@ -662,6 +681,23 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             }
         }
         Ok(None)
+    }
+
+    /// Step until the board has said hello on the link's current session,
+    /// for at most `budget_us` more emulated microseconds. The hello, or
+    /// `None` at the budget.
+    pub fn wait_for_hello(&mut self, budget_us: u64) -> Result<Option<BoardHello>> {
+        let until = self.board.micros() + budget_us;
+        while self.hello.is_none() && self.board.micros() < until && !self.ota_cut {
+            self.step()?;
+        }
+        Ok(self.hello.clone())
+    }
+
+    /// Write a host line of the caller's onto the console, as the board's
+    /// arrive (echoed, sunk, kept).
+    pub fn host_line(&mut self, line: String) {
+        self.line(line);
     }
 
     /// Send one request (a fire-and-forget; its answer lands in the console

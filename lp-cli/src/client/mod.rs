@@ -13,6 +13,7 @@ pub mod board_bench;
 pub mod board_password;
 pub mod cli_connect;
 pub mod client_connect;
+pub mod device_not_ready;
 pub mod esp32_probe;
 pub mod host_process;
 pub mod host_serial_esp32;
