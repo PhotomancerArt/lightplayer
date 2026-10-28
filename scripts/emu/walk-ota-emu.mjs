@@ -1436,30 +1436,60 @@ async function main() {
     return { label, order, links, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
   };
 
-  /// `cut-upgrade`'s cut, armed in the page: the first time the page says
-  /// it is upgrading a board's projects ("Upgrading projects", the card's
-  /// words), it writes `power-cycle` to the board's control channel on the
-  /// door — at once, in the page, since the stage is a second or two of
-  /// work and the walk reads the card every 250 ms. What it saw and the
-  /// door's reply land in `window.__walkCut`.
-  const armStageCut = async (board) => {
-    const control = `ws://${door.addr}/board/${board}/control`;
-    await driver.evaluate(`(() => {
-      window.__walkCut = null;
-      const observer = new MutationObserver(() => {
-        if (window.__walkCut) return;
-        const words = document.body.textContent.match(/Upgrading (?:its )?projects[^·—]{0,30}(?:[·—] \\d+ of \\d+)?/);
-        if (!words) return;
-        window.__walkCut = { words: words[0], at: Date.now(), reply: null };
-        observer.disconnect();
-        const ws = new WebSocket(${JSON.stringify(control)});
-        ws.onopen = () => ws.send('power-cycle\\n');
-        ws.onmessage = (event) => { window.__walkCut.reply = String(event.data).trim(); ws.close(); };
-        ws.onerror = () => { window.__walkCut.reply = 'the control channel refused the connection'; };
-      });
-      observer.observe(document.body, { subtree: true, childList: true, characterData: true });
-      return true;
-    })()`);
+  /// `cut-upgrade`'s cut: the first time the page logs that a board's
+  /// project stage has started (Studio's own line, `project_stage_controller`:
+  /// "projects: …'s project stage starts"), the walk writes `power-cycle` to
+  /// the board's control channel on the door — from the browser's console
+  /// event as it arrives (CDP), so it outlives the page reloading after a
+  /// USB flash, and lands within milliseconds: the stage is a second or two
+  /// of work, too quick for the card to show it every time. `get()` says
+  /// what it saw and the door's reply.
+  const armStageCut = (board) => {
+    let cut = null;
+    driver.cdp.on("Runtime.consoleAPICalled", (params, sid) => {
+      if (cut || sid !== driver.sessionId) return;
+      const text = (params.args ?? []).map((arg) => arg.value ?? arg.description ?? "").join(" ");
+      const said = text.match(/projects: \S+ project stage starts[^\n]*/);
+      if (/project stage/.test(text)) appendFileSync(path.join(out, "cut-upgrade.log"), `${new Date().toISOString()} ${said ? "CUT" : "seen"} ${text}\n`);
+      if (!said) return;
+      cut = { words: said[0], at: Date.now(), reply: null };
+      // On the Wi‑Fi lanes the walk holds the board's control channel; on
+      // `?emu=` the page's shim does (its banner's cable verbs), so the
+      // power cut goes through the shim's own port — and, on a cable, as a
+      // USB-powered board's power cut is: the cable out (the board goes from
+      // the host), the chip power-cycled, the cable back in after
+      // DETACHED_MS. A power cycle alone keeps the shim's port open, which no
+      // USB-powered board does.
+      const id = JSON.stringify(board);
+      cut.stages = [];
+      const powerCycle = ON_LAN
+        ? doorControl(door.addr, board, "power-cycle")
+        : (async () => {
+            await driver.evaluate(`(window.__walkEmu = window.__lpEmuSerial.bus.requireLivePort(${id}).emulator, true)`);
+            cut.stages.push("held the board's emulator port");
+            const reply = await driver.evaluate(`window.__walkEmu.command("power-cycle")`, { awaitPromise: true });
+            cut.stages.push(String(reply));
+            await driver.detach(board);
+            cut.stages.push("cable out");
+            // Out until Studio has seen it go (the card no longer live), then
+            // the seconds a person takes to plug it back, as `cut-core` does.
+            await driver.waitFor(
+              `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                        if (!card || card.offlineBoards || card.corner === 'quiet') return true;
+                        return !/· (live|connected)\b|connected$/.test(card.connection?.line ?? ''); })()`,
+              { timeoutMs: STEP_MS, what: "Studio to see the cable go" },
+            );
+            await new Promise((resolve) => setTimeout(resolve, DETACHED_MS));
+            await driver.attach(board);
+            cut.stages.push("cable back in");
+            return cut.stages.join(", ");
+          })();
+      powerCycle.then(
+        (reply) => { cut.reply = String(reply ?? "(no reply)"); cut.ok = true; },
+        (error) => { cut.reply = error.message; cut.ok = false; },
+      );
+    });
+    return { get: () => cut };
   };
 
   /// Through the relay, once Y is confirmed: Y sends its picture (relay
@@ -2322,11 +2352,9 @@ async function main() {
             // the format-11 eaves is lp-cli's X1 (the decoded frames).
             const xRan = boardWords(board).match(/Project loaded: eaves|"eaves"/)?.[0] ?? "(nothing about the eaves yet)";
             const yId = `${y.version}+${y.commit.slice(0, 12)}`;
-            // `cut-upgrade`: the board's power is cut the moment its card first
-            // says it is upgrading its projects — armed in the page (a
-            // MutationObserver that writes `power-cycle` to the board's
-            // control channel), since the stage is a second or two of work.
-            if (cutting) await armStageCut(board);
+            // `cut-upgrade`: the board's power is cut the moment the page says
+            // its project stage started (`armStageCut`).
+            const cutter = cutting ? armStageCut(board) : null;
             const ran = await runUpdate(board);
             // Then the stage: after a channel-3 update it is the update's last
             // stage; after a USB flash (how Studio updates an older-wire board
@@ -2339,16 +2367,15 @@ async function main() {
               async (snap) => {
                 if (!snap.board?.offers.edit?.enabled || snap.board.firmware?.work === "running") return false;
                 if (!cutting) return true;
-                const cut = await driver.evaluate("window.__walkCut ?? null").catch(() => null);
-                return Boolean(cut) && yBoots() > firstBoots;
+                return cutter.get()?.ok === true && yBoots() > firstBoots;
               },
-              cutting ? "the cut, Y booted again, and the card running the upgraded eaves" : "the card running the upgraded eaves",
-              UPDATE_MS,
+              cutting ? `the cut, Y booted again, and the card running the upgraded eaves (the cut: ${JSON.stringify(cutter.get())}, Y boots ${yBoots()} of ${firstBoots})` : "the card running the upgraded eaves",
+              STEP_MS,
             );
             const order = [...ran.order, ...finish.filter((entry) => !ran.order.some((seen) => seen.kind === entry.kind))];
-            const cut = cutting ? JSON.parse(await driver.evaluate("JSON.stringify(window.__walkCut ?? null)")) : null;
-            if (cutting && !cut) throw new Error("the card never said it was upgrading the board's projects: nothing was cut");
-            if (cutting && !String(cut.reply ?? "").startsWith("ok")) throw new Error(`the power cut was not taken: ${JSON.stringify(cut)}`);
+            const cut = cutter?.get() ?? null;
+            if (cutting && !cut) throw new Error("the page never said a project stage started: nothing was cut");
+            if (cutting && cut.ok !== true) throw new Error(`the power cut was not taken: ${JSON.stringify(cut)}`);
             await settle(board, ran.from);
             // How Studio brought Y: the update channel (the board's [OTA]
             // words), or a USB flash (Studio's own lines in the board's
@@ -2397,7 +2424,7 @@ async function main() {
             }
             const reconnects = ON_LAN ? checkWifiReconnects(await terminalLines(), 1) : null;
             return {
-              summary: `${cross.version} (format 11) → ${yId} by ${route}; card ${order.map((e) => e.kind).join(" → ")}; Y said "${refused.replace(/: Core error.*/, "")}" ×${refusals}, then "${loaded}"; Studio: ${journal.join(" / ")}${cutting ? `; power cut when the card said "${cut.words}", ${where}` : ""}`,
+              summary: `${cross.version} (format 11) → ${yId} by ${route}; card ${order.map((e) => e.kind).join(" → ")}; Y said "${refused.replace(/: Core error.*/, "")}" ×${refusals}, then "${loaded}"; Studio: ${journal.join(" / ")}${cutting ? `; power cut when the page said "${cut.words}", ${where}` : ""}`,
               card: order, board: { ...said, core, refused, loaded, refusals, xRan }, route, journal, cut, where, reconnects,
             };
           });
