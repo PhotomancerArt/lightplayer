@@ -617,19 +617,34 @@ fn the_corpus_renders_todays_lamps_bit_for_bit() {
     }
 }
 
-/// Every map2d document in the catalog renders today's lamps, bit for bit.
+/// Every format-5-or-older map2d document in the upgrade corpus's inputs
+/// (real projects at the formats they were authored at, the catalog's
+/// among them) renders today's lamps, bit for bit. The catalog itself is at
+/// map2d format 6 since project format 12; its format-11 copies are in
+/// `lp-app/lpa-upgrade/tests/corpus/v11/`.
 #[test]
-fn the_catalog_renders_todays_lamps_bit_for_bit() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog");
+fn the_upgrade_corpus_renders_todays_lamps_bit_for_bit() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-app/lpa-upgrade/tests/corpus");
     let mut files = Vec::new();
     collect_map2d(&root, &mut files);
+    files.retain(|file| {
+        !file
+            .components()
+            .any(|part| part.as_os_str() == "_expected")
+    });
     files.sort();
-    assert!(files.len() >= 30, "found {} catalog documents", files.len());
+    let mut checked = 0usize;
     for file in files {
         let json = std::fs::read_to_string(&file).unwrap();
+        if lpc_mapping::map2d6::peek_format(&json) == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
+            continue;
+        }
         let doc = Map2dDoc::from_json(&json).unwrap();
         assert_parity(&file.display().to_string(), &doc);
+        checked += 1;
     }
+    assert!(checked >= 30, "found {checked} corpus documents");
 }
 
 /// Every grid routing and corner, reversed paths with and without jumpers,

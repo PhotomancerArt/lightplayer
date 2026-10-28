@@ -86,7 +86,7 @@ fn a_move_inside_a_path_is_the_jumper() {
     let m = map2d6::read(&example("eaves")).unwrap();
     let tree = render(&m).unwrap();
     let today = resolve(&today_doc(
-        "lab/mapping/projects/eaves-wired/fixture.map2d.json",
+        "lp-app/lpa-upgrade/tests/corpus/v11/eaves-wired/fixture.map2d.json",
     ))
     .unwrap();
     assert_eq!(bits(tree.positions()), bits(&today.positions()));
@@ -444,7 +444,7 @@ fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
 /// with an override on every copy.
 #[test]
 fn zooks_dome_is_small_in_format_6() {
-    let file = "catalog/projects/zook-dome/fixture.map2d.json";
+    let file = "lp-app/lpa-upgrade/tests/corpus/v11/zook-dome/fixture.map2d.json";
     let today_bytes = std::fs::read_to_string(root().join(file)).unwrap().len();
     let as_flowing = example("dome_slice");
     let mut every_copy = map2d6::read(&as_flowing).unwrap();
@@ -485,7 +485,7 @@ fn the_chokers_document_patches_as_its_journey_ends() {
     assert_eq!(lamp("l2"), Some((0, 65)));
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     let today = resolve(&today_doc(
-        "catalog/projects/playful-choker/playful.map2d.json",
+        "lp-app/lpa-upgrade/tests/corpus/v11/playful-choker/playful.map2d.json",
     ))
     .unwrap();
     assert_eq!(
@@ -533,7 +533,10 @@ fn the_dome_slices_document_patches_one_per_port() {
         assert_eq!((first.port.0, first.channel), (k, 0), "copy {k}");
     }
     assert!(p.problems.is_empty(), "{:?}", p.problems);
-    let today = resolve(&today_doc("catalog/projects/zook-dome/fixture.map2d.json")).unwrap();
+    let today = resolve(&today_doc(
+        "lp-app/lpa-upgrade/tests/corpus/v11/zook-dome/fixture.map2d.json",
+    ))
+    .unwrap();
     assert_eq!(
         bits(render(&m).unwrap().positions()),
         bits(&today.positions())
@@ -566,6 +569,10 @@ fn example(name: &str) -> String {
     std::fs::read_to_string(path).unwrap()
 }
 
+/// A format-5-or-older document of the workspace. The repo's own projects
+/// are at map2d format 6 since project format 12, so "today's" documents are
+/// the upgrade corpus's format-11 copies of them
+/// (`lp-app/lpa-upgrade/tests/corpus/v11/`).
 fn today_doc(rel: &str) -> Map2dDoc {
     Map2dDoc::from_json(&std::fs::read_to_string(root().join(rel)).unwrap()).unwrap()
 }
