@@ -78,8 +78,8 @@ impl Editor {
         let Some(from) = self.selected_end() else {
             self.notice = Some(Notice::refused(
                 "Nothing to patch",
-                "a patch is made from one segment, or from a run of pixels on one port",
-                "select a segment, a port or its pixels, then press A",
+                "a patch is made from one segment, or from a run of lamps on one port",
+                "select a segment, a port or its lamps, then press A",
             ));
             return;
         };
@@ -190,7 +190,7 @@ impl Editor {
         if self.candidates().is_empty() {
             let why = match self.armed.as_ref().map(|a| &a.from) {
                 Some(PairEnd::Segment { .. }) => "every segment is already on the wire",
-                _ => "no port has a free pixel",
+                _ => "no port has a free lamp",
             };
             self.notice = Some(Notice::info(format!("Nothing to pair with: {why}")));
         }
@@ -327,7 +327,7 @@ impl Editor {
         };
         self.arm_next_free(&output, &port);
         if self.armed.is_none() && self.notice.is_none() {
-            self.notice = Some(Notice::info("No free pixel after this one"));
+            self.notice = Some(Notice::info("No free lamp after this one"));
         }
     }
 
@@ -695,7 +695,7 @@ impl Editor {
     pub fn next_port(&mut self) {
         match self.next_port_segment() {
             Some(seg) => self.selection = self.end_targets(&seg),
-            None => self.notice = Some(Notice::info("No port after this one has a free pixel")),
+            None => self.notice = Some(Notice::info("No port after this one has a free lamp")),
         }
     }
 
@@ -916,7 +916,7 @@ impl Editor {
         }
     }
 
-    /// An end in words: `panel 7`, `Box 1 port 2 · pixels 0–118`.
+    /// An end in words: `panel 7`, `Box 1 port 2 · lamps 0–118`.
     pub fn end_words(&self, end: &PairEnd) -> String {
         match end {
             PairEnd::Object(o) => self.segment_words(o),
@@ -929,7 +929,7 @@ impl Editor {
                     output: output.clone(),
                     key: port.clone(),
                 });
-                format!("{port} · {} pixels from {}", pixels.len(), pixels.start)
+                format!("{port} · {} lamps from {}", pixels.len(), pixels.start)
             }
         }
     }
@@ -956,12 +956,12 @@ impl Editor {
             let shows = self.segment_words(&x.segments[1]);
             self.notice = Some(Notice::refused(
                 format!(
-                    "{} overlaps {} on {} pixels",
+                    "{} overlaps {} on {} lamps",
                     self.segment_words(object),
                     self.segment_words(other),
                     x.pixels.len()
                 ),
-                format!("two segments share those pixels; the board shows {shows}"),
+                format!("two segments share those lamps; the board shows {shows}"),
                 "shift one ([ ]) or patch it elsewhere (A)",
             ));
         }

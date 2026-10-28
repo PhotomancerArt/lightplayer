@@ -39,7 +39,7 @@ fn graph_choker_fixture_selected() -> Element {
 }
 
 #[story(
-    description = "One of the choker's paths selected: its span on the output's port is lit, the inspector says which pixels it takes, and the rest of the fixture dims."
+    description = "One of the choker's paths selected: its span on the output's port is lit, the inspector says which lamps it takes, and the rest of the fixture dims."
 )]
 fn graph_choker_span_selected() -> Element {
     rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::FirstPath } }

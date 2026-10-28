@@ -190,7 +190,7 @@ fn App() -> Element {
                             key: "{g:?}",
                             class: if toolbar.grouping == g { "tool on" } else { "tool" },
                             tabindex: "-1",
-                            title: "How an output card groups a port's pixels",
+                            title: "How an output card groups a port's lamps",
                             onmousedown: move |evt| evt.prevent_default(),
                             onclick: {
                                 let ed = e();

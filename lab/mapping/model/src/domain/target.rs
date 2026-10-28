@@ -375,11 +375,11 @@ impl Project {
                         Some(o) => self.long_label(&self.tree_target(o)),
                         None => "free".into(),
                     };
-                    format!("{what} · {}", pixel_words(&s.pixels))
+                    format!("{what} · {}", lamp_run_words(&s.pixels))
                 }
                 None => "span".into(),
             },
-            Target::Pixel { index, .. } => format!("pixel {index}"),
+            Target::Pixel { index, .. } => format!("lamp {index}"),
         }
     }
 
@@ -467,7 +467,7 @@ impl Project {
     }
 
     /// The word for a target's kind, plural-able: "module", "fixture",
-    /// "output", "port", "pixel", "group", "circle", "path", "polygon",
+    /// "output", "port", "lamp" (a port's), "group", "circle", "path", "polygon",
     /// "repeat", "ring", "copy", "lamp".
     pub fn kind_word(&self, t: &Target) -> &'static str {
         match t {
@@ -477,7 +477,7 @@ impl Project {
             Target::Lamp { .. } => "lamp",
             Target::Port { .. } => "port",
             Target::Span { .. } => "span",
-            Target::Pixel { .. } => "pixel",
+            Target::Pixel { .. } => "lamp",
         }
     }
 }
@@ -530,11 +530,12 @@ pub fn output_name_words(name: &str) -> String {
     }
 }
 
-/// Pixels in words: `pixel 4`, `pixels 40–63`.
-fn pixel_words(px: &std::ops::Range<u32>) -> String {
-    if px.len() == 1 {
-        format!("pixel {}", px.start)
+/// A run of a port's lamps in words: `lamp 4`, `lamps 40–63` (lamps are
+/// on the line; pixels are in pictures, names.html).
+fn lamp_run_words(run: &std::ops::Range<u32>) -> String {
+    if run.len() == 1 {
+        format!("lamp {}", run.start)
     } else {
-        format!("pixels {}–{}", px.start, px.end.saturating_sub(1))
+        format!("lamps {}–{}", run.start, run.end.saturating_sub(1))
     }
 }

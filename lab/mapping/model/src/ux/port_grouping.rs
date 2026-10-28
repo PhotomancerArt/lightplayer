@@ -28,7 +28,7 @@ impl PortGrouping {
         match self {
             PortGrouping::Objects => "segments".into(),
             PortGrouping::Groups => format!("groups of {size}"),
-            PortGrouping::Pixels => "pixels".into(),
+            PortGrouping::Pixels => "lamps".into(),
         }
     }
 }

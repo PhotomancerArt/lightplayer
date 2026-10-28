@@ -56,7 +56,7 @@ impl Project {
                 Some(NodeKind::Output(o)) => {
                     let used: u32 = o.ports.iter().map(|p| patch.used(id, &p.key)).sum();
                     format!(
-                        "{} ports · {used}/{} px",
+                        "{} ports · {used}/{} lamps",
                         o.ports.len(),
                         self.output_pixels(id)
                     )
@@ -67,7 +67,7 @@ impl Project {
             },
             Target::Port { output, key } => {
                 let pixels = self.port_pixels(output, key);
-                format!("{}/{pixels} px", patch.used(output, key))
+                format!("{}/{pixels} lamps", patch.used(output, key))
             }
             Target::Part(id) => match self.part(id).map(|c| &c.kind) {
                 Some(PartKind::Shape(Shape::Circle(circle))) => {

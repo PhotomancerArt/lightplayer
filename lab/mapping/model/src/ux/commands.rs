@@ -116,9 +116,9 @@ impl Editor {
                     let port = t.port_of_pixel().unwrap_or_else(|| t.clone());
                     refused.push((
                         t.clone(),
-                        format!("{} makes its pixels from a count", f.long_label(&port)),
+                        format!("{} makes its lamps from a count", f.long_label(&port)),
                         format!(
-                            "press − to make it {} (pixels come off the end)",
+                            "press − to make it {} (lamps come off the end)",
                             n.saturating_sub(1).max(1)
                         ),
                     ));

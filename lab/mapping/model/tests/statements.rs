@@ -821,7 +821,7 @@ fn a_span_on_an_output_is_its_own_selection() {
     assert_eq!(
         items,
         vec![
-            UiItem::Fact("Pixels 0–29 of D1 of main".into()),
+            UiItem::Fact("Lamps 0–29 of D1 of main".into()),
             UiItem::Select {
                 text: "Select path1".into(),
                 target: comp(&e, "strip:path1")
@@ -2657,7 +2657,7 @@ fn clicking_into_a_span_selects_a_pixel() {
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
     assert_eq!(
         e.project.long_label(&e.selection[0]),
-        "pixel 3 of D1 of main"
+        "lamp 3 of D1 of main"
     );
     key(&mut e, Key::Right, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 4)]);

@@ -414,9 +414,9 @@ fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
                 key: s.port.clone(),
             });
             UiItem::Fact(if lo == hi {
-                format!("Pixel {lo} of {port}")
+                format!("Lamp {lo} of {port}")
             } else {
-                format!("Pixels {lo}–{hi} of {port}")
+                format!("Lamps {lo}–{hi} of {port}")
             })
         })
         .collect();
@@ -442,7 +442,7 @@ fn lamp_fact(p: &Project, t: &Target, object: &crate::TreeRef, index: u32) -> Op
     };
     let pixel = match p.pixel_of_lamp(object, index) {
         Some(px) => format!(" On {} (ringed).", p.long_label(&px)),
-        None => " On no pixel: it lights nothing.".into(),
+        None => " On no port: it lights nothing.".into(),
     };
     Some(format!(
         "Lamp {index} of {n} on {owner} — {place}. At ({:.1}, {:.1}).{pixel}",
@@ -474,7 +474,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     };
                     ports.push(UiItem::Port {
                         name: port.name.clone(),
-                        fill: format!("{used}/{pixels} px{rest}{}", orders(p, id, &port.key)),
+                        fill: format!("{used}/{pixels} lamps{rest}{}", orders(p, id, &port.key)),
                         ratio: (used as f64 / pixels.max(1) as f64).min(1.0),
                     });
                 }
@@ -564,7 +564,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 ""
             };
             facts.push(fact(format!(
-                "{used} of {pixels} px used{rest}{} · on {}",
+                "{used} of {pixels} lamps used{rest}{} · on {}",
                 orders(p, output, key),
                 p.node_name(output)
             )));
@@ -591,7 +591,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
         Target::Pixel { output, key, index } => {
             p.output(output)?.port(key)?;
             facts.push(fact(format!(
-                "Pixel {index} of {} on {}{}",
+                "Lamp {index} of {} on {}{}",
                 p.port_pixels(output, key),
                 p.long_label(&Target::Port {
                     output: output.clone(),
@@ -605,7 +605,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     p.long_label(&lamp)
                 ),
                 None => {
-                    "Nothing is patched to this pixel; it lights anyway, so you can find it".into()
+                    "Nothing is patched to this lamp; it lights anyway, so you can find it".into()
                 }
             }));
         }
@@ -652,10 +652,10 @@ impl Editor {
             .map(|port| p.long_label(&port))
             .unwrap_or_default();
         let pixels = if span.pixels.len() == 1 {
-            format!("Pixel {}", span.pixels.start)
+            format!("Lamp {}", span.pixels.start)
         } else {
             format!(
-                "Pixels {}–{}",
+                "Lamps {}–{}",
                 span.pixels.start,
                 span.pixels.end.saturating_sub(1)
             )

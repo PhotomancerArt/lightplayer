@@ -14,7 +14,7 @@
 //! per subpath / per ring `set-split`, Radius `set-radius`,
 //! Counter-clockwise `set-way-round`, Columns, Rows, Spacing and Angle
 //! `set-lattice`, Snake `set-routing`, Width and Height
-//! `set-fixture-size`, Colour order `set-colour-order`, a port's Pixels
+//! `set-fixture-size`, Colour order `set-colour-order`, a port's Lamps
 //! `set-port-lamps`. No row sets its field another way.
 
 use lpc_mapping::edit::DrawnFrom;
@@ -83,7 +83,7 @@ pub const HEIGHT: PropDesc = PropDesc {
 };
 pub const PIXELS: PropDesc = PropDesc {
     id: "pixels",
-    label: "Pixels",
+    label: "Lamps",
     kind: PropKind::Count { min: 1 },
     nudge: true,
     reshapes: false,
