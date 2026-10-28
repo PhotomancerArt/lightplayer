@@ -80,6 +80,15 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   which the gate runs; main's runs of the job that evening took 25–31 min.
   Moved the comparison to the PSRAM recipe in the S3 seams job (22 min of
   30, its PSRAM step 10 min), the split this entry prescribes.
+- 2026-10-28 — PR #1319 (the mapping rebuild's integration PR), run
+  40650335671 at 832ffa67c: `Emulator ESP32-S3 seams and heap (x64)` cancelled
+  at its 30-minute budget in "Heap budget ratchet — the S3's own ledger",
+  5 min 33 s into the S3 boot, with every earlier step passed (seams, LCD_CAM,
+  PSRAM 10 min, Wi-Fi 7 min, relay 3 min). Main's run of the job at fd2d9ad73
+  took 27 min 41 s, its S3 boot 5 min 35 s; this run reached the boot 2.5 min
+  later (24 min 38 s against 22 min) and the budget fell inside it. No figure
+  moved and no patch was posted for the job. Not split here (the PR is a
+  mapping change); a rerun is the evidence either way.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that
