@@ -104,7 +104,8 @@ fn a_faulted_project_reads_degraded_and_still_says_what_it_is_running() {
             label: "meteor".to_string()
         }
     );
-    let line = card.degraded.expect("the card names the degradation");
+    let degraded = card.degraded.expect("the card names the degradation");
+    let line = degraded.line;
     assert!(
         line.starts_with("Degraded: node /meteor.show/s faulted"),
         "{line}"
@@ -187,7 +188,7 @@ fn a_heartbeat_that_says_nothing_about_recovery_does_not_clear_it() {
     let card = roster_view(&roster, Millis(1_300)).devices[0].clone();
     assert_eq!(card.status, DeviceStatus::Degraded, "{card:?}");
     assert_eq!(
-        card.degraded.as_deref(),
+        card.degraded.as_ref().map(|d| d.line.as_str()),
         Some("Recovery yellow: 1 watched path (last crash: oom at node:nodes/fire)"),
     );
 }
@@ -212,7 +213,7 @@ fn a_load_that_did_not_fit_is_said_in_the_boards_words() {
     let card = roster_view(&roster, Millis(300)).devices[0].clone();
     assert_eq!(card.status, DeviceStatus::Degraded);
     assert_eq!(
-        card.degraded.as_deref(),
+        card.degraded.as_ref().map(|d| d.line.as_str()),
         Some("Small Dome didn't fit in memory — back on PLAYFUL Choker"),
     );
 }
@@ -236,7 +237,7 @@ fn safe_mode_alone_is_worth_saying() {
     let card = roster_view(&roster, Millis(300)).devices[0].clone();
     assert_eq!(card.status, DeviceStatus::Degraded);
     assert_eq!(
-        card.degraded.as_deref(),
+        card.degraded.as_ref().map(|d| d.line.as_str()),
         Some("Safe mode: project auto-load skipped after repeated incomplete boots"),
     );
 }

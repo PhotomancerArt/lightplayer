@@ -17,6 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
+use crate::degraded::{Degraded, DegradedCause};
 use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
     Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
@@ -91,7 +92,7 @@ pub struct DeviceView {
     /// name would answer "what is on it?" with a complaint. `None` = the
     /// board reported nothing wrong, which on an embedder that reports no
     /// recovery at all means only "no fault", never "healthy".
-    pub degraded: Option<String>,
+    pub degraded: Option<Degraded>,
     /// What the board says it is running. The empty face and the running
     /// face are the two answers; [`LoadedProject::Unknown`] is the third,
     /// and it offers neither rather than guessing.
@@ -654,7 +655,7 @@ fn loaded_project(device: &Device) -> LoadedProject {
 /// last thing a board said before we stopped listening would age into a
 /// lie. Not gated on the verdict — the fault is the board's own report,
 /// and it is stated whenever it was made (see [`loaded_project`]).
-fn degraded(device: &Device) -> Option<String> {
+fn degraded(device: &Device) -> Option<Degraded> {
     let evidence = &device.evidence;
     if !evidence.presence.is_open() {
         return None;
@@ -665,11 +666,35 @@ fn degraded(device: &Device) -> Option<String> {
     // The fault leads when there is one: it names the node, which is the
     // actionable half. Recovery is the device-wide backdrop, and a fault
     // raised BY the ledger already quotes it in its own message.
-    let line = evidence
+    evidence
         .project_fault()
-        .and_then(fault_line)
-        .or_else(|| recovery.map(recovery_line))?;
-    Some(line)
+        .and_then(|fault| {
+            let (node, message) = fault.nodes.first()?;
+            Some(Degraded {
+                line: fault_line(fault)?,
+                cause: DegradedCause::NodeFault {
+                    node: node.clone(),
+                    message: message.clone(),
+                },
+            })
+        })
+        .or_else(|| {
+            recovery.map(|recovery| Degraded {
+                line: recovery_line(recovery),
+                cause: match is_load_notice(recovery) {
+                    true => DegradedCause::LoadNotice,
+                    false => DegradedCause::Recovery,
+                },
+            })
+        })
+}
+
+/// A load that did not finish is the whole story when the board is
+/// otherwise fine.
+fn is_load_notice(recovery: &RecoveryFacts) -> bool {
+    recovery.load_notice.is_some()
+        && recovery.level == RecoveryLevelFacts::Green
+        && !recovery.safe_mode
 }
 
 /// "Degraded: node /x faulted — <why>", plus a count when several are.
@@ -687,9 +712,10 @@ fn fault_line(fault: &ProjectFaultFacts) -> Option<String> {
 fn recovery_line(recovery: &RecoveryFacts) -> String {
     // A load that did not finish is the whole story when the board is
     // otherwise fine: what it runs, and why.
-    if let Some(notice) = &recovery.load_notice
-        && recovery.level == RecoveryLevelFacts::Green
-        && !recovery.safe_mode
+    if let Some(notice) = recovery
+        .load_notice
+        .as_ref()
+        .filter(|_| is_load_notice(recovery))
     {
         return notice.clone();
     }

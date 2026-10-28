@@ -1407,11 +1407,10 @@ fn degraded_card_fixture() -> DeviceView {
     let mut card = roster_fixture().roster.devices.remove(0);
     card.status = DeviceStatus::Degraded;
     card.state_label = "Degraded".to_string();
-    card.degraded = Some(
-        "Degraded: node /studio.show/s faulted — recovery: node 'nodes/meteor' \
-         (disabled after 3 crashes)"
-            .to_string(),
-    );
+    card.degraded = Some(lpa_studio_core::DeviceDegraded::node_fault(
+        "/studio.show/s",
+        "recovery: node 'nodes/meteor' (disabled after 3 crashes)",
+    ));
     card.terminal.push(DeviceTerminalLine {
         kind: DeviceTerminalKind::Recovery,
         text: "[WARN] recovery: node 'nodes/meteor' disabled after 3 crashes".to_string(),
@@ -1918,7 +1917,9 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             },
             age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
-        degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
+        degraded: Some(lpa_studio_core::DeviceDegraded::recovery(
+            "Recovery red: /studio.show/s disabled after repeated crashes",
+        )),
         engine_fps: None,
         link_counters: None,
         loaded_project: DeviceLoadedProject::Running {

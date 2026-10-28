@@ -192,7 +192,15 @@ download mode               This board is waiting in download mode.
 says nothing (it never      This board doesn't respond.  Install the firmware to use it.   ▲ Install firmware
   said hello)                                                        # was: not answering, Retry (a new board, lightplayer.app 10-18)
 locked                      This board is locked.  Unlock it to connect.                   ○ Unlock
-a shader error              This board's project has an error.  Edit the project to fix it.   ✎ Edit project
+a node faulted              Aurora drift has an error in /show.module/orbit.shader:
+                            orbit.shader:12: 'tme' is not declared.
+                            Edit the project to fix it.                                    ✎ Edit project
+its startup project didn't  Zook dome didn't fit in memory at startup, so no project is
+  load (the board's words)  running.  This board runs Circular display now.                ✎ Edit project
+                                                                     # names the project Edit opens (Yona at G3 10-28: zook's notice over the circular display)
+…and nothing runs           (the board's words)  Add a project to play on it.              + Add a project
+its recovery state          Recovery red: /show.module/fire disabled after repeated
+                            crashes.  Edit the project to fix it.                          ✎ Edit project
 no project                  This board has no project yet.                                 + Add a project
 in the editor               This board is open in the editor.                              ✓ Done
 connected                   the live picture, no words (the rows become the panel)          ✓ Done

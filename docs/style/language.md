@@ -151,7 +151,7 @@ The board card's verbs:
 - **Retry** — the primary of a board that stopped responding, a connect
   that failed or was turned away, and work that failed (a send, an update,
   an install).
-- **Edit project** — the primary of a board whose project has an error.
+- **Edit project** — the primary of a board whose project has an error (a node faulted, its recovery state), or whose startup project didn't load while it runs another.
 - **Add a project** — the primary of a board running no project (there is
   firmware on it, and nothing to show yet): the project pick. The Project
   row, which says **none**, does not repeat it.

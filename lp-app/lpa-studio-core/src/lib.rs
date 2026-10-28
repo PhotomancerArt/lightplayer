@@ -354,6 +354,7 @@ pub use lpa_devices::{
     TerminalKind as DeviceTerminalKind, TerminalLine as DeviceTerminalLine,
     UpdateBoardState as DeviceUpdateBoardState, WireVersion as DeviceWireVersion,
 };
+pub use lpa_devices::{Degraded as DeviceDegraded, DegradedCause as DeviceDegradedCause};
 /// What a board reports about its saved networks, its station and what it
 /// hears.
 pub use lpc_wire::server::{

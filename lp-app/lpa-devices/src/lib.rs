@@ -44,6 +44,7 @@ pub mod activity;
 pub mod app_version;
 pub mod board_key;
 pub mod bootloader;
+pub mod degraded;
 pub mod device;
 pub mod event;
 pub mod evidence;
@@ -70,6 +71,7 @@ pub use activity::{
 };
 pub use app_version::{AppVersion, DevCommit};
 pub use board_key::{BoardKey, BoardKeyError};
+pub use degraded::{Degraded, DegradedCause};
 pub use device::{Device, DeviceStatus};
 pub use event::{
     Action, ActivityMarker, Command, EffectId, EffectRequest, Event, GrantAnswer, Input,

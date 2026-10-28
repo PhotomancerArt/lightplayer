@@ -195,11 +195,14 @@ pub(crate) fn state_action(
                 .with_icon("lock")
                 .drawn(UiActionDraw::Sheet)
         }),
+        // Edit opens what it runs; a board that runs nothing (its startup
+        // project didn't load) is given one.
         ProjectError => edit_action(input)
             .map(|edit| UiCardAction {
                 word: EDIT_PROJECT.to_string(),
                 ..edit
             })
+            .or_else(|| add_a_project(input))
             .or_else(|| press("connect", "Connect", icon)),
         NoProject => add_a_project(input),
     }
