@@ -3,13 +3,15 @@
 //! reads the same hints the page's hint bar shows), so the bar, the
 //! toolbar and the agent see one set.
 //!
-//! **Levels.** Delete, Unpatch and Unpatch all are Undoable: they take
-//! something away (off the canvas, or off the wire), and the Graph's own
-//! undo puts it back. Everything else is Routine: selecting, the tools, a
-//! count, a direction, undo and redo, and the rest of patching by hand
-//! (patch, swap, turn, shift, auto), which moves what is on the wire
-//! without taking anything off it. Nothing on the Graph is Lasting. Moving the view (pan,
-//! zoom, fit, Canvas | Stack) is view state, never an offer.
+//! **Levels.** Delete and Unpatch all are Undoable: they take something
+//! away (a part off the canvas, or every segment of a fixture turned off),
+//! and the Graph's own undo puts it back. Unpatch is Routine: it puts the
+//! selected segments back to following their rule, which turns nothing off.
+//! Everything else is Routine too: selecting, the tools, a count, a
+//! direction, undo and redo, and the rest of patching by hand (patch, swap,
+//! turn, shift), which moves where things land without taking anything
+//! away. Nothing on the Graph is Lasting. Moving the view (pan, zoom, fit,
+//! Canvas | Stack) is view state, never an offer.
 
 use lab_mapping_model::{Editor, GraphVerb};
 
@@ -29,7 +31,7 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
     for verb in editor.verbs() {
         let action = GraphOp::action(verb);
         let action = match verb {
-            GraphVerb::Delete | GraphVerb::Unpatch | GraphVerb::UnpatchAll => action.undoable(),
+            GraphVerb::Delete | GraphVerb::UnpatchAll => action.undoable(),
             _ => action,
         };
         offers.publish(UiOffer::new(graph_verb_path(verb), icon(verb), action));
@@ -38,8 +40,8 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
 
 fn icon(verb: GraphVerb) -> &'static str {
     match verb {
-        GraphVerb::Delete | GraphVerb::Unpatch | GraphVerb::UnpatchAll => "trash",
-        GraphVerb::Undo | GraphVerb::Redo => "revert",
+        GraphVerb::Delete | GraphVerb::UnpatchAll => "trash",
+        GraphVerb::Unpatch | GraphVerb::Undo | GraphVerb::Redo => "revert",
         _ => "",
     }
 }

@@ -16,9 +16,9 @@
 //! Unarmed, the wiring keys act on the selected objects: `R` reverses a
 //! placement (with Move & draw off; on, it reverses the path itself, D3),
 //! `K` `L` turn one lamp, `;` `'` a third, `[` `]` shift a pixel, `U`
-//! unpatches. ⇧← ⇧→ walk the places on the wire (spans and free segments),
-//! `.` jumps to the next port's first free segment. On a fixture, ⇧A turns
-//! auto on or off, and ⇧U unpatches every object.
+//! puts them back to following their rule. ⇧← ⇧→ walk the places on the wire (spans and free segments),
+//! `.` jumps to the next port's first free segment. On a fixture, ⇧U turns
+//! every object off.
 
 use std::ops::Range;
 
