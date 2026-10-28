@@ -5813,6 +5813,11 @@ walk-drop-emu *args:
 # relay protocol 1 commit, updated through the relay to this build, which
 # then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
 # walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
+# Across a project-format bump (not default steps): `--steps cross-format`
+# and `cut-upgrade` board the last PUBLISHED format-11 release (fetched by
+# scripts/ota/fetch-release-image.sh, `LP_OTA_CROSS_RELEASE`) holding
+# format-11 projects; `found-older` and `cut-older` a board already on this
+# build holding them. docs/reports/2026-10-28-ota-project-upgrade-walk.md.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -5850,10 +5855,27 @@ walk-ota-emu *args: install-rv32-target
         exit 0
     fi
     images=target/walk-ota-emu/images
-    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+    # The crossing's steps (cross-format, cut-upgrade, found-older,
+    # cut-older) board the last PUBLISHED release before the last
+    # project-format bump, fetched (never built here); a run of only those
+    # steps needs no images/x and no single image.
+    crossing_only=0
+    if [[ " {{ args }} " =~ --steps\ ([a-z,-]+) ]]; then
+        crossing_only=1
+        for s in ${BASH_REMATCH[1]//,/ }; do
+            case "$s" in cross-format|cut-upgrade|found-older|cut-older) ;; *) crossing_only=0 ;; esac
+        done
+    fi
+    if [[ " {{ args }} " == *cross-format* || " {{ args }} " == *cut-upgrade* ]]; then
+        release="${LP_OTA_CROSS_RELEASE:-2026.10.27-5}"
+        if [[ -z "${WALK_OTA_CROSS:-}" && "$(jq -r .version target/ota-cross/x-release/ota/ota-manifest.json 2>/dev/null)" != "$release" ]]; then
+            scripts/ota/fetch-release-image.sh target/ota-cross/x-release "$release"
+        fi
+    fi
+    if [[ "$crossing_only" == 0 && -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
-    if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
+    if [[ "$crossing_only" == 0 && ! -f "${images}/mono/package/manifest.json" ]]; then
         ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
     fi
     # install-older's (and install-lookup's) two releases (they differ only
