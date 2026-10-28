@@ -7,11 +7,13 @@ use crate::edit::edit_error::EditError;
 use crate::edit::part_place::part_mut;
 use crate::part::{Circle, Mapping, PartId, PartKind, SegmentKey, Shape};
 
-/// Add a ring of `count` lamps at `radius` to the circle `id`, at the end
-/// of its list (the rings are listed outside in), and return its key. The
-/// key is the circle's next (`r<n>`), never one a ring of it had before,
-/// even one since removed ([`Circle::add_ring`]): an override left on a
-/// removed ring never lands on the new one. A ring of radius 0 is the
+/// Add a ring of `count` lamps at `radius` to the circle `id`, and return
+/// its key. The rings are listed outside in, so it goes where its radius
+/// puts it: after every ring at least as large, before the first smaller
+/// one (a ring smaller than all of them goes last, a larger one first).
+/// The key is the circle's next (`r<n>`), never one a ring of it had
+/// before, even one since removed ([`Circle::add_ring`]): an override left
+/// on a removed ring never lands on the new one. A ring of radius 0 is the
 /// centre and holds one lamp.
 pub fn add_ring(
     m: &mut Mapping,
@@ -21,7 +23,15 @@ pub fn add_ring(
 ) -> Result<SegmentKey, EditError> {
     check_ring(radius, count).map_err(EditError::BadRing)?;
     let circle = circle_mut(m, id)?;
-    Ok(circle.add_ring(radius, count))
+    let at = circle
+        .rings
+        .iter()
+        .position(|ring| ring.radius < radius)
+        .unwrap_or(circle.rings.len());
+    let key = circle.add_ring(radius, count);
+    let ring = circle.rings.pop().expect("just added");
+    circle.rings.insert(at, ring);
+    Ok(key)
 }
 
 /// The circle `id`, to edit in place.

@@ -65,7 +65,7 @@ pub use set_flow::set_flow;
 pub use set_lamp_count::set_lamp_count;
 pub use set_override_field::set_override_field;
 pub use set_path_split::set_path_split;
-pub use set_repeat_count::set_repeat_count;
+pub use set_repeat_count::{overrides_past_count, set_repeat_count};
 pub use set_start::set_start;
 pub use unrepeat::unrepeat;
 pub use wrap_in_repeat::wrap_in_repeat;

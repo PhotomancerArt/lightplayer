@@ -14,9 +14,9 @@ mod journey_mappings;
 use journey_mappings::{Journey, choker, circular_display, dome_slice, eaves, journeys};
 use lpc_mapping::edit::{
     DrawnFrom, EditError, OverrideField, OverrideFieldKind, add_part, add_ring,
-    clear_override_field, expand_repeat, insert_part, move_part, remove_part, remove_ring,
-    rename_part, set_circle_split, set_drawn_from, set_flow, set_lamp_count, set_override_field,
-    set_path_split, set_repeat_count, set_start, unrepeat, wrap_in_repeat,
+    clear_override_field, expand_repeat, insert_part, move_part, overrides_past_count, remove_part,
+    remove_ring, rename_part, set_circle_split, set_drawn_from, set_flow, set_lamp_count,
+    set_override_field, set_path_split, set_repeat_count, set_start, unrepeat, wrap_in_repeat,
 };
 use lpc_mapping::part::{
     Circle, CircleSplit, Mapping, Part, PartId, PartKind, Path, PathCommand, PathSplit, Repeat,
@@ -483,6 +483,8 @@ fn expanding_refuses_a_copy_id_in_use() {
 fn counting_a_repeat_down_keeps_its_dropped_copies_overrides() {
     let journey = dome_slice();
     let mut m = journey.mapping.clone();
+    assert_eq!(overrides_past_count(&m, &part("sector"), 4), 0);
+    assert_eq!(overrides_past_count(&m, &part("sector"), 3), 1);
     set_repeat_count(&mut m, &part("sector"), 3).unwrap();
     assert!(m.overrides.contains_key(&node("path1@3")));
     let p = patch(&m, &journey.outputs);
@@ -502,7 +504,8 @@ fn counting_a_repeat_down_keeps_its_dropped_copies_overrides() {
 }
 
 /// A ring added to a circle gets a key never used before, even after one
-/// was removed; the removed ring's override is kept and reported.
+/// was removed, and goes where its radius puts it; the removed ring's
+/// override is kept and reported.
 #[test]
 fn a_ring_added_gets_a_key_never_used_before() {
     let journey = circular_display();
@@ -513,6 +516,19 @@ fn a_ring_added_gets_a_key_never_used_before() {
     assert_eq!(add_ring(&mut m, &circle, 5.0, 4), Ok(key("r6")));
     remove_ring(&mut m, &circle, &key("r6")).unwrap();
     assert_eq!(add_ring(&mut m, &circle, 5.0, 4), Ok(key("r7")));
+    let order = |m: &Mapping| -> Vec<String> {
+        let PartKind::Shape(Shape::Circle(c)) = &m.part(&circle).unwrap().kind else {
+            panic!("a circle");
+        };
+        c.rings.iter().map(|r| r.key.to_string()).collect()
+    };
+    assert_eq!(
+        order(&m),
+        ["r1", "r2", "r4", "r7", "r5"],
+        "listed outside in: it goes where its radius puts it"
+    );
+    assert_eq!(add_ring(&mut m, &circle, 50.0, 30), Ok(key("r8")));
+    assert_eq!(order(&m)[0], "r8", "a larger ring goes first");
     let p = patch(&m, &journey.outputs);
     assert!(p.problems.contains(&Problem::GoneNode(node("circle1/r3"))));
     assert!(p.segment(&node("circle1/r7")).is_some());
