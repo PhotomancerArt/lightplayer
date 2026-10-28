@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use lab_mapping_model::{
-    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Vec2, port_value,
+    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Target, Vec2, port_value,
 };
 use lpc_mapping::part::{Mapping, TreeId, render};
 use lpc_mapping::patching::{
@@ -561,6 +561,149 @@ fn the_circular_display_from_nothing() {
     }
     let expected = std::fs::read_to_string(golden).expect("the golden");
     assert_eq!(text, expected, "the saved map2d is the golden");
+}
+
+/// The output the Graph names keeps its name on the board when it is then
+/// selected, and Save writes it (docs/defects/2026-10-28-the-graph-names-
+/// an-output-the-board-keeps-it-unnamed.md). Selecting an output writes its
+/// `highlight` Debug slot; on the board that slot edit replaced the output
+/// file's pending body (the name) and clearing it dropped the file's
+/// overlay, so Save wrote nothing for it. What Studio showed kept the name,
+/// which is why the journey above never saw it: this asks the board. Once
+/// saved, the output breathes on the board again when selected; and a body
+/// the Graph writes while it breathes (a port's lamps) is kept and saved
+/// too.
+#[test]
+fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
+    let mut j = Journey::new_board_with_display_output();
+    let output = NodeId::new("output");
+    let select = |j: &mut Journey, targets: Vec<Target>| {
+        j.graph.handle.input(GraphInput::Select(targets));
+        j.graph.batch();
+        j.graph.refresh();
+    };
+    let field = |text: Option<String>, pointer: &str| -> Option<serde_json::Value> {
+        let def: serde_json::Value =
+            serde_json::from_str(&text.expect("the output's file")).expect("json");
+        def.pointer(pointer).cloned()
+    };
+    let name = |text: Option<String>| field(text, "/name");
+    let one = Some(serde_json::Value::from("1"));
+    // Breathing on the board: its overlay holds the output's `highlight`.
+    let breathes = |j: &Journey| {
+        use lpc_model::project::overlay::ArtifactOverlay;
+        let server = j.graph.server.borrow();
+        let project = server.project_manager().first_loaded().expect("a project");
+        let overlay = project.registry().overlay().get();
+        matches!(
+            overlay.artifact(&lpc_model::ArtifactLocation::file("/output.json")),
+            Some(ArtifactOverlay::Slot { .. })
+        )
+    };
+
+    // Named by choosing its port.
+    let d0 = j.offered_option(
+        "set-fixture-start",
+        "port",
+        "D0 of output (names it output 1)",
+    );
+    j.press(
+        "set-fixture-start",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("port", d0)
+            .with("lamps", "0"),
+    );
+    assert_eq!(name(Some(j.graph.file_text("/output.json"))), one);
+    assert_eq!(
+        name(j.graph.board_text("/output.json")),
+        one,
+        "the board holds the name"
+    );
+
+    // The output selected, then nothing, then the output, then nothing.
+    for (targets, what) in [
+        (vec![Target::Node(output.clone())], "the output selected"),
+        (Vec::new(), "nothing selected"),
+        (
+            vec![Target::Node(output.clone())],
+            "the output selected again",
+        ),
+        (Vec::new(), "nothing selected again"),
+    ] {
+        select(&mut j, targets);
+        assert_eq!(
+            name(j.graph.board_text("/output.json")),
+            one,
+            "{what}, the board still holds the name"
+        );
+    }
+
+    // Saved: the board's own file carries it.
+    actor_clicks(&mut j.graph.actor, &j.graph.tx).press("project/save", OfferArgs::new());
+    j.graph.refresh();
+    assert_eq!(
+        name(j.graph.board_saved_text("/output.json")),
+        one,
+        "saved, the board's output.json is named"
+    );
+
+    // Selected again, it breathes; a port's lamps written while it does
+    // are kept when it stops, and saved.
+    select(&mut j, vec![Target::Node(output.clone())]);
+    assert!(breathes(&j), "saved, the selected output breathes again");
+    j.press(
+        "set-port-lamps",
+        OfferArgs::new()
+            .with("subject", port_value(&output, "4"))
+            .with("lamps", "50"),
+    );
+    let fifty = Some(serde_json::Value::from(50));
+    assert_eq!(
+        field(j.graph.board_text("/output.json"), "/ports/4/count"),
+        fifty
+    );
+    select(&mut j, Vec::new());
+    assert_eq!(
+        field(j.graph.board_text("/output.json"), "/ports/4/count"),
+        fifty,
+        "nothing selected, the board still holds the port's lamps"
+    );
+    actor_clicks(&mut j.graph.actor, &j.graph.tx).press("project/save", OfferArgs::new());
+    j.graph.refresh();
+    let saved = j.graph.board_saved_text("/output.json");
+    assert_eq!(field(saved.clone(), "/ports/4/count"), fifty, "saved");
+    assert_eq!(name(saved), one, "and still named");
+}
+
+/// The same for a fixture: the Graph writes its file as a body (its
+/// colour order), and selecting it writes its `selection` Debug slot,
+/// which must not take the colour order off the board.
+#[test]
+fn a_fixtures_colour_order_stays_on_the_board_when_selected() {
+    let mut j = Journey::new_board_with_display_output();
+    j.press(
+        "set-colour-order",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("order", "grb"),
+    );
+    let order = |j: &Journey| -> Option<serde_json::Value> {
+        let text = j
+            .graph
+            .board_text("/fixture.json")
+            .expect("the fixture's file");
+        let def: serde_json::Value = serde_json::from_str(&text).expect("json");
+        def.get("color_order").cloned()
+    };
+    let grb = Some(serde_json::Value::from("grb"));
+    assert_eq!(order(&j), grb, "the board holds the colour order");
+    for targets in [vec![Target::Node(j.fixture.clone())], Vec::new()] {
+        j.graph.handle.input(GraphInput::Select(targets));
+        j.graph.batch();
+        j.graph.refresh();
+        assert_eq!(order(&j), grb, "selected or not, the board keeps it");
+    }
 }
 
 /// `projects/test/circular-display-walk`, the project G3's and M5's walks

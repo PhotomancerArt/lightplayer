@@ -568,6 +568,9 @@ pub(super) struct Graph {
     view: crate::app::studio::studio_view_channel::StudioViewReceiver,
     pub(super) handle: GraphHandle,
     last: Option<UiStudioView>,
+    /// The board Studio talks to, for what it holds (not what Studio
+    /// shows): its overlay and its files.
+    pub(super) server: Rc<RefCell<lpa_server::LpServer>>,
 }
 
 impl Graph {
@@ -581,7 +584,7 @@ impl Graph {
     pub(super) fn on_server(server: lpa_server::LpServer) -> Self {
         let server = Rc::new(RefCell::new(server));
         let io = InProcessServerIo {
-            server,
+            server: server.clone(),
             inbox: Rc::new(RefCell::new(VecDeque::new())),
             sent: Rc::new(RefCell::new(Vec::new())),
         };
@@ -597,6 +600,7 @@ impl Graph {
             view: studio.view,
             handle,
             last: None,
+            server,
         };
         connect_running_project(&graph.tx);
         graph.batch();
@@ -651,6 +655,47 @@ impl Graph {
             .asset_content_cached(&ArtifactLocation::file(path))
             .and_then(|c| c.text().map(str::to_string))
             .unwrap_or_else(|| panic!("{path}"))
+    }
+
+    /// A project file as the board holds it now: its pending body when
+    /// its overlay has one, else the file on its disk (`None` when the
+    /// overlay deletes it or the disk has none). What Studio shows
+    /// ([`Self::file_text`]) can hold a body the board never took.
+    pub(super) fn board_text(&self, path: &str) -> Option<String> {
+        use lpc_model::project::overlay::{ArtifactOverlay, AssetBodyOverlay};
+        let server = self.server.borrow();
+        let project = server
+            .project_manager()
+            .first_loaded()
+            .expect("the board runs a project");
+        let artifact = ArtifactLocation::file(path);
+        match project.registry().overlay().get().artifact(&artifact) {
+            Some(ArtifactOverlay::Asset {
+                overlay: AssetBodyOverlay::ReplaceBody(bytes),
+            }) => return Some(String::from_utf8(bytes.clone()).expect("utf-8")),
+            Some(ArtifactOverlay::Asset {
+                overlay: AssetBodyOverlay::Delete,
+            }) => return None,
+            // Slot edits sit over the file on disk (a Debug slot's, say):
+            // the file is what they edit.
+            Some(ArtifactOverlay::Slot { .. }) | None => {}
+        }
+        drop(server);
+        self.board_saved_text(path)
+    }
+
+    /// A project file as the board's disk holds it (what Save wrote),
+    /// whatever its overlay holds.
+    pub(super) fn board_saved_text(&self, path: &str) -> Option<String> {
+        use lpc_model::AsLpPath;
+        let server = self.server.borrow();
+        let project = server
+            .project_manager()
+            .first_loaded()
+            .expect("the board runs a project");
+        let file = format!("{}{path}", project.path().as_str());
+        let bytes = server.base_fs().read_file(file.as_path()).ok()?;
+        Some(String::from_utf8(bytes).expect("utf-8"))
     }
 
     /// The fixture's mapping, as the Graph holds it.

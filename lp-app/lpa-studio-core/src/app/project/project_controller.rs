@@ -6591,7 +6591,9 @@ impl ProjectController {
     /// with Clear — one selection, one pulse, never a trail. `None` (or a
     /// subject no wire carries) clears everything. The writes are ordinary
     /// Debug-slot overlay edits, so they reach whatever runs the engine and
-    /// never touch dirty/save accounting.
+    /// never touch dirty/save accounting. An output whose file holds a
+    /// pending whole-body edit is not written
+    /// ([`Self::holds_pending_body`]).
     pub async fn apply_patch_pulse(
         &mut self,
         server: &mut StudioServerClient,
@@ -6633,6 +6635,10 @@ impl ProjectController {
             }
             _ => Vec::new(),
         };
+        let writes: Vec<(NodeId, String)> = writes
+            .into_iter()
+            .filter(|(node, _)| !self.holds_pending_body(*node))
+            .collect();
 
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
@@ -6682,12 +6688,18 @@ impl ProjectController {
     /// fixture overrides on the board, plan M4b) and clear the ones the last
     /// write set and this one doesn't. Like [`Self::apply_patch_pulse`]: one
     /// selection, never a trail; ordinary Debug-slot overlay edits, so they
-    /// reach whatever runs the engine and are never saved.
+    /// reach whatever runs the engine and are never saved. A fixture whose
+    /// file holds a pending whole-body edit is not written
+    /// ([`Self::holds_pending_body`]).
     pub(crate) async fn apply_fixture_selection(
         &mut self,
         server: &mut StudioServerClient,
         writes: Vec<(NodeId, String)>,
     ) -> Result<(), UiError> {
+        let writes: Vec<(NodeId, String)> = writes
+            .into_iter()
+            .filter(|(node, _)| !self.holds_pending_body(*node))
+            .collect();
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
             .selected_fixtures
@@ -6715,6 +6727,36 @@ impl ProjectController {
         }
         self.selected_fixtures = written;
         Ok(())
+    }
+
+    /// Whether the node's file holds a pending whole-body edit on the board
+    /// (the Graph writes a node file it changes as a body: an output it
+    /// named, a fixture's colour order). A slot edit to that file — a Debug
+    /// slot's `highlight` or `selection` included — would replace the
+    /// body in the board's overlay (an artifact holds slot edits or a body,
+    /// never both), and clearing it would then drop the file's overlay
+    /// entry: the body's change gone, unsaved, with Studio still showing
+    /// it (docs/defects/2026-10-28-the-graph-names-an-output-the-board-
+    /// keeps-it-unnamed.md). So a Debug write skips such a node: its lamps
+    /// don't breathe or chase on the board until Save puts the file on
+    /// disk.
+    fn holds_pending_body(&self, node: NodeId) -> bool {
+        let Some(controller) = self.node_by_runtime_id(node) else {
+            return false;
+        };
+        let address = ProjectSlotAddress::new(
+            controller.address().clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::root(),
+        );
+        let Ok(artifact) = self.resolve_def_artifact(&address) else {
+            return false;
+        };
+        self.asset_edit_buffer.contains_key(&artifact)
+            || self
+                .sync
+                .as_ref()
+                .is_some_and(|sync| sync.overlay_asset_edit_at(&artifact).is_some())
     }
 
     /// Whether a fixture's firmware has the `selection` Debug slot (the
