@@ -9,6 +9,15 @@
           "pattern": "^[0-9a-f]{40}$",
           "type": "string"
         },
+        "projectFormat": {
+          "description": "The project format the release's engine reads, as its\n`ota-manifest.json` says it. Additive (format 1): absent for a release\nwhose manifest predates the field, which a reader takes as \"not said\"\nand may guess from `wireProto` instead.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "publishedAt": {
           "description": "When the release was published (RFC 3339, UTC), as GitHub reports\nit. For display only: the version, not this, is the release's order.",
           "type": [

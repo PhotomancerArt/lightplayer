@@ -28,6 +28,13 @@
 //!   does not list `fs.tree` holds littlefs, and over the air that core
 //!   would meet files it cannot read. Such a build is never listed for it —
 //!   its files move over USB first (the card's own update offers that).
+//! - **Which project format a choice's engine reads** is what its release
+//!   says (the index entry's `projectFormat`, DD31), this Studio's own for
+//!   its own build, and only for a release that predates the field a guess
+//!   from its wire ([`super::engine_project_format`]). Read against the
+//!   project format the board's engine reads, it says whether installing
+//!   the choice upgrades the board's projects (`upgrades_projects`) or
+//!   strands them (`strands_projects`).
 
 use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
@@ -71,6 +78,10 @@ pub struct InstallChoice {
     /// The board's projects were saved for newer firmware than this
     /// version's engine reads (Q106): they won't load on it.
     pub strands_projects: bool,
+    /// This version's engine reads a newer project format than the board's
+    /// (DD31): installing it upgrades the board's projects (the update's
+    /// last stage), and older firmware won't load them after.
+    pub upgrades_projects: bool,
     /// Shown with nothing typed in the box.
     pub recent: bool,
 }
@@ -220,7 +231,10 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
                         .wire_proto
                         .map(|proto| WireVersion::compare(proto, inputs.studio_wire_proto)),
                 },
-                strands_projects: strands_projects(&f, inputs.board_project_format),
+                strands_projects: project_format_against(&f, inputs.board_project_format)
+                    == Some(std::cmp::Ordering::Less),
+                upgrades_projects: project_format_against(&f, inputs.board_project_format)
+                    == Some(std::cmp::Ordering::Greater),
                 recent: at < RECENT_CHOICES || f.own || f.from_file || on_board,
                 on_board,
                 own: f.own,
@@ -233,21 +247,23 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
         .collect()
 }
 
-/// Whether a version found as `found` reads an older project format than the
-/// board's projects are saved in: known for this Studio's own build (it
-/// reads this Studio's format) and for a version on a wire older than the
-/// one whose hello says the format ([`super::engine_project_format`]).
-fn strands_projects(found: &Found, board: Option<u32>) -> bool {
-    let Some(board) = board else {
-        return false;
-    };
+/// The project format a version found as `found` reads, against the one
+/// the board's engine reads (`board`, its hello's): `None` when either is not
+/// known. What the version reads is this Studio's own format for its own
+/// build, else what its release says (`projectFormat`, DD31), else — a
+/// release from before the field — a guess from its wire
+/// ([`super::engine_project_format`]), which knows only "at most 11".
+fn project_format_against(found: &Found, board: Option<u32>) -> Option<std::cmp::Ordering> {
+    let board = board?;
     let reads = match found.own {
         true => Some(lpc_model::PROJECT_FORMAT_VERSION),
-        false => found
-            .wire_proto
-            .and_then(super::engine_project_format::project_format_of_wire),
-    };
-    reads.is_some_and(|reads| reads < board)
+        false => found.project_format.or_else(|| {
+            found
+                .wire_proto
+                .and_then(super::engine_project_format::project_format_of_wire)
+        }),
+    }?;
+    Some(reads.cmp(&board))
 }
 
 /// A choice before it is read against the board.
@@ -256,6 +272,8 @@ struct Found {
     own: bool,
     from_file: bool,
     wire_proto: Option<u32>,
+    /// The project format its engine reads, when its release says.
+    project_format: Option<u32>,
     published_at: Option<String>,
     needs_tree_store: bool,
 }
@@ -267,6 +285,7 @@ impl Found {
             own: false,
             from_file: false,
             wire_proto: Some(entry.wire_proto),
+            project_format: entry.project_format,
             published_at: entry.published_at.clone(),
             needs_tree_store: entry.requires.fs_tree,
         }
@@ -281,6 +300,7 @@ impl Found {
             own,
             from_file: false,
             wire_proto: Some(build.identity.wire_proto),
+            project_format: None,
             published_at: None,
             needs_tree_store: build.needs_tree_store,
         }
@@ -347,6 +367,7 @@ mod tests {
     use crate::app::devices::device_update_route::{
         FIRST_RELAY_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE,
     };
+    use crate::app::devices::engine_project_format::FIRST_WIRE_SAYING_PROJECT_FORMAT;
     use crate::app::devices::store_lookups::StoreLookup;
 
     const PROTO: u32 = 40;
@@ -600,6 +621,62 @@ mod tests {
         assert!(choices.iter().any(|c| c.own));
     }
 
+    /// DD31: what a release's index entry says its engine reads decides
+    /// whether installing it upgrades the board's projects or strands them;
+    /// the wire guess stands in only for a release from before the field,
+    /// and says nothing from wire 46 on. A board that has not said its own
+    /// format gets neither.
+    #[test]
+    fn a_release_that_says_its_project_format_upgrades_or_strands_the_boards_projects() {
+        let mut releases = releases(&["2026.10.20-1", "2026.10.10-1", "2026.10.06-10"]);
+        let mut entries = releases.index.releases.clone();
+        entries[0].project_format = Some(13);
+        entries[1].project_format = Some(11);
+        entries[2].wire_proto = FIRST_WIRE_SAYING_PROJECT_FORMAT;
+        let mut before_the_field = entries[2].clone();
+        before_the_field.version = "2026.10.03-4".to_string();
+        before_the_field.wire_proto = FIRST_WIRE_SAYING_PROJECT_FORMAT - 1;
+        entries.push(before_the_field);
+        releases.index =
+            ReleaseIndex::newest_first(&TargetName::parse("esp32c6-4mb").unwrap(), entries);
+        let board = UpdateVersion::new("2026.10.08-1");
+        let mut saved_at_12 = inputs(&board, None, Some(&releases));
+        saved_at_12.board_project_format = Some(12);
+        let choices = install_choices(&saved_at_12);
+        let flags = |version: &str| {
+            let choice = choices
+                .iter()
+                .find(|c| c.version.version == version)
+                .expect(version);
+            (choice.upgrades_projects, choice.strands_projects)
+        };
+        assert_eq!(flags("2026.10.20-1"), (true, false), "says 13: upgrades");
+        assert_eq!(flags("2026.10.10-1"), (false, true), "says 11: strands");
+        assert_eq!(
+            flags("2026.10.06-10"),
+            (false, false),
+            "says nothing, wire 46+: unknown"
+        );
+        assert_eq!(
+            flags("2026.10.03-4"),
+            (false, true),
+            "says nothing, older wire: at most 11"
+        );
+        assert!(
+            choices
+                .iter()
+                .filter(|c| c.own)
+                .all(|c| !c.upgrades_projects && !c.strands_projects)
+        );
+
+        let unsaid = install_choices(&inputs(&board, None, Some(&releases)));
+        assert!(
+            unsaid
+                .iter()
+                .all(|c| !c.upgrades_projects && !c.strands_projects)
+        );
+    }
+
     fn inputs<'a>(
         board: &'a UpdateVersion,
         refused: Option<&'a UpdateVersion>,
@@ -636,6 +713,7 @@ mod tests {
                     "736d72856d243fce519c9f461f369f59fcbf175a".to_string()
                 },
                 wire_proto: PROTO,
+                project_format: None,
                 requires: Requires {
                     fs_tree: false,
                     layout: 1,

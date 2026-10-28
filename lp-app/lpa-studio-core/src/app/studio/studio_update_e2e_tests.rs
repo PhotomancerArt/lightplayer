@@ -2195,6 +2195,7 @@ fn index_entry(version: &str, build: Option<&ModelBuild>, wire: u32) -> ReleaseI
         version: version.to_string(),
         commit,
         wire_proto: wire,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,
@@ -2245,6 +2246,7 @@ fn ota_manifest(build: &ModelBuild) -> OtaManifest {
         version: build.version.clone(),
         commit: format!("{commit12}{}", "0".repeat(28)),
         wire_proto: 36,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,

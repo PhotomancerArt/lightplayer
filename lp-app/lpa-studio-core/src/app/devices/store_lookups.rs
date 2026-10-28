@@ -120,6 +120,7 @@ mod tests {
             version: version.to_string(),
             commit: "a".repeat(40),
             wire_proto: 40,
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,

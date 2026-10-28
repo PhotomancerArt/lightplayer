@@ -693,6 +693,7 @@ mod tests {
                     published_at: None,
                     recent: true,
                     strands_projects: false,
+                    upgrades_projects: false,
                 }],
                 listed: true,
                 ..UpdateOfferFacts::default()

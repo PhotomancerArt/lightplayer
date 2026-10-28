@@ -1,9 +1,9 @@
 //! Which project format a build's engine reads, where nothing says it
-//! outright (M3 P11).
+//! outright (M3 P11) — the fallback.
 //!
-//! A board says it in its hello (`build.projectFormat`, wire 46 on). A
-//! release in the store says nothing of it (its index entry carries its wire
-//! protocol, not its project format), so for a release it is read off its
+//! A board says it in its hello (`build.projectFormat`, wire 46 on), and a
+//! release in the store in its index entry (`projectFormat`, DD31). A release
+//! from before that field says nothing of it, so for one it is read off its
 //! wire: the hello learned to say the project format in the same change that
 //! made the format 12, so a release on an older wire reads at most 11. From
 //! wire 46 on, the wire does not tell: `None`.

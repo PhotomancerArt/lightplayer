@@ -314,7 +314,11 @@ backwards, and now orders by number). `version`, `commit`, `wireProto` and
 `requires` are copied from the release's `ota-manifest.json` and spelled
 exactly as it spells them. There is no `buildId`: it is derived
 (`version+commit[..12]`), as in the manifest. `publishedAt` is optional and
-for display only. The compatibility rule is the manifest's: readers refuse
+for display only. (Since 2026-10-28, an entry also copies the manifest's
+optional `projectFormat` — the project format the release's engine reads —
+when the manifest says it: an additive field of format 1, in both, by this
+very rule. Plan `lp2025/2026-10-27-0114-mapping-rebuild`, DD31.) The
+compatibility rule is the manifest's: readers refuse
 another `format` and **ignore unknown fields, at the top and in every entry
 (its `requires` included)**, so the index can grow without breaking a
 Studio in the field; an additive optional field keeps format 1; no value is

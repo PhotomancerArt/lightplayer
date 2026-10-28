@@ -12,6 +12,12 @@
 //! the split tool's account of the same bytes. The one fact the image does
 //! not carry whole is the commit: the manifest core holds its first 12
 //! digits, and the full 40 are resolved from the checkout that built it.
+//! The other is `projectFormat`, the project format the build's engine reads
+//! (the mapping rebuild's DD31): the image does not say it, so lp-cli writes
+//! its own `lpc_model::PROJECT_FORMAT_VERSION` — and only when it was built
+//! as the image's own version ([`project_format_vouched`]), the one case where
+//! the two link the same `lpc_model`. Otherwise the field is left out, and
+//! readers guess from `wireProto` as they did before it.
 //!
 //! The compression is **the one packer**, `lpa_update::pack::pack_piece`
 //! (encoding 1, the dictionary rule in `lpc_update`); lp-cli compresses
@@ -169,6 +175,16 @@ pub fn write_ota_files(
     let core_z = pack_piece(PieceKind::Core, &core);
     let engine_z = pack_piece(PieceKind::Engine, &engine);
 
+    let project_format = project_format_vouched(&identity.version, env!("LP_APP_VERSION"));
+    if project_format.is_none() {
+        eprintln!(
+            "warning: {} {}'s OTA manifest says no project format: this lp-cli was built as {}, \
+             not as the image's version",
+            def.id,
+            identity.version,
+            env!("LP_APP_VERSION")
+        );
+    }
     let manifest = OtaManifest {
         format: OTA_MANIFEST_FORMAT,
         target: identity.target,
@@ -176,6 +192,7 @@ pub fn write_ota_files(
         version: identity.version,
         commit,
         wire_proto: identity.wire_proto,
+        project_format,
         requires,
         core: piece_file(CORE_BIN, &core),
         engine: piece_file(ENGINE_BIN, &engine),
@@ -218,6 +235,16 @@ pub fn write_ota_files(
         core: core_z,
         engine: engine_z,
     }))
+}
+
+/// The project format an image built as `image_version` reads, when this
+/// lp-cli, built as `own_version`, can say it: the same version is the same
+/// commit (a release, or a dev `<sha>` with the same dirty stamp), so the
+/// same `lpc_model::PROJECT_FORMAT_VERSION`. `None` otherwise, and for a
+/// build whose version is unknown.
+pub fn project_format_vouched(image_version: &str, own_version: &str) -> Option<u32> {
+    (image_version == own_version && own_version != "unknown")
+        .then_some(lpc_model::PROJECT_FORMAT_VERSION)
 }
 
 impl OtaFiles {
@@ -588,6 +615,25 @@ mod tests {
             m["core"]["platform"]["cargoTarget"] = fx.def.cargo_target.clone().into();
         });
         fx
+    }
+
+    /// DD31: the manifest says the project format only when this lp-cli was
+    /// built as the image's own version — the one case where both read the
+    /// same `lpc_model` — and never for an unknown version.
+    #[test]
+    fn the_project_format_is_said_only_for_the_image_s_own_version() {
+        let format = Some(lpc_model::PROJECT_FORMAT_VERSION);
+        assert_eq!(
+            project_format_vouched("2026.10.28-3", "2026.10.28-3"),
+            format
+        );
+        assert_eq!(project_format_vouched("abc1234", "abc1234"), format);
+        assert_eq!(project_format_vouched("2026.10.28-3", "2026.10.28-4"), None);
+        assert_eq!(
+            project_format_vouched("abc1234-dirty-101010PT", "abc1234-dirty-101512PT"),
+            None
+        );
+        assert_eq!(project_format_vouched("unknown", "unknown"), None);
     }
 
     #[test]

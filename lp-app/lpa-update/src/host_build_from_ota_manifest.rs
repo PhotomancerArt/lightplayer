@@ -218,6 +218,7 @@ pub(crate) mod tests {
             version: "2026.10.05-3".into(),
             commit: "abc1234567890123456789012345678901234567".into(),
             wire_proto: 37,
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,

@@ -1112,6 +1112,7 @@ impl Release {
             version: version.into(),
             commit: COMMIT.into(),
             wire_proto: 36,
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,

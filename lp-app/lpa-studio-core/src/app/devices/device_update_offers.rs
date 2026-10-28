@@ -81,6 +81,12 @@ pub const INSTALL_FIND_PARAM: &str = "find";
 /// "Other version…").
 pub const INSTALL_PRESS_LABEL: &str = "Install";
 
+/// What an install that upgrades the board's projects says before it is
+/// pressed (DD31): the summary of its button, and a sentence of its arm copy
+/// when it has one.
+pub const UPGRADES_PROJECTS: &str = "This version upgrades this board's projects to a newer \
+     format, which older firmware won't load.";
+
 /// The line the version list carries when the store's full list could not
 /// be read (offline, or a server without the index).
 pub const INSTALL_LIST_UNAVAILABLE: &str = "The full list isn't available right now.";
@@ -282,7 +288,14 @@ pub fn update_offers(
                 FirmwareAge::Older | FirmwareAge::Unknown => "Update".to_string(),
                 _ => format!("Install {}", to.short()),
             };
-            let action = install_action(device, &to.version, false).with_label(label);
+            let mut action = install_action(device, &to.version, false).with_label(label);
+            if facts
+                .choices
+                .iter()
+                .any(|c| c.version.version == to.version && c.upgrades_projects)
+            {
+                action = action.with_summary(UPGRADES_PROJECTS);
+            }
             set.offers.push(UiOffer::new(
                 at("update-firmware"),
                 "download",
@@ -589,6 +602,8 @@ fn warning(choice: &InstallChoice) -> Option<&'static str> {
         Some("older language than Studio")
     } else if choice.speaks_newer_wire() {
         Some("newer than Studio — reload to edit")
+    } else if choice.upgrades_projects {
+        Some("upgrades the board's projects")
     } else {
         None
     }
@@ -600,7 +615,10 @@ fn bind_choice(device: DeviceId, board: &UpdateVersion, choice: &InstallChoice) 
     // A build from files has no order the host can trust: `decide()` may
     // take it whichever way it compares.
     let allow_downgrade = choice.is_older() || choice.from_file;
-    let action = install_action(device, &choice.version.version, allow_downgrade);
+    let mut action = install_action(device, &choice.version.version, allow_downgrade);
+    if choice.upgrades_projects {
+        action = action.with_summary(UPGRADES_PROJECTS);
+    }
     match install_confirmation(board, choice) {
         Some(copy) => action.lasting(copy),
         None => action,
@@ -669,6 +687,13 @@ fn install_confirmation(
         message.push_str(&format!(
             "This board's projects were saved for newer firmware and won't load on {version}."
         ));
+    }
+    // DD31: an engine that reads a newer project format upgrades them.
+    if choice.upgrades_projects {
+        if !message.is_empty() {
+            message.push(' ');
+        }
+        message.push_str(UPGRADES_PROJECTS);
     }
     if let Some(link) = choice.stranded_over {
         if !message.is_empty() {
@@ -1317,6 +1342,45 @@ mod tests {
             "{}",
             copy.message
         );
+    }
+
+    /// DD31: an update whose engine reads a newer project format than the
+    /// board's says so before it is pressed — in the Update button's summary
+    /// and on its line in the version list. A board whose engine already
+    /// reads this Studio's format, or has not said, is told nothing.
+    #[test]
+    fn an_update_that_upgrades_the_boards_projects_says_so_before_it_is_pressed() {
+        let update_of = |fixture: &UpdateFixture| {
+            update_offers(&fixture.view, &fixture.offer_facts(), &prefix())
+                .offers
+                .into_iter()
+                .find(|o| o.path.last() == Some("update-firmware"))
+                .expect("Update offered")
+        };
+        let own_line = |fixture: &UpdateFixture| {
+            let (options, _) = choice_param(&install_of(fixture));
+            options
+                .into_iter()
+                .find(|o| o.value == "2026.10.05-2")
+                .expect("this Studio's build in the list")
+                .warning
+        };
+
+        let saved_at_11 = fixture(UpdateFixtureRow::Available).with_board_project_format(11);
+        assert_eq!(update_of(&saved_at_11).summary(), UPGRADES_PROJECTS);
+        assert_eq!(
+            own_line(&saved_at_11).as_deref(),
+            Some("upgrades the board's projects")
+        );
+
+        for quiet in [
+            fixture(UpdateFixtureRow::Available)
+                .with_board_project_format(lpc_model::PROJECT_FORMAT_VERSION),
+            fixture(UpdateFixtureRow::Available),
+        ] {
+            assert_ne!(update_of(&quiet).summary(), UPGRADES_PROJECTS);
+            assert_eq!(own_line(&quiet), None);
+        }
     }
 
     /// "From a file…" sits beside the list, for the user's own click; the

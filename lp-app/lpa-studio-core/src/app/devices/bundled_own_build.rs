@@ -554,6 +554,7 @@ mod tests {
                 version: "2026.10.06-1".to_string(),
                 commit: "e6775ad537f6039afabc35952488312141962ccd".to_string(),
                 wire_proto: 38,
+                project_format: None,
                 requires: Requires {
                     fs_tree: false,
                     layout: layout.filter(|layout| *layout > 1).unwrap_or(1),

@@ -79,8 +79,9 @@ install,
 newest first by number (`2026.10.06-10` above `-9`): the release index,
 **format 1** (`lpc_firmware_release::ReleaseIndex`,
 `schemas/firmware-release-index.schema.json`) — `format`, `target`, and per
-release `version`, `commit`, `wireProto`, `requires` and an optional
-`publishedAt`. Studios in the field read it, so it is a public format:
+release `version`, `commit`, `wireProto`, an optional `projectFormat` (the
+project format its engine reads, copied from its manifest), `requires` and an
+optional `publishedAt`. Studios in the field read it, so it is a public format:
 readers refuse another `format` and **ignore unknown fields**, at the top
 and in every entry, so the index grows without a new format. It is an API
 answer, not a file the store passes through, so it lives under the

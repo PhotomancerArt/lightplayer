@@ -539,6 +539,7 @@ pub fn release_index() -> ReleaseIndex {
                 0..9 => lpc_wire::WIRE_PROTO_VERSION,
                 _ => lpc_wire::WIRE_PROTO_VERSION - 1,
             },
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,
@@ -558,6 +559,7 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
         version: version.to_string(),
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,
@@ -591,6 +593,7 @@ pub fn ota_manifest_for(version: &str, core: &[u8], engine: &[u8]) -> OtaManifes
         version: version.to_string(),
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,
