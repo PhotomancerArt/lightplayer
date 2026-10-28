@@ -38,7 +38,10 @@
 //! session's hello carried `firmware` or the board sent an update message
 //! itself. A board without the channel would never acknowledge a reliable
 //! frame there and the link would stall; a message refused this way is a
-//! note, never a stalled link.
+//! note, never a stalled link. A hello from another wire this build cannot
+//! decode announces it the same way when its `firmware` reads
+//! (`lpc_wire::hello_firmware`): the update channel does not change with
+//! the wire, and it is how a board on an older wire is updated.
 //!
 //! **An update message waits for room** (OTA M8): channel-3 messages the
 //! link's send ring cannot take yet (`Full`: the update host keeps several
@@ -426,16 +429,30 @@ impl LinkPortService {
                 MappedRead::Read(read) => {
                     match &read {
                         WireRead::LinkReset(_) => self.forget_session(),
-                        WireRead::Frame(frame) => {
-                            if let Ok(message) = &frame.message
-                                && let ServerMsgBody::Hello(hello) = &message.msg
-                            {
-                                self.announced |= hello.firmware.is_some();
-                                if let Some(mac) = &hello.hardware.base_mac {
-                                    self.base_mac = Some(mac.clone());
+                        WireRead::Frame(frame) => match &frame.message {
+                            Ok(message) => {
+                                if let ServerMsgBody::Hello(hello) = &message.msg {
+                                    self.announced |= hello.firmware.is_some();
+                                    if let Some(mac) = &hello.hardware.base_mac {
+                                        self.base_mac = Some(mac.clone());
+                                    }
                                 }
                             }
-                        }
+                            // A hello from another wire: what its update
+                            // needs is read off it all the same (the demux's
+                            // `HelloOnOtherWire`), its announcement included.
+                            Err(_) => {
+                                if lpc_wire::hello_proto(&frame.json)
+                                    .is_some_and(|proto| proto != lpc_wire::WIRE_PROTO_VERSION)
+                                {
+                                    self.announced |=
+                                        lpc_wire::hello_firmware(&frame.json).is_some();
+                                    if let Some(mac) = lpc_wire::hello_base_mac(&frame.json) {
+                                        self.base_mac = Some(mac);
+                                    }
+                                }
+                            }
+                        },
                         _ => {}
                     }
                     self.reads.push_back(read);
@@ -744,6 +761,49 @@ mod tests {
             "{updates:?}"
         );
         assert!(bench.host.take_reads().is_empty());
+    }
+
+    /// A board on an older wire whose hello this build cannot decode, but
+    /// which carries its manifest, announces the channel all the same: its
+    /// update rides channel 3, which the wire never changes, and that is
+    /// how it is updated over a radio or the relay. Its MAC is read too.
+    #[test]
+    fn an_older_wire_hello_with_firmware_announces_the_channel() {
+        let mut board = BoardDouble::split(0xB0A2_0001, false);
+        board.older_wire = true;
+        let mut bench = Bench::with_board(board);
+        bench.run(40);
+        let reads = bench.host.take_reads();
+        assert!(
+            reads.iter().any(|read| matches!(
+                read,
+                WireRead::Frame(frame) if frame.message.is_err() && frame.json.contains("\"hello\"")
+            )),
+            "the premise: a hello this build cannot decode: {reads:?}"
+        );
+        assert!(bench.host.update_channel_announced());
+        assert_eq!(bench.host.base_mac(), Some("10:bd:a3:b0:8e:30"));
+
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(true));
+        bench.run(40);
+        assert_eq!(bench.board.updates, vec![b"Q\x01".to_vec()]);
+        let updates = bench.host.take_updates();
+        assert!(
+            matches!(updates.as_slice(), [m] if m[0] == b'M'),
+            "{updates:?}"
+        );
+    }
+
+    /// The same older hello with no manifest (a single image) announces
+    /// nothing: channel 3 stays quiet.
+    #[test]
+    fn an_older_wire_hello_without_firmware_announces_nothing() {
+        let mut board = BoardDouble::new(0xB0A2_0001);
+        board.older_wire = true;
+        let mut bench = Bench::with_board(board);
+        bench.run(40);
+        assert!(!bench.host.update_channel_announced());
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(false));
     }
 
     /// OTA M8: a burst of update messages larger than the link's send ring
@@ -1222,6 +1282,9 @@ mod tests {
         core_only: bool,
         /// Channel-3 messages the board heard.
         updates: Vec<Vec<u8>>,
+        /// Its hello is from an older wire whose shape this build cannot
+        /// decode (no `packFormat`, which this wire requires).
+        older_wire: bool,
     }
 
     impl BoardDouble {
@@ -1236,6 +1299,7 @@ mod tests {
                 manifest: None,
                 core_only: false,
                 updates: Vec::new(),
+                older_wire: false,
             }
         }
 
@@ -1288,8 +1352,22 @@ mod tests {
                         let mut message = hello();
                         if let ServerMsgBody::Hello(hello) = &mut message.msg {
                             hello.firmware = self.manifest.clone();
+                            hello.hardware.base_mac = Some("10:bd:a3:b0:8e:30".to_string());
                         }
-                        self.send(&message);
+                        if self.older_wire {
+                            let json = lpc_wire::json::to_string(&message).unwrap().replace(
+                                &format!(r#""proto":{WIRE_PROTO_VERSION}"#),
+                                &format!(r#""proto":{}"#, WIRE_PROTO_VERSION - 1),
+                            );
+                            let start = json.find(r#""packFormat":"#).expect("a packFormat");
+                            let end = start + json[start..].find(',').expect("a field after");
+                            let json = format!("{}{}", &json[..start], &json[end + 1..]);
+                            self.link
+                                .send(CH_PROTO, json.as_bytes())
+                                .expect("board send");
+                        } else {
+                            self.send(&message);
+                        }
                     }
                     LinkEvent::Message {
                         channel: CH_UPDATE,
