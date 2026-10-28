@@ -31,9 +31,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    Channel, ColorOrder, Component, ComponentId, ComponentKind, Direction, Fixture, Node, NodeId,
-    NodeKind, ObjectId, OtherNode, Output, PatchPlace, PatchTarget, Pattern, Port, Project,
-    RenderSource, Unsupported, Vec2, Wire,
+    Channel, ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind,
+    ObjectId, OtherNode, Output, Pattern, Port, ProductPatch, ProductRow, Project, RenderSource,
+    Unsupported, Vec2,
 };
 use serde_json::Value;
 
@@ -75,6 +75,11 @@ pub struct NodeFile {
     pub map: Option<MapFile>,
     /// A fixture's patch, if it has one.
     pub patch: Option<PatchFile>,
+    /// A fixture's patch in the product's terms as it opened (its rows, and
+    /// the output it flows onto on auto): what the lab froze into a Start
+    /// and overrides, and what a save checks the walker against before it
+    /// keeps the file as it is.
+    pub product_patch: Option<ProductPatch>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +160,10 @@ impl Opened {
         *project.nodes_mut() = reader.module("module.json", &root, None)?;
         // Rules, now that every output is known. A patch with a row the
         // lab can't place leaves its fixture as its box alone, and the rest
-        // of the project opens round it (plan M4).
+        // of the project opens round it (plan M4). Each fixture's patch is
+        // read in the product's terms, then frozen into the walker's: a
+        // Start, and overrides where the walk would go elsewhere.
+        let mut product: BTreeMap<NodeId, ProductPatch> = BTreeMap::new();
         for (fixture, path, doc) in patches {
             let rules = match rules_of(&project, &files, &fixture, Some(&doc)) {
                 Ok((rules, ranges)) => {
@@ -175,9 +183,7 @@ impl Opened {
                 }
                 Err(RulesRefusal::Broken(what)) => return Err(FilesError::new(&path, what)),
             };
-            if let Some(f) = project.fixture_mut(&fixture) {
-                f.places = rules;
-            }
+            product.insert(fixture, rules);
         }
         let unpatched: Vec<NodeId> = project
             .fixtures()
@@ -191,8 +197,28 @@ impl Opened {
                 RulesRefusal::Unsupported(why) => FilesError::new("", why.what),
                 RulesRefusal::Broken(what) => FilesError::new("", what),
             })?;
+            product.insert(fixture, rules);
+        }
+        // An object the product lays across two ports can't be said in the
+        // walker's terms (a leaf makes one span, on one port): its fixture
+        // opens as its box alone, and says why.
+        for object in project.freeze_product_patches(&product) {
+            let Some(fixture) = project.fixture_of(&object.component).map(|n| n.id.clone()) else {
+                continue;
+            };
             if let Some(f) = project.fixture_mut(&fixture) {
-                f.places = rules;
+                f.components.clear();
+                f.overrides.clear();
+                f.rules.clear();
+                f.unsupported = Some(Unsupported {
+                    what: format!("an object the patch lays across two ports ({object})"),
+                    edit_in: "Patch".into(),
+                });
+            }
+        }
+        for (fixture, patch) in product {
+            if let Some(f) = files.nodes.get_mut(&fixture) {
+                f.product_patch = Some(patch);
             }
         }
         Ok(Opened { project, files })
@@ -246,6 +272,7 @@ impl Reader<'_> {
                 value: node_value.clone(),
                 map: None,
                 patch: None,
+                product_patch: None,
             };
             let kind = match kind.as_str() {
                 "Module" => NodeKind::Module {
@@ -378,10 +405,9 @@ impl Reader<'_> {
                     value: o.value.clone(),
                 },
             );
-            components.push(Component {
-                id: lab_id,
-                kind: o.kind.clone(),
-            });
+            let mut kind = o.kind.clone();
+            self.name_repeat_children(&mut kind);
+            components.push(Component { id: lab_id, kind });
         }
 
         // The box: the canvas, from (0, 0). A canvas that starts elsewhere
@@ -424,6 +450,28 @@ impl Reader<'_> {
             });
         }
         Ok(fixture)
+    }
+
+    /// A product repeat copies a bare shape; the lab's holds a component
+    /// with its own id, minted here (`polygon3`) the way the lab mints any
+    /// (theory "Ids"). The product's files can't hold it, so it is minted
+    /// again, the same, each time the project opens.
+    fn name_repeat_children(&mut self, kind: &mut ComponentKind) {
+        if let ComponentKind::Repeat { child, .. } = kind {
+            if child.id.as_str().is_empty() {
+                let word = child.kind.id_word();
+                let mut n = 1;
+                while self
+                    .taken_components
+                    .contains(&ComponentId::new(format!("{word}{n}")))
+                {
+                    n += 1;
+                }
+                child.id = ComponentId::new(format!("{word}{n}"));
+                self.taken_components.insert(child.id.clone());
+            }
+            self.name_repeat_children(&mut child.kind);
+        }
     }
 
     fn component_id(&mut self, product_id: &str) -> ComponentId {
@@ -536,9 +584,9 @@ pub(crate) fn rules_of(
     files: &ProductProject,
     fixture: &NodeId,
     patch: Option<&PatchDoc>,
-) -> Result<(Vec<PatchPlace>, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
+) -> Result<(ProductPatch, BTreeMap<ObjectId, (u32, Option<u32>)>), RulesRefusal> {
     let default = default_output(project, files, fixture);
-    let mut rules = Vec::new();
+    let mut rules: Vec<ProductRow> = Vec::new();
     let mut ranges = BTreeMap::new();
     let spans = object_lamp_ranges(project, fixture);
     let manual = patch.is_some_and(|d| d.manual);
@@ -599,47 +647,39 @@ pub(crate) fn rules_of(
                 (last.key.clone(), e.lamp - start)
             }
         };
-        // One placement per object: the first row wins.
-        let target = PatchTarget::Object(object);
-        if rules.iter().any(|r: &PatchPlace| r.on == target) {
+        // One row per object: the first wins.
+        if rules.iter().any(|r| r.object == object) {
             continue;
         }
-        rules.push(PatchPlace {
-            on: target,
-            wire: Some(Wire::At {
-                output,
-                port,
-                pixel,
-            }),
-            direction: e.reversed.then_some(Direction::Reversed),
-            turn: (e.offset != 0).then_some(e.offset),
+        rules.push(ProductRow {
+            object,
+            output,
+            port,
+            pixel,
+            reversed: e.reversed,
+            rotation: e.offset,
         });
     }
-    if !manual && let Some(output) = default {
-        rules.push(PatchPlace {
-            wire: Some(Wire::Auto { output }),
-            ..PatchPlace::on(PatchTarget::Fixture)
-        });
-    }
-    Ok((rules, ranges))
+    let patch = ProductPatch {
+        auto: (!manual).then_some(default).flatten(),
+        rows: rules,
+    };
+    Ok((patch, ranges))
 }
 
 /// Each of a fixture's objects, with where its lamps start in the
 /// fixture's own numbering and how many it has, in wiring order.
 pub(crate) fn object_lamp_ranges(project: &Project, fixture: &NodeId) -> Vec<(ObjectId, u32, u32)> {
-    fn walk(list: &[Component], start: &mut u32, out: &mut Vec<(ObjectId, u32, u32)>) {
-        for c in list {
+    let mut out = Vec::new();
+    let mut start = 0;
+    if let Some(f) = project.fixture(fixture) {
+        for c in &f.components {
             for o in lab_mapping_model::domain::object::objects_of(c) {
                 let n = o.lamps.len() as u32;
-                out.push((o.id, *start, n));
-                *start += n;
+                out.push((o.id, start, n));
+                start += n;
             }
-            walk(c.children(), start, out);
         }
-    }
-    let mut out = Vec::new();
-    if let Some(f) = project.fixture(fixture) {
-        walk(&f.components, &mut 0, &mut out);
     }
     out
 }
@@ -659,23 +699,20 @@ fn object_of(
         .objects
         .iter()
         .find(|(_, o)| o.product_id == product_id)?;
-    let key = match (&project.component(id)?.kind, instances) {
-        (ComponentKind::Path { .. }, []) => lab_mapping_model::domain::object::PATH_KEY.to_string(),
-        (ComponentKind::Polygon { .. }, []) => {
-            lab_mapping_model::domain::object::POLYGON_KEY.to_string()
+    let c = project.component(id)?;
+    match (&c.kind, instances) {
+        (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => {
+            Some(ObjectId::new(id, rings[0].key.clone()))
         }
-        (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => rings[0].key.clone(),
-        (ComponentKind::Grid(_), []) => lab_mapping_model::domain::object::GRID_KEY.to_string(),
-        (ComponentKind::RingSet(_), []) => lab_mapping_model::domain::object::RINGS_KEY.to_string(),
-        (ComponentKind::Filled(_), []) => lab_mapping_model::domain::object::FILLED_KEY.to_string(),
-        (ComponentKind::Repeat { shape, count, .. }, [k])
-            if *k < *count && !matches!(**shape, ComponentKind::Repeat { .. }) =>
+        (_, []) if c.is_single_object() => Some(ObjectId::of(id)),
+        // `/sector/2`: copy 2 of the repeat's child, `<child>@2`.
+        (ComponentKind::Repeat { child, count, .. }, [k])
+            if *k < *count && child.is_single_object() =>
         {
-            k.to_string()
+            Some(ObjectId::of(&child.id).in_copy(*k).canonical())
         }
-        _ => return None,
-    };
-    Some(ObjectId::new(id, key))
+        _ => None,
+    }
 }
 
 /// The output a fixture auto-flows onto: the first output, in attach

@@ -74,13 +74,16 @@ pub enum ComponentKind {
         rings: Vec<Ring>,
         next_ring: u32,
     },
-    /// `count` copies of one shape, turned evenly round `center`: copy `k`
-    /// is the shape turned `k · 360° / count`, clockwise. Each copy is its
-    /// own object — its own strand of wire — keyed by its number (`2`), the
-    /// product's `/sector/2`. The copies are derived: an edit to one is an
-    /// edit to the shape, so it lands on every copy (D11).
+    /// `count` copies of one component, turned evenly round `center`: copy
+    /// `k` is the component turned `k · 360° / count`, clockwise. The
+    /// repeat holds a whole component with its own id (theory "Components
+    /// and objects"), so a repeated group works, and a component can go
+    /// into a repeat and out again. Copy 0 carries the child's own ids
+    /// (`panel`); copy `k` is `panel@k` (`object.rs`), the product's
+    /// `/sector/k`. The copies are derived: an edit to one is an edit to
+    /// the child, so it lands on every copy (D11).
     Repeat {
-        shape: Box<ComponentKind>,
+        child: Box<Component>,
         center: Vec2,
         count: u32,
     },
@@ -127,13 +130,28 @@ impl Component {
         )
     }
 
+    /// The components under this one: a group's children, or a repeat's
+    /// one child.
     pub fn children(&self) -> &[Component] {
         match &self.kind {
             ComponentKind::Group { children } => children,
+            ComponentKind::Repeat { child, .. } => std::slice::from_ref(&**child),
             _ => &[],
         }
     }
 
+    /// The components under this one, to edit in place (a repeat's child
+    /// too).
+    pub fn children_slice_mut(&mut self) -> &mut [Component] {
+        match &mut self.kind {
+            ComponentKind::Group { children } => children,
+            ComponentKind::Repeat { child, .. } => std::slice::from_mut(&mut **child),
+            _ => &mut [],
+        }
+    }
+
+    /// A group's children, to add to or take from. A repeat always holds
+    /// exactly one child, so it has none to change here.
     pub fn children_mut(&mut self) -> Option<&mut Vec<Component>> {
         match &mut self.kind {
             ComponentKind::Group { children } => Some(children),
@@ -166,10 +184,10 @@ impl ComponentKind {
         }
     }
 
-    /// `count` copies of `shape`, turned evenly round `center`.
-    pub fn repeat(shape: ComponentKind, center: Vec2, count: u32) -> Self {
+    /// `count` copies of `child`, turned evenly round `center`.
+    pub fn repeat(child: Component, center: Vec2, count: u32) -> Self {
         ComponentKind::Repeat {
-            shape: Box::new(shape),
+            child: Box::new(child),
             center,
             count: count.max(1),
         }
@@ -234,9 +252,9 @@ impl ComponentKind {
                 }
             }
             ComponentKind::Circle { center, .. } => *center = *center + delta,
-            ComponentKind::Repeat { shape, center, .. } => {
+            ComponentKind::Repeat { child, center, .. } => {
                 *center = *center + delta;
-                shape.translate(delta);
+                child.translate(delta);
             }
             ComponentKind::Group { children } => {
                 for child in children {

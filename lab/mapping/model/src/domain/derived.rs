@@ -28,6 +28,7 @@ use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
 use crate::domain::object::{Object, ObjectId, ObjectShape};
+use crate::domain::object_tree::{self, ObjectNode};
 use crate::domain::patch::EffectivePatch;
 use crate::domain::placement::Frame;
 use crate::domain::project::Project;
@@ -69,8 +70,15 @@ pub struct Placed {
     /// objects in authoring order — the order the auto patch fills ports.
     pub list: Vec<(NodeId, Object)>,
     by_id: HashMap<ObjectId, usize>,
-    /// A component's own objects sit together in `list`.
-    by_component: HashMap<ComponentId, Range<usize>>,
+    /// Each fixture's object tree (`object_tree.rs`): one root per
+    /// top-level component. Its leaves, depth first, are `list`.
+    trees: HashMap<NodeId, Vec<ObjectNode>>,
+    /// The leaves under each component's node, every copy included, as
+    /// indices into `list`, in tree order.
+    by_component: HashMap<ComponentId, Vec<usize>>,
+    /// Each object node's parent node, when it has one (a top-level
+    /// component's node has none: its parent is the fixture).
+    parents: HashMap<ObjectId, ObjectId>,
     /// Every component (groups too) and the fixture it lives in.
     fixture_of: HashMap<ComponentId, NodeId>,
     /// Where each object's lamp 0 sits among all the lamps, `list` order.
@@ -98,12 +106,35 @@ impl Placed {
         self.by_id.get(id).copied()
     }
 
-    /// A component's own objects (a group has none).
-    pub fn of_component(&self, id: &ComponentId) -> &[(NodeId, Object)] {
-        match self.by_component.get(id) {
-            Some(r) => &self.list[r.clone()],
-            None => &[],
-        }
+    /// The leaves a component renders, in tree order: its own (a path),
+    /// its generated ones (a circle's rings), or everything under it (a
+    /// group's children's, every copy of a repeat's child's).
+    pub fn of_component(&self, id: &ComponentId) -> Vec<&(NodeId, Object)> {
+        self.by_component
+            .get(id)
+            .map(|v| v.iter().map(|&i| &self.list[i]).collect())
+            .unwrap_or_default()
+    }
+
+    /// The object node above this one; `None` for a top-level component's
+    /// node (the fixture is above it) or an id that isn't there.
+    pub fn parent_of(&self, id: &ObjectId) -> Option<&ObjectId> {
+        self.parents.get(id)
+    }
+
+    /// A fixture's object tree: one root per top-level component.
+    pub fn tree(&self, fixture: &NodeId) -> &[ObjectNode] {
+        self.trees.get(fixture).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The node with this id, a leaf or a container, in whichever fixture
+    /// holds it.
+    pub fn node(&self, id: &ObjectId) -> Option<(&NodeId, &ObjectNode)> {
+        let fixture = self.fixture_of.get(&id.component)?;
+        self.tree(fixture)
+            .iter()
+            .find_map(|root| root.find(id))
+            .map(|n| (fixture, n))
     }
 
     pub fn fixture_of(&self, id: &ComponentId) -> Option<&NodeId> {
@@ -340,8 +371,11 @@ fn object_bounds(o: &Object) -> Rect {
 fn bound_components(list: &[Component], p: &mut Placed) -> Option<Rect> {
     let mut all: Option<Rect> = None;
     for c in list {
-        let own = p.by_component.get(&c.id).cloned().unwrap_or_default();
-        let mut boxes: Vec<Rect> = p.bounds[own].to_vec();
+        let mut boxes: Vec<Rect> = p
+            .by_component
+            .get(&c.id)
+            .map(|v| v.iter().map(|&i| p.bounds[i]).collect())
+            .unwrap_or_default();
         boxes.extend(bound_components(c.children(), p));
         if let Some(b) = Rect::around(boxes.iter().flat_map(|r| [r.min, r.max])) {
             p.component_bounds.insert(c.id.clone(), b);
@@ -351,19 +385,57 @@ fn bound_components(list: &[Component], p: &mut Placed) -> Option<Rect> {
     all
 }
 
-/// Index a fixture's components: each one's fixture, and its objects placed
-/// in world units, in authoring order (a component's own objects, then its
-/// children's).
+/// Index a fixture's components: each one's fixture, its object tree
+/// placed in world units, and its leaves in tree order.
 fn index_components(list: &[Component], fixture: &NodeId, frame: Frame, p: &mut Placed) {
+    let mut roots = Vec::with_capacity(list.len());
     for c in list {
-        p.fixture_of.insert(c.id.clone(), fixture.clone());
-        let start = p.list.len();
-        p.list.extend(
-            crate::domain::object::objects_of(c)
-                .into_iter()
-                .map(|o| (fixture.clone(), crate::domain::project::placed(o, frame))),
-        );
-        p.by_component.insert(c.id.clone(), start..p.list.len());
-        index_components(c.children(), fixture, frame, p);
+        let root = placed_node(object_tree::render(c), frame);
+        index_node(&root, fixture, p);
+        mark_fixture(c, fixture, p);
+        roots.push(root);
+    }
+    p.trees.insert(fixture.clone(), roots);
+}
+
+/// Every component under `c` (itself too) lives in `fixture`.
+fn mark_fixture(c: &Component, fixture: &NodeId, p: &mut Placed) {
+    p.fixture_of.insert(c.id.clone(), fixture.clone());
+    for child in c.children() {
+        mark_fixture(child, fixture, p);
+    }
+}
+
+/// Put a node's leaves in `list`, and note each one under every component
+/// whose node it sits under (a copy's leaves under the repeat too).
+fn index_node(node: &ObjectNode, fixture: &NodeId, p: &mut Placed) -> Vec<usize> {
+    let mut mine = Vec::new();
+    if let Some(o) = &node.leaf {
+        mine.push(p.list.len());
+        p.list.push((fixture.clone(), o.clone()));
+    }
+    for child in &node.children {
+        p.parents.insert(child.id.clone(), node.id.clone());
+        mine.extend(index_node(child, fixture, p));
+    }
+    if node.kind == crate::domain::object_tree::ObjectNodeKind::Component {
+        p.by_component
+            .entry(node.id.component.clone())
+            .or_default()
+            .extend(mine.iter().copied());
+    }
+    mine
+}
+
+/// A node with its lamps and shapes moved into world units.
+fn placed_node(node: ObjectNode, frame: Frame) -> ObjectNode {
+    ObjectNode {
+        leaf: node.leaf.map(|o| crate::domain::project::placed(o, frame)),
+        children: node
+            .children
+            .into_iter()
+            .map(|c| placed_node(c, frame))
+            .collect(),
+        ..node
     }
 }

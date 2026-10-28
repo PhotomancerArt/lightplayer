@@ -434,14 +434,10 @@ impl Editor {
     pub fn framing_rect(&self, t: &Target) -> Option<Rect> {
         let p = &self.project;
         match t {
-            Target::Node(id) if let Some(f) = p.fixture(id) => union(
+            Target::Node(id) if p.fixture(id).is_some() => union(
                 std::iter::once(id.clone())
                     .chain(p.outputs_of(id))
-                    .chain(
-                        f.places
-                            .iter()
-                            .filter_map(|r| r.wire.as_ref()?.output().cloned()),
-                    )
+                    .chain(p.control_outputs(id))
                     .filter_map(|n| p.node_rect(&n)),
             ),
             Target::Node(id) => p.node_rect(id),
@@ -971,7 +967,6 @@ impl Editor {
             ('d', false, _) => self.set_move_draw(!self.move_draw),
             // Patching by hand (`patching.rs`).
             ('a', false, false) => self.arm_patch(),
-            ('a', false, true) => self.toggle_auto(),
             ('m', false, _) => self.patch_next(),
             ('s', false, _) => self.arm_swap(),
             ('k', false, _) => self.turn_selection(1, false),

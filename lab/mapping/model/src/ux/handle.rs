@@ -244,7 +244,7 @@ impl Project {
         fn of(kind: &ComponentKind) -> Option<&Vec<u32>> {
             match kind {
                 ComponentKind::Path { gaps, .. } => Some(gaps),
-                ComponentKind::Repeat { shape, .. } => of(shape),
+                ComponentKind::Repeat { child, .. } => of(&child.kind),
                 _ => None,
             }
         }
@@ -257,7 +257,7 @@ impl Project {
         fn of(kind: &mut ComponentKind) -> Option<&mut Vec<u32>> {
             match kind {
                 ComponentKind::Path { gaps, .. } => Some(gaps),
-                ComponentKind::Repeat { shape, .. } => of(shape),
+                ComponentKind::Repeat { child, .. } => of(&mut child.kind),
                 _ => None,
             }
         }

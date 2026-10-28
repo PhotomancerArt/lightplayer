@@ -176,8 +176,8 @@ impl Project {
                 Some(ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. }) => {
                     vec![(LAMPS, PropRaw::Count(*lamps as i64))]
                 }
-                Some(ComponentKind::Repeat { shape, count, .. }) => {
-                    let mut props = shape_lamps(shape)
+                Some(ComponentKind::Repeat { child, count, .. }) => {
+                    let mut props = shape_lamps(&child.kind)
                         .map(|n| vec![(LAMPS, PropRaw::Count(n as i64))])
                         .unwrap_or_default();
                     props.push((COPIES, PropRaw::Count(*count as i64)));
@@ -220,13 +220,10 @@ impl Project {
                     (RADIUS, PropRaw::Number(r.radius)),
                     (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
                 ],
-                // A copy's lamps are its repeat's shape's (D11).
-                None => match self.component(&o.component).map(|c| &c.kind) {
-                    Some(ComponentKind::Repeat { shape, .. }) => shape_lamps(shape)
-                        .map(|n| vec![(LAMPS, PropRaw::Count(n as i64))])
-                        .unwrap_or_default(),
-                    _ => Vec::new(),
-                },
+                // A copy's properties are its component's (D11): an edit to
+                // one copy is an edit to all of them.
+                None if o.key.is_empty() => self.props_of(&Target::Component(o.component.clone())),
+                None => Vec::new(),
             },
             Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => Vec::new(),
         }
@@ -273,8 +270,8 @@ impl Project {
                         "lamps",
                         PropRaw::Count(n),
                     ) => *lamps = n as u32,
-                    (Some(ComponentKind::Repeat { shape, .. }), "lamps", PropRaw::Count(n)) => {
-                        set_shape_lamps(shape, n as u32)
+                    (Some(ComponentKind::Repeat { child, .. }), "lamps", PropRaw::Count(n)) => {
+                        set_shape_lamps(&mut child.kind, n as u32)
                     }
                     (Some(ComponentKind::Repeat { count, .. }), "copies", PropRaw::Count(n)) => {
                         *count = n as u32
@@ -315,17 +312,14 @@ impl Project {
             }
             Target::Object(o) => {
                 if self.ring(&o.component, &o.key).is_none() {
-                    return match (
-                        self.component_mut(&o.component).map(|c| &mut c.kind),
-                        prop_id,
-                        new,
-                    ) {
-                        (Some(ComponentKind::Repeat { shape, .. }), "lamps", PropRaw::Count(n)) => {
-                            set_shape_lamps(shape, n as u32);
-                            true
-                        }
-                        _ => false,
-                    };
+                    // A copy's edits land on its component (D11).
+                    return o.key.is_empty()
+                        && self.edit_prop(
+                            &Target::Component(o.component.clone()),
+                            prop_id,
+                            edit,
+                            spacing,
+                        );
                 }
                 let Some(r) = self.ring_mut(&o.component, &o.key) else {
                     return false;
@@ -370,7 +364,7 @@ fn routing(snake: bool) -> Routing {
 fn shape_lamps(kind: &ComponentKind) -> Option<u32> {
     match kind {
         ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => Some(*lamps),
-        ComponentKind::Repeat { shape, .. } => shape_lamps(shape),
+        ComponentKind::Repeat { child, .. } => shape_lamps(&child.kind),
         _ => None,
     }
 }
@@ -378,7 +372,7 @@ fn shape_lamps(kind: &ComponentKind) -> Option<u32> {
 fn set_shape_lamps(kind: &mut ComponentKind, n: u32) {
     match kind {
         ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => *lamps = n,
-        ComponentKind::Repeat { shape, .. } => set_shape_lamps(shape, n),
+        ComponentKind::Repeat { child, .. } => set_shape_lamps(&mut child.kind, n),
         _ => {}
     }
 }

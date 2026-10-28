@@ -10,19 +10,25 @@
 //!
 //! The conversions, each fit-check's resolution:
 //!
-//! - **an auto rule** → the fixture writes the channel its output reads.
-//!   If the output isn't the first reader of a channel the fixture can
-//!   write, saving refuses and says why. An output reads the channel the
+//! - **rules and overrides** (`patch_rule.rs`, `object_override.rs`) can't
+//!   be said in today's patch rows (patch format 4 is M1's). A fixture
+//!   keeps the patch file it opened with while the product, reading it,
+//!   still lands every lamp where the walker does; otherwise its file is
+//!   written expanded (`choose_patches`): each object the walker lands, at
+//!   its address, `flow: manual`. The fixture writes the channel the
+//!   output it writes for reads (its kept file's auto output, or the first
+//!   its rules name). If that output isn't the first reader of a channel
+//!   the fixture can write, saving refuses and says why. An output reads the channel the
 //!   model gives it (a new one its own, `control.<name>`, when another
 //!   output beside it already reads `control.out`); a fixture reads the
 //!   visual channel the model gives it.
 //! - **a render source** (a shader) the lab opened is never written: the
 //!   lab shows its GLSL and never edits it. One the lab made is written as
 //!   a shader node with a stand-in GLSL file (`stand_in_shader.rs`).
-//! - **a place rule** → a patch row: the object's path (`/sector/2`), the
-//!   output's name (minted, `"1"`, `"2"`…, for an output that has none and
-//!   isn't the default), and the port and pixel flattened onto the
-//!   output's one wire. No auto rule → `flow: manual`.
+//! - **an expanded row**: the object's path (`/sector/2`; a repeat's copy
+//!   `panel@2` is its repeat's copy 2), the output's name (minted, `"1"`,
+//!   `"2"`…, for an output that has none and isn't the default), and the
+//!   port and pixel flattened onto the output's one wire.
 //! - **a circle** → one ring shape per ring (each its own object, so the
 //!   lamps stay put; the product has no addressable rings yet, fit-check
 //!   §4). **A group** → its children, in order (the product has no groups
@@ -33,8 +39,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId,
-    PatchTarget, Project, Vec2, Wire,
+    ColorOrder, Component, ComponentId, ComponentKind, Node, NodeId, NodeKind, ObjectId, ObjectRun,
+    ProblemKind, ProductPatch, ProductRow, Project, Vec2,
 };
 use serde_json::{Map, Value, json};
 
@@ -78,6 +84,9 @@ struct Writer<'a> {
     channels: BTreeMap<NodeId, String>,
     /// Output names, the carried ones and any a patch row needs.
     labels: BTreeMap<NodeId, String>,
+    /// Fixtures whose patch is written from the walker, each object at its
+    /// address; every other fixture keeps its patch file as it opened.
+    explicit: BTreeSet<NodeId>,
 }
 
 impl<'a> Writer<'a> {
@@ -90,11 +99,13 @@ impl<'a> Writer<'a> {
             places: BTreeMap::new(),
             channels: BTreeMap::new(),
             labels: BTreeMap::new(),
+            explicit: BTreeSet::new(),
         }
     }
 
     fn run(mut self) -> Result<Saved, FilesError> {
         self.place("module.json", self.project.nodes());
+        self.choose_patches()?;
         self.choose_channels()?;
         self.choose_labels();
         let root = self.module_value(&self.files.root, "module.json", self.project.nodes());
@@ -142,6 +153,83 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// Which fixtures' patch files can stay as they opened, and which must
+    /// be written from the walker (theory "Patching": rules and overrides
+    /// can't be said in today's rows, patch format 4 is M1's).
+    ///
+    /// A fixture keeps its file when the product, reading every file as it
+    /// will be, lands each of its lamps where the walker does. Otherwise
+    /// its file is written expanded: every object the walker lands, at its
+    /// address, and no auto (the walker's universe wrapping, say, is not
+    /// what the product's auto flow does). An expanded fixture never
+    /// depends on another, so this settles in one pass per fixture at most.
+    /// What an address can't say — an object clipped at its port's end —
+    /// refuses to save, plainly.
+    fn choose_patches(&mut self) -> Result<(), FilesError> {
+        let p = self.project;
+        let fixtures: Vec<NodeId> = p
+            .fixtures()
+            .iter()
+            .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_none()))
+            .map(|n| n.id.clone())
+            .collect();
+        let carried = |f: &NodeId| {
+            self.files
+                .nodes
+                .get(f)
+                .and_then(|x| x.product_patch.clone())
+        };
+        let mut explicit: BTreeSet<NodeId> = fixtures
+            .iter()
+            .filter(|f| carried(f).is_none())
+            .cloned()
+            .collect();
+        let walker = &p.effective_patch().runs;
+        loop {
+            let candidates: BTreeMap<NodeId, ProductPatch> = fixtures
+                .iter()
+                .map(|f| {
+                    let patch = if explicit.contains(f) {
+                        expanded(p, f)
+                    } else {
+                        carried(f).unwrap_or_default()
+                    };
+                    (f.clone(), patch)
+                })
+                .collect();
+            let product = p.product_runs(&candidates);
+            let wrong: Vec<NodeId> = fixtures
+                .iter()
+                .filter(|f| !explicit.contains(*f))
+                .filter(|f| runs_of(&product, f) != runs_of(walker, f))
+                .cloned()
+                .collect();
+            if wrong.is_empty() {
+                break;
+            }
+            explicit.extend(wrong);
+        }
+        for problem in &p.effective_patch().problems {
+            if let ProblemKind::DoesntFit { object, port } = &problem.kind
+                && explicit.contains(&problem.fixture)
+            {
+                let path = self
+                    .places
+                    .get(&problem.fixture)
+                    .map_or("", |(_, path)| path.as_str());
+                return Err(FilesError::new(
+                    path,
+                    format!(
+                        "{object} doesn't fit what is left of port {port}: the product's patch \
+                         would carry it on to the next port, so it can't be saved like this yet"
+                    ),
+                ));
+            }
+        }
+        self.explicit = explicit;
+        Ok(())
+    }
+
     /// Every output reads the channel the model says (an opened one, the
     /// channel its file named; a new one, `control.out` or a channel of its
     /// own, minted by the model). A fixture with an auto rule writes the
@@ -158,7 +246,17 @@ impl<'a> Writer<'a> {
                 || "control.out".to_string(),
                 |f| crate::channels::fixture_writes(&f.value),
             );
-            let auto = p.auto_output(&n.id).filter(|o| p.output(o).is_some());
+            // The output it writes for: the one its kept file flows onto,
+            // or the first its rules name.
+            let home = if self.explicit.contains(&n.id) {
+                p.control_outputs(&n.id).into_iter().next()
+            } else {
+                self.files
+                    .nodes
+                    .get(&n.id)
+                    .and_then(|f| f.product_patch.as_ref()?.auto.clone())
+            };
+            let auto = home.filter(|o| p.output(o).is_some());
             let channel = match auto.as_ref() {
                 None => carried,
                 Some(x) if self.default_output(&n.id, &carried).as_ref() == Some(x) => carried,
@@ -170,7 +268,7 @@ impl<'a> Writer<'a> {
                         return Err(FilesError::new(
                             &self.places[&n.id].1,
                             format!(
-                                "{}'s auto rule names {}, which isn't the first output on any \
+                                "{}'s patch names {}, which isn't the first output on any \
                                  channel {} can write; give {} a channel of its own",
                                 n.name,
                                 p.node_name(x),
@@ -211,10 +309,13 @@ impl<'a> Writer<'a> {
             }
         }
         for n in p.fixtures() {
+            if !self.explicit.contains(&n.id) {
+                continue;
+            }
             let channel = self.channels.get(&n.id).cloned().unwrap_or_default();
             let default = self.default_output(&n.id, &channel);
-            let (rows, _) = patch_rows(p, n);
-            for Row { output, .. } in &rows {
+            let rows = expanded(p, &n.id).rows;
+            for ProductRow { output, .. } in &rows {
                 if self.labels.contains_key(output) || Some(output) == default.as_ref() {
                     continue;
                 }
@@ -393,15 +494,15 @@ impl<'a> Writer<'a> {
         value: &mut Value,
     ) -> Result<BTreeSet<ComponentId>, FilesError> {
         let p = self.project;
-        let Some(fx) = n.fixture() else {
+        // A kept patch file stays as it opened (`choose_patches`).
+        if n.fixture().is_none() || !self.explicit.contains(&n.id) {
             return Ok(BTreeSet::new());
-        };
+        }
         let carried = self.files.nodes.get(&n.id);
         let channel = self.channels.get(&n.id).cloned().unwrap_or_default();
         let default = self.default_output(&n.id, &channel);
         let mut entries = Vec::new();
         let mut addressed = BTreeSet::new();
-        let mut auto = false;
         // Rows read as a plain range stay one while their object still
         // covers exactly those lamps.
         let spans = object_lamp_ranges(p, &n.id);
@@ -412,10 +513,8 @@ impl<'a> Writer<'a> {
             let same = s == start && count.map_or(s + c == total, |want| want == c);
             same.then_some(PatchSource::Range(start, count))
         };
-        let _ = fx;
-        let (rows, flows) = patch_rows(p, n);
-        auto |= flows;
-        for Row {
+        let rows = expanded(p, &n.id).rows;
+        for ProductRow {
             object,
             output,
             port,
@@ -424,7 +523,7 @@ impl<'a> Writer<'a> {
             rotation,
         } in rows
         {
-            let (Some(out), Some(c)) = (p.output(&output), p.component(&object.component)) else {
+            let Some(out) = p.output(&output) else {
                 continue;
             };
             let Some(start) = out.port_start(&port) else {
@@ -433,10 +532,10 @@ impl<'a> Writer<'a> {
             let source = match read_as_range(&object) {
                 Some(range) => range,
                 None => {
-                    let Some(path) = self.object_path(&n.id, c, &object.key) else {
+                    let Some((path, owner)) = self.object_path(&n.id, &object) else {
                         continue;
                     };
-                    addressed.insert(c.id.clone());
+                    addressed.insert(owner);
                     PatchSource::Path { path, range: None }
                 }
             };
@@ -454,7 +553,7 @@ impl<'a> Writer<'a> {
             });
         }
         let doc = PatchDoc {
-            manual: !auto,
+            manual: true,
             entries,
         };
         let old = carried.and_then(|f| f.patch.as_ref());
@@ -477,17 +576,53 @@ impl<'a> Writer<'a> {
     }
 
     /// `/door`, `/sector/2`, `/circle1-r2`: what a patch row calls an
-    /// object.
-    fn object_path(&self, fixture: &NodeId, c: &Component, key: &str) -> Option<ObjectPath> {
+    /// object, and the product object (top-level component) it is in. A
+    /// copy of a repeat's child (`panel@2`, or `panel` itself, copy 0) is
+    /// the repeat's: `/<repeat>/2`.
+    fn object_path(
+        &self,
+        fixture: &NodeId,
+        object: &ObjectId,
+    ) -> Option<(ObjectPath, ComponentId)> {
+        let p = self.project;
+        let c = p.component(&object.component)?;
+        if let Some(parent) = p.parent_group(&c.id).and_then(|id| p.component(id))
+            && let ComponentKind::Repeat { .. } = &parent.kind
+        {
+            // The product's repeats copy one shape: its object is a copy.
+            let [k] = object.copies.as_slice() else {
+                return object.copies.is_empty().then(|| {
+                    (
+                        ObjectPath {
+                            id: self.product_id(fixture, parent),
+                            instances: vec![0],
+                        },
+                        parent.id.clone(),
+                    )
+                });
+            };
+            return Some((
+                ObjectPath {
+                    id: self.product_id(fixture, parent),
+                    instances: vec![*k],
+                },
+                parent.id.clone(),
+            ));
+        }
         let id = self.product_id(fixture, c);
-        let (id, instances) = match &c.kind {
-            ComponentKind::Repeat { .. } => (id, vec![key.parse().ok()?]),
+        let id = match &c.kind {
             ComponentKind::Circle { rings, .. } if rings.len() > 1 => {
-                (format!("{id}-{key}"), Vec::new())
+                format!("{id}-{}", object.key)
             }
-            _ => (id, Vec::new()),
+            _ => id,
         };
-        Some(ObjectPath { id, instances })
+        Some((
+            ObjectPath {
+                id,
+                instances: Vec::new(),
+            },
+            c.id.clone(),
+        ))
     }
 
     /// A component's id in its document: the carried one, else its lab id
@@ -695,77 +830,23 @@ fn insert_after(obj: &mut Map<String, Value>, key: &str, value: Value, after: &s
     obj.extend(entries);
 }
 
-/// One patch row: an object at its address.
-struct Row {
-    object: ObjectId,
-    output: NodeId,
-    port: String,
-    pixel: u32,
-    reversed: bool,
-    rotation: u32,
-}
-
-/// A fixture's patch rows, and whether its file says `flow: auto`.
-///
-/// Placements the rows can say — the fixture's own wire (auto, or unset
-/// for manual) and objects at an address of their own, reversed or turned
-/// — are written as they are. Anything else (a component placed, an
-/// object reversed or turned while it follows, an object taken off the
-/// wire under auto) can't be said in today's rows (plan D14: patch
-/// format 4), so the fixture is written expanded: every object that lands
-/// at the address its placements give it, and auto kept only while every
-/// object lands (else auto would put back what is meant to be dark).
-fn patch_rows(p: &Project, n: &Node) -> (Vec<Row>, bool) {
-    let Some(fx) = n.fixture() else {
-        return (Vec::new(), false);
-    };
-    let auto = p.auto_output(&n.id).is_some_and(|o| p.output(&o).is_some());
-    let sayable = fx.places.iter().all(|pl| match &pl.on {
-        PatchTarget::Fixture => {
-            pl.direction.is_none() && matches!(pl.wire, None | Some(Wire::Auto { .. }))
-        }
-        PatchTarget::Object(_) => matches!(pl.wire, Some(Wire::At { .. })),
-        PatchTarget::Component(_) => false,
-    });
-    if sayable {
-        let rows = fx
-            .places
-            .iter()
-            .filter_map(|pl| {
-                let (
-                    PatchTarget::Object(object),
-                    Some(Wire::At {
-                        output,
-                        port,
-                        pixel,
-                    }),
-                ) = (&pl.on, &pl.wire)
-                else {
-                    return None;
-                };
-                let n = p.object(object).map_or(1, |o| o.lamps.len() as u32).max(1);
-                Some(Row {
-                    object: object.clone(),
-                    output: output.clone(),
-                    port: port.clone(),
-                    pixel: *pixel,
-                    reversed: pl.direction.is_some_and(|d| d.is_reversed()),
-                    rotation: pl.turn.unwrap_or(0) % n,
-                })
-            })
-            .collect();
-        return (rows, auto);
-    }
-    let patch = p.effective_patch();
+/// A fixture's patch written expanded: every object the walker lands, at
+/// its address, reversed and turned as it runs; no auto.
+fn expanded(p: &Project, fixture: &NodeId) -> ProductPatch {
     let mut rows = Vec::new();
-    for r in patch.runs.iter().filter(|r| r.fixture == n.id) {
+    for r in p
+        .effective_patch()
+        .runs
+        .iter()
+        .filter(|r| &r.fixture == fixture)
+    {
         let Some(out) = p.output(&r.output) else {
             continue;
         };
         let Some((i, pixel)) = out.port_at(r.wire) else {
             continue;
         };
-        rows.push(Row {
+        rows.push(ProductRow {
             object: r.object.clone(),
             output: r.output.clone(),
             port: out.ports[i].key.clone(),
@@ -774,10 +855,25 @@ fn patch_rows(p: &Project, n: &Node) -> (Vec<Row>, bool) {
             rotation: r.rotation,
         });
     }
-    let all_land = p
-        .objects_in(&n.id)
+    ProductPatch { auto: None, rows }
+}
+
+/// One fixture's runs, in a form two lists of them compare in.
+fn runs_of(runs: &[ObjectRun], fixture: &NodeId) -> Vec<(String, String, u32, u32, bool, u32)> {
+    let mut out: Vec<_> = runs
         .iter()
-        .filter(|o| !o.lamps.is_empty())
-        .all(|o| rows.iter().any(|r| r.object == o.id));
-    (rows, auto && all_land)
+        .filter(|r| &r.fixture == fixture)
+        .map(|r| {
+            (
+                r.object.to_string(),
+                r.output.to_string(),
+                r.wire,
+                r.count,
+                r.reversed,
+                r.rotation,
+            )
+        })
+        .collect();
+    out.sort();
+    out
 }

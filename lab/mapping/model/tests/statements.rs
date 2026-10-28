@@ -89,7 +89,7 @@ fn select_all_climbs_to_everything_from_anywhere() {
 #[test]
 fn deleting_a_lamp_is_refused_with_a_reason() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 4)]);
+    e.select(vec![lamp("path3", "", 4)]);
     key(&mut e, Key::Delete, none());
     let n = e.notice.clone().expect("a notice");
     assert_eq!(n.kind, NoticeKind::Refused);
@@ -165,7 +165,7 @@ fn clicking_again_goes_in_one_level() {
 fn inside_a_group_a_click_selects_a_sibling() {
     let mut e = editor();
     e.select(vec![comp("path1")]);
-    click_lamp(&mut e, "path2", "path", 10, none());
+    click_lamp(&mut e, "path2", "", 10, none());
     assert_eq!(e.selection, vec![comp("path2")]);
 }
 
@@ -173,8 +173,8 @@ fn inside_a_group_a_click_selects_a_sibling() {
 #[test]
 fn command_click_selects_the_lamp_directly() {
     let mut e = editor();
-    click_lamp(&mut e, "path2", "path", 10, cmd());
-    assert_eq!(e.selection, vec![lamp("path2", "path", 10)]);
+    click_lamp(&mut e, "path2", "", 10, cmd());
+    assert_eq!(e.selection, vec![lamp("path2", "", 10)]);
 }
 
 /// Clicking empty space clears the selection.
@@ -220,8 +220,8 @@ fn hover_shows_what_a_click_selects() {
     let probes = [
         ("circle1", "r2", 5),
         ("circle1", "r1", 2),
-        ("path1", "path", 3),
-        ("path3", "path", 0),
+        ("path1", "", 3),
+        ("path3", "", 0),
     ];
     for start in starts {
         for (c, k, i) in probes {
@@ -262,12 +262,12 @@ fn escape_goes_up_a_level() {
 #[test]
 fn arrows_walk_the_lamps() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 0)]);
+    e.select(vec![lamp("path3", "", 0)]);
     key(&mut e, Key::Right, none());
     key(&mut e, Key::Right, none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 2)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 2)]);
     key(&mut e, Key::Left, none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 1)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 1)]);
 }
 
 /// A box selects everything at the current level that it touches; with ⌥
@@ -976,17 +976,14 @@ fn deleting_an_output_leaves_problems_not_retargets() {
         .map(|x| p.node_name(&x.fixture))
         .collect();
     assert_eq!(broken, vec!["ring display", "strip"]);
-    assert!(
-        patch
-            .problems
-            .iter()
-            .all(|x| x.gone == Gone::Output(main.clone()))
-    );
+    assert!(patch.problems.iter().all(|x| matches!(
+        &x.kind,
+        ProblemKind::GoneOutput { output, .. } if *output == main
+    )));
     let ring = node_id(&e, "ring display");
-    assert_eq!(
-        p.fixture(&ring).unwrap().places,
-        vec![auto_onto(&main)],
-        "the placement still names main"
+    assert!(
+        matches!(&p.fixture(&ring).unwrap().start, Start::At { output, .. } if *output == main),
+        "its start still names main"
     );
     assert!(
         patch
@@ -1008,7 +1005,7 @@ fn a_selected_port_highlights_its_lamps() {
     let e = editor();
     let main = node_id(&e, "main");
     let d1 = e.project.lamps_on_port(&main, "1");
-    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    let path3 = ObjectId::of(&ComponentId::new("path3"));
     assert_eq!(d1, (0..30).map(|i| (path3.clone(), i)).collect::<Vec<_>>());
     let d0 = e.project.lamps_on_port(&main, "0");
     assert_eq!(d0.len(), 64);
@@ -1054,12 +1051,12 @@ fn enter_on_a_fixture_frames_it_with_its_outputs() {
 #[test]
 fn selection_survives_a_count_change() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 7)]);
+    e.select(vec![lamp("path3", "", 7)]);
     key(&mut e, Key::Char('='), none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 7)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 7)]);
     assert_eq!(
         e.project
-            .object(&ObjectId::new(&ComponentId::new("path3"), "path"))
+            .object(&ObjectId::of(&ComponentId::new("path3")))
             .unwrap()
             .lamps
             .len(),
@@ -1072,9 +1069,9 @@ fn selection_survives_a_count_change() {
 #[test]
 fn shrinking_past_the_selected_lamp_keeps_the_last_one() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 29)]);
+    e.select(vec![lamp("path3", "", 29)]);
     key(&mut e, Key::Char('-'), none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 28)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 28)]);
 }
 
 /// With many things selected, the inspector shows what they share, mixed
@@ -1132,14 +1129,14 @@ fn ring_edits_land_in_the_circle() {
 #[test]
 fn reverse_keeps_the_same_physical_lamp() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 2)]);
-    let before = lamp_pos(&e, "path3", "path", 2);
+    e.select(vec![lamp("path3", "", 2)]);
+    let before = lamp_pos(&e, "path3", "", 2);
     key(&mut e, Key::Char('r'), none());
     let Target::Lamp { index, .. } = e.selection[0].clone() else {
         panic!()
     };
     assert_eq!(index, 27);
-    assert!(lamp_pos(&e, "path3", "path", index).distance(before) < 1e-9);
+    assert!(lamp_pos(&e, "path3", "", index).distance(before) < 1e-9);
 }
 
 /// Dragging a ring moves its whole circle.
@@ -1252,7 +1249,7 @@ fn a_paths_lamps_are_spread_along_its_length() {
     };
     let lamps = e
         .project
-        .object(&ObjectId::new(&id, "path"))
+        .object(&ObjectId::of(&id))
         .unwrap()
         .lamps
         .iter()
@@ -1331,7 +1328,7 @@ fn a_click_on_a_handle_clicks_whats_under_it() {
     let before = e.project.clone();
     e.pointer_down(start, Button::Primary, none());
     e.pointer_up(start, none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 0)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 0)]);
     assert_eq!(e.project, before);
 }
 
@@ -1341,7 +1338,7 @@ fn a_click_on_a_handle_clicks_whats_under_it() {
 #[test]
 fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
     let mut e = editor();
-    e.select(vec![lamp("path3", "path", 0)]);
+    e.select(vec![lamp("path3", "", 0)]);
     let shown: Vec<HandleKind> = e.handles().into_iter().map(|h| h.kind).collect();
     let point = |index| HandleKind::PathPoint {
         path: ComponentId::new("path3"),
@@ -1359,13 +1356,13 @@ fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
         "{points:?}"
     );
     assert_eq!(points[1], Vec2::new(74.0, 40.0), "the other end stays");
-    assert_eq!(e.selection, vec![lamp("path3", "path", 0)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 0)]);
     key(&mut e, Key::Char('z'), cmd());
     // A click on the far end's handle selects the lamp there.
     let end = handle_at(&e, |k| *k == point(1));
     e.pointer_down(end, Button::Primary, none());
     e.pointer_up(end, none());
-    assert_eq!(e.selection, vec![lamp("path3", "path", 29)]);
+    assert_eq!(e.selection, vec![lamp("path3", "", 29)]);
     // A ring's lamp shows its ring's handle.
     e.select(vec![lamp("circle1", "r2", 3)]);
     let shown: Vec<HandleKind> = e.handles().into_iter().map(|h| h.kind).collect();
@@ -1813,7 +1810,7 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
 fn selecting_a_lamp_lights_exactly_its_pixel() {
     let mut e = editor();
     let plain = e.board_frame(CREST);
-    e.select(vec![lamp("path3", "path", 4)]);
+    e.select(vec![lamp("path3", "", 4)]);
     assert!(e.board_animates());
     let frame = e.board_frame(CREST);
     let main = node_id(&e, "main");
@@ -1881,7 +1878,7 @@ fn a_lamp_outside_its_box_is_never_lit() {
         .collect();
     assert_eq!(outside, vec![2, 3, 4]);
     let tail_out = node_id(&e, "tail out");
-    let object = ObjectId::new(&id, "path");
+    let object = ObjectId::of(&id);
     for selection in [
         vec![],
         vec![Target::Component(id.clone())],
@@ -2090,7 +2087,7 @@ fn every_lamp_shows_its_control_products_colour() {
                 }
             }
         }
-        let strip = ObjectId::new(&ComponentId::new("path3"), "path");
+        let strip = ObjectId::of(&ComponentId::new("path3"));
         assert!(
             !frame.lands(&strip, 30),
             "lamp 30 of the strip is unpatched"
@@ -2161,7 +2158,7 @@ fn a_selection_inside_a_fixture_changes_its_control_product() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let strip = node_id(&e, "strip");
-    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    let path3 = ObjectId::of(&ComponentId::new("path3"));
     let plain = e.board_frame(CREST);
     e.select(vec![comp("path3")]);
     let frame = e.board_frame(CREST);
@@ -2241,11 +2238,11 @@ fn an_output_selection_changes_only_the_outputs_pixels() {
 fn a_selected_pixels_lamp_is_marked_not_recoloured() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    let path3 = ObjectId::of(&ComponentId::new("path3"));
     let plain = e.board_frame(CREST);
     e.select(vec![pixel(&main, "1", 3)]);
     let frame = e.board_frame(CREST);
-    assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
+    assert_eq!(e.marked_lamps(), vec![lamp("path3", "", 3)]);
     assert_eq!(
         frame.lamp(&path3, 3),
         plain.lamp(&path3, 3),
@@ -2359,10 +2356,10 @@ fn the_data_path_runs_object_to_object_in_patch_order() {
     let tail = e.project.data_path(&node_id(&e, "tail"));
     assert_eq!(
         tail.links,
-        vec![(pos("path1", "path", 24), pos("path2", "path", 0))]
+        vec![(pos("path1", "", 24), pos("path2", "", 0))]
     );
     assert_eq!(tail.entries.len(), 1);
-    assert_eq!(tail.entries[0].at, pos("path1", "path", 0));
+    assert_eq!(tail.entries[0].at, pos("path1", "", 0));
     assert!(
         tail.entries[0].along.distance(Vec2::new(0.0, -1.0)) < 1e-9,
         "path1 runs up"
@@ -2384,10 +2381,7 @@ fn the_data_path_runs_object_to_object_in_patch_order() {
     let tail = e.project.data_path(&node_id(&e, "tail"));
     assert_eq!(
         tail.links,
-        vec![(
-            lamp_pos(&e, "path1", "path", 24),
-            lamp_pos(&e, "path2", "path", 0)
-        )]
+        vec![(lamp_pos(&e, "path1", "", 24), lamp_pos(&e, "path2", "", 0))]
     );
     assert!(
         tail.links[0].0.y > tail.links[0].1.y,
@@ -2487,11 +2481,7 @@ fn hovering_an_edge_says_what_it_carries() {
 #[test]
 fn the_bar_lead_says_what_youre_doing() {
     let mut e = editor();
-    for selection in [
-        vec![],
-        vec![comp("circle1")],
-        vec![lamp("path3", "path", 2)],
-    ] {
+    for selection in [vec![], vec![comp("circle1")], vec![lamp("path3", "", 2)]] {
         e.select(selection.clone());
         assert_eq!(e.hint_bar().lead, "", "{selection:?}");
     }
@@ -2509,11 +2499,7 @@ fn the_bar_lead_says_what_youre_doing() {
     assert_eq!(e.hint_bar().lead, "Box-selecting");
     e.pointer_up(empty + Vec2::new(20.0, 20.0), none());
     // Choosing from the right-click list.
-    e.pointer_down(
-        lamp_screen(&e, "path3", "path", 3),
-        Button::Secondary,
-        none(),
-    );
+    e.pointer_down(lamp_screen(&e, "path3", "", 3), Button::Secondary, none());
     assert_eq!(e.hint_bar().lead, "Choosing");
     key(&mut e, Key::Escape, none());
     // Drawing a path.
@@ -2669,11 +2655,11 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
     // Pixel 3 of D1 carries lamp 3 of path3: that lamp is marked.
     let main = node_id(&e, "main");
     e.select(vec![pixel(&main, "1", 3)]);
-    assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
+    assert_eq!(e.marked_lamps(), vec![lamp("path3", "", 3)]);
     let frame = e.board_frame(CREST);
     assert!(bright(frame.port(&main, "1").unwrap()[3]));
     // And the other way round: select the lamp, and its pixel is marked.
-    e.select(vec![lamp("path3", "path", 3)]);
+    e.select(vec![lamp("path3", "", 3)]);
     assert_eq!(e.marked_pixels(), vec![pixel(&main, "1", 3)]);
     // r2's first lamp lands on D0 after r1's 40.
     e.select(vec![lamp("circle1", "r2", 0)]);
@@ -2725,7 +2711,7 @@ fn reversing_a_path_never_moves_a_point() {
         e.project.component(&path3).unwrap().kind,
         ComponentKind::Path { reversed: true, .. }
     ));
-    assert!(lamp_pos(&e, "path3", "path", 0).distance(place(&e, "strip", 74.0, 40.0)) < 1e-9);
+    assert!(lamp_pos(&e, "path3", "", 0).distance(place(&e, "strip", 74.0, 40.0)) < 1e-9);
 }
 
 /// A one-lamp path's lamp sits on its first point, where the device puts
@@ -2771,31 +2757,34 @@ fn a_polygon_is_closed_and_starts_on_its_first_point() {
     assert_eq!(p.kind_word(&Target::Component(square)), "polygon");
 }
 
-/// A repeat makes one object per copy, keyed by its number (the product's
-/// `/sector/2`): copy k is its shape turned k · 360° / count, clockwise,
-/// about its centre. Each copy is its own strand.
+/// A repeat holds a component with its own id and makes one copy of it per
+/// turn: copy 0 IS that component (its ids), copy k is `<id>@k` (the
+/// product's `/sector/k`), turned k · 360° / count, clockwise, about the
+/// repeat's centre. Each copy is its own strand.
 #[test]
 fn a_repeat_makes_one_copy_per_turn() {
     let (mut p, f, _) = bare(&[("D0", 60)]);
-    let sector = add(
+    let (sector, arm) = add_repeat(
         &mut p,
         &f,
-        ComponentKind::repeat(
-            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
-            Vec2::new(50.0, 50.0),
-            4,
-        ),
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
     );
     let t = Target::Component(sector.clone());
     let copies = p.children(Some(&t));
-    let keys: Vec<String> = copies
+    assert_eq!(copies[0], Target::Component(arm.clone()));
+    let ids: Vec<String> = copies[1..]
         .iter()
         .map(|c| match c {
-            Target::Object(o) => o.key.clone(),
-            _ => panic!("a copy is an object"),
+            Target::Object(o) => o.to_string(),
+            _ => panic!("a copy past copy 0 is an object"),
         })
         .collect();
-    assert_eq!(keys, ["0", "1", "2", "3"]);
+    assert_eq!(
+        ids,
+        [format!("{arm}@1"), format!("{arm}@2"), format!("{arm}@3")]
+    );
     assert_eq!(p.label(&copies[2]), "copy 2");
     // Copy 1 is turned a quarter clockwise: from above the centre to its
     // right.
@@ -2804,19 +2793,82 @@ fn a_repeat_makes_one_copy_per_turn() {
     assert_eq!(p.lamps_under(&t).len(), 12);
 }
 
+/// The one tree (Yona, G1 direction): components are its rows; an object
+/// is a row only where it differs from its component — a circle's rings, a
+/// repeat's copies 1…n — drawn lighter, and still selectable. Copy 0 is the
+/// repeat's component itself.
+#[test]
+fn the_tree_lists_objects_only_where_they_differ() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let circle = add(
+        &mut p,
+        &f,
+        ComponentKind::circle(Vec2::new(50.0, 50.0), &[(30.0, 8), (15.0, 4)]),
+    );
+    let (_, arm) = add_repeat(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        3,
+    );
+    let rows: Vec<(String, bool)> = p
+        .tree_rows()
+        .into_iter()
+        .filter(|r| matches!(r.target, Target::Component(_) | Target::Object(_)))
+        .map(|r| (r.label, r.derived))
+        .collect();
+    let want: Vec<(String, bool)> = [
+        (circle.to_string(), false),
+        ("ring r1".into(), true),
+        ("ring r2".into(), true),
+        ("repeat1".into(), false),
+        (arm.to_string(), false),
+        ("copy 1".into(), true),
+        ("copy 2".into(), true),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(rows, want);
+}
+
+/// On the canvas a click selects the repeat, and the next goes into the
+/// copy under it: copy 0 is the repeated component, copy k its `@k`.
+#[test]
+fn a_click_selects_the_repeat_then_the_copy() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let (repeat, arm) = add_repeat(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
+    );
+    let mut e = editor_of(p);
+    e.fit();
+    let origin = e.project.origin(&f);
+    // Copy 1 is turned a quarter clockwise: right of the centre.
+    let on_copy_1 = origin + Vec2::new(80.0, 50.0);
+    click_at(&mut e, on_copy_1, none());
+    assert_eq!(e.selection, vec![Target::Component(repeat)]);
+    click_at(&mut e, on_copy_1, none());
+    assert_eq!(
+        e.selection,
+        vec![Target::Object(ObjectId::of(&arm).in_copy(1))]
+    );
+}
+
 /// A repeat's area is its copies' outlines, not the space between them:
 /// round a dome, the middle belongs to whatever is there.
 #[test]
 fn a_repeat_is_picked_by_its_copies() {
     let (mut p, f, _) = bare(&[("D0", 60)]);
-    let sector = add(
+    let (sector, _) = add_repeat(
         &mut p,
         &f,
-        ComponentKind::repeat(
-            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
-            Vec2::new(50.0, 50.0),
-            4,
-        ),
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
     );
     let mut e = editor_of(p);
     e.fit();
@@ -2833,16 +2885,14 @@ fn a_repeat_is_picked_by_its_copies() {
 #[test]
 fn a_copys_lamps_live_in_its_repeat() {
     let (mut p, f, _) = bare(&[("D0", 60)]);
-    let sector = add(
+    let (sector, arm) = add_repeat(
         &mut p,
         &f,
-        ComponentKind::repeat(
-            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
-            Vec2::new(50.0, 50.0),
-            4,
-        ),
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
     );
-    let copy = Target::Object(ObjectId::new(&sector, "2"));
+    let copy = Target::Object(ObjectId::of(&arm).in_copy(2));
     assert!(p.edit_prop(&copy, "lamps", PropEdit::SetCount(7), 2.4));
     for k in 0..4 {
         assert_eq!(local_lamps(&p, &sector, k).len(), 7);
@@ -2854,17 +2904,15 @@ fn a_copys_lamps_live_in_its_repeat() {
 #[test]
 fn a_copy_cant_be_deleted_on_its_own() {
     let (mut p, f, _) = bare(&[("D0", 60)]);
-    let sector = add(
+    let (sector, arm) = add_repeat(
         &mut p,
         &f,
-        ComponentKind::repeat(
-            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
-            Vec2::new(50.0, 50.0),
-            4,
-        ),
+        ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+        Vec2::new(50.0, 50.0),
+        4,
     );
     let mut e = editor_of(p);
-    e.select(vec![Target::Object(ObjectId::new(&sector, "2"))]);
+    e.select(vec![Target::Object(ObjectId::of(&arm).in_copy(2))]);
     key(&mut e, Key::Delete, none());
     assert_eq!(
         e.project.children(Some(&Target::Component(sector))).len(),
@@ -2874,10 +2922,10 @@ fn a_copy_cant_be_deleted_on_its_own() {
     assert!(n.why.unwrap().contains("copies from a count"));
 }
 
-/// A place rule puts one object's lamps on a port, starting on a pixel.
-/// Reversed lays them end first, and a turn rotates them inside their own
-/// window: orientation first, then rotation, as on the device — five
-/// lamps at pixel 10 turned 2 land on 12, 13, 14, 10, 11; reversed too, on
+/// An override puts one object's lamps on a port, starting on a pixel.
+/// Reversed lays them end first, and an offset rotates them inside their
+/// own span: orientation first, then rotation, as on the device — five
+/// lamps at pixel 10 offset 2 land on 12, 13, 14, 10, 11; reversed too, on
 /// 11, 10, 14, 13, 12.
 #[test]
 fn a_place_rule_puts_an_object_on_a_pixel() {
@@ -2888,11 +2936,9 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             &f,
             ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
         );
-        let object = ObjectId::new(&path, "path");
-        p.fixture_mut(&f)
-            .unwrap()
-            .places
-            .push(placed_at(&object, &out, "0", 10, reversed, 2));
+        let object = ObjectId::of(&path);
+        p.start_at(&f, &out, "0", 0);
+        placed_at(&mut p, &object, &out, "0", 10, reversed, 2);
         let got: Vec<u32> = (0..5)
             .map(|i| match p.pixel_of_lamp(&object, i) {
                 Some(Target::Pixel { index, .. }) => index,
@@ -2901,26 +2947,6 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             .collect();
         assert_eq!(got, want, "reversed: {reversed}");
     }
-}
-
-/// An output's ports make one flat wire, in key order: a run that passes
-/// the end of one port carries on into the next.
-#[test]
-fn a_run_carries_on_into_the_next_port() {
-    let (mut p, f, out) = bare(&[("D0", 4), ("D1", 10)]);
-    add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 6),
-    );
-    p.auto_patch(&f, &out);
-    let spans: Vec<(String, std::ops::Range<u32>, u32)> = p
-        .effective_patch()
-        .pixel_runs
-        .iter()
-        .map(|s| (s.port.clone(), s.lamps.clone(), s.start_pixel))
-        .collect();
-    assert_eq!(spans, vec![("0".into(), 0..4, 0), ("1".into(), 4..6, 0)]);
 }
 
 /// The last port may have no count: it takes the rest — as many pixels as
@@ -2934,129 +2960,30 @@ fn a_last_port_without_a_count_takes_the_rest() {
         &f,
         ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 10),
     );
-    p.auto_patch(&f, &out);
-    assert_eq!(p.port_fill(&out, &key), (6, 6));
+    p.start_at(&f, &out, &key, 0);
+    assert_eq!(p.port_fill(&out, &key), (10, 10));
     assert!(p.effective_patch().unpatched.is_empty());
 }
 
-/// Auto flows on after every placed run on its output. A fixture with
-/// place rules too flows its other lamps on after its own runs; a fixture
-/// with only an auto rule, after everything.
+/// An override putting an object on a port that's gone is a problem; it is
+/// never moved to another port, and the object lands nowhere.
 #[test]
-fn auto_flows_after_placed_runs() {
-    let (mut p, a, out) = bare(&[("D0", 40)]);
-    let a1 = add(
-        &mut p,
-        &a,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-    );
-    let a2 = add(
-        &mut p,
-        &a,
-        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
-    );
-    p.fixture_mut(&a).unwrap().places = vec![
-        placed_at(&ObjectId::new(&a2, "path"), &out, "0", 10, false, 0),
-        auto_onto(&out),
-    ];
-    let b = p.add_fixture(None, "b").unwrap();
-    let b1 = add(
-        &mut p,
-        &b,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 2),
-    );
-    p.auto_patch(&b, &out);
-    let at = |c: &ComponentId| {
-        p.effective_patch()
-            .pixel_runs
-            .iter()
-            .find(|s| &s.object.component == c)
-            .map(|s| s.start_pixel)
-    };
-    assert_eq!(at(&a2), Some(10));
-    assert_eq!(at(&a1), Some(12), "after a's own run");
-    assert_eq!(at(&b1), Some(15), "after every run");
-}
-
-/// A fixture with no auto rule is manual: a lamp no rule places is dark.
-#[test]
-fn without_an_auto_rule_unplaced_lamps_are_dark() {
+fn an_override_on_a_gone_port_is_a_problem() {
     let (mut p, f, out) = bare(&[("D0", 40)]);
     let a1 = add(
         &mut p,
         &f,
         ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     );
-    let a2 = add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
-    );
-    p.fixture_mut(&f).unwrap().places = vec![placed_at(
-        &ObjectId::new(&a2, "path"),
-        &out,
-        "0",
-        0,
-        false,
-        0,
-    )];
-    let patch = p.effective_patch();
-    assert_eq!(patch.pixel_runs.len(), 1);
-    assert_eq!(patch.unpatched.len(), 1);
-    assert_eq!(patch.unpatched[0].object, ObjectId::new(&a1, "path"));
-}
-
-/// Fixtures sharing an output fill it in the product's order — each
-/// module's nodes by name, depth first — not the order they were added in.
-#[test]
-fn fixtures_share_an_output_in_name_order() {
-    let mut p = Project::new("t");
-    let zebra = p.add_fixture(None, "zebra").unwrap();
-    let apple = p.add_fixture(None, "apple").unwrap();
-    let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
-    for f in [&zebra, &apple] {
-        add(
-            &mut p,
-            f,
-            ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-        );
-        p.auto_patch(f, &out);
-    }
-    let start = |f: &NodeId| {
-        p.effective_patch()
-            .pixel_runs
-            .iter()
-            .find(|s| &s.fixture == f)
-            .map(|s| s.start_pixel)
-    };
-    assert_eq!(start(&apple), Some(0));
-    assert_eq!(start(&zebra), Some(3));
-}
-
-/// A rule placing lamps on a port that's gone is a problem; it is never
-/// moved to another port, and its lamps fall to the next rule.
-#[test]
-fn a_rule_on_a_gone_port_is_a_problem() {
-    let (mut p, f, out) = bare(&[("D0", 40)]);
-    let a1 = add(
-        &mut p,
-        &f,
-        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
-    );
-    p.fixture_mut(&f).unwrap().places = vec![
-        placed_at(&ObjectId::new(&a1, "path"), &out, "7", 0, false, 0),
-        auto_onto(&out),
-    ];
+    p.start_at(&f, &out, "0", 0);
+    placed_at(&mut p, &ObjectId::of(&a1), &out, "7", 0, false, 0);
     let patch = p.effective_patch();
     assert_eq!(patch.problems.len(), 1);
-    assert_eq!(
-        patch.problems[0].gone,
-        Gone::Port {
-            output: out.clone(),
-            port: "7".into()
-        }
-    );
-    assert_eq!(patch.pixel_runs.len(), 1, "auto still places it");
+    assert!(matches!(
+        &patch.problems[0].kind,
+        ProblemKind::GonePort { port, .. } if port == "7"
+    ));
+    assert!(patch.pixel_runs.is_empty(), "never moved to another port");
     assert!(patch.problems[0].notice(&p).why.is_some());
 }
 
@@ -3068,13 +2995,13 @@ fn colour_order_belongs_to_the_fixture() {
     let a = p.add_fixture(None, "a").unwrap();
     let b = p.add_fixture(None, "b").unwrap();
     let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
-    for f in [&a, &b] {
+    for (f, pixel) in [(&a, 0), (&b, 3)] {
         add(
             &mut p,
             f,
             ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
         );
-        p.auto_patch(f, &out);
+        p.start_at(f, &out, "0", pixel);
     }
     assert_eq!(
         p.fixture(&a).unwrap().color_order,
@@ -3878,6 +3805,21 @@ fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> ComponentId {
     p.add(fixture, kind).unwrap()
 }
 
+/// A repeat of `count` copies of a new component of `kind` round `center`:
+/// the repeat's id and its child's.
+fn add_repeat(
+    p: &mut Project,
+    fixture: &NodeId,
+    kind: ComponentKind,
+    center: Vec2,
+    count: u32,
+) -> (ComponentId, ComponentId) {
+    let child = p.mint(kind);
+    let child_id = child.id.clone();
+    let repeat = add(p, fixture, ComponentKind::repeat(child, center, count));
+    (repeat, child_id)
+}
+
 fn pts(points: &[(f64, f64)]) -> Vec<Vec2> {
     points.iter().map(|&(x, y)| Vec2::new(x, y)).collect()
 }
@@ -3891,35 +3833,22 @@ fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
         .collect()
 }
 
-/// An object on `pixel` of `port`, reversed and turned: its own placement.
+/// Put an object on `pixel` of `port`, reversed and offset: its own
+/// override.
 fn placed_at(
+    p: &mut Project,
     object: &ObjectId,
     output: &NodeId,
     port: &str,
     pixel: u32,
     reversed: bool,
-    rotation: u32,
-) -> PatchPlace {
-    PatchPlace {
-        on: PatchTarget::Object(object.clone()),
-        wire: Some(Wire::At {
-            output: output.clone(),
-            port: port.into(),
-            pixel,
-        }),
-        direction: reversed.then_some(Direction::Reversed),
-        turn: (rotation != 0).then_some(rotation),
-    }
-}
-
-/// The fixture's own wire, auto onto `output`.
-fn auto_onto(output: &NodeId) -> PatchPlace {
-    PatchPlace {
-        wire: Some(Wire::Auto {
-            output: output.clone(),
-        }),
-        ..PatchPlace::on(PatchTarget::Fixture)
-    }
+    offset: u32,
+) {
+    p.patch_object(object, output, port, pixel);
+    p.edit_override(object, |o| {
+        o.direction = reversed.then_some(Direction::Reversed);
+        o.offset = (offset != 0).then_some(offset);
+    });
 }
 
 /// path3's span on D1 of main.
@@ -3927,7 +3856,7 @@ fn path3_span(main: &NodeId) -> Target {
     Target::Span {
         output: main.clone(),
         key: "1".into(),
-        object: Some(ObjectId::new(&ComponentId::new("path3"), "path")),
+        object: Some(ObjectId::of(&ComponentId::new("path3"))),
         start: 0,
     }
 }

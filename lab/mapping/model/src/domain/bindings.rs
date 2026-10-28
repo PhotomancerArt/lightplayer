@@ -85,17 +85,26 @@ impl Project {
     }
 
     /// The outputs a fixture's control product goes to: every output its
-    /// placements name that is still there, in their order.
+    /// rules and overrides name that is still there — its Start's first,
+    /// then its components', then its objects'.
     pub fn control_outputs(&self, fixture: &NodeId) -> Vec<NodeId> {
+        use crate::domain::cursor_op::OutputOp;
+        use crate::domain::patch_rule::Start;
+        let Some(f) = self.fixture(fixture) else {
+            return Vec::new();
+        };
+        let starts = std::iter::once(&f.start).chain(f.rules.values().map(|r| &r.start));
+        let named = starts
+            .filter_map(|s| match s {
+                Start::At { output, .. } => Some(output),
+                _ => None,
+            })
+            .chain(f.overrides.values().filter_map(|o| match &o.output {
+                Some(OutputOp::Set(output)) => Some(output),
+                _ => None,
+            }));
         let mut out: Vec<NodeId> = Vec::new();
-        for r in self
-            .fixture(fixture)
-            .map(|f| f.places.as_slice())
-            .unwrap_or_default()
-        {
-            let Some(o) = r.wire.as_ref().and_then(|w| w.output()) else {
-                continue;
-            };
+        for o in named {
             if self.output(o).is_some() && !out.contains(o) {
                 out.push(o.clone());
             }

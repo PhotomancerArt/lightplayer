@@ -1,40 +1,26 @@
 //! The patch: which lamp lands on which pixel of which port.
 //!
-//! What is authored is a fixture's **placements** (`patch_place.rs`): one
-//! vocabulary for the fixture, its components and its objects, each
-//! setting inherited down the tree (plan D8, D9). What they make — the
-//! effective patch — is derived every time and never stored (D7), so an
-//! edit anywhere (a ring's count, a port's size, a deleted output) moves
-//! the patch with it and nothing goes stale. `patch_resolve.rs` turns
-//! placements into runs on the wire; this file lays the runs down.
+//! What is authored is rules on a fixture and its components
+//! (`patch_rule.rs`) and overrides on objects (`object_override.rs`). The
+//! walker (`walker.rs`) turns them into one run per object; this file lays
+//! the runs on the pixels. The result — the effective patch — is derived
+//! every time and never stored (D7), so an edit anywhere (a ring's count,
+//! a port's size, a deleted output) moves the patch with it and nothing
+//! goes stale.
 //!
-//! How runs land, in the product's own arithmetic (`lpc-mapping`'s
-//! `resolve_patch`, the engine's `plan_fragments`):
-//!
-//! 1. An output's ports make **one flat wire**, in key order: port 0's
-//!    pixels, then port 1's. A run that runs past a port's end carries on
-//!    into the next port. The last port may have no count, and takes the
-//!    rest; past the end of a counted last port, lamps light nothing.
-//! 2. **Placed runs land where they say.** Orientation first, then
-//!    rotation: lamp `j` of a run of `n` placed at `c` with rotation `k`
-//!    lands on `c + ((j' + k) mod n)`, where `j'` is `n − 1 − j` when the
-//!    run is reversed and `j` otherwise.
-//! 3. A fixture with placed runs AND objects on auto flows those on after
-//!    its own runs on that output.
-//! 4. A fixture with only auto flows on after every run on that output,
-//!    one fixture after another in **attach order** — each module's nodes
-//!    by name, depth first: the product's provider order (fit-check §5.2).
-//!    Moving one ahead of another on a wire is a wiring edit, a placement,
-//!    not a move in the tree.
-//! 5. A fixture whose wire is unset is manual: what no placement puts on
-//!    the wire is dark.
+//! How a run lands, in the product's arithmetic: an output's ports make
+//! one flat wire, in key order. Orientation first, then rotation: lamp `j`
+//! of a run of `n` at `c` with rotation `k` lands on `c + ((j' + k) mod n)`,
+//! where `j'` is `n − 1 − j` when the run is reversed and `j` otherwise. A
+//! run the walker clipped (an explicit start that doesn't fit its port)
+//! lands only the lamps that reach no further than the port's end.
 //!
 //! Two objects may land on the same pixels: nothing refuses it, since a
 //! hand patch passes through overlaps on its way to right (plan D7). The
 //! patch reports each one, and the board shows the later span, in the
 //! patch's order (fixtures in attach order, objects in tree order).
 //!
-//! Editing placements by hand is `patch_edits.rs`.
+//! Editing by hand is `patch_edits.rs`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
@@ -43,9 +29,9 @@ use crate::domain::color_order::ColorOrder;
 use crate::domain::node::{Node, NodeId};
 use crate::domain::notice::Notice;
 use crate::domain::object::ObjectId;
-use crate::domain::patch_place::{PatchPlace, PatchTarget, Wire};
-use crate::domain::patch_resolve::{Flow, Resolved, target_words};
+use crate::domain::patch_target::PatchTarget;
 use crate::domain::project::Project;
+use crate::domain::walker::Walked;
 
 /// Some lamps of one object, landing on consecutive pixels of one port —
 /// up the port, or down it when `reversed`.
@@ -113,26 +99,43 @@ pub struct Unpatched {
     pub lamps: Range<u32>,
 }
 
-/// A placement that can't do what it says.
+/// Something the patch can't do, said plainly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchProblem {
     pub fixture: NodeId,
-    /// Its index in the fixture's placements.
-    pub place: usize,
-    /// What is gone.
-    pub gone: Gone,
+    pub kind: ProblemKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Gone {
-    Output(NodeId),
-    Port { output: NodeId, port: String },
-    Object(ObjectId),
-    Component(crate::domain::component::ComponentId),
+pub enum ProblemKind {
+    /// The fixture's Start says nowhere, so nothing in it lands.
+    NoStart,
+    /// A rule or an override names an output that is gone.
+    GoneOutput { on: PatchTarget, output: NodeId },
+    /// …or a port that is gone.
+    GonePort {
+        on: PatchTarget,
+        output: NodeId,
+        port: String,
+    },
+    /// Rules for a component that isn't in the fixture any more.
+    GoneComponent(crate::domain::component::ComponentId),
+    /// An override for an object that isn't there any more (a copy counted
+    /// away, a ring removed): kept, never moved to another.
+    GoneObject(ObjectId),
+    /// An object whose start was set doesn't fit what is left of its port:
+    /// it stays (slots are physical), and lands as far as the port reaches.
+    DoesntFit { object: ObjectId, port: String },
+    /// The walk ran past the output's last port: this object and everything
+    /// after it that only follows on land nowhere, until a new start.
+    PastLastPort { object: ObjectId },
+    /// An object starts part-way into a pixel: the board, and the
+    /// product, speak in whole pixels, so it lands nowhere yet.
+    MidPixel { object: ObjectId },
 }
 
-/// One object's run on an output's flat wire, as the placements made it:
-/// what a save writes when the file can't say the placements themselves.
+/// One object's run on an output's flat wire, as the walker made it: what
+/// a save writes when the file can't say the rules themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectRun {
     pub fixture: NodeId,
@@ -169,9 +172,9 @@ pub struct EffectivePatch {
     pub unpatched: Vec<Unpatched>,
     pub problems: Vec<PatchProblem>,
     pub overlaps: Vec<Overlap>,
-    /// Every object's settings and where each came from, in fixture then
-    /// tree order.
-    pub resolved: Vec<Resolved>,
+    /// What every node of every fixture's object tree did on the walk, and
+    /// why: in fixture then tree order.
+    pub walked: Vec<Walked>,
     /// Every object's run on the wire, in the order they were laid.
     pub runs: Vec<ObjectRun>,
 }
@@ -222,9 +225,9 @@ impl EffectivePatch {
         self.pixel_runs_of(object).next().is_some()
     }
 
-    /// An object's settings, and where each came from.
-    pub fn resolved(&self, object: &ObjectId) -> Option<&Resolved> {
-        self.resolved.iter().find(|r| &r.object == object)
+    /// What an object did on the walk, and why.
+    pub fn walked(&self, object: &ObjectId) -> Option<&Walked> {
+        self.walked.iter().find(|w| &w.object == object)
     }
 
     /// Where two spans on one port share pixels.
@@ -270,6 +273,9 @@ pub(crate) struct Run {
     pub wire: u32,
     pub reversed: bool,
     pub rotation: u32,
+    /// How many of its places on the wire are really on its port: the
+    /// walker clipped it (an explicit start that doesn't fit). `None`: all.
+    pub limit: Option<u32>,
 }
 
 impl Run {
@@ -278,15 +284,29 @@ impl Run {
     }
 
     /// Where the run's lamp `j` lands: orientation first, then rotation.
-    fn wire_of(&self, j: u32) -> u32 {
+    /// `None` past its limit.
+    fn wire_of(&self, j: u32) -> Option<u32> {
         let oriented = if self.reversed { self.count - 1 - j } else { j };
-        self.wire + (oriented + self.rotation) % self.count.max(1)
+        let at = (oriented + self.rotation) % self.count.max(1);
+        self.limit.is_none_or(|l| at < l).then_some(self.wire + at)
+    }
+
+    pub(crate) fn object_run(&self) -> ObjectRun {
+        ObjectRun {
+            fixture: self.fixture.clone(),
+            object: self.object.clone(),
+            output: self.output.clone(),
+            wire: self.wire,
+            count: self.count,
+            reversed: self.reversed,
+            rotation: self.rotation,
+        }
     }
 }
 
 /// A fixture's objects, end to end: each one's id, and where its lamps
 /// start in the fixture's numbering.
-pub(crate) struct FixtureLamps {
+pub struct FixtureLamps {
     pub id: NodeId,
     pub objects: Vec<(ObjectId, u32, u32)>,
     /// Where each object sits in `objects`.
@@ -294,7 +314,7 @@ pub(crate) struct FixtureLamps {
 }
 
 impl FixtureLamps {
-    pub(crate) fn object(&self, id: &ObjectId) -> Option<(u32, u32)> {
+    pub fn object(&self, id: &ObjectId) -> Option<(u32, u32)> {
         let (_, start, n) = &self.objects[*self.by_id.get(id)?];
         Some((*start, *n))
     }
@@ -311,56 +331,31 @@ impl FixtureLamps {
 }
 
 impl Project {
-    /// What the placements make. Kept until the project changes
+    /// What the rules and overrides make. Kept until the project changes
     /// (`derived.rs`), so it is derived afresh after every edit and never
     /// stored.
     pub fn effective_patch(&self) -> &EffectivePatch {
         self.kept_patch()
     }
 
-    /// Work the patch out from the placements.
+    /// Walk every fixture, in attach order (the order the board shows
+    /// overlaps in), and lay the runs.
     pub(crate) fn compute_patch(&self) -> EffectivePatch {
         let mut patch = EffectivePatch::default();
         let fixtures: Vec<FixtureLamps> =
             self.fixtures().iter().map(|n| lamps_of(self, n)).collect();
         let by_id: BTreeMap<&NodeId, &FixtureLamps> = fixtures.iter().map(|f| (&f.id, f)).collect();
-
         let mut runs: Vec<Run> = Vec::new();
-        // Fixtures that only auto-flow, in attach order.
-        let mut flows: Vec<Flow> = Vec::new();
         for n in self.attach_order() {
             let (Some(_), Some(lamps)) = (n.fixture(), by_id.get(&n.id)) else {
                 continue;
             };
-            let resolved = self.resolve_fixture(n, lamps, &mut patch.problems);
-            let (own, waiting) = self.fixture_runs(n, lamps, &resolved);
-            runs.extend(own);
-            flows.extend(waiting);
-            patch.resolved.extend(resolved);
+            let walk = self.walk_fixture(n, lamps);
+            runs.extend(walk.runs);
+            patch.walked.extend(walk.walked);
+            patch.problems.extend(walk.problems);
         }
-        // Fixtures that only auto-flow go on after every run on their
-        // output, one after another.
-        let mut cursors: BTreeMap<NodeId, u32> = BTreeMap::new();
-        for r in &runs {
-            let c = cursors.entry(r.output.clone()).or_default();
-            *c = (*c).max(r.wire_end());
-        }
-        for flow in flows {
-            let cursor = cursors.entry(flow.output.clone()).or_default();
-            *cursor = flow.lay(*cursor, &mut runs);
-        }
-        patch.runs = runs
-            .iter()
-            .map(|r| ObjectRun {
-                fixture: r.fixture.clone(),
-                object: r.object.clone(),
-                output: r.output.clone(),
-                wire: r.wire,
-                count: r.count,
-                reversed: r.reversed,
-                rotation: r.rotation,
-            })
-            .collect();
+        patch.runs = runs.iter().map(Run::object_run).collect();
         self.cut_into_spans(&fixtures, &runs, &mut patch);
         patch.find_overlaps();
         patch
@@ -478,8 +473,9 @@ impl Project {
                 let Some((o, i)) = lamps.locate(r.start + j) else {
                     continue;
                 };
-                objects[o][i as usize] = out
-                    .port_at(r.wire_of(j))
+                objects[o][i as usize] = r
+                    .wire_of(j)
+                    .and_then(|w| out.port_at(w))
                     .map(|(port, pixel)| (r.output.clone(), port, pixel));
             }
         }
@@ -594,64 +590,6 @@ impl Project {
         out
     }
 
-    /// A placement in words: `dome → auto onto main`, `circle1 → main D0
-    /// @40 · reversed`, `sector/2: turned 40`.
-    pub fn place_label(&self, fixture: &NodeId, place: &PatchPlace) -> String {
-        let what = target_words(self, fixture, &place.on);
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(d) = place.direction {
-            parts.push(
-                if d.is_reversed() {
-                    "reversed"
-                } else {
-                    "as drawn"
-                }
-                .into(),
-            );
-        }
-        if let Some(t) = place.turn.filter(|t| *t != 0) {
-            parts.push(format!("turned {t}"));
-        }
-        match &place.wire {
-            Some(w) => {
-                let mut s = format!("{what} → {}", self.wire_words(w));
-                for p in parts {
-                    s.push_str(&format!(" · {p}"));
-                }
-                s
-            }
-            None => format!("{what}: {}", parts.join(" · ")),
-        }
-    }
-
-    /// A wire in words: `auto onto main`, `main D0 @40`, `not on the wire`.
-    pub fn wire_words(&self, wire: &Wire) -> String {
-        let to = |output: &NodeId| match self.node(output) {
-            Some(n) => n.name.clone(),
-            None => format!("{output} (gone)"),
-        };
-        match wire {
-            Wire::Auto { output } => format!("auto onto {}", to(output)),
-            Wire::At {
-                output,
-                port,
-                pixel,
-            } => {
-                let port_name = self
-                    .output(output)
-                    .and_then(|o| o.port(port))
-                    .map_or_else(|| format!("port {port}"), |p| p.name.clone());
-                format!("{} {port_name} @{pixel}", to(output))
-            }
-            Wire::Off => "not on the wire".into(),
-        }
-    }
-
-    /// A placement's target in words.
-    pub fn target_words(&self, fixture: &NodeId, t: &PatchTarget) -> String {
-        target_words(self, fixture, t)
-    }
-
     /// An object as a rule names it: `door`, `sector/2`.
     pub fn object_words(&self, o: &ObjectId) -> String {
         match self.component(&o.component) {
@@ -661,8 +599,8 @@ impl Project {
     }
 }
 
-/// A fixture's lamps, objects end to end, in authoring order.
-fn lamps_of(p: &Project, n: &Node) -> FixtureLamps {
+/// A fixture's lamps, objects end to end, in tree order.
+pub(crate) fn lamps_of(p: &Project, n: &Node) -> FixtureLamps {
     let mut objects = Vec::new();
     let mut by_id = HashMap::new();
     let mut total = 0u32;
@@ -684,39 +622,71 @@ impl PatchProblem {
     /// The problem in rustc style: what, why, what to do.
     pub fn notice(&self, p: &Project) -> Notice {
         let fixture = p.node_name(&self.fixture);
-        let what = p
-            .fixture(&self.fixture)
-            .and_then(|f| f.places.get(self.place))
-            .map(|pl| p.target_words(&self.fixture, &pl.on))
-            .unwrap_or_else(|| fixture.clone());
-        let (text, why) = match &self.gone {
-            Gone::Output(output) => (
-                format!("{what} is patched to {output}, which no longer exists"),
-                format!(
-                    "its output was deleted, and a placement is never pointed somewhere else on its own; ⌘Z brings {output} back"
-                ),
+        let on = |t: &PatchTarget| match t {
+            PatchTarget::Fixture => fixture.clone(),
+            PatchTarget::Component(c) => c.to_string(),
+            PatchTarget::Object(o) => p.object_words(o),
+        };
+        let (text, why, help) = match &self.kind {
+            ProblemKind::NoStart => (
+                format!("nothing says where {fixture} starts"),
+                "every fixture starts somewhere of its own: nothing flows in from another fixture"
+                    .to_string(),
+                "set its Start to a port of an output",
             ),
-            Gone::Port { output, port } => (
+            ProblemKind::GoneOutput { on: t, output } => (
+                format!("{} is patched to {output}, which no longer exists", on(t)),
                 format!(
-                    "{what} is patched to port {port} of {}, which is gone",
+                    "its output was deleted, and patching is never pointed somewhere else on its own; ⌘Z brings {output} back"
+                ),
+                "until then it lands nowhere",
+            ),
+            ProblemKind::GonePort { on: t, output, port } => (
+                format!(
+                    "{} is patched to port {port} of {}, which is gone",
+                    on(t),
                     p.node_name(output)
                 ),
-                "its port was deleted, and a placement is never moved to another port on its own"
+                "its port was deleted, and patching never moves to another port on its own"
                     .to_string(),
+                "until then it lands nowhere",
             ),
-            Gone::Object(o) => (
-                format!("{fixture} has a placement for {o}, which no longer exists"),
-                "what it placed was deleted".to_string(),
+            ProblemKind::GoneComponent(c) => (
+                format!("{fixture} has rules for {c}, which no longer exists"),
+                "what they were on was deleted".to_string(),
+                "they do nothing",
             ),
-            Gone::Component(c) => (
-                format!("{fixture} has a placement for {c}, which no longer exists"),
-                "what it placed was deleted".to_string(),
+            ProblemKind::GoneObject(o) => (
+                format!("{fixture} has an override for {o}, which no longer exists"),
+                "what it was on was deleted, or counted away; an override never moves to another object"
+                    .to_string(),
+                "it does nothing; it comes back into use if the object does",
+            ),
+            ProblemKind::DoesntFit { object, port } => (
+                format!(
+                    "{} doesn't fit what is left of port {port}",
+                    p.object_words(object)
+                ),
+                "its start was set there, so it stays: ports are physical".to_string(),
+                "the lamps past the port's end light nothing",
+            ),
+            ProblemKind::PastLastPort { object } => (
+                format!(
+                    "{} runs past the output's last port",
+                    p.object_words(object)
+                ),
+                "outputs have no order, so it never moves on to another output".to_string(),
+                "it, and everything after it that follows on, lights nothing until something sets a new start",
+            ),
+            ProblemKind::MidPixel { object } => (
+                format!(
+                    "{} starts part-way into a pixel",
+                    p.object_words(object)
+                ),
+                "the board speaks in whole pixels".to_string(),
+                "it lands nowhere until it starts on a pixel",
             ),
         };
-        Notice::refused(
-            text,
-            why,
-            "until then its lamps follow what's above them, or light nothing",
-        )
+        Notice::refused(text, why, help)
     }
 }

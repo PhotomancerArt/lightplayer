@@ -17,7 +17,11 @@ use crate::domain::channel::Channel;
 use crate::domain::color_order::ColorOrder;
 use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
-use crate::domain::patch_place::{PatchPlace, PatchTarget};
+use std::collections::BTreeMap;
+
+use crate::domain::object::ObjectId;
+use crate::domain::object_override::ObjectOverride;
+use crate::domain::patch_rule::{Children, ComponentRules, Start};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fixture {
@@ -26,10 +30,20 @@ pub struct Fixture {
     pub size: Vec2,
     /// Top-level components, in authoring order.
     pub components: Vec<Component>,
-    /// Where its lamps go: at most one placement for itself, each
-    /// component and each object (`patch_place.rs`). The patch they make is
-    /// derived (`patch.rs`), never stored.
-    pub places: Vec<PatchPlace>,
+    /// Where its walk starts (`patch_rule.rs`): it must say, since nothing
+    /// flows in from another fixture.
+    pub start: Start,
+    /// How its top-level components follow each other.
+    pub children: Children,
+    /// The rules on its components, by id (absent: follows, end to end).
+    pub rules: BTreeMap<crate::domain::component::ComponentId, ComponentRules>,
+    /// Overrides on its objects, by id (`object_override.rs`). The patch
+    /// the walker makes from all of it is derived (`patch.rs`), never
+    /// stored.
+    pub overrides: BTreeMap<ObjectId, ObjectOverride>,
+    /// How many channels one lamp takes (its lamp type's; RGB is 3). The
+    /// lab has only RGB lamps so far.
+    pub channels_per_lamp: u32,
     /// Which byte of each of its pixels is red, green and blue.
     pub color_order: ColorOrder,
     /// The visual channel whose render product it samples (the product's
@@ -71,7 +85,11 @@ impl Fixture {
         Self {
             size,
             components: Vec::new(),
-            places: Vec::new(),
+            start: Start::default(),
+            children: Children::default(),
+            rules: BTreeMap::new(),
+            overrides: BTreeMap::new(),
+            channels_per_lamp: 3,
             color_order: ColorOrder::default(),
             reads: Channel::visual_out(),
             unsupported: None,
@@ -104,28 +122,18 @@ impl Fixture {
         parent_of(&self.components, id, None)
     }
 
+    /// The rules on a component (default when it has none).
+    pub fn rules_of(&self, id: &crate::domain::component::ComponentId) -> ComponentRules {
+        self.rules.get(id).cloned().unwrap_or_default()
+    }
+
+    /// Drop rules and overrides that set nothing any more.
+    pub fn tidy_patching(&mut self) {
+        self.rules.retain(|_, r| !r.is_default());
+        self.overrides.retain(|_, o| !o.is_empty());
+    }
+
     /// Remove a component (and everything under it) wherever it lives.
-    /// The placement on `target`, if it has one.
-    pub fn place(&self, target: &PatchTarget) -> Option<&PatchPlace> {
-        self.places.iter().find(|p| &p.on == target)
-    }
-
-    /// The placement on `target`, made empty if it has none.
-    pub fn place_mut(&mut self, target: &PatchTarget) -> &mut PatchPlace {
-        match self.places.iter().position(|p| &p.on == target) {
-            Some(i) => &mut self.places[i],
-            None => {
-                self.places.push(PatchPlace::on(target.clone()));
-                self.places.last_mut().expect("just pushed")
-            }
-        }
-    }
-
-    /// Drop placements that set nothing any more.
-    pub fn tidy_places(&mut self) {
-        self.places.retain(|p| !p.is_empty());
-    }
-
     pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
         remove_from(&mut self.components, id)
     }
@@ -148,9 +156,7 @@ fn find_mut<'a>(list: &'a mut [Component], id: &ComponentId) -> Option<&'a mut C
         if &c.id == id {
             return Some(c);
         }
-        if let Some(children) = c.children_mut()
-            && let Some(found) = find_mut(children, id)
-        {
+        if let Some(found) = find_mut(c.children_slice_mut(), id) {
             return Some(found);
         }
     }

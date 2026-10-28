@@ -89,6 +89,16 @@ impl Editor {
             }
             out.extend(facts);
         }
+        // One component or object: the component first, then its object
+        // (Yona, 2026-10-25: one tree, components primary; the inspector
+        // shows the component's properties, then the object's).
+        if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice() {
+            out.extend(self.component_then_object(t));
+            if let Some(spans) = span_facts(p, t) {
+                out.push(section("Spans", spans));
+            }
+            return out;
+        }
         if let [t @ Target::Span { .. }] = selection.as_slice()
             && let Some(span) = p.span_of(t)
         {
@@ -144,6 +154,65 @@ impl Editor {
             });
         }
         out
+    }
+}
+
+impl Editor {
+    /// A component's section — its properties and its rules — then its
+    /// object's — what it does on the walk. For a ring or a copy the
+    /// component is the circle or the repeated thing, and what is edited
+    /// there changes every ring or every copy (D11).
+    fn component_then_object(&self, t: &Target) -> Vec<UiSection> {
+        let p = &self.project;
+        let (component, object) = match t {
+            Target::Component(c) => (c.clone(), crate::ObjectId::of(c)),
+            Target::Object(o) => (o.component.clone(), o.clone()),
+            _ => return Vec::new(),
+        };
+        let Some(fixture) = p.fixture_of(&component).map(|n| n.id.clone()) else {
+            return Vec::new();
+        };
+        let props = |targets: &[Target]| -> Vec<UiItem> {
+            common_props(p, targets)
+                .into_iter()
+                .map(|prop| UiItem::Prop {
+                    locked: !self.move_draw && prop.desc.reshapes,
+                    prop,
+                })
+                .collect()
+        };
+        let mut comp_items = Vec::new();
+        if let Target::Object(o) = t {
+            let what = if o.key.is_empty() { "copy" } else { "ring" };
+            comp_items.push(UiItem::Hint(format!(
+                "Changes here change every {what} of {component}."
+            )));
+        }
+        comp_items.extend(props(&[Target::Component(component.clone())]));
+        comp_items.extend(self.rule_rows_for(&[(
+            fixture.clone(),
+            crate::PatchTarget::Component(component.clone()),
+        )]));
+        let mut obj_items = Vec::new();
+        // A ring's own count, radius and way round live in its circle, but
+        // are the ring's alone.
+        if matches!(t, Target::Object(o) if !o.key.is_empty()) {
+            obj_items.extend(props(std::slice::from_ref(t)));
+        }
+        obj_items.extend(
+            self.object_rows_for(&[(fixture, object.clone())])
+                .unwrap_or_default(),
+        );
+        vec![
+            UiSection {
+                title: Some(format!("Component · {component}")),
+                items: comp_items,
+            },
+            UiSection {
+                title: Some(format!("Object · {object}")),
+                items: obj_items,
+            },
+        ]
     }
 }
 
@@ -216,6 +285,25 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
         });
     }
     out
+}
+
+/// Where a fixture starts, in words: "Starts at D0 of main, pixel 0".
+fn start_words(p: &Project, start: &crate::domain::patch_rule::Start) -> String {
+    match start {
+        crate::domain::patch_rule::Start::At {
+            output,
+            port,
+            channel,
+        } => format!(
+            "Starts at {}, {}",
+            p.long_label(&Target::Port {
+                output: output.clone(),
+                key: port.clone()
+            }),
+            channel.words(3)
+        ),
+        _ => "Starts nowhere yet: its lamps go nowhere".into(),
+    }
 }
 
 /// Where a drawn thing's lamps land: one line per span, its pixels on its
@@ -341,12 +429,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 // Auto and how much is on the wire first, with what changes
                 // them (patching by hand), then the rules themselves.
                 rules.extend(patch_facts(p, id));
-                if fx.places.is_empty() {
-                    rules.push(UiItem::Rule("Not placed: its lamps go nowhere yet".into()));
-                }
-                for r in &fx.places {
-                    rules.push(UiItem::Rule(p.place_label(id, r)));
-                }
+                rules.push(UiItem::Rule(start_words(p, &fx.start)));
                 let lands: Vec<String> = p.ports_of(t).iter().map(|x| p.long_label(x)).collect();
                 if !lands.is_empty() {
                     rules.push(UiItem::Rule(format!("Lands on {}", lands.join(", "))));
@@ -357,12 +440,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     .filter(|u| &u.fixture == id)
                     .map(|u| u.lamps.len())
                     .sum();
-                let working = fx.places.iter().any(|r| {
-                    r.wire
-                        .as_ref()
-                        .and_then(|w| w.output())
-                        .is_some_and(|o| p.node(o).is_some())
-                });
+                let working = !p.control_outputs(id).is_empty();
                 if left > 0 && working {
                     rules.push(UiItem::Rule(format!(
                         "{left} lamps past the end of its ports"

@@ -76,8 +76,15 @@ change the sentence first, then the code.
 
 ## Real projects
 
-The toolbar's **Project** picker opens the desk (the lab's own seed) or
-one of the test projects, and fits the view:
+The toolbar's **Project** picker opens the desk (the lab's own seed), the
+circular display, or one of the test projects, and fits the view:
+
+- **Circular display** (built in code, `domain/circular_display.rs`): a
+  circle of four rings and a one-lamp centre (its innermost ring) on a
+  five-port output, starting at D0. Its hardware preview is wired as one
+  might really be soldered — ring 3 the other way round, rings 3–5 on
+  D1 — for the lead journey. Built in code because the product's files
+  can't hold a circle of rings yet (it saves as separate rings).
 
 - **PLAYFUL choker** (`catalog/projects/playful-choker`): 12 paths, 73
   lamps, one output whose one port takes the rest; its shader is a card
@@ -102,24 +109,33 @@ What the model took from the product to open them (each with its
 statement, fit-check's resolutions applied): lamps resolved in the
 product's own f32 arithmetic (`resolve.rs`, bit for bit); paths with
 gaps and a `reversed` flag; polygons; repeats (copy *k* turned
-*k*·360°/count, keyed `2` like `/sector/2`); place rules (an object on a
-port's pixel, reversed, turned in its window) beside auto; an output's
-ports as one flat wire, the last one free to take the rest; auto flow in
-the product's attach order (each module's nodes by name); colour order
+*k*·360°/count; the lab gives the repeated shape an id of its own, so
+`/sector/2` is `path1@2`); patch rows (an object on a port's pixel,
+reversed, turned in its window) beside auto flow in the product's attach
+order (each module's nodes by name), frozen on open into each fixture's
+Start and the fewest overrides that land every lamp where the product
+does (`product_patch.rs`, the M3 upgrade step in miniature); an output's
+ports as one flat wire, the last one free to take the rest; colour order
 on the fixture; shaders as render sources (stand-in patterns, picked from
 their GLSL); bus channels (`bindings`) — the visual channel a fixture
 reads, the control channel an output reads; nodes the lab doesn't
 simulate as plain cards; output names.
 
-On disk (`files/src/save.rs`): an auto rule is the fixture writing the
+On disk (`files/src/save.rs`): rules and overrides can't be said in
+today's patch rows (patch format 4 is M1's), so a fixture keeps the
+patch file it opened with while the product, reading it, still lands
+every lamp where the walker does, and is otherwise written expanded —
+each object the walker lands at its address, `flow: manual` — and reopens
+frozen (its rules come back as overrides). An object the walker clipped
+at its port's end can't be said and refuses to save. A fixture writes the
 channel its output reads; a shader the lab made is a shader node with a
-small stand-in GLSL file (one it opened is never written); a place rule is a patch row, its port and
-pixel flattened onto the wire; a lab circle is one ring shape per ring
+small stand-in GLSL file (one it opened is never written); a lab circle is one ring shape per ring
 and a group is its children (both lose their grouping until the product
 has addressable rings and groups); a lab name the product refuses
 (`tail rig`) is written as one it accepts (`tail_rig`). The lab doesn't
-open grids, filled polygons, multi-ring rings, or patch rows that place
-part of an object or a plain lamp range — it refuses them by name.
+open patch rows that place part of an object or a plain lamp range, or
+a patch that lays one object across two ports (the walker lays a leaf on
+one port: `projects/test/quad-wire-oracle`) — it refuses them by name.
 
 ## What it covers
 
@@ -170,47 +186,57 @@ A 2D canvas with selection, and the start of the whole node graph on it
   edge between nodes is a channel binding and says its channel's name,
   small, once per pair of nodes (D53): `visual.out` from a shader's card
   to each fixture it feeds, `control.out` (or an output's own channel,
-  `control.scarf_out`) on the patch. The lab's auto rule IS the control
-  binding, read the product's way: the fixture writes the channel its
-  rule's output reads (fit-check §6); a fixture bound to an output with
-  nothing placed yet gets one plain edge, node to node.
-- **Placements** (`patch_place.rs`, `patch_resolve.rs`, `patch.rs`; plan
-  D8–D11): one vocabulary for a fixture, a component and an object — a
-  **wire** (auto onto an output, a port and pixel, or not on the wire), a
-  **direction** (as drawn, reversed) and a **turn** (objects only) — each
-  setting inherited down the tree on its own. A placed circle runs its
-  rings end to end; reversed, in the other order, each the other way. One
-  ring can reverse in its slot with no address of its own, or leave its
-  circle's run for a wire of its own (the others close up). Auto fills the
-  output's ports in order, after every placed run and after fixtures
-  before it in the product's attach order. The effective patch is derived
-  and never stored; a placement whose target, output or port is gone is a
-  problem and is never retargeted. Two objects on the same pixels are
-  allowed and reported as an **overlap**; the board shows the later one.
-  What today's patch rows can't say (a component placed, an object
-  reversed while it follows) saves as each object's address (plan D14:
-  patch format 4 later).
+  `control.scarf_out`) on the patch. The control binding is read the
+  product's way: the fixture writes the channel its rules' output reads
+  (fit-check §6); a fixture bound to an output with nothing landed yet
+  gets one plain edge, node to node.
+- **Objects, a tree under the components** (`object.rs`, `object_tree.rs`;
+  theory "Components and objects"): every component renders exactly one
+  object node — a path is its own leaf, a circle a container of its ring
+  leaves, a group of its children, a repeat of its copies — and leaves
+  hold lamps. Ids are flat: `path1`, `circle1/r3`, and a repeat (which
+  holds a component with its own id) makes copy 0 its child's own ids
+  and copy k `path1@k` (nested repeats stack inner first, trailing zeros
+  dropped). A ring of one lamp is that lamp at the centre.
+- **The walker** (`walker.rs`, `cursor_op.rs`, `patch_rule.rs`,
+  `object_override.rs`; theory "Patching"): each fixture walks its object
+  tree depth first, holding a cursor — an output, a port, a channel —
+  that each object it enters moves, field by field, by **Keep**, **Set**
+  or **Add** (values in pixels or channels). Rules on the fixture and its
+  components render the steps: **Start** (Follows, At a port's pixel,
+  Next port; a fixture's must say where — nothing flows across fixtures)
+  and, on containers, **Children** (End to end, or One per port from a
+  port: absolute, so slots are kept). An **override** on an object, by
+  id, replaces its rule's step field by field, and can turn it **Off**,
+  give it a **Direction** or an **Offset**. The cursor continues: putting
+  ring 3 on D1 takes ring 4 and the centre along. A leaf that doesn't fit
+  its port starts on the next one; the first leaf after a Set that
+  doesn't fit is reported and clipped; past the last port is an error
+  until the next Set. The effective patch is derived and never stored;
+  anything naming something gone is reported and never retargeted; two
+  objects on the same pixels are allowed and reported as an **overlap**
+  (the board shows the later one). `model/tests/walker.rs` is the
+  walker's statements.
 - **Patching by hand** (the roadmap's stage 4, plan
   `lp2025/2026-10-18-2337-explicit-patching-spike`; `patch_edits.rs`,
-  `ux/patching.rs`). Looking is free; a pair takes an arm. **A** arms a
-  patch from what is selected: one object (or its span), or a gap (a
-  span with nothing on it; a run of selected pixels, or a port's first
-  gap, works the same). While armed, **← →**
-  walk the other end's candidates (free segments in wire order from an
-  object; objects not on the wire from a segment), the board previews the
-  pair as if it were made, and **Enter** or a click makes it. **M** is
-  lp2014's `m`: armed, it patches and moves on to the next free segment
-  still armed; on an object just patched (and lined up), it moves on the
-  same way. **Esc** disarms first. **S** arms a swap between two objects
-  on the wire. On the selected objects: **R** reverses the placement
-  while Move & draw is off (on, it reverses the path itself), **K L** turn
-  one lamp and **; '** a third (direction-aware, as lp2014's keys were),
-  **[ ]** shift a pixel along the port, **U** puts a thing back to
-  following. **⇧← ⇧→** walk the wire span by span, port after port; **.**
-  jumps to the next port's first gap. On a fixture, **⇧A** turns auto on
-  or off and **⇧U** unpatches every object. **A wiring edit moves only
-  what it edits**: when auto would move an object nobody touched, the edit
-  pins it where it was and says so.
+  `ux/patching.rs`), on overrides. Looking is free; a pair takes an arm.
+  **A** arms a patch from what is selected: one object (or its span), or
+  a gap (a span with nothing on it; a run of selected pixels, or a port's
+  first gap, works the same). While armed, **← →** walk the other end's
+  candidates (free segments in wire order from an object; objects not on
+  the wire from a segment), the board previews the pair as if it were
+  made, and **Enter** or a click makes it. **M** is lp2014's `m`: armed,
+  it patches and moves on to the next free segment still armed; on an
+  object just patched (and lined up), it moves on the same way. **Esc**
+  disarms first. **S** arms a swap between two objects on the wire. On
+  the selected objects: **R** reverses the object's direction while Move
+  & draw is off (on, it reverses the path itself), **K L** turn one lamp
+  and **; '** a third (direction-aware, as lp2014's keys were), **[ ]**
+  shift a pixel along the port, **U** hands its start back to its rule.
+  **⇧← ⇧→** walk the wire span by span, port after port; **.** jumps to
+  the next port's first gap. On a fixture, **⇧U** turns every object off,
+  for patching by hand from nothing. An edit takes what follows along;
+  nothing is pinned behind a person's back.
 - **The hardware preview** (plan D4's piece; `piece.rs`,
   `web/src/piece_view.rs`): the real lights as they are really wired, lit
   by what the board sends, so a hand patch can be walked with no hardware.
@@ -312,15 +338,23 @@ A 2D canvas with selection, and the start of the whole node graph on it
   too, sized to hold their drawing. Resize one by its handles, or set
   width and height in the inspector.
 - **One tree and a data-driven inspector:** the tree lists modules,
-  fixtures, outputs and ports. The inspector shows the properties
-  everything selected shares, a fixture's rules and problems, and an
-  output's ports with how full each one is. Its **Patch** section is the
-  same on a fixture, a component, an object or a span (plan P6): Wire
-  (follows its parent, auto onto an output, any port, not on the wire),
-  Start with − + when it has a port of its own, Direction, and Turn on an
-  object; each "Follows" says what it follows. A multi-selection edits
-  together and says mixed; every edit is one undo step, the same edit the
-  keys make.
+  fixtures, outputs and ports, and a fixture's components; an object is
+  a row only where it differs from its component — a circle's rings, a
+  repeat's copies 1…n (copy 0 is the repeated component itself) — drawn
+  lighter, and selectable. On the canvas a click selects the circle or
+  repeat, the next the ring or copy under it. The inspector shows the
+  properties everything selected shares, a fixture's rules and problems,
+  and an output's ports with how full each one is. One component or
+  object shows **Component · <id>** first — its properties, its Start and
+  Children (for a ring or a copy, the circle's or the repeated thing's,
+  with a note that edits change every one) — then **Object · <id>**: a
+  ring's own properties, then where it is on the walk and why: Port,
+  Pixel, Direction, Offset, On the wire. A value from a rule says what it
+  is and where it came from ("after ring r2 ↗", "from circle1: one per
+  port ↗") and Override makes it the object's own without moving
+  anything; Reset hands it back; an object with a start of its own says
+  what follows it. A multi-selection edits together and says mixed;
+  every edit is one undo step, the same edit the keys make.
 - **Verbs by name** (`graph_verb.rs`): every key the hint bar names is a
   `GraphVerb` (`delete`, `go-in`, `select-all`, `path-tool`, …), and each
   hint carries its verbs; `Editor::verbs` lists the ones on offer now from
@@ -386,9 +420,8 @@ sm, md, lg), which draws as if the screen were that size and frames the
 app at 390 or 820 px wide, the way devtools' device mode does.
 
 Not covered yet: touch gestures (pinch, long-press: the touch plan, on
-the test phones), GPU faces at dome scale, editing place rules on the canvas (they open, show,
-save and light the board, but there is no gesture for them yet), choosing
-a rule's output, choosing a node's channels, saving from the page,
+the test phones), GPU faces at dome scale, saving rules and overrides as
+themselves (patch format 4, M1), the output/port picker, choosing a node's channels, saving from the page,
 routes, running GLSL (shaders are stand-in patterns), clocks and other
 inputs to a shader, and a level above the project. In the lab the board
 is simulated; in Studio's Graph tab it is the real one (or the preview
