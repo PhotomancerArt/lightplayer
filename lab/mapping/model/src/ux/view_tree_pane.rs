@@ -14,7 +14,9 @@ impl Editor {
             .selection
             .iter()
             .map(|t| match t {
-                Target::Lamp { object, .. } => p.object_target(object),
+                Target::Lamp {
+                    segment: object, ..
+                } => p.tree_target(object),
                 other => other.clone(),
             })
             .collect();

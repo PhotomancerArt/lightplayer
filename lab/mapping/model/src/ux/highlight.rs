@@ -7,7 +7,7 @@
 //! effective patch, so it is always what the patch really does.
 
 use crate::domain::node::NodeId;
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::patch::PixelRun;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -15,8 +15,8 @@ use crate::ux::editor::Editor;
 
 impl Project {
     /// Every lamp one port carries, as (object, lamp index), in pixel order.
-    pub fn lamps_on_port(&self, output: &NodeId, key: &str) -> Vec<(ObjectId, u32)> {
-        let mut on: Vec<(u32, ObjectId, u32)> = self
+    pub fn lamps_on_port(&self, output: &NodeId, key: &str) -> Vec<(TreeRef, u32)> {
+        let mut on: Vec<(u32, TreeRef, u32)> = self
             .effective_patch()
             .pixel_runs
             .iter()
@@ -24,7 +24,7 @@ impl Project {
             .flat_map(|s| {
                 s.lamps
                     .clone()
-                    .map(move |i| (s.pixel(i), s.object.clone(), i))
+                    .map(move |i| (s.pixel(i), s.segment.clone(), i))
             })
             .collect();
         on.sort_by_key(|(pixel, _, _)| *pixel);
@@ -62,11 +62,11 @@ impl Project {
     }
 
     /// The pixel a lamp lands on, if it is patched.
-    pub fn pixel_of_lamp(&self, object: &ObjectId, index: u32) -> Option<Target> {
+    pub fn pixel_of_lamp(&self, object: &TreeRef, index: u32) -> Option<Target> {
         self.effective_patch()
             .pixel_runs
             .iter()
-            .find(|s| &s.object == object && s.lamps.contains(&index))
+            .find(|s| &s.segment == object && s.lamps.contains(&index))
             .map(|s| Target::Pixel {
                 index: s.pixel(index),
                 output: s.output.clone(),
@@ -83,20 +83,23 @@ impl Project {
             .find_map(|s| {
                 Some(Target::Lamp {
                     index: s.lamp_at(index)?,
-                    object: s.object.clone(),
+                    segment: s.segment.clone(),
                 })
             })
     }
 
     fn span_belongs_to(&self, s: &PixelRun, t: &Target) -> bool {
         match t {
-            Target::Lamp { object, index } => &s.object == object && s.lamps.contains(index),
+            Target::Lamp {
+                segment: object,
+                index,
+            } => &s.segment == object && s.lamps.contains(index),
             Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => false,
             Target::Node(id) if self.output(id).is_some() => false,
             // A fixture: its own spans, without walking up from each one.
             Target::Node(id) if self.fixture(id).is_some() => &s.fixture == id,
             // The span's object, and everything above it up to the root.
-            _ => self.is_ancestor_or_self(t, &self.object_target(&s.object)),
+            _ => self.is_ancestor_or_self(t, &self.tree_target(&s.segment)),
         }
     }
 }
@@ -112,7 +115,10 @@ impl Editor {
                 Target::Port { output, key } => p
                     .lamps_on_port(output, key)
                     .into_iter()
-                    .map(|(object, index)| Target::Lamp { object, index })
+                    .map(|(object, index)| Target::Lamp {
+                        segment: object,
+                        index,
+                    })
                     .collect(),
                 Target::Pixel { output, key, index } => {
                     p.lamp_on_pixel(output, key, *index).into_iter().collect()
@@ -140,7 +146,10 @@ impl Editor {
     pub fn marked_pixels(&self) -> Vec<Target> {
         let mut out: Vec<Target> = Vec::new();
         for t in &self.selection {
-            if let Target::Lamp { object, index } = t
+            if let Target::Lamp {
+                segment: object,
+                index,
+            } = t
                 && let Some(px) = self.project.pixel_of_lamp(object, *index)
                 && !out.contains(&px)
             {

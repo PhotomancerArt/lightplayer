@@ -5,7 +5,7 @@
 
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::pattern::Pattern;
 use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::ui::Emphasis;
@@ -66,7 +66,7 @@ pub enum FixtureLook {
 /// One object drawn in a fixture.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiObject {
-    pub id: ObjectId,
+    pub id: TreeRef,
     pub shape: UiShape,
     /// Lit when selected (or inside the selection); dimmed outside the
     /// level you are working in.

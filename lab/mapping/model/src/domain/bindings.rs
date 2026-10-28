@@ -11,7 +11,7 @@
 //!   ARE this binding, read the product's way (fit-check §1, §6). A rule
 //!   naming an output means the fixture writes the channel that output
 //!   reads, so the rule's output decides the channel and the binding's
-//!   name is the output's. A rule naming an output that is gone binds to
+//!   name is the output's. A start naming an output that is gone binds to
 //!   nothing (and is a patch problem, `patch.rs`), never to another
 //!   output.
 
@@ -85,28 +85,28 @@ impl Project {
     }
 
     /// The outputs a fixture's control product goes to: every output its
-    /// rules and overrides name that is still there — its Start's first,
-    /// then its components', then its objects'.
+    /// starts and overrides name that is still there — the fixture's start
+    /// first, then its parts', then its overrides'.
     pub fn control_outputs(&self, fixture: &NodeId) -> Vec<NodeId> {
-        use crate::domain::cursor_op::OutputOp;
-        use crate::domain::patch_rule::Start;
+        use lpc_mapping::patching::OutputOp;
         let Some(f) = self.fixture(fixture) else {
             return Vec::new();
         };
-        let starts = std::iter::once(&f.start).chain(f.rules.values().map(|r| &r.start));
-        let named = starts
-            .filter_map(|s| match s {
-                Start::At { output, .. } => Some(output),
-                _ => None,
-            })
-            .chain(f.overrides.values().filter_map(|o| match &o.output {
-                Some(OutputOp::Set(output)) => Some(output),
-                _ => None,
-            }));
+        let m = &f.mapping;
+        let parts = m.all_parts();
+        let named = std::iter::once(&m.start.output)
+            .chain(parts.iter().map(|p| &p.start.output))
+            .chain(m.overrides.values().filter_map(|o| o.output.as_ref()))
+            .filter_map(|op| match op {
+                OutputOp::Set(name) => Some(name.as_str()),
+                OutputOp::Keep => None,
+            });
         let mut out: Vec<NodeId> = Vec::new();
-        for o in named {
-            if self.output(o).is_some() && !out.contains(o) {
-                out.push(o.clone());
+        for name in named {
+            if let Some(o) = self.output_named(name)
+                && !out.contains(&o)
+            {
+                out.push(o);
             }
         }
         out

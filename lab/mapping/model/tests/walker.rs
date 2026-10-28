@@ -70,8 +70,8 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
         )
         .unwrap();
     p.start_at(&f, &out, "0", 0);
-    let ring = |k: &str| ObjectId::new(&circle, k);
-    p.patch_object(&ring("r3"), &out, "1", 0).unwrap();
+    let ring = |k: &str| TreeRef::new(&circle, k);
+    p.patch_segment(&ring("r3"), &out, "1", 0).unwrap();
     assert_eq!(landing(&p, &ring("r2"), 0), Some(("0".into(), 6)));
     assert_eq!(landing(&p, &ring("r3"), 0), Some(("1".into(), 0)));
     assert_eq!(
@@ -95,12 +95,12 @@ fn one_per_port_puts_each_child_on_its_own_port() {
     p.start_at(&f, &out, "0", 0);
     p.set_children(
         &f,
-        &PatchTarget::Component(circle.clone()),
-        Children::OnePerPort { from: "1".into() },
+        &PatchTarget::Part(circle.clone()),
+        Flow::OnePerPort { from: "1".into() },
     );
     for (k, port) in [("r1", "1"), ("r2", "2"), ("r3", "3")] {
         assert_eq!(
-            landing(&p, &ObjectId::new(&circle, k), 0),
+            landing(&p, &TreeRef::new(&circle, k), 0),
             Some((port.into(), 0))
         );
     }
@@ -124,11 +124,11 @@ fn anchoring_one_copy_leaves_the_others_in_their_slots() {
     p.start_at(&f, &out, "0", 0);
     p.set_children(
         &f,
-        &PatchTarget::Component(repeat),
-        Children::OnePerPort { from: "0".into() },
+        &PatchTarget::Part(repeat),
+        Flow::OnePerPort { from: "0".into() },
     );
-    let copy = |k: u32| ObjectId::of(&arm).in_copy(k).canonical();
-    p.patch_object(&copy(3), &out, "7", 0).unwrap();
+    let copy = |k: u32| TreeRef::of(&arm).in_copy(k).canonical();
+    p.patch_segment(&copy(3), &out, "7", 0).unwrap();
     assert_eq!(landing(&p, &copy(3), 0), Some(("7".into(), 0)));
     assert_eq!(
         landing(&p, &copy(4), 0),
@@ -157,7 +157,7 @@ fn a_set_start_that_doesnt_fit_is_reported_not_moved() {
     let (mut p, f, out) = bare(&[("D0", 10), ("D1", 10)]);
     let a = path(&mut p, &f, 6);
     p.start_at(&f, &out, "0", 0);
-    p.patch_object(&a, &out, "0", 7).unwrap();
+    p.patch_segment(&a, &out, "0", 7).unwrap();
     assert_eq!(landing(&p, &a, 0), Some(("0".into(), 7)));
     assert_eq!(landing(&p, &a, 3), None, "past the port's end");
     assert!(matches!(
@@ -181,7 +181,7 @@ fn past_the_last_port_is_an_error() {
         p.effective_patch().problems[0].kind,
         ProblemKind::PastLastPort { .. }
     ));
-    p.patch_object(&c, &out, "0", 0).unwrap();
+    p.patch_segment(&c, &out, "0", 0).unwrap();
     assert!(p.effective_patch().lands(&c), "a new start lands again");
 }
 
@@ -207,11 +207,7 @@ fn next_port_is_the_next_key() {
     let _a = path(&mut p, &f, 5);
     let b = path(&mut p, &f, 3);
     p.start_at(&f, &out, "0", 0);
-    p.set_start(
-        &f,
-        &PatchTarget::Component(b.component.clone()),
-        Start::NextPort,
-    );
+    p.set_start(&f, &PatchTarget::Part(b.component.clone()), Start::NextPort);
     assert_eq!(landing(&p, &b, 0), Some(("2".into(), 0)));
 }
 
@@ -222,11 +218,15 @@ fn values_keep_their_unit() {
     let (mut p, f, out) = bare(&[("D0", 60)]);
     let a = path(&mut p, &f, 3);
     p.start_at(&f, &out, "0", 0);
-    p.edit_override(&a, |o| o.channel = Some(ChannelOp::Set(Amount::ch(6))))
-        .unwrap();
+    p.edit_override(&a, |o| {
+        o.channel = Some(ChannelOp::Set(Amount::channels(6)))
+    })
+    .unwrap();
     assert_eq!(pixels(&p, &a), vec![2, 3, 4]);
-    p.edit_override(&a, |o| o.channel = Some(ChannelOp::Set(Amount::ch(4))))
-        .unwrap();
+    p.edit_override(&a, |o| {
+        o.channel = Some(ChannelOp::Set(Amount::channels(4)))
+    })
+    .unwrap();
     assert!(!p.effective_patch().lands(&a));
     assert!(matches!(
         p.effective_patch().problems[0].kind,
@@ -242,7 +242,7 @@ fn reversed_and_offset_land_as_the_product_does() {
     let a = path(&mut p, &f, 5);
     p.start_at(&f, &out, "0", 10);
     p.edit_override(&a, |o| {
-        o.direction = Some(Direction::Reversed);
+        o.direction = Some(Direction::Reverse);
         o.offset = Some(2);
     })
     .unwrap();
@@ -290,7 +290,7 @@ fn bare(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId) {
 }
 
 /// A straight path of `n` lamps in `f`: its object.
-fn path(p: &mut Project, f: &NodeId, n: u32) -> ObjectId {
+fn path(p: &mut Project, f: &NodeId, n: u32) -> TreeRef {
     let k = p.fixture(f).unwrap().components.len() as f64;
     let y = 10.0 + 5.0 * k;
     let id = p
@@ -299,17 +299,17 @@ fn path(p: &mut Project, f: &NodeId, n: u32) -> ObjectId {
             ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(80.0, y)], n),
         )
         .unwrap();
-    ObjectId::of(&id)
+    TreeRef::of(&id)
 }
 
-fn landing(p: &Project, object: &ObjectId, lamp: u32) -> Option<(String, u32)> {
+fn landing(p: &Project, object: &TreeRef, lamp: u32) -> Option<(String, u32)> {
     p.effective_patch()
         .landing(object, lamp)
         .map(|l| (l.port, l.pixel))
 }
 
-fn pixels(p: &Project, object: &ObjectId) -> Vec<u32> {
-    let n = p.object(object).unwrap().lamps.len() as u32;
+fn pixels(p: &Project, object: &TreeRef) -> Vec<u32> {
+    let n = p.segment(object).unwrap().lamps.len() as u32;
     (0..n)
         .map(|j| landing(p, object, j).expect("on the wire").1)
         .collect()

@@ -1,4 +1,4 @@
-//! A port's pixels as runs: one run per object patched to it, and the
+//! A port's pixels as runs: one run per segment patched to it, and the
 //! unpatched stretches between them as runs of their own.
 //!
 //! lp2014 drew an output's channels in groups, one per mapped shape, with
@@ -11,7 +11,7 @@
 use std::ops::Range;
 
 use crate::domain::node::NodeId;
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::project::Project;
 
 /// One run of a port's pixels.
@@ -19,8 +19,8 @@ use crate::domain::project::Project;
 pub struct PortRun {
     /// The pixels, in wire order.
     pub pixels: Range<u32>,
-    /// The object patched there, or `None` for unpatched pixels.
-    pub object: Option<ObjectId>,
+    /// The segment patched there, or `None` for unpatched pixels.
+    pub segment: Option<TreeRef>,
 }
 
 impl Project {
@@ -28,7 +28,7 @@ impl Project {
     /// to exactly one run.
     pub fn port_runs(&self, output: &NodeId, key: &str) -> Vec<PortRun> {
         let count = self.port_pixels(output, key);
-        let mut spans: Vec<(u32, u32, ObjectId)> = self
+        let mut spans: Vec<(u32, u32, TreeRef)> = self
             .effective_patch()
             .pixel_runs
             .iter()
@@ -40,26 +40,26 @@ impl Project {
                 } else {
                     s.start_pixel
                 };
-                (lo, lo + s.len(), s.object.clone())
+                (lo, lo + s.len(), s.segment.clone())
             })
             .collect();
         spans.sort_by_key(|(lo, _, _)| *lo);
 
         let mut runs = Vec::new();
         let mut at = 0;
-        for (lo, hi, object) in spans {
+        for (lo, hi, segment) in spans {
             let lo = lo.max(at).min(count);
             let hi = hi.min(count);
             if lo > at {
                 runs.push(PortRun {
                     pixels: at..lo,
-                    object: None,
+                    segment: None,
                 });
             }
             if hi > lo {
                 runs.push(PortRun {
                     pixels: lo..hi,
-                    object: Some(object),
+                    segment: Some(segment),
                 });
                 at = hi;
             }
@@ -67,7 +67,7 @@ impl Project {
         if at < count {
             runs.push(PortRun {
                 pixels: at..count,
-                object: None,
+                segment: None,
             });
         }
         runs

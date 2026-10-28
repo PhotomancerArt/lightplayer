@@ -1,12 +1,12 @@
 //! Targets: every selectable thing, and the one tree they form.
 //!
 //! The UI shows ONE tree (D18): the project holds nodes, a module holds
-//! nodes, a fixture holds components, groups hold components, a circle
-//! holds its rings, a ring holds its lamps; an output holds its ports, and
-//! a port its spans (`span.rs`: an object's pixels on it, or a gap), a
-//! span its pixels. A path is its own object, so its lamps sit directly
-//! under it. Lamps and pixels are part of the tree for navigation (Enter,
-//! arrows, drill-down) but the tree *pane* stops above them.
+//! nodes, a fixture holds parts, groups hold parts, a circle holds its
+//! rings, a repeat its copies, a segment holds its lamps; an output holds
+//! its ports, and a port its spans (`span.rs`: a segment's pixels on it, or
+//! a gap), a span its pixels. A path is its own segment, so its lamps sit
+//! directly under it. Lamps and pixels are part of the tree for navigation
+//! (Enter, arrows, drill-down) but the tree *pane* stops above them.
 //!
 //! On the canvas a frame — a module, a fixture — is see-through, like a
 //! frame in Figma: a click inside it selects what is in it. A frame itself
@@ -19,30 +19,30 @@
 //! A target is a path of stable ids, so a selection survives edits: change a
 //! path's count and lamp 7 is still lamp 7.
 
-use crate::domain::component::ComponentId;
 use crate::domain::geom::Vec2;
 use crate::domain::node::{NodeId, NodeKind};
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::project::Project;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {
     /// A node: a module, a fixture, an output.
     Node(NodeId),
-    /// An authored component: a path, a circle, a group.
-    Component(ComponentId),
-    /// A derived object of a multi-object component (a ring).
-    Object(ObjectId),
-    /// One lamp, by its index in its object's data order.
-    Lamp { object: ObjectId, index: u32 },
+    /// An authored part, as itself (copy 0): a path, a circle, a group.
+    Part(PartRef),
+    /// A node a part generated: a ring, a subpath, a repeat's copy (and
+    /// anything in a copy).
+    Generated(TreeRef),
+    /// One lamp, by its index in its segment's data order.
+    Lamp { segment: TreeRef, index: u32 },
     /// One port of an output, by the key its output minted.
     Port { output: NodeId, key: String },
-    /// A span of a port (`span.rs`): one object's pixels on it, by its
-    /// object (`start` 0), or a gap, by where it starts.
+    /// A span of a port (`span.rs`): one segment's pixels on it, by its
+    /// segment (`start` 0), or a gap, by where it starts.
     Span {
         output: NodeId,
         key: String,
-        object: Option<ObjectId>,
+        segment: Option<TreeRef>,
         start: u32,
     },
     /// One pixel of a port, by its index on the strip (D47). Like a lamp,
@@ -55,16 +55,16 @@ pub enum Target {
 }
 
 impl Target {
-    /// The authored component this target belongs to. Moving or editing a
+    /// The authored part this target belongs to. Moving or editing a
     /// target always lands here (D11). Nodes and ports have none: the
     /// layout places them.
-    pub fn owner(&self) -> Option<&ComponentId> {
+    pub fn owner(&self) -> Option<PartRef> {
         match self {
             Target::Node(_) | Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
                 None
             }
-            Target::Component(id) => Some(id),
-            Target::Object(o) | Target::Lamp { object: o, .. } => Some(&o.component),
+            Target::Part(id) => Some(id.clone()),
+            Target::Generated(o) | Target::Lamp { segment: o, .. } => Some(o.part()),
         }
     }
 
@@ -72,7 +72,7 @@ impl Target {
     pub fn is_authored(&self) -> bool {
         matches!(
             self,
-            Target::Component(_) | Target::Node(_) | Target::Port { .. }
+            Target::Part(_) | Target::Node(_) | Target::Port { .. }
         )
     }
 
@@ -102,10 +102,10 @@ impl Project {
     pub fn exists(&self, t: &Target) -> bool {
         match t {
             Target::Node(id) => self.node(id).is_some(),
-            Target::Component(id) => self.component(id).is_some(),
-            Target::Object(o) => self.placed().node(o).is_some(),
-            Target::Lamp { object, index } => self
-                .object(object)
+            Target::Part(id) => self.part(id).is_some(),
+            Target::Generated(o) => self.placed().node(o).is_some(),
+            Target::Lamp { segment, index } => self
+                .segment(segment)
                 .is_some_and(|o| (*index as usize) < o.lamps.len()),
             Target::Port { output, key } => {
                 self.output(output).is_some_and(|o| o.port(key).is_some())
@@ -139,66 +139,67 @@ impl Project {
         match t {
             Target::Node(id) => self.fixture(id).map(|_| id.clone()),
             Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => None,
-            other => self.fixture_of(other.owner()?).map(|n| n.id.clone()),
+            other => Some(other.owner()?.fixture),
         }
     }
 
-    /// The target that stands for an object node in the tree: its
-    /// component when it is the component's own node (a path, a circle,
-    /// copy 0 of a repeat's child), the object itself otherwise (a ring, a
-    /// copy `@k`).
-    pub fn object_target(&self, o: &ObjectId) -> Target {
-        if o.is_component_node() {
-            Target::Component(o.component.clone())
+    /// The target that stands for a tree node: its part when it is the
+    /// part's own node in copy 0 (a path, a circle, copy 0 of a repeat's
+    /// part), the generated node otherwise (a ring, a copy `@k`).
+    pub fn tree_target(&self, o: &TreeRef) -> Target {
+        if o.is_part_node() {
+            Target::Part(o.part())
         } else {
-            Target::Object(o.clone())
+            Target::Generated(o.clone())
         }
     }
 
-    /// The object node a target stands for, when it stands for one: a
-    /// component's own node, or an object.
-    pub fn object_of_target(&self, t: &Target) -> Option<ObjectId> {
+    /// The tree node a target stands for, when it stands for one: a part's
+    /// own node, or a generated one.
+    pub fn tree_node_of_target(&self, t: &Target) -> Option<TreeRef> {
         match t {
-            Target::Component(id) => Some(ObjectId::of(id)),
-            Target::Object(o) => Some(o.clone()),
+            Target::Part(id) => Some(id.node()),
+            Target::Generated(o) => Some(o.clone()),
             _ => None,
         }
     }
 
-    /// The targets for an object node's children: lamps under a leaf,
-    /// object nodes under a container.
-    fn object_children(&self, o: &ObjectId) -> Vec<Target> {
+    /// The targets for a tree node's children: lamps under a segment, tree
+    /// nodes under anything else.
+    fn tree_children(&self, o: &TreeRef) -> Vec<Target> {
         let Some((_, node)) = self.placed().node(o) else {
             return Vec::new();
         };
-        match &node.leaf {
-            Some(leaf) => lamp_targets(&leaf.id, leaf.lamps.len()),
-            None => node
-                .children
-                .iter()
-                .map(|c| self.object_target(&c.id))
-                .collect(),
+        if node.is_leaf() {
+            let n = self.segment(o).map_or(0, |s| s.lamps.len());
+            return lamp_targets(o, n);
         }
+        node.children()
+            .iter()
+            .map(|c| self.tree_target(c))
+            .collect()
     }
 
     /// One level up; `None` means the project itself.
     pub fn parent(&self, t: &Target) -> Option<Target> {
         match t {
             Target::Node(id) => self.parent_module(id).cloned().map(Target::Node),
-            Target::Component(id) => match self.parent_group(id) {
-                Some(group) => Some(Target::Component(group.clone())),
-                None => self.fixture_of(id).map(|n| Target::Node(n.id.clone())),
+            Target::Part(id) => match self.parent_part(id) {
+                Some(parent) => Some(Target::Part(parent)),
+                None => self
+                    .fixture(&id.fixture)
+                    .map(|_| Target::Node(id.fixture.clone())),
             },
-            Target::Object(o) => self.placed().parent_of(o).map(|p| self.object_target(p)),
-            Target::Lamp { object, .. } => Some(self.object_target(object)),
+            Target::Generated(o) => self.placed().parent_of(o).map(|p| self.tree_target(&p)),
+            Target::Lamp { segment, .. } => Some(self.tree_target(segment)),
             Target::Port { output, .. } => Some(Target::Node(output.clone())),
             Target::Span { .. } => t.port_of_pixel(),
             Target::Pixel { output, key, index } => {
-                // The span the pixel is in: an object's first, else its gap.
+                // The span the pixel is in: a segment's first, else its gap.
                 let spans = self.spans(output, key);
                 let span = spans
                     .iter()
-                    .find(|s| s.object.is_some() && s.pixels.contains(index))
+                    .find(|s| s.segment.is_some() && s.pixels.contains(index))
                     .or_else(|| spans.iter().find(|s| s.pixels.contains(index)));
                 span.map(|s| s.target()).or_else(|| t.port_of_pixel())
             }
@@ -221,9 +222,9 @@ impl Project {
                     .map(|n| Target::Node(n.id.clone()))
                     .collect(),
                 Some(NodeKind::Fixture(f)) => f
-                    .components
+                    .parts()
                     .iter()
-                    .map(|c| Target::Component(c.id.clone()))
+                    .map(|c| Target::Part(PartRef::new(id, &c.id)))
                     .collect(),
                 Some(NodeKind::Output(o)) => o
                     .ports
@@ -235,8 +236,8 @@ impl Project {
                     .collect(),
                 Some(NodeKind::Source(_) | NodeKind::Other(_)) | None => Vec::new(),
             },
-            Target::Component(id) => self.object_children(&ObjectId::of(id)),
-            Target::Object(o) => self.object_children(o),
+            Target::Part(id) => self.tree_children(&id.node()),
+            Target::Generated(o) => self.tree_children(o),
             Target::Port { output, key } => {
                 self.spans(output, key).iter().map(|s| s.target()).collect()
             }
@@ -310,31 +311,22 @@ impl Project {
     /// Every lamp position under a target, in world units.
     pub fn lamps_under(&self, t: &Target) -> Vec<Vec2> {
         match t {
-            Target::Lamp { object, index } => self
-                .object(object)
+            Target::Lamp { segment, index } => self
+                .segment(segment)
                 .and_then(|o| o.lamps.get(*index as usize).map(|l| l.pos))
                 .into_iter()
                 .collect(),
-            Target::Object(o) => self
-                .placed()
-                .node(o)
-                .map(|(_, n)| {
-                    n.leaves()
-                        .into_iter()
-                        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            // A component's own node: in a repeat, copy 0 (the copies are
-            // their own objects); a repeat's node holds every copy.
-            Target::Component(id) => self
-                .placed()
-                .node(&ObjectId::of(id))
-                .map(|(_, n)| {
-                    n.leaves()
-                        .into_iter()
-                        .flat_map(|o| o.lamps.iter().map(|l| l.pos))
-                        .collect()
+            // A part's own node: in a repeat, copy 0 (the copies are their
+            // own nodes); a repeat's node holds every copy.
+            Target::Generated(_) | Target::Part(_) => self
+                .tree_node_of_target(t)
+                .and_then(|o| {
+                    self.placed().node(&o).map(|(_, n)| {
+                        n.leaves()
+                            .into_iter()
+                            .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+                            .collect()
+                    })
                 })
                 .unwrap_or_default(),
             Target::Node(_) => self
@@ -351,14 +343,14 @@ impl Project {
     pub fn lamp_count_under(&self, t: &Target) -> usize {
         match t {
             Target::Lamp { .. } => self.lamps_under(t).len(),
-            Target::Object(o) => self
-                .placed()
-                .node(o)
-                .map_or(0, |(_, n)| n.leaves().iter().map(|o| o.lamps.len()).sum()),
-            Target::Component(id) => self
-                .placed()
-                .node(&ObjectId::of(id))
-                .map_or(0, |(_, n)| n.leaves().iter().map(|o| o.lamps.len()).sum()),
+            Target::Generated(_) | Target::Part(_) => self
+                .tree_node_of_target(t)
+                .and_then(|o| {
+                    self.placed()
+                        .node(&o)
+                        .map(|(_, n)| n.leaves().iter().map(|o| o.lamps.len()).sum())
+                })
+                .unwrap_or(0),
             Target::Node(_) => self
                 .children(Some(t))
                 .iter()
@@ -373,8 +365,8 @@ impl Project {
     pub fn label(&self, t: &Target) -> String {
         match t {
             Target::Node(id) => self.node_name(id),
-            Target::Component(id) => id.to_string(),
-            Target::Object(o) => self.object_label(o),
+            Target::Part(id) => id.to_string(),
+            Target::Generated(o) => self.generated_label(o),
             Target::Lamp { index, .. } => format!("lamp {index}"),
             Target::Port { output, key } => self
                 .output(output)
@@ -383,8 +375,8 @@ impl Project {
                 .unwrap_or_else(|| key.clone()),
             Target::Span { .. } => match self.span_of(t) {
                 Some(s) => {
-                    let what = match &s.object {
-                        Some(o) => self.long_label(&self.object_target(o)),
+                    let what = match &s.segment {
+                        Some(o) => self.long_label(&self.tree_target(o)),
                         None => "free".into(),
                     };
                     format!("{what} · {}", pixel_words(&s.pixels))
@@ -399,17 +391,17 @@ impl Project {
     /// `lamp 14 of line3`, `D0 of main`, `pixel 7 of D0 of main`.
     pub fn long_label(&self, t: &Target) -> String {
         match t {
-            Target::Node(_) | Target::Component(_) => self.label(t),
-            Target::Object(o) => match self.placed().parent_of(o) {
+            Target::Node(_) | Target::Part(_) => self.label(t),
+            Target::Generated(o) => match self.placed().parent_of(o) {
                 Some(p) => format!(
                     "{} of {}",
-                    self.object_label(o),
-                    self.long_label(&self.object_target(p))
+                    self.generated_label(o),
+                    self.long_label(&self.tree_target(&p))
                 ),
-                None => self.object_label(o),
+                None => self.generated_label(o),
             },
-            Target::Lamp { object, .. } => {
-                let parent = self.object_target(object);
+            Target::Lamp { segment, .. } => {
+                let parent = self.tree_target(segment);
                 format!("{} of {}", self.label(t), self.long_label(&parent))
             }
             Target::Port { output, .. } => {
@@ -422,21 +414,25 @@ impl Project {
         }
     }
 
-    /// What an object is called: a circle's are rings, a repeat's copies
-    /// are copies.
-    pub fn object_word(&self, o: &ObjectId) -> &'static str {
-        if o.key.is_empty() { "copy" } else { "ring" }
+    /// What a generated node is called: a circle's are rings, a split
+    /// path's subpaths, a repeat's copies are copies.
+    pub fn generated_word(&self, o: &TreeRef) -> &'static str {
+        match o.id.key.as_ref().map(|k| k.as_str()) {
+            None => "copy",
+            Some(k) if k.starts_with('s') => "subpath",
+            Some(_) => "ring",
+        }
     }
 
-    /// An object's short label: `ring r2`, `copy 2` (the innermost copy it
-    /// is), and a ring in a copy says both (`ring r2 · copy 2`).
-    fn object_label(&self, o: &ObjectId) -> String {
-        let copy = o.copies.first().map(|k| format!("copy {k}"));
-        match (o.key.is_empty(), copy) {
-            (true, Some(copy)) => copy,
-            (true, None) => o.component.to_string(),
-            (false, None) => format!("ring {}", o.key),
-            (false, Some(copy)) => format!("ring {} · {copy}", o.key),
+    /// A generated node's short label: `ring r2`, `copy 2` (the innermost
+    /// copy it is), and a ring in a copy says both (`ring r2 · copy 2`).
+    fn generated_label(&self, o: &TreeRef) -> String {
+        let copy = o.id.copies.first().map(|k| format!("copy {k}"));
+        match (&o.id.key, copy) {
+            (None, Some(copy)) => copy,
+            (None, None) => o.id.part.to_string(),
+            (Some(key), None) => format!("{} {key}", self.generated_word(o)),
+            (Some(key), Some(copy)) => format!("{} {key} · {copy}", self.generated_word(o)),
         }
     }
 
@@ -446,8 +442,8 @@ impl Project {
     pub fn kind_word(&self, t: &Target) -> &'static str {
         match t {
             Target::Node(id) => self.node(id).map(|n| n.kind_word()).unwrap_or("node"),
-            Target::Component(id) => self.component(id).map(|c| c.kind_word()).unwrap_or("thing"),
-            Target::Object(o) => self.object_word(o),
+            Target::Part(id) => self.part(id).map(|c| part_word(&c.kind)).unwrap_or("thing"),
+            Target::Generated(o) => self.generated_word(o),
             Target::Lamp { .. } => "lamp",
             Target::Port { .. } => "port",
             Target::Span { .. } => "span",
@@ -456,10 +452,39 @@ impl Project {
     }
 }
 
-fn lamp_targets(object: &ObjectId, n: usize) -> Vec<Target> {
+/// What a person calls a kind of part.
+pub fn part_word(kind: &lpc_mapping::part::PartKind) -> &'static str {
+    use lpc_mapping::part::{PartKind, Shape};
+    match kind {
+        PartKind::Shape(Shape::Path(_)) => "path",
+        PartKind::Shape(Shape::Polygon(_)) => "polygon",
+        PartKind::Shape(Shape::Circle(_)) => "circle",
+        PartKind::Shape(Shape::Grid(_)) => "grid",
+        PartKind::Shape(Shape::FilledPolygon(_)) => "filled polygon",
+        PartKind::Shape(Shape::Points(_)) => "points",
+        PartKind::Group { .. } => "group",
+        PartKind::Repeat(_) => "repeat",
+    }
+}
+
+/// Does a part of this kind render exactly one segment, which is its own
+/// node (D18's 1:1 case: the tree shows it as ONE row, its lamps directly
+/// under it)? Decided by kind and split, not by the current count, so the
+/// tree never changes shape under you.
+pub fn is_single_segment(kind: &lpc_mapping::part::PartKind) -> bool {
+    use lpc_mapping::part::{CircleSplit, PartKind, PathSplit, Shape};
+    match kind {
+        PartKind::Shape(Shape::Path(path)) => path.split == PathSplit::One,
+        PartKind::Shape(Shape::Circle(circle)) => circle.split == CircleSplit::One,
+        PartKind::Shape(_) => true,
+        PartKind::Group { .. } | PartKind::Repeat(_) => false,
+    }
+}
+
+fn lamp_targets(segment: &TreeRef, n: usize) -> Vec<Target> {
     (0..n as u32)
         .map(|index| Target::Lamp {
-            object: object.clone(),
+            segment: segment.clone(),
             index,
         })
         .collect()

@@ -14,7 +14,7 @@ use lab_mapping_model::*;
 fn patching_an_object_puts_its_first_lamp_on_the_pixel() {
     let (mut p, _, out, objects) = paths(&[("D0", 40), ("D1", 40)], &[5]);
     let a = &objects[0];
-    p.patch_object(a, &out, "1", 7).unwrap();
+    p.patch_segment(a, &out, "1", 7).unwrap();
     assert_eq!(landing(&p, a, 0), Some(("1".into(), 7)));
     assert_eq!(landing(&p, a, 4), Some(("1".into(), 11)));
 }
@@ -24,11 +24,11 @@ fn patching_an_object_puts_its_first_lamp_on_the_pixel() {
 fn moving_a_patched_object_keeps_its_direction_and_turn() {
     let (mut p, _, out, objects) = paths(&[("D0", 40)], &[5]);
     let a = &objects[0];
-    p.patch_object(a, &out, "0", 0).unwrap();
+    p.patch_segment(a, &out, "0", 0).unwrap();
     p.reverse_placement(a).unwrap();
     p.turn_placement(a, 2).unwrap();
     let pixels_before = pixels(&p, a);
-    p.patch_object(a, &out, "0", 20).unwrap();
+    p.patch_segment(a, &out, "0", 20).unwrap();
     let after: Vec<u32> = pixels(&p, a).iter().map(|x| x - 20).collect();
     assert_eq!(after, pixels_before);
 }
@@ -41,7 +41,7 @@ fn an_edit_takes_what_follows_along() {
     flow(&mut p, &f, &out);
     let [a, b, c] = [&objects[0], &objects[1], &objects[2]];
     let was_a = pixels(&p, a);
-    let edit = p.patch_object(b, &out, "0", 30).unwrap();
+    let edit = p.patch_segment(b, &out, "0", 30).unwrap();
     assert_eq!(pixels(&p, a), was_a, "before it: where it was");
     assert_eq!(pixels(&p, b), vec![30, 31, 32, 33]);
     assert_eq!(
@@ -58,7 +58,7 @@ fn pinning_moves_nothing() {
     let (mut p, f, out, objects) = paths(&[("D0", 4), ("D1", 40)], &[3, 4]);
     flow(&mut p, &f, &out);
     let before = p.effective_patch().pixel_runs.clone();
-    p.pin_object(&objects[1]).unwrap();
+    p.pin_segment(&objects[1]).unwrap();
     assert_eq!(p.effective_patch().pixel_runs, before);
     assert!(matches!(p.on_wire(&objects[1]), OnWire::Placed { .. }));
 }
@@ -81,7 +81,7 @@ fn turning_is_the_same_way_after_a_reverse() {
     for reversed in [false, true] {
         let (mut p, _, out, objects) = paths(&[("D0", 40)], &[5]);
         let a = &objects[0];
-        p.patch_object(a, &out, "0", 0).unwrap();
+        p.patch_segment(a, &out, "0", 0).unwrap();
         if reversed {
             p.reverse_placement(a).unwrap();
         }
@@ -105,7 +105,7 @@ fn the_big_turn_is_a_third() {
 fn shifting_moves_along_the_port_and_stays_on_it() {
     let (mut p, _, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3]);
     let a = &objects[0];
-    p.patch_object(a, &out, "1", 0).unwrap();
+    p.patch_segment(a, &out, "1", 0).unwrap();
     p.shift_placement(a, 2).unwrap();
     assert_eq!(landing(&p, a, 0), Some(("1".into(), 2)));
     assert_eq!(p.shift_placement(a, -3), Err(PortEdge::Start));
@@ -123,8 +123,8 @@ fn shifting_moves_along_the_port_and_stays_on_it() {
 fn swapping_trades_places_and_keeps_direction() {
     let (mut p, _, out, objects) = paths(&[("D0", 40)], &[3, 3]);
     let (a, b) = (&objects[0], &objects[1]);
-    p.patch_object(a, &out, "0", 0).unwrap();
-    p.patch_object(b, &out, "0", 10).unwrap();
+    p.patch_segment(a, &out, "0", 0).unwrap();
+    p.patch_segment(b, &out, "0", 10).unwrap();
     p.reverse_placement(a).unwrap();
     p.swap_placements(a, b).unwrap();
     assert_eq!(pixels(&p, a), vec![12, 11, 10]);
@@ -136,11 +136,11 @@ fn swapping_trades_places_and_keeps_direction() {
 #[test]
 fn unpatch_all_then_patching_one_puts_it_back_alone() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3, 4]);
-    p.patch_object(&objects[0], &out, "0", 5).unwrap();
-    p.patch_object(&objects[1], &out, "0", 20).unwrap();
+    p.patch_segment(&objects[0], &out, "0", 5).unwrap();
+    p.patch_segment(&objects[1], &out, "0", 20).unwrap();
     assert_eq!(p.unpatch_all(&f), 2);
     assert!(p.effective_patch().pixel_runs.is_empty());
-    p.patch_object(&objects[1], &out, "0", 0).unwrap();
+    p.patch_segment(&objects[1], &out, "0", 0).unwrap();
     assert_eq!(pixels(&p, &objects[1]), vec![0, 1, 2, 3]);
     assert!(!p.effective_patch().lands(&objects[0]));
 }
@@ -151,8 +151,8 @@ fn unpatch_all_then_patching_one_puts_it_back_alone() {
 fn an_overlap_is_reported_and_the_later_one_shows() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[4, 4]);
     let (a, b) = (&objects[0], &objects[1]);
-    p.patch_object(a, &out, "0", 0).unwrap();
-    p.patch_object(b, &out, "0", 2).unwrap();
+    p.patch_segment(a, &out, "0", 0).unwrap();
+    p.patch_segment(b, &out, "0", 2).unwrap();
     let overlaps = &p.effective_patch().overlaps;
     assert_eq!(overlaps.len(), 1);
     assert_eq!(overlaps[0].pixels, 2..4);
@@ -160,7 +160,7 @@ fn an_overlap_is_reported_and_the_later_one_shows() {
     // The board shows b's lamp 0 on pixel 2: select b and its first lamp
     // is blue on the board (lp2014's start), on pixel 2.
     let p = laid_out(p);
-    let frame = p.board_frame(&[Target::Object(b.clone())], 0.0);
+    let frame = p.board_frame(&[Target::Generated(b.clone())], 0.0);
     let d0 = frame.port(&out, "0").unwrap();
     let b0 = frame.lamp(b, 0);
     assert!(b0.is_some());
@@ -174,7 +174,7 @@ fn an_overlap_is_reported_and_the_later_one_shows() {
 #[test]
 fn free_segments_and_the_next_object() {
     let (mut p, f, out, objects) = paths(&[("D0", 10)], &[3, 2]);
-    p.patch_object(&objects[0], &out, "0", 2).unwrap();
+    p.patch_segment(&objects[0], &out, "0", 2).unwrap();
     assert_eq!(p.free_segments(&out, "0", 3), vec![0..2, 5..8, 8..10]);
     assert_eq!(p.next_unplaced(&f), Some(objects[1].clone()));
 }
@@ -189,7 +189,7 @@ fn plain_clicks_never_patch() {
     let mut e = editor_of(p);
     let before = e.project.clone();
     e.select(vec![pixel(&out, "0", 4)]);
-    e.select(vec![Target::Component(objects[0].component.clone())]);
+    e.select(vec![Target::Part(objects[0].component.clone())]);
     assert_eq!(e.project, before);
 }
 
@@ -230,7 +230,7 @@ fn wire_first_a_then_enter_patches() {
 fn object_first_arrows_walk_free_segments() {
     let (p, _, out, objects) = paths(&[("D0", 4), ("D1", 10)], &[3]);
     let mut e = editor_of(p);
-    e.select(vec![Target::Component(objects[0].component.clone())]);
+    e.select(vec![Target::Part(objects[0].component.clone())]);
     key(&mut e, Key::Char('a'), none());
     let walked: Vec<(String, u32)> = e
         .candidates()
@@ -283,7 +283,7 @@ fn m_patches_and_moves_on_armed() {
 fn esc_disarms_before_it_climbs() {
     let (p, _, _, objects) = paths(&[("D0", 40)], &[3]);
     let mut e = editor_of(p);
-    let t = Target::Component(objects[0].component.clone());
+    let t = Target::Part(objects[0].component.clone());
     e.select(vec![t.clone()]);
     key(&mut e, Key::Char('a'), none());
     key(&mut e, Key::Escape, none());
@@ -298,7 +298,7 @@ fn esc_disarms_before_it_climbs() {
 fn armed_the_board_previews_the_pair() {
     let (p, _, out, objects) = paths(&[("D0", 40)], &[3]);
     let mut e = editor_of(p);
-    e.select(vec![Target::Component(objects[0].component.clone())]);
+    e.select(vec![Target::Part(objects[0].component.clone())]);
     let unarmed = e.board_frame(0.0).port(&out, "0").unwrap()[0];
     key(&mut e, Key::Char('a'), none());
     let armed = e.board_frame(0.0).port(&out, "0").unwrap()[0];
@@ -316,7 +316,7 @@ fn r_reverses_the_placement_with_move_and_draw_off() {
     flow(&mut p, &f, &out);
     let mut e = editor_of(p);
     let c = objects[0].component.clone();
-    e.select(vec![Target::Component(c.clone())]);
+    e.select(vec![Target::Part(c.clone())]);
     key(&mut e, Key::Char('d'), none());
     let path = e.project.component(&c).cloned();
     key(&mut e, Key::Char('r'), none());
@@ -343,7 +343,7 @@ fn unpatching_what_already_follows_says_how_to_take_it_off() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3]);
     flow(&mut p, &f, &out);
     let mut e = editor_of(p);
-    e.select(vec![Target::Component(objects[0].component.clone())]);
+    e.select(vec![Target::Part(objects[0].component.clone())]);
     key(&mut e, Key::Char('u'), none());
     let n = e.notice.clone().unwrap();
     assert_eq!(n.kind, NoticeKind::Refused);
@@ -356,7 +356,7 @@ fn unpatching_what_already_follows_says_how_to_take_it_off() {
 #[test]
 fn shift_arrows_walk_the_wire() {
     let (mut p, _, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3, 4]);
-    p.patch_object(&objects[1], &out, "0", 3).unwrap();
+    p.patch_segment(&objects[1], &out, "0", 3).unwrap();
     let mut e = editor_of(p);
     e.select(vec![port(&out, "0")]);
     key(&mut e, Key::Right, shift());
@@ -378,10 +378,10 @@ fn shift_arrows_walk_the_wire() {
 #[test]
 fn every_offered_patching_verb_does_something() {
     let (mut p, f, out, objects) = paths(&[("D0", 10), ("D1", 10)], &[3, 4]);
-    p.patch_object(&objects[0], &out, "0", 2).unwrap();
+    p.patch_segment(&objects[0], &out, "0", 2).unwrap();
     let starts = vec![
-        vec![Target::Component(objects[0].component.clone())],
-        vec![Target::Component(objects[1].component.clone())],
+        vec![Target::Part(objects[0].component.clone())],
+        vec![Target::Part(objects[1].component.clone())],
         vec![port(&out, "1")],
         vec![pixel(&out, "1", 0), pixel(&out, "1", 1)],
         vec![Target::Node(f.clone())],
@@ -446,12 +446,12 @@ fn placing_a_circle_puts_its_rings_there_in_order() {
     place(
         &mut p,
         &f,
-        &PatchTarget::Component(circle.clone()),
+        &PatchTarget::Part(circle.clone()),
         &out,
         "0",
         10,
     );
-    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
+    let (r1, r2) = (TreeRef::new(&circle, "r1"), TreeRef::new(&circle, "r2"));
     assert_eq!(pixels(&p, &r1), (10..18).collect::<Vec<_>>());
     assert_eq!(pixels(&p, &r2), (18..22).collect::<Vec<_>>());
 }
@@ -465,16 +465,16 @@ fn reversing_a_circle_reverses_each_ring_in_its_slot() {
     place(
         &mut p,
         &f,
-        &PatchTarget::Component(circle.clone()),
+        &PatchTarget::Part(circle.clone()),
         &out,
         "0",
         10,
     );
-    p.edit_override(&ObjectId::of(&circle), |o| {
-        o.direction = Some(Direction::Reversed)
+    p.edit_override(&TreeRef::of(&circle), |o| {
+        o.direction = Some(Direction::Reverse)
     })
     .unwrap();
-    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
+    let (r1, r2) = (TreeRef::new(&circle, "r1"), TreeRef::new(&circle, "r2"));
     assert_eq!(pixels(&p, &r1), (10..18).rev().collect::<Vec<_>>());
     assert_eq!(pixels(&p, &r2), vec![21, 20, 19, 18]);
 }
@@ -487,12 +487,12 @@ fn one_ring_reverses_without_an_address() {
     place(
         &mut p,
         &f,
-        &PatchTarget::Component(circle.clone()),
+        &PatchTarget::Part(circle.clone()),
         &out,
         "0",
         10,
     );
-    let r2 = ObjectId::new(&circle, "r2");
+    let r2 = TreeRef::new(&circle, "r2");
     p.reverse_placement(&r2).unwrap();
     assert_eq!(pixels(&p, &r2), vec![21, 20, 19, 18]);
     let w = p.effective_patch().walked(&r2).unwrap();
@@ -502,7 +502,7 @@ fn one_ring_reverses_without_an_address() {
     );
     assert_eq!(
         p.override_of(&r2).unwrap().direction,
-        Some(Direction::Reversed)
+        Some(Direction::Reverse)
     );
 }
 
@@ -511,19 +511,12 @@ fn one_ring_reverses_without_an_address() {
 #[test]
 fn a_ring_set_elsewhere_takes_the_rest_along() {
     let (mut p, f, out, circle) = circle(&[("D0", 40), ("D1", 40)]);
-    place(
-        &mut p,
-        &f,
-        &PatchTarget::Component(circle.clone()),
-        &out,
-        "0",
-        0,
-    );
-    let (r1, r2) = (ObjectId::new(&circle, "r1"), ObjectId::new(&circle, "r2"));
-    p.patch_object(&r1, &out, "1", 5).unwrap();
+    place(&mut p, &f, &PatchTarget::Part(circle.clone()), &out, "0", 0);
+    let (r1, r2) = (TreeRef::new(&circle, "r1"), TreeRef::new(&circle, "r2"));
+    p.patch_segment(&r1, &out, "1", 5).unwrap();
     assert_eq!(landing(&p, &r1, 0), Some(("1".into(), 5)));
     assert_eq!(landing(&p, &r2, 0), Some(("1".into(), 13)), "r2 follows r1");
-    assert!(p.unpatch_object(&r1));
+    assert!(p.unpatch_segment(&r1));
     assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
     assert_eq!(pixels(&p, &r2), vec![8, 9, 10, 11]);
 }
@@ -532,17 +525,10 @@ fn a_ring_set_elsewhere_takes_the_rest_along() {
 #[test]
 fn an_offset_is_a_leafs_alone() {
     let (mut p, f, out, circle) = circle(&[("D0", 40)]);
-    place(
-        &mut p,
-        &f,
-        &PatchTarget::Component(circle.clone()),
-        &out,
-        "0",
-        0,
-    );
-    p.edit_override(&ObjectId::of(&circle), |o| o.offset = Some(3))
+    place(&mut p, &f, &PatchTarget::Part(circle.clone()), &out, "0", 0);
+    p.edit_override(&TreeRef::of(&circle), |o| o.offset = Some(3))
         .unwrap();
-    let r1 = ObjectId::new(&circle, "r1");
+    let r1 = TreeRef::new(&circle, "r1");
     assert_eq!(pixels(&p, &r1), (0..8).collect::<Vec<_>>());
 }
 
@@ -557,7 +543,7 @@ fn an_offset_is_a_leafs_alone() {
 fn the_inspector_shows_the_component_then_its_object() {
     let (p, f, _, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
-    e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
+    e.select(vec![Target::Generated(TreeRef::new(&circle, "r2"))]);
     let sections = patch_labels(&e);
     assert_eq!(sections[0].0, "Component · circle1");
     assert!(sections[0].1.ends_with(&["Start", "Children"]));
@@ -568,7 +554,7 @@ fn the_inspector_shows_the_component_then_its_object() {
             .ends_with(&["Port", "Pixel", "Direction", "Offset", "On the wire"])
     );
     assert_eq!(choice(&e, "Port").1, None, "nowhere yet: choose one");
-    e.select(vec![Target::Component(circle.clone())]);
+    e.select(vec![Target::Part(circle.clone())]);
     let sections = patch_labels(&e);
     assert_eq!(sections[0].0, "Component · circle1");
     assert_eq!(sections[1].0, "Object · circle1");
@@ -591,14 +577,14 @@ fn the_inspector_shows_the_component_then_its_object() {
 fn choosing_a_port_places_it_and_pixel_moves_it() {
     let (p, _, out, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
-    e.select(vec![Target::Component(circle.clone())]);
+    e.select(vec![Target::Part(circle.clone())]);
     let (options, _) = choice(&e, "Port");
     let d0 = options.iter().position(|o| o.starts_with("D0")).unwrap();
     e.patch_input(PatchInput::Choose {
         field: PatchField::Port,
         option: d0,
     });
-    let r1 = ObjectId::new(&circle, "r1");
+    let r1 = TreeRef::new(&circle, "r1");
     assert_eq!(landing(&e.project, &r1, 0), Some(("0".into(), 0)));
     e.patch_input(PatchInput::Nudge {
         field: PatchField::Pixel,
@@ -615,7 +601,7 @@ fn a_ring_with_a_port_of_its_own_says_what_follows_it() {
     let (mut p, f, out, circle) = circle(&[("D0", 40), ("D1", 40)]);
     place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 0);
     let mut e = editor_of(p);
-    e.select(vec![Target::Object(ObjectId::new(&circle, "r1"))]);
+    e.select(vec![Target::Generated(TreeRef::new(&circle, "r1"))]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Port,
     });
@@ -646,14 +632,14 @@ fn reversing_one_ring_from_the_section_keeps_its_address() {
     place(
         &mut p,
         &f,
-        &PatchTarget::Component(circle.clone()),
+        &PatchTarget::Part(circle.clone()),
         &out,
         "0",
         10,
     );
     let mut e = editor_of(p);
-    let r2 = ObjectId::new(&circle, "r2");
-    e.select(vec![Target::Object(r2.clone())]);
+    let r2 = TreeRef::new(&circle, "r2");
+    e.select(vec![Target::Generated(r2.clone())]);
     e.patch_input(PatchInput::Override {
         field: PatchField::Direction,
     });
@@ -671,12 +657,12 @@ fn reversing_one_ring_from_the_section_keeps_its_address() {
 fn two_objects_edit_together_and_say_mixed() {
     let (mut p, f, out, objects) = paths(&[("D0", 40), ("D1", 40)], &[3, 3]);
     flow(&mut p, &f, &out);
-    p.patch_object(&objects[1], &out, "1", 20).unwrap();
+    p.patch_segment(&objects[1], &out, "1", 20).unwrap();
     let mut e = editor_of(p);
     e.select(
         objects
             .iter()
-            .map(|o| Target::Component(o.component.clone()))
+            .map(|o| Target::Part(o.component.clone()))
             .collect(),
     );
     assert_eq!(inherited(&e, "Port").0, "mixed");
@@ -701,7 +687,7 @@ fn turn_in_the_section_is_the_turn_key() {
     flow(&mut p, &f, &out);
     let mut by_key = editor_of(p.clone());
     let mut by_row = editor_of(p);
-    let t = Target::Component(objects[0].component.clone());
+    let t = Target::Part(objects[0].component.clone());
     by_key.select(vec![t.clone()]);
     by_row.select(vec![t]);
     key(&mut by_key, Key::Char('k'), none());
@@ -724,18 +710,18 @@ fn a_walked_value_names_where_it_came_from() {
     let (mut p, f, out, circle) = circle(&[("D0", 40)]);
     place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 10);
     let mut e = editor_of(p);
-    let r1 = ObjectId::new(&circle, "r1");
-    e.select(vec![Target::Object(r1.clone())]);
+    let r1 = TreeRef::new(&circle, "r1");
+    e.select(vec![Target::Generated(r1.clone())]);
     let (value, from) = inherited(&e, "Port");
     assert_eq!(value, "D0 of out");
     let (words, target) = from.unwrap();
     assert_eq!(words, "from fixture f's start");
     assert_eq!(target, Target::Node(f.clone()));
-    e.select(vec![Target::Object(ObjectId::new(&circle, "r2"))]);
+    e.select(vec![Target::Generated(TreeRef::new(&circle, "r2"))]);
     assert_eq!(inherited(&e, "Pixel").0, "18");
     let (words, target) = inherited(&e, "Pixel").1.unwrap();
     assert_eq!(words, "after ring r1");
-    assert_eq!(target, Target::Object(r1));
+    assert_eq!(target, Target::Generated(r1));
 }
 
 /// Override makes an inherited value the thing's own and moves nothing;
@@ -746,7 +732,7 @@ fn override_moves_nothing_and_reset_follows_again() {
     place(&mut p, &f, &PatchTarget::Fixture, &out, "0", 10);
     let mut e = editor_of(p);
     let before = e.project.effective_patch().pixel_runs.clone();
-    let r2 = Target::Object(ObjectId::new(&rings, "r2"));
+    let r2 = Target::Generated(TreeRef::new(&rings, "r2"));
     e.select(vec![r2]);
     for field in [PatchField::Port, PatchField::Direction] {
         e.patch_input(PatchInput::Override { field });
@@ -771,7 +757,7 @@ fn override_moves_nothing_and_reset_follows_again() {
     let mut e = editor_of(p);
     let before = e.project.effective_patch().pixel_runs.clone();
     for ring in ["r2", "r1"] {
-        e.select(vec![Target::Object(ObjectId::new(&rings, ring))]);
+        e.select(vec![Target::Generated(TreeRef::new(&rings, ring))]);
         e.patch_input(PatchInput::Override {
             field: PatchField::Port,
         });
@@ -786,9 +772,9 @@ fn override_moves_nothing_and_reset_follows_again() {
 #[test]
 fn spans_are_projections_and_gaps_and_may_overlap() {
     let (mut p, _, out, objects) = paths(&[("D0", 20)], &[4, 4]);
-    p.patch_object(&objects[0], &out, "0", 2).unwrap();
-    p.patch_object(&objects[1], &out, "0", 4).unwrap();
-    let spans: Vec<(std::ops::Range<u32>, Option<ObjectId>)> = p
+    p.patch_segment(&objects[0], &out, "0", 2).unwrap();
+    p.patch_segment(&objects[1], &out, "0", 4).unwrap();
+    let spans: Vec<(std::ops::Range<u32>, Option<TreeRef>)> = p
         .spans(&out, "0")
         .into_iter()
         .map(|s| (s.pixels, s.object))
@@ -809,7 +795,7 @@ fn spans_are_projections_and_gaps_and_may_overlap() {
 #[test]
 fn patch_here_puts_an_object_at_the_gap() {
     let (mut p, _, out, objects) = paths(&[("D0", 20)], &[3, 4]);
-    p.patch_object(&objects[0], &out, "0", 0).unwrap();
+    p.patch_segment(&objects[0], &out, "0", 0).unwrap();
     let mut e = editor_of(p);
     let gap = e.project.spans(&out, "0")[1].target();
     e.select(vec![gap]);
@@ -849,15 +835,15 @@ fn a_spans_patch_section_edits_its_object() {
 fn the_piece_shows_the_truth() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[3, 3]);
     let (a, b) = (&objects[0], &objects[1]);
-    p.patch_object(a, &out, "0", 0).unwrap();
-    p.patch_object(b, &out, "0", 10).unwrap();
+    p.patch_segment(a, &out, "0", 0).unwrap();
+    p.patch_segment(b, &out, "0", 10).unwrap();
     let piece = Piece::of(&p, "the test");
     // The model now has them the wrong way round.
     p.swap_placements(a, b).unwrap();
     // Select a: on the board, a's run (pixels 10–12 now) runs its start
     // colour. On the piece that is b's lamps, not a's.
     let p = laid_out(p);
-    let frame = p.board_frame(&[Target::Object(a.clone())], 0.0);
+    let frame = p.board_frame(&[Target::Generated(a.clone())], 0.0);
     assert_eq!(piece.lamp(&frame, b, 0), frame.lamp(a, 0));
     assert_eq!(
         piece
@@ -876,8 +862,8 @@ fn the_piece_shows_the_truth() {
 fn a_hand_patch_matches_the_piece_when_done() {
     let (mut p, f, out, objects) = paths(&[("D0", 40)], &[5, 5]);
     let (a, b) = (&objects[0], &objects[1]);
-    p.patch_object(a, &out, "0", 10).unwrap();
-    p.patch_object(b, &out, "0", 0).unwrap();
+    p.patch_segment(a, &out, "0", 10).unwrap();
+    p.patch_segment(b, &out, "0", 0).unwrap();
     p.reverse_placement(b).unwrap();
     p.turn_placement(b, 2).unwrap();
     let piece = Piece::of(&p, "the test");
@@ -892,8 +878,8 @@ fn a_hand_patch_matches_the_piece_when_done() {
     assert_eq!(kinds(&p), vec![DifferenceKind::NotPatched; 2]);
     // Unpatching takes wires away; each object keeps its own direction and
     // turn, so patching it back is all it takes.
-    p.patch_object(a, &out, "0", 10).unwrap();
-    p.patch_object(b, &out, "0", 0).unwrap();
+    p.patch_segment(a, &out, "0", 10).unwrap();
+    p.patch_segment(b, &out, "0", 0).unwrap();
     assert!(piece.matches(&p));
     // Reversed and turned wrong, it says which.
     p.reverse_placement(b).unwrap();
@@ -910,7 +896,7 @@ fn a_hand_patch_matches_the_piece_when_done() {
 /// A bare project: one fixture `f` with a straight path per count, and an
 /// output `out` with these ports. Nothing is on the wire yet: the fixture
 /// starts nowhere and every object is off, for patching by hand.
-fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec<ObjectId>) {
+fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec<TreeRef>) {
     let mut p = Project::new("t");
     p.add_shader(None, "rainbow", Pattern::Rainbow);
     let f = p.add_fixture(None, "f").unwrap();
@@ -926,7 +912,7 @@ fn paths(ports: &[(&str, u32)], counts: &[u32]) -> (Project, NodeId, NodeId, Vec
                     ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(80.0, y)], n),
                 )
                 .unwrap();
-            ObjectId::of(&id)
+            TreeRef::of(&id)
         })
         .collect();
     p.unpatch_all(&f);
@@ -989,7 +975,7 @@ fn segment(output: &NodeId, port: &str, pixels: std::ops::Range<u32>) -> PairEnd
 
 /// A bare project with one circle `circle` of two rings, r1 (8 lamps)
 /// then r2 (4), in a fixture `f` with nothing placed.
-fn circle(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId, ComponentId) {
+fn circle(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId, PartRef) {
     let mut p = Project::new("t");
     p.add_shader(None, "rainbow", Pattern::Rainbow);
     let f = p.add_fixture(None, "f").unwrap();
@@ -1008,7 +994,7 @@ fn place(p: &mut Project, f: &NodeId, t: &PatchTarget, out: &NodeId, port: &str,
     let start = Start::At {
         output: out.clone(),
         port: port.into(),
-        channel: Amount::px(pixel),
+        channel: Amount::lamps(pixel),
     };
     assert!(p.set_start(f, t, start));
 }
@@ -1087,15 +1073,15 @@ fn laid_out(p: Project) -> Project {
     e.project
 }
 
-fn landing(p: &Project, object: &ObjectId, lamp: u32) -> Option<(String, u32)> {
+fn landing(p: &Project, object: &TreeRef, lamp: u32) -> Option<(String, u32)> {
     p.effective_patch()
         .landing(object, lamp)
         .map(|l| (l.port, l.pixel))
 }
 
 /// Every lamp's pixel, lamp 0 first (all on one port).
-fn pixels(p: &Project, object: &ObjectId) -> Vec<u32> {
-    let n = p.object(object).unwrap().lamps.len() as u32;
+fn pixels(p: &Project, object: &TreeRef) -> Vec<u32> {
+    let n = p.segment(object).unwrap().lamps.len() as u32;
     (0..n)
         .map(|j| landing(p, object, j).expect("on the wire").1)
         .collect()

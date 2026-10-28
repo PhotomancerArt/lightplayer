@@ -1,5 +1,5 @@
 //! A fixture: one physical thing (a tail, a ring display, a dome), with its
-//! own bounding box and component tree. Its coordinates are its own:
+//! own bounding box and mapping (its parts and its patching). Its coordinates are its own:
 //! `(0, 0)` is the top-left of its box, wherever the layout puts it.
 //!
 //! A fixture is one kind of node (`node.rs`); its id and name live on the
@@ -13,37 +13,21 @@
 //! read (fit-check §6, `bindings.rs`). So a fixture names no channel of its
 //! own for that.
 
+use lpc_mapping::part::{Mapping, Part, PartId, PartKind};
+
 use crate::domain::channel::Channel;
 use crate::domain::color_order::ColorOrder;
-use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
-use std::collections::BTreeMap;
-
-use crate::domain::object::ObjectId;
-use crate::domain::object_override::ObjectOverride;
-use crate::domain::patch_rule::{Children, ComponentRules, Start};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fixture {
     /// The fixture's extent, from `(0, 0)`. Lamps outside it are never lit
     /// (D4).
     pub size: Vec2,
-    /// Top-level components, in authoring order.
-    pub components: Vec<Component>,
-    /// Where its walk starts (`patch_rule.rs`): it must say, since nothing
-    /// flows in from another fixture.
-    pub start: Start,
-    /// How its top-level components follow each other.
-    pub children: Children,
-    /// The rules on its components, by id (absent: follows, end to end).
-    pub rules: BTreeMap<crate::domain::component::ComponentId, ComponentRules>,
-    /// Overrides on its objects, by id (`object_override.rs`). The patch
-    /// the walker makes from all of it is derived (`patch.rs`), never
-    /// stored.
-    pub overrides: BTreeMap<ObjectId, ObjectOverride>,
-    /// How many channels one lamp takes (its lamp type's; RGB is 3). The
-    /// lab has only RGB lamps so far.
-    pub channels_per_lamp: u32,
+    /// Its mapping: its parts and its patching (`lpc_mapping::part`), as
+    /// its map2d format 6 file holds them. What the patcher makes of it is
+    /// derived (`patch.rs`), never stored.
+    pub mapping: Mapping,
     /// Which byte of each of its pixels is red, green and blue.
     pub color_order: ColorOrder,
     /// The visual channel whose render product it samples (the product's
@@ -84,12 +68,7 @@ impl Fixture {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            components: Vec::new(),
-            start: Start::default(),
-            children: Children::default(),
-            rules: BTreeMap::new(),
-            overrides: BTreeMap::new(),
-            channels_per_lamp: 3,
+            mapping: Mapping::new(),
             color_order: ColorOrder::default(),
             reads: Channel::visual_out(),
             unsupported: None,
@@ -109,83 +88,75 @@ impl Fixture {
         Vec2::new(at.x / self.size.x.max(1e-9), at.y / self.size.y.max(1e-9))
     }
 
-    pub fn component(&self, id: &ComponentId) -> Option<&Component> {
-        find(&self.components, id)
+    /// How many channels one of its lamps takes (its lamps' colors; RGB is
+    /// 3, and the lab has only RGB lamps so far).
+    pub fn channels_per_lamp(&self) -> u32 {
+        self.mapping.lamp.channels_per_lamp().max(1)
     }
 
-    pub fn component_mut(&mut self, id: &ComponentId) -> Option<&mut Component> {
-        find_mut(&mut self.components, id)
+    /// Its top-level parts, in wiring order.
+    pub fn parts(&self) -> &[Part] {
+        &self.mapping.parts
     }
 
-    /// The group holding `id`, or `None` when `id` is top-level (or absent).
-    pub fn parent_group(&self, id: &ComponentId) -> Option<&ComponentId> {
-        parent_of(&self.components, id, None)
+    pub fn part(&self, id: &PartId) -> Option<&Part> {
+        self.mapping.part(id)
     }
 
-    /// The rules on a component (default when it has none).
-    pub fn rules_of(&self, id: &crate::domain::component::ComponentId) -> ComponentRules {
-        self.rules.get(id).cloned().unwrap_or_default()
+    pub fn part_mut(&mut self, id: &PartId) -> Option<&mut Part> {
+        find_mut(&mut self.mapping.parts, id)
     }
 
-    /// Drop rules and overrides that set nothing any more.
+    /// The part holding `id` (a group, or a repeat), or `None` when `id`
+    /// is top-level (or absent).
+    pub fn parent_part(&self, id: &PartId) -> Option<&PartId> {
+        parent_of(&self.mapping.parts, id, None)
+    }
+
+    /// Drop overrides that set nothing any more.
     pub fn tidy_patching(&mut self) {
-        self.rules.retain(|_, r| !r.is_default());
-        self.overrides.retain(|_, o| !o.is_empty());
+        self.mapping.overrides.retain(|_, o| !o.is_empty());
     }
 
-    /// Remove a component (and everything under it) wherever it lives.
-    pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
-        remove_from(&mut self.components, id)
+    /// Take a part (and everything under it) out of a group's list or the
+    /// fixture's, wherever it lives. A repeat's one part can't be taken
+    /// out alone.
+    pub fn remove(&mut self, id: &PartId) -> Option<Part> {
+        remove_from(&mut self.mapping.parts, id)
     }
 }
 
-fn find<'a>(list: &'a [Component], id: &ComponentId) -> Option<&'a Component> {
-    for c in list {
-        if &c.id == id {
-            return Some(c);
+fn find_mut<'a>(list: &'a mut [Part], id: &PartId) -> Option<&'a mut Part> {
+    for p in list {
+        if &p.id == id {
+            return Some(p);
         }
-        if let Some(found) = find(c.children(), id) {
+        if let Some(found) = find_mut(p.kind.parts_mut(), id) {
             return Some(found);
         }
     }
     None
 }
 
-fn find_mut<'a>(list: &'a mut [Component], id: &ComponentId) -> Option<&'a mut Component> {
-    for c in list {
-        if &c.id == id {
-            return Some(c);
-        }
-        if let Some(found) = find_mut(c.children_slice_mut(), id) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn parent_of<'a>(
-    list: &'a [Component],
-    id: &ComponentId,
-    parent: Option<&'a ComponentId>,
-) -> Option<&'a ComponentId> {
-    for c in list {
-        if &c.id == id {
+fn parent_of<'a>(list: &'a [Part], id: &PartId, parent: Option<&'a PartId>) -> Option<&'a PartId> {
+    for p in list {
+        if &p.id == id {
             return parent;
         }
-        if let Some(found) = parent_of(c.children(), id, Some(&c.id)) {
+        if let Some(found) = parent_of(p.parts(), id, Some(&p.id)) {
             return Some(found);
         }
     }
     None
 }
 
-fn remove_from(list: &mut Vec<Component>, id: &ComponentId) -> Option<Component> {
-    if let Some(i) = list.iter().position(|c| &c.id == id) {
+fn remove_from(list: &mut Vec<Part>, id: &PartId) -> Option<Part> {
+    if let Some(i) = list.iter().position(|p| &p.id == id) {
         return Some(list.remove(i));
     }
-    for c in list.iter_mut() {
-        if let Some(children) = c.children_mut()
-            && let Some(found) = remove_from(children, id)
+    for p in list.iter_mut() {
+        if let PartKind::Group { parts } = &mut p.kind
+            && let Some(found) = remove_from(parts, id)
         {
             return Some(found);
         }

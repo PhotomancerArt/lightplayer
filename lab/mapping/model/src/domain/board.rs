@@ -39,8 +39,8 @@ use crate::domain::control_product::ControlProduct;
 use crate::domain::derived::Wiring;
 use crate::domain::fixture_overrides::FixtureOverrides;
 use crate::domain::node::NodeId;
-use crate::domain::object::ObjectId;
 use crate::domain::output_overrides::OutputOverrides;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::picture::Picture;
 use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
@@ -122,7 +122,7 @@ impl BoardFrame {
     /// The colour a lamp shows on the canvas: its colour in its fixture's
     /// control product. `None` for a lamp with no colour (outside its box,
     /// or nothing renders for its fixture).
-    pub fn lamp(&self, object: &ObjectId, index: u32) -> Option<Rgb> {
+    pub fn lamp(&self, object: &TreeRef, index: u32) -> Option<Rgb> {
         let first = *self.wiring.first_lamp.get(object)?;
         *self.lamps.get(first + index as usize)?
     }
@@ -132,7 +132,7 @@ impl BoardFrame {
     /// per object rather than per lamp.
     pub fn object_lamps<'a>(
         &'a self,
-        object: &ObjectId,
+        object: &TreeRef,
         lamps: usize,
     ) -> impl Iterator<Item = Option<Rgb>> + 'a {
         let first = self.wiring.first_lamp.get(object).copied();
@@ -152,7 +152,7 @@ impl BoardFrame {
 
     /// Whether a lamp is patched to a pixel that exists: whether anything
     /// on the board shows it.
-    pub fn lands(&self, object: &ObjectId, index: u32) -> bool {
+    pub fn lands(&self, object: &TreeRef, index: u32) -> bool {
         self.wiring.lamp(object, index).is_some()
     }
 }

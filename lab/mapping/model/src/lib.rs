@@ -11,27 +11,29 @@
 //! - [`Channel`] — the bus channels nodes write and read, the product's
 //!   wiring; [`bindings`] — which node feeds which over them, the edges
 //!   between nodes.
-//! - [`Fixture`] — one physical thing: its own box, component tree and
-//!   patch rules.
+//! - [`Fixture`] — one physical thing: its own box, and its mapping (an
+//!   `lpc_mapping::part::Mapping`: its parts and its patching, as its
+//!   map2d format 6 file holds them).
 //! - [`Output`] — where pixels leave the board: a card of ports that make
 //!   one flat wire. [`RenderSource`] — a shader or other node that makes a
 //!   picture, shown as a stand-in [`Pattern`]. [`OtherNode`] — anything
 //!   else a real project holds (a clock, a button): a plain card, never
 //!   edited here.
-//! - [`Component`] — what you draw: a path, a polygon, a circle, a repeat,
-//!   a group. It hands out the ids of what it makes, and it holds every
-//!   geometry edit. [`resolve`] — where its lamps land, in the product's
-//!   own f32 arithmetic, so they are the device's lamps bit for bit.
-//! - [`Object`] — what a component makes (a path, a ring), with lamps.
-//!   Derived, never stored.
+//! - Parts — what you draw: a path, a polygon, a circle, a grid, points, a
+//!   repeat, a group (`lpc_mapping::part::Part`, the engine's own model).
+//!   Rendered by `lpc_mapping::part::render` into a tree whose leaves are
+//!   segments, with the engine's arithmetic, so their lamps are the
+//!   device's lamps bit for bit. [`PartRef`] and [`TreeRef`] name a part or
+//!   a tree node with its fixture; [`DrawnSegment`] is a segment as the
+//!   canvas draws it, in world units.
 //! - [`Target`] — anything you can select, in ONE tree: module → fixture →
 //!   group → path → lamp, fixture → circle → ring → lamp, output → port →
 //!   pixel.
-//! - [`patch`] — where lamps land: rules on a fixture and its components
-//!   ([`ComponentRules`]: Start, Children) and overrides on objects
-//!   ([`ObjectOverride`]), walked by [`walker`] with an (output, port,
-//!   channel) cursor into the effective patch (derived, never stored);
-//!   [`port_runs`] — a port's pixels as one run per object.
+//! - [`patch`] — where lamps land: each fixture's mapping patched by
+//!   `lpc_mapping::patching::patch_mapping` (the engine's patcher) against
+//!   its port tables ([`port_tables`]), into the effective patch (derived,
+//!   never stored); [`walked`] — what each node did on the walk, and why;
+//!   [`port_runs`] — a port's pixels as one run per segment.
 //! - [`Placement`] — where each node sits, in world units, and each
 //!   fixture's frame (where its own units land, scaled when the stack draws
 //!   it bigger): a fact the view hands over. The model never lays anything
@@ -80,7 +82,8 @@ pub mod domain;
 pub mod ux;
 
 pub use domain::{
-    bindings, board, fixture_overrides, output_overrides, patch, port_runs, render_product, resolve,
+    bindings, board, fixture_overrides, output_overrides, patch, port_runs, port_tables,
+    render_product, walked,
 };
 pub use ux::{
     area, board_view, card_geometry, data_path, edges, handle, highlight, hints, layout_input,
@@ -91,36 +94,30 @@ pub use domain::bindings::Binding;
 pub use domain::board::{BoardFrame, PortFrame};
 pub use domain::channel::Channel;
 pub use domain::color_order::ColorOrder;
-pub use domain::component::{Component, ComponentId, ComponentKind, Ring};
 pub use domain::control_product::ControlProduct;
-pub use domain::cursor_op::{Amount, ChannelOp, Cursor, CursorOps, OutputOp, PortOp, Unit};
+pub use domain::drawn_segment::{DrawnSegment, DrawnShape, Lamp};
 pub use domain::fixture::{Fixture, Unsupported};
 pub use domain::geom::{Rect, Vec2};
 pub use domain::node::{Node, NodeId, NodeKind};
 pub use domain::notice::{Notice, NoticeKind};
-pub use domain::object::{Lamp, Object, ObjectId, ObjectShape};
-pub use domain::object_override::{Direction, ObjectOverride};
-pub use domain::object_tree::{ObjectNode, ObjectNodeKind};
 pub use domain::other_node::OtherNode;
 pub use domain::output::{Output, Port};
+pub use domain::part_ref::{PartRef, TreeRef};
 pub use domain::patch::{
-    EffectivePatch, Landing, ObjectRun, Overlap, PatchProblem, PixelRun, ProblemKind, Unpatched,
+    EffectivePatch, Landing, Overlap, PatchProblem, PixelRun, ProblemKind, Unpatched,
 };
 pub use domain::patch_edits::{OnWire, PatchEdit, PortEdge};
-pub use domain::patch_rule::{Children, ComponentRules, Start};
-pub use domain::patch_target::PatchTarget;
 pub use domain::pattern::Pattern;
 pub use domain::picture::{Picture, picture_rect};
 pub use domain::piece::{Difference, DifferenceKind, Piece};
 pub use domain::placement::Placement;
 pub use domain::port_runs::PortRun;
-pub use domain::product_patch::{ProductPatch, ProductRow};
 pub use domain::project::Project;
 pub use domain::render_product::RenderProduct;
 pub use domain::render_source::RenderSource;
 pub use domain::rgb::Rgb;
 pub use domain::target::Target;
-pub use domain::walker::{StepSource, Walked};
+pub use domain::walked::{Cursor, Walked};
 pub use ux::area::Area;
 pub use ux::camera::Camera;
 pub use ux::data_path::{DataEntry, DataPath};

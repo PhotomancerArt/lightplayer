@@ -4,14 +4,18 @@
 //! it finds. Everything that decides how the editor *feels* lives in this
 //! crate, so it can be read, changed and tested without a browser.
 
-use crate::domain::component::{Component, ComponentId, ComponentKind};
+use lpc_mapping::part::{Circle, PartKind, Path, Shape};
+
+use crate::domain::drawn_segment::{DrawnSegment as Object, drawn_draft, f32s, in_world};
 use crate::domain::geom::{Rect, Vec2, polyline_length};
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
-use crate::domain::object::{Object, objects_of};
+use crate::domain::part_geometry::{min_points, part_points, translate};
+use crate::domain::part_ref::PartRef;
 use crate::domain::piece::Piece;
 use crate::domain::project::{Project, union};
 use crate::domain::target::Target;
+use crate::domain::target::part_word;
 use crate::ux::camera::Camera;
 use crate::ux::debug_flags::DebugFlags;
 use crate::ux::handle::{Handle, HandleKind};
@@ -96,7 +100,7 @@ pub enum Gesture {
     Moving {
         start_world: Vec2,
         base: Box<Project>,
-        owners: Vec<ComponentId>,
+        owners: Vec<PartRef>,
         nodes: Vec<(NodeId, Vec2)>,
     },
     /// Dragging a selection box from empty space.
@@ -147,14 +151,14 @@ pub enum MenuCommand {
     Unpin(NodeId),
     /// Add a point to a path on segment `segment`, at `at` (world units).
     AddPoint {
-        path: ComponentId,
+        path: PartRef,
         segment: usize,
         at: Vec2,
     },
     /// Take a point away from a path.
-    RemovePoint { path: ComponentId, index: usize },
+    RemovePoint { path: PartRef, index: usize },
     /// Make a path's segment a jumper (wire, no lamps), or lit again.
-    ToggleJumper { path: ComponentId, segment: usize },
+    ToggleJumper { path: PartRef, segment: usize },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -332,14 +336,10 @@ impl Editor {
     pub fn draft(&self) -> Option<Vec<Object>> {
         let (fixture, kind) = self.draft_into()?;
         let frame = self.project.frame(&fixture);
-        let c = Component {
-            id: ComponentId::new("draft"),
-            kind,
-        };
         Some(
-            objects_of(&c)
+            drawn_draft(&fixture, kind)
                 .into_iter()
-                .map(|o| crate::domain::project::placed(o, frame))
+                .map(|o| in_world(o, frame))
                 .collect(),
         )
     }
@@ -702,8 +702,8 @@ impl Editor {
 
     /// The paths whose points show handles for this selection: a selected
     /// path, or one a selected lamp is on.
-    pub fn shaped_paths(&self, selection: &[Target]) -> Vec<ComponentId> {
-        let mut out: Vec<ComponentId> = Vec::new();
+    pub fn shaped_paths(&self, selection: &[Target]) -> Vec<PartRef> {
+        let mut out: Vec<PartRef> = Vec::new();
         for h in self.project.handles(selection) {
             if let HandleKind::PathPoint { path, .. } = h.kind
                 && !out.contains(&path)
@@ -717,7 +717,7 @@ impl Editor {
     /// Add a point to a path at `at` (world) on segment `segment`, and
     /// select the path so its new handle shows. Refused on top of a point
     /// it already has.
-    pub fn add_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) {
+    pub fn add_point(&mut self, path: &PartRef, segment: usize, at: Vec2) {
         if !self.move_draw {
             self.refuse_move_draw(&format!("add a point to {path}"));
             return;
@@ -737,7 +737,7 @@ impl Editor {
         }
         self.checkpoint();
         if self.project.insert_path_point(path, segment, at) {
-            self.selection = vec![Target::Component(path.clone())];
+            self.selection = vec![Target::Part(path.clone())];
             let n = self.project.path_points(path).map_or(0, |p| p.len());
             self.notice = Some(Notice::info(format!(
                 "Added a point to {path} — {n} points, the same lamps"
@@ -748,7 +748,7 @@ impl Editor {
     /// Make a path's segment a jumper (wire that carries no lamps: a corner,
     /// a run between windows) or lit again. The lamps keep their count and
     /// respace over the lit segments, as the product places them.
-    pub fn toggle_jumper(&mut self, path: &ComponentId, segment: usize) {
+    pub fn toggle_jumper(&mut self, path: &PartRef, segment: usize) {
         if !self.move_draw {
             self.refuse_move_draw(&format!("change {path}'s jumpers"));
             return;
@@ -756,14 +756,14 @@ impl Editor {
         self.checkpoint();
         match self.project.toggle_path_jumper(path, segment) {
             Some(true) => {
-                self.selection = vec![Target::Component(path.clone())];
+                self.selection = vec![Target::Part(path.clone())];
                 self.notice = Some(Notice::info(format!(
                     "Segment {} of {path} is a jumper: no lamps on it, the same lamps along the rest",
                     segment + 1
                 )));
             }
             Some(false) => {
-                self.selection = vec![Target::Component(path.clone())];
+                self.selection = vec![Target::Part(path.clone())];
                 self.notice = Some(Notice::info(format!(
                     "Segment {} of {path} is lit again",
                     segment + 1
@@ -784,15 +784,15 @@ impl Editor {
     fn jumper_under_pointer(&mut self) {
         let Some(at) = self.pointer else { return };
         let p = &self.project;
-        let is_path = |id: &ComponentId| {
-            p.component(id)
-                .is_some_and(|c| c.kind.points().is_some() && c.kind.min_points() == 2)
+        let is_path = |id: &PartRef| {
+            p.part(id)
+                .is_some_and(|c| part_points(&c.kind).is_some() && min_points(&c.kind) == 2)
         };
         let found = p
             .things_at(&self.camera, at)
             .into_iter()
             .find_map(|t| match t {
-                Target::Component(id) if is_path(&id) => {
+                Target::Part(id) if is_path(&id) => {
                     p.segment_at(&self.camera, &id, at).map(|(s, _)| (id, s))
                 }
                 _ => None,
@@ -804,14 +804,14 @@ impl Editor {
 
     /// Take a point away from a path (or a polygon); refused below two
     /// points (three).
-    pub fn remove_point(&mut self, path: &ComponentId, index: usize) {
+    pub fn remove_point(&mut self, path: &PartRef, index: usize) {
         if !self.move_draw {
             self.refuse_move_draw(&format!("remove a point of {path}"));
             return;
         }
         let n = self.project.path_points(path).map_or(0, |p| p.len());
-        let (min, word) = match self.project.component(path) {
-            Some(c) => (c.kind.min_points(), c.kind_word()),
+        let (min, word) = match self.project.part(path) {
+            Some(c) => (min_points(&c.kind), part_word(&c.kind)),
             None => (2, "path"),
         };
         if n <= min {
@@ -1049,10 +1049,10 @@ impl Editor {
             });
         }
         for t in p.things_at(&self.camera, at) {
-            if let Target::Component(id) = &t
+            if let Target::Part(id) = &t
                 && let Some((segment, q)) = p.segment_at(&self.camera, id, at)
             {
-                let is_path = p.component(id).is_some_and(|c| c.kind.points().is_some());
+                let is_path = p.part(id).is_some_and(|c| part_points(&c.kind).is_some());
                 out.push(MenuAction {
                     label: format!("Add a point to {id} here"),
                     keys: "double-click".into(),
@@ -1063,7 +1063,7 @@ impl Editor {
                     },
                 });
                 let jumper = p.path_jumpers(id).contains(&(segment as u32));
-                if !is_path || p.component(id).is_some_and(|c| c.kind.min_points() > 2) {
+                if !is_path || p.part(id).is_some_and(|c| min_points(&c.kind) > 2) {
                     continue;
                 }
                 out.push(MenuAction {
@@ -1312,7 +1312,7 @@ impl Editor {
         levels.push(
             p.pick_level(None)
                 .into_iter()
-                .filter(|t| matches!(t, Target::Component(_)))
+                .filter(|t| matches!(t, Target::Part(_)))
                 .collect(),
         );
         levels.push(p.children(None));
@@ -1362,8 +1362,11 @@ impl Editor {
         let f = &self.project;
         for t in &mut self.selection {
             let (n, index) = match t {
-                Target::Lamp { object, index } => (
-                    f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0),
+                Target::Lamp {
+                    segment: object,
+                    index,
+                } => (
+                    f.segment(object).map(|o| o.lamps.len() as u32).unwrap_or(0),
                     index,
                 ),
                 Target::Pixel { output, key, index } => (f.port_pixels(output, key), index),
@@ -1508,25 +1511,25 @@ impl Editor {
 
     /// The authored components a move of the selection moves: each target's
     /// owner, minus any whose group is also moving.
-    pub fn move_owners(&self) -> Vec<ComponentId> {
-        let mut owners: Vec<ComponentId> = Vec::new();
+    pub fn move_owners(&self) -> Vec<PartRef> {
+        let mut owners: Vec<PartRef> = Vec::new();
         for t in &self.selection {
             if let Some(o) = t.owner()
-                && !owners.contains(o)
+                && !owners.contains(&o)
             {
-                owners.push(o.clone());
+                owners.push(o);
             }
         }
         let f = &self.project;
         owners
             .iter()
             .filter(|o| {
-                let mut cur = f.parent_group(o).cloned();
+                let mut cur = f.parent_part(o);
                 while let Some(g) = cur {
                     if owners.contains(&g) {
                         return false;
                     }
-                    cur = f.parent_group(&g).cloned();
+                    cur = f.parent_part(&g);
                 }
                 true
             })
@@ -1549,8 +1552,8 @@ impl Editor {
         for o in owners {
             // The same move in the component's fixture's own units.
             let d = base.component_frame(o).delta_local(delta);
-            if let Some(c) = f.component_mut(o) {
-                c.translate(d);
+            if let Some(c) = f.part_mut(o) {
+                translate(&mut c.kind, d);
             }
         }
         for (id, from) in nodes {
@@ -1672,17 +1675,21 @@ impl Editor {
     }
 
     /// A circle dragged from `start` to `now`, in one fixture's coordinates.
-    fn drawn_circle(&self, start: Vec2, now: Vec2) -> ComponentKind {
+    fn drawn_circle(&self, start: Vec2, now: Vec2) -> PartKind {
         let r = start.distance(now).max(0.5);
         let lamps = ((std::f64::consts::TAU * r / self.spacing).round() as u32).max(3);
-        ComponentKind::circle(start, &[(r, lamps)])
+        PartKind::Shape(Shape::Circle(Circle::new(
+            f32s(start),
+            &[(r as f32, lamps)],
+        )))
     }
 
     /// A path through these points (one fixture's coordinates), its lamp
     /// count from its length.
-    fn drawn_path(&self, points: Vec<Vec2>) -> ComponentKind {
+    fn drawn_path(&self, points: Vec<Vec2>) -> PartKind {
         let lamps = self.lamps_for_length(polyline_length(&points));
-        ComponentKind::path(points, lamps)
+        let points: Vec<[f32; 2]> = points.iter().map(|p| f32s(*p)).collect();
+        PartKind::Shape(Shape::Path(Path::through(&points, lamps)))
     }
 
     /// Where the draft goes, and what it is in that fixture's own
@@ -1691,7 +1698,7 @@ impl Editor {
     /// outside every fixture. Finishing a drawing and the simulated board's
     /// preview of it (`board.rs`) both ask here, so the preview is
     /// exactly what finishing makes.
-    pub(crate) fn draft_into(&self) -> Option<(NodeId, ComponentKind)> {
+    pub(crate) fn draft_into(&self) -> Option<(NodeId, PartKind)> {
         if let Gesture::Drawing { start_world } = &self.gesture {
             let now = self.camera.to_world(self.pointer?);
             let fixture = self.project.fixture_at(*start_world)?;
@@ -1768,7 +1775,7 @@ impl Editor {
         let kind = self.drawn_path(points.into_iter().map(|p| frame.to_local(p)).collect());
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
-            self.selection = vec![Target::Component(id)];
+            self.selection = vec![Target::Part(id)];
         }
         self.tool = Tool::Select;
     }
@@ -1794,7 +1801,7 @@ impl Editor {
         let kind = self.drawn_circle(frame.to_local(start), frame.to_local(end));
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
-            self.selection = vec![Target::Component(id)];
+            self.selection = vec![Target::Part(id)];
         }
         self.tool = Tool::Select;
     }

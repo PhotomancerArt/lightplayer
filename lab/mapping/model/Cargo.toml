@@ -6,19 +6,18 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Mapping design lab: the editor model — fixtures, components, objects, selection, hints (pure, no product crates)"
+description = "Mapping design lab: the Graph editor model — fixtures on lpc-mapping parts, selection, hints"
 
-# The fence: this crate depends on NO product crate. It is the model Yona
-# reads and edits, and it has to stay small and abstract enough to drop into
-# the app later. Other lab crates are fine when they are as fenced as this
-# one (`lab-layout` depends on nothing at all). See lab/mapping/README.md.
-#
-# `libm` (crates.io, not the workspace) is the product's own trig: lamps are
-# resolved with the same f32 arithmetic the device runs (`resolve.rs`), so
-# the simulated board lights exactly the lamps a real one does.
+# The fixture domain is the product's own: `lpc-mapping` (the part tree,
+# the patcher and its `edit` operations), the model the engine and firmware
+# run, so what the Graph shows is what the board does (mapping rebuild M4
+# P03). That ends this crate's fence (C32); M4 P10 moves it into `lp-app/`.
+# Its node-graph domain (nodes, channels, bindings, the simulated board)
+# stays its own.
 [dependencies]
 lab-layout = { path = "../layout" }
 libm = "0.2"
+lpc-mapping = { path = "../../../lp-core/lpc-mapping", features = ["std", "edit"] }
 
 [lints]
 workspace = true

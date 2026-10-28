@@ -28,9 +28,13 @@
 //! Handles sit in world units; their squares are a fixed size on screen,
 //! like every area's padding.
 
-use crate::domain::component::{ComponentId, ComponentKind};
+use crate::domain::drawn_segment::vec2;
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
+use crate::domain::part_geometry::{
+    gaps_of, min_points, part_points, set_gaps_of, set_part_points,
+};
+use crate::domain::part_ref::PartRef;
 use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -51,9 +55,9 @@ pub struct Handle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HandleKind {
     /// One point of a path, by its index in the path's points.
-    PathPoint { path: ComponentId, index: usize },
+    PathPoint { path: PartRef, index: usize },
     /// A ring's radius, on the ring's right-hand side.
-    RingRadius { circle: ComponentId, ring: String },
+    RingRadius { circle: PartRef, ring: String },
     /// A fixture's size: its corner, or one of its far edges.
     FixtureSize { fixture: NodeId, edge: SizeEdge },
 }
@@ -123,48 +127,46 @@ impl Project {
     fn handles_of(&self, t: &Target) -> Vec<Handle> {
         let mut out = Vec::new();
         match t {
-            Target::Component(id) => {
+            Target::Part(id) => {
                 let frame = self.component_frame(id);
-                match self.component(id).map(|c| &c.kind) {
-                    Some(
-                        ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. },
-                    ) => out.extend(points.iter().enumerate().map(|(index, p)| Handle {
+                if let Some(points) = self.part(id).and_then(|c| part_points(&c.kind)) {
+                    out.extend(points.iter().enumerate().map(|(index, p)| Handle {
                         kind: HandleKind::PathPoint {
                             path: id.clone(),
                             index,
                         },
                         at: frame.to_world(*p),
-                    })),
-                    Some(ComponentKind::Circle { center, rings, .. }) => {
-                        out.extend(rings.iter().map(|r| Handle {
-                            kind: HandleKind::RingRadius {
-                                circle: id.clone(),
-                                ring: r.key.clone(),
-                            },
-                            at: frame.to_world(*center + Vec2::new(r.radius, 0.0)),
-                        }))
-                    }
-                    _ => {}
+                    }));
+                } else if let Some(circle) = self.circle(id) {
+                    let center = vec2(circle.center);
+                    out.extend(circle.rings.iter().map(|r| Handle {
+                        kind: HandleKind::RingRadius {
+                            circle: id.clone(),
+                            ring: r.key.as_str().to_string(),
+                        },
+                        at: frame.to_world(center + Vec2::new(f64::from(r.radius), 0.0)),
+                    }))
                 }
             }
-            Target::Object(o) => {
-                if let (Some(r), Some(ComponentKind::Circle { center, .. })) = (
-                    self.ring(&o.component, &o.key),
-                    self.component(&o.component).map(|c| &c.kind),
-                ) {
+            Target::Generated(o) => {
+                let part = o.part();
+                if let (Some(r), Some(circle)) = (self.ring_of(o), self.circle(&part)) {
+                    let center = vec2(circle.center);
                     out.push(Handle {
                         kind: HandleKind::RingRadius {
-                            circle: o.component.clone(),
-                            ring: o.key.clone(),
+                            circle: part.clone(),
+                            ring: r.key.as_str().to_string(),
                         },
                         at: self
-                            .component_frame(&o.component)
-                            .to_world(*center + Vec2::new(r.radius, 0.0)),
+                            .component_frame(&part)
+                            .to_world(center + Vec2::new(f64::from(r.radius), 0.0)),
                     });
                 }
             }
             // A lamp shows the handles of the path or ring it is on.
-            Target::Lamp { object, .. } => return self.handles_of(&self.object_target(object)),
+            Target::Lamp {
+                segment: object, ..
+            } => return self.handles_of(&self.tree_target(object)),
             Target::Node(id) if self.fixture(id).is_some_and(|f| f.unsupported.is_none()) => {
                 let Some(r) = self.node_rect(id) else {
                     return out;
@@ -191,18 +193,21 @@ impl Project {
 
     /// Add a point to a path on its segment `segment` (from point `segment`
     /// to the next), at `at` in world units. The path keeps its lamps.
-    pub fn insert_path_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) -> bool {
+    pub fn insert_path_point(&mut self, path: &PartRef, segment: usize, at: Vec2) -> bool {
         let frame = self.component_frame(path);
-        let inserted = match self.component_mut(path).and_then(|c| c.kind.points_mut()) {
-            Some(points) if segment + 1 < points.len() => {
-                points.insert(segment + 1, frame.to_local(at));
-                true
-            }
-            _ => false,
+        let Some(kind) = self.part_mut(path).map(|c| &mut c.kind) else {
+            return false;
         };
+        let Some(mut points) = part_points(kind) else {
+            return false;
+        };
+        if segment + 1 >= points.len() {
+            return false;
+        }
+        points.insert(segment + 1, frame.to_local(at));
         // A jumper split in two is two jumpers; the segments after it move
         // up one.
-        if inserted && let Some(gaps) = self.path_gaps_mut(path) {
+        let gaps = gaps_of(kind).map(|mut gaps| {
             let s = segment as u32;
             let was = gaps.contains(&s);
             for g in gaps.iter_mut().filter(|g| **g > s) {
@@ -212,76 +217,64 @@ impl Project {
                 gaps.push(s + 1);
                 gaps.sort_unstable();
             }
-        }
-        inserted
+            gaps
+        });
+        set_part_points(kind, &points, gaps.as_deref());
+        true
     }
 
     /// Make a path's segment `segment` a jumper (wire, no lamps) or lit
     /// again. Returns whether it is a jumper now; `None` when it isn't a
     /// path's segment. A path keeps at least one lit segment.
-    pub fn toggle_path_jumper(&mut self, path: &ComponentId, segment: usize) -> Option<bool> {
+    pub fn toggle_path_jumper(&mut self, path: &PartRef, segment: usize) -> Option<bool> {
         let segments = self.path_points(path)?.len().saturating_sub(1);
         if segment >= segments {
             return None;
         }
-        let gaps = self.path_gaps_mut(path)?;
+        let kind = &mut self.part_mut(path)?.kind;
+        let mut gaps = gaps_of(kind)?;
         let s = segment as u32;
-        if let Some(i) = gaps.iter().position(|g| *g == s) {
+        let now = if let Some(i) = gaps.iter().position(|g| *g == s) {
             gaps.remove(i);
-            return Some(false);
-        }
-        if gaps.len() + 1 >= segments {
-            return None;
-        }
-        gaps.push(s);
-        gaps.sort_unstable();
-        Some(true)
+            false
+        } else {
+            if gaps.len() + 1 >= segments {
+                return None;
+            }
+            gaps.push(s);
+            gaps.sort_unstable();
+            true
+        };
+        set_gaps_of(kind, &gaps);
+        Some(now)
     }
 
     /// A path's jumpers (by segment), when it is a path: its own, or the
     /// path a repeat copies.
-    pub fn path_jumpers(&self, path: &ComponentId) -> &[u32] {
-        fn of(kind: &ComponentKind) -> Option<&Vec<u32>> {
-            match kind {
-                ComponentKind::Path { gaps, .. } => Some(gaps),
-                ComponentKind::Repeat { child, .. } => of(&child.kind),
-                _ => None,
-            }
-        }
-        self.component(path)
-            .and_then(|c| of(&c.kind))
-            .map_or(&[], |g| g.as_slice())
-    }
-
-    fn path_gaps_mut(&mut self, path: &ComponentId) -> Option<&mut Vec<u32>> {
-        fn of(kind: &mut ComponentKind) -> Option<&mut Vec<u32>> {
-            match kind {
-                ComponentKind::Path { gaps, .. } => Some(gaps),
-                ComponentKind::Repeat { child, .. } => of(&mut child.kind),
-                _ => None,
-            }
-        }
-        self.component_mut(path).and_then(|c| of(&mut c.kind))
+    pub fn path_jumpers(&self, path: &PartRef) -> Vec<u32> {
+        self.part(path)
+            .and_then(|c| gaps_of(&c.kind))
+            .unwrap_or_default()
     }
 
     /// Take one point away from a path (or a polygon). Refused (false)
     /// below two points (a polygon: three).
-    pub fn remove_path_point(&mut self, path: &ComponentId, index: usize) -> bool {
-        let Some(kind) = self.component_mut(path).map(|c| &mut c.kind) else {
+    pub fn remove_path_point(&mut self, path: &PartRef, index: usize) -> bool {
+        let Some(kind) = self.part_mut(path).map(|c| &mut c.kind) else {
             return false;
         };
-        let min = kind.min_points();
-        let removed = match kind.points_mut() {
-            Some(points) if points.len() > min && index < points.len() => {
-                points.remove(index);
-                true
-            }
-            _ => false,
+        let min = min_points(kind);
+        let Some(mut points) = part_points(kind) else {
+            return false;
         };
+        if points.len() <= min || index >= points.len() {
+            return false;
+        }
+        points.remove(index);
         // The two segments either side of the point become one: a jumper
         // when both were, lit otherwise (an end point takes its one segment
         // with it); the segments after it move down one.
-        if removed && let Some(gaps) = self.path_gaps_mut(path) {
+        let gaps = gaps_of(kind).map(|mut gaps| {
             let i = index as u32;
             let merged_jumper = i > 0 && gaps.contains(&(i - 1)) && gaps.contains(&i);
             gaps.retain(|g| *g != i && !(i > 0 && *g == i - 1));
@@ -292,13 +285,15 @@ impl Project {
                 gaps.push(i - 1);
             }
             gaps.sort_unstable();
-        }
-        removed
+            gaps
+        });
+        set_part_points(kind, &points, gaps.as_deref());
+        true
     }
 
     /// The segment of a path nearest `p` (screen), within its area, and the
     /// point on it nearest `p` (world): where a new point would go.
-    pub fn segment_at(&self, cam: &Camera, path: &ComponentId, p: Vec2) -> Option<(usize, Vec2)> {
+    pub fn segment_at(&self, cam: &Camera, path: &PartRef, p: Vec2) -> Option<(usize, Vec2)> {
         let frame = self.component_frame(path);
         let points = self.path_points(path)?;
         let world = cam.to_world(p);
@@ -322,19 +317,21 @@ impl Project {
             .map(|(i, q, _)| (i, q))
     }
 
-    /// A path's points, in its fixture's own coordinates.
-    pub fn path_points(&self, id: &ComponentId) -> Option<&[Vec2]> {
-        self.component(id)?.kind.points().map(|p| p.as_slice())
+    /// A path's (or a polygon's) points, in its fixture's own coordinates.
+    pub fn path_points(&self, id: &PartRef) -> Option<Vec<Vec2>> {
+        part_points(&self.part(id)?.kind)
     }
 
-    /// Where a component's fixture puts its own units, in world units.
-    pub fn component_frame(&self, id: &ComponentId) -> Frame {
-        self.fixture_of(id)
-            .map(|n| self.frame(&n.id))
-            .unwrap_or(Frame {
+    /// Where a part's fixture puts its own units, in world units.
+    pub fn component_frame(&self, id: &PartRef) -> Frame {
+        if self.fixture(&id.fixture).is_some() {
+            self.frame(&id.fixture)
+        } else {
+            Frame {
                 origin: Vec2::default(),
                 scale: 1.0,
-            })
+            }
+        }
     }
 
     /// Drag a handle: `base` is the project before the drag began, `from`
@@ -357,23 +354,24 @@ impl Project {
         let delta = frame.delta_local(to - from);
         match h {
             HandleKind::PathPoint { path, index } => {
-                let Some(start) = base.path_points(path).and_then(|p| p.get(*index)).copied()
+                let Some(start) = base.path_points(path).and_then(|p| p.get(*index).copied())
                 else {
                     return;
                 };
-                if let Some(points) = self.component_mut(path).and_then(|c| c.kind.points_mut())
+                if let Some(kind) = self.part_mut(path).map(|c| &mut c.kind)
+                    && let Some(mut points) = part_points(kind)
                     && let Some(p) = points.get_mut(*index)
                 {
                     *p = start + delta;
+                    set_part_points(kind, &points, None);
                 }
             }
             HandleKind::RingRadius { circle, ring } => {
-                let center = match base.component(circle).map(|c| &c.kind) {
-                    Some(ComponentKind::Circle { center, .. }) => *center,
-                    _ => return,
+                let Some(center) = base.circle(circle).map(|c| vec2(c.center)) else {
+                    return;
                 };
                 if let Some(r) = self.ring_mut(circle, ring) {
-                    r.radius = frame.to_local(to).distance(center).max(0.5);
+                    r.radius = frame.to_local(to).distance(center).max(0.5) as f32;
                 }
             }
             HandleKind::FixtureSize { fixture, edge } => {

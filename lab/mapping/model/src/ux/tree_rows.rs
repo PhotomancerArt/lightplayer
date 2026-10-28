@@ -2,7 +2,8 @@
 //! outputs and their ports — then components, and the derived rings under
 //! a circle. Lamps and pixels are reached on the canvas, not listed here.
 
-use crate::domain::component::ComponentKind;
+use lpc_mapping::part::{PartKind, Shape};
+
 use crate::domain::node::NodeKind;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -66,21 +67,22 @@ impl Project {
                 let pixels = self.port_pixels(output, key);
                 format!("{}/{pixels} px", patch.used(output, key))
             }
-            Target::Component(id) => match self.component(id).map(|c| &c.kind) {
-                Some(ComponentKind::Circle { rings, .. }) => {
+            Target::Part(id) => match self.part(id).map(|c| &c.kind) {
+                Some(PartKind::Shape(Shape::Circle(circle))) => {
+                    let rings = &circle.rings;
                     format!("{} rings · {lamps} lamps", rings.len())
                 }
-                Some(ComponentKind::Group { children }) => {
-                    format!("{} parts · {lamps} lamps", children.len())
+                Some(PartKind::Group { parts }) => {
+                    format!("{} parts · {lamps} lamps", parts.len())
                 }
-                Some(ComponentKind::Repeat { count, .. }) => {
-                    format!("{count} copies · {lamps} lamps")
+                Some(PartKind::Repeat(repeat)) => {
+                    format!("{} copies", repeat.count) + &format!(" · {lamps} lamps")
                 }
                 _ => format!("{lamps} lamps"),
             },
-            Target::Object(o) => {
-                let dir = match self.ring(&o.component, &o.key) {
-                    Some(r) if r.reversed => " · counter-clockwise",
+            Target::Generated(o) => {
+                let dir = match patch.walked(o) {
+                    Some(w) if w.direction.is_reverse() => " · reversed",
                     _ => "",
                 };
                 format!("{lamps} lamps{dir}")
@@ -97,8 +99,10 @@ impl Project {
         // A port's children are pixels and an object's are lamps, never
         // listed: don't make the dome's 44,000 of them only to skip them.
         let leaves = match t {
-            Target::Port { .. } | Target::Object(_) => true,
-            Target::Component(id) => self.component(id).is_some_and(|c| c.is_single_object()),
+            Target::Port { .. } | Target::Generated(_) => true,
+            Target::Part(id) => self
+                .part(id)
+                .is_some_and(|c| crate::domain::target::is_single_segment(&c.kind)),
             _ => false,
         };
         if leaves {

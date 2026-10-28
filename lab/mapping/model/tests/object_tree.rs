@@ -3,7 +3,7 @@
 //!
 //! Each test builds its own small project: a fixture `f` and an output `out`.
 
-use lab_mapping_model::domain::object_tree::ObjectNodeKind;
+use lab_mapping_model::domain::object_tree::NodeKind;
 use lab_mapping_model::*;
 
 /// A path is its own object: its object's id is the path's id, and it is a
@@ -33,15 +33,11 @@ fn a_circles_rings_are_objects_under_it() {
         ComponentKind::circle(Vec2::new(50.0, 50.0), &[(40.0, 24), (20.0, 12)]),
     );
     let node = &p.placed().tree(&f)[0];
-    assert_eq!(node.id, ObjectId::of(&circle));
+    assert_eq!(node.id, TreeRef::of(&circle));
     assert!(!node.is_leaf());
     let rings: Vec<String> = node.children.iter().map(|c| c.id.to_string()).collect();
     assert_eq!(rings, ["circle1/r1", "circle1/r2"]);
-    assert!(
-        node.children
-            .iter()
-            .all(|c| c.kind == ObjectNodeKind::Generated)
-    );
+    assert!(node.children.iter().all(|c| c.kind == NodeKind::Generated));
 }
 
 /// A repeat holds a component with its own id: copy 0 has the original's
@@ -56,7 +52,7 @@ fn a_repeats_copies_carry_the_originals_ids() {
         ComponentKind::repeat(child, Vec2::new(50.0, 50.0), 3),
     );
     let node = &p.placed().tree(&f)[0];
-    assert_eq!(node.id, ObjectId::of(&repeat));
+    assert_eq!(node.id, TreeRef::of(&repeat));
     let copies: Vec<String> = node.children.iter().map(|c| c.id.to_string()).collect();
     assert_eq!(copies, ["path1", "path1@1", "path1@2"]);
 }
@@ -95,7 +91,7 @@ fn nested_repeats_stack_copies_inner_first() {
         ComponentKind::repeat(inner, Vec2::new(50.0, 50.0), 2),
     );
     let ids: Vec<String> = p
-        .placed_objects()
+        .placed_segments()
         .iter()
         .map(|(_, o)| o.id.to_string())
         .collect();
@@ -113,10 +109,10 @@ fn an_object_id_reads_back_from_its_text() {
         "circle2/r1@2",
         "path1@0@1",
     ] {
-        assert_eq!(ObjectId::parse(text).unwrap().to_string(), text);
+        assert_eq!(TreeRef::parse(text).unwrap().to_string(), text);
     }
     assert!(
-        ObjectId::parse("panel@0").is_none(),
+        TreeRef::parse("panel@0").is_none(),
         "copy 0 is never written"
     );
 }
@@ -132,7 +128,7 @@ fn a_ring_of_one_lamp_sits_at_the_centre() {
         &f,
         ComponentKind::circle(centre, &[(40.0, 24), (12.0, 1)]),
     );
-    let r2 = p.object(&ObjectId::new(&circle, "r2")).unwrap();
+    let r2 = p.segment(&TreeRef::new(&circle, "r2")).unwrap();
     assert_eq!(r2.lamps.len(), 1);
     let origin = p.origin(&f);
     assert!((r2.lamps[0].pos - origin).distance(centre) < 1e-6);
@@ -152,7 +148,7 @@ fn the_leaves_in_tree_order_are_the_lamp_order() {
         ComponentKind::circle(Vec2::new(50.0, 50.0), &[(20.0, 8)]),
     );
     let ids: Vec<String> = p
-        .placed_objects()
+        .placed_segments()
         .iter()
         .map(|(_, o)| o.id.to_string())
         .collect();
@@ -168,7 +164,7 @@ fn bare() -> (Project, NodeId) {
     (p, f)
 }
 
-fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> ComponentId {
+fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> PartRef {
     p.add(fixture, kind).unwrap()
 }
 

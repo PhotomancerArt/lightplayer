@@ -26,10 +26,10 @@
 //! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
 
-use crate::domain::component::ComponentKind;
-use crate::domain::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
+use lpc_mapping::part::{PartKind, Shape};
 
-use crate::domain::object::ObjectShape;
+use crate::domain::drawn_segment::{DrawnShape, vec2};
+use crate::domain::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
 use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -319,11 +319,11 @@ impl Project {
     /// The area of one target on screen, its own shape only.
     fn shape_area(&self, camera: &Camera, t: &Target) -> Option<Area> {
         let screen = |p: Vec2| camera.to_screen(p);
-        // Components store their own fixture's coordinates.
+        // Parts store their own fixture's coordinates.
         let frame = t
             .owner()
-            .and_then(|c| self.fixture_of(c))
-            .map(|n| self.frame(&n.id))
+            .filter(|c| self.fixture(&c.fixture).is_some())
+            .map(|c| self.frame(&c.fixture))
             .unwrap_or(Frame {
                 origin: Vec2::default(),
                 scale: 1.0,
@@ -385,7 +385,7 @@ impl Project {
             }
             // A copy of a group or a circle holds no lamps of its own: its
             // area is its leaves' outlines, as a repeat's is.
-            Target::Object(o) if self.object(o).is_none() => {
+            Target::Generated(o) if self.segment(o).is_none() => {
                 let (_, node) = self.placed().node(o)?;
                 let lines: Vec<Vec<Vec2>> = node
                     .leaves()
@@ -397,80 +397,90 @@ impl Project {
                     pad: PATH_PAD_PX,
                 })
             }
-            Target::Object(o) => match &self.object(o)?.shape {
-                ObjectShape::Ring { center, radius } => Some(Area::Band {
+            Target::Generated(o) => match &self.segment(o)?.shape {
+                DrawnShape::Ring { center, radius } => Some(Area::Band {
                     center: screen(*center),
                     radius: radius * camera.scale,
                     pad: RING_PAD_PX,
                 }),
-                ObjectShape::Polyline { points } => Some(Area::Polyline {
+                DrawnShape::Polyline { points } => Some(Area::Polyline {
                     points: points.iter().map(|p| screen(*p)).collect(),
                     pad: PATH_PAD_PX,
                 }),
-                ObjectShape::Rings { center, radii } => Some(Area::hull(
+                DrawnShape::Rings { center, radii } => Some(Area::hull(
                     &[screen(*center)],
                     radii.iter().copied().fold(0.0, f64::max) * camera.scale + CIRCLE_PAD_PX,
                 )),
-                ObjectShape::Filled { outline } => Some(Area::hull(
+                DrawnShape::Filled { outline } => Some(Area::hull(
                     &outline.iter().map(|p| screen(*p)).collect::<Vec<_>>(),
                     PATH_PAD_PX,
                 )),
             },
-            Target::Component(id) => {
-                let c = self.component(id)?;
+            Target::Part(id) => {
+                let c = self.part(id)?;
                 match &c.kind {
-                    ComponentKind::Path { points, .. } => Some(Area::Polyline {
-                        points: points.iter().map(|p| local(*p)).collect(),
+                    PartKind::Shape(Shape::Path(path)) => Some(Area::Polyline {
+                        points: path
+                            .commands
+                            .iter()
+                            .map(|c| local(vec2(c.point())))
+                            .collect(),
                         pad: PATH_PAD_PX,
                     }),
-                    ComponentKind::Polygon { points, .. } => Some(Area::Polyline {
-                        points: points
+                    PartKind::Shape(Shape::Polygon(polygon)) => Some(Area::Polyline {
+                        points: polygon
+                            .points
                             .iter()
-                            .chain(points.first())
-                            .map(|p| local(*p))
+                            .chain(polygon.points.first())
+                            .map(|p| local(vec2(*p)))
                             .collect(),
                         pad: PATH_PAD_PX,
                     }),
                     // Each copy's own outline: a repeat's copies are apart
                     // (round a dome), and a hull round them would cover
                     // everything between.
-                    ComponentKind::Repeat { .. } => Some(Area::Polylines {
+                    PartKind::Repeat(_) => Some(Area::Polylines {
                         lines: self
-                            .objects_of(id)
+                            .segments_of(id)
+                            .into_iter()
                             .map(|o| outline_points(&o.shape, &screen, camera.scale))
                             .collect(),
                         pad: PATH_PAD_PX,
                     }),
-                    ComponentKind::Circle { center, rings, .. } => {
-                        let r = frame.len_world(rings.iter().map(|r| r.radius).fold(0.0, f64::max))
-                            * camera.scale;
-                        Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))
+                    PartKind::Shape(Shape::Circle(circle)) => {
+                        let outer = circle
+                            .rings
+                            .iter()
+                            .map(|r| f64::from(r.radius))
+                            .fold(0.0, f64::max);
+                        let r = frame.len_world(outer) * camera.scale;
+                        Some(Area::hull(&[local(vec2(circle.center))], r + CIRCLE_PAD_PX))
                     }
-                    // A whole object (plan M4): its object's area, inside
+                    // A whole segment (plan M4): its segment's area, inside
                     // and all.
-                    ComponentKind::Grid(_)
-                    | ComponentKind::RingSet(_)
-                    | ComponentKind::Filled(_) => {
-                        let o = self.objects_of(id).next()?;
-                        self.area(camera, &Target::Object(o.id.clone()))
+                    PartKind::Shape(
+                        Shape::Grid(_) | Shape::FilledPolygon(_) | Shape::Points(_),
+                    ) => {
+                        let o = self.segments_of(id).into_iter().next()?;
+                        self.area(camera, &Target::Generated(o.id.clone()))
                     }
-                    ComponentKind::Group { .. } => {
+                    PartKind::Group { .. } => {
                         let mut points: Vec<Vec2> =
                             self.lamps_under(t).into_iter().map(screen).collect();
                         // Circles inside a group count by their whole disc.
-                        for o in self.objects_under(id) {
+                        for o in self.segments_of(id) {
                             match &o.shape {
-                                ObjectShape::Ring { center, radius } => points
+                                DrawnShape::Ring { center, radius } => points
                                     .extend(ring_points(screen(*center), radius * camera.scale)),
-                                ObjectShape::Rings { center, radii } => {
+                                DrawnShape::Rings { center, radii } => {
                                     let outer = radii.iter().copied().fold(0.0, f64::max);
                                     points
                                         .extend(ring_points(screen(*center), outer * camera.scale))
                                 }
-                                ObjectShape::Filled { outline } => {
+                                DrawnShape::Filled { outline } => {
                                     points.extend(outline.iter().map(|p| screen(*p)))
                                 }
-                                ObjectShape::Polyline { .. } => {}
+                                DrawnShape::Polyline { .. } => {}
                             }
                         }
                         (!points.is_empty()).then(|| Area::hull(&points, GROUP_PAD_PX))
@@ -536,8 +546,8 @@ impl Project {
     fn drawn_bounds(&self, t: &Target) -> Option<Rect> {
         let placed = self.placed();
         match t {
-            Target::Component(id) => placed.component_bounds(id),
-            Target::Object(o) | Target::Lamp { object: o, .. } => placed.object_bounds(o),
+            Target::Part(id) => placed.part_bounds(id),
+            Target::Generated(o) | Target::Lamp { segment: o, .. } => placed.segment_bounds(o),
             _ => None,
         }
     }
@@ -672,21 +682,21 @@ fn rounded_hull_path(hull: &[Vec2], pad: f64) -> String {
 
 /// An object's outline on screen, as one closed (or open) line: a path's
 /// points, a ring round, an outline closed.
-fn outline_points(shape: &ObjectShape, screen: &impl Fn(Vec2) -> Vec2, scale: f64) -> Vec<Vec2> {
+fn outline_points(shape: &DrawnShape, screen: &impl Fn(Vec2) -> Vec2, scale: f64) -> Vec<Vec2> {
     match shape {
-        ObjectShape::Polyline { points } => points.iter().map(|p| screen(*p)).collect(),
-        ObjectShape::Ring { center, radius } => {
+        DrawnShape::Polyline { points } => points.iter().map(|p| screen(*p)).collect(),
+        DrawnShape::Ring { center, radius } => {
             let mut ring = ring_points(screen(*center), radius * scale);
             ring.extend(ring.first().copied());
             ring
         }
-        ObjectShape::Rings { center, radii } => {
+        DrawnShape::Rings { center, radii } => {
             let outer = radii.iter().copied().fold(0.0, f64::max);
             let mut ring = ring_points(screen(*center), outer * scale);
             ring.extend(ring.first().copied());
             ring
         }
-        ObjectShape::Filled { outline } => outline
+        DrawnShape::Filled { outline } => outline
             .iter()
             .chain(outline.first())
             .map(|p| screen(*p))

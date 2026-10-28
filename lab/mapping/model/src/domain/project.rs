@@ -1,33 +1,35 @@
 //! The project: the root module. Its `nodes` are what sits at the top of
 //! the canvas — fixtures, outputs, modules holding more of them. It is the
-//! one thing that is authored and kept; everything else (objects, the
+//! one thing that is authored and kept; everything else (segments, the
 //! layout, the patch, the edges) is derived from it.
 //!
-//! Ids are minted here, so a component id or a node id is unique across
-//! the whole project — and only across the project: nothing assumes it is
-//! the only one (D44).
+//! Node ids are minted here, so a node id is unique across the whole
+//! project — and only across the project: nothing assumes it is the only
+//! one (D44). A part's id is its fixture's (`lpc_mapping::part::Mapping`
+//! mints it), so a part is named with its fixture ([`PartRef`]).
 //!
-//! Positions this file hands out (`objects`, `object`) are in **world**
+//! Positions this file hands out (`segments`, `segment`) are in **world**
 //! units: a fixture's own coordinates plus where the view placed it
-//! (`placement.rs`). Edits go to components in the fixture's own coordinates;
+//! (`placement.rs`). Edits go to parts in the fixture's own coordinates;
 //! a move is the same delta in both.
 //!
 //! The nodes are private to this file so that every edit comes in through
 //! a door that forgets what was worked out about them (`derived.rs`): a
-//! kept layout, objects or patch is never stale.
+//! kept layout, segments or patch is never stale.
+
+use lpc_mapping::part::{Circle, Part, PartKind, Path, Shape};
 
 use crate::domain::channel::Channel;
-use crate::domain::component::{Component, ComponentId, ComponentKind};
-use crate::domain::cursor_op::Amount;
 use crate::domain::derived::Derived;
+use crate::domain::drawn_segment::{DrawnSegment, f32s};
 use crate::domain::fixture::Fixture;
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{self, Node, NodeId, NodeKind};
-use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
-use crate::domain::patch_rule::Start;
+use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::pattern::Pattern;
-use crate::domain::placement::{Carried, Frame};
+use crate::domain::placement::Carried;
+use crate::domain::port_tables::CarriedPortTables;
 use crate::domain::render_source::RenderSource;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,25 +38,20 @@ pub struct Project {
     /// The root module's children, in authoring order. Read with
     /// [`Project::nodes`]; change with [`Project::nodes_mut`].
     nodes: Vec<Node>,
-    /// Per kind, the next number to mint. Never decremented, so an id is
-    /// never handed out twice.
+    /// Per kind of node, the next number to mint. Never decremented, so an
+    /// id is never handed out twice.
     counters: Counters,
     /// What has been worked out about the nodes, until they change.
     pub(crate) derived: Derived,
     /// Where the view placed the nodes (`placement.rs`).
     pub(crate) placement: Carried,
+    /// The ports each fixture is patched against, when a host handed them
+    /// over (`port_tables.rs`).
+    pub(crate) port_tables: CarriedPortTables,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct Counters {
-    path: u32,
-    polygon: u32,
-    circle: u32,
-    repeat: u32,
-    group: u32,
-    grid: u32,
-    rings: u32,
-    filled: u32,
     module: u32,
     fixture: u32,
     output: u32,
@@ -68,14 +65,6 @@ impl Project {
             name: name.into(),
             nodes: Vec::new(),
             counters: Counters {
-                path: 1,
-                polygon: 1,
-                circle: 1,
-                repeat: 1,
-                group: 1,
-                grid: 1,
-                rings: 1,
-                filled: 1,
                 module: 1,
                 fixture: 1,
                 output: 1,
@@ -84,32 +73,17 @@ impl Project {
             },
             derived: Derived::default(),
             placement: Carried::default(),
+            port_tables: CarriedPortTables::default(),
         }
     }
 
     // ---- minting ---------------------------------------------------------
 
-    /// Mint an id for a new component of this kind and wrap it. An id
-    /// already in the project (one opened from a file, say) is skipped.
-    pub fn mint(&mut self, kind: ComponentKind) -> Component {
-        let word = kind.id_word();
-        loop {
-            let counter = match kind {
-                ComponentKind::Path { .. } => &mut self.counters.path,
-                ComponentKind::Polygon { .. } => &mut self.counters.polygon,
-                ComponentKind::Circle { .. } => &mut self.counters.circle,
-                ComponentKind::Repeat { .. } => &mut self.counters.repeat,
-                ComponentKind::Group { .. } => &mut self.counters.group,
-                ComponentKind::Grid(_) => &mut self.counters.grid,
-                ComponentKind::RingSet(_) => &mut self.counters.rings,
-                ComponentKind::Filled(_) => &mut self.counters.filled,
-            };
-            let id = ComponentId::new(format!("{word}{counter}"));
-            *counter += 1;
-            if self.component(&id).is_none() {
-                return Component { id, kind };
-            }
-        }
+    /// A new part of this kind for `fixture`, its id minted by the
+    /// fixture's mapping (never one it has, never one it had); not yet
+    /// in the fixture. `None` when `fixture` isn't one.
+    pub fn new_part(&mut self, fixture: &NodeId, kind: PartKind) -> Option<Part> {
+        Some(self.fixture_mut(fixture)?.mapping.new_part(kind))
     }
 
     /// Mint a node id and put the node in `parent` (a module), or at the
@@ -171,8 +145,8 @@ impl Project {
 
     /// An output reads `control.out`, unless another output beside it
     /// already does: then a channel of its own, from its name
-    /// (`control.scarf_out`) — the product's idiom, so each fixture's auto
-    /// rule is a channel only its output reads.
+    /// (`control.scarf_out`) — the product's idiom. It is named as it is
+    /// called, so a fixture's start can say it (ops name outputs by name).
     pub fn add_output(
         &mut self,
         parent: Option<&NodeId>,
@@ -188,6 +162,7 @@ impl Project {
                 .is_some_and(|o| o.reads == Channel::control_out())
         });
         let mut output = Output::new(ports);
+        output.label = Some(name.to_string());
         if taken {
             output.reads = Channel::control_for(name);
         }
@@ -208,22 +183,23 @@ impl Project {
         )
     }
 
-    /// Mint and append a top-level component to a fixture; returns its id.
-    pub fn add(&mut self, fixture: &NodeId, kind: ComponentKind) -> Option<ComponentId> {
-        let component = self.mint(kind);
-        let id = component.id.clone();
-        self.fixture_mut(fixture)?.components.push(component);
+    /// Mint and append a top-level part to a fixture (`lpc_mapping::edit`'s
+    /// `insert_part`, last in wiring order); returns it.
+    pub fn add(&mut self, fixture: &NodeId, kind: PartKind) -> Option<PartRef> {
+        let part = self.new_part(fixture, kind)?;
+        let id = PartRef::new(fixture, &part.id);
+        let mapping = &mut self.fixture_mut(fixture)?.mapping;
+        let at = mapping.parts.len();
+        lpc_mapping::edit::insert_part(mapping, None, at, part).ok()?;
         Some(id)
     }
 
     /// Start a fixture's walk at `pixel` of `output`'s port `port`.
     pub fn start_at(&mut self, fixture: &NodeId, output: &NodeId, port: &str, pixel: u32) {
-        if let Some(f) = self.fixture_mut(fixture) {
-            f.start = Start::At {
-                output: output.clone(),
-                port: port.to_string(),
-                channel: Amount::px(pixel),
-            };
+        if let Some(start) = self.start_ops_at(output, port, pixel)
+            && let Some(f) = self.fixture_mut(fixture)
+        {
+            f.mapping.start = start;
         }
     }
 
@@ -330,85 +306,70 @@ impl Project {
         self.all_nodes().into_iter().find(|n| n.name == name)
     }
 
-    // ---- components --------------------------------------------------------
+    // ---- parts ---------------------------------------------------------------
 
-    /// The fixture node a component lives in.
-    pub fn fixture_of(&self, id: &ComponentId) -> Option<&Node> {
-        self.node(self.placed().fixture_of(id)?)
+    pub fn part(&self, id: &PartRef) -> Option<&Part> {
+        self.fixture(&id.fixture)?.part(&id.part)
     }
 
-    pub fn component(&self, id: &ComponentId) -> Option<&Component> {
-        self.fixture_of(id)?.fixture()?.component(id)
+    pub fn part_mut(&mut self, id: &PartRef) -> Option<&mut Part> {
+        self.fixture_mut(&id.fixture)?.part_mut(&id.part)
     }
 
-    pub fn component_mut(&mut self, id: &ComponentId) -> Option<&mut Component> {
-        let fixture = self.fixture_of(id)?.id.clone();
-        self.fixture_mut(&fixture)?.component_mut(id)
+    /// The part holding `id` (a group or a repeat), or `None` when `id` is
+    /// top-level in its fixture (or absent).
+    pub fn parent_part(&self, id: &PartRef) -> Option<PartRef> {
+        let parent = self.fixture(&id.fixture)?.parent_part(&id.part)?;
+        Some(PartRef::new(&id.fixture, parent))
     }
 
-    /// The group holding `id`, or `None` when `id` is top-level in its
-    /// fixture (or absent).
-    pub fn parent_group(&self, id: &ComponentId) -> Option<&ComponentId> {
-        self.fixture_of(id)?.fixture()?.parent_group(id)
+    /// Take a part (and everything under it) out of wherever it lives.
+    pub fn remove_part(&mut self, id: &PartRef) -> Option<Part> {
+        self.fixture_mut(&id.fixture)?.remove(&id.part)
     }
 
-    /// Remove a component (and everything under it) wherever it lives.
-    pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
-        let fixture = self.fixture_of(id)?.id.clone();
-        self.fixture_mut(&fixture)?.remove(id)
-    }
+    // ---- derived: segments and lamps, in world units ---------------------
 
-    // ---- derived: objects and lamps, in world units ----------------------
-
-    /// Every object with the fixture it lives in, in tree then authoring
-    /// order — the order the auto patch fills ports in.
-    pub fn placed_objects(&self) -> &[(NodeId, Object)] {
+    /// Every segment with the fixture it lives in, fixtures in tree order,
+    /// segments in each one's lamp order.
+    pub fn placed_segments(&self) -> &[(NodeId, DrawnSegment)] {
         &self.placed().list
     }
 
-    pub fn objects(&self) -> Vec<Object> {
-        self.placed_objects()
-            .iter()
-            .map(|(_, o)| o.clone())
-            .collect()
-    }
-
-    /// One fixture's objects, in authoring order, in world units.
-    pub fn objects_in(&self, fixture: &NodeId) -> Vec<&Object> {
-        self.placed_objects()
+    /// One fixture's segments, in its lamp order, in world units.
+    pub fn segments_in(&self, fixture: &NodeId) -> Vec<&DrawnSegment> {
+        self.placed_segments()
             .iter()
             .filter(|(f, _)| f == fixture)
             .map(|(_, o)| o)
             .collect()
     }
 
-    pub fn object(&self, id: &ObjectId) -> Option<&Object> {
+    pub fn segment(&self, id: &TreeRef) -> Option<&DrawnSegment> {
         self.placed().get(id).map(|(_, o)| o)
     }
 
-    /// The leaves a component renders, in world units and tree order: its
-    /// own, its generated ones, or everything under it (a group's
-    /// children's, every copy of a repeat's child's).
-    pub fn objects_of(&self, id: &ComponentId) -> impl Iterator<Item = &Object> {
-        self.placed().of_component(id).into_iter().map(|(_, o)| o)
+    /// The segments a part renders, in world units and tree order: its
+    /// own, its generated ones, or everything under it (a group's parts',
+    /// every copy of a repeat's part's).
+    pub fn segments_of(&self, id: &PartRef) -> Vec<&DrawnSegment> {
+        self.placed()
+            .of_part(id)
+            .into_iter()
+            .map(|(_, o)| o)
+            .collect()
     }
 
-    /// Every leaf under a component, in world units: the same as
-    /// [`Project::objects_of`], as a list.
-    pub fn objects_under(&self, id: &ComponentId) -> Vec<&Object> {
-        self.objects_of(id).collect()
-    }
-
-    /// Lamps outside their own fixture's box, as (object, lamp index).
-    pub fn lamps_outside(&self) -> Vec<(ObjectId, u32)> {
+    /// Lamps outside their own fixture's box, as (segment, lamp index).
+    pub fn lamps_outside(&self) -> Vec<(TreeRef, u32)> {
         let mut out = Vec::new();
-        for (f, object) in self.placed_objects() {
+        for (f, segment) in self.placed_segments() {
             let Some(bounds) = self.node_rect(f) else {
                 continue;
             };
-            for (i, lamp) in object.lamps.iter().enumerate() {
+            for (i, lamp) in segment.lamps.iter().enumerate() {
                 if !bounds.contains(lamp.pos) {
-                    out.push((object.id.clone(), i as u32));
+                    out.push((segment.id.clone(), i as u32));
                 }
             }
         }
@@ -433,21 +394,16 @@ impl Project {
     pub fn seed() -> Self {
         let mut p = Project::new("desk");
         let side = |s: f64| Vec2::new(s, s);
+        let path = |points: &[Vec2], lamps: u32| {
+            let points: Vec<[f32; 2]> = points.iter().map(|p| f32s(*p)).collect();
+            PartKind::Shape(Shape::Path(Path::through(&points, lamps)))
+        };
 
         p.add_shader(None, "rainbow", Pattern::Rainbow);
         let rig = p.add_module(None, "tail rig");
         p.add_shader(rig.as_ref(), "glow", Pattern::Gradient);
         let tail = p.add_fixture_sized(rig.as_ref(), "tail", side(82.0));
         let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60)]);
-        let out = p.mint(ComponentKind::path(
-            vec![Vec2::new(37.0, 70.0), Vec2::new(37.0, 12.0)],
-            25,
-        ));
-        let back = p.mint(ComponentKind::path(
-            vec![Vec2::new(45.0, 12.0), Vec2::new(45.0, 70.0)],
-            25,
-        ));
-
         let ring = p.add_fixture_sized(None, "ring display", side(70.0));
         let strip = p.add_fixture_sized(None, "strip", side(80.0));
         let main = p.add_output(None, "main", &[("D0", 64), ("D1", 30)]);
@@ -466,14 +422,34 @@ impl Project {
         else {
             unreachable!("the seed's parents are modules")
         };
-        p.add(&tail, ComponentKind::group(vec![out, back]));
+        let out = p
+            .new_part(
+                &tail,
+                path(&[Vec2::new(37.0, 70.0), Vec2::new(37.0, 12.0)], 25),
+            )
+            .expect("a fixture");
+        let back = p
+            .new_part(
+                &tail,
+                path(&[Vec2::new(45.0, 12.0), Vec2::new(45.0, 70.0)], 25),
+            )
+            .expect("a fixture");
+        p.add(
+            &tail,
+            PartKind::Group {
+                parts: vec![out, back],
+            },
+        );
         p.add(
             &ring,
-            ComponentKind::circle(Vec2::new(35.0, 35.0), &[(26.0, 40), (16.0, 24)]),
+            PartKind::Shape(Shape::Circle(Circle::new(
+                [35.0, 35.0],
+                &[(26.0, 40), (16.0, 24)],
+            ))),
         );
         p.add(
             &strip,
-            ComponentKind::path(vec![Vec2::new(6.0, 40.0), Vec2::new(74.0, 40.0)], 30),
+            path(&[Vec2::new(6.0, 40.0), Vec2::new(74.0, 40.0)], 30),
         );
         // Each fixture starts somewhere of its own (nothing flows across
         // fixtures): the strip on D1, where the ring display's 64 lamps
@@ -484,30 +460,6 @@ impl Project {
         p.start_at(&scarf, &scarf_out, "0", 0);
         p
     }
-}
-
-/// An object moved from its fixture's coordinates to world units.
-pub(crate) fn placed(mut o: Object, frame: Frame) -> Object {
-    for l in &mut o.lamps {
-        l.pos = frame.to_world(l.pos);
-    }
-    o.shape = match o.shape {
-        ObjectShape::Polyline { points } => ObjectShape::Polyline {
-            points: points.into_iter().map(|p| frame.to_world(p)).collect(),
-        },
-        ObjectShape::Ring { center, radius } => ObjectShape::Ring {
-            center: frame.to_world(center),
-            radius: frame.len_world(radius),
-        },
-        ObjectShape::Rings { center, radii } => ObjectShape::Rings {
-            center: frame.to_world(center),
-            radii: radii.into_iter().map(|r| frame.len_world(r)).collect(),
-        },
-        ObjectShape::Filled { outline } => ObjectShape::Filled {
-            outline: outline.into_iter().map(|p| frame.to_world(p)).collect(),
-        },
-    };
-    o
 }
 
 /// The rectangle around a set of rectangles.

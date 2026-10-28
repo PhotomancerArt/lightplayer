@@ -2,14 +2,16 @@
 //! place that knows a path has a lamp count, a ring has a radius and a
 //! port has pixels; the inspector reads the descriptors (`props.rs`).
 //!
-//! Note the object-level controls (D11): a ring's lamps, radius and
-//! direction are edited with the ring selected, but they are stored on the
-//! circle.
+//! Note the segment-level controls (D11): a ring's lamps and radius are
+//! edited with the ring selected, but they are stored on the circle. Which
+//! way round the rings run is the circle's (every ring's); one ring runs
+//! the other way on the wire by its own override (`r`).
+
+use lpc_mapping::part::{Circle, PartKind, Shape};
+use lpc_mapping::{GridRouting as Routing, RingDir, RingOrder};
 
 use crate::domain::color_order::ColorOrder;
-use crate::domain::component::{ComponentKind, Ring};
 use crate::domain::fixture::Fixture;
-use crate::domain::grid::Routing;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
@@ -126,7 +128,7 @@ pub const SNAKE: PropDesc = PropDesc {
     nudge: false,
     reshapes: false,
 };
-/// A ring set wires its inner ring first.
+/// A circle wires its inner ring first ("drawn from" the inside).
 pub const INNER_FIRST: PropDesc = PropDesc {
     id: "inner-first",
     label: "Inner ring first",
@@ -172,57 +174,50 @@ impl Project {
                 Some(_) => vec![(PIXELS, PropRaw::Count(self.port_pixels(output, key) as i64))],
                 None => Vec::new(),
             },
-            Target::Component(id) => match self.component(id).map(|c| &c.kind) {
-                Some(ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. }) => {
-                    vec![(LAMPS, PropRaw::Count(*lamps as i64))]
+            Target::Part(id) => match self.part(id).map(|c| &c.kind) {
+                Some(PartKind::Shape(Shape::Path(path))) => {
+                    vec![(LAMPS, PropRaw::Count(path.count as i64))]
                 }
-                Some(ComponentKind::Repeat { child, count, .. }) => {
-                    let mut props = shape_lamps(&child.kind)
+                Some(PartKind::Shape(Shape::Polygon(polygon))) => {
+                    vec![(LAMPS, PropRaw::Count(polygon.count as i64))]
+                }
+                Some(PartKind::Repeat(repeat)) => {
+                    let mut props = shape_lamps(&repeat.part.kind)
                         .map(|n| vec![(LAMPS, PropRaw::Count(n as i64))])
                         .unwrap_or_default();
-                    props.push((COPIES, PropRaw::Count(*count as i64)));
+                    props.push((COPIES, PropRaw::Count(repeat.count as i64)));
                     props
                 }
-                Some(ComponentKind::Circle { rings, .. }) => vec![
-                    (RINGS, PropRaw::Count(rings.len() as i64)),
+                Some(PartKind::Shape(Shape::Circle(circle))) => vec![
+                    (RINGS, PropRaw::Count(circle.rings.len() as i64)),
+                    (COUNTER_CLOCKWISE, PropRaw::Flag(circle.dir == RingDir::Ccw)),
                     (
-                        COUNTER_CLOCKWISE,
-                        PropRaw::Flag(!rings.is_empty() && rings.iter().all(|r| r.reversed)),
+                        INNER_FIRST,
+                        PropRaw::Flag(circle.drawn_from == RingOrder::InnerFirst),
                     ),
                 ],
-                Some(ComponentKind::Grid(g)) => vec![
+                Some(PartKind::Shape(Shape::Grid(g))) => vec![
                     (COLUMNS, PropRaw::Count(g.cols as i64)),
                     (ROWS, PropRaw::Count(g.rows as i64)),
-                    (PITCH, PropRaw::Number(g.pitch)),
+                    (PITCH, PropRaw::Number(f64::from(g.pitch))),
                     (SNAKE, PropRaw::Flag(g.routing == Routing::Snake)),
                 ],
-                // The outer ring's lamps (its own count when it has one);
-                // an inner ring without its own follows by circumference,
-                // as in the product.
-                Some(ComponentKind::RingSet(r)) => vec![
-                    (LAMPS, PropRaw::Count(r.outer_ring_lamps() as i64)),
-                    (RINGS, PropRaw::Count(r.rings as i64)),
-                    (RADIUS, PropRaw::Number(r.radius)),
-                    (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
-                    (INNER_FIRST, PropRaw::Flag(r.inner_first)),
-                ],
                 // Its lamp count is however many cells the outline holds.
-                Some(ComponentKind::Filled(f)) => vec![
-                    (PITCH, PropRaw::Number(f.pitch)),
-                    (ANGLE, PropRaw::Number(f.angle_deg)),
+                Some(PartKind::Shape(Shape::FilledPolygon(f))) => vec![
+                    (PITCH, PropRaw::Number(f64::from(f.pitch))),
+                    (ANGLE, PropRaw::Number(f64::from(f.angle_deg))),
                     (SNAKE, PropRaw::Flag(f.routing == Routing::Snake)),
                 ],
                 _ => Vec::new(),
             },
-            Target::Object(o) => match self.ring(&o.component, &o.key) {
+            Target::Generated(o) => match self.ring_of(o) {
                 Some(r) => vec![
-                    (LAMPS, PropRaw::Count(r.lamps as i64)),
-                    (RADIUS, PropRaw::Number(r.radius)),
-                    (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
+                    (LAMPS, PropRaw::Count(r.count as i64)),
+                    (RADIUS, PropRaw::Number(f64::from(r.radius))),
                 ],
-                // A copy's properties are its component's (D11): an edit to
-                // one copy is an edit to all of them.
-                None if o.key.is_empty() => self.props_of(&Target::Component(o.component.clone())),
+                // A copy's properties are its part's (D11): an edit to one
+                // copy is an edit to all of them.
+                None if o.id.key.is_none() => self.props_of(&Target::Part(o.part())),
                 None => Vec::new(),
             },
             Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => Vec::new(),
@@ -260,94 +255,86 @@ impl Project {
                     _ => return false,
                 }
             }
-            Target::Component(id) => {
-                match (self.component_mut(id).map(|c| &mut c.kind), prop_id, new) {
+            Target::Part(id) => {
+                if prop_id == "copies"
+                    && let PropRaw::Count(n) = new
+                    && matches!(self.part(id).map(|p| &p.kind), Some(PartKind::Repeat(_)))
+                {
+                    let Some(f) = self.fixture_mut(&id.fixture) else {
+                        return false;
+                    };
+                    return lpc_mapping::edit::set_repeat_count(&mut f.mapping, &id.part, n as u32)
+                        .is_ok();
+                }
+                match (self.part_mut(id).map(|c| &mut c.kind), prop_id, new) {
+                    (Some(PartKind::Shape(Shape::Path(path))), "lamps", PropRaw::Count(n)) => {
+                        path.count = n as u32
+                    }
                     (
-                        Some(
-                            ComponentKind::Path { lamps, .. }
-                            | ComponentKind::Polygon { lamps, .. },
-                        ),
+                        Some(PartKind::Shape(Shape::Polygon(polygon))),
                         "lamps",
                         PropRaw::Count(n),
-                    ) => *lamps = n as u32,
-                    (Some(ComponentKind::Repeat { child, .. }), "lamps", PropRaw::Count(n)) => {
-                        set_shape_lamps(&mut child.kind, n as u32)
+                    ) => polygon.count = n as u32,
+                    (Some(PartKind::Repeat(repeat)), "lamps", PropRaw::Count(n)) => {
+                        set_shape_lamps(&mut repeat.part.kind, n as u32)
                     }
-                    (Some(ComponentKind::Repeat { count, .. }), "copies", PropRaw::Count(n)) => {
-                        *count = n as u32
+                    (Some(PartKind::Shape(Shape::Circle(circle))), _, new) => {
+                        match (prop_id, new) {
+                            ("rings", PropRaw::Count(n)) => {
+                                set_ring_count(circle, n as usize, spacing)
+                            }
+                            ("ccw", PropRaw::Flag(v)) => {
+                                circle.dir = if v { RingDir::Ccw } else { RingDir::Cw }
+                            }
+                            ("inner-first", PropRaw::Flag(v)) => {
+                                circle.drawn_from = if v {
+                                    RingOrder::InnerFirst
+                                } else {
+                                    RingOrder::OuterFirst
+                                }
+                            }
+                            _ => return false,
+                        }
                     }
-                    (
-                        Some(ComponentKind::Circle {
-                            rings, next_ring, ..
-                        }),
-                        "rings",
-                        PropRaw::Count(n),
-                    ) => set_ring_count(rings, next_ring, n as usize, spacing),
-                    (Some(ComponentKind::Circle { rings, .. }), "ccw", PropRaw::Flag(v)) => {
-                        rings.iter_mut().for_each(|r| r.reversed = v)
-                    }
-                    (Some(ComponentKind::Grid(g)), _, new) => match (prop_id, new) {
+                    (Some(PartKind::Shape(Shape::Grid(g))), _, new) => match (prop_id, new) {
                         ("columns", PropRaw::Count(n)) => g.cols = n as u32,
                         ("rows", PropRaw::Count(n)) => g.rows = n as u32,
-                        ("pitch", PropRaw::Number(v)) => g.pitch = v,
+                        ("pitch", PropRaw::Number(v)) => g.pitch = v as f32,
                         ("snake", PropRaw::Flag(v)) => g.routing = routing(v),
                         _ => return false,
                     },
-                    (Some(ComponentKind::RingSet(r)), _, new) => match (prop_id, new) {
-                        ("lamps", PropRaw::Count(n)) => r.set_outer_ring_lamps(n as u32),
-                        ("rings", PropRaw::Count(n)) => r.rings = n as u32,
-                        ("radius", PropRaw::Number(v)) => r.radius = v,
-                        ("ccw", PropRaw::Flag(v)) => r.reversed = v,
-                        ("inner-first", PropRaw::Flag(v)) => r.inner_first = v,
-                        _ => return false,
-                    },
-                    (Some(ComponentKind::Filled(f)), _, new) => match (prop_id, new) {
-                        ("pitch", PropRaw::Number(v)) => f.pitch = v,
-                        ("angle", PropRaw::Number(v)) => f.angle_deg = v,
-                        ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
-                        _ => return false,
-                    },
+                    (Some(PartKind::Shape(Shape::FilledPolygon(f))), _, new) => {
+                        match (prop_id, new) {
+                            ("pitch", PropRaw::Number(v)) => f.pitch = v as f32,
+                            ("angle", PropRaw::Number(v)) => f.angle_deg = v as f32,
+                            ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
+                            _ => return false,
+                        }
+                    }
                     _ => return false,
                 }
             }
-            Target::Object(o) => {
-                if self.ring(&o.component, &o.key).is_none() {
-                    // A copy's edits land on its component (D11).
-                    return o.key.is_empty()
-                        && self.edit_prop(
-                            &Target::Component(o.component.clone()),
-                            prop_id,
-                            edit,
-                            spacing,
-                        );
+            Target::Generated(o) => {
+                if self.ring_of(o).is_none() {
+                    // A copy's edits land on its part (D11).
+                    return o.id.key.is_none()
+                        && self.edit_prop(&Target::Part(o.part()), prop_id, edit, spacing);
                 }
-                let Some(r) = self.ring_mut(&o.component, &o.key) else {
+                let Some(key) = o.id.key.clone() else {
+                    return false;
+                };
+                let Some(r) = self.ring_mut(&o.part(), key.as_str()) else {
                     return false;
                 };
                 match (prop_id, new) {
-                    ("lamps", PropRaw::Count(n)) => r.lamps = n as u32,
-                    ("radius", PropRaw::Number(v)) => r.radius = v,
-                    ("ccw", PropRaw::Flag(v)) => r.reversed = v,
+                    ("lamps", PropRaw::Count(n)) => r.count = n as u32,
+                    ("radius", PropRaw::Number(v)) => r.radius = v as f32,
                     _ => return false,
                 }
             }
             Target::Lamp { .. } | Target::Span { .. } | Target::Pixel { .. } => return false,
         }
         true
-    }
-
-    pub fn ring(&self, circle: &crate::ComponentId, key: &str) -> Option<&Ring> {
-        match &self.component(circle)?.kind {
-            ComponentKind::Circle { rings, .. } => rings.iter().find(|r| r.key == key),
-            _ => None,
-        }
-    }
-
-    pub fn ring_mut(&mut self, circle: &crate::ComponentId, key: &str) -> Option<&mut Ring> {
-        match &mut self.component_mut(circle)?.kind {
-            ComponentKind::Circle { rings, .. } => rings.iter_mut().find(|r| r.key == key),
-            _ => None,
-        }
     }
 }
 
@@ -361,35 +348,39 @@ fn routing(snake: bool) -> Routing {
 
 /// The lamps of a repeat's shape, when it has one count (a path, a
 /// polygon, a repeat of one).
-fn shape_lamps(kind: &ComponentKind) -> Option<u32> {
+fn shape_lamps(kind: &PartKind) -> Option<u32> {
     match kind {
-        ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => Some(*lamps),
-        ComponentKind::Repeat { child, .. } => shape_lamps(&child.kind),
+        PartKind::Shape(Shape::Path(path)) => Some(path.count),
+        PartKind::Shape(Shape::Polygon(polygon)) => Some(polygon.count),
+        PartKind::Repeat(repeat) => shape_lamps(&repeat.part.kind),
         _ => None,
     }
 }
 
-fn set_shape_lamps(kind: &mut ComponentKind, n: u32) {
+fn set_shape_lamps(kind: &mut PartKind, n: u32) {
     match kind {
-        ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => *lamps = n,
-        ComponentKind::Repeat { child, .. } => set_shape_lamps(&mut child.kind, n),
+        PartKind::Shape(Shape::Path(path)) => path.count = n,
+        PartKind::Shape(Shape::Polygon(polygon)) => polygon.count = n,
+        PartKind::Repeat(repeat) => set_shape_lamps(&mut repeat.part.kind, n),
         _ => {}
     }
 }
 
-/// Grow or shrink a circle's rings. Removing takes the newest ring; adding
-/// puts a ring outside the largest one, keys minted by the circle.
-fn set_ring_count(rings: &mut Vec<Ring>, next_ring: &mut u32, want: usize, spacing: f64) {
-    rings.truncate(want);
-    while rings.len() < want {
-        let radius = rings.iter().map(|r| r.radius).fold(0.0, f64::max) + 8.0;
+/// Grow or shrink a circle's rings. Removing takes the innermost ring (the
+/// last listed); adding puts a ring outside the largest one, first in the
+/// list (rings are listed outside in), its key minted by the circle and
+/// never one it had.
+fn set_ring_count(circle: &mut Circle, want: usize, spacing: f64) {
+    circle.rings.truncate(want);
+    while circle.rings.len() < want {
+        let radius = circle
+            .rings
+            .iter()
+            .map(|r| f64::from(r.radius))
+            .fold(0.0, f64::max)
+            + 8.0;
         let lamps = ((std::f64::consts::TAU * radius / spacing).round() as u32).max(3);
-        rings.push(Ring {
-            key: format!("r{next_ring}"),
-            radius,
-            lamps,
-            reversed: false,
-        });
-        *next_ring += 1;
+        circle.add_ring(radius as f32, lamps);
+        circle.rings.rotate_right(1);
     }
 }

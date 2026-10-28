@@ -11,7 +11,6 @@
 //! breadcrumb already says what's selected. A hint comes and goes only as
 //! its action does, so the bar stays still while you point around.
 
-use crate::domain::component::ComponentKind;
 use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -223,7 +222,9 @@ impl Editor {
             let edit: Vec<Target> = sel
                 .iter()
                 .map(|t| match t {
-                    Target::Lamp { object, .. } => f.object_target(object),
+                    Target::Lamp {
+                        segment: object, ..
+                    } => f.tree_target(object),
                     Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
                     other => other.clone(),
                 })
@@ -324,7 +325,7 @@ impl Editor {
             out.push(hv(".", "next port", &[GraphVerb::NextPort]));
         }
         if let Some(fixture) = self.selection.first().and_then(|t| p.fixture_of_target(t))
-            && p.objects_in(&fixture)
+            && p.segments_in(&fixture)
                 .iter()
                 .any(|o| p.effective_patch().lands(&o.id))
         {
@@ -458,7 +459,7 @@ impl Editor {
                 } else if self
                     .selection
                     .iter()
-                    .any(|t| matches!(t, Target::Object(_) | Target::Lamp { .. }))
+                    .any(|t| matches!(t, Target::Generated(_) | Target::Lamp { .. }))
                 {
                     Some("rings and lamps move with the thing that makes them".into())
                 } else {
@@ -484,11 +485,12 @@ impl Editor {
         let f = &self.project;
         match handle {
             HandleKind::PathPoint { path, index } => {
-                let (n, lamps) = match f.component(path).map(|c| &c.kind) {
-                    Some(ComponentKind::Path { points, lamps, .. })
-                    | Some(ComponentKind::Polygon { points, lamps }) => (points.len(), *lamps),
-                    _ => (0, 0),
-                };
+                let n = f.path_points(path).map_or(0, |p| p.len());
+                let lamps = f
+                    .segments_of(path)
+                    .iter()
+                    .map(|s| s.lamps.len())
+                    .sum::<usize>();
                 let what = if *index == 0 || *index + 1 == n {
                     "an end"
                 } else {
@@ -499,7 +501,7 @@ impl Editor {
             HandleKind::RingRadius { circle, ring } => match f.ring(circle, ring) {
                 Some(r) => format!(
                     "Radius {:.1} · ring {ring} keeps {} lamps · − = changes the count",
-                    r.radius, r.lamps
+                    r.radius, r.count
                 ),
                 None => String::new(),
             },
@@ -525,5 +527,5 @@ fn deletable(f: &Project, selection: &[Target]) -> bool {
     {
         return false;
     }
-    !matches!(selection, [Target::Object(o)] if f.ring(&o.component, &o.key).is_none())
+    !matches!(selection, [Target::Generated(o)] if f.ring_of(o).is_none())
 }

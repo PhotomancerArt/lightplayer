@@ -2,18 +2,18 @@
 //!
 //! Everything here is a function of the project and where the view placed
 //! its nodes (`placement.rs`) — never of the camera, the selection or the
-//! time: every object with its lamps in world units, the effective patch,
-//! and which pixel each lamp lights. Asked for again with nothing changed, it is the same answer, so
-//! it is worked out once and kept.
+//! time: each fixture's rendered tree (`lpc_mapping::part::render`), every
+//! segment with its lamps in world units, the effective patch, and which
+//! pixel each lamp lights. Asked for again with nothing changed, it is the
+//! same answer, so it is worked out once and kept.
 //!
 //! **Why it can't go stale:** a project's nodes are private to
 //! `project.rs`, and every way in that can change them — `nodes_mut`,
-//! `node_mut`, `fixture_mut`, `component_mut`, adding, removing — throws
-//! the kept answers away first ([`Project::changed`]). Nothing can read a
-//! kept answer while something holds a `&mut` to the project, so the next
-//! question after an edit always works it out afresh. A clone shares what
-//! its original had worked out (it is the same project); undo snapshots
-//! cost nothing extra.
+//! `node_mut`, `fixture_mut`, adding, removing — throws the kept answers
+//! away first ([`Project::changed`]). Nothing can read a kept answer while
+//! something holds a `&mut` to the project, so the next question after an
+//! edit always works it out afresh. A clone shares what its original had
+//! worked out (it is the same project); undo snapshots cost nothing extra.
 //!
 //! Why it matters: the radiance dome has 22,000 lamps. Before this, every
 //! question re-resolved every lamp and re-laid-out every node, and a page
@@ -24,13 +24,13 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use crate::domain::component::{Component, ComponentId};
+use lpc_mapping::part::{Tree, render};
+
+use crate::domain::drawn_segment::{DrawnSegment, DrawnShape, drawn_segments, in_world};
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
-use crate::domain::object::{Object, ObjectId, ObjectShape};
-use crate::domain::object_tree::{self, ObjectNode};
+use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::patch::EffectivePatch;
-use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 
 /// The kept answers. Each is worked out the first time it is asked for.
@@ -63,85 +63,147 @@ impl PartialEq for Derived {
     }
 }
 
-/// Every object, in world units, and where to find each.
+/// Every segment, in world units, and where to find each.
 #[derive(Debug, Default)]
 pub struct Placed {
-    /// Each object with the fixture it lives in: fixtures in tree order,
-    /// objects in authoring order — the order the auto patch fills ports.
-    pub list: Vec<(NodeId, Object)>,
-    by_id: HashMap<ObjectId, usize>,
-    /// Each fixture's object tree (`object_tree.rs`): one root per
-    /// top-level component. Its leaves, depth first, are `list`.
-    trees: HashMap<NodeId, Vec<ObjectNode>>,
-    /// The leaves under each component's node, every copy included, as
+    /// Each segment with the fixture it lives in: fixtures in tree order,
+    /// segments in each fixture's tree order (its lamp order).
+    pub list: Vec<(NodeId, DrawnSegment)>,
+    by_id: HashMap<TreeRef, usize>,
+    /// Each fixture's rendered tree, and where its segments start in
+    /// `list`.
+    trees: HashMap<NodeId, (Arc<Tree>, usize)>,
+    /// Why a fixture's mapping didn't render, when it didn't: it draws
+    /// nothing.
+    refused: HashMap<NodeId, String>,
+    /// The segments under each part's node, every copy included, as
     /// indices into `list`, in tree order.
-    by_component: HashMap<ComponentId, Vec<usize>>,
-    /// Each object node's parent node, when it has one (a top-level
-    /// component's node has none: its parent is the fixture).
-    parents: HashMap<ObjectId, ObjectId>,
-    /// Every component (groups too) and the fixture it lives in.
-    fixture_of: HashMap<ComponentId, NodeId>,
-    /// Where each object's lamp 0 sits among all the lamps, `list` order.
+    by_part: HashMap<PartRef, Vec<usize>>,
+    /// Where each segment's lamp 0 sits among all the lamps, `list` order.
     first_lamp: Vec<usize>,
     lamps: usize,
-    /// Each fixture's lamps among all the lamps: its objects sit together
+    /// Each fixture's lamps among all the lamps: its segments sit together
     /// in `list`, so they are one stretch. Every fixture has one, empty or
     /// not.
     fixture_lamps: HashMap<NodeId, Range<usize>>,
     /// Per lamp, among all the lamps: inside its fixture's box (D4).
     inside: Vec<bool>,
-    /// The box round each object's lamps and drawn shape, `list` order…
+    /// The box round each segment's lamps and drawn shape, `list` order…
     bounds: Vec<Rect>,
-    /// …and round everything under each component (a group's children too).
-    component_bounds: HashMap<ComponentId, Rect>,
+    /// …and round everything under each part (a group's parts too).
+    part_bounds: HashMap<PartRef, Rect>,
+}
+
+/// One node of a fixture's rendered tree, as placed.
+#[derive(Debug, Clone, Copy)]
+pub struct PlacedNode<'a> {
+    placed: &'a Placed,
+    fixture: &'a NodeId,
+    tree: &'a Tree,
+    base: usize,
+    index: usize,
+}
+
+impl<'a> PlacedNode<'a> {
+    pub fn id(&self) -> TreeRef {
+        TreeRef::new(self.fixture, self.tree.node(self.index).id.clone())
+    }
+
+    /// Does it hold lamps of its own (a segment)?
+    pub fn is_leaf(&self) -> bool {
+        self.tree.node(self.index).is_segment()
+    }
+
+    /// Is it a part's own node (in any copy), not a segment its part
+    /// generated (a ring, a subpath)?
+    pub fn is_part_node(&self) -> bool {
+        self.tree.node(self.index).id.is_part_node()
+    }
+
+    /// Every segment under it (itself, when it is one), in tree order.
+    pub fn leaves(&self) -> Vec<&'a DrawnSegment> {
+        self.tree
+            .node(self.index)
+            .segments
+            .clone()
+            .map(|s| &self.placed.list[self.base + s].1)
+            .collect()
+    }
+
+    /// Its children, in order.
+    pub fn children(&self) -> Vec<TreeRef> {
+        self.tree
+            .children(self.index)
+            .map(|c| TreeRef::new(self.fixture, self.tree.node(c).id.clone()))
+            .collect()
+    }
 }
 
 impl Placed {
-    pub fn get(&self, id: &ObjectId) -> Option<&(NodeId, Object)> {
+    pub fn get(&self, id: &TreeRef) -> Option<&(NodeId, DrawnSegment)> {
         self.by_id.get(id).map(|&i| &self.list[i])
     }
 
     /// Its index in `list`.
-    pub fn index_of(&self, id: &ObjectId) -> Option<usize> {
+    pub fn index_of(&self, id: &TreeRef) -> Option<usize> {
         self.by_id.get(id).copied()
     }
 
-    /// The leaves a component renders, in tree order: its own (a path),
-    /// its generated ones (a circle's rings), or everything under it (a
-    /// group's children's, every copy of a repeat's child's).
-    pub fn of_component(&self, id: &ComponentId) -> Vec<&(NodeId, Object)> {
-        self.by_component
+    /// The segments a part renders, in tree order: its own (a path), its
+    /// generated ones (a circle's rings), or everything under it (a group's
+    /// parts', every copy of a repeat's part's).
+    pub fn of_part(&self, id: &PartRef) -> Vec<&(NodeId, DrawnSegment)> {
+        self.by_part
             .get(id)
             .map(|v| v.iter().map(|&i| &self.list[i]).collect())
             .unwrap_or_default()
     }
 
-    /// The object node above this one; `None` for a top-level component's
-    /// node (the fixture is above it) or an id that isn't there.
-    pub fn parent_of(&self, id: &ObjectId) -> Option<&ObjectId> {
-        self.parents.get(id)
+    /// A fixture's rendered tree, when its mapping rendered.
+    pub fn tree(&self, fixture: &NodeId) -> Option<&Tree> {
+        self.trees.get(fixture).map(|(t, _)| &**t)
     }
 
-    /// A fixture's object tree: one root per top-level component.
-    pub fn tree(&self, fixture: &NodeId) -> &[ObjectNode] {
-        self.trees.get(fixture).map(Vec::as_slice).unwrap_or(&[])
+    /// Why a fixture's mapping didn't render, when it didn't.
+    pub fn refusal(&self, fixture: &NodeId) -> Option<&str> {
+        self.refused.get(fixture).map(String::as_str)
     }
 
-    /// The node with this id, a leaf or a container, in whichever fixture
-    /// holds it.
-    pub fn node(&self, id: &ObjectId) -> Option<(&NodeId, &ObjectNode)> {
-        let fixture = self.fixture_of.get(&id.component)?;
-        self.tree(fixture)
-            .iter()
-            .find_map(|root| root.find(id))
-            .map(|n| (fixture, n))
+    /// The node with this id, a segment or not, in its fixture.
+    pub fn node(&self, id: &TreeRef) -> Option<(&NodeId, PlacedNode<'_>)> {
+        let (fixture, (tree, base)) = self.trees.get_key_value(&id.fixture)?;
+        let index = tree.find(&id.id)?;
+        Some((
+            fixture,
+            PlacedNode {
+                placed: self,
+                fixture,
+                tree,
+                base: *base,
+                index,
+            },
+        ))
     }
 
-    pub fn fixture_of(&self, id: &ComponentId) -> Option<&NodeId> {
-        self.fixture_of.get(id)
+    /// A fixture's top-level nodes (its parts' own), in order.
+    pub fn roots(&self, fixture: &NodeId) -> Vec<TreeRef> {
+        let Some((tree, _)) = self.trees.get(fixture) else {
+            return Vec::new();
+        };
+        tree.roots()
+            .map(|r| TreeRef::new(fixture, tree.node(r).id.clone()))
+            .collect()
     }
 
-    /// Where an object's lamp 0 sits among every lamp, counted in `list`
+    /// The node above this one; `None` for a top-level part's node (the
+    /// fixture is above it) or an id that isn't there.
+    pub fn parent_of(&self, id: &TreeRef) -> Option<TreeRef> {
+        let (tree, _) = self.trees.get(&id.fixture)?;
+        let parent = tree.parent(tree.find(&id.id)?)?;
+        Some(TreeRef::new(&id.fixture, tree.node(parent).id.clone()))
+    }
+
+    /// Where a segment's lamp 0 sits among every lamp, counted in `list`
     /// order: the page keeps one flat array of lamps.
     pub fn first_lamp(&self, i: usize) -> usize {
         self.first_lamp[i]
@@ -163,15 +225,15 @@ impl Placed {
         &self.inside
     }
 
-    /// The box round an object's lamps and its drawn shape, world units.
-    pub fn object_bounds(&self, id: &ObjectId) -> Option<Rect> {
+    /// The box round a segment's lamps and its drawn shape, world units.
+    pub fn segment_bounds(&self, id: &TreeRef) -> Option<Rect> {
         Some(self.bounds[*self.by_id.get(id)?])
     }
 
-    /// The box round everything under a component, world units; `None`
-    /// for one with nothing under it.
-    pub fn component_bounds(&self, id: &ComponentId) -> Option<Rect> {
-        self.component_bounds.get(id).copied()
+    /// The box round everything under a part, world units; `None` for one
+    /// with nothing under it.
+    pub fn part_bounds(&self, id: &PartRef) -> Option<Rect> {
+        self.part_bounds.get(id).copied()
     }
 }
 
@@ -182,29 +244,29 @@ pub struct Wiring {
     /// Every port in output then port order, and its pixel count: the
     /// board's ports, all black.
     pub ports: Vec<(NodeId, String, usize)>,
-    /// Per span of the effective patch (same index): the port it lands on
-    /// (an index into `ports`), and each of its lamps that lands on one of
-    /// that port's pixels, as (lamp index, pixel).
+    /// Per pixel run of the effective patch (same index): the port it lands
+    /// on (an index into `ports`), and each of its lamps that lands on one
+    /// of that port's pixels, as (lamp index, pixel).
     pub pixel_runs: Vec<Option<SpanWiring>>,
     /// Per lamp, in [`Placed`] order: the (port, pixel) it lands on — only
     /// lamps that are patched to a real pixel.
     pub lit: Vec<Option<(u32, u32)>>,
-    /// Where each object's lamp 0 sits in `lit`.
-    pub first_lamp: HashMap<ObjectId, usize>,
+    /// Where each segment's lamp 0 sits in `lit`.
+    pub first_lamp: HashMap<TreeRef, usize>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct SpanWiring {
     pub port: usize,
-    /// Where the span's object's lamp 0 sits among all the lamps.
+    /// Where the run's segment's lamp 0 sits among all the lamps.
     pub first_lamp: usize,
     pub lamps: Vec<(u32, u32)>,
 }
 
 impl Wiring {
     /// The (port, pixel) a lamp lands on, if it is patched to one.
-    pub fn lamp(&self, object: &ObjectId, index: u32) -> Option<(usize, usize)> {
-        let first = *self.first_lamp.get(object)?;
+    pub fn lamp(&self, segment: &TreeRef, index: u32) -> Option<(usize, usize)> {
+        let first = *self.first_lamp.get(segment)?;
         let (port, pixel) = (*self.lit.get(first + index as usize)?)?;
         Some((port as usize, pixel as usize))
     }
@@ -236,7 +298,7 @@ impl Project {
         self.derived.revision
     }
 
-    /// Every object in world units, kept.
+    /// Every segment in world units, kept.
     pub fn placed(&self) -> &Placed {
         self.derived
             .placed
@@ -263,7 +325,33 @@ impl Project {
         let layout = self.placement();
         for n in self.fixtures() {
             let Some(f) = n.fixture() else { continue };
-            index_components(&f.components, &n.id, self.frame(&n.id), &mut p);
+            let tree = match render(&f.mapping) {
+                Ok(tree) => tree,
+                Err(why) => {
+                    p.refused.insert(n.id.clone(), why.to_string());
+                    continue;
+                }
+            };
+            let frame = self.frame(&n.id);
+            let base = p.list.len();
+            for segment in drawn_segments(&n.id, &f.mapping, &tree) {
+                p.list.push((n.id.clone(), in_world(segment, frame)));
+            }
+            for node in tree.nodes() {
+                if !node.id.is_part_node() {
+                    continue;
+                }
+                let under = p
+                    .by_part
+                    .entry(PartRef::new(&n.id, &node.id.part))
+                    .or_default();
+                under.extend(node.segments.clone().map(|s| base + s));
+            }
+            p.trees.insert(n.id.clone(), (Arc::new(tree), base));
+        }
+        for under in p.by_part.values_mut() {
+            under.sort_unstable();
+            under.dedup();
         }
         let mut lamps = 0;
         for (i, (fixture, o)) in p.list.iter().enumerate() {
@@ -281,17 +369,25 @@ impl Project {
                     .map(|l| bounds.is_some_and(|b| b.contains(l.pos))),
             );
             lamps += o.lamps.len();
-            p.bounds.push(object_bounds(o));
+            p.bounds.push(segment_bounds(o));
         }
         p.lamps = lamps;
         for n in self.fixtures() {
             p.fixture_lamps.entry(n.id.clone()).or_insert(lamps..lamps);
         }
-        for n in self.fixtures() {
-            if let Some(f) = n.fixture() {
-                bound_components(&f.components, &mut p);
-            }
-        }
+        let boxes: Vec<(PartRef, Rect)> = p
+            .by_part
+            .iter()
+            .filter_map(|(part, under)| {
+                let b = Rect::around(
+                    under
+                        .iter()
+                        .flat_map(|&i| [p.bounds[i].min, p.bounds[i].max]),
+                )?;
+                Some((part.clone(), b))
+            })
+            .collect();
+        p.part_bounds = boxes.into_iter().collect();
         p
     }
 
@@ -311,7 +407,7 @@ impl Project {
             w.first_lamp.insert(o.id.clone(), placed.first_lamp(i));
         }
         for s in &patch.pixel_runs {
-            let Some(at) = placed.index_of(&s.object) else {
+            let Some(at) = placed.index_of(&s.segment) else {
                 w.pixel_runs.push(None);
                 continue;
             };
@@ -346,96 +442,22 @@ impl Project {
     }
 }
 
-/// The box round an object's lamps and its drawn shape (a ring's whole
+/// The box round a segment's lamps and its drawn shape (a ring's whole
 /// circle).
-fn object_bounds(o: &Object) -> Rect {
+fn segment_bounds(o: &DrawnSegment) -> Rect {
     let shape: Vec<Vec2> = match &o.shape {
-        ObjectShape::Polyline { points } => points.clone(),
-        ObjectShape::Ring { center, radius } => {
+        DrawnShape::Polyline { points } => points.clone(),
+        DrawnShape::Ring { center, radius } => {
             let r = Vec2::new(*radius, *radius);
             vec![*center - r, *center + r]
         }
-        ObjectShape::Rings { center, radii } => {
+        DrawnShape::Rings { center, radii } => {
             let outer = radii.iter().copied().fold(0.0, f64::max);
             let r = Vec2::new(outer, outer);
             vec![*center - r, *center + r]
         }
-        ObjectShape::Filled { outline } => outline.clone(),
+        DrawnShape::Filled { outline } => outline.clone(),
     };
     Rect::around(shape.into_iter().chain(o.lamps.iter().map(|l| l.pos)))
         .unwrap_or(Rect::new(Vec2::default(), Vec2::default()))
-}
-
-/// Each component's box: its own objects' and its children's. Returns the
-/// box round the whole list.
-fn bound_components(list: &[Component], p: &mut Placed) -> Option<Rect> {
-    let mut all: Option<Rect> = None;
-    for c in list {
-        let mut boxes: Vec<Rect> = p
-            .by_component
-            .get(&c.id)
-            .map(|v| v.iter().map(|&i| p.bounds[i]).collect())
-            .unwrap_or_default();
-        boxes.extend(bound_components(c.children(), p));
-        if let Some(b) = Rect::around(boxes.iter().flat_map(|r| [r.min, r.max])) {
-            p.component_bounds.insert(c.id.clone(), b);
-            all = Rect::around(all.into_iter().chain([b]).flat_map(|r| [r.min, r.max]));
-        }
-    }
-    all
-}
-
-/// Index a fixture's components: each one's fixture, its object tree
-/// placed in world units, and its leaves in tree order.
-fn index_components(list: &[Component], fixture: &NodeId, frame: Frame, p: &mut Placed) {
-    let mut roots = Vec::with_capacity(list.len());
-    for c in list {
-        let root = placed_node(object_tree::render(c), frame);
-        index_node(&root, fixture, p);
-        mark_fixture(c, fixture, p);
-        roots.push(root);
-    }
-    p.trees.insert(fixture.clone(), roots);
-}
-
-/// Every component under `c` (itself too) lives in `fixture`.
-fn mark_fixture(c: &Component, fixture: &NodeId, p: &mut Placed) {
-    p.fixture_of.insert(c.id.clone(), fixture.clone());
-    for child in c.children() {
-        mark_fixture(child, fixture, p);
-    }
-}
-
-/// Put a node's leaves in `list`, and note each one under every component
-/// whose node it sits under (a copy's leaves under the repeat too).
-fn index_node(node: &ObjectNode, fixture: &NodeId, p: &mut Placed) -> Vec<usize> {
-    let mut mine = Vec::new();
-    if let Some(o) = &node.leaf {
-        mine.push(p.list.len());
-        p.list.push((fixture.clone(), o.clone()));
-    }
-    for child in &node.children {
-        p.parents.insert(child.id.clone(), node.id.clone());
-        mine.extend(index_node(child, fixture, p));
-    }
-    if node.kind == crate::domain::object_tree::ObjectNodeKind::Component {
-        p.by_component
-            .entry(node.id.component.clone())
-            .or_default()
-            .extend(mine.iter().copied());
-    }
-    mine
-}
-
-/// A node with its lamps and shapes moved into world units.
-fn placed_node(node: ObjectNode, frame: Frame) -> ObjectNode {
-    ObjectNode {
-        leaf: node.leaf.map(|o| crate::domain::project::placed(o, frame)),
-        children: node
-            .children
-            .into_iter()
-            .map(|c| placed_node(c, frame))
-            .collect(),
-        ..node
-    }
 }

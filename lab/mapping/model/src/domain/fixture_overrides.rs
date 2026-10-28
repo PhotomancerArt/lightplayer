@@ -24,9 +24,9 @@
 //! override gives it one.
 
 use crate::domain::breath::{DIM, breath};
-use crate::domain::component::ComponentId;
+use crate::domain::drawn_segment::DrawnSegment;
 use crate::domain::node::NodeKind;
-use crate::domain::object::Object;
+use crate::domain::part_ref::PartRef;
 use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
 use crate::domain::target::Target;
@@ -54,7 +54,7 @@ pub enum FixtureOverrides {
     Selection(Vec<Target>),
     /// A draft is being drawn: only its lamps light. `None` when it starts
     /// outside every fixture, so it lands nowhere and nothing lights.
-    Drawing(Option<ComponentId>),
+    Drawing(Option<PartRef>),
 }
 
 /// How the selection touches one object.
@@ -87,7 +87,7 @@ impl FixtureOverrides {
     pub fn apply(
         &self,
         project: &Project,
-        object: &Object,
+        object: &DrawnSegment,
         inside: &[bool],
         lamps: &mut [Option<Rgb>],
         time: f64,
@@ -96,7 +96,7 @@ impl FixtureOverrides {
         match self {
             FixtureOverrides::None => {}
             FixtureOverrides::Drawing(draft) => {
-                let lit = draft.as_ref() == Some(&object.id.component);
+                let lit = draft.as_ref() == Some(&object.id.part());
                 for (c, inside) in lamps.iter_mut().zip(inside) {
                     if *inside {
                         *c = Some(if lit { Rgb::WHITE } else { Rgb::BLACK });
@@ -124,15 +124,15 @@ impl FixtureOverrides {
 }
 
 impl Shown {
-    fn of(p: &Project, selected: &[Target], object: &Object) -> Self {
-        let target = p.object_target(&object.id);
+    fn of(p: &Project, selected: &[Target], object: &DrawnSegment) -> Self {
+        let target = p.tree_target(&object.id);
         let mut out = Shown {
             whole: false,
             lamps: Vec::new(),
         };
         for t in selected {
             match t {
-                Target::Lamp { object: o, index } if *o == object.id => out.lamps.push(*index),
+                Target::Lamp { segment: o, index } if *o == object.id => out.lamps.push(*index),
                 Target::Lamp { .. } => {}
                 _ => out.whole |= p.is_ancestor_or_self(t, &target),
             }
@@ -151,7 +151,7 @@ fn is_fixture_side(p: &Project, t: &Target) -> bool {
             p.node(id).map(|n| &n.kind),
             Some(NodeKind::Fixture(_) | NodeKind::Module { .. })
         ),
-        Target::Component(_) | Target::Object(_) | Target::Lamp { .. } => true,
+        Target::Part(_) | Target::Generated(_) | Target::Lamp { .. } => true,
     }
 }
 

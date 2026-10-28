@@ -25,7 +25,7 @@ use std::ops::Range;
 use crate::domain::board::BoardFrame;
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::patch_edits::{OnWire, PatchEdit, PortEdge};
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -34,7 +34,7 @@ use crate::ux::editor::Editor;
 /// One end of a pair: an object, or a free segment of a port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairEnd {
-    Object(ObjectId),
+    Object(TreeRef),
     Segment {
         output: NodeId,
         port: String,
@@ -96,7 +96,7 @@ impl Editor {
         };
         if matches!(self.project.on_wire(&object), OnWire::Nowhere) {
             self.notice = Some(Notice::refused(
-                format!("{} isn't on the wire", self.object_words(&object)),
+                format!("{} isn't on the wire", self.segment_words(&object)),
                 "a swap trades places, and it has none",
                 "A patches it",
             ));
@@ -121,7 +121,7 @@ impl Editor {
         let p = &self.project;
         match (&armed.verb, &armed.from) {
             (ArmVerb::Patch, PairEnd::Object(o)) => {
-                let n = p.object(o).map_or(1, |o| o.lamps.len() as u32).max(1);
+                let n = p.segment(o).map_or(1, |o| o.lamps.len() as u32).max(1);
                 p.wire_ports()
                     .into_iter()
                     .flat_map(|(output, port)| {
@@ -136,14 +136,14 @@ impl Editor {
                     .collect()
             }
             (ArmVerb::Patch, PairEnd::Segment { .. }) => p
-                .placed_objects()
+                .placed_segments()
                 .iter()
                 .filter(|(_, o)| !o.lamps.is_empty())
                 .filter(|(_, o)| matches!(p.on_wire(&o.id), OnWire::Nowhere))
                 .map(|(_, o)| PairEnd::Object(o.id.clone()))
                 .collect(),
             (ArmVerb::Swap, PairEnd::Object(from)) => p
-                .placed_objects()
+                .placed_segments()
                 .iter()
                 .filter(|(_, o)| &o.id != from && p.effective_patch().lands(&o.id))
                 .map(|(_, o)| PairEnd::Object(o.id.clone()))
@@ -224,18 +224,18 @@ impl Editor {
                     _ => return false,
                 };
                 self.checkpoint();
-                let Some(edit) = self.project.patch_object(&object, &output, &port, pixel) else {
+                let Some(edit) = self.project.patch_segment(&object, &output, &port, pixel) else {
                     return false;
                 };
                 self.after_edit();
-                self.selection = vec![self.project.object_target(&object)];
+                self.selection = vec![self.project.tree_target(&object)];
                 let port_words = self.project.long_label(&Target::Port {
                     output: output.clone(),
                     key: port,
                 });
                 self.notice = Some(Notice::info(format!(
                     "{} on {port_words} at {pixel}{}",
-                    self.object_words(&object),
+                    self.segment_words(&object),
                     pinned_words(edit)
                 )));
                 self.say_overlaps(&object);
@@ -250,11 +250,11 @@ impl Editor {
                     return false;
                 };
                 self.after_edit();
-                self.selection = vec![self.project.object_target(a)];
+                self.selection = vec![self.project.tree_target(a)];
                 self.notice = Some(Notice::info(format!(
                     "{} and {} swapped{}",
-                    self.object_words(a),
-                    self.object_words(b),
+                    self.segment_words(a),
+                    self.segment_words(b),
                     pinned_words(edit)
                 )));
                 true
@@ -301,7 +301,7 @@ impl Editor {
     }
 
     /// Arm from the next free segment after an object on the wire.
-    fn arm_after(&mut self, object: &ObjectId) {
+    fn arm_after(&mut self, object: &TreeRef) {
         let Some((output, port)) = self
             .project
             .effective_patch()
@@ -361,7 +361,7 @@ impl Editor {
                 },
                 PairEnd::Object(o),
             ) => {
-                p.patch_object(o, output, port, pixels.start)?;
+                p.patch_segment(o, output, port, pixels.start)?;
                 o.clone()
             }
             (ArmVerb::Swap, PairEnd::Object(a), PairEnd::Object(b)) => {
@@ -370,7 +370,7 @@ impl Editor {
             }
             _ => return None,
         };
-        Some(p.board_frame(&[p.object_target(&object)], time))
+        Some(p.board_frame(&[p.tree_target(&object)], time))
     }
 
     /// A click while armed: the other end under the pointer, if there is
@@ -391,7 +391,7 @@ impl Editor {
         let PairEnd::Object(o) = &armed.from else {
             return None;
         };
-        let n = self.project.object(o).map_or(1, |o| o.lamps.len() as u32);
+        let n = self.project.segment(o).map_or(1, |o| o.lamps.len() as u32);
         here.iter().find_map(|t| match t {
             Target::Pixel { output, key, index } => Some(PairEnd::Segment {
                 output: output.clone(),
@@ -420,7 +420,7 @@ impl Editor {
             .find(|o| matches!(self.project.on_wire(o), OnWire::Flowing))
         {
             self.notice = Some(Notice::refused(
-                format!("{} already follows its rule", self.object_words(o)),
+                format!("{} already follows its rule", self.segment_words(o)),
                 "U puts a thing back to following its rule, and it does already",
                 "to take it off the wire, choose Off for On the wire in its Patch section",
             ));
@@ -429,12 +429,12 @@ impl Editor {
         self.checkpoint();
         let n = objects
             .iter()
-            .filter(|o| self.project.unpatch_object(o))
+            .filter(|o| self.project.unpatch_segment(o))
             .count();
         self.after_edit();
         self.notice = Some(Notice::info(match n {
             0 => "Nothing was on the wire".to_string(),
-            1 => format!("{} unpatched", self.object_words(&objects[0])),
+            1 => format!("{} unpatched", self.segment_words(&objects[0])),
             n => format!("{n} objects unpatched"),
         }));
     }
@@ -467,7 +467,7 @@ impl Editor {
     fn wiring_edit(
         &mut self,
         did: &str,
-        edit: impl Fn(&mut Project, &ObjectId) -> Option<Result<PatchEdit, PortEdge>>,
+        edit: impl Fn(&mut Project, &TreeRef) -> Option<Result<PatchEdit, PortEdge>>,
     ) {
         let objects = self.selected_objects();
         if objects.is_empty() {
@@ -483,7 +483,7 @@ impl Editor {
             .find(|o| matches!(self.project.on_wire(o), OnWire::Nowhere))
         {
             self.notice = Some(Notice::refused(
-                format!("{} isn't on the wire", self.object_words(o)),
+                format!("{} isn't on the wire", self.segment_words(o)),
                 "it has no place to change",
                 "A patches it",
             ));
@@ -505,7 +505,7 @@ impl Editor {
                         PortEdge::End => "end",
                     };
                     self.notice = Some(Notice::refused(
-                        format!("{} is at the {end} of its port", self.object_words(o)),
+                        format!("{} is at the {end} of its port", self.segment_words(o)),
                         "a placement never leaves its port",
                         "patch it onto another port instead (A)",
                     ));
@@ -516,7 +516,7 @@ impl Editor {
         }
         self.after_edit();
         let what = match objects.as_slice() {
-            [o] => self.object_words(o),
+            [o] => self.segment_words(o),
             many => format!("{} objects", many.len()),
         };
         self.notice = Some(Notice::info(format!(
@@ -575,7 +575,7 @@ impl Editor {
             _ => match self.selected_end() {
                 Some(PairEnd::Object(o)) => places
                     .iter()
-                    .position(|s| matches!(s, Target::Span { object: Some(x), .. } if *x == o)),
+                    .position(|s| matches!(s, Target::Span { segment: Some(x), .. } if *x == o)),
                 Some(PairEnd::Segment {
                     output,
                     port,
@@ -701,7 +701,7 @@ impl Editor {
         p.fixtures()
             .iter()
             .find_map(|n| p.next_unplaced(&n.id))
-            .and_then(|o| p.object(&o))
+            .and_then(|o| p.segment(&o))
             .map_or(1, |o| o.lamps.len() as u32)
             .max(1)
     }
@@ -714,7 +714,7 @@ impl Editor {
         if let Some(o) = self.selected_object() {
             return Some(PairEnd::Object(o));
         }
-        if let [t @ Target::Span { object: None, .. }] = self.selection.as_slice() {
+        if let [t @ Target::Span { segment: None, .. }] = self.selection.as_slice() {
             let gap = self.project.span_of(t)?;
             return Some(PairEnd::Segment {
                 output: gap.output,
@@ -755,7 +755,7 @@ impl Editor {
     }
 
     /// The one object selected (a path is its own object).
-    pub fn selected_object(&self) -> Option<ObjectId> {
+    pub fn selected_object(&self) -> Option<TreeRef> {
         match self.selection.as_slice() {
             [t] => self.object_of(t),
             _ => None,
@@ -763,7 +763,7 @@ impl Editor {
     }
 
     /// Every object the selection names, one per target.
-    pub fn selected_objects(&self) -> Vec<ObjectId> {
+    pub fn selected_objects(&self) -> Vec<TreeRef> {
         let mut out = Vec::new();
         for t in &self.selection {
             if let Some(o) = self.object_of(t)
@@ -777,17 +777,17 @@ impl Editor {
 
     /// The object a target is: an object, or a component that makes
     /// exactly one.
-    fn object_of(&self, t: &Target) -> Option<ObjectId> {
+    fn object_of(&self, t: &Target) -> Option<TreeRef> {
         match t {
-            Target::Object(o)
+            Target::Generated(o)
             | Target::Span {
-                object: Some(o), ..
+                segment: Some(o), ..
             } => Some(o.clone()),
-            Target::Component(c) => self
+            Target::Part(c) => self
                 .project
-                .component(c)
-                .is_some_and(|comp| comp.is_single_object())
-                .then(|| ObjectId::of(c)),
+                .part(c)
+                .is_some_and(|comp| crate::domain::target::is_single_segment(&comp.kind))
+                .then(|| c.node()),
             _ => None,
         }
     }
@@ -818,7 +818,7 @@ impl Editor {
     /// gap span it starts, else its pixels.
     pub(crate) fn end_targets(&self, end: &PairEnd) -> Vec<Target> {
         match end {
-            PairEnd::Object(o) => vec![self.project.object_target(o)],
+            PairEnd::Object(o) => vec![self.project.tree_target(o)],
             PairEnd::Segment {
                 output,
                 port,
@@ -827,7 +827,7 @@ impl Editor {
                 .project
                 .spans(output, port)
                 .into_iter()
-                .find(|s| s.object.is_none() && s.pixels.start == pixels.start) =>
+                .find(|s| s.segment.is_none() && s.pixels.start == pixels.start) =>
             {
                 vec![gap.target()]
             }
@@ -849,7 +849,7 @@ impl Editor {
     /// An end in words: `panel 7`, `Box 1 port 2 · pixels 0–118`.
     pub fn end_words(&self, end: &PairEnd) -> String {
         match end {
-            PairEnd::Object(o) => self.object_words(o),
+            PairEnd::Object(o) => self.segment_words(o),
             PairEnd::Segment {
                 output,
                 port,
@@ -864,31 +864,31 @@ impl Editor {
         }
     }
 
-    fn object_words(&self, o: &ObjectId) -> String {
-        self.project.long_label(&self.project.object_target(o))
+    fn segment_words(&self, o: &TreeRef) -> String {
+        self.project.long_label(&self.project.tree_target(o))
     }
 
     /// Tell when an object now shares pixels with another (plan D7).
-    fn say_overlaps(&mut self, object: &ObjectId) {
+    fn say_overlaps(&mut self, object: &TreeRef) {
         let found = self
             .project
             .effective_patch()
             .overlaps
             .iter()
-            .find(|x| x.objects.contains(object))
+            .find(|x| x.segments.contains(object))
             .cloned();
         if let Some(x) = found {
-            let other = if &x.objects[0] == object {
-                &x.objects[1]
+            let other = if &x.segments[0] == object {
+                &x.segments[1]
             } else {
-                &x.objects[0]
+                &x.segments[0]
             };
-            let shows = self.object_words(&x.objects[1]);
+            let shows = self.segment_words(&x.segments[1]);
             self.notice = Some(Notice::refused(
                 format!(
                     "{} overlaps {} on {} pixels",
-                    self.object_words(object),
-                    self.object_words(other),
+                    self.segment_words(object),
+                    self.segment_words(other),
                     x.pixels.len()
                 ),
                 format!("two objects share those pixels; the board shows {shows}"),

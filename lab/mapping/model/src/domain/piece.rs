@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::domain::board::BoardFrame;
 use crate::domain::node::NodeId;
-use crate::domain::object::ObjectId;
+use crate::domain::part_ref::TreeRef;
 use crate::domain::patch::{EffectivePatch, Landing};
 use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
@@ -26,7 +26,7 @@ use crate::domain::rgb::Rgb;
 pub struct Piece {
     truth: EffectivePatch,
     /// Each object's spans in `truth`.
-    by_object: HashMap<ObjectId, Vec<usize>>,
+    by_object: HashMap<TreeRef, Vec<usize>>,
     /// Where the truth came from, in words: `dome.patch.json when it
     /// opened`.
     pub wired_as: String,
@@ -35,7 +35,7 @@ pub struct Piece {
 /// One object the project's patch puts somewhere the piece doesn't.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Difference {
-    pub object: ObjectId,
+    pub object: TreeRef,
     pub kind: DifferenceKind,
 }
 
@@ -54,9 +54,9 @@ pub enum DifferenceKind {
 impl Piece {
     /// A piece wired as `truth` says.
     pub fn wired(truth: EffectivePatch, wired_as: impl Into<String>) -> Self {
-        let mut by_object: HashMap<ObjectId, Vec<usize>> = HashMap::new();
+        let mut by_object: HashMap<TreeRef, Vec<usize>> = HashMap::new();
         for (i, s) in truth.pixel_runs.iter().enumerate() {
-            by_object.entry(s.object.clone()).or_default().push(i);
+            by_object.entry(s.segment.clone()).or_default().push(i);
         }
         Piece {
             truth,
@@ -83,13 +83,13 @@ impl Piece {
     ) -> Self {
         let patch = project.effective_patch();
         // Each object on the output, and where its first span starts.
-        let mut objects: Vec<ObjectId> = Vec::new();
+        let mut objects: Vec<TreeRef> = Vec::new();
         let mut places: Vec<(String, u32)> = Vec::new();
         for s in patch.pixel_runs.iter().filter(|s| &s.output == output) {
-            if objects.contains(&s.object) {
+            if objects.contains(&s.segment) {
                 continue;
             }
-            objects.push(s.object.clone());
+            objects.push(s.segment.clone());
             places.push((s.port.clone(), s.pixels().start));
         }
         let mut rng = Lcg(seed);
@@ -99,21 +99,21 @@ impl Piece {
         }
         let mut wired = project.clone();
         for o in &objects {
-            wired.unpatch_object(o);
+            wired.unpatch_segment(o);
         }
         for (o, (port, pixel)) in objects.iter().zip(places) {
-            wired.patch_object(o, output, &port, pixel);
+            wired.patch_segment(o, output, &port, pixel);
             if rng.next() % 2 == 1 {
                 wired.reverse_placement(o);
             }
-            let n = wired.object(o).map_or(1, |o| o.lamps.len() as u64).max(1);
+            let n = wired.segment(o).map_or(1, |o| o.lamps.len() as u64).max(1);
             wired.turn_placement(o, (rng.next() % n) as i64);
         }
         Self::wired(wired.effective_patch().clone(), wired_as)
     }
 
     /// Where one of an object's lamps really is.
-    pub fn landing(&self, object: &ObjectId, lamp: u32) -> Option<Landing> {
+    pub fn landing(&self, object: &TreeRef, lamp: u32) -> Option<Landing> {
         let s = self
             .by_object
             .get(object)?
@@ -129,7 +129,7 @@ impl Piece {
 
     /// What a lamp of the piece shows: the board's pixel it is really on.
     /// `None` when it is on none.
-    pub fn lamp(&self, board: &BoardFrame, object: &ObjectId, lamp: u32) -> Option<Rgb> {
+    pub fn lamp(&self, board: &BoardFrame, object: &TreeRef, lamp: u32) -> Option<Rgb> {
         let at = self.landing(object, lamp)?;
         board
             .port(&at.output, &at.port)?
@@ -141,16 +141,16 @@ impl Piece {
     /// in the project's tree order.
     pub fn differences(&self, project: &Project) -> Vec<Difference> {
         project
-            .placed_objects()
+            .placed_segments()
             .iter()
             .filter_map(|(_, o)| self.difference(project, &o.id))
             .collect()
     }
 
     /// How one object's place differs from the piece's, if it does.
-    pub fn difference(&self, project: &Project, object: &ObjectId) -> Option<Difference> {
+    pub fn difference(&self, project: &Project, object: &TreeRef) -> Option<Difference> {
         let patch = project.effective_patch();
-        let n = project.object(object)?.lamps.len() as u32;
+        let n = project.segment(object)?.lamps.len() as u32;
         let truth: Vec<Option<Landing>> = (0..n).map(|j| self.landing(object, j)).collect();
         let now: Vec<Option<Landing>> = (0..n).map(|j| patch.landing(object, j)).collect();
         if truth == now {

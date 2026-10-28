@@ -38,12 +38,12 @@ impl Project {
     /// The data path through one fixture.
     pub fn data_path(&self, fixture: &NodeId) -> DataPath {
         let patch = self.effective_patch();
-        let lamp = |object: &crate::ObjectId, i: u32| -> Option<Vec2> {
-            self.object(object)
+        let lamp = |object: &crate::TreeRef, i: u32| -> Option<Vec2> {
+            self.segment(object)
                 .and_then(|o| o.lamps.get(i as usize))
                 .map(|l| l.pos)
         };
-        let on = |s: &PixelRun, pixel: u32| s.lamp_at(pixel).and_then(|i| lamp(&s.object, i));
+        let on = |s: &PixelRun, pixel: u32| s.lamp_at(pixel).and_then(|i| lamp(&s.segment, i));
         let mut out = DataPath::default();
         let mine: Vec<&PixelRun> = patch
             .pixel_runs
@@ -78,7 +78,7 @@ impl Project {
             // The span that carries on from this one's last pixel.
             let Some(next) = starting
                 .get(&(&s.output, s.port.as_str(), pixels.end))
-                .and_then(|ns| ns.iter().find(|n| n.object != s.object))
+                .and_then(|ns| ns.iter().find(|n| n.segment != s.segment))
             else {
                 continue;
             };

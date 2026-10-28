@@ -4,9 +4,10 @@
 //! (what's lit, what's dimmed, which ports are tinted, which pixels are
 //! ringed).
 
+use crate::domain::drawn_segment::{DrawnSegment as Object, DrawnShape};
 use crate::domain::geom::{Vec2, along_polyline, polyline_length};
 use crate::domain::node::{Node, NodeId, NodeKind};
-use crate::domain::object::{Object, ObjectId, ObjectShape};
+use crate::domain::part_ref::TreeRef;
 use crate::domain::placement::Frame;
 use crate::domain::port_runs::PortRun;
 use crate::domain::project::Project;
@@ -77,10 +78,10 @@ impl Editor {
         let local = |v: Vec2| frame.to_local(v);
         let context = &cx.context;
         let objects = p
-            .objects_in(id)
+            .segments_in(id)
             .into_iter()
             .map(|o| {
-                let chain = p.chain(&p.object_target(&o.id));
+                let chain = p.chain(&p.tree_target(&o.id));
                 let emphasis = if chain.iter().any(|t| self.selection.contains(t)) {
                     Emphasis::Lit
                 } else if context.as_ref().is_some_and(|c| !chain.contains(c)) {
@@ -90,7 +91,7 @@ impl Editor {
                 };
                 let mut ui = ui_object(o, emphasis, frame);
                 ui.jumpers = p
-                    .path_jumpers(&o.id.component)
+                    .path_jumpers(&o.id.part())
                     .iter()
                     .map(|g| *g as usize)
                     .collect();
@@ -149,10 +150,10 @@ impl Editor {
         let runs = self.project.port_runs(id, key);
         match self.grouping {
             PortGrouping::Objects => runs,
-            PortGrouping::Pixels => runs.into_iter().filter(|r| r.object.is_some()).collect(),
+            PortGrouping::Pixels => runs.into_iter().filter(|r| r.segment.is_some()).collect(),
             PortGrouping::Groups => runs
                 .into_iter()
-                .flat_map(|r| match r.object {
+                .flat_map(|r| match r.segment {
                     Some(_) => vec![r],
                     None => {
                         let mut out = Vec::new();
@@ -161,7 +162,7 @@ impl Editor {
                             let end = (at + size.max(1)).min(r.pixels.end);
                             out.push(PortRun {
                                 pixels: at..end,
-                                object: None,
+                                segment: None,
                             });
                             at = end;
                         }
@@ -184,8 +185,8 @@ impl Editor {
         let (tinted, hover) = (&cx.tinted, &cx.hover);
         // A run is lit while its object, or anything round it, is hovered
         // or selected.
-        let lit_by = |object: &ObjectId| {
-            let t = p.object_target(object);
+        let lit_by = |object: &TreeRef| {
+            let t = p.tree_target(object);
             hover
                 .iter()
                 .chain(self.selection.iter())
@@ -212,11 +213,11 @@ impl Editor {
                     .into_iter()
                     .map(|run| UiRun {
                         rects: grid.run_outline(run.pixels.clone()),
-                        emphasis: match &run.object {
+                        emphasis: match &run.segment {
                             Some(o) if lit_by(o) => Emphasis::Lit,
                             Some(o)
                                 if self.selection.iter().any(
-                                    |t| matches!(t, Target::Span { object: Some(x), .. } if x == o),
+                                    |t| matches!(t, Target::Span { segment: Some(x), .. } if x == o),
                                 ) =>
                             {
                                 Emphasis::Lit
@@ -259,7 +260,7 @@ impl Editor {
                     if let Target::Span {
                         output,
                         key,
-                        object: None,
+                        segment: None,
                         ..
                     } = t
                         && output == id
@@ -321,23 +322,23 @@ pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, frame: Frame) -> UiObjec
 /// A drawn shape as the page draws it: `point` moves a point, `length` a
 /// radius, into the face's (or the screen's) units.
 pub(crate) fn ui_shape(
-    shape: &ObjectShape,
+    shape: &DrawnShape,
     point: impl Fn(Vec2) -> Vec2,
     length: impl Fn(f64) -> f64,
 ) -> UiShape {
     match shape {
-        ObjectShape::Polyline { points } => {
+        DrawnShape::Polyline { points } => {
             UiShape::Polyline(points.iter().map(|p| point(*p)).collect())
         }
-        ObjectShape::Ring { center, radius } => UiShape::Ring {
+        DrawnShape::Ring { center, radius } => UiShape::Ring {
             center: point(*center),
             radius: length(*radius),
         },
-        ObjectShape::Rings { center, radii } => UiShape::Rings {
+        DrawnShape::Rings { center, radii } => UiShape::Rings {
             center: point(*center),
             radii: radii.iter().map(|r| length(*r)).collect(),
         },
-        ObjectShape::Filled { outline } => {
+        DrawnShape::Filled { outline } => {
             UiShape::Outline(outline.iter().map(|p| point(*p)).collect())
         }
     }
@@ -366,7 +367,7 @@ pub(crate) fn direction_arrow(shape: &UiShape, lamps: &[Vec2]) -> Option<(Vec2, 
 fn lamp_pitch(p: &Project, fixture: &NodeId) -> f64 {
     let frame = p.frame(fixture);
     let mut gaps: Vec<f64> = p
-        .objects_in(fixture)
+        .segments_in(fixture)
         .iter()
         .flat_map(|o| {
             o.lamps

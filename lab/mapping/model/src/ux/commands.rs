@@ -1,8 +1,8 @@
 //! Commands on the selection: delete, nudge a count, reverse, edit a
 //! property. Each one does what it can and says why it didn't do the rest.
 
-use crate::domain::component::ComponentKind;
 use crate::domain::notice::Notice;
+use crate::domain::part_geometry::{has_drawn_direction, reverse_drawn};
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
 use crate::ux::props::{PropEdit, common_props};
@@ -57,46 +57,49 @@ impl Editor {
                         ports.push((output.clone(), key.clone()));
                     }
                 }
-                Target::Component(id) => components.push(id.clone()),
+                Target::Part(id) => components.push(id.clone()),
                 // A repeat's copies come from its count (D11): one can't
                 // go on its own.
-                Target::Object(o) if f.ring(&o.component, &o.key).is_none() => {
-                    refused.push((
-                        t.clone(),
-                        format!("{} makes its copies from a count", o.component),
-                        format!(
-                            "set {}'s Copies in the inspector (Esc selects it), or delete it whole",
-                            o.component
-                        ),
-                    ));
-                }
-                Target::Object(o) => {
-                    let total = match f.component(&o.component).map(|c| &c.kind) {
-                        Some(ComponentKind::Circle { rings, .. }) => rings.len(),
-                        _ => 0,
+                Target::Generated(o) if f.ring_of(o).is_none() => {
+                    let part = o.part();
+                    let (what, help) = if o.id.key.is_some() && f.ring_of(o).is_none() {
+                        (
+                            format!("{part} makes its subpaths from its moves"),
+                            format!("move {part}'s points in Move & draw, or delete it whole"),
+                        )
+                    } else {
+                        (
+                            format!("{part} is copied by a repeat's count"),
+                            "set the repeat's Copies in the inspector (Esc selects it), or delete it whole".to_string(),
+                        )
                     };
+                    refused.push((t.clone(), what, help));
+                }
+                Target::Generated(o) => {
+                    let part = o.part();
+                    let total = f.circle(&part).map_or(0, |c| c.rings.len());
                     let going = rings
                         .iter()
-                        .filter(|r: &&crate::ObjectId| r.component == o.component)
+                        .filter(|r: &&crate::TreeRef| r.part() == part)
                         .count();
                     if going + 1 >= total {
                         refused.push((
                             t.clone(),
-                            format!("it is {}'s last ring", o.component),
-                            format!("delete {} itself (Esc selects it, then ⌫)", o.component),
+                            format!("it is {part}'s last ring"),
+                            format!("delete {part} itself (Esc selects it, then ⌫)"),
                         ));
                     } else {
                         rings.push(o.clone());
                     }
                 }
-                // A span is where an object lands, a view of the wire:
+                // A span is where a segment lands, a view of the wire:
                 // there is nothing of its own to delete.
-                Target::Span { object, .. } => {
+                Target::Span { segment, .. } => {
                     refused.push((
                         t.clone(),
-                        "a span is where an object lands on the wire".into(),
-                        match object {
-                            Some(_) => "U puts its object back to following; choose Not on the wire in its Patch section to take it off".into(),
+                        "a span is where a segment lands on the wire".into(),
+                        match segment {
+                            Some(_) => "U puts its segment back to following; choose Not on the wire in its Patch section to take it off".into(),
                             None => "nothing is there to delete".into(),
                         },
                     ));
@@ -113,9 +116,11 @@ impl Editor {
                         ),
                     ));
                 }
-                Target::Lamp { object, .. } => {
-                    let owner = f.object_target(object);
-                    let n = f.object(object).map(|o| o.lamps.len()).unwrap_or(0);
+                Target::Lamp {
+                    segment: object, ..
+                } => {
+                    let owner = f.tree_target(object);
+                    let n = f.segment(object).map(|o| o.lamps.len()).unwrap_or(0);
                     refused.push((
                         t.clone(),
                         format!("{} makes its lamps from a count", f.long_label(&owner)),
@@ -135,7 +140,7 @@ impl Editor {
             .chain(
                 rings
                     .iter()
-                    .map(|o| f.long_label(&Target::Object(o.clone()))),
+                    .map(|o| f.long_label(&Target::Generated(o.clone()))),
             )
             .chain(ports.iter().map(|(o, k)| {
                 f.long_label(&Target::Port {
@@ -156,13 +161,13 @@ impl Editor {
                 }
             }
             for c in &components {
-                self.project.remove(c);
+                if let Some(f) = self.project.fixture_mut(&c.fixture) {
+                    let _ = lpc_mapping::edit::remove_part(&mut f.mapping, &c.part);
+                }
             }
             for o in &rings {
-                if let Some(c) = self.project.component_mut(&o.component)
-                    && let ComponentKind::Circle { rings, .. } = &mut c.kind
-                {
-                    rings.retain(|r| r.key != o.key);
+                if let (Some(key), Some(f)) = (&o.id.key, self.project.fixture_mut(&o.fixture)) {
+                    let _ = lpc_mapping::edit::remove_ring(&mut f.mapping, &o.id.part, key);
                 }
             }
         }
@@ -217,7 +222,9 @@ impl Editor {
         let mut out = Vec::new();
         for t in &self.selection {
             let t = match t {
-                Target::Lamp { object, .. } => self.project.object_target(object),
+                Target::Lamp {
+                    segment: object, ..
+                } => self.project.tree_target(object),
                 Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
                 other => other.clone(),
             };
@@ -279,9 +286,11 @@ impl Editor {
     }
 
     /// r: reverse the data direction. A path runs from its last point to
-    /// its first (its `reversed` flag: no point moves); a ring runs the
-    /// other way round; a repeat of a path reverses the path, so every copy.
-    /// A selected lamp stays the same physical lamp.
+    /// its first (its `reversed` flag: no point moves); a circle's rings run
+    /// the other way round; a repeat of a path reverses the path, so every
+    /// copy. One ring of a circle has no drawn direction of its own (its
+    /// circle's way round is every ring's): it is reversed on the wire, by
+    /// its own override. A selected lamp stays the same physical lamp.
     pub fn reverse(&mut self) {
         let targets = self.edit_targets();
         if targets.is_empty() {
@@ -305,22 +314,23 @@ impl Editor {
         }
         self.checkpoint();
         // A repeat's copies share one shape: reverse it once.
-        let mut whole: Vec<crate::ComponentId> = Vec::new();
+        let mut whole: Vec<crate::PartRef> = Vec::new();
         for t in &targets {
             match t {
-                Target::Component(id) => {
-                    if let Some(c) = self.project.component_mut(id) {
-                        reverse_kind(&mut c.kind);
+                Target::Part(id) => {
+                    if let Some(c) = self.project.part_mut(id) {
+                        reverse_drawn(&mut c.kind);
                     }
                 }
-                Target::Object(o) => {
-                    if let Some(r) = self.project.ring_mut(&o.component, &o.key) {
-                        r.reversed = !r.reversed;
-                    } else if !whole.contains(&o.component)
-                        && let Some(c) = self.project.component_mut(&o.component)
+                Target::Generated(o) => {
+                    let part = o.part();
+                    if self.project.ring_of(o).is_some() {
+                        self.project.reverse_placement(o);
+                    } else if !whole.contains(&part)
+                        && let Some(c) = self.project.part_mut(&part)
                     {
-                        reverse_kind(&mut c.kind);
-                        whole.push(o.component.clone());
+                        reverse_drawn(&mut c.kind);
+                        whole.push(part);
                     }
                 }
                 Target::Lamp { .. }
@@ -333,12 +343,24 @@ impl Editor {
         // Keep each selected lamp on the same physical lamp.
         let f = &self.project;
         for t in &mut self.selection {
-            if let Target::Lamp { object, index } = t {
-                let n = f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0);
+            if let Target::Lamp {
+                segment: object,
+                index,
+            } = t
+            {
+                let n = f.segment(object).map(|o| o.lamps.len() as u32).unwrap_or(0);
                 if n == 0 {
                     continue;
                 }
-                let ring = f.ring(&object.component, &object.key).is_some();
+                // A ring reversed on the wire keeps its lamps where they are.
+                let own_ring = f.ring_of(object).is_some()
+                    && targets
+                        .iter()
+                        .any(|t| matches!(t, Target::Generated(g) if g == object));
+                if own_ring {
+                    continue;
+                }
+                let ring = f.circle(&object.part()).is_some();
                 *index = if ring {
                     (n - *index) % n
                 } else {
@@ -383,50 +405,15 @@ impl crate::Project {
     /// Paths, circles, rings and lamps have a data direction; groups,
     /// nodes and ports don't.
     pub fn has_direction(&self, t: &Target) -> bool {
-        let kind_has = |id: &crate::ComponentId| {
-            self.component(id)
-                .is_some_and(|c| kind_has_direction(&c.kind))
-        };
+        let kind_has =
+            |id: &crate::PartRef| self.part(id).is_some_and(|c| has_drawn_direction(&c.kind));
         match t {
-            Target::Component(id) => kind_has(id),
-            Target::Object(o) | Target::Lamp { object: o, .. } => kind_has(&o.component),
+            Target::Part(id) => kind_has(id),
+            Target::Generated(o) | Target::Lamp { segment: o, .. } => kind_has(&o.part()),
             Target::Node(_) | Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
                 false
             }
         }
-    }
-}
-
-/// A path, a ring and a ring set have a direction of their own; a polygon (as in the
-/// product) and a group don't; a repeat has its child's.
-fn kind_has_direction(kind: &ComponentKind) -> bool {
-    match kind {
-        ComponentKind::Path { .. } | ComponentKind::Circle { .. } | ComponentKind::RingSet(_) => {
-            true
-        }
-        ComponentKind::Repeat { child, .. } => kind_has_direction(&child.kind),
-        // A lattice's wiring is its start corner and routing, not a flag.
-        ComponentKind::Polygon { .. }
-        | ComponentKind::Group { .. }
-        | ComponentKind::Grid(_)
-        | ComponentKind::Filled(_) => false,
-    }
-}
-
-/// Reverse a whole component's direction: a path's flag, every ring of a
-/// circle, a repeat's shape.
-fn reverse_kind(kind: &mut ComponentKind) {
-    match kind {
-        ComponentKind::Path { reversed, .. } => *reversed = !*reversed,
-        ComponentKind::Circle { rings, .. } => {
-            rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
-        }
-        ComponentKind::RingSet(set) => set.reversed = !set.reversed,
-        ComponentKind::Repeat { child, .. } => reverse_kind(&mut child.kind),
-        ComponentKind::Polygon { .. }
-        | ComponentKind::Group { .. }
-        | ComponentKind::Grid(_)
-        | ComponentKind::Filled(_) => {}
     }
 }
 

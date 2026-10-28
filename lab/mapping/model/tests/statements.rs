@@ -1005,7 +1005,7 @@ fn a_selected_port_highlights_its_lamps() {
     let e = editor();
     let main = node_id(&e, "main");
     let d1 = e.project.lamps_on_port(&main, "1");
-    let path3 = ObjectId::of(&ComponentId::new("path3"));
+    let path3 = TreeRef::of(&PartRef::new("path3"));
     assert_eq!(d1, (0..30).map(|i| (path3.clone(), i)).collect::<Vec<_>>());
     let d0 = e.project.lamps_on_port(&main, "0");
     assert_eq!(d0.len(), 64);
@@ -1056,7 +1056,7 @@ fn selection_survives_a_count_change() {
     assert_eq!(e.selection, vec![lamp("path3", "", 7)]);
     assert_eq!(
         e.project
-            .object(&ObjectId::of(&ComponentId::new("path3")))
+            .object(&TreeRef::of(&PartRef::new("path3")))
             .unwrap()
             .lamps
             .len(),
@@ -1113,13 +1113,13 @@ fn ring_edits_land_in_the_circle() {
     e.edit_selection_prop("ccw", PropEdit::SetFlag(true));
     assert!(
         e.project
-            .ring(&ComponentId::new("circle1"), "r2")
+            .ring(&PartRef::new("circle1"), "r2")
             .unwrap()
             .reversed
     );
     assert!(
         !e.project
-            .ring(&ComponentId::new("circle1"), "r1")
+            .ring(&PartRef::new("circle1"), "r1")
             .unwrap()
             .reversed
     );
@@ -1150,11 +1150,8 @@ fn dragging_a_ring_moves_its_circle() {
     e.pointer_move(at + by * 0.5, none());
     e.pointer_move(at + by, none());
     e.pointer_up(at + by, none());
-    let ComponentKind::Circle { center, .. } = &e
-        .project
-        .component(&ComponentId::new("circle1"))
-        .unwrap()
-        .kind
+    let ComponentKind::Circle { center, .. } =
+        &e.project.component(&PartRef::new("circle1")).unwrap().kind
     else {
         panic!()
     };
@@ -1168,7 +1165,7 @@ fn dragging_a_ring_moves_its_circle() {
 fn drawing_a_path_counts_lamps_from_its_length() {
     let mut e = editor();
     draw_path(&mut e, "scarf", &[(10.0, 15.0), (34.0, 15.0)]);
-    let Target::Component(id) = e.selection[0].clone() else {
+    let Target::Part(id) = e.selection[0].clone() else {
         panic!()
     };
     assert_eq!(id.as_str(), "path4", "ids are never reused");
@@ -1199,7 +1196,7 @@ fn clicking_points_builds_a_path() {
     e.pointer_down(last, Button::Primary, none());
     e.pointer_up(last, none());
     assert!(e.double_click(last, none()));
-    let Target::Component(id) = e.selection[0].clone() else {
+    let Target::Part(id) = e.selection[0].clone() else {
         panic!("the new path is selected")
     };
     let points = e.project.path_points(&id).unwrap();
@@ -1244,12 +1241,12 @@ fn a_paths_lamps_are_spread_along_its_length() {
     let mut e = editor();
     // An L: 30 across, then 18 down — 48 long, so 21 lamps 2.4 apart.
     draw_path(&mut e, "scarf", &[(10.0, 10.0), (40.0, 10.0), (40.0, 28.0)]);
-    let Target::Component(id) = e.selection[0].clone() else {
+    let Target::Part(id) = e.selection[0].clone() else {
         panic!()
     };
     let lamps = e
         .project
-        .object(&ObjectId::of(&id))
+        .object(&TreeRef::of(&id))
         .unwrap()
         .lamps
         .iter()
@@ -1306,7 +1303,7 @@ fn dragging_a_paths_end_keeps_its_count() {
         e.cursor_note()
     );
     e.pointer_up(end + by, none());
-    let points = e.project.path_points(&ComponentId::new("path3")).unwrap();
+    let points = e.project.path_points(&PartRef::new("path3")).unwrap();
     assert!(
         points[1].distance(Vec2::new(74.0, 60.0)) < 1e-9,
         "{points:?}"
@@ -1341,7 +1338,7 @@ fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
     e.select(vec![lamp("path3", "", 0)]);
     let shown: Vec<HandleKind> = e.handles().into_iter().map(|h| h.kind).collect();
     let point = |index| HandleKind::PathPoint {
-        path: ComponentId::new("path3"),
+        path: PartRef::new("path3"),
         index,
     };
     assert_eq!(shown, vec![point(0), point(1)]);
@@ -1350,7 +1347,7 @@ fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
     let start = handle_at(&e, |k| *k == point(0));
     let to = start + Vec2::new(0.0, 15.0) * e.camera.scale;
     drag(&mut e, start, to, none());
-    let points = e.project.path_points(&ComponentId::new("path3")).unwrap();
+    let points = e.project.path_points(&PartRef::new("path3")).unwrap();
     assert!(
         points[0].distance(Vec2::new(6.0, 55.0)) < 1e-9,
         "{points:?}"
@@ -1369,7 +1366,7 @@ fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
     assert_eq!(
         shown,
         vec![HandleKind::RingRadius {
-            circle: ComponentId::new("circle1"),
+            circle: PartRef::new("circle1"),
             ring: "r2".into()
         }]
     );
@@ -1381,7 +1378,7 @@ fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
 #[test]
 fn adding_and_removing_a_paths_points() {
     let mut e = editor();
-    let path3 = ComponentId::new("path3");
+    let path3 = PartRef::new("path3");
     let points = |e: &Editor| e.project.path_points(&path3).unwrap().to_vec();
     let near = |a: &[Vec2], b: &[(f64, f64)]| {
         a.len() == b.len()
@@ -1466,7 +1463,7 @@ fn dragging_a_rings_handle_changes_its_radius() {
     e.pointer_move(r2 + by, none());
     assert_eq!(e.hint_bar().lead, "Changing a radius");
     e.pointer_up(r2 + by, none());
-    let circle = ComponentId::new("circle1");
+    let circle = PartRef::new("circle1");
     let ring = e.project.ring(&circle, "r2").unwrap();
     assert!((ring.radius - 10.0).abs() < 1e-9, "{}", ring.radius);
     assert_eq!(ring.lamps, 24);
@@ -1551,7 +1548,7 @@ fn every_offered_key_does_something() {
         let mut e = editor();
         e.select(vec![start.clone()]);
         let bar = e.hint_bar();
-        if matches!(start, Target::Object(_)) {
+        if matches!(start, Target::Generated(_)) {
             for keys in ["Esc", "Enter", "R", "− ="] {
                 assert!(
                     bar.hints.iter().any(|h| h.keys == keys),
@@ -1585,7 +1582,7 @@ fn every_offered_key_does_something() {
 
 /// An editor with an eave in its first fixture: a path of 20 lamps
 /// turning one corner on a short segment, three segments in all.
-fn eave() -> (Editor, ComponentId) {
+fn eave() -> (Editor, PartRef) {
     let mut p = Project::seed();
     let fixture = p.fixtures()[0].id.clone();
     let c = p.mint(ComponentKind::path(
@@ -1609,7 +1606,7 @@ fn a_jumper_carries_no_lamps_and_keeps_the_count() {
     let (mut e, path) = eave();
     let before: Vec<Vec2> = e
         .project
-        .objects_of(&path)
+        .segments_of(&path)
         .flat_map(|o| o.lamps.iter().map(|l| l.pos))
         .collect();
     e.toggle_jumper(&path, 0);
@@ -1617,7 +1614,7 @@ fn a_jumper_carries_no_lamps_and_keeps_the_count() {
     let points = e.project.path_points(&path).unwrap().to_vec();
     let after: Vec<Vec2> = e
         .project
-        .objects_of(&path)
+        .segments_of(&path)
         .flat_map(|o| o.lamps.iter().map(|l| l.pos))
         .collect();
     assert_eq!(after.len(), before.len(), "the count stays");
@@ -1747,7 +1744,7 @@ fn a_real_boards_pixels_colour_the_lamps_on_them() {
     assert_eq!(frame.port(&tail_out, "0").unwrap(), &[red; 60][..]);
     let tail = e
         .project
-        .placed_objects()
+        .placed_segments()
         .iter()
         .find(|(f, _)| f == &node_id(&e, "tail"))
         .map(|(_, o)| o.id.clone())
@@ -1878,10 +1875,10 @@ fn a_lamp_outside_its_box_is_never_lit() {
         .collect();
     assert_eq!(outside, vec![2, 3, 4]);
     let tail_out = node_id(&e, "tail out");
-    let object = ObjectId::of(&id);
+    let object = TreeRef::of(&id);
     for selection in [
         vec![],
-        vec![Target::Component(id.clone())],
+        vec![Target::Part(id.clone())],
         vec![Target::Lamp {
             object: object.clone(),
             index: 3,
@@ -1938,7 +1935,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     e.pointer_down(b, Button::Primary, none());
     e.pointer_up(b, none());
     e.double_click(b, none());
-    let Target::Component(id) = e.selection[0].clone() else {
+    let Target::Part(id) = e.selection[0].clone() else {
         panic!()
     };
     let landed: Vec<usize> = e
@@ -2087,7 +2084,7 @@ fn every_lamp_shows_its_control_products_colour() {
                 }
             }
         }
-        let strip = ObjectId::of(&ComponentId::new("path3"));
+        let strip = TreeRef::of(&PartRef::new("path3"));
         assert!(
             !frame.lands(&strip, 30),
             "lamp 30 of the strip is unpatched"
@@ -2112,7 +2109,7 @@ fn a_fixtures_lamps_sample_its_render_product() {
         let product = e.project.render_product(&f).expect("a shader feeds it");
         let fx = e.project.fixture(&f).unwrap();
         let origin = e.project.origin(&f);
-        for o in e.project.objects_in(&f) {
+        for o in e.project.segments_in(&f) {
             for (i, l) in o.lamps.iter().enumerate() {
                 assert_eq!(
                     frame.lamp(&o.id, i as u32),
@@ -2124,7 +2121,7 @@ fn a_fixtures_lamps_sample_its_render_product() {
         }
     }
     // Lamps in different places differ: it's a picture, not a fill.
-    let r1 = ObjectId::new(&ComponentId::new("circle1"), "r1");
+    let r1 = TreeRef::new(&PartRef::new("circle1"), "r1");
     assert_ne!(frame.lamp(&r1, 0), frame.lamp(&r1, 20));
     // The ring display reads the root's shader; the tail reads its own
     // rig's, the nearer writer of `visual.out` — and the two look
@@ -2158,7 +2155,7 @@ fn a_selection_inside_a_fixture_changes_its_control_product() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let strip = node_id(&e, "strip");
-    let path3 = ObjectId::of(&ComponentId::new("path3"));
+    let path3 = TreeRef::of(&PartRef::new("path3"));
     let plain = e.board_frame(CREST);
     e.select(vec![comp("path3")]);
     let frame = e.board_frame(CREST);
@@ -2180,7 +2177,7 @@ fn a_selection_inside_a_fixture_changes_its_control_product() {
     // pixel 43 of D0.
     e.select(vec![lamp("circle1", "r2", 3)]);
     let frame = e.board_frame(CREST);
-    let r2 = ObjectId::new(&ComponentId::new("circle1"), "r2");
+    let r2 = TreeRef::new(&PartRef::new("circle1"), "r2");
     assert_eq!(frame.lamp(&r2, 3), Some(Rgb::WHITE));
     assert_eq!(frame.port(&main, "0").unwrap()[43], Rgb::WHITE);
     assert!(frame.lamp(&path3, 0).unwrap().level() < plain.lamp(&path3, 0).unwrap().level());
@@ -2238,7 +2235,7 @@ fn an_output_selection_changes_only_the_outputs_pixels() {
 fn a_selected_pixels_lamp_is_marked_not_recoloured() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    let path3 = ObjectId::of(&ComponentId::new("path3"));
+    let path3 = TreeRef::of(&PartRef::new("path3"));
     let plain = e.board_frame(CREST);
     e.select(vec![pixel(&main, "1", 3)]);
     let frame = e.board_frame(CREST);
@@ -2600,8 +2597,8 @@ fn with_move_and_draw_off_nothing_moves() {
     let at = lamp_screen(&e, "circle1", "r1", 3);
     drag(&mut e, at, at + Vec2::new(40.0, 0.0), none());
     assert_ne!(
-        e.project.component(&ComponentId::new("circle1")),
-        before.component(&ComponentId::new("circle1"))
+        e.project.component(&PartRef::new("circle1")),
+        before.component(&PartRef::new("circle1"))
     );
 }
 
@@ -2702,7 +2699,7 @@ fn a_paths_gaps_carry_no_lamps() {
 #[test]
 fn reversing_a_path_never_moves_a_point() {
     let mut e = editor();
-    let path3 = ComponentId::new("path3");
+    let path3 = PartRef::new("path3");
     let before = e.project.path_points(&path3).unwrap().to_vec();
     e.select(vec![comp("path3")]);
     key(&mut e, Key::Char('r'), none());
@@ -2754,7 +2751,7 @@ fn a_polygon_is_closed_and_starts_on_its_first_point() {
             (0.0, 5.0)
         ])
     );
-    assert_eq!(p.kind_word(&Target::Component(square)), "polygon");
+    assert_eq!(p.kind_word(&Target::Part(square)), "polygon");
 }
 
 /// A repeat holds a component with its own id and makes one copy of it per
@@ -2771,13 +2768,13 @@ fn a_repeat_makes_one_copy_per_turn() {
         Vec2::new(50.0, 50.0),
         4,
     );
-    let t = Target::Component(sector.clone());
+    let t = Target::Part(sector.clone());
     let copies = p.children(Some(&t));
-    assert_eq!(copies[0], Target::Component(arm.clone()));
+    assert_eq!(copies[0], Target::Part(arm.clone()));
     let ids: Vec<String> = copies[1..]
         .iter()
         .map(|c| match c {
-            Target::Object(o) => o.to_string(),
+            Target::Generated(o) => o.to_string(),
             _ => panic!("a copy past copy 0 is an object"),
         })
         .collect();
@@ -2815,7 +2812,7 @@ fn the_tree_lists_objects_only_where_they_differ() {
     let rows: Vec<(String, bool)> = p
         .tree_rows()
         .into_iter()
-        .filter(|r| matches!(r.target, Target::Component(_) | Target::Object(_)))
+        .filter(|r| matches!(r.target, Target::Part(_) | Target::Generated(_)))
         .map(|r| (r.label, r.derived))
         .collect();
     let want: Vec<(String, bool)> = [
@@ -2850,11 +2847,11 @@ fn a_click_selects_the_repeat_then_the_copy() {
     // Copy 1 is turned a quarter clockwise: right of the centre.
     let on_copy_1 = origin + Vec2::new(80.0, 50.0);
     click_at(&mut e, on_copy_1, none());
-    assert_eq!(e.selection, vec![Target::Component(repeat)]);
+    assert_eq!(e.selection, vec![Target::Part(repeat)]);
     click_at(&mut e, on_copy_1, none());
     assert_eq!(
         e.selection,
-        vec![Target::Object(ObjectId::of(&arm).in_copy(1))]
+        vec![Target::Generated(TreeRef::of(&arm).in_copy(1))]
     );
 }
 
@@ -2873,7 +2870,7 @@ fn a_repeat_is_picked_by_its_copies() {
     let mut e = editor_of(p);
     e.fit();
     let origin = e.project.origin(&f);
-    let t = Target::Component(sector);
+    let t = Target::Part(sector);
     let on_copy = e.camera.to_screen(origin + Vec2::new(50.0, 20.0));
     let middle = e.camera.to_screen(origin + Vec2::new(50.0, 50.0));
     assert!(e.project.area(&e.camera, &t).unwrap().contains(on_copy));
@@ -2892,7 +2889,7 @@ fn a_copys_lamps_live_in_its_repeat() {
         Vec2::new(50.0, 50.0),
         4,
     );
-    let copy = Target::Object(ObjectId::of(&arm).in_copy(2));
+    let copy = Target::Generated(TreeRef::of(&arm).in_copy(2));
     assert!(p.edit_prop(&copy, "lamps", PropEdit::SetCount(7), 2.4));
     for k in 0..4 {
         assert_eq!(local_lamps(&p, &sector, k).len(), 7);
@@ -2912,12 +2909,9 @@ fn a_copy_cant_be_deleted_on_its_own() {
         4,
     );
     let mut e = editor_of(p);
-    e.select(vec![Target::Object(ObjectId::of(&arm).in_copy(2))]);
+    e.select(vec![Target::Generated(TreeRef::of(&arm).in_copy(2))]);
     key(&mut e, Key::Delete, none());
-    assert_eq!(
-        e.project.children(Some(&Target::Component(sector))).len(),
-        4
-    );
+    assert_eq!(e.project.children(Some(&Target::Part(sector))).len(), 4);
     let n = e.notice.clone().unwrap();
     assert!(n.why.unwrap().contains("copies from a count"));
 }
@@ -2936,7 +2930,7 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             &f,
             ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
         );
-        let object = ObjectId::of(&path);
+        let object = TreeRef::of(&path);
         p.start_at(&f, &out, "0", 0);
         placed_at(&mut p, &object, &out, "0", 10, reversed, 2);
         let got: Vec<u32> = (0..5)
@@ -2976,7 +2970,7 @@ fn an_override_on_a_gone_port_is_a_problem() {
         ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     );
     p.start_at(&f, &out, "0", 0);
-    placed_at(&mut p, &ObjectId::of(&a1), &out, "7", 0, false, 0);
+    placed_at(&mut p, &TreeRef::of(&a1), &out, "7", 0, false, 0);
     let patch = p.effective_patch();
     assert_eq!(patch.problems.len(), 1);
     assert!(matches!(
@@ -3043,7 +3037,7 @@ fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
 fn minting_skips_ids_already_taken() {
     let (mut p, f, _) = bare(&[("D0", 40)]);
     p.fixture_mut(&f).unwrap().components.push(Component {
-        id: ComponentId::new("path1"),
+        id: PartRef::new("path1"),
         kind: ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     });
     let next = add(
@@ -3077,7 +3071,7 @@ fn kept_answers_are_never_stale() {
             e.project.board_frame(&[], 0.5),
             afresh.board_frame(&[], 0.5)
         );
-        let ring = ObjectId::new(&ComponentId::new("circle1"), "r1");
+        let ring = TreeRef::new(&PartRef::new("circle1"), "r1");
         for i in 0..44 {
             assert_eq!(
                 e.project.board_frame(&[], 0.5).lamp(&ring, i),
@@ -3549,7 +3543,7 @@ fn a_fixture_drawn_bigger_in_the_stack_still_picks_and_drags() {
     let k = box_.width() / 70.0;
     assert!(k > 3.0, "the ring display is drawn {k}× its box");
     let lamp0 = lamp_pos(&e, "circle1", "r1", 0);
-    let local = local_lamps(&e.project, &ComponentId::new("circle1"), 0)[0];
+    let local = local_lamps(&e.project, &PartRef::new("circle1"), 0)[0];
     assert!((lamp0.x - (box_.min.x + local.x * k)).abs() < 1e-9);
     click_lamp(&mut e, "circle1", "r1", 0, cmd());
     assert_eq!(e.selection, vec![lamp("circle1", "r1", 0)]);
@@ -3560,7 +3554,7 @@ fn a_fixture_drawn_bigger_in_the_stack_still_picks_and_drags() {
     drag(&mut e, at, to, none());
     let Some(ComponentKind::Circle { center, .. }) = e
         .project
-        .component(&ComponentId::new("circle1"))
+        .component(&PartRef::new("circle1"))
         .map(|c| c.kind.clone())
     else {
         panic!("a circle")
@@ -3747,23 +3741,23 @@ fn cross_path3(e: &mut Editor) {
 }
 
 fn comp(id: &str) -> Target {
-    Target::Component(ComponentId::new(id))
+    Target::Part(PartRef::new(id))
 }
 
 fn ring(circle: &str, key: &str) -> Target {
-    Target::Object(ObjectId::new(&ComponentId::new(circle), key))
+    Target::Generated(TreeRef::new(&PartRef::new(circle), key))
 }
 
 fn lamp(component: &str, key: &str, index: u32) -> Target {
     Target::Lamp {
-        object: ObjectId::new(&ComponentId::new(component), key),
+        object: TreeRef::new(&PartRef::new(component), key),
         index,
     }
 }
 
 fn lamp_pos(e: &Editor, component: &str, key: &str, index: u32) -> Vec2 {
     e.project
-        .object(&ObjectId::new(&ComponentId::new(component), key))
+        .object(&TreeRef::new(&PartRef::new(component), key))
         .unwrap()
         .lamps[index as usize]
         .pos
@@ -3801,7 +3795,7 @@ fn bare(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId) {
     (p, f, out)
 }
 
-fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> ComponentId {
+fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> PartRef {
     p.add(fixture, kind).unwrap()
 }
 
@@ -3813,7 +3807,7 @@ fn add_repeat(
     kind: ComponentKind,
     center: Vec2,
     count: u32,
-) -> (ComponentId, ComponentId) {
+) -> (PartRef, PartRef) {
     let child = p.mint(kind);
     let child_id = child.id.clone();
     let repeat = add(p, fixture, ComponentKind::repeat(child, center, count));
@@ -3825,8 +3819,8 @@ fn pts(points: &[(f64, f64)]) -> Vec<Vec2> {
 }
 
 /// A component's `k`th object's lamps, in its fixture's own coordinates.
-fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
-    object::objects_of(p.component(id).unwrap())[k]
+fn local_lamps(p: &Project, id: &PartRef, k: usize) -> Vec<Vec2> {
+    object::segments_of(p.component(id).unwrap())[k]
         .lamps
         .iter()
         .map(|l| l.pos)
@@ -3837,16 +3831,16 @@ fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
 /// override.
 fn placed_at(
     p: &mut Project,
-    object: &ObjectId,
+    object: &TreeRef,
     output: &NodeId,
     port: &str,
     pixel: u32,
     reversed: bool,
     offset: u32,
 ) {
-    p.patch_object(object, output, port, pixel);
+    p.patch_segment(object, output, port, pixel);
     p.edit_override(object, |o| {
-        o.direction = reversed.then_some(Direction::Reversed);
+        o.direction = reversed.then_some(Direction::Reverse);
         o.offset = (offset != 0).then_some(offset);
     });
 }
@@ -3856,7 +3850,7 @@ fn path3_span(main: &NodeId) -> Target {
     Target::Span {
         output: main.clone(),
         key: "1".into(),
-        object: Some(ObjectId::of(&ComponentId::new("path3"))),
+        object: Some(TreeRef::of(&PartRef::new("path3"))),
         start: 0,
     }
 }
