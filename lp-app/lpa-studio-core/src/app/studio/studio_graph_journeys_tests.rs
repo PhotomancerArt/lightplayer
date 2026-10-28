@@ -784,15 +784,16 @@ fn a_fixtures_colour_order_stays_on_the_board_when_selected() {
 }
 
 /// `projects/test/circular-display-walk`, the project G3's and M5's walks
-/// map the circular display in by hand, is exactly what the journey above
-/// starts from: a new board's project as Studio generates it, with the
-/// display's output. Written with `LPA_STUDIO_CORE_BLESS=1`; its README is
-/// its own.
+/// map the circular display in by hand, is a new board's project as Studio
+/// generates it, with the display's output — the from-nothing journey's
+/// start, but with the output keeping the starter's name, so the walk
+/// opens with no problem. Written with `LPA_STUDIO_CORE_BLESS=1`; its
+/// README is its own.
 #[test]
-fn the_walk_project_is_the_from_nothing_journeys() {
+fn the_walk_project_is_a_new_boards_project_with_the_display() {
     let dir =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/circular-display-walk");
-    let files = display_walk_files();
+    let files = display_walk_files_with(true);
     if std::env::var_os("LPA_STUDIO_CORE_BLESS").is_some() {
         for (path, bytes) in &files {
             let to = dir.join(path);
@@ -1198,7 +1199,12 @@ impl Journey {
 /// A new board's project as Studio generates it, its output given the
 /// display's five ports of 64 and no name (`new_board_with_display_output`,
 /// and `projects/test/circular-display-walk`).
-fn display_walk_files() -> Vec<(String, Vec<u8>)> {
+/// A new board's project with the circular display's output: five ports
+/// of 64 lamps (D0 to D4). `named` keeps the starter's name on the output
+/// (`1`, which the fixture starts on, so the project opens with no
+/// problem: the walk project); without it the output has no name, and the
+/// first port chosen names it (lean Q96: the from-nothing journey).
+fn display_walk_files_with(named: bool) -> Vec<(String, Vec<u8>)> {
     let mut project =
         crate::app::home::generate_board_project("seeed/xiao-esp32-c6", Some("Circular display"))
             .expect("the board project");
@@ -1234,7 +1240,7 @@ fn display_walk_files() -> Vec<(String, Vec<u8>)> {
         .collect();
     let mut out: Vec<String> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        if i == name || (i > ports && i < bindings - 1) {
+        if (i == name && !named) || (i > ports && i < bindings - 1) {
             continue;
         }
         out.push(line.to_string());
@@ -1244,6 +1250,11 @@ fn display_walk_files() -> Vec<(String, Vec<u8>)> {
     }
     output.1 = (out.join("\n") + "\n").into_bytes();
     project.files
+}
+
+/// The from-nothing journey's start: the display's output, not named yet.
+fn display_walk_files() -> Vec<(String, Vec<u8>)> {
+    display_walk_files_with(false)
 }
 
 fn id(text: &str) -> TreeId {

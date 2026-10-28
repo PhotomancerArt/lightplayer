@@ -130,8 +130,8 @@ pub const CIRCULAR_DISPLAY: Embedded = Embedded {
 };
 
 /// The circular display's walk project (`projects/test/circular-display-walk`):
-/// a new board's project with the display's five ports of 64 on an output
-/// with no name, its starter strip still in place. Not in the picker;
+/// a new board's project with the display's five ports of 64 on its output
+/// (`1`), its starter strip still in place. Not in the picker;
 /// Studio's Graph stories map the display from nothing in it.
 pub const CIRCULAR_DISPLAY_WALK: Embedded = Embedded {
     key: "circular-display-walk",
