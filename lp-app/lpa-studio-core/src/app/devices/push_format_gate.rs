@@ -11,10 +11,7 @@
 use lpa_devices::wire::HelloFacts;
 use lpa_upgrade::{PROJECT_MANIFEST, ProjectFiles, stored_format};
 
-/// The newest project format an engine reads when its hello does not say:
-/// the hello learned to say it (wire 46) with format 12, so a board on an
-/// older wire reads at most 11.
-pub const FORMAT_BEFORE_THE_HELLO_SAID: u32 = 11;
+use super::engine_project_format::FORMAT_BEFORE_THE_HELLO_SAID;
 
 /// Why a push of `files` to the board that said `hello` is refused, or
 /// `None` when it may go: the project's format is one the board reads, the

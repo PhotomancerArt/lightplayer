@@ -87,6 +87,10 @@ pub struct UpdateStandingInputs<'a> {
     /// P11): running with no click, or how it was held back. `None` when
     /// nothing is pending.
     pub projects: Option<&'a ProjectStageStatus>,
+    /// The project format the board's engine reads (its hello's), when it
+    /// said: the card's version choices warn when an older version would
+    /// read none of the board's projects (Q106).
+    pub board_project_format: Option<u32>,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -887,6 +891,7 @@ pub(crate) mod tests {
             store_lookups: None,
             file_build: None,
             projects: None,
+            board_project_format: None,
         }
     }
 

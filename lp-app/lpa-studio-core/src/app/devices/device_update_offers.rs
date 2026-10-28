@@ -194,6 +194,7 @@ impl UpdateOfferFacts {
                     link: inputs.link,
                     studio_wire_proto: lpc_wire::WIRE_PROTO_VERSION,
                     board_tree_store: inputs.board_tree_store,
+                    board_project_format: inputs.board_project_format,
                 });
                 (choices, index_for(inputs.store_releases, target).is_some())
             }
@@ -657,6 +658,16 @@ fn install_confirmation(
         message.push_str(&format!(
             "{lead} speaks an older language than this Studio: Studio can still update it, \
              but may not edit its project until you do."
+        ));
+    }
+    // Q106: an engine that reads an older project format than the board's
+    // projects are saved in lights none of them.
+    if choice.strands_projects {
+        if !message.is_empty() {
+            message.push(' ');
+        }
+        message.push_str(&format!(
+            "This board's projects were saved for newer firmware and won't load on {version}."
         ));
     }
     if let Some(link) = choice.stranded_over {
@@ -1268,6 +1279,44 @@ mod tests {
 
         // The board's own is not a choice to press.
         assert!(other.press(&args("2026.10.05-2")).is_err());
+    }
+
+    /// Q106 (M3 P11): an older version whose engine reads an older project
+    /// format than the board's projects are saved in says so in its arm's
+    /// copy; one that reads them, or a board that has not said its format,
+    /// adds nothing. Nothing else in the picker changes.
+    #[test]
+    fn an_older_version_that_reads_none_of_the_boards_projects_says_so() {
+        let saved_at_12 = fixture(UpdateFixtureRow::UpToDate).with_board_project_format(12);
+        let other = install_of(&saved_at_12);
+
+        // `2026.10.03-4` speaks the wire before the hello said the format:
+        // its engine reads at most format 11.
+        let copy = lasting(&press(&other, "2026.10.03-4"));
+        assert!(
+            copy.message.contains(
+                "This board's projects were saved for newer firmware and won't load on \
+                 v2026.10.03-4."
+            ),
+            "{}",
+            copy.message
+        );
+        assert_eq!(copy.title, "Install an older version?");
+
+        let copy = lasting(&press(&other, "2026.10.05-1"));
+        assert!(
+            !copy.message.contains("saved for newer firmware"),
+            "{}",
+            copy.message
+        );
+
+        let unknown = install_of(&fixture(UpdateFixtureRow::UpToDate));
+        let copy = lasting(&press(&unknown, "2026.10.03-4"));
+        assert!(
+            !copy.message.contains("saved for newer firmware"),
+            "{}",
+            copy.message
+        );
     }
 
     /// "From a file…" sits beside the list, for the user's own click; the

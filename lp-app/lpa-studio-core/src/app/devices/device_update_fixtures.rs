@@ -126,6 +126,9 @@ pub struct UpdateFixture {
     pub lookups: StoreLookups,
     /// A custom build picked from files ([`Self::with_file_build`]).
     pub file: Option<HostBuildFacts>,
+    /// The project format the board's engine reads, as its hello says
+    /// ([`Self::with_board_project_format`]); `None`: it has not said.
+    pub board_project_format: Option<u32>,
 }
 
 impl UpdateFixture {
@@ -211,7 +214,14 @@ impl UpdateFixture {
             }),
             lookups: StoreLookups::default(),
             file: None,
+            board_project_format: None,
         }
+    }
+
+    /// The same board, its hello saying its engine reads project `format`.
+    pub fn with_board_project_format(mut self, format: u32) -> Self {
+        self.board_project_format = Some(format);
+        self
     }
 
     /// The same board, with the custom build `version` picked from files.
@@ -267,6 +277,7 @@ impl UpdateFixture {
             store_lookups: Some(&self.lookups),
             file_build: self.file.as_ref(),
             projects: None,
+            board_project_format: self.board_project_format,
         }
     }
 

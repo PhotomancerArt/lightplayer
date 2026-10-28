@@ -692,6 +692,7 @@ mod tests {
                     stranded_over: None,
                     published_at: None,
                     recent: true,
+                    strands_projects: false,
                 }],
                 listed: true,
                 ..UpdateOfferFacts::default()

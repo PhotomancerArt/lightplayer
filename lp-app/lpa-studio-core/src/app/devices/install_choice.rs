@@ -68,6 +68,9 @@ pub struct InstallChoice {
     pub stranded_over: Option<UpdateLink>,
     /// When the release was published (RFC 3339), when the index says.
     pub published_at: Option<String>,
+    /// The board's projects were saved for newer firmware than this
+    /// version's engine reads (Q106): they won't load on it.
+    pub strands_projects: bool,
     /// Shown with nothing typed in the box.
     pub recent: bool,
 }
@@ -127,6 +130,10 @@ pub struct InstallChoiceInputs<'a> {
     /// The board's filesystem is the tree store (its hello lists
     /// `fs.tree`).
     pub board_tree_store: bool,
+    /// The project format the board's engine reads (its hello's), which its
+    /// stored projects are at once its update finished; `None` when it has
+    /// not said.
+    pub board_project_format: Option<u32>,
 }
 
 /// The release index for `target`, when the store listed that target's.
@@ -213,6 +220,7 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
                         .wire_proto
                         .map(|proto| WireVersion::compare(proto, inputs.studio_wire_proto)),
                 },
+                strands_projects: strands_projects(&f, inputs.board_project_format),
                 recent: at < RECENT_CHOICES || f.own || f.from_file || on_board,
                 on_board,
                 own: f.own,
@@ -223,6 +231,23 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
             }
         })
         .collect()
+}
+
+/// Whether a version found as `found` reads an older project format than the
+/// board's projects are saved in: known for this Studio's own build (it
+/// reads this Studio's format) and for a version on a wire older than the
+/// one whose hello says the format ([`super::engine_project_format`]).
+fn strands_projects(found: &Found, board: Option<u32>) -> bool {
+    let Some(board) = board else {
+        return false;
+    };
+    let reads = match found.own {
+        true => Some(lpc_model::PROJECT_FORMAT_VERSION),
+        false => found
+            .wire_proto
+            .and_then(super::engine_project_format::project_format_of_wire),
+    };
+    reads.is_some_and(|reads| reads < board)
 }
 
 /// A choice before it is read against the board.
@@ -592,6 +617,7 @@ mod tests {
             file_build: None,
             link: UpdateLink::Usb,
             studio_wire_proto: PROTO,
+            board_project_format: None,
         }
     }
 

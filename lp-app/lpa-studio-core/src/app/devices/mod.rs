@@ -117,6 +117,7 @@ pub mod devices_op;
 pub mod done_offer;
 pub mod edit_offer;
 pub mod emu_transport;
+pub mod engine_project_format;
 pub mod firmware_file_build;
 pub mod firmware_lookup_op;
 pub mod forget_from_account_offer;

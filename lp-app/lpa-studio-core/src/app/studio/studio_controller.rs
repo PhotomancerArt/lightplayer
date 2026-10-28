@@ -2073,6 +2073,7 @@ impl StudioController {
                 // is never started on its own.
                 board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
                 projects: None,
+                board_project_format: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -2180,6 +2181,9 @@ impl StudioController {
             file_build: self.update_build_facts.file_build(),
             board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
             projects: self.project_stages.status(view.id),
+            board_project_format: evidence
+                .and_then(|evidence| evidence.classification.hello())
+                .and_then(|hello| hello.project_format),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
