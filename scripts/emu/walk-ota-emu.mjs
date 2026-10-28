@@ -2471,11 +2471,17 @@ async function main() {
                     && /· (live|connected)\b|connected$/.test(card.connection?.line ?? "");
                   if (!live) wentDown = true;
                 }
-                if (!snap.board?.offers.edit?.enabled || snap.board.firmware?.work === "running") return false;
+                // Running the upgraded eaves, in the board's words (the card's
+                // Edit is not offered on every link: not through the relay).
+                const card = snap.board;
+                if (!card || card.corner === "quiet" || card.corner === "blank" || card.firmware?.work === "running") return false;
+                const words = boardWords(board);
+                const refusedAt = words.lastIndexOf("Boot: auto-load failed for /projects/eaves");
+                if (!words.slice(Math.max(0, refusedAt)).includes("Project loaded: eaves")) return false;
                 return !cutting || wentDown;
               },
               cutting ? `the cut, Y booted again, and the card running the upgraded eaves (${JSON.stringify(cutter?.get() ?? null)})` : "the card running the upgraded eaves",
-              UPDATE_MS,
+              STEP_MS * 2,
             );
             const kept = await liveCardPath();
             await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
