@@ -122,42 +122,82 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
     Ok(())
 }
 
-/// Every project root the format-12 upgrade migrated (M3 P4): each map2d in
-/// them is format 6, and no patch document remains (one file holds a
-/// fixture's patching).
-const MIGRATED_ROOTS: &[&str] = &[
-    "projects",
-    "catalog",
-    "lab/mapping/projects",
-    "lp-fw/fw-browser/www/smoke-project",
-    "lp-app/lpa-studio-core/tests/fixtures",
+/// The places a map2d below format 6, or a patch document, may still be:
+/// each holds old documents on purpose, as input to something that reads
+/// the old formats.
+const OLD_MAPPING_DOCUMENTS: &[(&str, &str)] = &[
+    (
+        "schemas/history/",
+        "the schema snapshots of earlier project formats, with their fixture projects",
+    ),
+    (
+        "lp-app/lpa-upgrade/tests/corpus/",
+        "the upgrade corpus's inputs (each version's `_expected/` is at the current format)",
+    ),
+    (
+        "lp-app/lpa-upgrade/tests/refused/",
+        "projects the upgrade refuses, kept as they were",
+    ),
+    (
+        "lp-core/lpc-mapping/src/corpus/",
+        "the old reader's corpus, which the Map tab and its stories read until M4 deletes them",
+    ),
 ];
 
+/// Directories the walk never enters: build output, dependencies, and VCS.
+const NOT_WALKED: &[&str] = &["target", "node_modules", ".git", ".claude"];
+
+/// No file in the repo is a map2d below format 6 or a patch document,
+/// outside [`OLD_MAPPING_DOCUMENTS`] (one file holds a fixture's layout and
+/// patching since project format 12): every writer writes format 6.
 #[test]
-fn every_migrated_map2d_is_format_6_and_no_patch_document_remains() -> Result<()> {
+fn no_map2d_below_format_6_and_no_patch_document_outside_the_old_inputs() -> Result<()> {
     let workspace = workspace_dir();
+    let mut files = Vec::new();
+    collect_mapping_documents(&workspace, &mut files)?;
     let mut mappings = 0usize;
     let mut failures = Vec::new();
-    for root in MIGRATED_ROOTS {
-        for file in walk_json_files(&workspace, root)? {
-            let rel = relative(&workspace, &file);
-            if rel.ends_with(".patch.json") {
-                failures.push(format!("{rel}: a patch document remains"));
-            }
-            if rel.ends_with(".map2d.json") {
-                mappings += 1;
-                let text =
-                    std::fs::read_to_string(&file).with_context(|| format!("reading {rel}"))?;
-                let format = lpc_mapping::map2d6::peek_format(&text);
-                if format != Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
-                    failures.push(format!("{rel}: map2d format {format:?}, not 6"));
-                }
-            }
+    for file in files {
+        let rel = relative(&workspace, &file);
+        if OLD_MAPPING_DOCUMENTS
+            .iter()
+            .any(|(prefix, _)| rel.starts_with(prefix))
+        {
+            continue;
+        }
+        if rel.ends_with(".patch.json") {
+            failures.push(format!("{rel}: a patch document remains"));
+            continue;
+        }
+        mappings += 1;
+        let text = std::fs::read_to_string(&file).with_context(|| format!("reading {rel}"))?;
+        let format = lpc_mapping::map2d6::peek_format(&text);
+        if format != Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
+            failures.push(format!("{rel}: map2d format {format:?}, not 6"));
         }
     }
     assert!(mappings > 100, "only {mappings} map2d documents walked");
     if !failures.is_empty() {
         bail!("{}", failures.join("\n"));
+    }
+    Ok(())
+}
+
+/// Every `*.map2d.json` and `*.patch.json` under `dir`, skipping
+/// [`NOT_WALKED`].
+fn collect_mapping_documents(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry.with_context(|| format!("read entry in {}", dir.display()))?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if entry.file_type()?.is_dir() {
+            if !NOT_WALKED.contains(&name.as_ref()) {
+                collect_mapping_documents(&path, out)?;
+            }
+        } else if name.ends_with(".map2d.json") || name.ends_with(".patch.json") {
+            out.push(path);
+        }
     }
     Ok(())
 }
