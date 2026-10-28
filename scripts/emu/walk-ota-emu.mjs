@@ -259,19 +259,20 @@ const RELAY_LANE = ARGS.includes("--relay");
 const ON_LAN = LAN_LANE || RELAY_LANE;
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop", "cross-format", "cut-upgrade", "found-older"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop", "cross-format", "cut-upgrade", "found-older", "cut-older"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const LAN_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "renumber", "second-client"];
 const RELAY_STEPS = ["update", "relay-drop", "cut-engine"];
 /// The crossing's steps (a project-format bump): never a lane's default.
-const CROSS_STEPS = ["cross-format", "cut-upgrade", "found-older"];
+const CROSS_STEPS = ["cross-format", "cut-upgrade", "found-older", "cut-older"];
 /// Where each is walked.
 const CROSS_LANES = {
   "cross-format": "every lane",
   "cut-upgrade": "the door's ?emu= and --lan",
-  "found-older": "the door's ?emu= only",
+  "found-older": "the door's ?emu=, --lan, --relay and --ble",
+  "cut-older": "the door's ?emu= and --lan",
 };
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_STEPS : RELAY_LANE ? RELAY_STEPS : DOOR_STEPS);
 /// The steps that stand r1 and r2 behind a real lp-cloud-server.
@@ -287,8 +288,8 @@ if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
   process.exit(2);
 }
-if (RELAY_LANE && STEPS.some((step) => ![...RELAY_STEPS, "cross-format"].includes(step))) {
-  console.error(`walk-ota-emu: --relay walks ${[...RELAY_STEPS, "cross-format"].join(", ")}`);
+if (RELAY_LANE && STEPS.some((step) => ![...RELAY_STEPS, "cross-format", "found-older"].includes(step))) {
+  console.error(`walk-ota-emu: --relay walks ${[...RELAY_STEPS, "cross-format", "found-older"].join(", ")}`);
   process.exit(2);
 }
 if (!RELAY_LANE && STEPS.includes("relay-drop")) {
@@ -303,8 +304,8 @@ if (!LAN_LANE && STEPS.some((step) => step === "renumber" || step === "second-cl
   console.error("walk-ota-emu: renumber and second-client are Wi-Fi steps (--lan)");
   process.exit(2);
 }
-if (LAN_LANE && STEPS.some((step) => ![...LAN_STEPS, "cross-format", "cut-upgrade"].includes(step))) {
-  console.error(`walk-ota-emu: --lan walks ${[...LAN_STEPS, "cross-format", "cut-upgrade"].join(", ")}`);
+if (LAN_LANE && STEPS.some((step) => ![...LAN_STEPS, ...CROSS_STEPS].includes(step))) {
+  console.error(`walk-ota-emu: --lan walks ${[...LAN_STEPS, ...CROSS_STEPS].join(", ")}`);
   process.exit(2);
 }
 if (TAB && BLE) {
@@ -322,7 +323,8 @@ for (const name of STEPS) {
   const crossOff =
     (S3 && CROSS_STEPS.includes(name)) ||
     (name === "cut-upgrade" && (TAB || BLE || RELAY_LANE)) ||
-    (name === "found-older" && (TAB || BLE || ON_LAN));
+    (name === "found-older" && TAB) ||
+    (name === "cut-older" && (TAB || BLE || RELAY_LANE));
   if (crossOff) {
     console.error(`walk-ota-emu: ${name} is walked on ${CROSS_LANES[name]}${S3 ? " (C6 boards; not --s3)" : ""}`);
     process.exit(2);
@@ -525,14 +527,22 @@ async function main() {
   const crossLanChip = path.join(chips, "cross-lan.bin");
   const crossRelayChip = path.join(chips, "cross-relay.bin");
   const olderChip = path.join(chips, "found-older.bin");
+  const olderLanChip = path.join(chips, "found-older-lan.bin");
+  const olderRelayChip = path.join(chips, "found-older-relay.bin");
+  const OLDER = STEPS.includes("found-older") || STEPS.includes("cut-older");
+  const yMerged = path.join(PACKAGES, TARGET, `fw-${CHIP}-merged.bin`);
   const cross = CROSSING ? JSON.parse(readFileSync(path.join(CROSS, "ota/ota-manifest.json"), "utf8")) : null;
-  if (CROSSING && !ON_LAN) seedCrossChip(path.join(CROSS, "merged.bin"), crossChip);
-  if (CROSSING && LAN_LANE) {
+  const CROSS_X = STEPS.includes("cross-format") || STEPS.includes("cut-upgrade");
+  if (CROSS_X && !ON_LAN) seedCrossChip(path.join(CROSS, "merged.bin"), crossChip);
+  if (CROSS_X && LAN_LANE) {
     seedCrossChip(path.join(CROSS, "merged.bin"), crossLanChip, [
       JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
     ]);
   }
-  if (STEPS.includes("found-older")) seedCrossChip(path.join(PACKAGES, TARGET, `fw-${CHIP}-merged.bin`), olderChip);
+  if (OLDER && !ON_LAN) seedCrossChip(yMerged, olderChip);
+  if (OLDER && LAN_LANE) {
+    seedCrossChip(yMerged, olderLanChip, [JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } })]);
+  }
   chipFiles.cross = crossChip;
   const xrChip = path.join(chips, "x-release.bin");
   if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
@@ -599,7 +609,13 @@ async function main() {
         cloud.accessAdd,
       ]);
     }
-    if (CROSSING) {
+    if (OLDER) {
+      seedCrossChip(yMerged, olderRelayChip, [
+        JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+        cloud.accessAdd,
+      ]);
+    }
+    if (STEPS.some((step) => step === "cross-format" || step === "cut-upgrade")) {
       seedCrossChip(path.join(CROSS, "merged.bin"), crossRelayChip, [
         JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
         cloud.accessAdd,
@@ -2430,20 +2446,37 @@ async function main() {
           });
           break;
         }
-        case "found-older": {
-          await openDoor(name, [`${board}=${olderChip},kind=rom-up,${mac}`]);
-          await step(name, "a board already on Y holding format-11 projects: connected, its projects are upgraded with no click and no update", async () => {
+        case "found-older":
+        case "cut-older": {
+          const cutting = name === "cut-older";
+          await openDoor(name, [`${board}=${RELAY_LANE ? olderRelayChip : LAN_LANE ? olderLanChip : olderChip},kind=rom-up,${mac}`]);
+          const describe = cutting
+            ? `a board already on Y holding format-11 projects, over ${LINK_WORD}: its power cut the moment the stage starts; it comes back and the stage finishes with no click`
+            : `a board already on Y holding format-11 projects, over ${LINK_WORD}: connected, its projects are upgraded with no click and no update`;
+          await step(name, describe, async () => {
             await nameThisBoard();
+            const cutter = cutting ? armStageCut(board) : null;
             // The board's boot words before a host takes its port are not
             // kept, so its refusal is read after: the boot's line if the
             // console has it, else the hello's `startupRefused`.
             await connect(board);
+            // After the cut the board must be seen gone (its card no longer
+            // live) before a card running the eaves counts.
+            let wentDown = false;
             const order = await watchCard(
-              async (snap) => Boolean(snap.board?.offers.edit?.enabled) && snap.board.firmware?.work !== "running",
-              "the card running the upgraded eaves",
+              async (snap) => {
+                if (cutting && cutter.get()?.ok === true) {
+                  const card = snap.board;
+                  const live = card && !card.offlineBoards && card.corner !== "quiet" && card.corner !== "blank"
+                    && /· (live|connected)\b|connected$/.test(card.connection?.line ?? "");
+                  if (!live) wentDown = true;
+                }
+                if (!snap.board?.offers.edit?.enabled || snap.board.firmware?.work === "running") return false;
+                return !cutting || wentDown;
+              },
+              cutting ? `the cut, Y booted again, and the card running the upgraded eaves (${JSON.stringify(cutter?.get() ?? null)})` : "the card running the upgraded eaves",
               UPDATE_MS,
             );
-            const loaded = await waitBoard(board, /Project loaded: eaves/, "the upgraded eaves loaded", STEP_MS);
             const kept = await liveCardPath();
             await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
             await driver.closeDetails({ board: kept });
@@ -2455,9 +2488,20 @@ async function main() {
             await new Promise((resolve) => setTimeout(resolve, 2_500));
             const refused = boardWords(board).match(/Boot: auto-load failed for \/projects\/eaves[^\n]*|"startupRefused":\{[^}]*\}/)?.[0]
               ?? "(its boot words were said before the port was taken)";
+            const lastRefusal = boardWords(board).lastIndexOf("Boot: auto-load failed for /projects/eaves");
+            const loaded = await waitBoard(board, /Project loaded: eaves/, "the upgraded eaves loaded after its last refusal", STEP_MS, Math.max(0, lastRefusal));
+            const refusals = boardWords(board).split("Boot: auto-load failed for /projects/eaves").length - 1;
+            const cut = cutter?.get() ?? null;
+            let where = null;
+            if (cutting) {
+              if (refusals >= 2) where = "before the startup project's batch committed: the board came back refusing the eaves again";
+              else if (journal.length >= 2) where = "after the startup project's batch: the eaves came back new, the rest was finished after";
+              else throw new Error(`the cut fell after the stage had written everything (refusals ${refusals}, journal ${JSON.stringify(journal)})`);
+            }
+            const reconnects = ON_LAN ? reconnectLines(await terminalLines()) : null;
             return {
-              summary: `Y said "${refused.replace(/: Core error.*/, "")}", then "${loaded}" with no press; card ${order.map((e) => e.kind).join(" → ") || "(no update lines)"}; Studio: ${journal.join(" / ")}`,
-              card: order, board: { refused, loaded }, journal,
+              summary: `Y said "${refused.replace(/: Core error.*/, "")}"${refusals > 1 ? ` ×${refusals}` : ""}, then "${loaded}" with no press; card ${order.map((e) => e.kind).join(" → ") || "(no update lines)"}; Studio: ${journal.join(" / ")}${cutting ? `; power cut when the page said "${cut.words}" (${cut.reply}), ${where}` : ""}`,
+              card: order, board: { refused, loaded, refusals }, journal, cut, where, reconnects,
             };
           });
           break;
