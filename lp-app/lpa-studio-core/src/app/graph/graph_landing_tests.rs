@@ -8,13 +8,16 @@
 //! fragments. The Graph opens the project as Studio does (`Opened::open`,
 //! then the port tables core builds with the engine's walk,
 //! `graph_port_tables.rs`), and its effective patch must say the same, lamp
-//! by lamp.
+//! by lamp. The third does it again after a save: an unedited save writes
+//! nothing, and every file the Graph owns, written and opened again, lands
+//! every lamp where the golden says (mapping rebuild M4 P05). The goldens
+//! are never re-blessed here: a difference is the Graph's to fix.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use lab_mapping_files::{DirFiles, Opened, ProductProject};
+use lab_mapping_files::{DirFiles, Opened, ProductProject, Saved, Source};
 use lab_mapping_model::{NodeId, Project};
 
 use super::graph_port_tables::port_tables;
@@ -147,6 +150,112 @@ fn every_lamp_lands_where_the_engines_landing_golden_says() {
         "only {} goldens were compared",
         totals.projects
     );
+}
+
+/// The Graph lands every lamp where the engine did after a save, too: for
+/// every golden's project, an unedited save writes nothing, and every file
+/// the Graph owns written out (each mapping by `lpc-mapping`'s format-6
+/// writer) and opened again — port tables built from the written files —
+/// lands each lamp where the golden says. What the Graph writes says all
+/// the patching there is.
+#[test]
+fn every_lamp_lands_where_the_engines_golden_says_after_a_save() {
+    let workspace = workspace_dir();
+    let mut totals = Totals::default();
+    let mut failures = Vec::new();
+    for (relative, text) in goldens(&workspace) {
+        let dir = workspace.join(&relative);
+        if !dir.join("project.json").is_file() || project_format(&dir) != Some(PROJECT_FORMAT) {
+            totals.skip(&relative, "not a format-12 project in the tree");
+            continue;
+        }
+        let golden = Golden::read(&text).unwrap_or_else(|why| panic!("{relative}: {why}"));
+        if let Some(why) = &golden.refused {
+            totals.skip(&relative, &format!("the engine refused it: {why}"));
+            continue;
+        }
+        let Ok(opened) = Opened::open(&DirFiles::new(&dir)) else {
+            failures.push(format!("{relative}: doesn't open"));
+            continue;
+        };
+        let unedited = opened
+            .files
+            .save(&opened.project)
+            .unwrap_or_else(|e| panic!("{relative}: {e}"));
+        if unedited != Saved::default() {
+            failures.push(format!(
+                "{relative}: an unedited save writes {:?}",
+                unedited.writes.iter().map(|(p, _)| p).collect::<Vec<_>>()
+            ));
+        }
+        let saved = opened
+            .files
+            .save_all(&opened.project)
+            .unwrap_or_else(|e| panic!("{relative}: {e}"));
+        totals.written += saved.writes.len();
+        let overlay = Overlay {
+            dir: DirFiles::new(&dir),
+            saved: &saved,
+        };
+        let Opened { mut project, files } = match Opened::open(&overlay) {
+            Ok(o) => o,
+            Err(why) => {
+                failures.push(format!("{relative}: what was written doesn't open: {why}"));
+                continue;
+            }
+        };
+        project.set_port_tables(port_tables(&project, &files));
+        let graph = graph_landing(&project, &files);
+        totals.projects += 1;
+        for (path, recorded) in &golden.fixtures {
+            totals.fixtures += 1;
+            totals.lamps += recorded.len() as u64;
+            totals.dark += recorded.iter().filter(|l| l.is_empty()).count() as u64;
+            let Some(now) = graph.get(path) else {
+                totals.differences += recorded.len() as u64;
+                failures.push(format!("{relative}: no fixture {path} after a save"));
+                continue;
+            };
+            let differ = recorded
+                .iter()
+                .zip(now)
+                .filter(|(was, is)| was != is)
+                .count()
+                + recorded.len().abs_diff(now.len());
+            totals.differences += differ as u64;
+            if differ > 0 {
+                failures.push(first_difference(&relative, path, recorded, now));
+            }
+        }
+    }
+    eprintln!("after a save, {totals}");
+    assert!(
+        failures.is_empty(),
+        "after a save, these lamps land where the engine doesn't land them:\n{}",
+        failures.join("\n")
+    );
+    assert!(
+        totals.projects > 50,
+        "only {} goldens were compared",
+        totals.projects
+    );
+}
+
+/// A project's directory with a save's writes over it.
+struct Overlay<'a> {
+    dir: DirFiles,
+    saved: &'a Saved,
+}
+
+impl Source for Overlay<'_> {
+    fn read(&self, path: &str) -> Option<String> {
+        self.saved
+            .writes
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, text)| text.clone())
+            .or_else(|| self.dir.read(path))
+    }
 }
 
 /// One lamp on one wire: the output's definition file, the port key and
@@ -287,6 +396,8 @@ struct Totals {
     lamps: u64,
     dark: u64,
     differences: u64,
+    /// Files a save wrote (after-a-save only).
+    written: usize,
     skipped: Vec<String>,
 }
 
@@ -304,6 +415,9 @@ impl fmt::Display for Totals {
              {} lamps landing differently",
             self.projects, self.fixtures, self.lamps, self.dark, self.differences
         )?;
+        if self.written > 0 {
+            write!(f, ", {} files written", self.written)?;
+        }
         for skipped in &self.skipped {
             write!(f, "\n  skipped {skipped}")?;
         }

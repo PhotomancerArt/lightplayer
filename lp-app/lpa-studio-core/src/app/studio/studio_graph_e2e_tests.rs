@@ -4,23 +4,23 @@
 //! the same editor, and the colours are the board's own published frames;
 //! the selection breathes or chases on the board through its `highlight`
 //! and `selection` slots (plans `lp2025/2026-10-17-0202-mapping-lab-into-studio`
-//! and `lp2025/2026-10-27-0114-mapping-rebuild`).
-//!
-//! Saving an edit made on the Graph comes back with map2d format 6 written
-//! (mapping rebuild M4 P05), and its journeys with it.
+//! and `lp2025/2026-10-27-0114-mapping-rebuild`). An edit pressed by its
+//! offer's path saves map2d format 6 through Studio's asset edits, and an
+//! unedited Graph writes nothing (mapping rebuild M4 P05).
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use lab_mapping_model::{GraphInput, NodeId, PartRef, Rgb, Target, UiNodeFace};
+use lab_mapping_model::{GraphInput, GraphVerb, NodeId, PartRef, Rgb, Target, UiNodeFace};
 
-use crate::app::graph::{GraphHandle, UiGraphState};
+use crate::app::graph::{GraphHandle, UiGraphState, graph_verb_path};
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive};
 use crate::app::studio::studio_face_e2e_tests::{connect_running_project, example_e2e_server};
 use crate::{
-    OfferPath, StudioActor, StudioCommand, StudioController, StudioServerClient, UiPage, UiPlace,
-    UiProjectView, UiStudioView,
+    ArtifactLocation, OfferArgs, OfferPath, StudioActor, StudioCommand, StudioController,
+    StudioServerClient, UiPage, UiPlace, UiProjectView, UiStudioView,
 };
 
 /// The Graph opens a format-6 fixture: the choker's state is open, its
@@ -348,6 +348,150 @@ fn a_selected_fixture_chases_every_segment_in_it() {
     }
 }
 
+/// Opening the Graph and selecting writes nothing: no file of the project
+/// becomes an edit, and the mapping is the file's own bytes.
+#[test]
+fn the_graph_writes_nothing_when_nothing_is_edited() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_part();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(first)]));
+    graph.batch();
+    graph.refresh();
+    let project = graph.actor.controller_mut_for_test().project_for_test();
+    for path in [MAP, "/fixture.json", "/output.json", "/module.json"] {
+        let content = project.asset_content_cached(&ArtifactLocation::file(path));
+        assert!(
+            content.as_ref().is_none_or(|c| !c.dirty),
+            "{path} is not an edit"
+        );
+    }
+    assert_eq!(graph.mapping_text(), choker_map(), "the file's own bytes");
+}
+
+/// An edit pressed on the Graph by its offer's path saves through Studio's
+/// own asset edit: the choker's mapping is the project's pending edit, in
+/// map2d format 6 exactly as `lpc-mapping`'s writer writes the edited
+/// mapping, which the engine's reader reads back with the lamp the edit
+/// added. Only the mapping is written.
+#[test]
+fn an_edit_on_the_graph_saves_through_the_asset_path() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_part();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(first.clone())]));
+    graph.batch();
+    graph.press(GraphVerb::More);
+    graph.refresh();
+    assert_eq!(graph.handle.editor().borrow().project.lamp_count(), 74);
+    let project = graph.actor.controller_mut_for_test().project_for_test();
+    let content = project
+        .asset_content_cached(&ArtifactLocation::file(MAP))
+        .expect("the mapping is Studio's to show");
+    assert!(content.dirty, "the edit is the project's pending edit");
+    for path in ["/fixture.json", "/output.json", "/module.json"] {
+        let content = project.asset_content_cached(&ArtifactLocation::file(path));
+        assert!(
+            content.as_ref().is_none_or(|c| !c.dirty),
+            "{path} is not written"
+        );
+    }
+    let text = graph.mapping_text();
+    let mapping = lpc_mapping::map2d6::read(&text).expect("the engine's reader reads it");
+    let editor_mapping = graph.fixture_mapping();
+    assert_eq!(mapping, editor_mapping, "the Graph's mapping, all of it");
+    assert_eq!(
+        text,
+        lpc_mapping::map2d6::write(&editor_mapping).unwrap(),
+        "the writer's canonical bytes"
+    );
+    let tree = lpc_mapping::part::render(&mapping).expect("it renders");
+    assert_eq!(tree.positions().len(), 74);
+    // Saved once: the next reads write nothing more, and the Graph keeps
+    // its editor (its own edit is no change made elsewhere).
+    graph.refresh();
+    assert_eq!(graph.handle.editor().borrow().project.lamp_count(), 74);
+    assert!(graph.handle.editor().borrow().can_undo());
+    assert_eq!(graph.mapping_text(), text);
+}
+
+/// Undo on the Graph is the Graph's own, and what it puts back is saved
+/// the same way: the mapping is the file's own bytes again.
+#[test]
+fn undo_on_the_graph_saves_what_it_puts_back() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_part();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(first)]));
+    graph.batch();
+    graph.press(GraphVerb::More);
+    graph.refresh();
+    assert_ne!(graph.mapping_text(), choker_map());
+    graph.press(GraphVerb::Undo);
+    graph.refresh();
+    assert_eq!(graph.handle.editor().borrow().project.lamp_count(), 73);
+    assert_eq!(graph.mapping_text(), choker_map(), "the file's own bytes");
+}
+
+/// A port's count edited on the Graph re-patches as soon as it is saved:
+/// the output's file is written, and the port tables are built again from
+/// it, so the dome's first copy no longer fits its port — without opening
+/// the project again.
+#[test]
+fn a_port_count_edited_on_the_graph_re_patches_once_saved() {
+    let mut graph = Graph::new("catalog/zook-dome");
+    graph.go_to_graph();
+    let fixture = NodeId::new("fixture");
+    let capacity = |graph: &Graph| {
+        graph.handle.editor().borrow().project.port_tables(&fixture)[0].ports[0].channels
+    };
+    assert_eq!(capacity(&graph), Some(900), "300 lamps of three channels");
+    graph.handle.input(GraphInput::Select(vec![Target::Port {
+        output: NodeId::new("output"),
+        key: "0".to_string(),
+    }]));
+    graph.batch();
+    graph.press(GraphVerb::Fewer);
+    graph.refresh();
+    let output = graph
+        .actor
+        .controller_mut_for_test()
+        .project_for_test()
+        .asset_content_cached(&ArtifactLocation::file("/output.json"))
+        .and_then(|c| c.text().map(str::to_string))
+        .expect("the output");
+    assert!(output.contains("\"count\": 299"), "{output}");
+    assert_eq!(capacity(&graph), Some(897), "the tables follow the file");
+    assert!(
+        !graph
+            .handle
+            .editor()
+            .borrow()
+            .project
+            .effective_patch()
+            .problems
+            .is_empty(),
+        "copy 0's 300 lamps no longer fit port 0"
+    );
+}
+
+/// The choker's mapping file in the repo.
+const MAP: &str = "/playful.map2d.json";
+
+fn choker_map() -> String {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../catalog/projects/playful-choker/playful.map2d.json"
+    );
+    std::fs::read_to_string(path).expect("the choker's mapping")
+}
+
 /// The fixture node's face, as the canvas draws it.
 fn fixture_face(e: &lab_mapping_model::Editor) -> lab_mapping_model::UiFixtureFace {
     let face = e
@@ -422,6 +566,36 @@ impl Graph {
 
     fn view(&self) -> UiStudioView {
         self.last.clone().expect("a snapshot")
+    }
+
+    /// Press the Graph's verb by its offer's path, as a click does.
+    fn press(&mut self, verb: GraphVerb) {
+        actor_clicks(&mut self.actor, &self.tx).press(graph_verb_path(verb), OfferArgs::default());
+        if let Some(next) = self.view.try_recv() {
+            self.last = Some(next);
+        }
+    }
+
+    /// The choker's mapping as Studio holds it now.
+    fn mapping_text(&mut self) -> String {
+        self.actor
+            .controller_mut_for_test()
+            .project_for_test()
+            .asset_content_cached(&ArtifactLocation::file(MAP))
+            .and_then(|c| c.text().map(str::to_string))
+            .expect("the mapping")
+    }
+
+    /// The fixture's mapping, as the Graph holds it.
+    fn fixture_mapping(&self) -> lpc_mapping::part::Mapping {
+        self.handle
+            .editor()
+            .borrow()
+            .project
+            .fixture(&NodeId::new("fixture"))
+            .expect("the fixture")
+            .mapping
+            .clone()
     }
 
     /// The choker's first drawn part.

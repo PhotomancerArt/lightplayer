@@ -20,11 +20,19 @@
 //! output's authored ports (`graph_port_tables.rs`), handed to the editor
 //! when it opens, so the Graph and the board can't disagree.
 //!
-//! **Saving.** Not yet (mapping rebuild M4 P05 writes map2d format 6): an
-//! edit on the Graph changes the editor only, and no mapping file is
-//! written. The one thing still written is where pinned nodes sit
-//! (`editor.json`'s `canvas` surface, Debug's Pinning), which is not
-//! mapping data. Undo is the Graph's own (the lab's project snapshots).
+//! **Saving.** After an edit (not mid-drag, not mid-drawing) the files
+//! crate says which of the project's files changed — each fixture's
+//! mapping in map2d format 6, written by `lpc-mapping`'s own writer, and
+//! the node files the Graph edits — and each is written as an ordinary
+//! asset edit, so Studio's dirty state, Save and the push to the board work
+//! unchanged. A project nobody edited writes nothing. The written files are
+//! then the baseline the next save compares against, and the port tables
+//! are built again from them (an output's ports edited on the Graph
+//! re-patch at once). Where pinned nodes sit is written too (`editor.json`'s
+//! `canvas` surface, Debug's Pinning). Undo is the Graph's own (the lab's
+//! project snapshots); what it puts back is saved the same way. A deleted
+//! node's files (`Saved::removed`) are left where they are: nothing refers
+//! to them any more.
 //!
 //! **Colours.** [`GraphController::view`] carries the board's frame, built
 //! from the frames the board published (`graph_frame.rs`) and kept until
@@ -75,9 +83,10 @@ pub struct GraphController {
     frame: RefCell<Option<(FrameKey, Rc<BoardFrame>)>>,
 }
 
-/// What the open read.
+/// What the open read, and what saving starts from.
 #[derive(Debug)]
 struct GraphOpened {
+    files: ProductProject,
     /// Every path the open asked for, and what it said.
     read: BTreeMap<String, Option<String>>,
     /// The lab's nodes, as Studio's.
@@ -220,23 +229,39 @@ impl GraphController {
         used
     }
 
-    /// Write where pinned nodes sit, after an edit (mapping files are not
-    /// written until M4 P05). Returns whether the Graph's view changed (a
-    /// notice).
+    /// Write what the editor changed to the project's files, after an
+    /// edit. Returns whether the Graph's view changed (a notice).
     async fn save(
         &mut self,
         project: &mut ProjectController,
         server: &mut StudioServerClient,
     ) -> bool {
-        {
-            if self.opened.is_none() {
+        let (saved, revision) = {
+            let Some(opened) = self.opened.as_ref() else {
                 return false;
-            }
+            };
             let e = self.handle.editor().borrow();
             if e.dragging() || e.drawing() || e.project.revision() == self.saved {
                 return false;
             }
-            self.saved = e.project.revision();
+            (opened.files.save(&e.project), e.project.revision())
+        };
+        self.saved = revision;
+        let saved = match saved {
+            Ok(saved) => saved,
+            Err(why) => {
+                self.refuse_save(why.to_string());
+                return true;
+            }
+        };
+        for (path, text) in &saved.writes {
+            let written = project
+                .apply_asset_body(server, location(path), text.clone().into_bytes())
+                .await;
+            if let Err(why) = written {
+                self.refuse_save(format!("{path}: {why}"));
+                return true;
+            }
         }
         // Pins: editor.json's `canvas` surface.
         let paths = [EDITOR_JSON.to_string()];
@@ -267,7 +292,41 @@ impl GraphController {
                 );
             }
         }
+        if !saved.writes.is_empty() {
+            self.rebase(project);
+        }
         false
+    }
+
+    /// What was written is what the next save compares against, and what
+    /// the open read now: read the files again, and build the port tables
+    /// from them, so an output whose ports the Graph edited re-patches at
+    /// once instead of on the next open.
+    fn rebase(&mut self, project: &ProjectController) {
+        let source = GraphSource::new(project, &self.absent);
+        let Ok(reopened) = Opened::open(&source) else {
+            return;
+        };
+        if !source.misses().is_empty() {
+            return;
+        }
+        let mut read = source.into_read();
+        read.insert(
+            EDITOR_JSON.to_string(),
+            GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
+        );
+        {
+            let mut editor = self.handle.editor().borrow_mut();
+            let tables = port_tables(&editor.project, &reopened.files);
+            if editor.project.set_port_tables(tables) {
+                self.generation += 1;
+                *self.frame.borrow_mut() = None;
+            }
+        }
+        if let Some(opened) = self.opened.as_mut() {
+            opened.files = reopened.files;
+            opened.read = read;
+        }
     }
 
     /// Show the selection on the board while the Graph is the place, and
@@ -434,7 +493,7 @@ impl GraphController {
             *editor = e;
             self.saved = editor.project.revision();
         }
-        self.opened = Some(GraphOpened { read, nodes });
+        self.opened = Some(GraphOpened { files, read, nodes });
         self.state = Some(UiGraphState::Open { live: false });
         self.generation += 1;
         *self.frame.borrow_mut() = None;
