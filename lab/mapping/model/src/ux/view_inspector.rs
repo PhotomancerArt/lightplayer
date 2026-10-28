@@ -45,22 +45,16 @@ impl Editor {
     fn inspector_sections(&self) -> Vec<UiSection> {
         let p = &self.project;
         let selection = &self.selection;
-        let section = |title: &str, items: Vec<UiItem>| UiSection {
-            title: Some(title.to_string()),
-            items,
-        };
+        let section = |title: &str, items: Vec<UiItem>| UiSection::titled(title, items);
         let mut out = Vec::new();
         if selection.is_empty() {
             out.push(section(
                 "Project",
                 project_facts(p).into_iter().map(UiItem::Fact).collect(),
             ));
-            out.push(UiSection {
-                title: None,
-                items: vec![UiItem::Hint(
-                    "Click something on the canvas or in the tree to see it here.".into(),
-                )],
-            });
+            out.push(UiSection::untitled(vec![UiItem::Hint(
+                "Click something on the canvas or in the tree to see it here.".into(),
+            )]));
             return out;
         }
         if selection.len() > 1 {
@@ -89,14 +83,15 @@ impl Editor {
             }
             out.extend(facts);
         }
-        // One component or object: the component first, then its object
-        // (Yona, 2026-10-25: one tree, components primary; the inspector
-        // shows the component's properties, then the object's).
+        // One part or node: the part first, then its segment (Yona,
+        // 2026-10-25: one tree, parts primary; the inspector shows the
+        // part's properties, then the segment's; lean Q80).
         if let [t @ (Target::Part(_) | Target::Generated(_))] = selection.as_slice() {
-            out.extend(self.component_then_object(t));
+            out.extend(self.part_then_segment(t));
             if let Some(spans) = span_facts(p, t) {
                 out.push(section("Spans", spans));
             }
+            out.extend(self.cursor_ops_section());
             return out;
         }
         if let [t @ Target::Span { .. }] = selection.as_slice()
@@ -110,6 +105,7 @@ impl Editor {
         if !fixtures_only && let Some(rows) = self.patch_section() {
             out.push(section("Patch", rows));
         }
+        out.extend(self.cursor_ops_section());
         if let [t @ (Target::Part(_) | Target::Generated(_))] = selection.as_slice()
             && let Some(spans) = span_facts(p, t)
         {
@@ -143,41 +139,44 @@ impl Editor {
                 .collect();
             out.push(section(title, items));
         } else if only_lamps {
-            out.push(UiSection {
-                title: None,
-                items: vec![UiItem::Hint(
-                    "A lamp's count belongs to its path or ring — Esc selects it.".into(),
-                )],
-            });
+            out.push(UiSection::untitled(vec![UiItem::Hint(
+                "A lamp's count belongs to its path or ring — Esc selects it.".into(),
+            )]));
         } else if selection.len() > 1 {
-            out.push(UiSection {
-                title: None,
-                items: vec![UiItem::Hint(
-                    "These share no properties. Select things of one kind to edit them together."
-                        .into(),
-                )],
-            });
+            out.push(UiSection::untitled(vec![UiItem::Hint(
+                "These share no properties. Select things of one kind to edit them together."
+                    .into(),
+            )]));
         }
         out
     }
 }
 
 impl Editor {
-    /// A part's section — its properties, its start and flow — then its
-    /// node's — what it does on the walk. For a ring or a copy the part is
-    /// the circle or the repeated thing, and what is edited there changes
-    /// every ring or every copy (D11).
-    fn component_then_object(&self, t: &Target) -> Vec<UiSection> {
+    /// A part's section, then its segment's (lean Q80).
+    ///
+    /// The part's: "Part · circle1" (or "Copy · panel@2" for a copy, with
+    /// "Changes here change every copy of panel." on top; for a ring, the
+    /// circle's, "Changes here change every ring of circle1."): its
+    /// properties and lamps, then its Flow on a container and its Start
+    /// (lean Q83: on a container, or a part inside a repeat). A container
+    /// has no segment of its own, so its own node's rows (its direction, on
+    /// the line) and problems sit here too.
+    ///
+    /// The segment's: "Segment · circle1/r3": its own properties (a
+    /// ring's), its rows (Output, Port, Starts at, Direction, Offset, On
+    /// the line) and its problems. Ids show in the titles only.
+    fn part_then_segment(&self, t: &Target) -> Vec<UiSection> {
         let p = &self.project;
-        let (component, object) = match t {
+        let (part, node) = match t {
             Target::Part(c) => (c.clone(), c.node()),
             Target::Generated(o) => (o.part(), o.clone()),
             _ => return Vec::new(),
         };
-        if p.part(&component).is_none() {
+        if p.part(&part).is_none() {
             return Vec::new();
         }
-        let fixture = component.fixture.clone();
+        let fixture = part.fixture.clone();
         let props = |targets: &[Target]| -> Vec<UiItem> {
             common_props(p, targets)
                 .into_iter()
@@ -187,38 +186,90 @@ impl Editor {
                 })
                 .collect()
         };
-        let mut comp_items = Vec::new();
-        if let Target::Generated(o) = t {
-            let what = p.generated_word(o);
-            comp_items.push(UiItem::Hint(format!(
-                "Changes here change every {what} of {component}."
+        let is_copy = node.id.key.is_none() && !node.id.copies.is_empty();
+        let is_segment = p.placed().node(&node).is_some_and(|(_, n)| n.is_leaf());
+
+        let mut part_items = Vec::new();
+        if is_copy {
+            part_items.push(UiItem::Hint(format!(
+                "Changes here change every copy of {}.",
+                part.part
+            )));
+        } else if let Target::Generated(o) = t {
+            part_items.push(UiItem::Hint(format!(
+                "Changes here change every {} of {}.",
+                p.generated_word(o),
+                part.part
             )));
         }
-        comp_items.extend(props(&[Target::Part(component.clone())]));
-        comp_items.extend(self.rule_rows_for(&[(
-            fixture.clone(),
-            lpc_mapping::patching::PatchTarget::Part(component.part.clone()),
-        )]));
-        let mut obj_items = Vec::new();
-        // A ring's own count, radius and way round live in its circle, but
-        // are the ring's alone.
-        if matches!(t, Target::Generated(o) if p.ring_of(o).is_some()) {
-            obj_items.extend(props(std::slice::from_ref(t)));
+        part_items.extend(props(&[Target::Part(part.clone())]));
+        if let Some(f) = p.fixture(&fixture) {
+            part_items.push(UiItem::Fact(format!(
+                "Lamps: {}, {} channels each",
+                f.color_order.word(),
+                f.channels_per_lamp()
+            )));
         }
-        obj_items.extend(
-            self.object_rows_for(&[(fixture, object.clone())])
-                .unwrap_or_default(),
-        );
+        part_items.extend(self.rule_rows_for(&[(
+            fixture.clone(),
+            lpc_mapping::patching::PatchTarget::Part(part.part.clone()),
+        )]));
+        let node_rows = self
+            .object_rows_for(&[(fixture, node.clone())])
+            .unwrap_or_default();
+        let problems: Vec<UiItem> = p
+            .problems_naming(&node)
+            .into_iter()
+            .map(UiItem::Problem)
+            .collect();
+        let mut part_section = UiSection {
+            title: Some(if is_copy { "Copy" } else { "Part" }.into()),
+            id: Some(if is_copy {
+                node.id.to_string()
+            } else {
+                part.part.to_string()
+            }),
+            items: part_items,
+        };
+        if !is_segment {
+            part_section.items.extend(node_rows);
+            part_section.items.extend(problems);
+            return vec![part_section];
+        }
+        let mut segment_items = Vec::new();
+        // A ring's own count and radius live in its circle, but are the
+        // ring's alone.
+        if matches!(t, Target::Generated(o) if p.ring_of(o).is_some()) {
+            segment_items.extend(props(std::slice::from_ref(t)));
+        }
+        segment_items.extend(node_rows);
+        segment_items.extend(problems);
         vec![
+            part_section,
             UiSection {
-                title: Some(format!("Part · {component}")),
-                items: comp_items,
-            },
-            UiSection {
-                title: Some(format!("{} · {object}", node_title(p, &object))),
-                items: obj_items,
+                title: Some("Segment".into()),
+                id: Some(node.id.to_string()),
+                items: segment_items,
             },
         ]
+    }
+
+    /// Debug's cursor ops: the patcher's steps for the one selected node,
+    /// under either presentation.
+    fn cursor_ops_section(&self) -> Option<UiSection> {
+        if !self.debug.cursor_ops {
+            return None;
+        }
+        let objects = self.patch_objects();
+        let [(_, node)] = objects.as_slice() else {
+            return None;
+        };
+        let p = &self.project;
+        let w = p.effective_patch().walked(node)?;
+        Some(UiSection::titled(
+            "Cursor ops",
+            p.cursor_ops_lines(w).into_iter().map(UiItem::Hint).collect(),
+        ))
     }
 }
 
@@ -280,7 +331,7 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
         .filter(|o| matches!(p.on_wire(&o.id), OnWire::Placed { .. }))
         .count();
     let mut out = vec![UiItem::Fact(format!(
-        "{on} of {} on the wire · {} waiting",
+        "{on} of {} on the line · {} waiting",
         objects.len(),
         objects.len() - on
     ))];
@@ -293,18 +344,8 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
     out
 }
 
-/// What the second section of a part's inspector is called: the node it is
-/// about, in a person's words.
-fn node_title(p: &Project, node: &crate::TreeRef) -> &'static str {
-    match p.placed().node(node) {
-        Some((_, n)) if n.is_leaf() => "Segment",
-        _ if node.id.key.is_none() && !node.id.copies.is_empty() => "Copy",
-        _ => "On the wire",
-    }
-}
-
 /// Where a fixture starts, in words: "Starts at D0 of main, pixel 0".
-fn start_words(p: &Project, start: &lpc_mapping::patching::Start) -> String {
+fn fixture_start_words(p: &Project, start: &lpc_mapping::patching::Start) -> String {
     use lpc_mapping::patching::{ChannelOp, OutputOp, PortOp, Unit};
     let (OutputOp::Set(name), PortOp::Set { key, .. }) = (&start.output, &start.port) else {
         return "Starts nowhere yet: its lamps go nowhere".into();
@@ -402,6 +443,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
     let mut ports: Vec<UiItem> = Vec::new();
     let mut rules: Vec<UiItem> = Vec::new();
     let mut facts: Vec<UiItem> = Vec::new();
+    let mut problems: Vec<UiItem> = Vec::new();
     let fact = |s: String| UiItem::Fact(s);
     match t {
         Target::Node(id) => match p.node(id).map(|n| &n.kind) {
@@ -448,7 +490,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 // Auto and how much is on the wire first, with what changes
                 // them (patching by hand), then the rules themselves.
                 rules.extend(patch_facts(p, id));
-                rules.push(UiItem::Rule(start_words(p, &fx.mapping.start)));
+                rules.push(UiItem::Rule(fixture_start_words(p, &fx.mapping.start)));
                 let lands: Vec<String> = p.ports_of(t).iter().map(|x| p.long_label(x)).collect();
                 if !lands.is_empty() {
                     rules.push(UiItem::Rule(format!("Lands on {}", lands.join(", "))));
@@ -465,13 +507,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                         "{left} lamps past the end of its ports"
                     )));
                 }
-                rules.extend(
-                    patch
-                        .problems
-                        .iter()
-                        .filter(|x| &x.fixture == id)
-                        .map(|x| UiItem::Problem(x.notice(p))),
-                );
+                problems.extend(p.problems_of_fixture(id).into_iter().map(UiItem::Problem));
             }
             Some(NodeKind::Module { children }) => {
                 facts.push(fact(format!(
@@ -572,22 +608,16 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
     }
     let mut out = Vec::new();
     if !ports.is_empty() {
-        out.push(UiSection {
-            title: Some("Ports".into()),
-            items: ports,
-        });
+        out.push(UiSection::titled("Ports", ports));
     }
     if !rules.is_empty() {
-        out.push(UiSection {
-            title: Some("Patch".into()),
-            items: rules,
-        });
+        out.push(UiSection::titled("Patch", rules));
+    }
+    if !problems.is_empty() {
+        out.push(UiSection::titled("Problems", problems));
     }
     if !facts.is_empty() {
-        out.push(UiSection {
-            title: None,
-            items: facts,
-        });
+        out.push(UiSection::untitled(facts));
     }
     Some(out)
 }

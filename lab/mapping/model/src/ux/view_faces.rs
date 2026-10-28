@@ -17,6 +17,7 @@ use crate::ux::editor::{Editor, Tool};
 use crate::ux::patching::PairEnd;
 use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::port_grouping::PortGrouping;
+use crate::ux::port_rows::{lamps_words, pixels_of};
 use crate::ux::ui::{
     Emphasis, FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace,
     UiPortRow, UiRun, UiShape, UiSourceFace, UiWire,
@@ -209,9 +210,20 @@ impl Editor {
                 let pixels = p.port_pixels(id, &port.key);
                 let starts = port_runs.iter().skip(1).map(|r| r.pixels.start).collect();
                 let grid = PixelGrid::in_row(row, pixels, starts);
+                // The port as one row of spans, every fixture on it merged:
+                // what each run is, in lamps, and where segments overlap.
+                let port_row = p.port_row(id, &port.key);
                 let runs = port_runs
                     .into_iter()
                     .map(|run| UiRun {
+                        label: match &run.segment {
+                            Some(o) => port_row
+                                .spans
+                                .iter()
+                                .find(|s| s.segment.as_ref() == Some(o))
+                                .map_or_else(|| p.segment_words(o), |s| s.words(p)),
+                            None => format!("gap · {}", lamps_words(run.pixels.len() as u32)),
+                        },
                         rects: grid.run_outline(run.pixels.clone()),
                         emphasis: match &run.segment {
                             Some(o) if lit_by(o) => Emphasis::Lit,
@@ -236,13 +248,10 @@ impl Editor {
                 };
                 let mut overlaps = Vec::new();
                 let mut shared = 0;
-                for x in patch
-                    .overlaps
-                    .iter()
-                    .filter(|x| &x.output == id && x.port == port.key)
-                {
-                    overlaps.extend(grid.run_outline(x.pixels.clone()));
-                    shared += x.pixels.len();
+                for x in &port_row.overlaps {
+                    let px = pixels_of(&x.channels);
+                    overlaps.extend(grid.run_outline(px.clone()));
+                    shared += px.len() as u32;
                 }
                 let mut marked: Vec<u32> = marked
                     .iter()
@@ -290,7 +299,7 @@ impl Editor {
                     runs,
                     marked,
                     overlaps,
-                    overlap: (shared > 0).then(|| format!("overlap {shared}")),
+                    overlap: (shared > 0).then(|| format!("{} overlap", lamps_words(shared))),
                 })
             })
             .collect();

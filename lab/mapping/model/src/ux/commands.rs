@@ -99,7 +99,7 @@ impl Editor {
                         t.clone(),
                         "a span is where a segment lands on the wire".into(),
                         match segment {
-                            Some(_) => "U puts its segment back to following; choose Not on the wire in its Patch section to take it off".into(),
+                            Some(_) => "U puts its segment back to the flow; choose Off for On the line in its Segment section to take it off".into(),
                             None => "nothing is there to delete".into(),
                         },
                     ));

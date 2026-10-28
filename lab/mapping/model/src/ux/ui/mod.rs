@@ -18,7 +18,9 @@ mod ui_tree;
 pub use ui_canvas_edge::UiCanvasEdge;
 pub use ui_canvas_node::{DetailLevel, Emphasis, FrameKind, UiCanvasNode};
 pub use ui_canvas_view::{LayoutKind, SizeClass, UiCanvasView, UiCursor, UiCursorNote};
-pub use ui_inspector::{UiCrumb, UiInspector, UiItem, UiSection};
+pub use ui_inspector::{
+    UiCrumb, UiField, UiFieldValue, UiInspector, UiItem, UiProblem, UiSection, UiSource,
+};
 pub use ui_menu::{UiMenu, UiMenuAction, UiMenuItem};
 pub use ui_node_face::{
     FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace, UiPortRow, UiRun,

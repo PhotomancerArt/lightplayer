@@ -347,7 +347,14 @@ impl Project {
                 let title = Rect::new(
                     Vec2::new(rect.min.x, rect.min.y - FRAME_TITLE_PX - 2.0),
                     Vec2::new(
-                        rect.min.x + title_width(&n.name, n.pinned.is_some()),
+                        rect.min.x
+                            + title_width(
+                                &n.name,
+                                n.pinned.is_some(),
+                                n.fixture()
+                                    .and_then(|_| self.problem_count_words(&n.id))
+                                    .as_deref(),
+                            ),
                         rect.min.y - 2.0,
                     ),
                 );
@@ -568,9 +575,14 @@ impl Project {
 
 /// A frame's title tab, in pixels: wide enough for its name, and for the
 /// pinned mark after it when the node is pinned (D48).
-pub fn title_width(name: &str, pinned: bool) -> f64 {
-    14.0 + 7.0 * name.chars().count() as f64 + if pinned { PIN_MARK_PX } else { 0.0 }
+pub fn title_width(name: &str, pinned: bool, problems: Option<&str>) -> f64 {
+    14.0 + 7.0 * name.chars().count() as f64
+        + if pinned { PIN_MARK_PX } else { 0.0 }
+        + problems.map_or(0.0, |p| PROBLEM_GAP_PX + 6.5 * (p.chars().count() + 2) as f64)
 }
+
+/// The room between a title and its problems' count, in pixels.
+pub const PROBLEM_GAP_PX: f64 = 10.0;
 
 /// The room a pinned node's mark takes in its title tab, in pixels.
 pub const PIN_MARK_PX: f64 = 12.0;

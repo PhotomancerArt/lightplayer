@@ -55,7 +55,7 @@ fn seans_eaves() {
     e.patch_input(PatchInput::Override {
         field: PatchField::Direction,
     });
-    choose(&mut e, PatchField::Direction, "Direction", "Reversed");
+    choose(&mut e, PatchField::Direction, "Direction", "Reverse");
     assert_eq!(span(&e.project, &front), Some(("0".into(), 59, 0)));
     assert!(
         truth.matches(&e.project),

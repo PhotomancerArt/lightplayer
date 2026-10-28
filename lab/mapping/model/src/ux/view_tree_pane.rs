@@ -39,6 +39,7 @@ impl Editor {
                     label: r.label,
                     detail: r.detail,
                     derived: r.derived,
+                    problems: r.problems,
                 }
             })
             .collect();

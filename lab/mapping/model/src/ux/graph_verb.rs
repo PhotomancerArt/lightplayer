@@ -46,7 +46,8 @@ pub enum GraphVerb {
     Patch,
     /// M: patch, then on to the next free segment, still armed.
     PatchNext,
-    /// U: take the selected objects off the wire.
+    /// U: Back to the flow: the selected segments' own starts go, and each
+    /// takes what its flow gives it again.
     Unpatch,
     /// S: arm a swap.
     Swap,
@@ -68,7 +69,8 @@ pub enum GraphVerb {
     WirePrevious,
     /// .: the next port's first free segment.
     NextPort,
-    /// ⇧U: every object of the fixture off the wire.
+    /// ⇧U: everything off: every segment of the fixture off the line, to
+    /// patch by hand from nothing.
     UnpatchAll,
     /// ⌘Z
     Undo,
@@ -171,7 +173,7 @@ impl GraphVerb {
             GraphVerb::MoveDraw => "Move & draw",
             GraphVerb::Patch => "Patch",
             GraphVerb::PatchNext => "Patch & next",
-            GraphVerb::Unpatch => "Unpatch",
+            GraphVerb::Unpatch => "Back to the flow",
             GraphVerb::Swap => "Swap",
             GraphVerb::Turn => "Turn",
             GraphVerb::TurnBack => "Turn back",
@@ -182,7 +184,7 @@ impl GraphVerb {
             GraphVerb::WireNext => "Next on wire",
             GraphVerb::WirePrevious => "Previous on wire",
             GraphVerb::NextPort => "Next port",
-            GraphVerb::UnpatchAll => "Unpatch all",
+            GraphVerb::UnpatchAll => "Everything off",
             GraphVerb::Undo => "Undo",
             GraphVerb::Redo => "Redo",
         }

@@ -62,6 +62,7 @@ impl Editor {
                 let fed_by_open =
                     n.output().is_some() && open.iter().any(|f| p.outputs_of(f).contains(&n.id));
                 let size = node_size(n);
+                let problems = n.fixture().and_then(|_| p.problem_count_words(&n.id));
                 UiCanvasNode {
                     id: n.id.clone(),
                     parent: p.parent_module(&n.id).cloned(),
@@ -72,7 +73,8 @@ impl Editor {
                         name: n.name.clone(),
                         kind: n.kind_word().to_string(),
                         pinned: self.debug.pinning && n.pinned.is_some(),
-                        title_px: title_width(&n.name, n.pinned.is_some()),
+                        problems: problems.clone(),
+                        title_px: title_width(&n.name, n.pinned.is_some(), problems.as_deref()),
                     },
                     face: self.view_face(n, &cx),
                     // The stack always shows a card whole.

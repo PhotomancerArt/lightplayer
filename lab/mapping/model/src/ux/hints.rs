@@ -304,7 +304,7 @@ impl Editor {
                 .iter()
                 .all(|o| matches!(p.on_wire(o), OnWire::Placed { .. }))
             {
-                out.push(hv("U", "unpatch", &[GraphVerb::Unpatch]));
+                out.push(hv("U", "back to the flow", &[GraphVerb::Unpatch]));
             }
         }
         let on_ports = !p.wire_ports().is_empty()
@@ -329,7 +329,7 @@ impl Editor {
                 .iter()
                 .any(|o| p.effective_patch().lands(&o.id))
         {
-            out.push(hv("⇧U", "unpatch all", &[GraphVerb::UnpatchAll]));
+            out.push(hv("⇧U", "everything off", &[GraphVerb::UnpatchAll]));
         }
         out
     }

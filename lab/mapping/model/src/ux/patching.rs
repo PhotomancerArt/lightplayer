@@ -16,9 +16,9 @@
 //! Unarmed, the wiring keys act on the selected objects: `R` reverses a
 //! placement (with Move & draw off; on, it reverses the path itself, D3),
 //! `K` `L` turn one lamp, `;` `'` a third, `[` `]` shift a pixel, `U`
-//! puts them back to following their rule. ⇧← ⇧→ walk the places on the wire (spans and free segments),
+//! puts them back to the flow. ⇧← ⇧→ walk the places on the wire (spans and free segments),
 //! `.` jumps to the next port's first free segment. On a fixture, ⇧U turns
-//! every object off.
+//! everything off.
 
 use std::ops::Range;
 
@@ -409,9 +409,9 @@ impl Editor {
         let objects = self.selected_objects();
         if objects.is_empty() {
             self.notice = Some(Notice::refused(
-                "Nothing to unpatch",
-                "U takes segments off the wire",
-                "select the segments to take off",
+                "Nothing to put back to the flow",
+                "U takes away a segment's own start, so it follows its flow again",
+                "select the segments to put back",
             ));
             return;
         }
@@ -420,9 +420,9 @@ impl Editor {
             .find(|o| matches!(self.project.on_wire(o), OnWire::Flowing))
         {
             self.notice = Some(Notice::refused(
-                format!("{} already follows its rule", self.segment_words(o)),
-                "U puts a thing back to following its rule, and it does already",
-                "to take it off the wire, choose Off for On the wire in its Patch section",
+                format!("{} already follows its flow", self.segment_words(o)),
+                "U puts a segment back to the flow, and it is already",
+                "to take it off the line, choose Off for On the line in its Segment section",
             ));
             return;
         }
@@ -433,9 +433,9 @@ impl Editor {
             .count();
         self.after_edit();
         self.notice = Some(Notice::info(match n {
-            0 => "Nothing was on the wire".to_string(),
-            1 => format!("{} unpatched", self.segment_words(&objects[0])),
-            n => format!("{n} segments unpatched"),
+            0 => "Nothing was set here".to_string(),
+            1 => format!("{}: back to the flow", self.segment_words(&objects[0])),
+            n => format!("{n} segments back to the flow"),
         }));
     }
 
@@ -532,8 +532,8 @@ impl Editor {
     pub fn unpatch_all_selected(&mut self) {
         let Some(fixture) = self.selected_fixture() else {
             self.notice = Some(Notice::refused(
-                "No fixture to unpatch",
-                "⇧U takes every segment of one fixture off the wire",
+                "No fixture to turn off",
+                "⇧U takes every segment of one fixture off the line",
                 "select a fixture, or anything in one",
             ));
             return;
@@ -543,7 +543,7 @@ impl Editor {
         self.after_edit();
         let name = self.project.node_name(&fixture);
         self.notice = Some(Notice::info(format!(
-            "{name}: {n} off the wire; patch them by hand"
+            "{name}: everything off, {n} were lit; patch them by hand"
         )));
     }
 

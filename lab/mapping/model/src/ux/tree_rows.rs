@@ -15,8 +15,10 @@ pub struct TreeRow {
     pub label: String,
     /// "25 lamps", "2 rings · 64 lamps".
     pub detail: String,
-    /// Made by its component, not authored: drawn lighter, never dragged.
+    /// Made by its part, not authored: drawn lighter, never dragged.
     pub derived: bool,
+    /// A fixture's problems, while it has any: "2 problems" (loud).
+    pub problems: Option<String>,
 }
 
 impl Project {
@@ -95,6 +97,10 @@ impl Project {
             label: self.label(t),
             detail,
             derived: !t.is_authored(),
+            problems: match t {
+                Target::Node(id) if self.fixture(id).is_some() => self.problem_count_words(id),
+                _ => None,
+            },
         });
         // A port's children are pixels and an object's are lamps, never
         // listed: don't make the dome's 44,000 of them only to skip them.

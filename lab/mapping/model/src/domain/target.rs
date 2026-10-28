@@ -368,11 +368,7 @@ impl Project {
             Target::Part(id) => id.to_string(),
             Target::Generated(o) => self.generated_label(o),
             Target::Lamp { index, .. } => format!("lamp {index}"),
-            Target::Port { output, key } => self
-                .output(output)
-                .and_then(|o| o.port(key))
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| key.clone()),
+            Target::Port { output, key } => self.pin_words(output, key),
             Target::Span { .. } => match self.span_of(t) {
                 Some(s) => {
                     let what = match &s.segment {
@@ -404,13 +400,40 @@ impl Project {
                 let parent = self.tree_target(segment);
                 format!("{} of {}", self.label(t), self.long_label(&parent))
             }
-            Target::Port { output, .. } => {
-                format!("{} of {}", self.label(t), self.node_name(output))
-            }
+            Target::Port { output, key } => self.port_words(output, key),
             Target::Pixel { .. } | Target::Span { .. } => match t.port_of_pixel() {
                 Some(port) => format!("{} of {}", self.label(t), self.long_label(&port)),
                 None => self.label(t),
             },
+        }
+    }
+
+    /// A port as a person says it: its pin, then its output by the name the
+    /// patch says it by: `D1 of main`, `D0 of output 1` (P03's finding:
+    /// never the node or the endpoint).
+    pub fn port_words(&self, output: &NodeId, key: &str) -> String {
+        format!(
+            "{} of {}",
+            self.pin_words(output, key),
+            self.output_words(output)
+        )
+    }
+
+    /// A port's pin, short: `D1` for `ws281x:local:D1`, `GPIO 10`; its key
+    /// when the output doesn't have it.
+    pub fn pin_words(&self, output: &NodeId, key: &str) -> String {
+        match self.output(output).and_then(|o| o.port(key)) {
+            Some(p) => p.name.rsplit(':').next().unwrap_or(&p.name).to_string(),
+            None => format!("port {key}"),
+        }
+    }
+
+    /// An output by its name on the wire: `main`, `output 1` for a numbered
+    /// one; its node's name while it has none.
+    pub fn output_words(&self, output: &NodeId) -> String {
+        match self.output(output).and_then(|o| o.label.as_deref()) {
+            Some(name) => output_name_words(name),
+            None => self.node_name(output),
         }
     }
 
@@ -424,15 +447,22 @@ impl Project {
         }
     }
 
-    /// A generated node's short label: `ring r2`, `copy 2` (the innermost
-    /// copy it is), and a ring in a copy says both (`ring r2 · copy 2`).
+    /// A generated node's short label, in words (lean Q79): `ring r2`,
+    /// `the centre` (a ring of radius 0), `subpath 2`, `copy 2` (the
+    /// innermost copy it is), and a ring in a copy says both
+    /// (`ring r2 · copy 2`).
     fn generated_label(&self, o: &TreeRef) -> String {
         let copy = o.id.copies.first().map(|k| format!("copy {k}"));
+        let keyed = |key: &lpc_mapping::part::SegmentKey| match self.generated_word(o) {
+            "subpath" => format!("subpath {}", key.as_str().trim_start_matches('s')),
+            _ if self.ring_of(o).is_some_and(|r| r.radius == 0.0) => "the centre".to_string(),
+            word => format!("{word} {key}"),
+        };
         match (&o.id.key, copy) {
             (None, Some(copy)) => copy,
             (None, None) => o.id.part.to_string(),
-            (Some(key), None) => format!("{} {key}", self.generated_word(o)),
-            (Some(key), Some(copy)) => format!("{} {key} · {copy}", self.generated_word(o)),
+            (Some(key), None) => keyed(key),
+            (Some(key), Some(copy)) => format!("{} · {copy}", keyed(key)),
         }
     }
 
@@ -488,6 +518,16 @@ fn lamp_targets(segment: &TreeRef, n: usize) -> Vec<Target> {
             index,
         })
         .collect()
+}
+
+/// An output's name on the wire as a person reads it: `main`, and a bare
+/// number as `output 1`.
+pub fn output_name_words(name: &str) -> String {
+    if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) {
+        format!("output {name}")
+    } else {
+        name.to_string()
+    }
 }
 
 /// Pixels in words: `pixel 4`, `pixels 40–63`.

@@ -137,12 +137,11 @@ pub fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
         .into_iter()
         .rev()
         .find_map(|i| match i {
-            UiItem::PatchChoice {
+            UiItem::Field(UiField {
                 label: l,
-                options,
-                chosen,
+                value: UiFieldValue::Choice { options, chosen },
                 ..
-            } if l == label => Some((options, chosen)),
+            }) if l == label => Some((options, chosen)),
             _ => None,
         })
         .unwrap_or_else(|| panic!("no {label} choice"))
@@ -158,12 +157,14 @@ pub fn choose(e: &mut Editor, field: PatchField, label: &str, words: &str) {
     e.patch_input(PatchInput::Choose { field, option });
 }
 
-/// The hints the inspector shows.
+/// The hints the inspector shows, and its rows' notes ("ring r4 and the
+/// centre follow it").
 pub fn hints(e: &Editor) -> Vec<String> {
     rows(e)
         .into_iter()
         .filter_map(|i| match i {
             UiItem::Hint(h) => Some(h),
+            UiItem::Field(f) => f.note,
             _ => None,
         })
         .collect()

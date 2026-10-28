@@ -18,8 +18,11 @@ pub struct UiTreeRow {
     pub label: String,
     /// `25 lamps`, shown on hover.
     pub detail: String,
-    /// Made by its component, not authored.
+    /// Made by its part, not authored: drawn lighter.
     pub derived: bool,
+    /// A fixture's problems, while it has any: "2 problems", drawn loud
+    /// (a mark and the words, never colour alone).
+    pub problems: Option<String>,
     /// `fixture`, `port`; empty for what's drawn.
     pub kind: &'static str,
     pub selected: bool,

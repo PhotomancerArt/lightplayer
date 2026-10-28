@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use lpc_mapping::patching::{PatchTarget, Problem, patch_mapping};
+use lpc_mapping::patching::{PatchTarget, Patching, Problem, patch_mapping};
 
 use crate::domain::color_order::ColorOrder;
 use crate::domain::node::{Node, NodeId};
@@ -164,6 +164,10 @@ pub struct EffectivePatch {
     /// What every node of every fixture's tree did on the walk, and why:
     /// in fixture then tree order.
     pub walked: Vec<Walked>,
+    /// Each fixture's patching as the patcher answered it, in attach order:
+    /// its ports as rows of spans (`port_rows.rs` merges them across
+    /// fixtures), its segments' addresses.
+    pub patchings: Vec<(NodeId, Patching)>,
 }
 
 impl EffectivePatch {
@@ -305,6 +309,7 @@ impl Project {
                     .collect();
                 self.gather(&n.id, &id, &lamps, &mut patch);
             }
+            patch.patchings.push((n.id.clone(), patching));
         }
         patch.find_overlaps();
         patch
@@ -530,9 +535,10 @@ impl Project {
         out
     }
 
-    /// A node as a person names it: `door`, `circle1/r3`, `panel@2`.
+    /// A node as a person names it: `door`, `ring r3`, `the centre`,
+    /// `copy 2` (the tree's words; the id is the inspector's title's).
     pub fn segment_words(&self, o: &TreeRef) -> String {
-        o.id.to_string()
+        self.label(&self.tree_target(o))
     }
 
     /// What a patch target names, in words.

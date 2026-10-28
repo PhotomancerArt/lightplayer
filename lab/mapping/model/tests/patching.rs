@@ -330,8 +330,8 @@ fn r_reverses_the_placement_with_move_and_draw_off() {
     assert_ne!(e.project.part(&c).cloned(), path, "now the path reverses");
 }
 
-/// U on a segment that already follows is refused, and says how to take
-/// it off the wire.
+/// U (Back to the flow) on a segment that already follows its flow is
+/// refused, and says how to take it off the line.
 #[test]
 fn unpatching_what_already_follows_says_how_to_take_it_off() {
     let (mut p, f, out, segments) = paths(&[("D0", 40)], &[3]);
@@ -341,7 +341,7 @@ fn unpatching_what_already_follows_says_how_to_take_it_off() {
     key(&mut e, Key::Char('u'), none());
     let n = e.notice.clone().unwrap();
     assert_eq!(n.kind, NoticeKind::Refused);
-    assert!(n.help.unwrap().contains("On the wire"));
+    assert!(n.help.unwrap().contains("On the line"));
 }
 
 /// ⇧→ walks the wire span by span: the segments on it and the gaps
@@ -540,57 +540,58 @@ fn an_offset_is_a_leafs_alone() {
 
 // ---- the patching rows ------------------------------------------------------
 
-/// The inspector shows the part, then its node on the wire: a circle's
-/// section has its properties and rules (Start, Children), then its node's
-/// rows; a ring's has the circle's (every ring changes with it), then the
-/// ring's own, as a segment. A fixture has its rules. A ring of a circle
-/// that starts nowhere lands nowhere, and offers its ports.
+/// The inspector shows the part, then its segment: a ring's shows the
+/// circle's section (its Flow and Start: every ring changes with it), then
+/// the ring's own rows. A circle, which has no segment of its own, is one
+/// section: its Flow and Start, then its own node's Direction and On the
+/// line. A fixture has its Flow and Start. A ring of a circle that starts
+/// nowhere lands nowhere, and offers its ports.
 #[test]
-fn the_inspector_shows_the_part_then_its_node_on_the_wire() {
+fn the_inspector_shows_the_part_then_its_segment() {
     let (p, f, _, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
     e.select(vec![Target::Generated(ring(&circle, "r2"))]);
     let sections = patch_labels(&e);
     assert_eq!(sections[0].0, "Part · circle1");
-    assert!(sections[0].1.ends_with(&["Start", "Children"]));
+    assert!(sections[0].1.ends_with(&["Flow", "Start"]));
     assert_eq!(sections[1].0, "Segment · circle1/r2");
-    assert!(
-        sections[1]
-            .1
-            .ends_with(&["Port", "Pixel", "Direction", "Offset", "On the wire"])
-    );
+    assert!(sections[1].1.ends_with(&[
+        "Output",
+        "Port",
+        "Starts at",
+        "Direction",
+        "Offset",
+        "On the line"
+    ]));
     assert_eq!(choice(&e, "Port").1, None, "nowhere yet: choose one");
     e.select(vec![Target::Part(circle.clone())]);
     let sections = patch_labels(&e);
     assert_eq!(sections[0].0, "Part · circle1");
-    assert_eq!(sections[1].0, "On the wire · circle1");
     assert!(
-        sections[1]
+        sections[0]
             .1
-            .ends_with(&["Port", "Pixel", "Direction", "On the wire"])
+            .ends_with(&["Flow", "Start", "Direction", "On the line"]),
+        "{sections:?}"
     );
+    assert!(!sections.iter().any(|s| s.0.starts_with("Segment")));
     e.select(vec![Target::Node(f.clone())]);
-    assert_eq!(
-        e.rule_rows().map(|r| r.len()),
-        Some(2),
-        "Start and Children"
-    );
+    assert_eq!(e.rule_rows().map(|r| r.len()), Some(2), "Flow and Start");
 }
 
-/// Choosing a port puts the thing at that port's first pixel ("ring 3 is
-/// on D9, ch 0"); − + move its start.
+/// Choosing a port puts the segment at that port's first lamp ("ring 3 is
+/// on D9, from its first lamp"); Starts at's − + move its start.
 #[test]
 fn choosing_a_port_places_it_and_pixel_moves_it() {
     let (p, _, out, circle) = circle(&[("D0", 40)]);
     let mut e = editor_of(p);
-    e.select(vec![Target::Part(circle.clone())]);
+    let r1 = ring(&circle, "r1");
+    e.select(vec![Target::Generated(r1.clone())]);
     let (options, _) = choice(&e, "Port");
     let d0 = options.iter().position(|o| o.starts_with("D0")).unwrap();
     e.patch_input(PatchInput::Choose {
         field: PatchField::Port,
         option: d0,
     });
-    let r1 = ring(&circle, "r1");
     assert_eq!(landing(&e.project, &r1, 0), Some(("0".into(), 0)));
     e.patch_input(PatchInput::Nudge {
         field: PatchField::Pixel,
@@ -617,16 +618,16 @@ fn a_ring_with_a_port_of_its_own_says_what_follows_it() {
         field: PatchField::Port,
         option: d1,
     });
-    let hints: Vec<String> = rows(&e)
+    let notes: Vec<String> = rows(&e)
         .into_iter()
         .filter_map(|i| match i {
-            UiItem::Hint(h) => Some(h),
+            UiItem::Field(f) => f.note,
             _ => None,
         })
         .collect();
     assert!(
-        hints.contains(&"ring r2 follows it".to_string()),
-        "{hints:?}"
+        notes.contains(&"ring r2 follows it".to_string()),
+        "{notes:?}"
     );
 }
 
@@ -650,7 +651,7 @@ fn reversing_one_ring_from_the_section_keeps_its_address() {
         field: PatchField::Direction,
     });
     let (options, _) = choice(&e, "Direction");
-    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    let reversed = options.iter().position(|o| o == "Reverse").unwrap();
     e.patch_input(PatchInput::Choose {
         field: PatchField::Direction,
         option: reversed,
@@ -671,7 +672,7 @@ fn two_segments_edit_together_and_say_mixed() {
         field: PatchField::Direction,
     });
     let (options, _) = choice(&e, "Direction");
-    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    let reversed = options.iter().position(|o| o == "Reverse").unwrap();
     e.patch_input(PatchInput::Choose {
         field: PatchField::Direction,
         option: reversed,
@@ -716,12 +717,12 @@ fn a_walked_value_names_where_it_came_from() {
     let (value, from) = inherited(&e, "Port");
     assert_eq!(value, "D0 of out");
     let (words, target) = from.unwrap();
-    assert_eq!(words, "from fixture f's start");
+    assert_eq!(words, "from the fixture's start");
     assert_eq!(target, Target::Node(f.clone()));
     e.select(vec![Target::Generated(ring(&circle, "r2"))]);
-    assert_eq!(inherited(&e, "Pixel").0, "18");
-    let (words, target) = inherited(&e, "Pixel").1.unwrap();
-    assert_eq!(words, "after ring r1");
+    assert_eq!(inherited(&e, "Starts at").0, "18 lamps");
+    let (words, target) = inherited(&e, "Starts at").1.unwrap();
+    assert_eq!(words, "follows ring r1");
     assert_eq!(target, Target::Generated(r1));
 }
 
@@ -743,13 +744,13 @@ fn override_moves_nothing_and_reset_follows_again() {
     assert_eq!(options[chosen.unwrap()], "D0 of out");
     assert_eq!(
         choice(&e, "Direction").0[choice(&e, "Direction").1.unwrap()],
-        "As drawn"
+        "Forward"
     );
     for field in [PatchField::Port, PatchField::Direction] {
         e.patch_input(PatchInput::Reset { field });
     }
     assert_eq!(e.project.effective_patch().pixel_runs, before);
-    assert_eq!(inherited(&e, "Port").1.unwrap().0, "after ring r1");
+    assert_eq!(inherited(&e, "Port").1.unwrap().0, "follows ring r1");
 
     // From the fixture's own start too: each ring taking its place as its
     // own keeps the order.
@@ -819,7 +820,7 @@ fn a_spans_patch_section_edits_its_segment() {
         field: PatchField::Direction,
     });
     let (options, _) = choice(&e, "Direction");
-    let reversed = options.iter().position(|o| o == "Reversed").unwrap();
+    let reversed = options.iter().position(|o| o == "Reverse").unwrap();
     e.patch_input(PatchInput::Choose {
         field: PatchField::Direction,
         option: reversed,
@@ -1003,13 +1004,11 @@ fn patch_labels(e: &Editor) -> Vec<(String, Vec<&'static str>)> {
                 .items
                 .iter()
                 .filter_map(|i| match i {
-                    UiItem::PatchChoice { label, .. }
-                    | UiItem::PatchInherited { label, .. }
-                    | UiItem::PatchNumber { label, .. } => Some(*label),
+                    UiItem::Field(f) => Some(f.label),
                     _ => None,
                 })
                 .collect();
-            (s.title.unwrap_or_default(), labels)
+            (s.heading(), labels)
         })
         .collect()
 }
@@ -1030,29 +1029,33 @@ fn choice(e: &Editor, label: &str) -> (Vec<String>, Option<usize>) {
         .into_iter()
         .rev()
         .find_map(|i| match i {
-            UiItem::PatchChoice {
+            UiItem::Field(UiField {
                 label: l,
-                options,
-                chosen,
+                value: UiFieldValue::Choice { options, chosen },
                 ..
-            } if l == label => Some((options, chosen)),
+            }) if l == label => Some((options, chosen)),
             _ => None,
         })
         .unwrap()
 }
 
-/// A Patch inherited row's value and where it is set.
+/// A patching row's value in words, and where it came from (the words and
+/// what they select).
 fn inherited(e: &Editor, label: &str) -> (String, Option<(String, Target)>) {
     rows(e)
         .into_iter()
         .rev()
         .find_map(|i| match i {
-            UiItem::PatchInherited {
-                label: l,
-                value,
-                from,
-                ..
-            } if l == label => Some((value, from)),
+            UiItem::Field(f) if f.label == label => Some((
+                f.value_words(),
+                match f.source {
+                    Some(UiSource::From {
+                        words,
+                        target: Some(t),
+                    }) => Some((words, t)),
+                    _ => None,
+                },
+            )),
             _ => None,
         })
         .unwrap()

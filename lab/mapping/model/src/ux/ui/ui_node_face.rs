@@ -132,19 +132,21 @@ pub struct UiPortRow {
     /// Pixels ringed: the pixel of each selected lamp (D47), and while a
     /// patch is armed, the candidate in focus.
     pub marked: Vec<u32>,
-    /// Where two objects share pixels (plan D7): their outline, and the
-    /// words for the row (`overlap 3`).
+    /// Where two segments share channels (plan D7; `port_rows.rs`): their
+    /// outline, and the words for the row (`3 lamps overlap`), loud.
     pub overlaps: Vec<Rect>,
     pub overlap: Option<String>,
 }
 
 /// The outline round one run of a port's pixels: one box per line it
-/// covers. Lit while its object is hovered or selected; quiet when no
-/// object is patched there.
+/// covers. Lit while its segment is hovered or selected; quiet when no
+/// segment is patched there (a gap).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiRun {
     pub rects: Vec<Rect>,
     pub emphasis: Emphasis,
+    /// What it is, in lamps: "ring r3 · 12 lamps", "gap · 16 lamps".
+    pub label: String,
 }
 
 /// A shader or other render source: what it is and where it writes.

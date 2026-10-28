@@ -53,7 +53,7 @@ fn a_dome_slice() {
     // 2. Set the repeat's Children to end to end: nothing moves, since each
     //    copy fills its port and the next one starts the next port.
     e.select(vec![Target::Part(sector.clone())]);
-    choose(&mut e, PatchField::Children, "Children", "End to end");
+    choose(&mut e, PatchField::Children, "Flow", "End to end");
     every_copy_on_its_port(&e.project);
 
     // 3. Under end to end, give copy 3 port 4: copy 4 follows it there,
@@ -62,7 +62,7 @@ fn a_dome_slice() {
     e.patch_input(PatchInput::Override {
         field: PatchField::Port,
     });
-    choose(&mut e, PatchField::Port, "Port", "ws281x:local:IO16");
+    choose(&mut e, PatchField::Port, "Port", "IO16");
     assert_eq!(landing(&e.project, &copy(3), 0), Some(("4".into(), 0)));
     assert_eq!(
         landing(&e.project, &copy(4), 0),
@@ -77,8 +77,8 @@ fn a_dome_slice() {
     choose(
         &mut e,
         PatchField::Children,
-        "Children",
-        "One per port from ws281x:local:IO18",
+        "Flow",
+        "One per port from IO18",
     );
     let p = &e.project;
     assert_eq!(

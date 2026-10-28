@@ -10,6 +10,8 @@
 
 use crate::domain::geom::Vec2;
 use crate::domain::node::NodeId;
+use crate::domain::part_ref::TreeRef;
+use crate::ux::debug_flags::Presentation;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::editor::{Button, Editor, Key, Mods, Tool};
@@ -98,6 +100,14 @@ pub enum GraphInput {
     Pinning(bool),
     /// Debug's Size.
     ForceSizeClass(Option<SizeClass>),
+    /// Debug's Presentation: how the inspector shows a start against its
+    /// flow (view state; the page remembers it per browser).
+    Presentation(Presentation),
+    /// Debug's Cursor ops: the patcher's steps under the inspector.
+    CursorOps(bool),
+    /// A problem's Remove: take away an override whose node is gone (one
+    /// undo step). An offer from P06.
+    RemoveOverride(TreeRef),
     /// A verb by name, as its key does it.
     Verb(GraphVerb),
     /// How output cards group a port's pixels.
@@ -139,6 +149,9 @@ impl Editor {
             GraphInput::Redo => self.redo(),
             GraphInput::Pinning(on) => self.set_pinning(on),
             GraphInput::ForceSizeClass(class) => self.force_size_class(class),
+            GraphInput::Presentation(presentation) => self.debug.presentation = presentation,
+            GraphInput::CursorOps(on) => self.debug.cursor_ops = on,
+            GraphInput::RemoveOverride(node) => self.remove_gone_override(&node),
             GraphInput::Verb(verb) => return self.press(verb),
             GraphInput::Grouping(g) => self.grouping = g,
             GraphInput::Patch(input) => self.patch_input(input),

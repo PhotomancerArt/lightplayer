@@ -9,34 +9,34 @@
 //! Set to lamp 0). A start that is none of those shows no choice.
 //!
 //! ```text
-//! circle1 · circle                     the component's rules
-//!   Start       [ Follows ▾ ]            Follows · <output> <port> · Next port
-//!   Children    [ End to end ▾ ]         End to end · One per port from <port>
+//! Part · circle1                       the part: its start and flow
+//!   Flow        [ End to end ▾ ]         End to end · One per port from <port>
+//!   Start       [ Follows ▾ ]            (containers, and parts in a repeat)
 //!
-//! r3 · ring                            the object, against its rule
-//!   Port        D0 of main  · from circle1: end to end ↗   [Override]
-//!   Pixel       24          · after ring r2 ↗              [Override]
-//!   Port        [ D9 of main ▾ ]  [Reset]                  its own
-//!               ring r4 and ring r5 follow it              what moves with it
-//!   Direction   As drawn                                   [Override]
-//!   Offset      [ − ] 0 [ + ]
-//!   On the wire [ Yes ▾ ]
+//! Segment · circle1/r3                 the node, against what it is given
+//!   Output      main                    from circle1's flow: one per port ↗
+//!   Port        [ D2 of main ▾ ]        set here · Back to the flow
+//!               ring r4 and the centre follow it
+//!   Starts at   [ − ] 0 [ + ] lamps     follows ring r2 ↗
+//!   Direction   [ Reverse ▾ ]           from circle1 ↗
+//!   Offset      [ − ] 0 [ + ] lamps
+//!   On the line [ Yes ▾ ]
 //! ```
 //!
-//! A value that comes from a rule says what it is and where it came from,
-//! never just "follows": the link selects the rule's owner. Override makes
-//! the value the object's own without moving anything; Reset hands it back.
+//! Presentation A (the default, these rows) says where each value came
+//! from (`start_words.rs`); presentation B (`presentation_b.rs`) shows the
+//! flow's start as one line, then only what is set here. Both read the
+//! same facts; Debug switches them (lean Q82).
 //!
 //! A row's options are worked out from the project, so a choice names this
-//! project's own outputs and ports; that is why these are rows of their
-//! own and not property descriptors (whose choices are fixed lists). They
-//! follow the same rules: every selected thing is edited together, a
-//! value they don't share shows as mixed, and every edit is one undo
-//! step. The keys do the same edits (`patching.rs`).
+//! project's own outputs and ports (by the name the patch says them by);
+//! that is why these are rows of their own and not property descriptors.
+//! They follow the same rules: every selected thing is edited together, a
+//! value they don't share shows as mixed, and every edit is one undo step.
+//! The keys do the same edits (`patching.rs`).
 
 use lpc_mapping::patching::{
-    Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, PatchTarget, PortOp, Start,
-    StepSource, Unit,
+    Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, PatchTarget, PortOp, Start, Unit,
 };
 
 use crate::domain::node::NodeId;
@@ -44,25 +44,28 @@ use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::patch_edits::{moves_start, port_key};
 use crate::domain::target::{Target, is_single_segment};
 use crate::domain::walked::{Cursor, Walked};
+use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::Editor;
-use crate::ux::ui::UiItem;
+use crate::ux::ui::{UiField, UiFieldValue, UiItem, UiSource};
 
 /// Which patching row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchField {
-    /// A fixture's or a component's Start rule.
+    /// A fixture's or a part's Start.
     Start,
-    /// The pixel its Start is at.
+    /// The lamp its Start is at ("Starts at" under Start).
     StartPixel,
-    /// A fixture's or a container's Children rule.
+    /// A fixture's or a container's Flow.
     Children,
-    /// An object's output and port.
+    /// A node's output (read here; the Port row chooses it).
+    Output,
+    /// A node's output and port.
     Port,
-    /// An object's start on its port.
+    /// A node's start on its port ("Starts at").
     Pixel,
     Direction,
     Offset,
-    /// On the wire, or off.
+    /// On the line, or off.
     OnWire,
 }
 
@@ -71,13 +74,16 @@ pub enum PatchField {
 pub enum PatchInput {
     /// The option at this index of the row's list.
     Choose { field: PatchField, option: usize },
-    /// Make a value from a rule the object's own, as it is now.
+    /// Make a value from the flow the node's own, as it is now.
     Override { field: PatchField },
-    /// Drop the object's own value and take its rule's again.
+    /// Back to the flow: drop the node's own value.
     Reset { field: PatchField },
     /// − or + on a number row.
     Nudge { field: PatchField, by: i64 },
-    /// A gap's "Patch here": this object (by its index in
+    /// Stays here: hold the cursor where it is, whatever the flow says (an
+    /// explicit keep, G1 answer 7).
+    Stay { field: PatchField },
+    /// A gap's "Patch here": this segment (by its index in
     /// `Editor::patch_here_options`) at the gap's start.
     PatchHere { option: usize },
 }
@@ -89,10 +95,12 @@ pub enum PatchOption {
     At(NodeId, String),
     NextPort,
     EndToEnd,
-    /// One per port from this port of this output (the rule keeps only the
+    /// One per port from this port of this output (the flow keeps only the
     /// port's key; the output names it for the person).
     OnePerPort(NodeId, String),
     Port(NodeId, String),
+    /// An explicit keep: the port the cursor is on.
+    StaysHere,
     AsDrawn,
     Reversed,
     OnWire,
@@ -100,7 +108,8 @@ pub enum PatchOption {
 }
 
 impl Editor {
-    /// What the selection's rules are on: a fixture node, or a component.
+    /// What the selection's starts and flows are on: a fixture node, or a
+    /// part.
     pub fn rule_targets(&self) -> Vec<(NodeId, PatchTarget)> {
         let p = &self.project;
         let mut out = Vec::new();
@@ -124,8 +133,8 @@ impl Editor {
         out
     }
 
-    /// The object nodes the selection stands for: a component's own node,
-    /// an object, a span's object.
+    /// The nodes the selection stands for: a part's own node, a generated
+    /// one, a span's segment.
     pub fn patch_objects(&self) -> Vec<(NodeId, TreeRef)> {
         let p = &self.project;
         let mut out = Vec::new();
@@ -148,15 +157,16 @@ impl Editor {
         out
     }
 
-    /// The patching rows for the selection: its rules, then its objects'.
+    /// The patching rows for the selection: its starts and flows, then its
+    /// nodes'.
     pub fn patch_section(&self) -> Option<Vec<UiItem>> {
         let mut items = self.rule_rows().unwrap_or_default();
         items.extend(self.object_rows().unwrap_or_default());
         (!items.is_empty()).then_some(items)
     }
 
-    /// The rules rows: Start, and on a container Children. `None` unless
-    /// every selected thing has rules.
+    /// The Start and Flow rows. `None` unless every selected thing has
+    /// them.
     pub fn rule_rows(&self) -> Option<Vec<UiItem>> {
         let targets = self.rule_targets();
         if targets.is_empty() || targets.len() != self.selection.len() {
@@ -165,59 +175,87 @@ impl Editor {
         Some(self.rule_rows_for(&targets))
     }
 
-    /// The rules rows for these fixtures or components.
+    /// The Start and Flow rows for these fixtures or parts: Flow on a
+    /// container, then Start (lean Q83: a part's Start shows only on a
+    /// container and on a part inside a repeat; a fixture always has one).
     pub fn rule_rows_for(&self, targets: &[(NodeId, PatchTarget)]) -> Vec<UiItem> {
         let targets = targets.to_vec();
         let fixture_only = targets.iter().all(|(_, t)| *t == PatchTarget::Fixture);
         let mut items = Vec::new();
 
+        if targets.iter().all(|(_, t)| self.is_container(t)) {
+            let options = self.children_options(&targets);
+            let chosen = self.shared(&targets, |f, t| {
+                Some(children_option(&self.rules_on(f, t).1))
+            });
+            items.push(UiItem::Field(UiField {
+                label: "Flow",
+                field: PatchField::Children,
+                value: UiFieldValue::Choice {
+                    options: options.iter().map(|o| self.option_words(o)).collect(),
+                    chosen: chosen.and_then(|c| options.iter().position(|o| c.matches(o))),
+                },
+                source: None,
+                note: None,
+            }));
+        }
+
+        let shows_start = targets.iter().all(|(f, t)| match t {
+            PatchTarget::Fixture => true,
+            PatchTarget::Part(part) => {
+                let r = PartRef::new(f, part);
+                self.is_container(t) || self.project.in_repeat(&r)
+            }
+            PatchTarget::Node(_) => false,
+        });
+        if !shows_start {
+            return items;
+        }
         let starts = self.start_options(fixture_only);
         let chosen = self.shared(&targets, |f, t| self.start_option(&self.rules_on(f, t).0));
-        items.push(UiItem::PatchChoice {
-            label: "Start",
-            options: starts.iter().map(|o| self.option_words(o)).collect(),
-            chosen: chosen.and_then(|c| starts.iter().position(|o| *o == c)),
-            reset: None,
-            field: PatchField::Start,
+        let every_copy = targets.iter().all(|(f, t)| match t {
+            PatchTarget::Part(part) => self.project.in_repeat(&PartRef::new(f, part)),
+            _ => false,
         });
+        items.push(UiItem::Field(UiField {
+            label: "Start",
+            field: PatchField::Start,
+            value: UiFieldValue::Choice {
+                options: starts.iter().map(|o| self.option_words(o)).collect(),
+                chosen: chosen.and_then(|c| starts.iter().position(|o| *o == c)),
+            },
+            source: None,
+            note: every_copy.then(|| "every copy starts this way".to_string()),
+        }));
         if targets.iter().all(|(f, t)| {
             matches!(
                 self.start_option(&self.rules_on(f, t).0),
                 Some(PatchOption::At(..))
             )
         }) {
-            let pixel = self.shared(&targets, |f, t| match &self.rules_on(f, t).0.channel {
+            let lamp = self.shared(&targets, |f, t| match &self.rules_on(f, t).0.channel {
                 ChannelOp::Set(amount) => {
                     Some(channels(*amount, self.per_lamp(f)) as i64 / self.per_lamp(f) as i64)
                 }
                 _ => None,
             });
-            items.push(UiItem::PatchNumber {
-                label: "Pixel",
-                value: pixel,
-                note: None,
-                reset: None,
+            items.push(UiItem::Field(UiField {
+                label: "Starts at",
                 field: PatchField::StartPixel,
-            });
-        }
-        if targets.iter().all(|(_, t)| self.is_container(t)) {
-            let options = self.children_options(&targets);
-            let chosen = self.shared(&targets, |f, t| {
-                Some(children_option(&self.rules_on(f, t).1))
-            });
-            items.push(UiItem::PatchChoice {
-                label: "Children",
-                options: options.iter().map(|o| self.option_words(o)).collect(),
-                chosen: chosen.and_then(|c| options.iter().position(|o| c.matches(o))),
-                reset: None,
-                field: PatchField::Children,
-            });
+                value: UiFieldValue::Number {
+                    value: lamp,
+                    unit: "lamps",
+                    stays: false,
+                },
+                source: None,
+                note: None,
+            }));
         }
         items
     }
 
-    /// The object rows: where it is on the walk and why, against its rule.
-    /// `None` unless every selected thing stands for an object.
+    /// The node rows: where it is on the walk and why. `None` unless every
+    /// selected thing stands for a node.
     pub fn object_rows(&self) -> Option<Vec<UiItem>> {
         let objects = self.patch_objects();
         if objects.is_empty() || objects.len() != self.selection.len() {
@@ -226,8 +264,19 @@ impl Editor {
         self.object_rows_for(&objects)
     }
 
-    /// The object rows for these objects; `None` when one isn't on the walk.
+    /// The node rows for these nodes, in the presentation Debug chose;
+    /// `None` when one isn't on the walk.
     pub fn object_rows_for(&self, objects: &[(NodeId, TreeRef)]) -> Option<Vec<UiItem>> {
+        let fields = self.node_fields(objects)?;
+        Some(match self.debug.presentation {
+            Presentation::A => fields.into_iter().map(UiItem::Field).collect(),
+            Presentation::B => self.presentation_b(objects, fields),
+        })
+    }
+
+    /// Every row a node has, each with its value and where it came from
+    /// (presentation A; B keeps only those set here).
+    pub fn node_fields(&self, objects: &[(NodeId, TreeRef)]) -> Option<Vec<UiField>> {
         let p = &self.project;
         let patch = p.effective_patch();
         let walked: Vec<(&NodeId, &TreeRef, &Walked)> = objects
@@ -238,118 +287,124 @@ impl Editor {
             return None;
         }
         let own = |o: &TreeRef| p.override_of(o).cloned().unwrap_or_default();
-        let mut items = Vec::new();
+        let segments = walked
+            .iter()
+            .all(|(_, o, _)| p.placed().node(o).is_some_and(|(_, n)| n.is_leaf()));
+        let mut fields = Vec::new();
 
-        // Port: output and port together.
-        let port_own = walked.iter().all(|(_, o, _)| {
-            let x = own(o);
-            x.output.is_some() || x.port.is_some()
-        });
-        let place = |w: &Walked| -> Option<(NodeId, String)> {
-            let at = w.landed.as_ref().unwrap_or(&w.at);
-            Some((at.output.clone()?, at.port.clone()?))
-        };
-        let nowhere = walked.iter().all(|(_, _, w)| place(w).is_none());
-        if port_own || nowhere {
-            let ports = self.port_options();
+        if segments {
+            let place = |w: &Walked| -> Option<(NodeId, String)> {
+                let at = w.landed.as_ref().unwrap_or(&w.at);
+                Some((at.output.clone()?, at.port.clone()?))
+            };
+            // Output: read here; the Port row chooses it.
+            let output = self.shared_walked(&walked, |w| {
+                let at = w.landed.as_ref().unwrap_or(&w.at);
+                Some(match (&at.output, &at.output_name) {
+                    (Some(o), _) => p.output_words(o),
+                    (None, Some(name)) => format!("{name}, which isn't there"),
+                    (None, None) => "nowhere yet".into(),
+                })
+            });
+            fields.push(UiField {
+                label: "Output",
+                field: PatchField::Output,
+                value: UiFieldValue::Text(output.unwrap_or_else(|| "mixed".into())),
+                source: self.shared_source(&walked, 0),
+                note: None,
+            });
+
+            // Port: output and port together, with the presets.
+            let ports = self.node_port_options();
             let chosen = self.shared_walked(&walked, |w| {
                 place(w).map(|(out, port)| PatchOption::Port(out, port))
             });
-            items.push(UiItem::PatchChoice {
+            let mut notes = Vec::new();
+            if let [(_, o, w)] = walked.as_slice() {
+                if w.wrapped {
+                    notes.push("moved on to the next port: it didn't fit".to_string());
+                }
+                if moves_start(&own(o))
+                    && !w.off
+                    && let Some(words) = p.follows_it_words(o)
+                {
+                    notes.push(words);
+                }
+            }
+            fields.push(UiField {
                 label: "Port",
-                options: ports.iter().map(|o| self.option_words(o)).collect(),
-                chosen: chosen.and_then(|c| ports.iter().position(|o| *o == c)),
-                reset: port_own.then(|| "its rule".into()),
                 field: PatchField::Port,
+                value: UiFieldValue::Choice {
+                    options: ports.iter().map(|o| self.option_words(o)).collect(),
+                    chosen: chosen.and_then(|c| ports.iter().position(|o| *o == c)),
+                },
+                source: self.shared_source(&walked, 1),
+                note: (!notes.is_empty()).then(|| notes.join(" · ")),
             });
-        } else {
+
+            // Starts at: in lamps, in channels only off a lamp boundary.
+            let channel = |w: &Walked| w.landed.as_ref().unwrap_or(&w.at).channel;
+            let off_boundary = walked
+                .iter()
+                .any(|(f, _, w)| channel(w) % self.per_lamp(f) != 0);
             let value = self.shared_walked(&walked, |w| {
-                let words = match place(w) {
-                    Some((out, port)) => self.port_words(&out, &port),
-                    None => "nowhere yet".into(),
-                };
-                Some(if w.wrapped {
-                    format!("{words} · moved on: it didn't fit")
+                Some(if off_boundary {
+                    channel(w) as i64
                 } else {
-                    words
+                    channel(w) as i64 / self.per_lamp(&w.fixture) as i64
                 })
             });
-            items.push(UiItem::PatchInherited {
-                label: "Port",
-                value: value.unwrap_or_else(|| "mixed".into()),
-                from: self.shared_source(&walked, 1),
-                field: PatchField::Port,
-            });
-        }
-
-        // Pixel: its start on the port.
-        let pixel = self.shared_walked(&walked, |w| {
-            let at = w.landed.as_ref().unwrap_or(&w.at);
-            Some(at.channel as i64 / self.per_lamp(&w.fixture) as i64)
-        });
-        let pixel_own = walked.iter().all(|(_, o, _)| own(o).channel.is_some());
-        if pixel_own {
-            items.push(UiItem::PatchNumber {
-                label: "Pixel",
-                value: pixel,
+            fields.push(UiField {
+                label: "Starts at",
+                field: PatchField::Pixel,
+                value: UiFieldValue::Number {
+                    value,
+                    unit: if off_boundary { "channels" } else { "lamps" },
+                    stays: true,
+                },
+                source: self.shared_source(&walked, 2),
                 note: None,
-                reset: Some("its rule".into()),
-                field: PatchField::Pixel,
             });
-        } else {
-            items.push(UiItem::PatchInherited {
-                label: "Pixel",
-                value: pixel.map_or_else(|| "mixed".into(), |v| v.to_string()),
-                from: self.shared_source(&walked, 2),
-                field: PatchField::Pixel,
-            });
-        }
-        if let [(f, o, _)] = walked.as_slice()
-            && moves_start(&own(o))
-            && let Some(words) = self.followers_words(f, o)
-        {
-            items.push(UiItem::Hint(words));
         }
 
         // Direction.
+        let options = [PatchOption::AsDrawn, PatchOption::Reversed];
         let direction = self.shared_walked(&walked, |w| Some(direction_option(w.direction)));
-        if walked.iter().all(|(_, o, _)| own(o).direction.is_some()) {
-            let options = [PatchOption::AsDrawn, PatchOption::Reversed];
-            items.push(UiItem::PatchChoice {
-                label: "Direction",
+        let ring_note = match walked.as_slice() {
+            [(_, o, _)] if p.ring_of(o).is_some() => Some(
+                "this ring only, on the line: its lamps stay where they are (the circle's \
+                 Counter-clockwise turns every ring)"
+                    .to_string(),
+            ),
+            _ => None,
+        };
+        fields.push(UiField {
+            label: "Direction",
+            field: PatchField::Direction,
+            value: UiFieldValue::Choice {
                 options: options.iter().map(|o| self.option_words(o)).collect(),
                 chosen: direction.and_then(|c| options.iter().position(|o| *o == c)),
-                reset: Some("as drawn".into()),
-                field: PatchField::Direction,
-            });
-        } else {
-            items.push(UiItem::PatchInherited {
-                label: "Direction",
-                value: direction.map_or_else(|| "mixed".into(), |d| self.option_words(&d)),
-                from: None,
-                field: PatchField::Direction,
-            });
-        }
+            },
+            source: self.shared_override_source(&walked, |x| x.direction.is_some()),
+            note: ring_note,
+        });
 
-        // Offset: leaves only.
-        if walked
-            .iter()
-            .all(|(_, o, _)| p.placed().node(o).is_some_and(|(_, n)| n.is_leaf()))
-        {
-            let offset = self.shared_walked(&walked, |w| Some(w.offset as i64));
-            items.push(UiItem::PatchNumber {
+        // Offset: segments only.
+        if segments {
+            fields.push(UiField {
                 label: "Offset",
-                value: offset,
-                note: Some("lamps".into()),
-                reset: walked
-                    .iter()
-                    .all(|(_, o, _)| own(o).offset.is_some())
-                    .then(|| "none".into()),
                 field: PatchField::Offset,
+                value: UiFieldValue::Number {
+                    value: self.shared_walked(&walked, |w| Some(w.offset as i64)),
+                    unit: "lamps",
+                    stays: false,
+                },
+                source: self.shared_override_source(&walked, |x| x.offset.is_some()),
+                note: None,
             });
         }
 
-        // On the wire.
+        // On the line.
         let options = [PatchOption::OnWire, PatchOption::Off];
         let chosen = self.shared_walked(&walked, |w| {
             Some(if w.off {
@@ -358,17 +413,24 @@ impl Editor {
                 PatchOption::OnWire
             })
         });
-        items.push(UiItem::PatchChoice {
-            label: "On the wire",
-            options: options.iter().map(|o| self.option_words(o)).collect(),
-            chosen: chosen.and_then(|c| options.iter().position(|o| *o == c)),
-            reset: None,
+        let note = match walked.as_slice() {
+            [(_, o, w)] if w.off => p.moves_back_words(o),
+            _ => None,
+        };
+        fields.push(UiField {
+            label: "On the line",
             field: PatchField::OnWire,
+            value: UiFieldValue::Choice {
+                options: options.iter().map(|o| self.option_words(o)).collect(),
+                chosen: chosen.and_then(|c| options.iter().position(|o| *o == c)),
+            },
+            source: self.shared_override_source(&walked, |x| x.off),
+            note,
         });
-        Some(items)
+        Some(fields)
     }
 
-    /// What a gap's "Patch here" offers: the objects not on the wire, in
+    /// What a gap's "Patch here" offers: the segments not on the line, in
     /// tree order.
     pub fn patch_here_options(&self) -> Vec<TreeRef> {
         let p = &self.project;
@@ -466,19 +528,54 @@ impl Editor {
             PatchInput::Choose {
                 field: PatchField::Port,
                 option,
+            } => match self.node_port_options().get(option).cloned() {
+                // A port of its own starts it at that port's first lamp:
+                // "ring 3 is on D9, from its first lamp".
+                Some(PatchOption::Port(out, port)) => {
+                    for (_, o) in &objects {
+                        self.project.patch_segment(o, &out, &port, 0);
+                    }
+                }
+                Some(PatchOption::NextPort) => {
+                    for (_, o) in &objects {
+                        self.project.edit_override(o, |x| {
+                            x.output = None;
+                            x.port = Some(PortOp::Add(1));
+                            x.channel = Some(ChannelOp::Set(Amount::lamps(0)));
+                            x.off = false;
+                        });
+                    }
+                }
+                Some(PatchOption::StaysHere) => {
+                    for (_, o) in &objects {
+                        self.project.edit_override(o, |x| {
+                            x.output = Some(OutputOp::Keep);
+                            x.port = Some(PortOp::Keep);
+                        });
+                    }
+                }
+                _ => return,
+            },
+            PatchInput::Stay {
+                field: PatchField::Port,
             } => {
-                let Some(PatchOption::Port(out, port)) = self.port_options().get(option).cloned()
-                else {
-                    return;
-                };
-                // A port of its own starts it at that port's first pixel:
-                // "ring 3 is on D9, ch 0".
                 for (_, o) in &objects {
-                    self.project.patch_segment(o, &out, &port, 0);
+                    self.project.edit_override(o, |x| {
+                        x.output = Some(OutputOp::Keep);
+                        x.port = Some(PortOp::Keep);
+                    });
+                }
+            }
+            PatchInput::Stay {
+                field: PatchField::Pixel,
+            } => {
+                for (_, o) in &objects {
+                    self.project
+                        .edit_override(o, |x| x.channel = Some(ChannelOp::Keep));
                 }
             }
             PatchInput::Override {
-                field: PatchField::Port,
+                field: PatchField::Port | PatchField::Output,
             } => {
                 for (_, o) in &objects {
                     if let Some(at) = self.landed(o) {
@@ -506,6 +603,13 @@ impl Editor {
                         x.port = None;
                         x.channel = None;
                     });
+                }
+            }
+            PatchInput::Reset {
+                field: PatchField::Output,
+            } => {
+                for (_, o) in &objects {
+                    self.project.edit_override(o, |x| x.output = None);
                 }
             }
             PatchInput::Override {
@@ -581,6 +685,18 @@ impl Editor {
                     self.project.turn_placement(o, by);
                 }
             }
+            PatchInput::Override {
+                field: PatchField::Offset,
+            } => {
+                for (_, o) in &objects {
+                    let offset = self
+                        .project
+                        .effective_patch()
+                        .walked(o)
+                        .map_or(0, |w| w.offset);
+                    self.project.edit_override(o, |x| x.offset = Some(offset));
+                }
+            }
             PatchInput::Reset {
                 field: PatchField::Offset,
             } => {
@@ -596,11 +712,41 @@ impl Editor {
                     self.project.edit_override(o, |x| x.off = option == 1);
                 }
             }
+            // Off is the only value On the line can be set to here.
+            PatchInput::Override {
+                field: PatchField::OnWire,
+            } => {
+                for (_, o) in &objects {
+                    self.project.edit_override(o, |x| x.off = true);
+                }
+            }
+            PatchInput::Reset {
+                field: PatchField::OnWire,
+            } => {
+                for (_, o) in &objects {
+                    self.project.edit_override(o, |x| x.off = false);
+                }
+            }
             PatchInput::Choose { .. }
             | PatchInput::Override { .. }
             | PatchInput::Reset { .. }
             | PatchInput::Nudge { .. }
+            | PatchInput::Stay { .. }
             | PatchInput::PatchHere { .. } => {}
+        }
+        self.after_edit();
+    }
+
+    /// A problem's Remove: take away an override whose node isn't there
+    /// any more, as one undo step. Nothing for a node that is.
+    pub fn remove_gone_override(&mut self, node: &TreeRef) {
+        if self.project.placed().node(node).is_some() || self.project.override_of(node).is_none()
+        {
+            return;
+        }
+        self.checkpoint();
+        if let Some(f) = self.project.fixture_mut(&node.fixture) {
+            f.mapping.overrides.remove(&node.id);
         }
         self.after_edit();
     }
@@ -629,108 +775,31 @@ impl Editor {
         it.all(|v| v.as_ref() == Some(&first)).then_some(first)
     }
 
-    /// Where one step of every selected object came from, when they share
-    /// it: its words, and what selects it.
+    /// Where one step of every selected node came from, when they agree.
     fn shared_source(
         &self,
         walked: &[(&NodeId, &TreeRef, &Walked)],
         field: usize,
-    ) -> Option<(String, Target)> {
-        self.shared_walked(walked, |w| self.source_words(w, field))
+    ) -> Option<UiSource> {
+        agreed(
+            walked
+                .iter()
+                .map(|(_, _, w)| self.project.step_source(w, field)),
+        )
     }
 
-    /// Where a walked object's step came from, in words, with the thing to
-    /// select to see it. A step nothing set says what it carried on after.
-    pub fn source_words(&self, w: &Walked, field: usize) -> Option<(String, Target)> {
-        let p = &self.project;
-        match &w.sources[field] {
-            StepSource::Override => None,
-            StepSource::Follows => match self.previous_leaf(&w.fixture, &w.node) {
-                Some(prev) => Some((
-                    format!("after {}", p.label(&p.tree_target(&prev))),
-                    p.tree_target(&prev),
-                )),
-                // The first thing laid: where the fixture starts.
-                None => p.fixture_start(&w.fixture).map(|_| {
-                    (
-                        format!("from fixture {}'s start", p.node_name(&w.fixture)),
-                        Target::Node(w.fixture.clone()),
-                    )
-                }),
-            },
-            StepSource::Start(t) => Some((
-                format!("from {}'s start", self.owner_words(&w.fixture, t)),
-                self.owner_target(&w.fixture, t),
-            )),
-            StepSource::Flow(t) => {
-                let (_, flow) = self.rules_on(&w.fixture, t);
-                Some((
-                    format!(
-                        "from {}: {}",
-                        self.owner_words(&w.fixture, t),
-                        children_option(&flow).words()
-                    ),
-                    self.owner_target(&w.fixture, t),
-                ))
-            }
-        }
-    }
-
-    /// The leaf the walk laid before this object, in its fixture.
-    fn previous_leaf(&self, fixture: &NodeId, object: &TreeRef) -> Option<TreeRef> {
-        let p = &self.project;
-        let leaves: Vec<&TreeRef> = p
-            .placed_segments()
-            .iter()
-            .filter(|(f, _)| f == fixture)
-            .map(|(_, o)| &o.id)
-            .collect();
-        let first_mine = match p.placed().node(object) {
-            Some((_, n)) => n.leaves().first().map(|l| l.id.clone())?,
-            None => return None,
-        };
-        let i = leaves.iter().position(|o| **o == first_mine)?;
-        i.checked_sub(1).map(|j| leaves[j].clone())
-    }
-
-    /// The objects that move with one whose start is its own: those after
-    /// it that only carry on. "ring r4 and ring r5 follow it".
-    fn followers_words(&self, fixture: &NodeId, object: &TreeRef) -> Option<String> {
-        let p = &self.project;
-        let patch = p.effective_patch();
-        let leaves: Vec<&TreeRef> = p
-            .placed_segments()
-            .iter()
-            .filter(|(f, _)| f == fixture)
-            .map(|(_, o)| &o.id)
-            .collect();
-        let last_mine = p.placed().node(object)?.1.leaves().last()?.id.clone();
-        let i = leaves.iter().position(|o| **o == last_mine)?;
-        let mut names = Vec::new();
-        for o in &leaves[i + 1..] {
-            let w = patch.walked(o)?;
-            if w.off {
-                continue;
-            }
-            if !w.sources.iter().all(|s| *s == StepSource::Follows) {
-                break;
-            }
-            names.push(p.label(&p.tree_target(o)));
-        }
-        match names.len() {
-            0 => None,
-            1 => Some(format!("{} follows it", names[0])),
-            n if n <= 4 => {
-                let (last, rest) = names.split_last()?;
-                Some(format!("{} and {last} follow it", rest.join(", ")))
-            }
-            n => Some(format!(
-                "{}, {} and {} more follow it",
-                names[0],
-                names[1],
-                n - 2
-            )),
-        }
+    /// Where a direction, offset or Off of every selected node came from,
+    /// when they agree.
+    fn shared_override_source(
+        &self,
+        walked: &[(&NodeId, &TreeRef, &Walked)],
+        has: impl Fn(&lpc_mapping::patching::Override) -> bool + Copy,
+    ) -> Option<UiSource> {
+        agreed(
+            walked
+                .iter()
+                .map(|(_, o, _)| self.project.override_source(o, has)),
+        )
     }
 
     /// The start and flow of a fixture or a part (a node's are its part's).
@@ -764,14 +833,14 @@ impl Editor {
         }
     }
 
-    fn per_lamp(&self, fixture: &NodeId) -> u32 {
+    pub(crate) fn per_lamp(&self, fixture: &NodeId) -> u32 {
         self.project
             .fixture(fixture)
             .map_or(3, |f| f.channels_per_lamp())
     }
 
-    /// Whether a rules target has children: the fixture, a group, a circle,
-    /// a repeat.
+    /// Whether a start-and-flow target has children: the fixture, a group,
+    /// a circle, a repeat.
     fn is_container(&self, t: &PatchTarget) -> bool {
         match t {
             PatchTarget::Fixture => true,
@@ -782,7 +851,7 @@ impl Editor {
         }
     }
 
-    /// The part a rules target names, in the selection's fixture.
+    /// The part a start-and-flow target names, in the selection's fixture.
     fn rule_part(&self, t: &PatchTarget) -> Option<&lpc_mapping::part::Part> {
         let PatchTarget::Part(c) = t else { return None };
         self.rule_targets()
@@ -791,29 +860,10 @@ impl Editor {
             .and_then(|(f, _)| self.project.part(&PartRef::new(f, c)))
     }
 
-    /// Where an object's span starts now (after any wrap).
+    /// Where a node's span starts now (after any wrap).
     fn landed(&self, object: &TreeRef) -> Option<Cursor> {
         let w = self.project.effective_patch().walked(object)?;
         Some(w.landed.clone().unwrap_or_else(|| w.at.clone()))
-    }
-
-    /// The owner of a rule in words: "fixture ring display", "circle1",
-    /// "copy 2 of repeat1".
-    fn owner_words(&self, fixture: &NodeId, t: &PatchTarget) -> String {
-        let p = &self.project;
-        match t {
-            PatchTarget::Fixture => format!("fixture {}", p.node_name(fixture)),
-            PatchTarget::Part(c) => c.to_string(),
-            PatchTarget::Node(o) => p.long_label(&p.tree_target(&TreeRef::new(fixture, o.clone()))),
-        }
-    }
-
-    fn owner_target(&self, fixture: &NodeId, t: &PatchTarget) -> Target {
-        match t {
-            PatchTarget::Fixture => Target::Node(fixture.clone()),
-            PatchTarget::Part(c) => Target::Part(PartRef::new(fixture, c)),
-            PatchTarget::Node(o) => self.project.tree_target(&TreeRef::new(fixture, o.clone())),
-        }
     }
 
     /// Start's options: follows (not for a fixture, which must say), each
@@ -832,8 +882,8 @@ impl Editor {
         out
     }
 
-    /// Children's options: end to end, or one per port from each port of
-    /// the output the targets are on (none when that isn't one output).
+    /// Flow's options: end to end, or one per port from each port of the
+    /// output the targets are on (none when that isn't one output).
     fn children_options(&self, targets: &[(NodeId, PatchTarget)]) -> Vec<PatchOption> {
         let p = &self.project;
         let output = self.shared(targets, |f, t| {
@@ -853,42 +903,48 @@ impl Editor {
         out
     }
 
-    /// The Port row's options: every port of every output.
-    fn port_options(&self) -> Vec<PatchOption> {
-        self.project
+    /// The Port row's options: every port of every output (At <port>),
+    /// then Next port and Stays here (presets that write ops, Q26).
+    fn node_port_options(&self) -> Vec<PatchOption> {
+        let mut out: Vec<PatchOption> = self
+            .project
             .wire_ports()
             .into_iter()
             .map(|(o, p)| PatchOption::Port(o, p))
-            .collect()
-    }
-
-    fn port_words(&self, output: &NodeId, port: &str) -> String {
-        self.project.long_label(&Target::Port {
-            output: output.clone(),
-            key: port.to_string(),
-        })
+            .collect();
+        out.push(PatchOption::NextPort);
+        out.push(PatchOption::StaysHere);
+        out
     }
 
     /// An option in words.
-    fn option_words(&self, o: &PatchOption) -> String {
+    pub(crate) fn option_words(&self, o: &PatchOption) -> String {
         let p = &self.project;
         match o {
             PatchOption::Follows => "Follows".into(),
-            PatchOption::At(out, port) | PatchOption::Port(out, port) => self.port_words(out, port),
+            PatchOption::At(out, port) | PatchOption::Port(out, port) => p.port_words(out, port),
             PatchOption::NextPort => "Next port".into(),
+            PatchOption::StaysHere => "Stays here".into(),
             PatchOption::EndToEnd => "End to end".into(),
             PatchOption::OnePerPort(out, port) => {
-                let name = p
-                    .output(out)
-                    .and_then(|o| o.port(port))
-                    .map_or_else(|| port.clone(), |x| x.name.clone());
-                format!("One per port from {name}")
+                format!("One per port from {}", p.pin_words(out, port))
             }
-            PatchOption::AsDrawn => "As drawn".into(),
-            PatchOption::Reversed => "Reversed".into(),
+            PatchOption::AsDrawn => "Forward".into(),
+            PatchOption::Reversed => "Reverse".into(),
             PatchOption::OnWire => "Yes".into(),
             PatchOption::Off => "Off".into(),
         }
+    }
+}
+
+/// One value if every one agrees, `Mixed` when they don't, `None` when
+/// none says anything.
+fn agreed(mut sources: impl Iterator<Item = Option<UiSource>>) -> Option<UiSource> {
+    let first = sources.next()?;
+    if sources.all(|s| s == first) {
+        first
+    } else {
+        Some(UiSource::Mixed)
     }
 }
 
@@ -921,13 +977,6 @@ impl ChildrenKey {
             (ChildrenKey::EndToEnd, PatchOption::EndToEnd) => true,
             (ChildrenKey::OnePerPort(a), PatchOption::OnePerPort(_, b)) => a == b,
             _ => false,
-        }
-    }
-
-    fn words(&self) -> String {
-        match self {
-            ChildrenKey::EndToEnd => "end to end".into(),
-            ChildrenKey::OnePerPort(_) => "one per port".into(),
         }
     }
 }

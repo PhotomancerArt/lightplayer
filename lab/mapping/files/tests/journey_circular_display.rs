@@ -68,7 +68,7 @@ fn the_circular_display() {
     e.patch_input(PatchInput::Override {
         field: PatchField::Direction,
     });
-    choose(&mut e, PatchField::Direction, "Direction", "Reversed");
+    choose(&mut e, PatchField::Direction, "Direction", "Reverse");
     assert_eq!(span(&e.project, &ring("r3")), Some(("0".into(), 51, 40)));
     assert_eq!(span(&e.project, &ring("r4")), before_r4);
 
@@ -78,14 +78,14 @@ fn the_circular_display() {
     e.patch_input(PatchInput::Override {
         field: PatchField::Port,
     });
-    choose(&mut e, PatchField::Port, "Port", "ws281x:local:D1");
+    choose(&mut e, PatchField::Port, "Port", "D1");
     let p = &e.project;
     assert_eq!(span(p, &ring("r2")), Some(("0".into(), 24, 39)));
     assert_eq!(span(p, &ring("r3")), Some(("1".into(), 11, 0)));
     assert_eq!(span(p, &ring("r4")), Some(("1".into(), 12, 19)));
     assert_eq!(span(p, &ring("r5")), Some(("1".into(), 20, 20)));
     assert!(
-        hints(&e).contains(&"ring r4 and ring r5 follow it".to_string()),
+        hints(&e).contains(&"ring r4 and the centre follow it".to_string()),
         "{:?}",
         hints(&e)
     );
@@ -107,8 +107,8 @@ fn the_circular_display() {
     choose(
         &mut e,
         PatchField::Children,
-        "Children",
-        "One per port from ws281x:local:D0",
+        "Flow",
+        "One per port from D0",
     );
     let p = &e.project;
     for (k, port) in [
@@ -136,8 +136,11 @@ fn the_circular_display() {
     assert!(
         rows(&e).iter().any(|i| matches!(
             i,
-            UiItem::PatchInherited { label: "Port", from: Some((words, _)), .. }
-                if words == "from circle1: one per port"
+            UiItem::Field(UiField {
+                label: "Port",
+                source: Some(UiSource::From { words, .. }),
+                ..
+            }) if words == "from circle1's flow: one per port"
         )),
         "{:?}",
         rows(&e)
