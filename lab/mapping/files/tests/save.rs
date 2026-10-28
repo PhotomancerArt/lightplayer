@@ -238,6 +238,25 @@ fn moving_a_part_writes_only_its_mapping() {
     );
 }
 
+/// Naming an output and pointing the fixture's start at the new name (as
+/// choosing a port on an unnamed output will, Q96) writes both files in
+/// one save, and the project opens again landing every lamp where it did.
+#[test]
+fn a_named_output_and_the_mapping_naming_it_save_together() {
+    let o = common::open(&CHOKER);
+    let mut p = o.project.clone();
+    let out = NodeId::new("output");
+    let fixture = NodeId::new("fixture");
+    p.output_mut(&out).unwrap().label = Some("main".to_string());
+    p.fixture_mut(&fixture).unwrap().mapping.start =
+        lpc_mapping::patching::Start::at("main", 0, lpc_mapping::patching::Amount::lamps(0));
+    let saved = o.files.save(&p).unwrap();
+    assert_eq!(paths(&saved), ["output.json", "playful.map2d.json"]);
+    let again = reopen(&CHOKER, &saved).project;
+    assert_eq!(again.output(&out).unwrap().label.as_deref(), Some("main"));
+    assert_eq!(wire(&again), wire(&o.project));
+}
+
 /// Resizing a fixture's box writes its canvas from the box's corner, and
 /// the box opens again that size.
 #[test]
