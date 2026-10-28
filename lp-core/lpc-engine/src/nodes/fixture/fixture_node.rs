@@ -352,15 +352,17 @@ impl FixtureNode {
             self.patch_source.is_none(),
             "a format-6 fixture has no patch document"
         );
-        let carrier = match render_parts_carrier(&mapping, render_width, render_height) {
-            Ok(carrier) => carrier,
+        let (carrier, rendered) = match render_parts_carrier(&mapping, render_width, render_height)
+        {
+            Ok((carrier, tree)) => (carrier, Some(tree)),
             Err(error) => {
                 self.mapping_error = Some(error);
-                ResolvedMappingCompact {
+                let empty = ResolvedMappingCompact {
                     spans: Vec::new(),
                     points: Vec::new(),
                     sample_diameter: mapping.sample_diameter,
-                }
+                };
+                (empty, None)
             }
         };
         self.mapping = FixtureMapping::Compact(carrier);
@@ -374,7 +376,11 @@ impl FixtureNode {
         self.precomputed = None;
         self.direct_channels = None;
         self.display_layout_revision = None;
-        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(mapping)));
+        let parts = match rendered {
+            Some(tree) => FixturePartsPatch::rendered(mapping, tree),
+            None => FixturePartsPatch::new(mapping),
+        };
+        self.parts = Some(alloc::boxed::Box::new(parts));
         self
     }
 
@@ -801,8 +807,9 @@ impl FixtureNode {
                 return;
             }
         }
-        let carrier = match render_parts_carrier(&mapping, render_width, render_height) {
-            Ok(carrier) => carrier,
+        let (carrier, rendered) = match render_parts_carrier(&mapping, render_width, render_height)
+        {
+            Ok(rendered) => rendered,
             Err(error) => {
                 self.mapping_error = Some(error);
                 return;
@@ -821,7 +828,9 @@ impl FixtureNode {
         self.direct_channels = None;
         self.display_layout_revision = None;
         self.mapping_error = None;
-        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::new(mapping)));
+        self.parts = Some(alloc::boxed::Box::new(FixturePartsPatch::rendered(
+            mapping, rendered,
+        )));
     }
 
     /// The patch half of [`NodeRuntime::refresh_asset`].

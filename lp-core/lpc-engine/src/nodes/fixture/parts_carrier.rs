@@ -6,8 +6,10 @@
 //! exact-size buffer; [`Tree::take_positions`] moves that buffer out and the
 //! fit rewrites it in place, the way `mapping_from_map2d_doc` carries a
 //! map2d document's (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
-//! The rest of the tree is dropped: the patcher renders its own for each
-//! patch (`parts_patch.rs`).
+//! The rest of the tree, positions gone, goes back to the caller for the
+//! fixture's first patch (`parts_patch.rs`), which would otherwise render
+//! the same mapping again a frame later only to walk its structure; every
+//! later patch renders its own.
 //!
 //! [`Tree::take_positions`]: lpc_mapping::part::Tree::take_positions
 
@@ -15,19 +17,19 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Mapping, render};
+use lpc_mapping::part::{Mapping, Tree, render};
 use lpc_mapping::{Bounds2d, fit_points_in_place, fit_scale};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 
 /// Render `mapping` for a `texture_width` × `texture_height` fixture into
-/// the carrier. `Err` is the fixture's
-/// mapping error, in words (a mapping too big for memory is refused here,
-/// never aborted).
+/// the carrier, and hand back the render's tree with its positions taken
+/// (they are the carrier's now). `Err` is the fixture's mapping error, in
+/// words (a mapping too big for memory is refused here, never aborted).
 pub fn render_parts_carrier(
     mapping: &Mapping,
     texture_width: u32,
     texture_height: u32,
-) -> Result<ResolvedMappingCompact, String> {
+) -> Result<(ResolvedMappingCompact, Tree), String> {
     let mut tree = render(mapping).map_err(|error| format!("render fixture mapping: {error}"))?;
     let mut points = tree.take_positions();
 
@@ -49,15 +51,17 @@ pub fn render_parts_carrier(
             count: segment.count(),
         });
     }
-    drop(tree);
 
     if points.is_empty() {
         // Nothing to fit (the fit would reject empty bounds).
-        return Ok(ResolvedMappingCompact {
-            spans,
-            points,
-            sample_diameter: mapping.sample_diameter,
-        });
+        return Ok((
+            ResolvedMappingCompact {
+                spans,
+                points,
+                sample_diameter: mapping.sample_diameter,
+            },
+            tree,
+        ));
     }
     let frame = canvas_bounds(mapping);
     let fit = |error| format!("fit fixture mapping: {error}");
@@ -66,11 +70,14 @@ pub fn render_parts_carrier(
     let sample_diameter = mapping.sample_diameter
         * fit_scale(&points, frame, texture_width, texture_height).map_err(fit)?;
     fit_points_in_place(&mut points, frame, texture_width, texture_height).map_err(fit)?;
-    Ok(ResolvedMappingCompact {
-        spans,
-        points,
-        sample_diameter,
-    })
+    Ok((
+        ResolvedMappingCompact {
+            spans,
+            points,
+            sample_diameter,
+        },
+        tree,
+    ))
 }
 
 /// The mapping's canvas as the fit reads it; a canvas of no width or height
@@ -98,7 +105,7 @@ mod tests {
     fn the_carrier_holds_the_trees_positions_fitted() {
         let mapping = mapping(&[3, 5]);
         let raw = render(&mapping).unwrap().positions().to_vec();
-        let carrier = render_parts_carrier(&mapping, 40, 20).unwrap();
+        let (carrier, _) = render_parts_carrier(&mapping, 40, 20).unwrap();
 
         let frame = Some(Bounds2d {
             min_x: 0.0,
@@ -122,7 +129,7 @@ mod tests {
     /// One carrier span per segment, in tree order.
     #[test]
     fn one_carrier_span_per_segment_in_tree_order() {
-        let carrier = render_parts_carrier(&mapping(&[3, 5, 2]), 40, 20).unwrap();
+        let (carrier, _) = render_parts_carrier(&mapping(&[3, 5, 2]), 40, 20).unwrap();
         let spans: Vec<(u32, u32, u32)> = carrier
             .spans
             .iter()

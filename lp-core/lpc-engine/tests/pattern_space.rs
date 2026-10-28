@@ -304,7 +304,7 @@ fn dome_scale_pitch_is_nonzero_and_q32_safe() {
         lpc_mapping::map2d6::read(&std::fs::read_to_string(dir.join("dome.map2d.json")).unwrap())
             .expect("dome map2d parses");
     let (width, height) = (128, 128);
-    let mapping = render_parts_carrier(&doc, width, height).expect("render the dome");
+    let (mapping, _) = render_parts_carrier(&doc, width, height).expect("render the dome");
     let mapping = MappingRef::Compact(&mapping);
     let scope = ScopeGeometry::from_mapping(mapping, width, height).expect("lamps");
     assert_eq!(scope.lamp_count, 5950, "the small dome's dome fixture");

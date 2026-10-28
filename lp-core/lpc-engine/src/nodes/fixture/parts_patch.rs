@@ -16,7 +16,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::{Mapping, render};
+use lpc_mapping::part::{Mapping, Tree, render};
 use lpc_mapping::patching::{
     OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping_placed,
 };
@@ -40,6 +40,13 @@ pub(crate) struct FixturePartsPatch {
     /// The first problem in words, with how many more; `None` when nothing
     /// is wrong.
     pub status: Option<String>,
+    /// The tree the fixture's carrier was rendered from, positions taken:
+    /// held only until the first patch walks it, so that patch does not
+    /// render the same mapping again: every lamp of `projects/test/basic`'s
+    /// circle through soft-float `sinf`/`cosf` a second time, positions then
+    /// dropped unread — ~1.0 M of fw-emu's startup cycles, 5 ms of first
+    /// light on `lp-emu:esp32c6:t2`.
+    rendered: Option<Tree>,
 }
 
 impl FixturePartsPatch {
@@ -49,6 +56,16 @@ impl FixturePartsPatch {
             key: None,
             runs: Vec::new(),
             status: None,
+            rendered: None,
+        }
+    }
+
+    /// [`Self::new`], with the tree `mapping` was just rendered to (its
+    /// positions taken) for the first patch to walk.
+    pub fn rendered(mapping: Mapping, tree: Tree) -> Self {
+        Self {
+            rendered: Some(tree),
+            ..Self::new(mapping)
         }
     }
 
@@ -74,6 +91,7 @@ impl FixturePartsPatch {
         debug_assert!(self.mapping.same_layout(&mapping));
         self.mapping = mapping;
         self.key = None;
+        self.rendered = None;
     }
 
     /// [`Self::ensure`] with the question passed in (a test double of P1's
@@ -110,16 +128,20 @@ impl FixturePartsPatch {
         color_order: ColorOrder,
     ) -> bool {
         self.key = Some(key);
-        // The same mapping rendered at load, so only memory can refuse it
-        // now; then nothing lands, and the status says why.
-        let mut tree = match render(&self.mapping) {
-            Ok(tree) => tree,
-            Err(error) => {
-                self.status = Some(alloc::format!("render fixture mapping: {error}"));
-                let changed = !self.runs.is_empty();
-                self.runs = Vec::new();
-                return changed;
-            }
+        // The load's render on the first patch; after that, the same mapping
+        // rendered anew, so only memory can refuse it; then nothing lands,
+        // and the status says why.
+        let mut tree = match self.rendered.take() {
+            Some(tree) => tree,
+            None => match render(&self.mapping) {
+                Ok(tree) => tree,
+                Err(error) => {
+                    self.status = Some(alloc::format!("render fixture mapping: {error}"));
+                    let changed = !self.runs.is_empty();
+                    self.runs = Vec::new();
+                    return changed;
+                }
+            },
         };
         drop(tree.take_positions());
         let ports = patcher_ports(&reachable);
