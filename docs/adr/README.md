@@ -244,6 +244,7 @@ holds the full context.
 | Pictures and project names cross the relay's device leg unsealed (Yona, 2026-10-08); only the uid and package hash are protected, as keyed tags | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A chip affords TLS on the device leg, or a privacy need for what a board shows: seal them in a later relay protocol |
 | The relay's last picture of a board lives in the hub's memory and is lost at every deploy | `2026-10-06-cloud-relay` (2026-10-09 amendment) | M7's board list (new persisted cloud data, with its own migration) |
 | No `LabelChanged` relay frame: the hub's board name goes stale until the board registers again | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A renamed board's stale name shows up on cloud cards, unless M7 makes the account own the name |
+| The project stage's window: between a new engine's first start and a project's batch commit, the board holds a project it cannot read and lights nothing; closing it needs a channel-3 file service in the core (core flash near its 32 KiB page, a permanent protocol addition) | `2026-10-28-firmware-updates-upgrade-the-boards-projects` | A desk or field walk shows a lamp left dark after an update |
 
 ## Relationship To Shared Planning
 

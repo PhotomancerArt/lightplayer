@@ -206,6 +206,10 @@ and `lpa-upgrade` does the rest on the host. **The device never upgrades**:
 it refuses an older project by name and keeps serving (`lpa-server`'s
 `tests/old_startup_project.rs`).
 
+*(2026-10-28)* The decision, its one window and the alternatives are
+recorded in
+[`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`](../../docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md).
+
 ```text
 ProjectStage::new(engine_format, tier)
   ├─ engine_format past this host's chain → Done(HostTooOld), nothing read

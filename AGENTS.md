@@ -77,7 +77,11 @@ afterwards. Sort every action by what a wrong call costs:
 - **Lasting — ask.** A revert cannot put it back:
   - persisted bytes: project/package files and `PROJECT_FORMAT_VERSION`,
     the cloud store, stamped device identity, the access and network files
-    (see "Persisted-format compatibility");
+    (see "Persisted-format compatibility"). A project-format bump is still
+    an ask, but a cheap one, asked in one line: "bump for X; the step does
+    Y; the corpus shows behaviour unchanged" — a revert can't un-upgrade
+    files already rewritten on boards and in libraries
+    (`docs/adr/2026-10-28-project-format-policy.md`);
   - the never-break pins: lp-link's plain, secure and update-channel
     goldens, `lpc-update`'s v1 golden, the LAN endpoint contract,
     `RELAY_PROTO_VERSION` and the relay goldens;
@@ -489,6 +493,16 @@ the app through the same view model and presses the same actions. See
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
   field names.
+- **A project-format bump is also an update-time upgrade.** The next
+  firmware update (or flash) upgrades each board's stored projects as its
+  last stage, through the same `lpa-upgrade` step, rewritten by the host
+  over the board's link — so a new step needs no new device machinery.
+  Migrations live in hosts (Studio, lp-cli), never in firmware, and the
+  model keeps one current shape: no aliases, no dual reads. Before a bump,
+  run the crossing walk: `just test-emu-c6-ota` with its cross-format
+  scenarios and `just walk-ota-emu --steps cross-format`. See
+  `docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`
+  and `docs/adr/2026-10-28-project-format-policy.md`.
 - The tell to watch for in review: a serde `Serialize`/`Deserialize`/
   `Display`/`FromStr` change in a type that appears in `schemas/` or in any
   `*.json` a user's library can hold. If old bytes would no longer round-
@@ -525,6 +539,9 @@ are four ADRs, which cross-link each other:
   growth is the flash cost that counts. Watch the distance to the core's next
   32 KiB page, not only the headroom; the ledger and the growth table are in
   `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
+- **An update ends by upgrading the board's stored projects** to the format
+  its new engine reads, with no click
+  (`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
 - **Updates follow whatever link reaches the board**, the relay included. Who
   may flash is the link's tier (a key's, or "Anyone" on an open board, never
   through the relay): if you can edit, you can flash. A missing engine is

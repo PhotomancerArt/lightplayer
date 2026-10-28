@@ -308,6 +308,26 @@ the same date. Studio's relay half stayed behind `?relay=` (#1031's flag) until 
 - **Updates follow whatever link reaches the board**, the relay included
   (walked: G2 in ADR 2's amendment).
 
+## Amendment (2026-10-28): the update's last stage
+
+An update now ends by upgrading the board's stored projects
+([2026-10-28-firmware-updates-upgrade-the-boards-projects](2026-10-28-firmware-updates-upgrade-the-boards-projects.md)).
+When the driver reaches `Done(UpToDate)`, the update host enters
+`RunPhase::Projects`: once engine Y's hello says the project format it
+reads (`build.projectFormat`, wire 46), the project stage rewrites every
+older project over channel 1, one atomic batch each, the startup project
+first and then loaded, and the card says "Upgrading projects · n of m". The
+update is up to date only after that stage ends. A hello that says no format
+ends the update at once; over a wireless link Studio waits at most 10 s for
+the link's tier, then ends the update with a line and lets the no-click
+stage run once the tier is granted. Like heal and finish (§4), the stage
+also starts itself with no click when Studio finds a board whose engine
+reads a newer format than a project it holds, on an edit link; a play link
+is told and offered nothing. No new offer and no consequence level moved;
+the words did: a version that upgrades the board's projects says so before
+it is pressed (from the release index's `projectFormat`), and installing an
+older version that would strand them says so in its Lasting copy.
+
 ## References
 
 - `docs/adr/2026-10-06-ota-update-protocol.md` (ADR 2: the protocol and
