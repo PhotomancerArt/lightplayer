@@ -1,5 +1,6 @@
-//! The Graph's patching verbs with their arguments, and the one function
-//! each runs through (lean Q77).
+//! The Graph's verbs that take values, with their arguments, and the one
+//! function each runs through (lean Q77): the patching verbs here, the
+//! layout verbs in `graph_layout_edit.rs`.
 //!
 //! A [`GraphEdit`] is a [`GraphVerb`] that takes values, bound: "set ring
 //! r3's port to D1 of main". Whoever presses it — Studio's offer
@@ -20,21 +21,19 @@
 //! fixture `<fixture>:`, a port `<output>:<key>`, `next-port` or
 //! `stays-here`, a number of lamps as a whole number.
 
+use lpc_mapping::edit::DrawnFrom;
 use lpc_mapping::edit::{self, OverrideField, OverrideFieldKind};
 use lpc_mapping::part::TreeId;
 use lpc_mapping::patching::{
-    Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, PatchTarget, PortKey, PortOp, Start,
+    Amount, ChannelOp, Direction, Flow, OutputOp, PatchTarget, PortKey, PortOp, Start,
 };
 
 use crate::domain::node::NodeId;
 use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::project::Project;
 use crate::ux::editor::Editor;
+use crate::ux::graph_layout_edit::{DeleteSubject, Split, Units, bind_layout};
 use crate::ux::graph_verb::GraphVerb;
-
-/// Why an output can't be patched to yet (lean Q96: choosing one names it,
-/// which is a layout verb of P07's).
-pub const NO_NAME_YET: &str = "this output has no name yet";
 
 /// One patching verb, bound to what it acts on and the values it takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +79,34 @@ pub enum GraphEdit {
     /// Take away an override whose node isn't there any more (a copy
     /// counted away, a ring removed).
     RemoveOverride { node: TreeRef },
+    // ---- layout (`graph_layout_edit.rs`) ------------------------------
+    /// Give a part the id `id`; every override on it follows.
+    Rename { part: PartRef, id: String },
+    /// Put a part in a new repeat of `count` copies about its fixture's
+    /// centre.
+    Repeat { part: PartRef, count: u32 },
+    /// Keep only the part a repeat repeats.
+    Unrepeat { part: PartRef },
+    /// Every copy of a repeat a real part.
+    Expand { part: PartRef },
+    /// A repeat's copies, or a path's, a polygon's or a ring's lamps.
+    SetCount { subject: TreeRef, count: u32 },
+    /// A ring of `count` lamps at `radius`.
+    AddRing {
+        circle: PartRef,
+        count: u32,
+        radius: Units,
+    },
+    /// A one-lamp ring at the centre.
+    AddCentreLamp { circle: PartRef },
+    /// A ring taken from its circle (its overrides kept, D12).
+    RemoveRing { ring: TreeRef },
+    /// One segment, or one per subpath or ring.
+    SetSplit { part: PartRef, split: Split },
+    /// Where a circle or a path is drawn from.
+    SetDrawnFrom { part: PartRef, from: DrawnFrom },
+    /// A node, a part or a ring deleted (overrides kept, D12).
+    Delete { subject: DeleteSubject },
 }
 
 /// A port, as `set-port` takes it (Q26).
@@ -142,6 +169,17 @@ impl GraphEdit {
             GraphEdit::SetFixtureStart { .. } => GraphVerb::SetFixtureStart,
             GraphEdit::SetPartStart { .. } => GraphVerb::SetPartStart,
             GraphEdit::RemoveOverride { .. } => GraphVerb::RemoveOverride,
+            GraphEdit::Rename { .. } => GraphVerb::Rename,
+            GraphEdit::Repeat { .. } => GraphVerb::Repeat,
+            GraphEdit::Unrepeat { .. } => GraphVerb::Unrepeat,
+            GraphEdit::Expand { .. } => GraphVerb::Expand,
+            GraphEdit::SetCount { .. } => GraphVerb::SetCount,
+            GraphEdit::AddRing { .. } => GraphVerb::AddRing,
+            GraphEdit::AddCentreLamp { .. } => GraphVerb::AddCentreLamp,
+            GraphEdit::RemoveRing { .. } => GraphVerb::RemoveRing,
+            GraphEdit::SetSplit { .. } => GraphVerb::SetSplit,
+            GraphEdit::SetDrawnFrom { .. } => GraphVerb::SetDrawnFrom,
+            GraphEdit::Delete { .. } => GraphVerb::Delete,
         }
     }
 
@@ -219,19 +257,21 @@ impl GraphEdit {
                 GraphEdit::SetPartStart { part, start }
             }
             GraphVerb::RemoveOverride => GraphEdit::RemoveOverride { node: node()? },
+            layout if GraphVerb::LAYOUT.contains(&layout) => return bind_layout(layout, arg),
             other => return Err(format!("{} takes no values", other.name())),
         })
     }
 }
 
 impl Project {
-    /// Make one patching edit: the one function every door to the verb
-    /// runs. A refused edit says why; every refusal is found before
-    /// anything changes ([`Editor::edit`] puts everything back anyway).
+    /// Make one edit that takes values: the one function every door to the
+    /// verb runs. A refused edit says why; [`Editor::edit`] puts everything
+    /// back when one is refused. Choosing a port or an output with no name
+    /// names it (lean Q96, `output_naming.rs`).
     pub fn apply_graph_edit(&mut self, e: &GraphEdit) -> Result<(), String> {
         match e {
             GraphEdit::SetOutput { subject, output } => {
-                let name = self.output_name(output)?;
+                let name = self.name_output(output)?;
                 self.put_field(subject, OverrideField::Output(OutputOp::Set(name)))
             }
             GraphEdit::SetPort { subject, port } => match port {
@@ -311,6 +351,7 @@ impl Project {
                 }
                 Ok(())
             }
+            layout => self.apply_layout_edit(layout),
         }
     }
 
@@ -373,16 +414,16 @@ impl Project {
         ])
     }
 
-    /// The start ops for `port` of `output`, from `lamps`; refused while
-    /// the output has no name to say it by.
-    fn start_at_port(&self, output: &NodeId, port: &str, lamps: u32) -> Result<Start, String> {
-        let name = self.output_name(output)?;
+    /// The start ops for `port` of `output`, from `lamps`, naming the
+    /// output when it has no name to say it by.
+    fn start_at_port(&mut self, output: &NodeId, port: &str, lamps: u32) -> Result<Start, String> {
+        if self.output(output).and_then(|o| o.port(port)).is_none() {
+            return Err(format!("{} has no port {port}", self.output_words(output)));
+        }
         let key: u32 = port
             .parse()
-            .map_err(|_| format!("{port} isn't a port of {}", name.as_str()))?;
-        if self.output(output).and_then(|o| o.port(port)).is_none() {
-            return Err(format!("{} has no port {port}", name.as_str()));
-        }
+            .map_err(|_| format!("{port} isn't a port of {}", self.output_words(output)))?;
+        let name = self.name_output(output)?;
         Ok(Start {
             output: OutputOp::Set(name),
             port: PortOp::set(key),
@@ -390,16 +431,10 @@ impl Project {
         })
     }
 
-    /// An output's name on the wire, which ops say it by.
-    fn output_name(&self, output: &NodeId) -> Result<OutputName, String> {
-        let o = self
-            .output(output)
-            .ok_or_else(|| format!("there is no output {output}"))?;
-        let name = o.label.as_deref().ok_or_else(|| NO_NAME_YET.to_string())?;
-        Ok(OutputName::new(name))
-    }
-
-    fn mapping_mut(&mut self, fixture: &NodeId) -> Result<&mut lpc_mapping::part::Mapping, String> {
+    pub(crate) fn mapping_mut(
+        &mut self,
+        fixture: &NodeId,
+    ) -> Result<&mut lpc_mapping::part::Mapping, String> {
         self.fixture_mut(fixture)
             .map(|f| &mut f.mapping)
             .ok_or_else(|| format!("there is no fixture {fixture}"))
@@ -433,6 +468,7 @@ impl Editor {
             return Ok(());
         }
         let before = self.project.clone();
+        let gone_before = self.project.gone_overrides();
         self.checkpoint();
         for e in edits {
             if let Err(why) = self.project.apply_graph_edit(e) {
@@ -446,6 +482,7 @@ impl Editor {
                 return Err(why);
             }
         }
+        self.after_layout_edits(edits, gone_before);
         self.after_edit();
         Ok(())
     }
@@ -547,7 +584,7 @@ pub fn flow_value(flow: &Flow) -> String {
     }
 }
 
-fn parse_node(text: &str) -> Result<TreeRef, String> {
+pub(crate) fn parse_node(text: &str) -> Result<TreeRef, String> {
     let (fixture, id) = text
         .rsplit_once(':')
         .ok_or_else(|| format!("{text} isn't <fixture>:<id>"))?;
@@ -602,7 +639,7 @@ fn parse_back_field(text: &str) -> Result<BackField, String> {
         .ok_or_else(|| format!("no field {text}"))
 }
 
-fn parse_lamps(text: &str) -> Result<u32, String> {
+pub(crate) fn parse_lamps(text: &str) -> Result<u32, String> {
     text.trim()
         .parse()
         .map_err(|_| format!("{text} isn't a whole number of lamps"))

@@ -1,10 +1,16 @@
 //! Commands on the selection: delete, nudge a count, reverse, edit a
 //! property. Each one does what it can and says why it didn't do the rest.
 
+use lpc_mapping::edit::DrawnFrom;
+use lpc_mapping::part::{PartKind, Shape};
+use lpc_mapping::patching::Direction;
+
 use crate::domain::notice::Notice;
 use crate::domain::part_geometry::{has_drawn_direction, reverse_drawn};
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::graph_edit::{BackField, GraphEdit};
+use crate::ux::graph_layout_edit::DeleteSubject;
 use crate::ux::props::{PropEdit, common_props};
 
 impl Editor {
@@ -150,27 +156,28 @@ impl Editor {
             }))
             .collect();
         let problems_before = f.effective_patch().problems.clone();
+        let gone_before = f.gone_overrides();
         if !deleted.is_empty() {
             self.checkpoint();
-            for x in &nodes {
-                self.project.remove_node(x);
+            // Nodes, parts and rings go through `delete`'s one function
+            // (`graph_layout_edit.rs`), as its offer does.
+            let subjects = nodes
+                .iter()
+                .map(|x| DeleteSubject::Node(x.clone()))
+                .chain(components.iter().map(|c| DeleteSubject::Part(c.clone())))
+                .chain(rings.iter().map(|o| DeleteSubject::Ring(o.clone())));
+            for subject in subjects {
+                let _ = self
+                    .project
+                    .apply_graph_edit(&GraphEdit::Delete { subject });
             }
             for (o, k) in &ports {
                 if let Some(out) = self.project.output_mut(o) {
                     out.ports.retain(|p| &p.key != k);
                 }
             }
-            for c in &components {
-                if let Some(f) = self.project.fixture_mut(&c.fixture) {
-                    let _ = lpc_mapping::edit::remove_part(&mut f.mapping, &c.part);
-                }
-            }
-            for o in &rings {
-                if let (Some(key), Some(f)) = (&o.id.key, self.project.fixture_mut(&o.fixture)) {
-                    let _ = lpc_mapping::edit::remove_ring(&mut f.mapping, &o.id.part, key);
-                }
-            }
         }
+        let kept = self.project.gone_overrides().saturating_sub(gone_before);
         // What was refused stays selected, so you can act on it.
         self.selection = refused.iter().map(|(t, _, _)| t.clone()).collect();
         self.after_edit();
@@ -184,6 +191,20 @@ impl Editor {
             .map(|p| self.project.node_name(&p.fixture))
             .collect();
         self.notice = Some(match (deleted.is_empty(), refused.first()) {
+            (false, None) if kept > 0 => {
+                let (s, are, they, show, problems) = if kept == 1 {
+                    ("", "is", "it", "shows", "a problem")
+                } else {
+                    ("s", "are", "they", "show", "problems")
+                };
+                Notice {
+                    why: Some(format!(
+                        "{kept} override{s} on what went {are} kept; {they} {show} as {problems}"
+                    )),
+                    help: Some("nothing was pointed anywhere else; ⌘Z brings it back".into()),
+                    ..Notice::info(format!("Deleted {}", join(&deleted)))
+                }
+            }
             (false, None) if !broken.is_empty() => Notice {
                 why: Some(format!(
                     "{} still patch{} to it: {}, shown in the inspector",
@@ -313,23 +334,31 @@ impl Editor {
             return;
         }
         self.checkpoint();
-        // A repeat's copies share one shape: reverse it once.
+        // A repeat's copies share one shape: reverse it once. A path's
+        // drawing turns by `set-drawn-from` and one ring by its direction
+        // on the line (`set-direction`, or back to the flow when it is
+        // reversed there), the verbs' own function; a circle's way round
+        // has no verb yet and turns its field.
         let mut whole: Vec<crate::PartRef> = Vec::new();
         for t in &targets {
             match t {
-                Target::Part(id) => {
-                    if let Some(c) = self.project.part_mut(id) {
-                        reverse_drawn(&mut c.kind);
-                    }
-                }
+                Target::Part(id) => self.reverse_part(id),
                 Target::Generated(o) => {
                     let part = o.part();
                     if self.project.ring_of(o).is_some() {
-                        self.project.reverse_placement(o);
-                    } else if !whole.contains(&part)
-                        && let Some(c) = self.project.part_mut(&part)
-                    {
-                        reverse_drawn(&mut c.kind);
+                        let ring = match self.project.override_of(o).and_then(|x| x.direction) {
+                            Some(Direction::Reverse) => GraphEdit::BackToTheFlow {
+                                subject: o.clone(),
+                                field: BackField::Direction,
+                            },
+                            _ => GraphEdit::SetDirection {
+                                subject: o.clone(),
+                                direction: Direction::Reverse,
+                            },
+                        };
+                        let _ = self.project.apply_graph_edit(&ring);
+                    } else if !whole.contains(&part) {
+                        self.reverse_part(&part);
                         whole.push(part);
                     }
                 }
@@ -375,6 +404,36 @@ impl Editor {
         )));
     }
 
+    /// Reverse one part's drawing: a path's by `set-drawn-from` (a
+    /// repeat's by the part it holds), a circle's way round by its field.
+    fn reverse_part(&mut self, id: &crate::PartRef) {
+        let held = match self.project.part(id).map(|c| &c.kind) {
+            Some(PartKind::Repeat(r)) => crate::PartRef::new(&id.fixture, &r.part.id),
+            _ => id.clone(),
+        };
+        let path = match self.project.part(&held).map(|c| &c.kind) {
+            Some(PartKind::Shape(Shape::Path(path))) => Some(path.reversed),
+            _ => None,
+        };
+        match path {
+            Some(reversed) => {
+                let _ = self.project.apply_graph_edit(&GraphEdit::SetDrawnFrom {
+                    part: held,
+                    from: if reversed {
+                        DrawnFrom::FirstPoint
+                    } else {
+                        DrawnFrom::LastPoint
+                    },
+                });
+            }
+            None => {
+                if let Some(c) = self.project.part_mut(&held) {
+                    reverse_drawn(&mut c.kind);
+                }
+            }
+        }
+    }
+
     /// The inspector's edit: one property, every selected thing.
     pub fn edit_selection_prop(&mut self, prop_id: &str, edit: PropEdit) {
         let targets = self.selection.clone();
@@ -392,6 +451,14 @@ impl Editor {
     }
 
     fn edit_selected(&mut self, targets: &[Target], prop_id: &str, edit: PropEdit) {
+        // A row that is a verb presses it, as its offer does: one undo step.
+        if let Some(edits) = self
+            .project
+            .prop_edits(targets, prop_id, edit, self.spacing)
+        {
+            let _ = self.edit(&edits);
+            return;
+        }
         self.checkpoint();
         let spacing = self.spacing;
         for t in targets {

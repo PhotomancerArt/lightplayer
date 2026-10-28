@@ -183,15 +183,14 @@ impl Project {
         )
     }
 
-    /// Mint and append a top-level part to a fixture (`lpc_mapping::edit`'s
-    /// `insert_part`, last in wiring order); returns it.
+    /// Make a top-level part of a fixture, last in wiring order
+    /// (`lpc_mapping::edit::add_part`: its id never one a part has nor one
+    /// a kept override names); returns it.
     pub fn add(&mut self, fixture: &NodeId, kind: PartKind) -> Option<PartRef> {
-        let part = self.new_part(fixture, kind)?;
-        let id = PartRef::new(fixture, &part.id);
         let mapping = &mut self.fixture_mut(fixture)?.mapping;
         let at = mapping.parts.len();
-        lpc_mapping::edit::insert_part(mapping, None, at, part).ok()?;
-        Some(id)
+        let id = lpc_mapping::edit::add_part(mapping, None, at, kind).ok()?;
+        Some(PartRef::new(fixture, &id))
     }
 
     /// Start a fixture's walk at `pixel` of `output`'s port `port`.

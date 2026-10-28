@@ -16,6 +16,7 @@ pub mod node;
 pub mod notice;
 pub mod other_node;
 pub mod output;
+pub mod output_naming;
 pub mod output_overrides;
 pub mod part_geometry;
 pub mod part_ref;

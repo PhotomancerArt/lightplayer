@@ -6,6 +6,12 @@
 //! edited with the ring selected, but they are stored on the circle. Which
 //! way round the rings run is the circle's (every ring's); one ring runs
 //! the other way on the wire by its own override (`r`).
+//!
+//! **Rows that are verbs** (mapping rebuild M4 P07). Lamps, Copies, Rings
+//! and Inner ring first press the layout verbs (`set-count`, `add-ring`,
+//! `remove-ring`, `set-drawn-from`) through [`Project::prop_edits`] and
+//! `Editor::edit`, the function their offers run; the other rows (a
+//! radius, a grid's columns, a fixture's size…) still set their field.
 
 use lpc_mapping::part::{Circle, PartKind, Shape};
 use lpc_mapping::{GridRouting as Routing, RingDir, RingOrder};
@@ -14,6 +20,8 @@ use crate::domain::color_order::ColorOrder;
 use crate::domain::fixture::Fixture;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::graph_edit::GraphEdit;
+use crate::ux::graph_layout_edit::Units;
 use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 
 pub const LAMPS: PropDesc = PropDesc {
@@ -224,8 +232,77 @@ impl Project {
         }
     }
 
-    /// Apply an edit to one target's property. Returns whether it had it.
-    /// `spacing` is the lamp spacing new rings are drawn with.
+    /// The verbs a row that is one presses for `targets` (module docs):
+    /// `None` for a row that sets its field. `spacing` is the lamp spacing
+    /// new rings are drawn with.
+    pub(crate) fn prop_edits(
+        &self,
+        targets: &[Target],
+        prop_id: &str,
+        edit: PropEdit,
+        spacing: f64,
+    ) -> Option<Vec<GraphEdit>> {
+        if !matches!(prop_id, "lamps" | "copies" | "rings" | "inner-first") {
+            return None;
+        }
+        let mut out = Vec::new();
+        for t in targets {
+            let Some((desc, current)) = self.props_of(t).into_iter().find(|(d, _)| d.id == prop_id)
+            else {
+                continue;
+            };
+            let new = edited(&desc, current, edit);
+            let part = match t {
+                Target::Part(id) => Some(id.clone()),
+                Target::Generated(o) if o.id.key.is_none() => Some(o.part()),
+                _ => None,
+            };
+            match (t, prop_id, new) {
+                (Target::Generated(o), "lamps", PropRaw::Count(n)) if o.id.key.is_some() => out
+                    .push(GraphEdit::SetCount {
+                        subject: o.clone(),
+                        count: n as u32,
+                    }),
+                (_, "lamps", PropRaw::Count(n)) => {
+                    let part = part?;
+                    // A repeat's lamps are the part it holds.
+                    let subject = match self.part(&part).map(|p| &p.kind) {
+                        Some(PartKind::Repeat(r)) => {
+                            crate::PartRef::new(&part.fixture, &r.part.id).node()
+                        }
+                        _ => part.node(),
+                    };
+                    out.push(GraphEdit::SetCount {
+                        subject,
+                        count: n as u32,
+                    });
+                }
+                (_, "copies", PropRaw::Count(n)) => out.push(GraphEdit::SetCount {
+                    subject: part?.node(),
+                    count: n as u32,
+                }),
+                (_, "inner-first", PropRaw::Flag(inside)) => out.push(GraphEdit::SetDrawnFrom {
+                    part: part?,
+                    from: if inside {
+                        lpc_mapping::edit::DrawnFrom::Inside
+                    } else {
+                        lpc_mapping::edit::DrawnFrom::Outside
+                    },
+                }),
+                (_, "rings", PropRaw::Count(n)) => {
+                    let part = part?;
+                    let circle = self.circle(&part)?;
+                    out.extend(ring_count_edits(&part, circle, n.max(1) as usize, spacing));
+                }
+                _ => {}
+            }
+        }
+        Some(out)
+    }
+
+    /// Apply an edit to one target's property, for a row that sets its
+    /// field ([`Project::prop_edits`] says which rows are verbs). Returns
+    /// whether it had it.
     pub fn edit_prop(&mut self, t: &Target, prop_id: &str, edit: PropEdit, spacing: f64) -> bool {
         let Some((desc, current)) = self.props_of(t).into_iter().find(|(d, _)| d.id == prop_id)
         else {
@@ -255,65 +332,28 @@ impl Project {
                     _ => return false,
                 }
             }
-            Target::Part(id) => {
-                if prop_id == "copies"
-                    && let PropRaw::Count(n) = new
-                    && matches!(self.part(id).map(|p| &p.kind), Some(PartKind::Repeat(_)))
-                {
-                    let Some(f) = self.fixture_mut(&id.fixture) else {
-                        return false;
-                    };
-                    return lpc_mapping::edit::set_repeat_count(&mut f.mapping, &id.part, n as u32)
-                        .is_ok();
-                }
-                match (self.part_mut(id).map(|c| &mut c.kind), prop_id, new) {
-                    (Some(PartKind::Shape(Shape::Path(path))), "lamps", PropRaw::Count(n)) => {
-                        path.count = n as u32
-                    }
-                    (
-                        Some(PartKind::Shape(Shape::Polygon(polygon))),
-                        "lamps",
-                        PropRaw::Count(n),
-                    ) => polygon.count = n as u32,
-                    (Some(PartKind::Repeat(repeat)), "lamps", PropRaw::Count(n)) => {
-                        set_shape_lamps(&mut repeat.part.kind, n as u32)
-                    }
-                    (Some(PartKind::Shape(Shape::Circle(circle))), _, new) => {
-                        match (prop_id, new) {
-                            ("rings", PropRaw::Count(n)) => {
-                                set_ring_count(circle, n as usize, spacing)
-                            }
-                            ("ccw", PropRaw::Flag(v)) => {
-                                circle.dir = if v { RingDir::Ccw } else { RingDir::Cw }
-                            }
-                            ("inner-first", PropRaw::Flag(v)) => {
-                                circle.drawn_from = if v {
-                                    RingOrder::InnerFirst
-                                } else {
-                                    RingOrder::OuterFirst
-                                }
-                            }
-                            _ => return false,
-                        }
-                    }
-                    (Some(PartKind::Shape(Shape::Grid(g))), _, new) => match (prop_id, new) {
-                        ("columns", PropRaw::Count(n)) => g.cols = n as u32,
-                        ("rows", PropRaw::Count(n)) => g.rows = n as u32,
-                        ("pitch", PropRaw::Number(v)) => g.pitch = v as f32,
-                        ("snake", PropRaw::Flag(v)) => g.routing = routing(v),
-                        _ => return false,
-                    },
-                    (Some(PartKind::Shape(Shape::FilledPolygon(f))), _, new) => {
-                        match (prop_id, new) {
-                            ("pitch", PropRaw::Number(v)) => f.pitch = v as f32,
-                            ("angle", PropRaw::Number(v)) => f.angle_deg = v as f32,
-                            ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
-                            _ => return false,
-                        }
+            Target::Part(id) => match (self.part_mut(id).map(|c| &mut c.kind), prop_id, new) {
+                (Some(PartKind::Shape(Shape::Circle(circle))), _, new) => match (prop_id, new) {
+                    ("ccw", PropRaw::Flag(v)) => {
+                        circle.dir = if v { RingDir::Ccw } else { RingDir::Cw }
                     }
                     _ => return false,
-                }
-            }
+                },
+                (Some(PartKind::Shape(Shape::Grid(g))), _, new) => match (prop_id, new) {
+                    ("columns", PropRaw::Count(n)) => g.cols = n as u32,
+                    ("rows", PropRaw::Count(n)) => g.rows = n as u32,
+                    ("pitch", PropRaw::Number(v)) => g.pitch = v as f32,
+                    ("snake", PropRaw::Flag(v)) => g.routing = routing(v),
+                    _ => return false,
+                },
+                (Some(PartKind::Shape(Shape::FilledPolygon(f))), _, new) => match (prop_id, new) {
+                    ("pitch", PropRaw::Number(v)) => f.pitch = v as f32,
+                    ("angle", PropRaw::Number(v)) => f.angle_deg = v as f32,
+                    ("snake", PropRaw::Flag(v)) => f.routing = routing(v),
+                    _ => return false,
+                },
+                _ => return false,
+            },
             Target::Generated(o) => {
                 if self.ring_of(o).is_none() {
                     // A copy's edits land on its part (D11).
@@ -327,7 +367,6 @@ impl Project {
                     return false;
                 };
                 match (prop_id, new) {
-                    ("lamps", PropRaw::Count(n)) => r.count = n as u32,
                     ("radius", PropRaw::Number(v)) => r.radius = v as f32,
                     _ => return false,
                 }
@@ -357,30 +396,43 @@ fn shape_lamps(kind: &PartKind) -> Option<u32> {
     }
 }
 
-fn set_shape_lamps(kind: &mut PartKind, n: u32) {
-    match kind {
-        PartKind::Shape(Shape::Path(path)) => path.count = n,
-        PartKind::Shape(Shape::Polygon(polygon)) => polygon.count = n,
-        PartKind::Repeat(repeat) => set_shape_lamps(&mut repeat.part.kind, n),
-        _ => {}
-    }
-}
-
-/// Grow or shrink a circle's rings. Removing takes the innermost ring (the
-/// last listed); adding puts a ring outside the largest one, first in the
-/// list (rings are listed outside in), its key minted by the circle and
-/// never one it had.
-fn set_ring_count(circle: &mut Circle, want: usize, spacing: f64) {
-    circle.rings.truncate(want);
-    while circle.rings.len() < want {
-        let radius = circle
-            .rings
+/// The verbs that grow or shrink a circle's rings to `want`. Removing
+/// takes the innermost ring (the last listed: `remove-ring`); adding puts a
+/// ring outside the largest one (`add-ring`, which lists it first), its
+/// key minted by the circle and never one it had.
+fn ring_count_edits(
+    part: &crate::PartRef,
+    circle: &Circle,
+    want: usize,
+    spacing: f64,
+) -> Vec<GraphEdit> {
+    let have = circle.rings.len();
+    if want < have {
+        return circle.rings[want..]
             .iter()
-            .map(|r| f64::from(r.radius))
-            .fold(0.0, f64::max)
-            + 8.0;
-        let lamps = ((std::f64::consts::TAU * radius / spacing).round() as u32).max(3);
-        circle.add_ring(radius as f32, lamps);
-        circle.rings.rotate_right(1);
+            .rev()
+            .map(|r| GraphEdit::RemoveRing {
+                ring: crate::TreeRef::new(
+                    &part.fixture,
+                    lpc_mapping::part::TreeId::generated(&part.part, r.key.clone()),
+                ),
+            })
+            .collect();
     }
+    let mut largest = circle
+        .rings
+        .iter()
+        .map(|r| f64::from(r.radius))
+        .fold(0.0, f64::max);
+    (have..want)
+        .map(|_| {
+            largest += 8.0;
+            let lamps = ((std::f64::consts::TAU * largest / spacing).round() as u32).max(3);
+            GraphEdit::AddRing {
+                circle: part.clone(),
+                count: lamps,
+                radius: Units(largest as f32),
+            }
+        })
+        .collect()
 }

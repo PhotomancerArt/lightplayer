@@ -1,7 +1,9 @@
 //! The editor's verbs by name: everything a key does that a button, the
-//! right-click list or an agent can do too, and the patching verbs that
-//! take values (`graph_edit.rs`, lean Q77), which a key, an inspector row
-//! and an offer all press through one function.
+//! right-click list or an agent can do too, and the verbs that take values
+//! — patching (`graph_edit.rs`) and layout (`graph_layout_edit.rs`), lean
+//! Q77 — which a key, an inspector row and an offer all press through one
+//! function. Delete is both: ⌫ deletes the selection, and its offer takes
+//! what to delete as a value.
 //!
 //! The hint bar names each verb it shows ([`Hint::verbs`]), and
 //! [`Editor::verbs`] lists the ones on offer right now from the same
@@ -103,10 +105,33 @@ pub enum GraphVerb {
     SetPartStart,
     /// Take away an override whose node is gone.
     RemoveOverride,
+    // ---- the layout verbs that take values (`graph_layout_edit.rs`) -----
+    /// Give a part another id; every override on it follows.
+    Rename,
+    /// Put a part in a new repeat of some copies.
+    Repeat,
+    /// Keep only the part a repeat repeats (copy 0).
+    Unrepeat,
+    /// Make every copy of a repeat a real part (`x@k` → `x-k`).
+    Expand,
+    /// How many: a repeat's copies, a path's, a polygon's or a ring's
+    /// lamps.
+    SetCount,
+    /// A ring added to a circle.
+    AddRing,
+    /// A one-lamp ring at a circle's centre.
+    AddCentreLamp,
+    /// A ring taken from its circle.
+    RemoveRing,
+    /// One segment, or one per subpath or ring.
+    SetSplit,
+    /// Where a shape's own lamp order starts: a circle's outside or
+    /// inside, a path's first or last point.
+    SetDrawnFrom,
 }
 
 impl GraphVerb {
-    pub const ALL: [GraphVerb; 42] = [
+    pub const ALL: [GraphVerb; 52] = [
         GraphVerb::Up,
         GraphVerb::GoIn,
         GraphVerb::Previous,
@@ -149,11 +174,64 @@ impl GraphVerb {
         GraphVerb::SetFixtureStart,
         GraphVerb::SetPartStart,
         GraphVerb::RemoveOverride,
+        GraphVerb::Rename,
+        GraphVerb::Repeat,
+        GraphVerb::Unrepeat,
+        GraphVerb::Expand,
+        GraphVerb::SetCount,
+        GraphVerb::AddRing,
+        GraphVerb::AddCentreLamp,
+        GraphVerb::RemoveRing,
+        GraphVerb::SetSplit,
+        GraphVerb::SetDrawnFrom,
     ];
 
-    /// The patching verbs that take values: never a key of their own, and
-    /// offered with their parameters.
-    pub const WITH_VALUES: [GraphVerb; 12] = [
+    /// Every verb that takes values, offered with its parameters: the
+    /// patching verbs, then the layout verbs.
+    pub const WITH_VALUES: [GraphVerb; 23] = [
+        GraphVerb::SetOutput,
+        GraphVerb::SetPort,
+        GraphVerb::SetStartsAt,
+        GraphVerb::SetDirection,
+        GraphVerb::SetOffset,
+        GraphVerb::TurnOff,
+        GraphVerb::TurnOn,
+        GraphVerb::BackToTheFlow,
+        GraphVerb::SetFlow,
+        GraphVerb::SetFixtureStart,
+        GraphVerb::SetPartStart,
+        GraphVerb::RemoveOverride,
+        GraphVerb::Rename,
+        GraphVerb::Repeat,
+        GraphVerb::Unrepeat,
+        GraphVerb::Expand,
+        GraphVerb::SetCount,
+        GraphVerb::AddRing,
+        GraphVerb::AddCentreLamp,
+        GraphVerb::RemoveRing,
+        GraphVerb::SetSplit,
+        GraphVerb::SetDrawnFrom,
+        GraphVerb::Delete,
+    ];
+
+    /// The layout verbs that take values (Delete among them; its key
+    /// deletes the selection).
+    pub const LAYOUT: [GraphVerb; 11] = [
+        GraphVerb::Rename,
+        GraphVerb::Repeat,
+        GraphVerb::Unrepeat,
+        GraphVerb::Expand,
+        GraphVerb::SetCount,
+        GraphVerb::AddRing,
+        GraphVerb::AddCentreLamp,
+        GraphVerb::RemoveRing,
+        GraphVerb::SetSplit,
+        GraphVerb::SetDrawnFrom,
+        GraphVerb::Delete,
+    ];
+
+    /// The patching verbs that take values: never a key of their own.
+    pub const PATCHING: [GraphVerb; 12] = [
         GraphVerb::SetOutput,
         GraphVerb::SetPort,
         GraphVerb::SetStartsAt,
@@ -168,7 +246,8 @@ impl GraphVerb {
         GraphVerb::RemoveOverride,
     ];
 
-    /// Whether it takes values (and so no key presses it alone).
+    /// Whether it takes values (and so is offered with parameters; only
+    /// Delete also has a key, which acts on the selection).
     pub fn takes_values(self) -> bool {
         GraphVerb::WITH_VALUES.contains(&self)
     }
@@ -219,6 +298,16 @@ impl GraphVerb {
             GraphVerb::SetFixtureStart => "set-fixture-start",
             GraphVerb::SetPartStart => "set-part-start",
             GraphVerb::RemoveOverride => "remove-override",
+            GraphVerb::Rename => "rename",
+            GraphVerb::Repeat => "repeat",
+            GraphVerb::Unrepeat => "unrepeat",
+            GraphVerb::Expand => "expand",
+            GraphVerb::SetCount => "set-count",
+            GraphVerb::AddRing => "add-ring",
+            GraphVerb::AddCentreLamp => "add-centre-lamp",
+            GraphVerb::RemoveRing => "remove-ring",
+            GraphVerb::SetSplit => "set-split",
+            GraphVerb::SetDrawnFrom => "set-drawn-from",
         }
     }
 
@@ -246,7 +335,10 @@ impl GraphVerb {
             GraphVerb::MoveDraw => "Move & draw",
             GraphVerb::Patch => "Patch",
             GraphVerb::PatchNext => "Patch & next",
-            GraphVerb::Unpatch => "Back to the flow",
+            // U puts the selection's starts back (output, port and lamp);
+            // `back-to-the-flow` takes a node and which of what is set
+            // there goes.
+            GraphVerb::Unpatch => "Start back to the flow",
             GraphVerb::Swap => "Swap",
             GraphVerb::Turn => "Turn",
             GraphVerb::TurnBack => "Turn back",
@@ -272,6 +364,16 @@ impl GraphVerb {
             GraphVerb::SetFixtureStart => "Fixture start",
             GraphVerb::SetPartStart => "Part start",
             GraphVerb::RemoveOverride => "Remove override",
+            GraphVerb::Rename => "Rename",
+            GraphVerb::Repeat => "Repeat",
+            GraphVerb::Unrepeat => "Unrepeat",
+            GraphVerb::Expand => "Expand",
+            GraphVerb::SetCount => "Count",
+            GraphVerb::AddRing => "Add ring",
+            GraphVerb::AddCentreLamp => "Add centre lamp",
+            GraphVerb::RemoveRing => "Remove ring",
+            GraphVerb::SetSplit => "Split",
+            GraphVerb::SetDrawnFrom => "Drawn from",
         }
     }
 
@@ -320,11 +422,22 @@ impl GraphVerb {
             | GraphVerb::SetFlow
             | GraphVerb::SetFixtureStart
             | GraphVerb::SetPartStart
-            | GraphVerb::RemoveOverride => "",
+            | GraphVerb::RemoveOverride
+            | GraphVerb::Rename
+            | GraphVerb::Repeat
+            | GraphVerb::Unrepeat
+            | GraphVerb::Expand
+            | GraphVerb::SetCount
+            | GraphVerb::AddRing
+            | GraphVerb::AddCentreLamp
+            | GraphVerb::RemoveRing
+            | GraphVerb::SetSplit
+            | GraphVerb::SetDrawnFrom => "",
         }
     }
 
-    /// The key press that does it; `None` for a verb that takes values.
+    /// The key press that does it; `None` for a verb that takes values
+    /// (Delete excepted: ⌫ deletes the selection).
     fn key(self) -> Option<(Key, Mods)> {
         let plain = Mods::default();
         let command = Mods {

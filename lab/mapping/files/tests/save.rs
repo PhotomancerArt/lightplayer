@@ -189,7 +189,8 @@ fn a_circles_rings_keep_their_keys_across_a_save() {
         panic!("a circle");
     };
     let keys: Vec<String> = c.rings.iter().map(|r| r.key.to_string()).collect();
-    assert_eq!(keys, ["r1", "r3", "r4", "r5", "r6"]);
+    // Listed outside in: ring r6 (radius 37) goes where its radius puts it.
+    assert_eq!(keys, ["r1", "r6", "r3", "r4", "r5"]);
     assert_eq!(c.next_ring, 7, "r2 and r6 are never minted again");
 }
 

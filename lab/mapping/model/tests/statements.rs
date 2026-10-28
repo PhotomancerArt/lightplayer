@@ -1236,16 +1236,29 @@ fn clicking_points_builds_a_path() {
     key(&mut e, Key::Enter, none());
     assert_eq!(e.selection, vec![comp(&e, "scarf:path2")]);
 
-    // One point is no path: refused, and the draft is kept to go on from.
+    // One point is a single lamp (lean Q94): a one-lamp path, its lamp
+    // where you clicked.
     key(&mut e, Key::Char('p'), none());
-    let at = e.camera.to_screen(place(&e, "scarf", 70.0, 70.0));
+    let world = place(&e, "scarf", 70.0, 70.0);
+    let at = e.camera.to_screen(world);
     e.pointer_down(at, Button::Primary, none());
     e.pointer_down(at, Button::Primary, none());
     e.double_click(at, none());
-    assert_eq!(e.notice.clone().unwrap().kind, NoticeKind::Refused);
+    assert_eq!(e.selection, vec![comp(&e, "scarf:path3")]);
+    let Target::Part(single) = e.selection[0].clone() else {
+        panic!("a part");
+    };
+    let lamps = &e.project.segments_of(&single)[0].lamps;
+    assert_eq!(lamps.len(), 1, "one lamp");
+    assert!(lamps[0].pos.distance(world) < 1e-3, "where you clicked");
+    assert_eq!(e.tool, Tool::Select);
+
+    // A point clicked, then Esc: Esc takes it back, and Esc again leaves
+    // the tool.
+    key(&mut e, Key::Char('p'), none());
+    let at = e.camera.to_screen(place(&e, "scarf", 80.0, 70.0));
+    e.pointer_down(at, Button::Primary, none());
     assert_eq!(e.path_draft.len(), 1);
-    assert_eq!(e.tool, Tool::Path);
-    // Esc takes back that point, and Esc again leaves the tool.
     key(&mut e, Key::Escape, none());
     assert!(e.path_draft.is_empty());
     key(&mut e, Key::Escape, none());
@@ -2892,8 +2905,8 @@ fn a_repeat_is_picked_by_its_copies() {
     assert!(!e.project.area(&e.camera, &t).unwrap().contains(middle));
 }
 
-/// A copy's lamps live in its repeat (D11): changing them on one copy
-/// changes every copy.
+/// A copy's lamps live in its repeat (D11): a count set on one copy
+/// (`set-count`) changes every copy.
 #[test]
 fn a_copys_lamps_live_in_its_repeat() {
     let (mut p, f, _) = bare(&[("D0", 60)]);
@@ -2905,7 +2918,14 @@ fn a_copys_lamps_live_in_its_repeat() {
         4,
     );
     let copy = Target::Generated(copy_of(&arm, 2));
-    assert!(p.edit_prop(&copy, "lamps", PropEdit::SetCount(7), 2.4));
+    let Target::Generated(node) = copy else {
+        unreachable!()
+    };
+    p.apply_graph_edit(&GraphEdit::SetCount {
+        subject: node,
+        count: 7,
+    })
+    .unwrap();
     for k in 0..4 {
         assert_eq!(local_lamps(&p, &sector, k).len(), 7);
     }

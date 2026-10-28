@@ -1754,17 +1754,17 @@ impl Editor {
         self.path_draft.push(p);
     }
 
-    /// Double-click or Enter: make the clicked-out path. It needs two
-    /// different points; with fewer it is refused and the draft stays.
+    /// Double-click or Enter: make the clicked-out path. One point alone
+    /// is a single lamp (lean Q94): a one-lamp path whose lamp sits where
+    /// you clicked. With no point it is refused.
     fn finish_path(&mut self) {
         let draft = std::mem::take(&mut self.path_draft);
         let points = self.distinct(draft);
-        if points.len() < 2 {
-            self.path_draft = points;
+        if points.is_empty() {
             self.notice = Some(Notice::refused(
                 "Nothing drawn",
-                "a path needs two different points",
-                "click where it starts, click where it ends, then double-click or press Enter",
+                "a path needs a point",
+                "click where it starts (once for a single lamp), then double-click or press Enter",
             ));
             return;
         }
@@ -1772,7 +1772,11 @@ impl Editor {
             return;
         };
         let frame = self.project.frame(&fixture);
-        let kind = self.drawn_path(points.into_iter().map(|p| frame.to_local(p)).collect());
+        let local: Vec<Vec2> = points.into_iter().map(|p| frame.to_local(p)).collect();
+        let kind = match local.as_slice() {
+            [one] => single_lamp(*one),
+            _ => self.drawn_path(local),
+        };
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
             self.selection = vec![Target::Part(id)];
@@ -1874,4 +1878,15 @@ impl Editor {
     pub(crate) fn after_edit(&mut self) {
         self.prune_selection();
     }
+}
+
+/// A single lamp where the path tool was clicked once (lean Q94): a
+/// one-lamp path, its lamp at its first point. The path runs one unit on
+/// from there, only so it has a length to lay its lamp along.
+fn single_lamp(at: Vec2) -> PartKind {
+    let from = f32s(at);
+    PartKind::Shape(Shape::Path(Path::through(
+        &[from, [from[0] + 1.0, from[1]]],
+        1,
+    )))
 }

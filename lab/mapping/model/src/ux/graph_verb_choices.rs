@@ -1,5 +1,6 @@
 //! What the patching verbs that take values can be given, in words: the
-//! nodes each acts on, the ports, the flows. Studio's offers draw their
+//! nodes each acts on, the ports, the flows (the layout verbs' are in
+//! `layout_verb_choices.rs`). Studio's offers draw their
 //! parameters from these lists (`graph_offers.rs`), so the agent and a
 //! person choose among the same options, labelled as the Graph says them
 //! ("ring r3 of circle1", "D1 of main").
@@ -19,11 +20,9 @@ use crate::domain::node::NodeId;
 use crate::domain::part_ref::{PartRef, TreeRef};
 use crate::domain::patch::ProblemKind;
 use crate::domain::project::Project;
-use crate::domain::target::{Target, is_single_segment};
+use crate::domain::target::{Target, is_single_segment, output_name_words};
 use crate::ux::editor::Editor;
-use crate::ux::graph_edit::{
-    BackField, NO_NAME_YET, RuleSubject, flow_value, node_value, port_value,
-};
+use crate::ux::graph_edit::{BackField, RuleSubject, flow_value, node_value, port_value};
 use crate::ux::graph_verb::GraphVerb;
 
 /// One option of a verb's parameter.
@@ -38,7 +37,7 @@ pub struct VerbChoice {
 }
 
 impl VerbChoice {
-    fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+    pub(crate) fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             value: value.into(),
             label: label.into(),
@@ -124,6 +123,7 @@ impl Editor {
                     _ => None,
                 })
                 .collect(),
+            layout if GraphVerb::LAYOUT.contains(&layout) => self.layout_subjects(layout),
             _ => Vec::new(),
         }
     }
@@ -134,6 +134,9 @@ impl Editor {
         let [t] = self.selection.as_slice() else {
             return None;
         };
+        if GraphVerb::LAYOUT.contains(&verb) {
+            return self.layout_selected_subject(t, subjects);
+        }
         let value = match verb {
             GraphVerb::SetFlow | GraphVerb::SetFixtureStart | GraphVerb::SetPartStart => {
                 let subject = match t {
@@ -162,21 +165,21 @@ impl Editor {
 
     /// The ports `verb` can be given: every port of every named output
     /// some fixture reaches (`At <port>`), then, for `set-port`, Next port
-    /// and Stays here. An output with no name lists its ports too, each
-    /// disabled until it has one (lean Q96: naming it is a layout verb).
+    /// and Stays here. An output with no name lists its ports too: choosing
+    /// one names it, and its label says with what (lean Q96).
     pub fn port_choices(&self, verb: GraphVerb) -> Vec<VerbChoice> {
         let p = &self.project;
         let mut out = Vec::new();
         if verb == GraphVerb::SetPartStart {
             out.push(VerbChoice::new("follows", "Follows"));
         }
+        let names = p.next_output_name();
         for (output, port) in self.reachable_ports() {
-            let mut choice =
-                VerbChoice::new(port_value(&output, &port), p.port_words(&output, &port));
+            let mut label = p.port_words(&output, &port);
             if p.output(&output).is_some_and(|o| o.label.is_none()) {
-                choice.disabled = Some(NO_NAME_YET.to_string());
+                label = format!("{label} (names it {})", output_name_words(&names));
             }
-            out.push(choice);
+            out.push(VerbChoice::new(port_value(&output, &port), label));
         }
         match verb {
             GraphVerb::SetPort => {
@@ -190,7 +193,7 @@ impl Editor {
     }
 
     /// The outputs `set-output` can name: every output some fixture
-    /// reaches, an unnamed one disabled.
+    /// reaches; choosing an unnamed one names it.
     pub fn output_choices(&self) -> Vec<VerbChoice> {
         let p = &self.project;
         let mut out: Vec<VerbChoice> = Vec::new();
@@ -198,11 +201,14 @@ impl Editor {
             if out.iter().any(|c| c.value == output.to_string()) {
                 continue;
             }
-            let mut choice = VerbChoice::new(output.to_string(), p.output_words(&output));
+            let mut label = p.output_words(&output);
             if p.output(&output).is_some_and(|o| o.label.is_none()) {
-                choice.disabled = Some(NO_NAME_YET.to_string());
+                label = format!(
+                    "{label} (names it {})",
+                    output_name_words(&p.next_output_name())
+                );
             }
-            out.push(choice);
+            out.push(VerbChoice::new(output.to_string(), label));
         }
         out
     }
@@ -247,7 +253,7 @@ impl Editor {
     // ---- helpers -------------------------------------------------------------
 
     /// Every node of every fixture's tree that is there, in tree order.
-    fn tree_nodes(&self) -> Vec<TreeRef> {
+    pub(crate) fn tree_nodes(&self) -> Vec<TreeRef> {
         let p = &self.project;
         let mut out = Vec::new();
         for f in p.fixtures() {
@@ -285,7 +291,7 @@ impl Editor {
         out
     }
 
-    fn rule_choice(&self, s: &RuleSubject) -> VerbChoice {
+    pub(crate) fn rule_choice(&self, s: &RuleSubject) -> VerbChoice {
         let p = &self.project;
         let label = match s {
             RuleSubject::Fixture(f) => format!("{} (the fixture)", p.node_name(f)),
@@ -295,12 +301,12 @@ impl Editor {
     }
 
     /// A node as the tree says it, with its fixture when there are several.
-    fn node_label(&self, n: &TreeRef) -> String {
+    pub(crate) fn node_label(&self, n: &TreeRef) -> String {
         let p = &self.project;
         self.with_fixture(&n.fixture, p.long_label(&p.tree_target(n)))
     }
 
-    fn with_fixture(&self, fixture: &NodeId, words: String) -> String {
+    pub(crate) fn with_fixture(&self, fixture: &NodeId, words: String) -> String {
         if self.project.fixtures().len() > 1 {
             format!("{words} · {}", self.project.node_name(fixture))
         } else {

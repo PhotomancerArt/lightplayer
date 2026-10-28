@@ -127,10 +127,13 @@ pub use ux::editor::{
     Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
 };
 pub use ux::graph_edit::{
-    BackField, GraphEdit, NO_NAME_YET, PartStart, PortChoice, RuleSubject, flow_value, node_value,
-    port_value,
+    BackField, GraphEdit, PartStart, PortChoice, RuleSubject, flow_value, node_value, port_value,
 };
 pub use ux::graph_input::GraphInput;
+pub use ux::graph_layout_edit::{
+    DRAWN_FROM, DeleteSubject, Split, Units, delete_value, drawn_from_label, drawn_from_name,
+    part_value,
+};
 pub use ux::graph_verb::GraphVerb;
 pub use ux::graph_verb_choices::VerbChoice;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
