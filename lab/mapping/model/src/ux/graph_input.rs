@@ -10,11 +10,11 @@
 
 use crate::domain::geom::Vec2;
 use crate::domain::node::NodeId;
-use crate::domain::part_ref::TreeRef;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::{Button, Editor, Key, Mods, Tool};
+use crate::ux::graph_edit::GraphEdit;
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::patch_section::PatchInput;
 use crate::ux::port_grouping::PortGrouping;
@@ -105,11 +105,12 @@ pub enum GraphInput {
     Presentation(Presentation),
     /// Debug's Cursor ops: the patcher's steps under the inspector.
     CursorOps(bool),
-    /// A problem's Remove: take away an override whose node is gone (one
-    /// undo step). An offer from P06.
-    RemoveOverride(TreeRef),
     /// A verb by name, as its key does it.
     Verb(GraphVerb),
+    /// A verb that takes values, with them (a problem's Remove is
+    /// `GraphEdit::RemoveOverride`): made as one undo step by the same
+    /// function its offer and its rows run (`graph_edit.rs`).
+    Edit(GraphEdit),
     /// How output cards group a port's pixels.
     Grouping(PortGrouping),
     /// The inspector's Patch section edited the selection's placements.
@@ -151,8 +152,8 @@ impl Editor {
             GraphInput::ForceSizeClass(class) => self.force_size_class(class),
             GraphInput::Presentation(presentation) => self.debug.presentation = presentation,
             GraphInput::CursorOps(on) => self.debug.cursor_ops = on,
-            GraphInput::RemoveOverride(node) => self.remove_gone_override(&node),
             GraphInput::Verb(verb) => return self.press(verb),
+            GraphInput::Edit(edit) => return self.edit(&[edit]).is_ok(),
             GraphInput::Grouping(g) => self.grouping = g,
             GraphInput::Patch(input) => self.patch_input(input),
         }

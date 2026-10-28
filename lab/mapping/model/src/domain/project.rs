@@ -199,7 +199,12 @@ impl Project {
         if let Some(start) = self.start_ops_at(output, port, pixel)
             && let Some(f) = self.fixture_mut(fixture)
         {
-            f.mapping.start = start;
+            // Setting the fixture's start never refuses.
+            let _ = lpc_mapping::edit::set_start(
+                &mut f.mapping,
+                lpc_mapping::patching::PatchTarget::Fixture,
+                start,
+            );
         }
     }
 

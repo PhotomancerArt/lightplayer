@@ -395,7 +395,9 @@ fn each_problem_reads_as_one_sentence_naming_its_segment_or_port() {
         .into_iter()
         .find(|x| x.remove.is_some())
         .unwrap();
-    e.input(GraphInput::RemoveOverride(fixture.remove.unwrap()));
+    e.input(GraphInput::Edit(GraphEdit::RemoveOverride {
+        node: fixture.remove.unwrap(),
+    }));
     assert!(e.project.override_of(&gone).is_none());
     // A segment set where it doesn't fit: one sentence naming the port.
     let mut p = Project::circular_display();

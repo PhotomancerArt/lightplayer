@@ -4,9 +4,9 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchField, PatchInput, Prop,
-    PropEdit, PropKind, PropValue, UiField, UiFieldValue, UiInspector, UiItem, UiProblem, UiSource,
-    UiTree,
+    GraphEdit, GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchField,
+    PatchInput, Prop, PropEdit, PropKind, PropValue, UiField, UiFieldValue, UiInspector, UiItem,
+    UiProblem, UiSource, UiTree,
 };
 
 use crate::graph_editor::GraphEditor;
@@ -239,7 +239,7 @@ fn ProblemRow(ed: GraphEditor, problem: UiProblem) -> Element {
                     title: "Take this override away",
                     onmousedown: move |evt| evt.prevent_default(),
                     onclick: move |_| {
-                        ed.input(GraphInput::RemoveOverride(node.clone()));
+                        ed.input(GraphInput::Edit(GraphEdit::RemoveOverride { node: node.clone() }));
                     },
                     "Remove"
                 }

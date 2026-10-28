@@ -36,7 +36,7 @@
 //! The keys do the same edits (`patching.rs`).
 
 use lpc_mapping::patching::{
-    Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, PatchTarget, PortOp, Start, Unit,
+    Amount, ChannelOp, Direction, Flow, OutputOp, PatchTarget, PortOp, Start, Unit,
 };
 
 use crate::domain::node::NodeId;
@@ -46,6 +46,7 @@ use crate::domain::target::{Target, is_single_segment};
 use crate::domain::walked::{Cursor, Walked};
 use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::Editor;
+use crate::ux::graph_edit::{BackField, GraphEdit, PartStart, PortChoice, RuleSubject};
 use crate::ux::ui::{UiField, UiFieldValue, UiItem, UiSource};
 
 /// Which patching row.
@@ -442,7 +443,10 @@ impl Editor {
     }
 
     /// Apply a patching row's edit to every selected thing, as one undo
-    /// step.
+    /// step. A row says which row and which option; this turns it into the
+    /// patching verb it is, once per selected thing (`graph_edit.rs`), and
+    /// makes them through [`Editor::edit`], the function the verb's offer
+    /// runs too. No row edits the project another way.
     pub fn patch_input(&mut self, input: PatchInput) {
         if let PatchInput::PatchHere { option } = input {
             let gap = match self.selection.as_slice() {
@@ -451,17 +455,45 @@ impl Editor {
             };
             let object = self.patch_here_options().get(option).cloned();
             if let (Some(gap), Some(object)) = (gap, object) {
-                self.checkpoint();
-                self.project
-                    .patch_segment(&object, &gap.output, &gap.port, gap.pixels.start);
-                self.after_edit();
-                self.selection = vec![self.project.tree_target(&object)];
+                let edits = [
+                    GraphEdit::SetPort {
+                        subject: object.clone(),
+                        port: PortChoice::At {
+                            output: gap.output.clone(),
+                            port: gap.port.clone(),
+                        },
+                    },
+                    GraphEdit::SetStartsAt {
+                        subject: object.clone(),
+                        at: Some(Amount::lamps(gap.pixels.start)),
+                    },
+                ];
+                if self.edit(&edits).is_ok() {
+                    self.selection = vec![self.project.tree_target(&object)];
+                }
             }
             return;
         }
+        let edits = self.row_edits(input);
+        // A refusal says why in the notice; nothing changed.
+        let _ = self.edit(&edits);
+    }
+
+    /// The patching verbs a row's input stands for, one per selected thing.
+    fn row_edits(&self, input: PatchInput) -> Vec<GraphEdit> {
         let rules = self.rule_targets();
-        let objects = self.patch_objects();
-        self.checkpoint();
+        let objects: Vec<TreeRef> = self.patch_objects().into_iter().map(|(_, o)| o).collect();
+        let each = |make: &dyn Fn(&TreeRef) -> Option<GraphEdit>| -> Vec<GraphEdit> {
+            objects.iter().filter_map(make).collect()
+        };
+        let back = |field: BackField| {
+            each(&|o| {
+                Some(GraphEdit::BackToTheFlow {
+                    subject: o.clone(),
+                    field,
+                })
+            })
+        };
         match input {
             PatchInput::Choose {
                 field: PatchField::Start,
@@ -469,285 +501,255 @@ impl Editor {
             } => {
                 let fixture_only = rules.iter().all(|(_, t)| *t == PatchTarget::Fixture);
                 let Some(o) = self.start_options(fixture_only).get(option).cloned() else {
-                    return;
+                    return Vec::new();
                 };
-                for (f, t) in &rules {
-                    let start = match &o {
-                        PatchOption::Follows => Start::KEEP,
-                        PatchOption::NextPort => Start::next_port(),
-                        PatchOption::At(out, port) => {
-                            match self.project.start_ops_at(out, port, 0) {
-                                Some(start) => start,
-                                None => continue,
-                            }
-                        }
-                        _ => continue,
-                    };
-                    self.project.set_start(f, t, start);
-                }
+                rules
+                    .iter()
+                    .filter_map(|(f, t)| self.start_edit(f, t, &o, 0))
+                    .collect()
             }
             PatchInput::Nudge {
                 field: PatchField::StartPixel,
                 by,
-            } => {
-                for (f, t) in &rules {
+            } => rules
+                .iter()
+                .filter_map(|(f, t)| {
                     let start = self.rules_on(f, t).0;
-                    if let ChannelOp::Set(channel) = start.channel {
-                        let per = self.per_lamp(f) as i64;
-                        let px = (channels(channel, per as u32) as i64 / per + by).max(0) as u32;
-                        self.project.set_start(
-                            f,
-                            t,
-                            Start {
-                                channel: ChannelOp::Set(Amount::lamps(px)),
-                                ..start
-                            },
-                        );
-                    }
-                }
-            }
+                    let ChannelOp::Set(channel) = start.channel else {
+                        return None;
+                    };
+                    let per = self.per_lamp(f) as i64;
+                    let px = (channels(channel, per as u32) as i64 / per + by).max(0) as u32;
+                    let at = self.start_option(&start)?;
+                    self.start_edit(f, t, &at, px)
+                })
+                .collect(),
             PatchInput::Choose {
                 field: PatchField::Children,
                 option,
             } => {
                 let Some(o) = self.children_options(&rules).get(option).cloned() else {
-                    return;
+                    return Vec::new();
                 };
-                for (f, t) in &rules {
-                    let flow = match &o {
-                        PatchOption::EndToEnd => Flow::EndToEnd,
-                        PatchOption::OnePerPort(_, from) => match port_key(from) {
-                            Some(from) => Flow::OnePerPort { from },
-                            None => continue,
-                        },
-                        _ => continue,
-                    };
-                    self.project.set_flow(f, t, flow);
-                }
+                let flow = match &o {
+                    PatchOption::EndToEnd => Flow::EndToEnd,
+                    PatchOption::OnePerPort(_, from) => match port_key(from) {
+                        Some(from) => Flow::OnePerPort { from },
+                        None => return Vec::new(),
+                    },
+                    _ => return Vec::new(),
+                };
+                rules
+                    .iter()
+                    .map(|(f, t)| GraphEdit::SetFlow {
+                        subject: rule_subject(f, t),
+                        flow: flow.clone(),
+                    })
+                    .collect()
             }
             PatchInput::Choose {
                 field: PatchField::Port,
                 option,
-            } => match self.node_port_options().get(option).cloned() {
-                // A port of its own starts it at that port's first lamp:
-                // "ring 3 is on D9, from its first lamp".
-                Some(PatchOption::Port(out, port)) => {
-                    for (_, o) in &objects {
-                        self.project.patch_segment(o, &out, &port, 0);
-                    }
-                }
-                Some(PatchOption::NextPort) => {
-                    for (_, o) in &objects {
-                        self.project.edit_override(o, |x| {
-                            x.output = None;
-                            x.port = Some(PortOp::Add(1));
-                            x.channel = Some(ChannelOp::Set(Amount::lamps(0)));
-                            x.off = false;
-                        });
-                    }
-                }
-                Some(PatchOption::StaysHere) => {
-                    for (_, o) in &objects {
-                        self.project.edit_override(o, |x| {
-                            x.output = Some(OutputOp::Keep);
-                            x.port = Some(PortOp::Keep);
-                        });
-                    }
-                }
-                _ => return,
-            },
+            } => {
+                let port = match self.node_port_options().get(option).cloned() {
+                    // A port of its own starts it at that port's first
+                    // lamp: "ring 3 is on D9, from its first lamp".
+                    Some(PatchOption::Port(output, port)) => PortChoice::At { output, port },
+                    Some(PatchOption::NextPort) => PortChoice::NextPort,
+                    Some(PatchOption::StaysHere) => PortChoice::StaysHere,
+                    _ => return Vec::new(),
+                };
+                each(&|o| {
+                    Some(GraphEdit::SetPort {
+                        subject: o.clone(),
+                        port: port.clone(),
+                    })
+                })
+            }
             PatchInput::Stay {
                 field: PatchField::Port,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| {
-                        x.output = Some(OutputOp::Keep);
-                        x.port = Some(PortOp::Keep);
-                    });
-                }
-            }
+            } => each(&|o| {
+                Some(GraphEdit::SetPort {
+                    subject: o.clone(),
+                    port: PortChoice::StaysHere,
+                })
+            }),
             PatchInput::Stay {
                 field: PatchField::Pixel,
-            } => {
-                for (_, o) in &objects {
-                    self.project
-                        .edit_override(o, |x| x.channel = Some(ChannelOp::Keep));
-                }
-            }
+            } => each(&|o| {
+                Some(GraphEdit::SetStartsAt {
+                    subject: o.clone(),
+                    at: None,
+                })
+            }),
+            // Set here, as it is now: its port from its first lamp, then
+            // the channel it starts on.
             PatchInput::Override {
                 field: PatchField::Port | PatchField::Output,
-            } => {
-                for (_, o) in &objects {
-                    if let Some(at) = self.landed(o) {
-                        self.project.edit_override(o, |x| {
-                            x.output = at
-                                .output_name
-                                .as_deref()
-                                .map(|n| OutputOp::Set(OutputName::new(n)));
-                            x.port = at
-                                .port
-                                .as_deref()
-                                .and_then(port_key)
-                                .map(|k| PortOp::set(k.0));
-                            x.channel = Some(ChannelOp::Set(Amount::channels(at.channel)));
-                        });
-                    }
-                }
-            }
+            } => objects
+                .iter()
+                .flat_map(|o| {
+                    let Some(at) = self.landed(o) else {
+                        return Vec::new();
+                    };
+                    let (Some(output), Some(port)) = (at.output.clone(), at.port.clone()) else {
+                        return Vec::new();
+                    };
+                    vec![
+                        GraphEdit::SetPort {
+                            subject: o.clone(),
+                            port: PortChoice::At { output, port },
+                        },
+                        GraphEdit::SetStartsAt {
+                            subject: o.clone(),
+                            at: Some(Amount::channels(at.channel)),
+                        },
+                    ]
+                })
+                .collect(),
             PatchInput::Reset {
                 field: PatchField::Port,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| {
-                        x.output = None;
-                        x.port = None;
-                        x.channel = None;
-                    });
-                }
-            }
+            } => back(BackField::Start),
             PatchInput::Reset {
                 field: PatchField::Output,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.output = None);
-                }
-            }
+            } => back(BackField::Output),
             PatchInput::Override {
                 field: PatchField::Pixel,
-            } => {
-                for (_, o) in &objects {
-                    if let Some(at) = self.landed(o) {
-                        self.project.edit_override(o, |x| {
-                            x.channel = Some(ChannelOp::Set(Amount::channels(at.channel)))
-                        });
-                    }
-                }
-            }
+            } => each(&|o| {
+                Some(GraphEdit::SetStartsAt {
+                    subject: o.clone(),
+                    at: Some(Amount::channels(self.landed(o)?.channel)),
+                })
+            }),
             PatchInput::Reset {
                 field: PatchField::Pixel,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.channel = None);
-                }
-            }
+            } => back(BackField::StartsAt),
             PatchInput::Nudge {
                 field: PatchField::Pixel,
                 by,
-            } => {
-                for (f, o) in &objects {
-                    let per = self.per_lamp(f);
-                    if let Some(at) = self.landed(o) {
-                        let px = (at.channel as i64 / per as i64 + by).max(0) as u32;
-                        self.project.edit_override(o, |x| {
-                            x.channel = Some(ChannelOp::Set(Amount::lamps(px)))
-                        });
-                    }
-                }
-            }
+            } => objects
+                .iter()
+                .filter_map(|o| {
+                    let per = self.per_lamp(&o.fixture);
+                    let at = self.landed(o)?;
+                    let px = (at.channel as i64 / per as i64 + by).max(0) as u32;
+                    Some(GraphEdit::SetStartsAt {
+                        subject: o.clone(),
+                        at: Some(Amount::lamps(px)),
+                    })
+                })
+                .collect(),
             PatchInput::Choose {
                 field: PatchField::Direction,
                 option,
             } => {
-                let d = if option == 1 {
+                let direction = if option == 1 {
                     Direction::Reverse
                 } else {
                     Direction::Forward
                 };
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.direction = Some(d));
-                }
+                each(&|o| {
+                    Some(GraphEdit::SetDirection {
+                        subject: o.clone(),
+                        direction,
+                    })
+                })
             }
             PatchInput::Override {
                 field: PatchField::Direction,
-            } => {
-                for (_, o) in &objects {
-                    let d = self
+            } => each(&|o| {
+                Some(GraphEdit::SetDirection {
+                    subject: o.clone(),
+                    direction: self
                         .project
                         .effective_patch()
                         .walked(o)
                         .map(|w| w.direction)
-                        .unwrap_or_default();
-                    self.project.edit_override(o, |x| x.direction = Some(d));
-                }
-            }
+                        .unwrap_or_default(),
+                })
+            }),
             PatchInput::Reset {
                 field: PatchField::Direction,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.direction = None);
-                }
-            }
+            } => back(BackField::Direction),
             PatchInput::Nudge {
                 field: PatchField::Offset,
                 by,
-            } => {
-                for (_, o) in &objects {
-                    self.project.turn_placement(o, by);
-                }
-            }
+            } => each(&|o| self.project.turn_edit(o, by)),
             PatchInput::Override {
                 field: PatchField::Offset,
-            } => {
-                for (_, o) in &objects {
-                    let offset = self
+            } => each(&|o| {
+                Some(GraphEdit::SetOffset {
+                    subject: o.clone(),
+                    lamps: self
                         .project
                         .effective_patch()
                         .walked(o)
-                        .map_or(0, |w| w.offset);
-                    self.project.edit_override(o, |x| x.offset = Some(offset));
-                }
-            }
+                        .map_or(0, |w| w.offset),
+                })
+            }),
             PatchInput::Reset {
                 field: PatchField::Offset,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.offset = None);
-                }
-            }
+            } => back(BackField::Offset),
             PatchInput::Choose {
                 field: PatchField::OnWire,
                 option,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.off = option == 1);
-                }
-            }
+            } => each(&|o| {
+                Some(if option == 1 {
+                    GraphEdit::TurnOff { subject: o.clone() }
+                } else {
+                    GraphEdit::TurnOn { subject: o.clone() }
+                })
+            }),
             // Off is the only value On the line can be set to here.
             PatchInput::Override {
                 field: PatchField::OnWire,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.off = true);
-                }
-            }
+            } => each(&|o| Some(GraphEdit::TurnOff { subject: o.clone() })),
             PatchInput::Reset {
                 field: PatchField::OnWire,
-            } => {
-                for (_, o) in &objects {
-                    self.project.edit_override(o, |x| x.off = false);
-                }
-            }
+            } => each(&|o| Some(GraphEdit::TurnOn { subject: o.clone() })),
             PatchInput::Choose { .. }
             | PatchInput::Override { .. }
             | PatchInput::Reset { .. }
             | PatchInput::Nudge { .. }
             | PatchInput::Stay { .. }
-            | PatchInput::PatchHere { .. } => {}
+            | PatchInput::PatchHere { .. } => Vec::new(),
         }
-        self.after_edit();
     }
 
-    /// A problem's Remove: take away an override whose node isn't there
-    /// any more, as one undo step. Nothing for a node that is.
-    pub fn remove_gone_override(&mut self, node: &TreeRef) {
-        if self.project.placed().node(node).is_some() || self.project.override_of(node).is_none() {
-            return;
+    /// The verb a Start row's option is on a fixture or a part, from
+    /// `lamps`: a fixture's start is always at a port.
+    fn start_edit(
+        &self,
+        fixture: &NodeId,
+        t: &PatchTarget,
+        option: &PatchOption,
+        lamps: u32,
+    ) -> Option<GraphEdit> {
+        match t {
+            PatchTarget::Fixture => match option {
+                PatchOption::At(output, port) => Some(GraphEdit::SetFixtureStart {
+                    fixture: fixture.clone(),
+                    output: output.clone(),
+                    port: port.clone(),
+                    lamps,
+                }),
+                _ => None,
+            },
+            PatchTarget::Part(part) => Some(GraphEdit::SetPartStart {
+                part: PartRef::new(fixture, part),
+                start: match option {
+                    PatchOption::Follows => PartStart::Follows,
+                    PatchOption::NextPort => PartStart::NextPort,
+                    PatchOption::At(output, port) => PartStart::At {
+                        output: output.clone(),
+                        port: port.clone(),
+                        lamps,
+                    },
+                    _ => return None,
+                },
+            }),
+            PatchTarget::Node(_) => None,
         }
-        self.checkpoint();
-        if let Some(f) = self.project.fixture_mut(&node.fixture) {
-            f.mapping.overrides.remove(&node.id);
-        }
-        self.after_edit();
     }
 
     // ---- helpers -------------------------------------------------------------
@@ -977,6 +979,14 @@ impl ChildrenKey {
             (ChildrenKey::OnePerPort(a), PatchOption::OnePerPort(_, b)) => a == b,
             _ => false,
         }
+    }
+}
+
+/// A start-and-flow target as the verbs name it.
+fn rule_subject(fixture: &NodeId, t: &PatchTarget) -> RuleSubject {
+    match t {
+        PatchTarget::Part(part) => RuleSubject::Part(PartRef::new(fixture, part)),
+        PatchTarget::Fixture | PatchTarget::Node(_) => RuleSubject::Fixture(fixture.clone()),
     }
 }
 

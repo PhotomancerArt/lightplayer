@@ -1,5 +1,7 @@
 //! The editor's verbs by name: everything a key does that a button, the
-//! right-click list or an agent can do too.
+//! right-click list or an agent can do too, and the patching verbs that
+//! take values (`graph_edit.rs`, lean Q77), which a key, an inspector row
+//! and an offer all press through one function.
 //!
 //! The hint bar names each verb it shows ([`Hint::verbs`]), and
 //! [`Editor::verbs`] lists the ones on offer right now from the same
@@ -76,10 +78,35 @@ pub enum GraphVerb {
     Undo,
     /// ⇧⌘Z
     Redo,
+    // ---- the patching verbs that take values (`graph_edit.rs`) ----------
+    /// A segment's output.
+    SetOutput,
+    /// A segment's port: at a port, the next port, or stays here.
+    SetPort,
+    /// Where on its port a segment starts, in lamps.
+    SetStartsAt,
+    /// Which way a node's lamps run on the line.
+    SetDirection,
+    /// A segment's lamps shifted round, in lamps.
+    SetOffset,
+    /// Off the line.
+    TurnOff,
+    /// On the line again.
+    TurnOn,
+    /// Drop what is set here, one field or all.
+    BackToTheFlow,
+    /// A fixture's or a container's flow.
+    SetFlow,
+    /// Where a fixture starts.
+    SetFixtureStart,
+    /// Where a part starts, in every copy.
+    SetPartStart,
+    /// Take away an override whose node is gone.
+    RemoveOverride,
 }
 
 impl GraphVerb {
-    pub const ALL: [GraphVerb; 30] = [
+    pub const ALL: [GraphVerb; 42] = [
         GraphVerb::Up,
         GraphVerb::GoIn,
         GraphVerb::Previous,
@@ -110,7 +137,41 @@ impl GraphVerb {
         GraphVerb::UnpatchAll,
         GraphVerb::Undo,
         GraphVerb::Redo,
+        GraphVerb::SetOutput,
+        GraphVerb::SetPort,
+        GraphVerb::SetStartsAt,
+        GraphVerb::SetDirection,
+        GraphVerb::SetOffset,
+        GraphVerb::TurnOff,
+        GraphVerb::TurnOn,
+        GraphVerb::BackToTheFlow,
+        GraphVerb::SetFlow,
+        GraphVerb::SetFixtureStart,
+        GraphVerb::SetPartStart,
+        GraphVerb::RemoveOverride,
     ];
+
+    /// The patching verbs that take values: never a key of their own, and
+    /// offered with their parameters.
+    pub const WITH_VALUES: [GraphVerb; 12] = [
+        GraphVerb::SetOutput,
+        GraphVerb::SetPort,
+        GraphVerb::SetStartsAt,
+        GraphVerb::SetDirection,
+        GraphVerb::SetOffset,
+        GraphVerb::TurnOff,
+        GraphVerb::TurnOn,
+        GraphVerb::BackToTheFlow,
+        GraphVerb::SetFlow,
+        GraphVerb::SetFixtureStart,
+        GraphVerb::SetPartStart,
+        GraphVerb::RemoveOverride,
+    ];
+
+    /// Whether it takes values (and so no key presses it alone).
+    pub fn takes_values(self) -> bool {
+        GraphVerb::WITH_VALUES.contains(&self)
+    }
 
     /// The verb's name, as a path segment: lowercase words joined by `-`,
     /// never a dot.
@@ -146,6 +207,18 @@ impl GraphVerb {
             GraphVerb::UnpatchAll => "unpatch-all",
             GraphVerb::Undo => "undo",
             GraphVerb::Redo => "redo",
+            GraphVerb::SetOutput => "set-output",
+            GraphVerb::SetPort => "set-port",
+            GraphVerb::SetStartsAt => "set-starts-at",
+            GraphVerb::SetDirection => "set-direction",
+            GraphVerb::SetOffset => "set-offset",
+            GraphVerb::TurnOff => "turn-off",
+            GraphVerb::TurnOn => "turn-on",
+            GraphVerb::BackToTheFlow => "back-to-the-flow",
+            GraphVerb::SetFlow => "set-flow",
+            GraphVerb::SetFixtureStart => "set-fixture-start",
+            GraphVerb::SetPartStart => "set-part-start",
+            GraphVerb::RemoveOverride => "remove-override",
         }
     }
 
@@ -187,6 +260,18 @@ impl GraphVerb {
             GraphVerb::UnpatchAll => "Everything off",
             GraphVerb::Undo => "Undo",
             GraphVerb::Redo => "Redo",
+            GraphVerb::SetOutput => "Output",
+            GraphVerb::SetPort => "Port",
+            GraphVerb::SetStartsAt => "Starts at",
+            GraphVerb::SetDirection => "Direction",
+            GraphVerb::SetOffset => "Offset",
+            GraphVerb::TurnOff => "Turn off",
+            GraphVerb::TurnOn => "Turn on",
+            GraphVerb::BackToTheFlow => "Back to the flow",
+            GraphVerb::SetFlow => "Flow",
+            GraphVerb::SetFixtureStart => "Fixture start",
+            GraphVerb::SetPartStart => "Part start",
+            GraphVerb::RemoveOverride => "Remove override",
         }
     }
 
@@ -223,11 +308,24 @@ impl GraphVerb {
             GraphVerb::UnpatchAll => "⇧U",
             GraphVerb::Undo => "⌘Z",
             GraphVerb::Redo => "⇧⌘Z",
+            // No key of their own: a row or an offer gives them values.
+            GraphVerb::SetOutput
+            | GraphVerb::SetPort
+            | GraphVerb::SetStartsAt
+            | GraphVerb::SetDirection
+            | GraphVerb::SetOffset
+            | GraphVerb::TurnOff
+            | GraphVerb::TurnOn
+            | GraphVerb::BackToTheFlow
+            | GraphVerb::SetFlow
+            | GraphVerb::SetFixtureStart
+            | GraphVerb::SetPartStart
+            | GraphVerb::RemoveOverride => "",
         }
     }
 
-    /// The key press that does it.
-    fn key(self) -> (Key, Mods) {
+    /// The key press that does it; `None` for a verb that takes values.
+    fn key(self) -> Option<(Key, Mods)> {
         let plain = Mods::default();
         let command = Mods {
             command: true,
@@ -241,7 +339,7 @@ impl GraphVerb {
             alt: true,
             ..Mods::default()
         };
-        match self {
+        Some(match self {
             GraphVerb::Up => (Key::Escape, plain),
             GraphVerb::GoIn => (Key::Enter, plain),
             GraphVerb::Previous => (Key::Left, plain),
@@ -278,7 +376,8 @@ impl GraphVerb {
                     ..command
                 },
             ),
-        }
+            _ => return None,
+        })
     }
 }
 
@@ -304,9 +403,13 @@ impl Editor {
         out
     }
 
-    /// Do what the verb's key does. Returns whether anything listened.
+    /// Do what the verb's key does. Returns whether anything listened: a
+    /// verb that takes values has no key, and is made with
+    /// [`Editor::edit`].
     pub fn press(&mut self, verb: GraphVerb) -> bool {
-        let (key, mods) = verb.key();
+        let Some((key, mods)) = verb.key() else {
+            return false;
+        };
         let used = self.key_down(key.clone(), mods);
         self.key_up(key, Mods::default());
         used

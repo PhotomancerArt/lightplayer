@@ -19,6 +19,13 @@
 //! puts them back to the flow. ⇧← ⇧→ walk the places on the wire (spans and free segments),
 //! `.` jumps to the next port's first free segment. On a fixture, ⇧U turns
 //! everything off.
+//!
+//! **Every key that edits is a patching verb** (`graph_edit.rs`, lean Q95):
+//! a pair made is `set-port` and `set-starts-at`, a turn is `set-offset`,
+//! a shift `set-port` and `set-starts-at`, U `back-to-the-flow`, ⇧U
+//! `back-to-the-flow` and `turn-off` on every segment, a swap each end's
+//! place or `turn-off`. Each runs through the verb's one function, as its
+//! offer and its inspector row do.
 
 use std::ops::Range;
 
@@ -26,10 +33,13 @@ use crate::domain::board::BoardFrame;
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
 use crate::domain::part_ref::TreeRef;
-use crate::domain::patch_edits::{OnWire, PatchEdit, PortEdge};
+use lpc_mapping::patching::{Amount, Direction};
+
+use crate::domain::patch_edits::{OnWire, PatchEdit, PortEdge, moves_start};
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::graph_edit::{BackField, GraphEdit, PortChoice};
 
 /// One end of a pair: an object, or a free segment of a port.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,11 +233,13 @@ impl Editor {
                     ) => (o.clone(), (output.clone(), port.clone(), pixels.start)),
                     _ => return false,
                 };
-                self.checkpoint();
-                let Some(edit) = self.project.patch_segment(&object, &output, &port, pixel) else {
+                if self
+                    .edit(&place_edits(&object, &output, &port, pixel))
+                    .is_err()
+                {
                     return false;
-                };
-                self.after_edit();
+                }
+                let edit = PatchEdit::default();
                 self.selection = vec![self.project.tree_target(&object)];
                 let port_words = self.project.long_label(&Target::Port {
                     output: output.clone(),
@@ -245,11 +257,13 @@ impl Editor {
                 let (PairEnd::Object(a), PairEnd::Object(b)) = (&armed.from, &other) else {
                     return false;
                 };
-                self.checkpoint();
-                let Some(edit) = self.project.swap_placements(a, b) else {
+                let Some(edits) = swap_edits(&self.project, a, b) else {
                     return false;
                 };
-                self.after_edit();
+                if self.edit(&edits).is_err() {
+                    return false;
+                }
+                let edit = PatchEdit::default();
                 self.selection = vec![self.project.tree_target(a)];
                 self.notice = Some(Notice::info(format!(
                     "{} and {} swapped{}",
@@ -361,11 +375,15 @@ impl Editor {
                 },
                 PairEnd::Object(o),
             ) => {
-                p.patch_segment(o, output, port, pixels.start)?;
+                for e in place_edits(o, output, port, pixels.start) {
+                    p.apply_graph_edit(&e).ok()?;
+                }
                 o.clone()
             }
             (ArmVerb::Swap, PairEnd::Object(a), PairEnd::Object(b)) => {
-                p.swap_placements(a, b)?;
+                for e in swap_edits(&p, a, b)? {
+                    p.apply_graph_edit(&e).ok()?;
+                }
                 a.clone()
             }
             _ => return None,
@@ -426,12 +444,18 @@ impl Editor {
             ));
             return;
         }
-        self.checkpoint();
-        let n = objects
+        let edits: Vec<GraphEdit> = objects
             .iter()
-            .filter(|o| self.project.unpatch_segment(o))
-            .count();
-        self.after_edit();
+            .filter(|o| self.project.override_of(o).is_some_and(moves_start))
+            .map(|o| GraphEdit::BackToTheFlow {
+                subject: o.clone(),
+                field: BackField::Start,
+            })
+            .collect();
+        let n = edits.len();
+        if self.edit(&edits).is_err() {
+            return;
+        }
         self.notice = Some(Notice::info(match n {
             0 => "Nothing was set here".to_string(),
             1 => format!("{}: back to the flow", self.segment_words(&objects[0])),
@@ -439,12 +463,25 @@ impl Editor {
         }));
     }
 
-    /// R with Move & draw off: reverse the selected objects' placements.
+    /// R with Move & draw off: reverse the selected objects' placements
+    /// (`set-direction`, or back to the flow when it is reversed here).
     pub(crate) fn reverse_placements(&mut self) {
-        self.wiring_edit("reversed", |p, o| p.reverse_placement(o).map(Ok));
+        self.wiring_edit("reversed", |p, o| {
+            Some(Ok(vec![match p.override_of(o).and_then(|x| x.direction) {
+                Some(Direction::Reverse) => GraphEdit::BackToTheFlow {
+                    subject: o.clone(),
+                    field: BackField::Direction,
+                },
+                _ => GraphEdit::SetDirection {
+                    subject: o.clone(),
+                    direction: Direction::Reverse,
+                },
+            }]))
+        });
     }
 
-    /// K L (one lamp) and ; ' (a third): turn the selected placements.
+    /// K L (one lamp) and ; ' (a third): turn the selected placements
+    /// (`set-offset`).
     pub fn turn_selection(&mut self, steps: i64, coarse: bool) {
         self.wiring_edit("turned", |p, o| {
             let by = if coarse {
@@ -452,22 +489,25 @@ impl Editor {
             } else {
                 steps
             };
-            p.turn_placement(o, by).map(Ok)
+            p.turn_edit(o, by).map(|e| Ok(vec![e]))
         });
     }
 
-    /// [ ]: shift the selected placements a pixel along their ports.
+    /// [ ]: shift the selected placements a pixel along their ports
+    /// (`set-port` where it is, then `set-starts-at`).
     pub fn shift_selection(&mut self, pixels: i64) {
-        self.wiring_edit("shifted", |p, o| Some(p.shift_placement(o, pixels)));
+        self.wiring_edit("shifted", |p, o| Some(p.shift_edits(o, pixels)));
     }
 
     /// One wiring edit on every selected object on the wire, as one undo
-    /// step. Objects not on the wire are refused, and an edge of a port
-    /// stops a shift.
+    /// step: each object's verbs worked out from the project as the ones
+    /// before it left it, and made through the verbs' one function.
+    /// Objects not on the wire are refused, and an edge of a port stops a
+    /// shift.
     fn wiring_edit(
         &mut self,
         did: &str,
-        edit: impl Fn(&mut Project, &TreeRef) -> Option<Result<PatchEdit, PortEdge>>,
+        edit: impl Fn(&Project, &TreeRef) -> Option<Result<Vec<GraphEdit>, PortEdge>>,
     ) {
         let objects = self.selected_objects();
         if objects.is_empty() {
@@ -491,11 +531,19 @@ impl Editor {
         }
         let base = self.project.clone();
         self.checkpoint();
-        let mut pinned = 0;
+        let pinned = 0;
         for o in &objects {
-            match edit(&mut self.project, o) {
-                Some(Ok(e)) => pinned += e.pinned,
-                Some(Err(edge)) => {
+            let made = match edit(&self.project, o) {
+                Some(Ok(edits)) => edits
+                    .iter()
+                    .try_for_each(|e| self.project.apply_graph_edit(e))
+                    .map_err(|_| PortEdge::Start),
+                Some(Err(edge)) => Err(edge),
+                None => Ok(()),
+            };
+            match made {
+                Ok(()) => {}
+                Err(edge) => {
                     // Put everything back: one key, one undo step, all or
                     // nothing.
                     self.project = base;
@@ -511,7 +559,6 @@ impl Editor {
                     ));
                     return;
                 }
-                None => {}
             }
         }
         self.after_edit();
@@ -538,9 +585,32 @@ impl Editor {
             ));
             return;
         };
-        self.checkpoint();
-        let n = self.project.unpatch_all(&fixture);
-        self.after_edit();
+        // Everything off: each segment's own start goes, and it is off.
+        let segments: Vec<TreeRef> = self
+            .project
+            .segments_in(&fixture)
+            .iter()
+            .map(|o| o.id.clone())
+            .collect();
+        let n = segments
+            .iter()
+            .filter(|o| self.project.effective_patch().lands(o))
+            .count();
+        let edits: Vec<GraphEdit> = segments
+            .iter()
+            .flat_map(|o| {
+                [
+                    GraphEdit::BackToTheFlow {
+                        subject: o.clone(),
+                        field: BackField::Start,
+                    },
+                    GraphEdit::TurnOff { subject: o.clone() },
+                ]
+            })
+            .collect();
+        if self.edit(&edits).is_err() {
+            return;
+        }
         let name = self.project.node_name(&fixture);
         self.notice = Some(Notice::info(format!(
             "{name}: everything off, {n} were lit; patch them by hand"
@@ -916,6 +986,49 @@ impl Project {
             })
             .collect()
     }
+}
+
+/// Putting `object` at `pixel` of `output`'s port `port`, as verbs: the
+/// port from its first lamp (which puts it on the line), then the lamp.
+fn place_edits(object: &TreeRef, output: &NodeId, port: &str, pixel: u32) -> Vec<GraphEdit> {
+    vec![
+        GraphEdit::SetPort {
+            subject: object.clone(),
+            port: PortChoice::At {
+                output: output.clone(),
+                port: port.to_string(),
+            },
+        },
+        GraphEdit::SetStartsAt {
+            subject: object.clone(),
+            at: Some(Amount::lamps(pixel)),
+        },
+    ]
+}
+
+/// Two segments trading places, as verbs: each takes the other's place,
+/// and one whose other end is on no place is turned off. `None` when
+/// neither is on the wire.
+fn swap_edits(p: &Project, a: &TreeRef, b: &TreeRef) -> Option<Vec<GraphEdit>> {
+    let place = |o: &TreeRef| {
+        let at = p.effective_patch().walked(o)?.landed.clone()?;
+        p.effective_patch().lands(o).then_some(())?;
+        Some((at.output?, at.port?, at.channel / p.channels_per_lamp_of(o)))
+    };
+    let (at_a, at_b) = (place(a), place(b));
+    if at_a.is_none() && at_b.is_none() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for (segment, to) in [(a, at_b), (b, at_a)] {
+        match to {
+            Some((output, port, pixel)) => out.extend(place_edits(segment, &output, &port, pixel)),
+            None => out.push(GraphEdit::TurnOff {
+                subject: segment.clone(),
+            }),
+        }
+    }
+    Some(out)
 }
 
 fn pinned_words(edit: PatchEdit) -> String {

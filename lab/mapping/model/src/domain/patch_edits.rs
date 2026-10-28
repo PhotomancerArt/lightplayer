@@ -16,8 +16,13 @@
 //!
 //! Ops name an output by its name, as the file does: an output with no
 //! name can't be patched to here (naming it is a verb of its own).
+//!
+//! Every change goes through `lpc_mapping::edit` (`set_start`,
+//! `set_override_field`, `clear_override_field`): nothing here pokes a
+//! mapping's fields. The editor's patching verbs (`ux/graph_edit.rs`) are
+//! made of these.
 
-use lpc_mapping::edit;
+use lpc_mapping::edit::{self, OverrideField, OverrideFieldKind};
 use lpc_mapping::part::TreeId;
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, Override, PatchTarget, PortKey,
@@ -162,15 +167,76 @@ impl Project {
     // ---- overrides -------------------------------------------------------------
 
     /// Edit one node's override (made empty if it has none); one that ends
-    /// up overriding nothing goes.
+    /// up overriding nothing goes. The closure edits a copy; each field it
+    /// changed is then set or cleared through `lpc_mapping::edit`.
     pub fn edit_override(
         &mut self,
         node: &TreeRef,
-        edit: impl FnOnce(&mut Override),
+        change: impl FnOnce(&mut Override),
     ) -> Option<PatchEdit> {
-        let f = self.fixture_mut(&node.fixture)?;
-        edit(f.mapping.overrides.entry(node.id.clone()).or_default());
-        f.tidy_patching();
+        let before = self.override_of(node).cloned().unwrap_or_default();
+        let mut after = before.clone();
+        change(&mut after);
+        let m = &mut self.fixture_mut(&node.fixture)?.mapping;
+        let id = &node.id;
+        let mut put = |field: Option<OverrideField>, kind: OverrideFieldKind| match field {
+            Some(field) => edit::set_override_field(m, id, field).is_ok(),
+            None => edit::clear_override_field(m, id, kind).is_ok(),
+        };
+        let mut ok = true;
+        if after.output != before.output {
+            ok &= put(
+                after.output.map(OverrideField::Output),
+                OverrideFieldKind::Output,
+            );
+        }
+        if after.port != before.port {
+            ok &= put(after.port.map(OverrideField::Port), OverrideFieldKind::Port);
+        }
+        if after.channel != before.channel {
+            ok &= put(
+                after.channel.map(OverrideField::Channel),
+                OverrideFieldKind::Channel,
+            );
+        }
+        if after.off != before.off {
+            ok &= put(Some(OverrideField::Off(after.off)), OverrideFieldKind::Off);
+        }
+        if after.direction != before.direction {
+            ok &= put(
+                after.direction.map(OverrideField::Direction),
+                OverrideFieldKind::Direction,
+            );
+        }
+        if after.offset != before.offset {
+            ok &= put(
+                after.offset.map(OverrideField::Offset),
+                OverrideFieldKind::Offset,
+            );
+        }
+        ok.then_some(PatchEdit::default())
+    }
+
+    /// Set one field of a node's override.
+    pub fn set_override(&mut self, node: &TreeRef, field: OverrideField) -> Option<PatchEdit> {
+        let m = &mut self.fixture_mut(&node.fixture)?.mapping;
+        edit::set_override_field(m, &node.id, field).ok()?;
+        Some(PatchEdit::default())
+    }
+
+    /// Clear one field of a node's override: it takes what its flow gives.
+    pub fn clear_override(&mut self, node: &TreeRef, kind: OverrideFieldKind) {
+        if let Some(f) = self.fixture_mut(&node.fixture) {
+            // Clearing never refuses.
+            let _ = edit::clear_override_field(&mut f.mapping, &node.id, kind);
+        }
+    }
+
+    /// Set one node's start (its override's output, port and lamp; Keep
+    /// clears that field).
+    pub fn set_node_start(&mut self, node: &TreeRef, start: Start) -> Option<PatchEdit> {
+        let m = &mut self.fixture_mut(&node.fixture)?.mapping;
+        edit::set_start(m, PatchTarget::Node(node.id.clone()), start).ok()?;
         Some(PatchEdit::default())
     }
 
@@ -185,12 +251,8 @@ impl Project {
         pixel: u32,
     ) -> Option<PatchEdit> {
         let start = self.start_ops_at(output, port, pixel)?;
-        self.edit_override(segment, |o| {
-            o.output = Some(start.output);
-            o.port = Some(start.port);
-            o.channel = Some(start.channel);
-            o.off = false;
-        })
+        self.set_node_start(segment, start)?;
+        self.set_override(segment, OverrideField::Off(false))
     }
 
     /// Take a segment's own start away, so it follows its rule again.
@@ -199,11 +261,7 @@ impl Project {
         if !self.override_of(segment).is_some_and(moves_start) {
             return false;
         }
-        self.edit_override(segment, |o| {
-            o.output = None;
-            o.port = None;
-            o.channel = None;
-        });
+        self.set_node_start(segment, Start::KEEP);
         true
     }
 
@@ -227,29 +285,41 @@ impl Project {
     /// Lay a segment's run the other way inside its span. It stays where
     /// it is: a direction of its own.
     pub fn reverse_placement(&mut self, segment: &TreeRef) -> Option<PatchEdit> {
-        let own = self.override_of(segment).and_then(|o| o.direction);
-        self.edit_override(segment, |o| {
-            o.direction = match own {
-                Some(Direction::Reverse) => None,
-                _ => Some(Direction::Reverse),
-            };
-        })
+        match self.override_of(segment).and_then(|o| o.direction) {
+            Some(Direction::Reverse) => {
+                self.clear_override(segment, OverrideFieldKind::Direction);
+                Some(PatchEdit::default())
+            }
+            _ => self.set_override(segment, OverrideField::Direction(Direction::Reverse)),
+        }
     }
 
     /// Turn a segment's run inside its own span by `lamps`: each step
     /// moves where the data enters it back one lamp, whichever way it runs.
     pub fn turn_placement(&mut self, segment: &TreeRef, lamps: i64) -> Option<PatchEdit> {
+        match self.turned_offset(segment, lamps)? {
+            0 => {
+                self.clear_override(segment, OverrideFieldKind::Offset);
+                Some(PatchEdit::default())
+            }
+            to => self.set_override(segment, OverrideField::Offset(to)),
+        }
+    }
+
+    /// The offset a segment has after turning it by `lamps`: each step
+    /// moves where the data enters it back one lamp, whichever way it runs.
+    /// `None` for a segment that isn't there.
+    pub fn turned_offset(&self, segment: &TreeRef, lamps: i64) -> Option<u32> {
         let n = self.segment(segment)?.lamps.len() as i64;
         if n == 0 {
-            return Some(PatchEdit::default());
+            return Some(0);
         }
         let (reversed, turn) = self
             .effective_patch()
             .walked(segment)
             .map_or((false, 0), |w| (w.direction.is_reverse(), w.offset));
         let step = if reversed { -lamps } else { lamps };
-        let to = (turn as i64 + step).rem_euclid(n) as u32;
-        self.edit_override(segment, |o| o.offset = (to != 0).then_some(to))
+        Some((turn as i64 + step).rem_euclid(n) as u32)
     }
 
     /// The big turn: a third of the segment (a dome panel's side, lp2014's
@@ -321,7 +391,7 @@ impl Project {
                     self.patch_segment(segment, &output, &port, pixel);
                 }
                 None => {
-                    self.edit_override(segment, |o| o.off = true);
+                    self.set_override(segment, OverrideField::Off(true));
                 }
             }
         }
@@ -351,17 +421,11 @@ impl Project {
                     .lands(&TreeRef::new(fixture, o.clone()))
             })
             .collect();
-        let Some(f) = self.fixture_mut(fixture) else {
-            return 0;
-        };
         for o in &leaves {
-            let own = f.mapping.overrides.entry(o.clone()).or_default();
-            own.output = None;
-            own.port = None;
-            own.channel = None;
-            own.off = true;
+            let node = TreeRef::new(fixture, o.clone());
+            self.set_node_start(&node, Start::KEEP);
+            self.set_override(&node, OverrideField::Off(true));
         }
-        f.tidy_patching();
         lit.iter().filter(|l| **l).count()
     }
 }

@@ -126,8 +126,13 @@ pub use ux::edges::Edge;
 pub use ux::editor::{
     Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
 };
+pub use ux::graph_edit::{
+    BackField, GraphEdit, NO_NAME_YET, PartStart, PortChoice, RuleSubject, flow_value, node_value,
+    port_value,
+};
 pub use ux::graph_input::GraphInput;
 pub use ux::graph_verb::GraphVerb;
+pub use ux::graph_verb_choices::VerbChoice;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
 pub use ux::hints::{Hint, HintBar, HintKind};
 pub use ux::patch_section::{PatchField, PatchInput, PatchOption};

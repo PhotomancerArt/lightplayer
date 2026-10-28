@@ -108,7 +108,7 @@ pub struct UiProblem {
     /// What it names, to select from the sentence.
     pub about: Option<Target>,
     /// An override whose node is gone: Remove takes it away
-    /// (`GraphInput::RemoveOverride`; an offer from P06).
+    /// (`GraphEdit::RemoveOverride`, the `remove-override` verb).
     pub remove: Option<TreeRef>,
 }
 
