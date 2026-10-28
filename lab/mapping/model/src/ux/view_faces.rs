@@ -291,7 +291,7 @@ impl Editor {
                 }
                 Some(UiPortRow {
                     key: port.key.clone(),
-                    name: port.name.clone(),
+                    name: p.pin_words(id, &port.key),
                     fill: format!("{}/{pixels} px", patch.used(id, &port.key)),
                     row,
                     tinted: tinted.contains(&target),

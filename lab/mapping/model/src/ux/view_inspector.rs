@@ -344,7 +344,7 @@ fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
     out
 }
 
-/// Where a fixture starts, in words: "Starts at D0 of main, pixel 0".
+/// Where a fixture starts, in words: "Starts at D0 of main, lamp 0".
 fn fixture_start_words(p: &Project, start: &lpc_mapping::patching::Start) -> String {
     use lpc_mapping::patching::{ChannelOp, OutputOp, PortOp, Unit};
     let (OutputOp::Set(name), PortOp::Set { key, .. }) = (&start.output, &start.port) else {
@@ -358,8 +358,8 @@ fn fixture_start_words(p: &Project, start: &lpc_mapping::patching::Start) -> Str
         None => format!("port {} of {name}, which isn't there", key.0),
     };
     let channel = match start.channel {
-        ChannelOp::Set(a) if a.unit == Unit::Lamps => format!("pixel {}", a.n),
-        ChannelOp::Set(a) if a.n % 3 == 0 => format!("pixel {}", a.n / 3),
+        ChannelOp::Set(a) if a.unit == Unit::Lamps => format!("lamp {}", a.n),
+        ChannelOp::Set(a) if a.n % 3 == 0 => format!("lamp {}", a.n / 3),
         ChannelOp::Set(a) => format!("channel {}", a.n),
         _ => "where the cursor is".into(),
     };
@@ -495,18 +495,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 if !lands.is_empty() {
                     rules.push(UiItem::Rule(format!("Lands on {}", lands.join(", "))));
                 }
-                let left: usize = patch
-                    .unpatched
-                    .iter()
-                    .filter(|u| &u.fixture == id)
-                    .map(|u| u.lamps.len())
-                    .sum();
-                let working = !p.control_outputs(id).is_empty();
-                if left > 0 && working {
-                    rules.push(UiItem::Rule(format!(
-                        "{left} lamps past the end of its ports"
-                    )));
-                }
+                // What isn't lit, and why, is said once: by its problems.
                 problems.extend(p.problems_of_fixture(id).into_iter().map(UiItem::Problem));
             }
             Some(NodeKind::Module { children }) => {
