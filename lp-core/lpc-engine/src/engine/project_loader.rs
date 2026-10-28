@@ -4278,7 +4278,7 @@ mod tests {
     #[test]
     fn stale_project_json_format_names_project_json_not_module_json() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4296,7 +4296,7 @@ mod tests {
             text.contains("project.json") && !text.contains("module.json"),
             "expected the refusal to name project.json, not module.json: {text}"
         );
-        assert!(text.contains("unsupported project format 10"), "{text}");
+        assert!(text.contains("unsupported project format 11"), "{text}");
     }
 
     #[test]
