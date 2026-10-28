@@ -64,9 +64,10 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   can't wait behind a device read and a whole-view rebuild; what an input
   changes for the rest of Studio reaches the actor as a
   `StudioCommand::Graph` note. Every verb is an offer at
-  `project/graph/<verb>`; edits save through the ordinary asset edit
-  (`apply_asset_body`) in today's formats with an id on every written
-  object, pins go in `editor.json`'s per-node `canvas` surface, and the
+  `project/graph/<verb>`, the patching verbs with typed parameters (a
+  `subject` choice, a port, lamps…; `graph_offers.rs`); edits save through
+  the ordinary asset edit (`apply_asset_body`) in map2d format 6, a deleted
+  node's files are deleted the same way (`apply_asset_delete`), pins go in `editor.json`'s per-node `canvas` surface, and the
   selection breathes or chases on the board through the Patch view's
   `PatchPulseOp`. Colours are the board's own published frames. Plan:
   `lp2025/2026-10-17-0202-mapping-lab-into-studio`.

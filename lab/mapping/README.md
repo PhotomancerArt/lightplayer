@@ -373,6 +373,18 @@ A 2D canvas with selection, and the start of the whole node graph on it
   those same hints and `Editor::press` does what the key does, through the
   key handler. Studio publishes them as offers at `project/graph/<verb>`.
   Moving the view (pan, zoom, fit, the layout) is never a verb.
+- **Patching verbs that take values** (`graph_edit.rs`,
+  `graph_verb_choices.rs`): `set-port`, `set-starts-at`, `set-direction`,
+  `set-offset`, `turn-off`/`turn-on`, `back-to-the-flow`, `set-flow`,
+  `set-fixture-start`, `set-part-start`, `set-output`, `remove-override`.
+  A `GraphEdit` is one of them with its values bound (a `subject` node,
+  part or fixture, a port, lamps…); `Editor::edit` makes a list of them as
+  one undo step, each through `Project::apply_graph_edit`, which edits the
+  mapping only through `lpc_mapping::edit`. The inspector's rows and the
+  wiring keys are re-expressed on them (a turn is `set-offset`, U is
+  `back-to-the-flow`, ⇧U is `back-to-the-flow` and `turn-off` on every
+  segment), and Studio offers each with typed parameters, so a key, a row
+  and the app agent make the same edit by the same function.
 - **A hint bar** that says what every key does in the current state, each
   action in a word or two ("select", "go in", "delete"), never naming what
   it acts on — the breadcrumb says what's selected. A hint comes and goes
