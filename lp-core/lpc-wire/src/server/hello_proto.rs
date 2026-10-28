@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 45,
+            WIRE_PROTO_VERSION, 46,
             "re-read this test when the version moves"
         );
         assert!(
@@ -135,17 +135,18 @@ mod tests {
     }
 
     /// Main's wire 34 (`hardware.fs`, the C6 repartition) still lacks the
-    /// build's `version`, which wire 35 requires (36 and 37 left the hello
-    /// as it was, 38 only added the optional `firmware`, 39 and 40 changed only
-    /// network shapes, 41 only edit bodies, 42 only fs verbs, 43 only
-    /// added the `fs` value `refused`, 44 only file bodies, and 45 only
-    /// removed the node-command channel): such a hello does not
-    /// decode, and names its proto and board all the same. The same hello
-    /// with a version decodes — the one field is the whole difference.
+    /// build's `version`, which wire 35 requires, and its `projectFormat`,
+    /// which wire 46 requires (36 and 37 left the hello as it was, 38 only
+    /// added the optional `firmware`, 39 and 40 changed only network shapes,
+    /// 41 only edit bodies, 42 only fs verbs, 43 only added the `fs` value
+    /// `refused`, 44 only file bodies, and 45 only removed the node-command
+    /// channel): such a hello does not decode, and names its proto and
+    /// board all the same. The same hello with a version and a project
+    /// format decodes — the two fields are the whole difference.
     #[test]
-    fn a_wire_34_hello_lacks_only_the_version() {
+    fn a_wire_34_hello_lacks_only_the_version_and_the_project_format() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 45,
+            WIRE_PROTO_VERSION, 46,
             "re-read this test when the version moves"
         );
         let wire_34 = HELLO_PROTO_32
@@ -163,11 +164,20 @@ mod tests {
             r#""package":"fw-esp32c6","#,
             r#""package":"fw-esp32c6","version":"2026.10.03-1","#,
         );
+        assert!(
+            crate::json::from_str::<WireServerMessage>(&versioned).is_err(),
+            "a version alone is not enough since wire 46"
+        );
+        let versioned = versioned.replace(
+            r#""profile":"release-esp32"}"#,
+            r#""profile":"release-esp32","projectFormat":12}"#,
+        );
         let decoded = crate::json::from_str::<WireServerMessage>(&versioned)
-            .expect("a wire-34 hello plus a version is this wire's hello");
+            .expect("a wire-34 hello plus a version and a project format is this wire's hello");
         match decoded.msg {
             crate::server::ServerMsgBody::Hello(hello) => {
                 assert_eq!(hello.build.version, "2026.10.03-1");
+                assert_eq!(hello.build.project_format, 12);
             }
             other => panic!("expected a hello, got {other:?}"),
         }

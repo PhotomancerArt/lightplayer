@@ -1129,6 +1129,7 @@ mod tests {
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                    project_format: lpc_model::PROJECT_FORMAT_VERSION,
                 },
                 hardware: HardwareFacts::default(),
                 device_uid: None,

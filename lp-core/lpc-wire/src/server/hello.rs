@@ -37,6 +37,15 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 46: the hello says which project format the engine reads — `BuildFacts`
+///   gains the required `projectFormat` (`lpc_model::PROJECT_FORMAT_VERSION`,
+///   filled by the server, 12 at this bump). A host reads it to upgrade a
+///   board's stored projects as the last stage of a firmware update
+///   (`lpa-update`'s `projects`; plan `lp2025/2026-10-27-0114-mapping-rebuild`,
+///   M3 P10, Q102), comparing each stored `project.json` against it. A
+///   required field: an old client cannot decode a new hello, and a board at
+///   45 reads as older LightPlayer firmware through its `proto`, as before.
+///   `PACK_FORMAT_VERSION` is unchanged.
 /// - 45: a playlist pick is a panel write (plan
 ///   `lp2025/2026-10-20-0001-playlists-on-the-bus`, vision D1/D15) — the
 ///   runtime node-command channel is gone: `WireProjectCommand::NodeCommand`,
@@ -463,7 +472,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 45;
+pub const WIRE_PROTO_VERSION: u32 = 46;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -543,6 +552,14 @@ pub struct BuildFacts {
     pub dirty: bool,
     /// Cargo profile the binary was built with (`release-esp32`, …).
     pub profile: String,
+    /// The project format this build's engine reads
+    /// (`lpc_model::PROJECT_FORMAT_VERSION`). An engine refuses a stored
+    /// project at any other format; a host compares each stored project's
+    /// `project.json` against this to know which ones to upgrade (the
+    /// update's last stage, `lpa-update`'s `projects`). Filled by the
+    /// server from the engine it links, never by an embedder: what an
+    /// engine reads is the build's own fact.
+    pub project_format: u32,
 }
 
 /// Hardware facts of the unit answering the hello — runtime truth about
@@ -718,6 +735,7 @@ mod tests {
                 commit: "abc123456789".to_string(),
                 dirty: true,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: true,
@@ -776,6 +794,7 @@ mod tests {
                 commit: "abc123456789".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
@@ -818,6 +837,7 @@ mod tests {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-emu".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: false,
@@ -852,6 +872,7 @@ mod tests {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "debug".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: false,
@@ -894,7 +915,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 45,
+            WIRE_PROTO_VERSION, 46,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
