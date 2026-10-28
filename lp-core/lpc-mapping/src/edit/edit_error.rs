@@ -24,6 +24,10 @@ pub enum EditError {
     NotARepeat(PartId),
     NotACircle(PartId),
     NotAPath(PartId),
+    /// Neither a grid nor a filled polygon.
+    NotALattice(PartId),
+    /// A lattice change that can't be made (why, in words).
+    BadLattice(String),
     /// A repeat holds exactly one part: that part can't be removed or moved
     /// out on its own (unrepeat the repeat, or remove it).
     HeldByRepeat(PartId),
@@ -73,6 +77,8 @@ impl core::fmt::Display for EditError {
             Self::NotARepeat(id) => write!(f, "{id} isn't a repeat"),
             Self::NotACircle(id) => write!(f, "{id} isn't a circle"),
             Self::NotAPath(id) => write!(f, "{id} isn't a path"),
+            Self::NotALattice(id) => write!(f, "{id} isn't a grid or a filled polygon"),
+            Self::BadLattice(reason) => write!(f, "{reason}"),
             Self::HeldByRepeat(id) => write!(
                 f,
                 "{id} is what its repeat repeats: unrepeat or remove the repeat instead"

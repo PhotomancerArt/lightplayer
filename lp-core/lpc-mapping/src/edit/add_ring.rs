@@ -45,7 +45,7 @@ pub(crate) fn circle_mut<'a>(m: &'a mut Mapping, id: &PartId) -> Result<&'a mut 
 
 /// A ring can be drawn: a radius of 0 or more, at least one lamp, and one
 /// lamp exactly at the centre.
-fn check_ring(radius: f32, count: u32) -> Result<(), String> {
+pub(crate) fn check_ring(radius: f32, count: u32) -> Result<(), String> {
     if !radius.is_finite() || radius < 0.0 {
         return Err(format!("a ring's radius is 0 or more, not {radius}"));
     }

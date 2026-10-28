@@ -13,10 +13,11 @@ mod journey_mappings;
 
 use journey_mappings::{Journey, choker, circular_display, dome_slice, eaves, journeys};
 use lpc_mapping::edit::{
-    DrawnFrom, EditError, OverrideField, OverrideFieldKind, add_part, add_ring,
+    DrawnFrom, EditError, LatticeEdit, OverrideField, OverrideFieldKind, add_part, add_ring,
     clear_override_field, expand_repeat, insert_part, move_part, overrides_past_count, remove_part,
-    remove_ring, rename_part, set_circle_split, set_drawn_from, set_flow, set_lamp_count,
-    set_override_field, set_path_split, set_repeat_count, set_start, unrepeat, wrap_in_repeat,
+    remove_ring, rename_part, set_circle_dir, set_circle_split, set_drawn_from, set_flow,
+    set_lamp_count, set_lattice, set_override_field, set_path_split, set_repeat_count,
+    set_ring_radius, set_start, unrepeat, wrap_in_repeat,
 };
 use lpc_mapping::part::{
     Circle, CircleSplit, Mapping, Part, PartId, PartKind, Path, PathCommand, PathSplit, Repeat,
@@ -26,7 +27,7 @@ use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputPorts, Override, PatchTarget, Patching, PortKey,
     PortOp, Problem, Start, patch_mapping,
 };
-use lpc_mapping::{GridShape, MAX_REPEAT_COUNT, map2d6};
+use lpc_mapping::{FilledPolygonShape, GridRouting, GridShape, MAX_REPEAT_COUNT, RingDir, map2d6};
 
 /// Inserting a part refuses an id in use, and a place past the end.
 #[test]
@@ -710,6 +711,173 @@ fn drawn_from_orders_a_circles_rings_and_starts_a_path() {
     assert_eq!(
         set_drawn_from(&mut m, &part("circle1"), DrawnFrom::LastPoint),
         Err(EditError::NotAPath(part("circle1")))
+    );
+}
+
+/// A ring's radius moves its lamps and puts it where its radius puts it
+/// among the rings, listed outside in; its key stays, so its override
+/// stays on it. The centre holds one lamp at radius 0.
+#[test]
+fn a_rings_radius_moves_it_and_its_override_stays() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    let circle = part("circle1");
+    let order = |m: &Mapping| -> Vec<(String, f32)> {
+        let PartKind::Shape(Shape::Circle(c)) = &m.part(&circle).unwrap().kind else {
+            panic!("a circle");
+        };
+        c.rings
+            .iter()
+            .map(|r| (r.key.to_string(), r.radius))
+            .collect()
+    };
+    set_ring_radius(&mut m, &circle, &key("r3"), 25.0).unwrap();
+    assert_eq!(order(&m)[2], ("r3".to_string(), 25.0), "same place");
+    set_ring_radius(&mut m, &circle, &key("r3"), 36.0).unwrap();
+    let keys: Vec<String> = order(&m).into_iter().map(|(k, _)| k).collect();
+    assert_eq!(keys, ["r1", "r3", "r2", "r4", "r5"], "outside r2 now");
+    let p = patch(&m, &journey.outputs);
+    let r3 = p.segment(&node("circle1/r3")).unwrap();
+    assert!(r3.direction.is_reverse(), "its override stays on it");
+    assert_eq!(first_lamp(&p, "circle1/r3"), Some((1, 11)));
+    assert_eq!(m.overrides, journey.mapping.overrides);
+
+    assert!(matches!(
+        set_ring_radius(&mut m, &circle, &key("r2"), 0.0),
+        Err(EditError::BadRing(_))
+    ));
+    assert!(matches!(
+        set_ring_radius(&mut m, &circle, &key("r2"), -1.0),
+        Err(EditError::BadRing(_))
+    ));
+    assert_eq!(
+        set_ring_radius(&mut m, &circle, &key("r9"), 3.0),
+        Err(EditError::NoSuchRing {
+            part: circle.clone(),
+            key: key("r9")
+        })
+    );
+    set_ring_radius(&mut m, &circle, &key("r3"), 22.0).unwrap();
+    lands_where_it_did(&journey, &m, Clone::clone);
+}
+
+/// A circle's way round turns every ring: each ring's lamp 0 stays at the
+/// start angle and lamp 1 goes the other way; keys and overrides don't
+/// change.
+#[test]
+fn a_circles_way_round_turns_every_ring() {
+    let journey = circular_display();
+    let mut m = journey.mapping.clone();
+    let lamps = |m: &Mapping, ring: &str| {
+        let tree = render(m).unwrap();
+        tree.lamps_of(tree.segment(&node(ring)).unwrap()).to_vec()
+    };
+    let cw = lamps(&m, "circle1/r1");
+    set_circle_dir(&mut m, &part("circle1"), RingDir::Ccw).unwrap();
+    let ccw = lamps(&m, "circle1/r1");
+    assert_eq!(ccw[0], cw[0], "lamp 0 at the start angle");
+    assert!((ccw[1][0] - cw[1][0]).abs() > 1.0, "lamp 1 the other way");
+    assert!((ccw[1][0] + cw[1][0] - 100.0).abs() < 1e-3, "mirrored");
+    assert_eq!(m.overrides, journey.mapping.overrides);
+    set_circle_dir(&mut m, &part("circle1"), RingDir::Cw).unwrap();
+    lands_where_it_did(&journey, &m, Clone::clone);
+    assert_eq!(
+        set_circle_dir(&mut choker().mapping, &part("u"), RingDir::Ccw),
+        Err(EditError::NotACircle(part("u")))
+    );
+}
+
+/// A lattice's numbers lay its lamps again: a grid's columns, rows,
+/// spacing and routing, a filled polygon's spacing, angle and routing.
+/// A field the shape doesn't have is refused whole, with nothing changed.
+#[test]
+fn a_lattices_numbers_lay_its_lamps_again() {
+    let mut m = Mapping::new();
+    let grid = m.new_part(PartKind::Shape(Shape::Grid(GridShape {
+        origin: [10.0, 10.0],
+        cols: 3,
+        rows: 2,
+        pitch: 4.0,
+        routing: GridRouting::Snake,
+        start_corner: Default::default(),
+    })));
+    m.parts.push(grid);
+    let fill = m.new_part(PartKind::Shape(Shape::FilledPolygon(FilledPolygonShape {
+        points: vec![[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]],
+        pitch: 5.0,
+        angle_deg: 0.0,
+        origin: [0.0, 0.0],
+        routing: GridRouting::Snake,
+        start_corner: Default::default(),
+    })));
+    m.parts.push(fill);
+    let count = |m: &Mapping, id: &str| {
+        let tree = render(m).unwrap();
+        tree.lamps_of(tree.segment(&node(id)).unwrap()).len()
+    };
+    assert_eq!(count(&m, "grid1"), 6);
+    set_lattice(
+        &mut m,
+        &part("grid1"),
+        &LatticeEdit {
+            columns: Some(4),
+            routing: Some(GridRouting::Raster),
+            ..LatticeEdit::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(count(&m, "grid1"), 8, "4 columns of 2 rows");
+    let PartKind::Shape(Shape::Grid(g)) = &m.part(&part("grid1")).unwrap().kind else {
+        panic!("a grid");
+    };
+    assert_eq!(
+        (g.cols, g.rows, g.pitch, g.routing),
+        (4, 2, 4.0, GridRouting::Raster)
+    );
+
+    let before = count(&m, "filled1");
+    set_lattice(
+        &mut m,
+        &part("filled1"),
+        &LatticeEdit {
+            pitch: Some(2.5),
+            angle_deg: Some(45.0),
+            ..LatticeEdit::default()
+        },
+    )
+    .unwrap();
+    assert!(count(&m, "filled1") > before, "closer, more lamps");
+
+    let was = m.clone();
+    let rows = LatticeEdit {
+        rows: Some(3),
+        ..LatticeEdit::default()
+    };
+    assert!(matches!(
+        set_lattice(&mut m, &part("filled1"), &rows),
+        Err(EditError::BadLattice(_))
+    ));
+    let turned = LatticeEdit {
+        columns: Some(5),
+        angle_deg: Some(10.0),
+        ..LatticeEdit::default()
+    };
+    assert!(matches!(
+        set_lattice(&mut m, &part("grid1"), &turned),
+        Err(EditError::BadLattice(_))
+    ));
+    let flat = LatticeEdit {
+        pitch: Some(0.0),
+        ..LatticeEdit::default()
+    };
+    assert!(matches!(
+        set_lattice(&mut m, &part("grid1"), &flat),
+        Err(EditError::BadLattice(_))
+    ));
+    assert_eq!(m, was, "refused whole");
+    assert_eq!(
+        set_lattice(&mut choker().mapping, &part("u"), &rows),
+        Err(EditError::NotALattice(part("u")))
     );
 }
 
