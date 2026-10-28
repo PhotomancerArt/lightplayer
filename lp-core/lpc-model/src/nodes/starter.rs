@@ -47,13 +47,53 @@ pub const STARTER_COMPUTE_GLSL: &str = "void tick() { pulse = phase; }
 /// Canonical scaffold mapping document: a small grid, immediately visible
 /// and immediately editable in the in-place mapping editor (resize it,
 /// replace it, or delete it and draw the real fixture).
+///
+/// Map2d format 6, the canonical spelling `lpc_mapping::map2d6::write`
+/// gives it (project format 12: the mapping holds its patching). Its start
+/// names the output `"1"` at port 0, lamp 0: the name the format-12 upgrade
+/// gives a project's first output, and the one [`crate::starter_project_files`]
+/// writes. `lpc-engine`'s `creatable_projects_land` loads and lands it.
 pub const STARTER_FIXTURE_MAP2D: &str = r#"{
-  "format": 1,
-  "objects": [
-    { "name": "grid", "shape": { "grid": { "origin": [0, 0], "cols": 8, "rows": 8, "pitch": 10 } } }
+  "format": 6,
+  "sample_diameter": 2.0,
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "grid",
+      "name": "grid",
+      "kind": {
+        "grid": {
+          "origin": [
+            0.0,
+            0.0
+          ],
+          "cols": 8,
+          "rows": 8,
+          "pitch": 10.0,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
+      }
+    }
   ]
 }
 "#;
+
+/// The output name the starter mapping's start names: the starter project's
+/// one output carries it.
+pub const STARTER_OUTPUT_NAME: &str = "1";
 
 /// A starter node artifact: the authored definition plus any sibling assets
 /// it references (paths relative to the def file's directory, named with
@@ -412,7 +452,8 @@ mod tests {
 
         // The scaffold document itself parses and the def round-trips.
         let doc = core::str::from_utf8(&starter.assets[0].1).expect("utf8 doc");
-        assert!(doc.contains("\"format\": 1"));
+        assert!(doc.contains("\"format\": 6"));
+        assert!(doc.contains(&alloc::format!("\"set\": \"{STARTER_OUTPUT_NAME}\"")));
         let text = starter.def.write_json(&registry).expect("write fixture");
         let read = NodeDef::read_json(&registry, &text).expect("read fixture");
         assert_eq!(read.write_json(&registry).expect("re-write"), text);

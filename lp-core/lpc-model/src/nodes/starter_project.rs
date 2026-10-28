@@ -19,10 +19,12 @@ use lp_collection::VecMap;
 use crate::node::kind::NodeKind;
 use crate::nodes::fixture::{ColorOrder, FixtureSamplingConfig};
 use crate::nodes::node_def::NodeDefWriteError;
-use crate::nodes::starter::{starter_def_for_kind, starter_for_kind};
+use crate::nodes::output::OutputName;
+use crate::nodes::starter::{STARTER_OUTPUT_NAME, starter_def_for_kind, starter_for_kind};
 use crate::{
     ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, ModuleDef,
-    NodeDef, NodeInvocation, NodeInvocationSlot, ProjectManifest, SlotShapeRegistry, ValueSlot,
+    NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectManifest, SlotShapeRegistry,
+    ValueSlot,
 };
 
 /// The starter project's complete file set as `(relative path, bytes)` —
@@ -49,10 +51,9 @@ pub fn starter_project_files(
         node_json(&starter_def_for_kind(NodeKind::Clock), registry)?,
     ));
 
-    let mut texture = starter_def_for_kind(NodeKind::Texture);
-    if let NodeDef::Texture(texture) = &mut texture {
-        texture.bindings = bus_input_binding_defs("visual.out");
-    }
+    // A texture declares no `input` slot: binding one made the whole project
+    // refuse to load (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.md).
+    let texture = starter_def_for_kind(NodeKind::Texture);
     files.push((String::from("texture.json"), node_json(&texture, registry)?));
 
     let shader = starter_for_kind(NodeKind::Shader)
@@ -76,6 +77,10 @@ pub fn starter_project_files(
     let mut output = starter_def_for_kind(NodeKind::Output);
     if let NodeDef::Output(output) = &mut output {
         output.bindings = bus_input_binding_defs("control.out");
+        // The fixture's mapping starts on this output by name (map2d
+        // format 6 has no default output).
+        output.name =
+            OptionSlot::some(ValueSlot::new(OutputName::from_static(STARTER_OUTPUT_NAME)));
     }
     files.push((String::from("output.json"), node_json(&output, registry)?));
 

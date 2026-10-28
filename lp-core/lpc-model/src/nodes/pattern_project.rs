@@ -62,6 +62,7 @@ use lp_collection::VecMap;
 use crate::node::kind::NodeKind;
 use crate::nodes::fixture::{ColorOrder, FixtureSamplingConfig, MappingConfig};
 use crate::nodes::node_def::NodeDefWriteError;
+use crate::nodes::output::OutputName;
 use crate::nodes::provenance_def::ProvenanceDef;
 use crate::nodes::starter::{starter_def_for_kind, starter_for_kind};
 use crate::project::manifest::ProjectKind;
@@ -206,8 +207,8 @@ fn pattern_project_files(
         node_json(&starter_def_for_kind(NodeKind::Clock), registry)?,
     ));
 
-    for rig in rigs {
-        files.extend(rig_files(rig, registry)?);
+    for (index, rig) in rigs.iter().enumerate() {
+        files.extend(rig_files(rig, &rig_output_name(index), registry)?);
     }
 
     files.push((
@@ -250,9 +251,16 @@ fn root_module_def(rigs: &[RigSpec]) -> NodeDef {
     })
 }
 
+/// A rig's output name: `"1"`, `"2"`, … in rig order, the numeric names
+/// the format-12 upgrade gives outputs a mapping names.
+fn rig_output_name(index: usize) -> String {
+    format!("{}", index + 1)
+}
+
 /// One rig's three files: fixture, mapping document, output.
 fn rig_files(
     rig: &RigSpec,
+    output_name: &str,
     registry: &SlotShapeRegistry,
 ) -> Result<Vec<(String, Vec<u8>)>, NodeDefWriteError> {
     let control = rig.control_channel();
@@ -278,12 +286,17 @@ fn rig_files(
 
     let mut output = OutputDef::new(HwEndpointSpec::from_static(rig.endpoint));
     output.bindings = bus_input_binding_defs(&control);
+    output.name = OptionSlot::some(ValueSlot::new(
+        OutputName::parse(output_name).expect("a rig output's numeric name is valid"),
+    ));
 
     Ok(alloc::vec![
         (format!("{}.json", rig.name), node_json(&fixture, registry)?,),
         (
             format!("{}.map2d.json", rig.name),
-            rig.map2d.as_bytes().to_vec(),
+            rig.map2d
+                .replace(RIG_OUTPUT_PLACEHOLDER, output_name)
+                .into_bytes(),
         ),
         (
             format!("{}.json", rig.out_name()),
@@ -381,11 +394,18 @@ fn bus_ref(slot: &str) -> BindingRef {
     BindingRef::Bus(BusSlotRef::new(ChannelName(String::from(slot))))
 }
 
+/// The placeholder in a rig's mapping document for its output's name: map2d
+/// format 6 has no default output, so a fixture's start names the output it
+/// begins on, and a template's rigs each drive their own.
+const RIG_OUTPUT_PLACEHOLDER: &str = "{output}";
+
 /// 300 lamps evenly along a one-texel-tall canvas: the strand IS the
 /// texture's long axis, so `pos.x` in the shader is position along the
-/// strip with no mapping arithmetic in between.
+/// strip with no mapping arithmetic in between. Map2d format 6, in the
+/// canonical spelling `lpc_mapping::map2d6::write` gives it; it starts at
+/// port 0, lamp 0 of the rig's output.
 const STRIP_300_MAP2D: &str = r#"{
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -393,21 +413,26 @@ const STRIP_300_MAP2D: &str = r#"{
     300.0,
     1.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "{output}"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "strand",
       "name": "strand",
-      "shape": {
+      "kind": {
         "path": {
-          "points": [
-            [
-              0.5,
-              0.5
-            ],
-            [
-              299.5,
-              0.5
-            ]
-          ],
+          "d": "M 0.5 0.5 L 299.5 0.5",
           "count": 300
         }
       }
@@ -417,9 +442,10 @@ const STRIP_300_MAP2D: &str = r#"{
 "#;
 
 /// A 32x16 panel wired the way panels usually are (snake routing from the
-/// top-left), one lamp per texel of the fixture texture.
+/// top-left), one lamp per texel of the fixture texture. Format 6, as
+/// above.
 const MATRIX_32X16_MAP2D: &str = r#"{
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
   "canvas": [
     0.0,
@@ -427,10 +453,24 @@ const MATRIX_32X16_MAP2D: &str = r#"{
     32.0,
     16.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "{output}"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "panel",
       "name": "panel",
-      "shape": {
+      "kind": {
         "grid": {
           "origin": [
             0.5,
