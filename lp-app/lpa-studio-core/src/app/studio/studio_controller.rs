@@ -5129,9 +5129,13 @@ impl StudioController {
             }
             if action.op_as::<crate::app::graph::GraphOp>().is_some() {
                 let op = action.into_op::<crate::app::graph::GraphOp>()?;
-                self.graph.press(op.verb);
+                let done = self.graph.press(op);
                 self.mark_dirty();
-                return Ok(crate::core::notice::UiNotices::new());
+                return Ok(match done {
+                    Ok(_) => crate::core::notice::UiNotices::new(),
+                    Err(why) => crate::core::notice::UiNotices::new()
+                        .with_notice(crate::UiNotice::warning(why)),
+                });
             }
             if action.op_as::<PlaylistPickOp>().is_some() {
                 let op = action.into_op::<PlaylistPickOp>()?;

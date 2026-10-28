@@ -505,19 +505,26 @@ fn fixture_face(e: &lab_mapping_model::Editor) -> lab_mapping_model::UiFixtureFa
     face
 }
 
-/// A studio actor on a running catalog project, and the Graph's handle.
-struct Graph {
-    actor: StudioActor<fn(core::time::Duration) -> core::future::Ready<()>>,
-    tx: crate::app::studio::studio_view_channel::CommandSender,
+/// A studio actor on a running project, and the Graph's handle (also the
+/// journeys' bench, `studio_graph_journeys_tests.rs`).
+pub(super) struct Graph {
+    pub(super) actor: StudioActor<fn(core::time::Duration) -> core::future::Ready<()>>,
+    pub(super) tx: crate::app::studio::studio_view_channel::CommandSender,
     view: crate::app::studio::studio_view_channel::StudioViewReceiver,
-    handle: GraphHandle,
+    pub(super) handle: GraphHandle,
     last: Option<UiStudioView>,
 }
 
 impl Graph {
-    fn new(example: &str) -> Self {
+    /// On a running catalog project.
+    pub(super) fn new(example: &str) -> Self {
         let example = crate::app::home::embedded_example(example).expect("embedded");
-        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        Self::on_server(example_e2e_server(&example))
+    }
+
+    /// On whatever project `server` runs.
+    pub(super) fn on_server(server: lpa_server::LpServer) -> Self {
+        let server = Rc::new(RefCell::new(server));
         let io = InProcessServerIo {
             server,
             inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -542,14 +549,14 @@ impl Graph {
         graph
     }
 
-    fn batch(&mut self) {
+    pub(super) fn batch(&mut self) {
         drive(self.actor.run_one_batch_for_test());
         if let Some(next) = self.view.try_recv() {
             self.last = Some(next);
         }
     }
 
-    fn refresh(&mut self) -> UiStudioView {
+    pub(super) fn refresh(&mut self) -> UiStudioView {
         // The lens reads the project and the board's frames, as the page's
         // refresh timer has it do.
         for _ in 0..4 {
@@ -578,12 +585,17 @@ impl Graph {
 
     /// The choker's mapping as Studio holds it now.
     fn mapping_text(&mut self) -> String {
+        self.file_text(MAP)
+    }
+
+    /// A project file as Studio holds it now (an edit included).
+    pub(super) fn file_text(&mut self, path: &str) -> String {
         self.actor
             .controller_mut_for_test()
             .project_for_test()
-            .asset_content_cached(&ArtifactLocation::file(MAP))
+            .asset_content_cached(&ArtifactLocation::file(path))
             .and_then(|c| c.text().map(str::to_string))
-            .expect("the mapping")
+            .unwrap_or_else(|| panic!("{path}"))
     }
 
     /// The fixture's mapping, as the Graph holds it.
@@ -621,7 +633,7 @@ impl Graph {
     }
 
     /// Say the page is the Graph, and let the actor open it.
-    fn go_to_graph(&mut self) -> UiStudioView {
+    pub(super) fn go_to_graph(&mut self) -> UiStudioView {
         self.tx
             .send(StudioCommand::Place(UiPlace::new(UiPage::Project {
                 uid: "prj".to_string(),

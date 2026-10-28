@@ -2224,6 +2224,17 @@ fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayou
 /// A server holding one embedded gallery example, loaded from the very
 /// bytes the wasm bundle ships (`build.rs` embeds `catalog/<bucket>/<slug>/`).
 pub(super) fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
+    let files: Vec<(String, Vec<u8>)> = example
+        .files
+        .iter()
+        .map(|(name, bytes)| (name.to_string(), bytes.to_vec()))
+        .collect();
+    files_e2e_server(&example.id.replace('/', "-"), &files)
+}
+
+/// A board running the project made of `files` (paths relative to the
+/// project's directory), loaded as `/projects/<name>`.
+pub(super) fn files_e2e_server(name: &str, files: &[(String, Vec<u8>)]) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -2235,16 +2246,16 @@ pub(super) fn example_e2e_server(example: &crate::app::home::EmbeddedExample) ->
         None,
         graphics,
     );
-    let dir = format!("/projects/{}", example.id.replace('/', "-"));
-    for (name, bytes) in example.files {
+    let dir = format!("/projects/{name}");
+    for (file, bytes) in files {
         server
             .base_fs_mut()
-            .write_file(format!("{dir}/{name}").as_path(), bytes)
+            .write_file(format!("{dir}/{file}").as_path(), bytes)
             .expect("write example file");
     }
     server
         .load_project(dir.as_path())
-        .unwrap_or_else(|err| panic!("{} loads: {err}", example.id));
+        .unwrap_or_else(|err| panic!("{name} loads: {err}"));
     server.advance_frame(16).expect("tick");
     server
 }

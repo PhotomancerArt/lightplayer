@@ -1,29 +1,45 @@
-//! Pressing one of the Graph's verbs: what its offer's action carries.
+//! Pressing one of the Graph's verbs: what its offer's action carries —
+//! the verb, and for a verb that takes values, the values bound
+//! (`lab_mapping_model::GraphEdit`).
 
 use core::any::Any;
 
-use lab_mapping_model::GraphVerb;
+use lab_mapping_model::{GraphEdit, GraphVerb};
 
 use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerId, ControllerOp,
     PROJECT_EDITOR_ACTION_DEADLINE, UiAction,
 };
 
-/// Press `verb` on the Graph's editor, as its key does it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Press `verb` on the Graph's editor: as its key does it, or, with
+/// `edit`, the patching verb with its values, through the one function its
+/// inspector row and its key run too.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphOp {
     pub verb: GraphVerb,
+    /// The verb's values, bound, for a verb that takes values.
+    pub edit: Option<GraphEdit>,
 }
 
 impl GraphOp {
     /// The verb as an action for the studio actor, addressed to the open
     /// project (the Graph edits it).
     pub fn action(verb: GraphVerb) -> UiAction {
-        UiAction::from_op(
-            ControllerId::new(crate::ProjectController::NODE_ID),
-            GraphOp { verb },
-        )
-        .with_label(verb.label())
+        Self::to_action(GraphOp { verb, edit: None })
+    }
+
+    /// A patching verb with its values bound, as an action.
+    pub fn edit_action(edit: GraphEdit) -> UiAction {
+        Self::to_action(GraphOp {
+            verb: edit.verb(),
+            edit: Some(edit),
+        })
+    }
+
+    fn to_action(op: GraphOp) -> UiAction {
+        let label = op.verb.label();
+        UiAction::from_op(ControllerId::new(crate::ProjectController::NODE_ID), op)
+            .with_label(label)
     }
 }
 
@@ -31,7 +47,10 @@ impl ControllerOp for GraphOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             self.verb.label(),
-            "Do this on the Graph, as its key does.",
+            match self.edit {
+                Some(_) => "Make this patching edit on the Graph.",
+                None => "Do this on the Graph, as its key does.",
+            },
             ActionPriority::Secondary,
         )
     }
@@ -43,7 +62,7 @@ impl ControllerOp for GraphOp {
     }
 
     fn clone_box(&self) -> Box<dyn ControllerOp> {
-        Box::new(*self)
+        Box::new(self.clone())
     }
 
     fn eq_op(&self, other: &dyn ControllerOp) -> bool {

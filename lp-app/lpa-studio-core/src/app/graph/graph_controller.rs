@@ -222,11 +222,19 @@ impl GraphController {
         }
     }
 
-    /// Press a verb from its offer, as its key does it.
-    pub fn press(&mut self, verb: lab_mapping_model::GraphVerb) -> bool {
-        let used = self.handle.editor().borrow_mut().press(verb);
+    /// Press a verb from its offer: as its key does it, or, for a verb
+    /// that takes values, the edit it was bound to, through the function
+    /// the inspector's rows and the keys run too. A refused edit says why.
+    pub fn press(&mut self, op: crate::app::graph::GraphOp) -> Result<bool, String> {
+        let done = {
+            let mut editor = self.handle.editor().borrow_mut();
+            match &op.edit {
+                Some(edit) => editor.edit(std::slice::from_ref(edit)).map(|()| true),
+                None => Ok(editor.press(op.verb)),
+            }
+        };
         self.generation += 1;
-        used
+        done
     }
 
     /// Write what the editor changed to the project's files, after an
