@@ -167,7 +167,9 @@ impl LayoutProbe {
     /// Classify reads a provider already made (its inspection result),
     /// re-checking that they are the reads this probe would have asked for.
     /// A mismatch classifies as `Foreign` — nothing is migrated from bytes
-    /// whose provenance is not the probe's.
+    /// whose provenance is not the probe's. Reads after the probe settled
+    /// answered another question in the same session (what the board runs,
+    /// `crate::next_resident_read`) and are not the layout's.
     pub fn replay_for(
         target: PartitionTable,
         target_fs: FsKind,
@@ -176,6 +178,9 @@ impl LayoutProbe {
     ) -> LayoutInspection {
         let mut probe = Self::new_for(target, target_fs, chip_is_c6);
         for (read, bytes) in reads {
+            if probe.next_read().is_none() {
+                break;
+            }
             if probe.next_read() != Some(*read) || bytes.len() != read.length as usize {
                 return LayoutInspection {
                     state: LayoutState::Foreign,
@@ -830,6 +835,29 @@ pub(crate) mod tests {
         assert_eq!(replayed.state, LayoutState::TreeStore);
         let short = LayoutProbe::replay(d1_table(), true, &reads[..reads.len() - 1]);
         assert_eq!(short.state, LayoutState::Foreign);
+    }
+
+    /// The same session goes on to read what the board runs
+    /// (`next_resident_read`); those reads come after the layout settled and
+    /// do not unsettle it.
+    #[test]
+    fn reads_after_the_probe_settled_are_not_the_layouts() {
+        let mut flash = chip(Some(&d1_table()));
+        put_tree(&mut flash, target_lpfs(), 90);
+        let mut reads: Vec<_> = reads_of(&flash, d1_table(), true)
+            .into_iter()
+            .map(|r| {
+                let at = r.offset as usize;
+                (r, flash[at..at + r.length as usize].to_vec())
+            })
+            .collect();
+        let resident = LinkFlashRegion {
+            offset: 0x10000,
+            length: 0x120,
+        };
+        reads.push((resident, flash[0x10000..0x10120].to_vec()));
+        let replayed = LayoutProbe::replay(d1_table(), true, &reads);
+        assert_eq!(replayed.state, LayoutState::TreeStore);
     }
 
     /// A tree store holding a file, built by `lp-tree-store` at `geometry`'s

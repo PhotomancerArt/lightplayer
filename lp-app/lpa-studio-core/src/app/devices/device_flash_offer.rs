@@ -1,129 +1,150 @@
-//! `devices/<board>/flash` and `devices/<board>/update-firmware`: the
-//! firmware verbs as offers that take their board.
+//! `devices/<board>/flash`, `devices/<board>/update-firmware` and
+//! `devices/<board>/set-board`: the firmware verbs as offers.
 //!
-//! The board pick has always been core's decision ([`flash_offer`]: which
-//! boards a detected chip fits, which one to preselect, which served build
-//! and which connect dance each resolves to); only the PICKED value was the
-//! web's. Here the pick becomes the offer's `board` parameter, with the same
-//! candidates as its options, and the binder resolves the `build_id` and
-//! `park_first` the chosen [`FlashBoardChoice`] already carries — nothing is
-//! decided twice.
+//! **One press, no board pick** (plan
+//! `lp2025/2026-10-28-0025-install-without-board-pick`). Flash and Update
+//! used to take a `board` parameter — the user had to say which board this
+//! was before anything could be installed, from a list that was often not
+//! even narrowed to the chip, because the chip had not been heard yet. Now
+//! the press carries the chip table ([`FlashTarget`]); the bootloader
+//! session picks the build by the chip its SYNC names, reads what the board
+//! runs, and guesses the board from a fingerprint. Only two things are still
+//! asked, and neither before the press:
 //!
-//! Three verbs share the pick:
+//! - **Replacing somebody else's firmware** — inside the activity, once the
+//!   board has been read, with words that name what is there
+//!   (`devices/<board>/confirm-replace`, `device_replace_view`). Lasting.
+//! - **Which board is this?** — [`set_board_offer`], afterwards, when the
+//!   fingerprint fit several catalog boards (or any time, to correct it).
+//!   Routine: the board model is a file on the board, written again on the
+//!   next answer.
 //!
-//! - **Flash** on a card's needs-firmware face ([`flash_device_offer`]) and
-//!   on a pending link that settled on one — a fresh blank chip
-//!   ([`flash_pending_offer`], `devices/new-<n>/flash`). The optional
-//!   `name` is the setup field's: blank leaves the derived
-//!   "<board> · <Mon D>", minted at flash time by the controller exactly as
-//!   for the picker.
-//! - **Update firmware** on a running LightPlayer ([`update_firmware_offer`]):
-//!   one click when its board resolved, the same pick (no name — the board
-//!   has one) when it did not.
-//!
-//! **The chip filter and its escape.** A detected chip narrows the board
-//! list; the picker's "show all" escape is the `all_boards` toggle, off by
-//! default. The boards outside the chip are listed after the fits, each
-//! [`OfferChoice::only_with`] the toggle, so a renderer draws them only
-//! while it is on and a press that picks one with it off is refused. The
-//! filter is convenience; the flash preflight's chip guard (it checks the
-//! pick against the silicon before anything is written) is the safety, and
-//! it runs whatever is picked. With no chip known the list was never
-//! narrowed, so there is no toggle.
-//!
-//! **The level depends on what is on the chip (Q3).** Flashing a blank
-//! board loses nothing, so it is Routine: one click, and the agent may
-//! press it. Over anything else — somebody's firmware, a chip that will
-//! not say — it is the Flash op's own Lasting, with its copy. Update keeps
-//! the Flash op's Lasting (M1), with one exception:
-//!
-//! **An older LightPlayer's update loses nothing, so it is Routine**
-//! (2026-10-17, the desk C6's dead end). Its flash writes the firmware and
-//! keeps the board's files: the layout step decides before anything is
-//! written (`device_layout_step`), and a plain flash writes the firmware
-//! image only, below `lpfs`; a layout that moves the files stores a backup
-//! first and asks its own Lasting question (Continue); a store the new
-//! firmware cannot read is refused with nothing written. The project and
-//! the board's identity live in `lpfs`, so they stay. Priced like the
-//! over-the-air update ("Update", Routine, `devices_op`): one click, no
-//! red, and the agent may press it. The face's own words always said so —
-//! "flash to update; the project stays" (`device_firmware_face`). Whether
-//! the same price belongs on a pre-update LightPlayer's USB update (ADR
-//! 2026-10-06-studio-updates-over-the-update-channel, §4: Lasting) is left
-//! to that ADR.
+//! **The level.** Flash is Routine at the press: nothing is written before
+//! the board has been read, and the one thing that loses something is
+//! asked inside. An older LightPlayer's update loses nothing either (its
+//! files and identity stay: `device_layout_step`), so it is Routine
+//! (2026-10-17, the desk C6's dead end). A current LightPlayer's USB update
+//! keeps the Flash op's Lasting — the price ADR
+//! 2026-10-06-studio-updates-over-the-update-channel §4 set for it.
 
 use std::rc::Rc;
 
-use lpa_devices::Action;
 use lpa_devices::identity::DeviceId;
 use lpa_devices::view::{DeviceView, FirmwareFace, PendingLinkView};
+use lpa_devices::{Action, ActivityKind};
 
-use super::device_flash::{FirmwareVerb, FlashBoardChoice, firmware_verb, flash_offer};
-use super::device_identity::device_chip;
+use super::device_flash::{
+    FirmwareVerb, FlashBoardChoice, FlashTarget, firmware_verb, flash_offer_for,
+    pending_flash_target,
+};
 use super::devices_op::DevicesOp;
 use crate::{
     ActionConsequence, OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferPath,
     UiAction, UiOffer,
 };
 
-/// The firmware verbs' board parameter.
-pub const FLASH_BOARD_PARAM: &str = "board";
 /// The Flash offer's optional name parameter.
 pub const FLASH_NAME_PARAM: &str = "name";
-/// The firmware verbs' "show all" escape from the chip filter.
-pub const FLASH_ALL_BOARDS_PARAM: &str = "all_boards";
-
 /// What an empty name field means.
-const NAME_PLACEHOLDER: &str = "Leave blank to name it after the board and today's date";
+const NAME_PLACEHOLDER: &str = "Leave blank to name it after the board";
+
+/// The set-board verb's board parameter.
+pub const SET_BOARD_PARAM: &str = "board";
+/// The set-board verb's "show all" escape from the fingerprint's fits.
+pub const SET_BOARD_ALL_PARAM: &str = "all_boards";
+/// `devices/<board>/set-board`.
+pub const SET_BOARD: &str = "set-board";
+/// Why "Which board is this?" is asked at all — the one line its pick
+/// shows under the filter line.
+pub const WHICH_BOARD_REASON: &str = "Studio couldn't tell from the chip which board this is. \
+    Pick it so its pins are right; Studio saves it on the board and restarts it.";
 
 /// `<prefix>/flash` for a device whose firmware verb is Flash, or `None`
 /// when it offers no Flash (a running LightPlayer updates instead; a busy
-/// or unsettled card offers no firmware verb at all).
-///
-/// When the verb cannot be pressed whatever is picked — the link cannot
-/// carry firmware (Bluetooth), or this Studio serves no build for the chip
-/// — the offer is published disabled with that reason and no parameters:
-/// there is nothing to choose.
+/// or unsettled card offers no firmware verb at all). Disabled with the
+/// reason when the link cannot carry firmware (Bluetooth) or this Studio
+/// serves nothing for the chip.
 pub fn flash_device_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiOffer> {
-    if firmware_verb(view)? != FirmwareVerb::Flash {
+    let verb = firmware_verb(view)?;
+    if verb != FirmwareVerb::Flash {
         return None;
     }
-    Some(flash_at(
-        prefix.child("flash"),
-        view.id,
-        &view.firmware_face,
-        view.firmware_blocked.as_deref(),
-        device_chip(view),
-    ))
+    let action = match &view.firmware_blocked {
+        Some(reason) => verb.blocked_action(view.id, reason),
+        None => verb.action_for(view),
+    };
+    Some(install_offer(prefix.child("flash"), action))
 }
 
 /// `<prefix>/flash` for a pending link that settled on a needs-firmware
 /// verdict — a fresh blank chip — or `None` while it has not (an unsettled
 /// link projects [`FirmwareFace::Unknown`], so the verb never appears
 /// mid-identification). The Flash targets the link's provisional device,
-/// and pressing it adopts the link. Its only chip fact is the ROM boot
-/// banner.
+/// and pressing it adopts the link.
 pub fn flash_pending_offer(pending: &PendingLinkView, prefix: OfferPath) -> Option<UiOffer> {
     if !pending.needs_firmware() {
         return None;
     }
-    Some(flash_at(
-        prefix.child("flash"),
-        pending.device,
-        &pending.firmware_face,
-        pending.firmware_blocked.as_deref(),
-        pending.detected_chip.clone(),
-    ))
+    let verb = FirmwareVerb::Flash;
+    let action = match (&pending.firmware_blocked, pending_flash_target(pending)) {
+        (Some(reason), _) => verb.blocked_action(pending.device, reason),
+        (None, Err(reason)) => verb.blocked_action(pending.device, &reason),
+        (None, Ok(target)) => target_action(&verb, &target, pending.device),
+    };
+    Some(install_offer(prefix.child("flash"), action))
+}
+
+/// An install at `path`: one press (Routine — the board is read before
+/// anything is written), with an optional name for the board. A disabled
+/// action stays a plain, disabled offer: there is nothing to fill in.
+fn install_offer(path: OfferPath, action: UiAction) -> UiOffer {
+    let action = action.with_consequence(ActionConsequence::Routine);
+    if !action.meta().enablement.is_enabled() {
+        return UiOffer::new(path, "flash", action);
+    }
+    let template = action.clone();
+    let binder = OfferBinder::new(move |args: &OfferArgs| {
+        let mut bound = action.clone();
+        if let Some(name) = args.text(FLASH_NAME_PARAM)
+            && let Some(op) = bound.op_as::<DevicesOp>()
+            && let Action::Flash {
+                device,
+                board_id,
+                build,
+                park_first,
+                restore_backup,
+                ..
+            } = op.action().clone()
+        {
+            bound = DevicesOp::action_for(Action::Flash {
+                device,
+                board_id,
+                build,
+                park_first,
+                name: Some(name.to_string()),
+                restore_backup,
+            })
+            .with_label(action.meta().label.clone())
+            .with_summary(action.meta().summary.clone())
+            .with_consequence(ActionConsequence::Routine);
+        }
+        Ok(bound)
+    });
+    UiOffer::with_params(
+        path,
+        "flash",
+        vec![OfferParam::text(FLASH_NAME_PARAM, "name", NAME_PLACEHOLDER).optional()],
+        binder,
+        template,
+    )
 }
 
 /// `<prefix>/update-firmware` for a running LightPlayer, or `None` when the
-/// card offers no Update: one click when its board resolved
-/// ([`FirmwareVerb::Update`]), the board pick when it did not
-/// ([`FirmwareVerb::UpdatePick`]), and disabled with the reason over a link
-/// that cannot carry firmware.
+/// card offers no Update: one press, and disabled with the reason over a
+/// link that cannot carry firmware.
 pub fn update_firmware_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiOffer> {
     let verb = firmware_verb(view)?;
-    if verb == FirmwareVerb::Flash {
+    if verb != FirmwareVerb::Update {
         return None;
     }
     let path = prefix.child("update-firmware");
@@ -137,136 +158,110 @@ pub fn update_firmware_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiO
             verb.blocked_action(view.id, reason),
         ));
     }
-    let keeps_everything = keeps_everything(&view.firmware_face);
-    if let Some(action) = verb.update_action(view.id) {
-        let action = match keeps_everything {
-            true => action.with_consequence(ActionConsequence::Routine),
-            false => action,
-        };
-        return Some(UiOffer::new(path, "download", action));
-    }
-    let dress = Dress {
-        label: Some(verb.label().to_string()),
-        summary: Some(verb.summary()),
-        consequence: keeps_everything.then_some(ActionConsequence::Routine),
+    let action = verb.action_for(view);
+    let action = match matches!(view.firmware_face, FirmwareFace::OlderLightPlayer { .. }) {
+        true => action.with_consequence(ActionConsequence::Routine),
+        false => action,
     };
-    Some(board_pick_offer(
-        path,
-        "download",
-        view.id,
-        device_chip(view),
-        false,
-        dress,
-    ))
+    Some(UiOffer::new(path, "download", action))
 }
 
-/// What flashing over `face` costs: nothing on a blank chip, nor on an
-/// older LightPlayer (its update keeps its files: see the module docs); the
-/// Flash op's own Lasting everywhere else.
-pub fn flash_consequence(face: &FirmwareFace) -> ActionConsequence {
-    match face {
-        FirmwareFace::Blank => ActionConsequence::Routine,
-        face if keeps_everything(face) => ActionConsequence::Routine,
-        _ => flash_action(DeviceId(0), None, None, &Dress::default())
-            .meta()
-            .consequence
-            .clone(),
+/// `<prefix>/set-board` — "Which board is this?" — on a running LightPlayer
+/// whose chip several catalog boards fit, or `None`. The fingerprint's
+/// fits (`fits`, when an install just read them) come first and preselect
+/// when there is one; every other board of the chip waits behind the
+/// `all_boards` toggle. Pressing writes the board's `/hardware.json` and
+/// restarts it ([`Action::SetBoard`]). Routine: the answer is a file on the
+/// board, and the next answer replaces it.
+pub fn set_board_offer(view: &DeviceView, prefix: OfferPath, fits: &[String]) -> Option<UiOffer> {
+    let running = matches!(view.firmware_face, FirmwareFace::LightPlayer { .. })
+        && view.can_receive_project
+        && view.firmware_blocked.is_none();
+    if !running {
+        return None;
     }
-}
-
-/// An older LightPlayer: writing this Studio's firmware over it keeps the
-/// project, the files and the identity, so its update loses nothing.
-fn keeps_everything(face: &FirmwareFace) -> bool {
-    matches!(face, FirmwareFace::OlderLightPlayer { .. })
-}
-
-/// The Flash verb at `path` for `device`: disabled with `blocked` when the
-/// link cannot carry firmware, else the board pick (with the name field).
-fn flash_at(
-    path: OfferPath,
-    device: DeviceId,
-    face: &FirmwareFace,
-    blocked: Option<&str>,
-    chip: Option<String>,
-) -> UiOffer {
-    let dress = Dress {
-        consequence: Some(flash_consequence(face)),
-        ..Dress::default()
+    let boards = flash_offer_for(view).candidates;
+    if boards.len() < 2 {
+        return None;
+    }
+    let (narrowed, wider): (Vec<FlashBoardChoice>, Vec<FlashBoardChoice>) = boards
+        .into_iter()
+        .partition(|board| fits.is_empty() || fits.contains(&board.board_id));
+    let mut options: Vec<OfferChoice> = narrowed.iter().map(board_option).collect();
+    options.extend(
+        wider
+            .iter()
+            .map(|board| board_option(board).only_with(SET_BOARD_ALL_PARAM)),
+    );
+    let preselect = match narrowed.as_slice() {
+        [only] => Some(only.board_id.clone()),
+        _ => view
+            .board_id
+            .clone()
+            .filter(|board| narrowed.iter().any(|fit| &fit.board_id == board)),
     };
-    if let Some(reason) = blocked {
-        let template = flash_action(device, None, None, &dress);
-        return UiOffer::new(path, "flash", template.disabled(reason));
-    }
-    board_pick_offer(path, "flash", device, chip, true, dress)
-}
-
-/// The board pick both firmware verbs take: the chip's fits (preselected
-/// when there is exactly one), then — when a chip narrowed the list — every
-/// other served board behind the `all_boards` toggle, and the optional name
-/// when `with_name`. Disabled with core's reason when this Studio serves
-/// nothing for the chip.
-fn board_pick_offer(
-    path: OfferPath,
-    icon: &str,
-    device: DeviceId,
-    chip: Option<String>,
-    with_name: bool,
-    dress: Dress,
-) -> UiOffer {
-    let template = flash_action(device, None, None, &dress);
-    let narrowed = flash_offer(chip.as_deref());
-    if let Some(reason) = narrowed.unavailable {
-        return UiOffer::new(path, icon, template.disabled(reason));
-    }
-    let mut candidates = narrowed.candidates;
-    let mut options: Vec<OfferChoice> = candidates.iter().map(board_option).collect();
-    if chip.is_some() {
-        for wider in flash_offer(None).candidates {
-            if candidates.iter().any(|fit| fit.board_id == wider.board_id) {
-                continue;
-            }
-            options.push(board_option(&wider).only_with(FLASH_ALL_BOARDS_PARAM));
-            candidates.push(wider);
-        }
-    }
     let mut params = vec![OfferParam::choice(
-        FLASH_BOARD_PARAM,
+        SET_BOARD_PARAM,
         "board",
         options,
-        narrowed.preselect,
+        preselect,
     )];
-    if with_name {
-        params.push(OfferParam::text(FLASH_NAME_PARAM, "name", NAME_PLACEHOLDER).optional());
-    }
-    if chip.is_some() {
+    if !wider.is_empty() {
         params.push(OfferParam::toggle(
-            FLASH_ALL_BOARDS_PARAM,
-            "every served board",
+            SET_BOARD_ALL_PARAM,
+            "every board of this chip",
             false,
         ));
     }
-    let candidates = Rc::new(candidates);
-    let binder = OfferBinder::new(move |args: &OfferArgs| {
-        let board = args.choice(FLASH_BOARD_PARAM).unwrap_or_default();
-        let choice = candidates
+    let device = view.id;
+    let template = set_board_action(device, String::new());
+    let boards: Rc<Vec<String>> = Rc::new(
+        narrowed
             .iter()
-            .find(|choice| choice.board_id == board)
-            .ok_or_else(|| OfferArgError::NotAnOption {
-                name: FLASH_BOARD_PARAM.to_string(),
+            .chain(&wider)
+            .map(|board| board.board_id.clone())
+            .collect(),
+    );
+    let binder = OfferBinder::new(move |args: &OfferArgs| {
+        let board = args.choice(SET_BOARD_PARAM).unwrap_or_default();
+        if !boards.iter().any(|id| id == board) {
+            return Err(OfferArgError::NotAnOption {
+                name: SET_BOARD_PARAM.to_string(),
                 value: board.to_string(),
-                options: candidates
-                    .iter()
-                    .map(|choice| choice.board_id.clone())
-                    .collect(),
-            })?;
-        let name = if with_name {
-            args.text(FLASH_NAME_PARAM)
-        } else {
-            None
-        };
-        Ok(flash_action(device, Some(choice), name, &dress))
+                options: boards.as_ref().clone(),
+            });
+        }
+        Ok(set_board_action(device, board.to_string()))
     });
-    UiOffer::with_params(path, icon, params, binder, template)
+    Some(UiOffer::with_params(
+        prefix.child(SET_BOARD),
+        "chip",
+        params,
+        binder,
+        template,
+    ))
+}
+
+/// Whether the card should ASK "Which board is this?" rather than only
+/// offer it: an install just ended that could not tell the board (`fits`
+/// holds its candidates) and nothing has answered since.
+pub fn asks_which_board(view: &DeviceView, fits: &[String]) -> bool {
+    fits.len() > 1
+        && !view
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.kind == ActivityKind::SetBoard)
+}
+
+/// The press for `target` on `device`, wearing `verb`'s words.
+fn target_action(verb: &FirmwareVerb, target: &FlashTarget, device: DeviceId) -> UiAction {
+    DevicesOp::action_for(target.action(device, false))
+        .with_label(verb.label())
+        .with_summary(verb.summary())
+}
+
+fn set_board_action(device: DeviceId, board_id: String) -> UiAction {
+    DevicesOp::action_for(Action::SetBoard { device, board_id })
 }
 
 /// One board as a choice: its id, its display name, and the blurb line.
@@ -274,170 +269,104 @@ fn board_option(choice: &FlashBoardChoice) -> OfferChoice {
     OfferChoice::new(&choice.board_id, &choice.title).with_detail(&choice.blurb)
 }
 
-/// How a firmware verb wears the Flash op: the Update verbs' own label and
-/// summary, and the level a Flash takes from what is on the chip.
-#[derive(Clone, Debug, Default)]
-struct Dress {
-    label: Option<String>,
-    summary: Option<String>,
-    consequence: Option<ActionConsequence>,
-}
-
-/// The Flash op for `device`, with `choice`'s board and build (empty for the
-/// unbound template), wearing `dress`.
-fn flash_action(
-    device: DeviceId,
-    choice: Option<&FlashBoardChoice>,
-    name: Option<&str>,
-    dress: &Dress,
-) -> UiAction {
-    let mut action = DevicesOp::action_for(Action::Flash {
-        device,
-        board_id: choice.map(|c| c.board_id.clone()).unwrap_or_default(),
-        build_id: choice.map(|c| c.build_id.clone()).unwrap_or_default(),
-        park_first: choice.is_some_and(|c| c.park_first),
-        name: name.map(str::to_string),
-        restore_backup: false,
-    });
-    if let Some(label) = &dress.label {
-        action = action.with_label(label.clone());
-    }
-    if let Some(summary) = &dress.summary {
-        action = action.with_summary(summary.clone());
-    }
-    if let Some(consequence) = &dress.consequence {
-        action = action.with_consequence(consequence.clone());
-    }
-    action
-}
-
 #[cfg(test)]
 mod tests {
-    use lpa_devices::DeviceId;
     use lpa_devices::device::DeviceStatus;
     use lpa_devices::view::{Escape, LoadedProject};
+    use lpa_devices::{DeviceId, FlashBuildChoice};
 
     use super::*;
     use crate::flash_offer;
 
     #[test]
-    fn a_blank_boards_flash_lists_its_boards_preselects_and_binds() {
+    fn a_blank_board_installs_on_one_press_with_no_board_to_pick() {
         let view = needs_firmware(FirmwareFace::Blank, Some("esp32c6"));
         let offer = flash_device_offer(&view, prefix()).expect("a blank board flashes");
-        let candidates = flash_offer(Some("esp32c6"));
 
         assert_eq!(offer.path.to_string(), "devices/mac-a0f26287b48c/flash");
+        let [name] = offer.params() else {
+            panic!("only the optional name: {:?}", offer.params());
+        };
+        assert!(!name.is_required(), "nothing to choose");
+        assert!(offer.is_enabled());
         assert!(offer.consequence().is_routine(), "nothing on it to lose");
-        let [board, name, all_boards] = offer.params() else {
-            panic!("board + name + all_boards: {:?}", offer.params());
+        let bound = offer.press(&OfferArgs::new()).expect("one press");
+        let Action::Flash {
+            device,
+            board_id,
+            build,
+            park_first,
+            name,
+            ..
+        } = bound.op_as::<DevicesOp>().unwrap().action()
+        else {
+            panic!("a flash");
         };
-        assert_eq!(board.name, "board");
-        let crate::OfferParamKind::Choice { options, preselect } = &board.kind else {
-            panic!("board is a choice: {board:?}");
+        assert_eq!(*device, DeviceId(7));
+        assert_eq!(board_id, &None, "the session guesses the board");
+        assert_eq!(build, &FlashBuildChoice::Fixed("esp32c6-4mb".to_string()));
+        assert!(park_first, "a C6 parks in its downloader first");
+        assert_eq!(name, &None, "the controller derives the name");
+
+        let named = offer
+            .press(&OfferArgs::new().with("name", "Desk"))
+            .expect("a typed name binds");
+        let Action::Flash { name, .. } = named.op_as::<DevicesOp>().unwrap().action() else {
+            panic!("a flash");
         };
-        assert_eq!(
-            options
-                .iter()
-                .filter(|o| o.only_with.is_none())
-                .map(|o| o.value.clone())
-                .collect::<Vec<_>>(),
-            candidates
-                .candidates
-                .iter()
-                .map(|c| c.board_id.clone())
-                .collect::<Vec<_>>(),
-            "the narrowed options are the core pick's candidates, first"
-        );
-        assert_eq!(
-            options.len(),
-            flash_offer(None).candidates.len(),
-            "and every other served board waits behind the toggle"
-        );
-        assert!(
-            options
-                .iter()
-                .skip(candidates.candidates.len())
-                .all(|o| o.only_with.as_deref() == Some("all_boards")),
-            "{options:?}"
-        );
-        assert_eq!(preselect, &candidates.preselect);
-        assert!(!name.is_required(), "the name is optional");
-        assert_eq!(
-            all_boards.kind,
-            crate::OfferParamKind::Toggle { value: false },
-            "show all is off by default"
-        );
+        assert_eq!(name.as_deref(), Some("Desk"));
+        assert!(named.meta().consequence.is_routine());
+    }
 
-        let first = &candidates.candidates[0];
-        let bound = offer
-            .press(
-                &OfferArgs::new()
-                    .with("board", &first.board_id)
-                    .with("name", "Desk"),
-            )
-            .expect("a candidate binds");
-        let op = bound.op_as::<DevicesOp>().expect("a devices op");
-        assert_eq!(
-            op.action(),
-            &Action::Flash {
-                device: DeviceId(7),
-                board_id: first.board_id.clone(),
-                build_id: first.build_id.clone(),
-                park_first: first.park_first,
-                name: Some("Desk".to_string()),
-                restore_backup: false,
-            },
-            "build and connect dance come from the core choice"
-        );
-        assert!(bound.meta().consequence.is_routine());
+    /// The case Sean hit: a board whose chip nobody has heard. It used to
+    /// open every board in the catalog; it installs on one press now.
+    #[test]
+    fn a_board_whose_chip_was_never_heard_installs_on_one_press() {
+        for face in [
+            FirmwareFace::Silent,
+            FirmwareFace::NoHello,
+            FirmwareFace::Foreign { label: None },
+        ] {
+            let view = needs_firmware(face.clone(), None);
+            let offer = flash_device_offer(&view, prefix()).expect("it flashes");
+            assert!(offer.params().iter().all(|p| !p.is_required()), "{face:?}");
+            let bound = offer.press(&OfferArgs::new()).expect("one press");
+            assert!(
+                matches!(
+                    bound.op_as::<DevicesOp>().unwrap().action(),
+                    Action::Flash {
+                        build: FlashBuildChoice::ByChip(_),
+                        ..
+                    }
+                ),
+                "{face:?}: the session finds the chip"
+            );
+        }
+    }
 
-        match &candidates.preselect {
-            Some(preselect) => {
-                assert!(offer.is_enabled(), "a preselect binds the default press");
-                let default = offer.press(&OfferArgs::new()).expect("the preselect binds");
-                let Action::Flash { board_id, name, .. } =
-                    default.op_as::<DevicesOp>().unwrap().action()
-                else {
-                    panic!("a flash");
-                };
-                assert_eq!(board_id, preselect);
-                assert_eq!(
-                    name, &None,
-                    "blank leaves the derived name to the controller"
-                );
-            }
-            None => assert!(!offer.is_enabled(), "nothing chosen yet"),
+    /// Replacing somebody else's firmware is still the user's call — asked
+    /// inside the activity once the board has been read, so the question
+    /// can name what is there. The press itself writes nothing.
+    #[test]
+    fn the_press_is_routine_even_over_somebody_elses_firmware() {
+        for face in [
+            FirmwareFace::Foreign { label: None },
+            FirmwareFace::Bootloader,
+            FirmwareFace::Silent,
+            FirmwareFace::NoHello,
+        ] {
+            let view = needs_firmware(face.clone(), Some("esp32c6"));
+            let offer = flash_device_offer(&view, prefix()).expect("it flashes");
+            assert!(offer.consequence().is_routine(), "{face:?}");
         }
     }
 
     #[test]
-    fn an_unknown_board_is_refused() {
-        let view = needs_firmware(FirmwareFace::Blank, Some("esp32c6"));
-        let offer = flash_device_offer(&view, prefix()).unwrap();
-        let refused = offer
-            .press(&OfferArgs::new().with("board", "esp8266-nodemcu"))
-            .unwrap_err();
-        assert!(
-            matches!(&refused, OfferArgError::NotAnOption { name, .. } if name == "board"),
-            "{refused:?}"
-        );
-        assert!(
-            refused
-                .to_string()
-                .contains("`esp8266-nodemcu` is not one of them")
-        );
-    }
-
-    /// An older LightPlayer's update keeps its project and files: one
-    /// click, the over-the-air update's price — whether its board is known
-    /// (`update-firmware`) or must be picked (`flash`, bound too).
-    #[test]
-    fn an_older_lightplayers_update_is_routine() {
+    fn an_older_lightplayers_update_is_routine_and_a_current_ones_is_lasting() {
         let older = FirmwareFace::OlderLightPlayer { proto: Some(33) };
-        let mut known = needs_firmware(older.clone(), Some("esp32c6"));
-        known.board_id = Some("seeed/xiao-esp32-c6".to_string());
-        known.escapes = vec![Escape::Disconnect, Escape::Forget];
-        let update = update_firmware_offer(&known, prefix()).expect("it updates");
+        let mut view = needs_firmware(older, Some("esp32c6"));
+        view.escapes = vec![Escape::Disconnect, Escape::Forget];
+        let update = update_firmware_offer(&view, prefix()).expect("it updates");
         assert_eq!(
             update.path.to_string(),
             "devices/mac-a0f26287b48c/update-firmware"
@@ -447,146 +376,52 @@ mod tests {
             "{:?}",
             update.consequence()
         );
-        assert!(update.params().is_empty(), "one click");
+        assert!(update.params().is_empty(), "one press");
 
-        let unknown = needs_firmware(older, Some("esp32c6"));
-        let flash = flash_device_offer(&unknown, prefix()).expect("it flashes");
-        assert!(
-            flash.consequence().is_routine(),
-            "{:?}",
-            flash.consequence()
-        );
-        let bound = flash
-            .press(&OfferArgs::new().with("board", offer_first_board(&flash)))
-            .unwrap();
-        assert!(bound.meta().consequence.is_routine(), "bound Routine too");
+        let current = update_firmware_offer(&running(Some("esp32c6")), prefix()).unwrap();
+        assert!(current.consequence().arms(), "the Flash op's own Lasting");
+        assert!(current.params().is_empty(), "one press, no pick");
     }
 
     #[test]
-    fn flashing_over_firmware_is_lasting() {
-        for face in [
-            FirmwareFace::Foreign { label: None },
-            FirmwareFace::Bootloader,
-            FirmwareFace::Silent,
-            FirmwareFace::NoHello,
-        ] {
-            let view = needs_firmware(face.clone(), Some("esp32c6"));
-            let offer = flash_device_offer(&view, prefix()).expect("it flashes");
-            let copy = offer
-                .consequence()
-                .copy()
-                .unwrap_or_else(|| panic!("{face:?} is Lasting"));
-            assert_eq!(
-                copy.title, "Replace what this board runs?",
-                "the op's own copy"
-            );
-            let bound = offer
-                .press(&OfferArgs::new().with("board", offer_first_board(&offer)))
-                .unwrap();
-            assert!(
-                bound.meta().consequence.arms(),
-                "{face:?}: bound Lasting too"
-            );
-        }
-    }
-
-    #[test]
-    fn with_no_chip_nothing_is_preselected_and_the_verb_asks_for_a_board() {
-        let view = needs_firmware(FirmwareFace::Blank, None);
-        let offer = flash_device_offer(&view, prefix()).unwrap();
-        assert!(!offer.is_enabled());
-        assert_eq!(
-            offer.action.meta().enablement,
-            crate::ActionEnablement::Disabled {
-                reason: "choose a board".to_string()
-            }
-        );
-        assert_eq!(offer.label(), "Flash firmware");
-        assert!(
-            offer.consequence().is_routine(),
-            "the level reads before a choice"
-        );
-    }
-
-    #[test]
-    fn a_link_that_cannot_carry_firmware_offers_a_disabled_flash_with_no_choice() {
+    fn a_link_that_cannot_carry_firmware_offers_a_disabled_flash() {
         let mut view = needs_firmware(FirmwareFace::Blank, Some("esp32c6"));
         view.firmware_blocked = Some("Firmware updates need USB.".to_string());
         let offer = flash_device_offer(&view, prefix()).unwrap();
-        assert!(offer.params().is_empty());
         assert_eq!(
             offer.press(&OfferArgs::new()),
             Err(OfferArgError::Unavailable {
                 reason: "Firmware updates need USB.".to_string()
             })
         );
+
+        let mut running = running(Some("esp32c6"));
+        running.firmware_blocked = Some("Firmware updates need USB.".to_string());
+        let blocked = update_firmware_offer(&running, prefix()).unwrap();
+        assert_eq!(
+            blocked.press(&OfferArgs::new()),
+            Err(OfferArgError::Unavailable {
+                reason: "Firmware updates need USB.".to_string()
+            })
+        );
+        assert_eq!(blocked.label(), "Update firmware");
+    }
+
+    #[test]
+    fn a_chip_this_studio_serves_nothing_for_reads_honestly() {
+        let view = needs_firmware(FirmwareFace::Blank, Some("esp32p4"));
+        let offer = flash_device_offer(&view, prefix()).unwrap();
+        let Err(OfferArgError::Unavailable { reason }) = offer.press(&OfferArgs::new()) else {
+            panic!("a chip with no build cannot install");
+        };
+        assert!(reason.contains("esp32p4"), "{reason}");
     }
 
     #[test]
     fn a_running_lightplayer_offers_no_flash() {
-        let mut view = needs_firmware(
-            FirmwareFace::LightPlayer {
-                firmware: None,
-                wire: lpa_devices::WireVersion::Match,
-                age: lpa_devices::FirmwareAge::Unknown,
-            },
-            Some("esp32c6"),
-        );
-        view.board_id = Some(flash_offer(Some("esp32c6")).candidates[0].board_id.clone());
-        assert_eq!(
-            flash_device_offer(&view, prefix()),
-            None,
-            "it updates instead"
-        );
-    }
-
-    #[test]
-    fn show_all_widens_the_pick_past_the_chip_and_the_preflight_still_guards() {
-        let view = needs_firmware(FirmwareFace::Blank, Some("esp32c6"));
-        let offer = flash_device_offer(&view, prefix()).unwrap();
-        let fits = flash_offer(Some("esp32c6")).candidates;
-        let outside = flash_offer(None)
-            .candidates
-            .into_iter()
-            .find(|choice| !fits.iter().any(|fit| fit.board_id == choice.board_id))
-            .expect("this build serves a board for another chip");
-
-        let refused = offer
-            .press(&OfferArgs::new().with("board", &outside.board_id))
-            .unwrap_err();
-        assert!(
-            refused.to_string().contains("only with `all_boards` on"),
-            "{refused}"
-        );
-        let bound = offer
-            .press(
-                &OfferArgs::new()
-                    .with("board", &outside.board_id)
-                    .with("all_boards", "true"),
-            )
-            .expect("show all widens the choice");
-        let Action::Flash {
-            board_id, build_id, ..
-        } = bound.op_as::<DevicesOp>().unwrap().action()
-        else {
-            panic!("a flash");
-        };
-        assert_eq!(board_id, &outside.board_id);
-        assert_eq!(build_id, &outside.build_id, "the wider pick's own build");
-    }
-
-    #[test]
-    fn with_no_chip_the_list_was_never_narrowed_so_there_is_no_toggle() {
-        let view = needs_firmware(FirmwareFace::Blank, None);
-        let offer = flash_device_offer(&view, prefix()).unwrap();
-        assert_eq!(
-            offer
-                .params()
-                .iter()
-                .map(|param| param.name.as_str())
-                .collect::<Vec<_>>(),
-            ["board", "name"]
-        );
+        let view = running(Some("esp32c6"));
+        assert_eq!(flash_device_offer(&view, prefix()), None);
+        assert!(update_firmware_offer(&view, prefix()).is_some());
     }
 
     #[test]
@@ -602,19 +437,15 @@ mod tests {
             detected_chip: Some("esp32c6".to_string()),
             mac: None,
             firmware_blocked: None,
+            usb: None,
             held_by_tab: false,
             escapes: vec![Escape::Forget],
         };
         let prefix = OfferPath::board(&crate::BoardRef::New(3));
         let offer = flash_pending_offer(&pending, prefix.clone()).expect("a blank chip flashes");
         assert_eq!(offer.path.to_string(), "devices/new-3/flash");
-        assert!(
-            offer.consequence().is_routine(),
-            "a blank chip loses nothing"
-        );
-        let bound = offer
-            .press(&OfferArgs::new().with("board", offer_first_board(&offer)))
-            .unwrap();
+        assert!(offer.consequence().is_routine());
+        let bound = offer.press(&OfferArgs::new()).unwrap();
         assert!(matches!(
             bound.op_as::<DevicesOp>().unwrap().action(),
             Action::Flash {
@@ -634,183 +465,83 @@ mod tests {
         );
     }
 
+    /// "Which board is this?", after an install that could not tell: the
+    /// fingerprint's fits first, the rest of the chip's boards behind the
+    /// toggle, and the press saves the model.
     #[test]
-    fn a_running_board_updates_in_one_click_when_its_board_resolved() {
-        let mut view = running(Some("esp32c6"));
-        let choice = flash_offer(Some("esp32c6")).candidates[0].clone();
-        view.board_id = Some(choice.board_id.clone());
-        let offer = update_firmware_offer(&view, prefix()).expect("it updates");
-
-        assert_eq!(
-            offer.path.to_string(),
-            "devices/mac-a0f26287b48c/update-firmware"
-        );
-        assert!(offer.params().is_empty(), "one click");
-        assert_eq!(offer.label(), "Update firmware");
-        assert!(offer.consequence().arms(), "the Flash op's own Lasting");
-        let Action::Flash { board_id, name, .. } =
-            offer.action.op_as::<DevicesOp>().unwrap().action()
-        else {
-            panic!("a flash");
+    fn which_board_offers_the_fits_first_and_saves_the_pick() {
+        let view = running(Some("esp32c6"));
+        let chip_boards = flash_offer(Some("esp32c6")).candidates;
+        assert!(chip_boards.len() > 1, "the premise: two C6 boards");
+        let fit = chip_boards[1].board_id.clone();
+        let offer = set_board_offer(&view, prefix(), std::slice::from_ref(&fit)).unwrap();
+        assert_eq!(offer.path.to_string(), "devices/mac-a0f26287b48c/set-board");
+        assert!(offer.consequence().is_routine());
+        let [board, all] = offer.params() else {
+            panic!("board + all_boards: {:?}", offer.params());
         };
-        assert_eq!(board_id, &choice.board_id);
-        assert_eq!(name, &None, "an update never renames");
-        assert_eq!(flash_device_offer(&view, prefix()), None);
-
-        view.firmware_blocked = Some("Firmware updates need USB.".to_string());
-        let blocked = update_firmware_offer(&view, prefix()).unwrap();
-        assert_eq!(
-            blocked.press(&OfferArgs::new()),
-            Err(OfferArgError::Unavailable {
-                reason: "Firmware updates need USB.".to_string()
-            })
-        );
-        assert_eq!(blocked.label(), "Update firmware");
-    }
-
-    /// Over Wi‑Fi (the LAN or the relay) the link carries the update, but
-    /// a board that can only be flashed (no over-the-air route) still needs
-    /// USB: the USB Update verb says so.
-    #[test]
-    fn over_wifi_a_board_that_can_only_be_flashed_still_needs_usb() {
-        let mut view = running(Some("esp32c6"));
-        view.board_id = Some(flash_offer(Some("esp32c6")).candidates[0].board_id.clone());
-        view.firmware_blocked = Some(lpa_devices::view::FIRMWARE_NEEDS_USB.to_string());
-        view.update_blocked = None;
-        let update = update_firmware_offer(&view, prefix()).unwrap();
-        assert_eq!(
-            update.press(&OfferArgs::new()),
-            Err(OfferArgError::Unavailable {
-                reason: lpa_devices::view::FIRMWARE_NEEDS_USB.to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn an_update_whose_board_did_not_resolve_takes_the_pick_without_a_name() {
-        // A chip several served boards fit, and no board on record.
-        let chip = ["esp32", "esp32c6", "esp32s3"]
-            .into_iter()
-            .find(|chip| flash_offer(Some(chip)).candidates.len() > 1);
-        let Some(chip) = chip else {
-            // Every served chip has one board in this build: the pick never
-            // appears on a running board, which the verb itself says.
-            assert!(matches!(
-                firmware_verb(&running(Some("esp32c6"))),
-                Some(FirmwareVerb::Update(_))
-            ));
-            return;
+        let crate::OfferParamKind::Choice { options, preselect } = &board.kind else {
+            panic!("a choice: {board:?}");
         };
-        let view = running(Some(chip));
-        assert_eq!(firmware_verb(&view), Some(FirmwareVerb::UpdatePick));
-        let offer = update_firmware_offer(&view, prefix()).unwrap();
-        assert_eq!(
-            offer
-                .params()
-                .iter()
-                .map(|param| param.name.as_str())
-                .collect::<Vec<_>>(),
-            ["board", "all_boards"],
-            "an update names nothing"
-        );
-        assert_eq!(offer.label(), "Update firmware");
-        assert!(!offer.is_enabled(), "several fit: choose a board");
-        let bound = offer
-            .press(&OfferArgs::new().with("board", offer_first_board(&offer)))
-            .unwrap();
-        assert_eq!(bound.meta().label, "Update firmware");
-        assert!(bound.meta().consequence.arms());
-    }
-
-    /// Yona's phone, 2026-10-25: a blank C6 on Chrome for Android's WebUSB
-    /// port. The port opened mid boot loop, so the first thing heard was
-    /// "invalid header" and no banner named the chip, and the install
-    /// picker listed every board kind there is. Identify now resets the
-    /// board once for its banner; once the banner answers, the picker holds
-    /// the C6's boards only, with every other board behind `all_boards`.
-    #[test]
-    fn a_blank_c6_opened_mid_boot_loop_gets_a_c6_only_pick_once_its_banner_answers() {
-        use lpa_devices::event::Input;
-        use lpa_devices::link::{LinkCommand, LinkEvent, LinkId, ResetKind};
-        use lpa_devices::replay::{Replay, Step};
-        use lpa_devices::time::Millis;
-
-        let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
-        replay.step(Millis(0), Step::attach(1, "usb-phone"));
-        replay.step(Millis(20), Step::opened(1));
-        let commands = replay.step(Millis(40), Step::line(1, "invalid header: 0xffffffff"));
+        assert_eq!(options[0].value, fit);
+        assert!(options[0].only_with.is_none());
         assert!(
-            commands.iter().any(|command| matches!(
-                command,
-                lpa_devices::Command::Link {
-                    command: LinkCommand::RunReset(ResetKind::Normal),
-                    ..
-                }
-            )),
-            "no banner named the chip: the board is reset for one: {commands:?}"
-        );
-        assert_eq!(replay.view().pending[0].detected_chip, None, "the premise");
-
-        // The reset answers: the ROM's banner, then the loop again.
-        replay.feed(
-            Millis(150),
-            Input::link(
-                LinkId(1),
-                LinkEvent::ResetOutcome {
-                    kind: ResetKind::Normal,
-                    ok: true,
-                },
-            ),
-        );
-        replay.step(Millis(160), Step::opened(1));
-        replay.step(Millis(200), Step::line(1, "ESP-ROM:esp32c6-20220919"));
-        replay.step(Millis(220), Step::line(1, "invalid header: 0xffffffff"));
-
-        let view = replay.view();
-        let pending = &view.pending[0];
-        assert!(pending.needs_firmware(), "{pending:?}");
-        assert_eq!(pending.detected_chip.as_deref(), Some("esp32c6"));
-        let prefix = OfferPath::board(&crate::BoardRef::New(1));
-        let offer = flash_pending_offer(pending, prefix).expect("a blank chip flashes");
-        let board = offer
-            .params()
-            .iter()
-            .find(|param| param.name == FLASH_BOARD_PARAM)
-            .expect("the pick");
-        let crate::OfferParamKind::Choice { options, .. } = &board.kind else {
-            panic!("{board:?}");
-        };
-        let shown: Vec<&str> = options
-            .iter()
-            .filter(|option| option.only_with.is_none())
-            .map(|option| option.value.as_str())
-            .collect();
-        let c6: Vec<String> = flash_offer(Some("esp32c6"))
-            .candidates
-            .into_iter()
-            .map(|choice| choice.board_id)
-            .collect();
-        assert!(!shown.is_empty());
-        assert_eq!(shown, c6, "the C6's boards, and only those");
-        assert!(
-            options
+            options[1..]
                 .iter()
-                .filter(|option| option.only_with.is_some())
-                .all(|option| option.only_with.as_deref() == Some(FLASH_ALL_BOARDS_PARAM)),
-            "every other board waits behind the toggle"
+                .all(|o| o.only_with.as_deref() == Some(SET_BOARD_ALL_PARAM))
+        );
+        assert_eq!(preselect.as_ref(), Some(&fit), "one fit preselects");
+        assert_eq!(all.kind, crate::OfferParamKind::Toggle { value: false });
+
+        let bound = offer.press(&OfferArgs::new()).expect("the preselect binds");
+        assert_eq!(
+            bound.op_as::<DevicesOp>().unwrap().action(),
+            &Action::SetBoard {
+                device: DeviceId(7),
+                board_id: fit,
+            }
         );
         assert!(
             offer
-                .params()
-                .iter()
-                .any(|param| param.name == FLASH_ALL_BOARDS_PARAM),
-            "the toggle is there"
+                .press(&OfferArgs::new().with("board", "quinled/dig-uno"))
+                .is_err(),
+            "a board of another chip is not an option"
         );
+    }
+
+    #[test]
+    fn which_board_with_no_fits_offers_every_board_of_the_chip_unpicked() {
+        let view = running(Some("esp32c6"));
+        let offer = set_board_offer(&view, prefix(), &[]).unwrap();
+        let [board] = offer.params() else {
+            panic!("no toggle when nothing narrowed: {:?}", offer.params());
+        };
+        let crate::OfferParamKind::Choice { preselect, .. } = &board.kind else {
+            panic!("a choice");
+        };
+        assert_eq!(preselect, &None);
+        assert!(!offer.is_enabled(), "nothing chosen yet");
+    }
+
+    #[test]
+    fn which_board_is_only_asked_of_a_running_board_whose_chip_fits_several() {
+        assert!(set_board_offer(&running(Some("esp32c6")), prefix(), &[]).is_some());
+        let blank = needs_firmware(FirmwareFace::Blank, Some("esp32c6"));
+        assert_eq!(set_board_offer(&blank, prefix(), &[]), None);
+        let mut over_ble = running(Some("esp32c6"));
+        over_ble.firmware_blocked = Some("Firmware updates need USB.".to_string());
+        assert_eq!(set_board_offer(&over_ble, prefix(), &[]), None);
+        assert!(asks_which_board(
+            &running(Some("esp32c6")),
+            &["a".into(), "b".into()]
+        ));
+        assert!(!asks_which_board(&running(Some("esp32c6")), &["a".into()]));
     }
 
     fn running(chip: Option<&str>) -> DeviceView {
         DeviceView {
             status: DeviceStatus::Ready,
+            can_receive_project: true,
             ..needs_firmware(
                 FirmwareFace::LightPlayer {
                     firmware: None,
@@ -819,13 +550,6 @@ mod tests {
                 },
                 chip,
             )
-        }
-    }
-
-    fn offer_first_board(offer: &UiOffer) -> String {
-        match &offer.params()[0].kind {
-            crate::OfferParamKind::Choice { options, .. } => options[0].value.clone(),
-            other => panic!("{other:?}"),
         }
     }
 
@@ -862,6 +586,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,

@@ -378,6 +378,7 @@ fn ble_card_locked() -> Element {
         div { class: CARD_FRAME,
             StoryDeviceCard {
                 card: DeviceView {
+                    usb: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     can_remove_project: false,
                     ..ble_card()
@@ -594,6 +595,7 @@ fn ble_pending_card_over_bluetooth() -> Element {
         detected_chip: None,
         mac: None,
         firmware_blocked: None,
+        usb: None,
         held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
     };
@@ -602,6 +604,7 @@ fn ble_pending_card_over_bluetooth() -> Element {
         device: DeviceId(109),
         title: "PLAYFUL choker".to_string(),
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        usb: None,
         ..usb.clone()
     };
     // The same Bluetooth link once its check SETTLED on "needs firmware"
@@ -991,6 +994,7 @@ fn account_info(play: Option<&str>, edit: Option<&str>) -> AccountAccessInfo {
 pub(crate) fn usb_card() -> DeviceView {
     DeviceView {
         firmware_blocked: None,
+        usb: None,
         ..ble_card()
     }
 }
@@ -1027,6 +1031,7 @@ fn ble_card() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: Some("Firmware updates need USB".to_string()),
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,

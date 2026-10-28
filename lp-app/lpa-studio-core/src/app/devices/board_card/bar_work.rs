@@ -22,6 +22,7 @@ use super::board_card_input::BoardCardInput;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_stack_bar::BarLayer;
+use crate::app::devices::device_flash_offer::SET_BOARD;
 use crate::app::devices::device_identity::device_chip;
 use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
@@ -31,7 +32,7 @@ pub fn activity_bar(kind: ActivityKind) -> BarLayer {
     match kind {
         ActivityKind::Push | ActivityKind::RemoveProject => BarLayer::Project,
         ActivityKind::Flash | ActivityKind::Erase | ActivityKind::Update => BarLayer::Firmware,
-        ActivityKind::Identify => BarLayer::Hardware,
+        ActivityKind::Identify | ActivityKind::SetBoard => BarLayer::Hardware,
     }
 }
 
@@ -63,6 +64,7 @@ fn activity_verb(kind: ActivityKind) -> &'static str {
         ActivityKind::Erase => "erasing",
         ActivityKind::Update => "updating",
         ActivityKind::Identify => "identifying",
+        ActivityKind::SetBoard => "saving the board",
     }
 }
 
@@ -75,6 +77,7 @@ fn done_word(kind: ActivityKind) -> &'static str {
         ActivityKind::Erase => "erased",
         ActivityKind::Update => "updated",
         ActivityKind::Identify => "identified",
+        ActivityKind::SetBoard => "saved",
     }
 }
 
@@ -87,6 +90,7 @@ fn failed_words(kind: ActivityKind) -> &'static str {
         ActivityKind::Erase => "erase failed",
         ActivityKind::Update => "update failed",
         ActivityKind::Identify => "not identified",
+        ActivityKind::SetBoard => "not saved",
     }
 }
 
@@ -229,14 +233,11 @@ pub(crate) fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<Ui
                 board_id: input.view.board_id.clone(),
             },
         ),
-        ActivityKind::Flash => retry(input.offer("flash")?, board_pick(input)),
+        ActivityKind::Flash => retry(input.offer("flash")?, UiActionDraw::Press),
+        ActivityKind::SetBoard => retry(input.offer(SET_BOARD)?, board_pick(input)),
         ActivityKind::Update => {
             let update = input.offer("update-firmware")?;
-            let draw = match update.params().is_empty() {
-                true => UiActionDraw::Press,
-                false => board_pick(input),
-            };
-            retry(update, draw)
+            retry(update, UiActionDraw::Press)
         }
         ActivityKind::Erase => retry(input.offer("erase")?, UiActionDraw::Press),
         ActivityKind::RemoveProject => retry(input.offer("remove-project")?, UiActionDraw::Press),

@@ -17,7 +17,7 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
-use super::agent_card_view_stories::{agent_card, foreign_flash};
+use super::agent_card_view_stories::{agent_card, wled_replace};
 use super::{AppChatButton, AppChatDrawer};
 use crate::app::layout::site_chrome::{SiteChrome, SiteSection};
 use crate::app::node::NodePane;
@@ -96,22 +96,23 @@ fn connect_card_pending() -> Element {
 }
 
 #[story(
-    description = "A pending flash card, pre-filled. The board runs its factory demo, so flashing LightPlayer over it loses that firmware: the press is Lasting and only the user may make it. The card draws the Flash offer's own board pick, set to the board the assistant named and the name Sean asked for; he may change either, and the press arms first (error tint), acting on the second click."
+    description = "A pending Replace card. Sean asked the assistant to switch his WLED controller to LightPlayer; Install is one press the agent made, and the install stopped on its one question — the board runs WLED 0.15.0, and installing replaces it, settings and presets too. That answer is Lasting, so only Sean may make it: the press arms first (error tint) and acts on the second click."
 )]
 fn flash_card_pending() -> Element {
-    let offer = foreign_flash();
+    let (offer, offers) = wled_replace();
     let card = agent_card(&offer);
-    let mut offers = UiOfferTree::new();
-    offers.publish(offer);
     let turns = vec![
         UiAgentTurn::User {
-            text: "Put it on my XIAO, and call it Shelf lamp".to_string(),
+            text: "can I switch my WLED controller to lightplayer?".to_string(),
         },
-        act_row("tu_9", "asked you to click card c1: devices/new-3/flash"),
+        act_row(
+            "tu_9",
+            "asked you to click card c1: devices/new-3/confirm-replace",
+        ),
         UiAgentTurn::Card(card),
         UiAgentTurn::Assistant {
-            text: "Your XIAO is still running its factory demo. Click **Flash** on the card — \
-                   it replaces that demo with LightPlayer."
+            text: "Your controller runs WLED 0.15.0. Click **Replace** on the card — it replaces \
+                   WLED, and its settings and presets, with LightPlayer."
                 .to_string(),
         },
     ];

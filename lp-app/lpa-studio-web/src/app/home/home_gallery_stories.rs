@@ -551,6 +551,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     card.freshness_label = Some("last heard 4 min ago".to_string());
     let id = card.id;
     DeviceRosterView {
+        which_board: Default::default(),
         access: Default::default(),
         wifi: Default::default(),
         remembered_networks: Default::default(),
@@ -640,6 +641,7 @@ fn devices_page_held_board() -> Element {
     let held = devices.roster.devices[1].id;
     let title = devices.roster.devices[1].title.clone();
     devices.roster.devices[1] = DeviceView {
+        usb: None,
         id: held,
         title,
         ..held_by_another_tab(HoldLevel::Watching, false)
@@ -707,6 +709,7 @@ fn devices_card_live_feed() -> Element {
     // The feed's rate is the board's own, off its heartbeat (core joins one
     // from the other): the view says it too.
     let card = DeviceView {
+        usb: None,
         engine_fps: Some(43),
         ..card
     };
@@ -850,6 +853,7 @@ fn devices_card_layout_change() -> Element {
     };
 
     let base = DeviceView {
+        usb: None,
         title: "Porch C6".to_string(),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -862,6 +866,7 @@ fn devices_card_layout_change() -> Element {
     };
     let waiting = lpa_studio_core::DeviceFlashStep::WaitingForAnswer.label();
     let asking = |verdict: DeviceLayoutVerdict| DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         state_label: waiting.to_string(),
         activity: Some(DeviceActivityView {
@@ -875,6 +880,7 @@ fn devices_card_layout_change() -> Element {
                 awaiting_consent: true,
             }),
             update: None,
+            replace: None,
             flash_step: Some(lpa_studio_core::DeviceFlashStep::WaitingForAnswer),
         }),
         escapes: vec![
@@ -908,6 +914,7 @@ fn devices_card_layout_change() -> Element {
         block_bytes: 4096,
     };
     let refused = DeviceView {
+        usb: None,
         last_outcome: Some(OutcomeView {
             summary: "the board's files don't fit the new firmware — nothing was changed"
                 .to_string(),
@@ -923,6 +930,7 @@ fn devices_card_layout_change() -> Element {
         downloaded: false,
     };
     let held = DeviceView {
+        usb: None,
         loaded_project: DeviceLoadedProject::Empty,
         can_remove_project: false,
         ..base.clone()
@@ -995,6 +1003,7 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
     };
 
     let card = DeviceView {
+        usb: None,
         title: "LP-8e30".to_string(),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -1049,6 +1058,7 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
 /// wearing core's `project_note` in place of "Nothing loaded".
 fn removed_board_note_cell() -> Element {
     let card = DeviceView {
+        usb: None,
         can_remove_project: false,
         ..roster_fixture().roster.devices.remove(3)
     };
@@ -1162,6 +1172,7 @@ fn devices_card_update_steps() -> Element {
     use lpa_studio_core::DeviceFlashStep;
 
     let running = DeviceView {
+        usb: None,
         title: "Porch C6".to_string(),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -1177,6 +1188,7 @@ fn devices_card_update_steps() -> Element {
         ..roster_fixture().roster.devices.remove(0)
     };
     let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         state_label: step.label().to_string(),
         activity: Some(DeviceActivityView {
@@ -1186,6 +1198,7 @@ fn devices_card_update_steps() -> Element {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: Some(step),
             update: None,
         }),
@@ -1223,10 +1236,11 @@ fn devices_card_update_steps() -> Element {
 }
 
 #[story(
-    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. Both firmware bars say \"Older LightPlayer\", not the old contradictory \"No firmware\". LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board, and through it the chip, and its firmware details offer Update with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). RIGHT: the same board when nothing names it (never stamped, nothing remembered) — the one case left for the pick: Install, over every board."
+    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. Both firmware bars say \"Older LightPlayer\", not the old contradictory \"No firmware\". LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board, and through it the chip, and its firmware details offer Update with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). RIGHT: the same board when nothing names it (never stamped, nothing remembered) — still one press: Update reads the board in its bootloader and picks its firmware from the chip it hears (plan 2026-10-28-0025: nobody picks a board first)."
 )]
 fn devices_card_older_firmware() -> Element {
     let older = DeviceView {
+        usb: None,
         title: "Spare C6".to_string(),
         status: DeviceStatus::NeedsAttention,
         state_label: "Older LightPlayer firmware".to_string(),
@@ -1251,6 +1265,7 @@ fn devices_card_older_firmware() -> Element {
         ..roster_fixture().roster.devices.remove(0)
     };
     let unnamed = DeviceView {
+        usb: None,
         board_id: None,
         terminal: vec![
             story_line(DeviceTerminalKind::Board, "Opened the port"),
@@ -1331,6 +1346,7 @@ fn devices_page_degraded_card() -> Element {
         projects: Vec::new(),
         examples: examples(),
         devices: DeviceRosterView {
+            which_board: Default::default(),
             open_addresses,
             roster: RosterView {
                 pending: Vec::new(),
@@ -1409,6 +1425,7 @@ fn degraded_card_fixture() -> DeviceView {
 /// chip whose only honest verb is round 2\'s.
 pub(crate) fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
+        which_board: Default::default(),
         access: Default::default(),
         wifi: Default::default(),
         remembered_networks: Default::default(),
@@ -1454,6 +1471,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    usb: None,
                     held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -1464,12 +1482,13 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     state_label: "New device found — Blank flash — needs firmware".to_string(),
                     detail: Some("invalid header: 0xffffffff".to_string()),
                     can_adopt: true,
-                    // Settled blank: the needs-firmware face (board pick +
-                    // Flash) rides this pending card.
+                    // Settled blank: the needs-firmware face (Install)
+                    // rides this pending card.
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    usb: None,
                     held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -1535,6 +1554,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    usb: None,
                     held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
@@ -1574,6 +1594,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                         cancellable: true,
                         cancel_requested: false,
                         layout: None,
+                        replace: None,
                         flash_step: None,
                         update: None,
                     }),
@@ -1590,6 +1611,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     // Cancel FIRST: a running activity\'s way out leads.
                     firmware_blocked: None,
+                    usb: None,
                     escapes: vec![
                         DeviceEscape::Cancel,
                         DeviceEscape::Disconnect,
@@ -1643,6 +1665,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    usb: None,
                     held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
@@ -1708,6 +1731,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    usb: None,
                     held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
@@ -1746,6 +1770,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     // The two verbs an absent board can honestly offer.
                     firmware_blocked: None,
+                    usb: None,
                     held_elsewhere: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
                     update_blocked: None,
@@ -1791,6 +1816,7 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
     let empty = devices.remove(3);
     let running = devices.remove(0);
     DeviceRosterView {
+        which_board: Default::default(),
         access: Default::default(),
         wifi: Default::default(),
         remembered_networks: Default::default(),
@@ -1820,7 +1846,7 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
         open_addresses: full.open_addresses,
         roster: RosterView {
             // The blank board's link, the one a fresh plug actually looks
-            // like: settled at needs-firmware, wearing the board pick.
+            // like: settled at needs-firmware, wearing Install.
             pending: vec![full.roster.pending[1].clone()],
             devices: vec![running, empty, remembered],
         },
@@ -1835,7 +1861,7 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
 #[story(
-    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words on its firmware bar, decided in core and tested per variant. Two verbs for two situations (ruled 2026-09-04): a running LightPlayer's firmware bar offers UPDATE; a needs-firmware face's primary is INSTALL, with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still running, its fault in orange on the project bar): the firmware bar is blue, the version alone, with Update and no board pick because the registry knows the board — offered, never forced; OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update opens the board pick once, and the panel says why); NEWER (plain, no recommendation); PRE-HELLO, FOREIGN, BOOTLOADER and SILENT, each named in orange — \"Pre-hello firmware\", \"Other firmware\", \"In download mode\", \"No response\" — with the card's top saying the verdict and Install as the primary (SILENT's USB row also says \"not responding\", with Retry); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04): USB \"not connected\" with Connect as the primary, while the firmware bar keeps the version the record remembers with \"last seen\" — memory marked as memory, never a live claim. The status corner carries each card's worst notice, and every card measures the same height (AC2)."
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words on its firmware bar, decided in core and tested per variant. Two verbs for two situations (ruled 2026-09-04): a running LightPlayer's firmware bar offers UPDATE; a needs-firmware face's primary is INSTALL, one press: the install reads the board before writing anything (plan 2026-10-28-0025). OLDER (a running LightPlayer one wire version behind — still running, its fault in orange on the project bar): the firmware bar is blue, the version alone, with Update and no board pick because the registry knows the board — offered, never forced; OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — the SAME one-press Update, and the Hardware row asks which board it is afterwards when the install cannot tell); NEWER (plain, no recommendation); PRE-HELLO, FOREIGN, BOOTLOADER and SILENT, each named in orange — \"Pre-hello firmware\", \"Other firmware\", \"In download mode\", \"No response\" — with the card's top saying the verdict and Install as the primary (SILENT's USB row also says \"not responding\", with Retry); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04): USB \"not connected\" with Connect as the primary, while the firmware bar keeps the version the record remembers with \"last seen\" — memory marked as memory, never a live claim. The status corner carries each card's worst notice, and every card measures the same height (AC2)."
 )]
 fn devices_card_firmware_faces() -> Element {
     let faces = firmware_face_fixtures();
@@ -1875,6 +1901,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     // An older classic, running, with a fault — and REGISTERED as a
     // Dig-Uno, so Update firmware is one click.
     let older = DeviceView {
+        usb: None,
         id: DeviceId(31),
         title: "Shop classic · Sep 4".to_string(),
         status: DeviceStatus::Degraded,
@@ -1923,6 +1950,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     // the registry has no board either. A classic chip fits several boards,
     // so the SAME Update verb opens the pick once — and says why.
     let older_unknown = DeviceView {
+        usb: None,
         id: DeviceId(37),
         title: "Bench classic · Sep 4".to_string(),
         board_id: None,
@@ -1948,6 +1976,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         ..older.clone()
     };
     let newer = DeviceView {
+        usb: None,
         id: DeviceId(32),
         title: "Dev board · Sep 4".to_string(),
         status: DeviceStatus::Ready,
@@ -2004,12 +2033,14 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )],
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
     };
     let pre_hello = DeviceView {
+        usb: None,
         terminal: vec![
             story_line(
                 DeviceTerminalKind::Board,
@@ -2029,6 +2060,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )
     };
     let foreign = DeviceView {
+        usb: None,
         terminal: vec![
             story_line(DeviceTerminalKind::Rom, "ESP-ROM:esp32c6-20220919"),
             story_line(
@@ -2047,6 +2079,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )
     };
     let bootloader = DeviceView {
+        usb: None,
         terminal: vec![
             story_line(DeviceTerminalKind::Rom, "ESP-ROM:esp32c6-20220919"),
             story_line(DeviceTerminalKind::Rom, "waiting for download"),
@@ -2060,6 +2093,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )
     };
     let silent = DeviceView {
+        usb: None,
         status: DeviceStatus::NotResponding,
         freshness_label: None,
         heard_age_ms: None,
@@ -2121,6 +2155,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // so the projection offers Disconnect — which is also what keeps
         // the terminal and the verb rows drawn at their fixed heights.
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
@@ -2145,6 +2180,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
 pub(crate) fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
     let running = roster_fixture().roster.devices.remove(0);
     DeviceView {
+        usb: None,
         id: DeviceId(id),
         title: title.to_string(),
         board_id: Some(board_id.to_string()),
@@ -2160,6 +2196,7 @@ fn devices_card_sim_faces() -> Element {
     let desktop = sim_card_view(11, "Desktop sim", "lightplayer/desktop");
     let board = sim_card_view(12, "C6 sim", "seeed/xiao-esp32-c6");
     let lens = DeviceView {
+        usb: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "porch-sign".to_string(),
         },
@@ -2274,10 +2311,11 @@ fn devices_card_emu_band() -> Element {
 }
 
 #[story(
-    description = "An emu that came up on a BLANK CHIP (D22/D24): the needs-firmware face, on the same board card, \"Emulated XIAO ESP32-C6\" on its hardware bar. An emu is born flashed — the record's first power-on hands the worker a manifest URL and the worker fetches the packaged build, writes it into the 4 MiB image and boots into it — so this face means the fetch did not happen: this build serves no image for the board, or the network refused. THE CLAIM TO CHECK IS THAT NOTHING IS SPECIAL HERE. It is verbatim what a blank board on the desk gets (compare `devices_card_firmware_faces`): \"No firmware\" on the firmware bar, the verdict in its details, Install with the board pick. (The terminal in the status corner is the story fixture's shared transcript — furniture here, not evidence.) And the verb means what it says — mode A writes the emulated chip directly and resets it, with no ROM downloader in the way — which is exactly why the two verbs a sim has nothing honest to do are real on an emu. The hardware bar is the one row that tells you where this board is; no speed in its details: a chip that never booted has reported no time."
+    description = "An emu that came up on a BLANK CHIP (D22/D24): the needs-firmware face, on the same board card, \"Emulated XIAO ESP32-C6\" on its hardware bar. An emu is born flashed — the record's first power-on hands the worker a manifest URL and the worker fetches the packaged build, writes it into the 4 MiB image and boots into it — so this face means the fetch did not happen: this build serves no image for the board, or the network refused. THE CLAIM TO CHECK IS THAT NOTHING IS SPECIAL HERE. It is verbatim what a blank board on the desk gets (compare `devices_card_firmware_faces`): \"No firmware\" on the firmware bar, the verdict in its details, Install as one press. (The terminal in the status corner is the story fixture's shared transcript — furniture here, not evidence.) And the verb means what it says — mode A writes the emulated chip directly and resets it, with no ROM downloader in the way — which is exactly why the two verbs a sim has nothing honest to do are real on an emu. The hardware bar is the one row that tells you where this board is; no speed in its details: a chip that never booted has reported no time."
 )]
 fn devices_card_emu_needs_firmware() -> Element {
     let card = DeviceView {
+        usb: None,
         status: DeviceStatus::NeedsAttention,
         state_label: "Blank flash — needs firmware".to_string(),
         detail: Some("chip: esp32c6".to_string()),
@@ -2311,6 +2349,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     let open_uid = Some("dev000000daqf6dvvqz".to_string());
 
     let flashing = DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         state_label: "Flashing firmware".to_string(),
         activity: Some(DeviceActivityView {
@@ -2320,6 +2359,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: None,
             update: None,
         }),
@@ -2332,6 +2372,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         ..running.clone()
     };
     let sending = DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         state_label: "Sending the project".to_string(),
         activity: Some(DeviceActivityView {
@@ -2343,6 +2384,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: None,
             update: None,
         }),
@@ -2778,50 +2820,33 @@ fn device_pick_popover_open() -> Element {
 }
 
 #[story(
-    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses. Above the foot line sits the optional Board name field: blank keeps the derived \"<board> · <Mon D>\" the app mints at flash (shown as the placeholder once a board is picked), and a typed name rides the Flash gesture itself — the only road a still-pending link's name can take, since it has no intent to rename until this gesture adopts it. The Update verb's pick carries no field: that board already has its name."
+    description = "\"Which board is this?\", open, after an install that could not tell (plan lp2025/2026-10-28-0025-install-without-board-pick). Nobody picks a board before installing any more: the install reads the board in its bootloader and recognises it when exactly one catalog board fits what it heard (chip, flash size, USB bridge). Here the flash size could not be read — a C6 rev 2 over its own USB can answer the probe with nothing — so both C6 boards fit, the board installed anyway with no pin map guessed, and its Hardware row asks. The panel says why it is asking, the two fits are the tiles, nothing is preselected (Studio never guesses between two), and picking one saves it on the board and restarts it: the row's chip was already the press, so the pick completes it."
 )]
 fn device_board_pick_open() -> Element {
-    board_pick_story(BoardPickMode::Row, ("esp32c6", ChipSource::BootBanner))
+    which_board_story(&["espressif/esp32-c6-devkitc-1", "seeed/xiao-esp32-c6"])
 }
 
 #[story(
-    description = "Update's board pick, open (ruled 2026-09-04). An older LightPlayer's firmware bar offers Update, with no pick when its board is known. This is the other case — the bench classic: its hello reports board `?` (the board id comes from the manifest Studio stamps at flash, and this board was flashed from the CLI), the registry has no board, and a classic ESP32 chip fits several served boards — so the SAME Update is the picker's trigger, and the panel earns the detour with one line under its filter: \"This board hasn't said which board it is. Pick once; Studio stamps it at flash, and next time this is one click.\" Picking a board flashes it straight away: the verb was already pressed. The verb, the reason, and whether a pick is needed at all are decided in core (`firmware_verb`) and tested there; this panel only draws them."
+    description = "\"Which board is this?\" with one fit: the same pick on a board whose fingerprint fit only the XIAO ESP32-C6 (it stamped that model, and the user opened the row's Change board to correct it). The fit is preselected; every other board of the chip waits behind the filter line's \"show all\" escape, so a board the catalog draws differently is still one tap away."
 )]
 fn device_update_pick_open() -> Element {
-    board_pick_story(BoardPickMode::Verb, ("esp32", ChipSource::BootBanner))
+    which_board_story(&["seeed/xiao-esp32-c6"])
 }
 
-/// One 420px column with the board pick popover mounted open: Row is a
-/// blank chip's `flash` (a pending link the boot banner named), Verb the
-/// bench classic's `update-firmware` with its board unknown.
-fn board_pick_story(mode: BoardPickMode, chip: (&str, ChipSource)) -> Element {
-    let offer = match mode {
-        BoardPickMode::Row => {
-            let blank = PendingLinkView {
-                device: DeviceId(3),
-                firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
-                detected_chip: Some(chip.0.to_string()),
-                ..roster_fixture().roster.pending[1].clone()
-            };
-            lpa_studio_core::flash_pending_offer(&blank, story_board_prefix(DeviceId(3)))
-                .expect("a blank chip flashes")
-        }
-        BoardPickMode::Verb => {
-            let (_, older_unknown, _) = firmware_face_fixtures()
-                .into_iter()
-                .find(|(label, _, _)| *label == "Older, board unknown")
-                .expect("the bench classic");
-            lpa_studio_core::update_firmware_offer(&older_unknown, story_board_prefix(DeviceId(3)))
-                .expect("a running LightPlayer updates")
-        }
-    };
+/// `set-board` on a running C6, its install's fits `fits`, opened.
+fn which_board_story(fits: &[&str]) -> Element {
+    let mut board = crate::app::board_card::board_card_stories::porch();
+    board.board_id = None;
+    let fits: Vec<String> = fits.iter().map(|fit| fit.to_string()).collect();
+    let offer = lpa_studio_core::set_board_offer(&board, story_board_prefix(DeviceId(3)), &fits)
+        .expect("a C6 fits two boards");
     rsx! {
         section { class: "tw:min-h-[420px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 BoardPickPopover {
                     offer,
-                    chip: Some((chip.0.to_string(), chip.1)),
-                    mode,
+                    chip: Some(("esp32c6".to_string(), ChipSource::BootBanner)),
+                    mode: BoardPickMode::Verb,
                     initially_open: true,
                     on_action: |_| {},
                 }

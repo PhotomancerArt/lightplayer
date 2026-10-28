@@ -570,6 +570,7 @@ mod tests {
             detected_chip: None,
             mac: None,
             firmware_blocked: None,
+            usb: None,
             held_by_tab: false,
             escapes: Vec::new(),
         }
@@ -604,6 +605,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: Vec::new(),
             update_blocked: None,

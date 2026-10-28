@@ -495,13 +495,10 @@ fn a_silent_board_that_never_said_hello_offers_install_not_retry() {
     assert_eq!(link.action, None, "no Retry on the USB row");
     every_card_action_is_offered(&mut bench);
 
-    // Over firmware that will not say what it is, the flash is Lasting:
-    // the user's second click.
+    // One press: the board is read before anything is written, and only
+    // somebody else's firmware is asked about (inside the install).
     bench
-        .press_lasting(
-            &install.offer,
-            OfferArgs::new().with(crate::FLASH_BOARD_PARAM, c6_board_choice().board_id),
-        )
+        .press(&install.offer, OfferArgs::new())
         .expect("Install firmware starts the flash");
     bench.run_until(&tasks, "the flash to run", |bench| {
         bench.view().devices.iter().any(|card| {
@@ -704,12 +701,8 @@ fn a_factory_reset_from_hardware_lands_on_install_firmware_with_no_retry() {
     every_card_action_is_offered(&mut bench);
 
     // Install firmware, one press: the flash parks the chip and writes it.
-    let choice = c6_board_choice();
     bench
-        .press(
-            &install.offer,
-            OfferArgs::new().with("board", &choice.board_id),
-        )
+        .press(&install.offer, OfferArgs::new())
         .expect("Install firmware starts the flash");
     bench.run_until(&tasks, "the installed board to land Ready", |bench| {
         bench
@@ -972,7 +965,11 @@ fn the_layout_question_alone_offers_download_backup() {
     update(&mut bench, target);
     let panel = layout_panel(&mut bench, &tasks, target);
     let download = bench.device_verb(target, "download-backup");
-    assert_eq!(panel.download, download, "the question presses the verb");
+    assert_eq!(
+        panel.download,
+        Some(download.clone()),
+        "the question presses the verb"
+    );
 
     let details_verbs = |bench: &DeviceBench| -> Vec<crate::OfferPath> {
         card_of(bench, target)
@@ -1400,14 +1397,8 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
     );
     every_card_action_is_offered(&mut bench);
 
-    let board = crate::flash_offer(Some("esp32c6")).candidates[0]
-        .board_id
-        .clone();
     bench
-        .press(
-            &update.offer,
-            OfferArgs::new().with(crate::FLASH_BOARD_PARAM, board),
-        )
+        .press(&update.offer, OfferArgs::new())
         .expect("Update firmware starts the flash");
     bench.run_until(&tasks, "the flash to run", |bench| {
         bench.view().devices.iter().any(|card| {
@@ -1416,6 +1407,73 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
                 .is_some_and(|work| work.kind == crate::DeviceActivityKind::Flash)
         })
     });
+}
+
+/// "Which board is this?" (plan
+/// `lp2025/2026-10-28-0025-install-without-board-pick`): an install whose
+/// board the session could not tell — the flash id probe read nothing, so
+/// both C6 boards fit — stamps no board model, names the board after its
+/// chip, and the Hardware row asks which board it is. Answering saves the
+/// model on the board, and the row stops asking.
+#[test]
+fn an_install_that_cannot_tell_the_board_asks_which_board_afterwards() {
+    let device = super::blank_board();
+    device.set_flash_id_for_test(None);
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-which-board");
+    super::flash_the_blank_board_to_ready(&mut bench, &tasks);
+    assert!(
+        bench.manifest_writes.borrow().is_empty(),
+        "no board model is guessed"
+    );
+    let target = bench.view().devices[0].id;
+    assert_eq!(
+        bench.view().devices[0].title,
+        "ESP32-C6",
+        "named after its chip"
+    );
+
+    let hardware = card_of(&bench, target)
+        .bar(crate::BarLayer::Hardware)
+        .clone();
+    assert_eq!(hardware.summary, "ESP32-C6");
+    assert_eq!(hardware.aside.as_deref(), Some("which board?"));
+    assert!(hardware.todo, "the row asks until it is answered");
+    let ask = hardware.action.clone().expect("Which board?");
+    assert_eq!(ask.word, "Which board?");
+    assert!(matches!(ask.draw, crate::UiActionDraw::BoardPick { .. }));
+    let set_board = bench.device_verb(target, "set-board");
+    assert_eq!(ask.offer, set_board);
+    let offer = bench.offered(&set_board);
+    assert!(offer.consequence().is_routine(), "the agent may answer it");
+    let crate::OfferParamKind::Choice { options, preselect } = &offer.params()[0].kind else {
+        panic!("a board choice: {:?}", offer.params());
+    };
+    let xiao = super::c6_board_choice();
+    assert!(
+        options.iter().any(|o| o.value == xiao.board_id),
+        "{options:?}"
+    );
+    assert_eq!(preselect, &None, "two boards fit: the user says which");
+    every_card_action_is_offered(&mut bench);
+
+    bench
+        .press(&set_board, OfferArgs::new().with("board", &xiao.board_id))
+        .expect("the answer saves the board model");
+    bench.run_until(&tasks, "the board model to be saved", |bench| {
+        !bench.manifest_writes.borrow().is_empty()
+    });
+    assert_eq!(
+        bench.manifest_writes.borrow().as_slice(),
+        [lpa_boards::runtime_manifest_json(&xiao.board_id).expect("a served board")]
+    );
+    bench.run_until(&tasks, "the saved model to settle", |bench| {
+        bench.view().devices[0].activity.is_none()
+    });
+    let hardware = card_of(&bench, target)
+        .bar(crate::BarLayer::Hardware)
+        .clone();
+    assert!(!hardware.todo, "answered: the row stops asking");
+    assert_eq!(hardware.action, None);
 }
 
 /// The card the home view publishes for `device`.

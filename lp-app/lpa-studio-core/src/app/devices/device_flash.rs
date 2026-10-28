@@ -1,42 +1,37 @@
-//! The needs-firmware face's decisions: which boards to offer, which build
-//! a pick resolves to, and what a freshly-flashed board gets called.
+//! The firmware verbs' decisions: what an Install or Update press writes,
+//! which boards "Which board is this?" offers, and what a freshly-flashed
+//! board gets called.
 //!
 //! In core rather than in the renderer for the usual reason — these are
-//! decisions, and decisions get tests. The renderer lays out
-//! [`FlashOffer`]'s cards and dispatches the action it hands back.
+//! decisions, and decisions get tests.
 //!
-//! The rules (plan.md "Design pins", ruled):
+//! The rules:
 //!
-//! - **Chip necessary, board refinement, no fallback build.** Candidates are
-//!   the boards whose family matches the DETECTED chip and that resolve to a
-//!   served build (`lpa_boards::provisioning_build_id`). "Either it
-//!   matches, or it's a fail case."
-//! - **An unknown chip widens the pick, it does not remove the verb** (G1
-//!   finding 2026-08-30: a mid-stream attach sees no boot banner, so an
-//!   incompatible-proto board had no path forward — and the replug that
-//!   would name the chip is exactly what a C6 re-enum walk bans and what
-//!   kills a CH340's grant). With no chip we offer every board that
-//!   resolves to a served build, never preselect, and say plainly that the
-//!   pick is checked against the silicon before anything is written — the
-//!   flash preflight's chip guard (`assertChipMatchesManifest`, between
-//!   SYNC and write) is and always was the safety; the chip filter is
-//!   convenience.
-//! - **Preselect when exactly one candidate** — the primary verb is then one
-//!   click.
-//! - **Skip ALL naming**: the derived name is `"<board display_name> ·
-//!   <Mon D>"` with the ` 2`, ` 3` collision suffix, applied automatically
-//!   at flash time; `SetName` handles renames later.
-//!
-//! [`flash_offer`] and [`reflash_choice`] take a chip string, not a
-//! [`DeviceView`] — [`flash_offer_for`] is the honest call site: it reads
-//! the JOINED chip ([`device_identity::device_chip`]), which resolves a
-//! hello-only board's chip from its board id when the boot banner was never
-//! seen (device-card-v2 plan, P2's amendment).
+//! - **Nobody picks a board first** (plan
+//!   `lp2025/2026-10-28-0025-install-without-board-pick`, Yona and Sean
+//!   2026-10-27). The press carries the chip table ([`FlashTarget`]); the
+//!   bootloader session picks the build by the chip its SYNC names, reads
+//!   what the board runs, and guesses the board from a fingerprint. The
+//!   chip filter used to be the only narrowing, and it was missing exactly
+//!   when it mattered: a mid-stream attach or a quiet firmware never names
+//!   its chip passively.
+//! - **No fallback build** (Yona 2026-08-03: "either it matches, or it's a
+//!   fail case"): a chip the table lacks stops the install, nothing
+//!   written; the flash preflight's chip guard (`assertChipMatchesManifest`,
+//!   between SYNC and write) still checks the package against the silicon.
+//! - **The board model is a refinement, asked after when it must be** (D1):
+//!   the board this board already named, else the fingerprint's unique fit,
+//!   else nothing stamped — and the card's "Which board is this?" offers
+//!   [`flash_offer_for`]'s boards (the chip's catalog boards).
+//! - **Skip ALL naming**: the derived name is the board's display name (or
+//!   the chip's, before the board is known) with the ` 2`, ` 3` collision
+//!   suffix, applied automatically at flash time; `SetName` handles renames
+//!   later.
 
-use lpa_devices::Action;
-use lpa_devices::device::DeviceStatus;
 use lpa_devices::identity::DeviceId;
-use lpa_devices::view::{DeviceView, Escape, FirmwareFace};
+use lpa_devices::link::UsbIds;
+use lpa_devices::view::{DeviceView, Escape, FirmwareFace, PendingLinkView};
+use lpa_devices::{Action, ChipBuildRow, FlashBuildChoice};
 
 use super::device_identity::device_chip;
 use super::devices_op::DevicesOp;
@@ -121,115 +116,182 @@ pub fn flash_offer(detected_chip: Option<&str>) -> FlashOffer {
 }
 
 /// [`flash_offer`], called with a view's JOINED chip rather than its raw
-/// `detected_chip` — the honest call site for the needs-firmware face and
-/// the pending-link face alike.
+/// `detected_chip` — the board list "Which board is this?" offers.
 pub fn flash_offer_for(view: &DeviceView) -> FlashOffer {
     flash_offer(device_chip(view).as_deref())
 }
 
-/// The board a RUNNING card re-flashes as, or `None` when the pick would be
-/// a guess: the registered board when the served catalog has it for the
-/// joined chip, else the chip's single fit, else nothing (the
-/// needs-firmware face owns the picker; this verb never shows one). A card
-/// with no joined chip gets no verb — the chip guard has nothing to check
-/// the pick against.
+/// What an Install or Update press writes, decided before the press
+/// (plan `lp2025/2026-10-28-0025-install-without-board-pick`).
 ///
-/// `joined_chip` is [`device_chip`]'s answer, not the raw banner — a
-/// hello-only board (an already-running board the tab attached to, which
-/// never showed a boot banner) still resolves its re-flash pick from its
-/// board id this way.
-pub fn reflash_choice(
-    joined_chip: Option<&str>,
-    registered_board: Option<&str>,
-) -> Option<FlashBoardChoice> {
-    let chip = joined_chip?;
-    let offer = flash_offer(Some(chip));
-    offer
-        .candidates
+/// Nobody picks a board first. The build is the chip's when Studio has
+/// heard the chip; otherwise it is the chip table
+/// ([`lpa_boards::builds_by_chip`]), answered inside the bootloader session
+/// by the chip its SYNC names — so a board plugged in mid-stream, or one
+/// running a quiet firmware, installs on one press. The board model is the
+/// one this board already named when it is a catalog board of its chip;
+/// otherwise the session's fingerprint decides, and an ambiguous one stamps
+/// nothing (the card asks "Which board is this?" afterwards).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FlashTarget {
+    pub build: FlashBuildChoice,
+    pub board_id: Option<String>,
+    /// Park the chip in its ROM downloader first (native USB).
+    pub park_first: bool,
+}
+
+impl FlashTarget {
+    /// The Flash gesture for `device`.
+    pub fn action(&self, device: DeviceId, restore_backup: bool) -> Action {
+        Action::Flash {
+            device,
+            board_id: self.board_id.clone(),
+            build: self.build.clone(),
+            park_first: self.park_first,
+            name: None,
+            restore_backup,
+        }
+    }
+}
+
+/// Espressif's USB vendor id: a chip on its own USB-Serial-JTAG.
+const ESPRESSIF_USB_VENDOR: u16 = 0x303A;
+
+/// The target for a board whose chip (joined, when known), named board and
+/// USB bridge are these, or why nothing can be installed: this Studio
+/// serves no firmware at all, or none for a chip it already knows.
+pub fn flash_target(
+    chip: Option<&str>,
+    named_board: Option<&str>,
+    usb: Option<UsbIds>,
+) -> Result<FlashTarget, String> {
+    let table = lpa_boards::builds_by_chip();
+    if table.is_empty() {
+        return Err(
+            "This build of Studio ships no firmware at all — no board can be installed."
+                .to_string(),
+        );
+    }
+    let known_build = match chip {
+        Some(chip) => match table.iter().find(|(served, _)| served == chip) {
+            Some((_, build_id)) => Some(build_id.clone()),
+            None => {
+                return Err(format!(
+                    "This build of Studio ships no firmware for a {chip} board — the chip was \
+                     detected, but no served image runs on it."
+                ));
+            }
+        },
+        None => None,
+    };
+    let board_id = named_board
+        .and_then(lpa_boards::board_by_id)
+        .filter(|board| chip.is_none_or(|chip| board.family == chip))
+        .filter(|board| {
+            lpa_boards::provisioning_build_id(Some(board), Some(board.family.as_str())).is_some()
+        })
+        .map(|board| board.board_id.clone());
+    let chip = chip.map(str::to_string).or_else(|| {
+        board_id
+            .as_deref()
+            .and_then(lpa_boards::board_by_id)
+            .map(|board| board.family.clone())
+    });
+    // A native-USB chip parks in its downloader first; a classic behind a
+    // bridge does not. With no chip yet, the bridge says which it is.
+    let park_first = match chip.as_deref() {
+        Some(chip) => chip != "esp32",
+        None => usb.is_some_and(|usb| usb.vendor == ESPRESSIF_USB_VENDOR),
+    };
+    // A chip already heard gets its build now (a sim or an emulated tab
+    // board reads nothing in a bootloader); one nobody has heard gets the
+    // table, answered in the session.
+    let build = match known_build {
+        Some(build_id) => FlashBuildChoice::Fixed(build_id),
+        None => FlashBuildChoice::ByChip(
+            table
+                .into_iter()
+                .map(|(chip, build_id)| ChipBuildRow { chip, build_id })
+                .collect(),
+        ),
+    };
+    Ok(FlashTarget {
+        build,
+        board_id,
+        park_first,
+    })
+}
+
+/// [`flash_target`] for a card: its joined chip, the board it named, its
+/// link's USB bridge.
+pub fn flash_target_for(view: &DeviceView) -> Result<FlashTarget, String> {
+    flash_target(
+        device_chip(view).as_deref(),
+        view.board_id.as_deref(),
+        view.usb,
+    )
+}
+
+/// [`flash_target`] for a pending link: its boot banner's chip and its
+/// USB bridge (a pending link names no board).
+pub fn pending_flash_target(pending: &PendingLinkView) -> Result<FlashTarget, String> {
+    flash_target(pending.detected_chip.as_deref(), None, pending.usb)
+}
+
+/// The chip's name as people say it ("ESP32-C6"), from the catalog.
+pub fn chip_display_name(chip: &str) -> Option<String> {
+    lpa_boards::all_boards()
         .iter()
-        .find(|choice| Some(choice.board_id.as_str()) == registered_board)
-        .or_else(
-            || match (offer.preselect.as_deref(), offer.candidates.as_slice()) {
-                (Some(_), [only]) => Some(only),
-                _ => None,
-            },
-        )
-        .cloned()
+        .find(|board| board.family == chip)
+        .map(|board| board.soc.clone())
 }
 
 /// The FIRMWARE zone's verb, and which situation it is in. Two verbs for
-/// two situations (ruled 2026-09-04) — the card used to carry one label
-/// for both:
+/// two situations (ruled 2026-09-04):
 ///
-/// - **Flash firmware** on the needs-firmware faces, always with the board
-///   pick, because nothing is known about what is on the chip.
-/// - **Update firmware** on a running LightPlayer. The board is known →
-///   one click, no pick ([`reflash_choice`] resolves). The board is NOT
-///   known (the hello reported `?` because the board id comes from the
-///   `/hardware.json` manifest Studio stamps at flash and this board was
-///   flashed from the CLI; the registry row has no board either; and the
-///   chip fits several catalog boards — the bench classic) → the SAME verb
-///   opens the pick once, and the panel says why in one line. The firmware
-///   line already reads "older than Studio, update recommended", so verb
-///   and line now match.
+/// - **Flash firmware** on the needs-firmware faces: one press. The board
+///   is read in its bootloader before anything is written, and only
+///   somebody else's firmware asks first (inside the activity).
+/// - **Update firmware** on a running LightPlayer: one press too; the board
+///   keeps its project and identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FirmwareVerb {
-    /// A needs-firmware face: the board pick + Flash, on one row. The
-    /// action is the pick's, so this variant carries no choice.
     Flash,
-    /// A running LightPlayer whose board resolved: one click.
-    Update(FlashBoardChoice),
-    /// A running LightPlayer whose board did not resolve: the verb opens
-    /// the pick, picking flashes, and the panel explains the detour.
-    UpdatePick,
+    Update,
 }
 
 impl FirmwareVerb {
-    /// Why the pick appears on a running board at all — the one line the
-    /// popover shows under its filter line. Yona's words.
-    pub const PICK_REASON: &'static str = "This board hasn't said which board it is. Pick \
-        once; Studio stamps it at flash, and next time this is one click.";
-
     /// The verb's label, as the chip wears it.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Flash => "Flash firmware",
-            Self::Update(_) | Self::UpdatePick => "Update firmware",
+            Self::Update => "Update firmware",
         }
     }
 
     /// The verb's hover sentence: what happens, and what survives it.
     pub fn summary(&self) -> String {
         match self {
-            Self::Flash => "Write LightPlayer firmware for the picked board onto this chip.".to_string(),
-            Self::Update(choice) => format!(
-                "Write the firmware this Studio serves onto this {}; the project and identity stay.",
-                choice.title
-            ),
-            Self::UpdatePick => "Write the firmware this Studio serves onto the board; the project \
-                                 and identity stay. Several boards fit this chip, so say which one it is."
+            Self::Flash => "Install LightPlayer on this board. Studio reads which chip it is and \
+                            writes the firmware for it."
                 .to_string(),
-        }
-    }
-
-    /// The explanation the pick carries, when the verb opens one.
-    pub fn pick_reason(&self) -> Option<&'static str> {
-        match self {
-            Self::UpdatePick => Some(Self::PICK_REASON),
-            Self::Flash | Self::Update(_) => None,
+            Self::Update => "Write the firmware this Studio serves onto this board; the project \
+                             and identity stay."
+                .to_string(),
         }
     }
 
     /// This verb as a DISABLED action carrying `reason` — what the card
     /// draws when the link cannot carry firmware (a board reached over
-    /// Bluetooth: [`DeviceView::firmware_blocked`]). Disabled rather than
-    /// hidden, so "why can't I update this?" is answered where it is asked;
-    /// the action inside is never dispatched.
+    /// Bluetooth: [`DeviceView::firmware_blocked`]) or no firmware is
+    /// served for the chip. Disabled rather than hidden, so "why can't I
+    /// update this?" is answered where it is asked; the action inside is
+    /// never dispatched.
     pub fn blocked_action(&self, device: DeviceId, reason: &str) -> UiAction {
         DevicesOp::action_for(Action::Flash {
             device,
-            board_id: String::new(),
-            build_id: String::new(),
+            board_id: None,
+            build: FlashBuildChoice::ByChip(Vec::new()),
             park_first: false,
             name: None,
             restore_backup: false,
@@ -239,75 +301,45 @@ impl FirmwareVerb {
         .disabled(reason)
     }
 
-    /// The one-click Update as a dispatchable action, wearing this verb's
-    /// own label rather than the Flash op's default. `None` for the verbs
-    /// whose action is the pick's.
-    pub fn update_action(&self, device: DeviceId) -> Option<UiAction> {
-        let Self::Update(choice) = self else {
-            return None;
-        };
-        Some(
-            DevicesOp::action_for(Action::Flash {
-                device,
-                board_id: choice.board_id.clone(),
-                build_id: choice.build_id.clone(),
-                park_first: choice.park_first,
-                // An update never renames: the board already has a name.
-                name: None,
-                restore_backup: false,
-            })
-            .with_label(self.label())
-            .with_summary(self.summary()),
-        )
+    /// The press for `view`, wearing this verb's own label: dispatchable
+    /// when [`flash_target_for`] resolves, else disabled with why.
+    pub fn action_for(&self, view: &DeviceView) -> UiAction {
+        match flash_target_for(view) {
+            Ok(target) => DevicesOp::action_for(target.action(view.id, false))
+                .with_label(self.label())
+                .with_summary(self.summary()),
+            Err(reason) => self.blocked_action(view.id, &reason),
+        }
     }
 }
 
 /// Which firmware verb a card offers, or `None` when it offers none: while
 /// an activity runs (the row holds Cancel or nothing), while nothing is
-/// settled ([`FirmwareFace::Unknown`] — an Identify is running then), on a
-/// running board with no wire to flash over, and on one whose chip is not
-/// known (the chip guard has nothing to check a pick against).
+/// settled ([`FirmwareFace::Unknown`] — an Identify is running then), and
+/// on a running board with no wire to flash over.
 ///
 /// The Flash verb needs no wire: the needs-firmware faces come from the
 /// link's evidence. Update rides the link (`Escape::Disconnect` is offered
-/// exactly when the model has one), and its pick is only offered on a board
-/// that is actually up (Ready, or Degraded — a refinement of Ready).
+/// exactly when the model has one).
 ///
 /// An older LightPlayer (one whose wire this Studio cannot speak) is the
-/// running-board case too — a LightPlayer, its project staying — so when
-/// its board resolves it UPDATES in one click; when it does not, it falls
-/// back to Flash's pick, which needs nothing known (G1-F1: every fielded
-/// wire-32 C6, in a wire-33 Studio).
+/// running-board case too — a LightPlayer, its project staying — so it
+/// UPDATES (G1-F1: every fielded wire-32 C6, in a wire-33 Studio).
 pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
     if view.activity.is_some() {
         return None;
     }
     match &view.firmware_face {
-        FirmwareFace::OlderLightPlayer { .. } => Some(
-            reflash_choice(device_chip(view).as_deref(), view.board_id.as_deref())
-                .map_or(FirmwareVerb::Flash, FirmwareVerb::Update),
-        ),
-        face if face.wants_flash() => Some(FirmwareVerb::Flash),
-        FirmwareFace::LightPlayer { .. } => {
-            if !view.escapes.contains(&Escape::Disconnect) {
-                return None;
-            }
-            let chip = device_chip(view)?;
-            match reflash_choice(Some(&chip), view.board_id.as_deref()) {
-                Some(choice) => Some(FirmwareVerb::Update(choice)),
-                None if matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded) => {
-                    Some(FirmwareVerb::UpdatePick)
-                }
-                None => None,
-            }
-        }
+        FirmwareFace::OlderLightPlayer { .. } => Some(FirmwareVerb::Update),
+        FirmwareFace::LightPlayer { .. } => view
+            .escapes
+            .contains(&Escape::Disconnect)
+            .then_some(FirmwareVerb::Update),
         FirmwareFace::Unknown => None,
         // A core-only board's verbs are its update standing's over-the-air
         // offers (`device_update_offers`): its firmware comes back over its
         // own link, never by a flash.
         FirmwareFace::CoreOnly { .. } => None,
-        // `wants_flash` covered every other face; the arm keeps the match
-        // exhaustive so a new face is a compile error here.
         FirmwareFace::NoHello
         | FirmwareFace::Blank
         | FirmwareFace::Bootloader
@@ -362,6 +394,8 @@ pub fn taken_device_titles(devices: &[DeviceView], naming: DeviceId) -> Vec<Stri
 
 #[cfg(test)]
 mod tests {
+    use lpa_devices::device::DeviceStatus;
+
     use super::*;
 
     #[test]
@@ -477,110 +511,72 @@ mod tests {
         );
     }
 
-    /// The re-flash verb never guesses: the registered board wins, a lone
-    /// fit for the joined chip is the only other way in, and no chip means
-    /// no verb (the chip guard would have nothing to check). The catalog
-    /// carries TWO C6 boards, so a C6 with no registered board gets the
-    /// picker, not a pick.
-    ///
-    /// Moved from `lpa-studio-web`'s retired device card (#500) — same
-    /// semantics, same test — per the device-card-v2 plan's P2 amendment.
+    /// Nobody picks a board first: a chip already heard gets its build, and
+    /// a board this board already named rides along when the catalog has it
+    /// for the chip.
     #[test]
-    fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
-        let registered = reflash_choice(Some("esp32c6"), Some("seeed/xiao-esp32-c6"))
-            .expect("the registered XIAO resolves against the served catalog");
-        assert_eq!(registered.board_id, "seeed/xiao-esp32-c6");
-        assert_eq!(registered.build_id, "esp32c6-4mb");
-        assert!(
-            registered.park_first,
-            "a native-USB chip parks in its downloader first"
-        );
-
-        // Without a registered board, the answer is exactly the offer's
-        // one-click preselect — never a pick from a list of several.
-        let offer = flash_offer(Some("esp32c6"));
-        let unregistered = reflash_choice(Some("esp32c6"), None);
+    fn the_target_is_the_chips_build_and_the_board_it_named() {
+        let target = flash_target(Some("esp32c6"), Some("seeed/xiao-esp32-c6"), None).unwrap();
         assert_eq!(
-            unregistered.map(|choice| choice.board_id),
-            offer.preselect,
-            "no registered board: only a lone fit earns the pick",
+            target.build,
+            FlashBuildChoice::Fixed("esp32c6-4mb".to_string())
         );
+        assert_eq!(target.board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
+        assert!(target.park_first, "a native-USB chip parks first");
 
-        // A registered board the chip cannot run falls back the same way,
-        // never to the mismatched registration.
-        let mismatched = reflash_choice(Some("esp32c6"), Some("dig-uno"));
-        assert_ne!(
-            mismatched.as_ref().map(|c| c.board_id.as_str()),
-            Some("dig-uno")
-        );
-
-        assert!(reflash_choice(None, Some("seeed/xiao-esp32-c6")).is_none());
+        // A board of another chip is not this board's model.
+        let mismatched = flash_target(Some("esp32c6"), Some("quinled/dig-uno"), None).unwrap();
+        assert_eq!(mismatched.board_id, None);
+        let classic = flash_target(Some("esp32"), Some("quinled/dig-uno"), None).unwrap();
+        assert_eq!(classic.board_id.as_deref(), Some("quinled/dig-uno"));
+        assert!(!classic.park_first, "a classic behind a bridge never parks");
     }
 
-    /// The amendment's new case: a board seen only through its hello (no
-    /// boot banner, so `detected_chip` is `None`) still resolves its
-    /// re-flash pick, because the CALLER passes the joined chip
-    /// (`device_chip`, which reads the board id's catalog family) rather
-    /// than the raw banner field.
+    /// The case that used to show every board in the catalog: no chip heard
+    /// at all. It installs on one press; the bridge says whether to park.
     #[test]
-    fn a_hello_only_boards_reflash_pick_comes_from_its_board_id() {
-        use lpa_devices::device::DeviceStatus;
-        use lpa_devices::identity::DeviceId;
-        use lpa_devices::view::{DeviceView, Escape, LoadedProject};
-
-        let view = DeviceView {
-            id: DeviceId(1),
-            title: "Bench board".to_string(),
-            status: DeviceStatus::Ready,
-            state_label: "Ready".to_string(),
-            detail: None,
-            freshness_label: None,
-            heard_age_ms: None,
-            identity_label: None,
-            // No boot banner: this board was already running when the tab
-            // attached, so the only chip fact is its hello's board id.
-            detected_chip: None,
-            board_id: Some("seeed/xiao-esp32-c6".to_string()),
-            firmware_face: lpa_devices::view::FirmwareFace::LightPlayer {
-                firmware: Some("fw-esp32c6 abc1234".to_string()),
-                wire: lpa_devices::WireVersion::Match,
-                age: lpa_devices::FirmwareAge::Unknown,
-            },
-            remembered_firmware: None,
-            degraded: None,
-            loaded_project: LoadedProject::Empty,
-            engine_fps: None,
-            link_counters: None,
-            can_receive_project: true,
-            can_remove_project: false,
-            activity: None,
-            last_outcome: None,
-            terminal: Vec::new(),
-            terminal_dropped: 0,
-            firmware_blocked: None,
-            held_elsewhere: None,
-            escapes: vec![Escape::Disconnect, Escape::Forget],
-            update_blocked: None,
-            last_update_outcome: None,
+    fn an_unknown_chip_still_installs_and_its_bridge_decides_the_park() {
+        let native = UsbIds {
+            vendor: 0x303A,
+            product: 0x1001,
         };
-
-        assert_eq!(
-            reflash_choice(device_chip(&view).as_deref(), view.board_id.as_deref())
-                .map(|choice| choice.board_id),
-            Some("seeed/xiao-esp32-c6".to_string()),
-            "a hello-only board resolves its own registered board, not just a lone fit"
-        );
-
-        // The same fixture, through the honest call site.
-        let offer = flash_offer_for(&view);
+        let ch340 = UsbIds {
+            vendor: 0x1A86,
+            product: 0x7523,
+        };
+        let target = flash_target(None, None, Some(native)).unwrap();
+        let FlashBuildChoice::ByChip(rows) = &target.build else {
+            panic!("the chip table: {target:?}");
+        };
         assert!(
-            !offer.candidates.is_empty(),
-            "the joined chip (esp32c6, from the board id) filters the offer: {offer:?}"
+            rows.iter()
+                .any(|row| row.chip == "esp32c6" && row.build_id == "esp32c6-4mb"),
+            "{rows:?}"
         );
-        for candidate in &offer.candidates {
-            let board = lpa_boards::board_by_id(&candidate.board_id).expect("a real board");
-            assert_eq!(board.family, "esp32c6");
-        }
+        assert!(
+            rows.iter().any(|row| row.chip == "esp32"),
+            "every served chip"
+        );
+        assert_eq!(target.board_id, None);
+        assert!(target.park_first);
+        assert!(!flash_target(None, None, Some(ch340)).unwrap().park_first);
+        assert!(!flash_target(None, None, None).unwrap().park_first);
+        // A named board still names its chip.
+        let named = flash_target(None, Some("seeed/xiao-esp32-c6"), None).unwrap();
+        assert!(named.park_first);
+        assert_eq!(named.board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
+    }
+
+    #[test]
+    fn a_known_chip_with_no_served_build_reads_honestly() {
+        let refused = flash_target(Some("esp32p4"), None, None).unwrap_err();
+        assert!(refused.contains("esp32p4"), "{refused}");
+    }
+
+    #[test]
+    fn a_chip_reads_as_people_say_it() {
+        assert_eq!(chip_display_name("esp32c6").as_deref(), Some("ESP32-C6"));
+        assert_eq!(chip_display_name("esp8266"), None);
     }
 
     /// A running LightPlayer for the verb tests: `chip` is the boot banner's
@@ -613,6 +609,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
@@ -629,9 +626,8 @@ mod tests {
     }
 
     /// The 2026-09-04 ruling: two verbs for two situations. A needs-firmware
-    /// face FLASHES (with the pick — nothing is known); a running
-    /// LightPlayer UPDATES — one click when its board resolved, the same
-    /// verb opening the pick once when it did not, with the reason.
+    /// face FLASHES; a running LightPlayer UPDATES — both on one press,
+    /// with no board pick (plan 2026-10-28-0025).
     #[test]
     fn a_needs_firmware_face_flashes_and_a_running_board_updates() {
         use lpa_devices::WireVersion;
@@ -640,55 +636,43 @@ mod tests {
         let verb = firmware_verb(&blank).expect("a blank chip has a verb");
         assert_eq!(verb, FirmwareVerb::Flash);
         assert_eq!(verb.label(), "Flash firmware");
-        assert_eq!(verb.pick_reason(), None, "the flash pick needs no excuse");
-        assert!(
-            verb.update_action(blank.id).is_none(),
-            "the pick owns the action"
-        );
+        let action = verb.action_for(&blank);
+        assert!(action.meta().enablement.is_enabled());
+        let op = action.op_as::<DevicesOp>().expect("a devices op");
+        assert!(matches!(
+            op.action(),
+            Action::Flash {
+                board_id: None,
+                build: FlashBuildChoice::Fixed(_),
+                park_first: true,
+                ..
+            }
+        ));
 
-        // Board known: one click, and the action wears the verb's label.
-        let registered = running_view(
-            Some("esp32"),
-            Some("quinled/dig-uno"),
-            light_player(WireVersion::Match),
-        );
-        let verb = firmware_verb(&registered).expect("a registered classic has a verb");
-        let FirmwareVerb::Update(choice) = &verb else {
-            panic!("a registered board updates in one click, got {verb:?}");
-        };
-        assert_eq!(choice.board_id, "quinled/dig-uno");
-        assert_eq!(verb.label(), "Update firmware");
-        assert_eq!(verb.pick_reason(), None);
-        let action = verb.update_action(registered.id).expect("one click");
-        assert_eq!(action.meta().label, "Update firmware");
-        assert!(
-            action.meta().summary.contains(&choice.title),
-            "the hover names the board it re-flashes as: {}",
-            action.meta().summary
-        );
-
-        // The bench case: the hello said `?` (CLI-flashed, no manifest), the
-        // registry has no board, and a classic chip fits several boards —
-        // the SAME verb, opening the pick once, and saying why.
+        // The case that used to open the pick: a classic chip several boards
+        // fit, with no board named. One press now.
         let unknown = running_view(Some("esp32"), None, light_player(WireVersion::Match));
         assert!(
             flash_offer(Some("esp32")).candidates.len() > 1,
             "the case needs a chip several boards fit"
         );
-        let verb = firmware_verb(&unknown).expect("an unregistered classic still has a verb");
-        assert_eq!(verb, FirmwareVerb::UpdatePick);
-        assert_eq!(
-            verb.label(),
-            "Update firmware",
-            "the verb does not change with the pick"
+        let verb = firmware_verb(&unknown).expect("an unnamed classic still has a verb");
+        assert_eq!(verb, FirmwareVerb::Update);
+        let action = verb.action_for(&unknown);
+        assert_eq!(action.meta().label, "Update firmware");
+        assert!(action.meta().enablement.is_enabled());
+
+        // A named board rides along, to be stamped again.
+        let named = running_view(
+            Some("esp32"),
+            Some("quinled/dig-uno"),
+            light_player(WireVersion::Match),
         );
-        let reason = verb.pick_reason().expect("the pick explains itself");
-        assert!(reason.contains("hasn't said which board"), "{reason}");
-        assert!(reason.contains("next time this is one click"), "{reason}");
-        assert!(
-            verb.update_action(unknown.id).is_none(),
-            "the pick owns the action"
-        );
+        let action = FirmwareVerb::Update.action_for(&named);
+        let Action::Flash { board_id, .. } = action.op_as::<DevicesOp>().unwrap().action() else {
+            panic!("a flash");
+        };
+        assert_eq!(board_id.as_deref(), Some("quinled/dig-uno"));
     }
 
     /// The line and the verb agree: an older board's line says "update
@@ -742,14 +726,21 @@ mod tests {
         let mut known = card.clone();
         known.board_id = Some("seeed/xiao-esp32-c6".to_string());
         let verb = firmware_verb(&known).expect("an older board has a verb");
-        assert!(matches!(verb, FirmwareVerb::Update(_)), "{verb:?}");
+        assert_eq!(verb, FirmwareVerb::Update);
         assert_eq!(verb.label(), "Update firmware");
 
-        // Nothing names it: still a way forward, through the pick.
+        // Nothing names it: still one press — the session finds the chip.
         let mut unknown = card.clone();
         unknown.board_id = None;
         unknown.detected_chip = None;
-        assert_eq!(firmware_verb(&unknown), Some(FirmwareVerb::Flash));
+        assert_eq!(firmware_verb(&unknown), Some(FirmwareVerb::Update));
+        assert!(
+            FirmwareVerb::Update
+                .action_for(&unknown)
+                .meta()
+                .enablement
+                .is_enabled()
+        );
     }
 
     /// G1 walk (2026-10-03), Yona: "it really shouldn't say 8 boards fit,
@@ -796,10 +787,12 @@ mod tests {
             Some("seeed/xiao-esp32-c6"),
             "the hello named its board"
         );
-        let Some(FirmwareVerb::Update(choice)) = firmware_verb(card) else {
-            panic!("Update firmware for the known board, not the pick: {card:?}");
+        assert_eq!(firmware_verb(card), Some(FirmwareVerb::Update));
+        let action = FirmwareVerb::Update.action_for(card);
+        let Action::Flash { board_id, .. } = action.op_as::<DevicesOp>().unwrap().action() else {
+            panic!("a flash");
         };
-        assert_eq!(choice.board_id, "seeed/xiao-esp32-c6");
+        assert_eq!(board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
         let identity = device_identity_line(card).display();
         assert!(!identity.contains("no firmware"), "{identity}");
         assert!(identity.contains("XIAO ESP32-C6"), "{identity}");
@@ -825,7 +818,7 @@ mod tests {
     }
 
     /// When there is no verb at all: an activity running, nothing settled,
-    /// no wire, no chip, or an unresolved board that is not up.
+    /// or no wire.
     #[test]
     fn the_verb_withdraws_when_it_has_nothing_honest_to_offer() {
         use lpa_devices::WireVersion;
@@ -847,6 +840,7 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                replace: None,
                 flash_step: None,
                 update: None,
             }),
@@ -870,35 +864,9 @@ mod tests {
         };
         assert_eq!(firmware_verb(&unlinked), None, "no wire to update over");
 
+        // No chip, no board: the session finds the chip; the verb stands.
         let chipless = running_view(None, None, light_player(WireVersion::Match));
-        assert_eq!(
-            firmware_verb(&chipless),
-            None,
-            "no chip for the guard to check"
-        );
-
-        // A hello-only board (no banner) still resolves through its board id.
-        let hello_only = running_view(
-            None,
-            Some("quinled/dig-uno"),
-            light_player(WireVersion::Match),
-        );
-        assert!(matches!(
-            firmware_verb(&hello_only),
-            Some(FirmwareVerb::Update(_))
-        ));
-
-        // The pick is only offered on a board that is up.
-        let down = DeviceView {
-            status: DeviceStatus::NotResponding,
-            ..running_view(Some("esp32"), None, light_player(WireVersion::Match))
-        };
-        assert_eq!(firmware_verb(&down), None);
-        let degraded = DeviceView {
-            status: DeviceStatus::Degraded,
-            ..running_view(Some("esp32"), None, light_player(WireVersion::Match))
-        };
-        assert_eq!(firmware_verb(&degraded), Some(FirmwareVerb::UpdatePick));
+        assert_eq!(firmware_verb(&chipless), Some(FirmwareVerb::Update));
 
         // A blank chip needs no wire fact beyond its face.
         let blank_unlinked = DeviceView {

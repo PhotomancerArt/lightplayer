@@ -9,12 +9,15 @@
 //! serial ports, browser workers, spawned host runtimes, and protocol handles
 //! stay owned by the provider implementation that created them.
 
+pub mod app_descriptor;
 pub mod base_mac;
 pub mod chip;
 pub mod connection;
 pub mod diagnostic;
 pub mod endpoint;
 pub mod error;
+pub mod flash_build;
+pub mod flash_id;
 pub mod flash_plan;
 pub mod flash_region;
 pub mod fs_kind;
@@ -26,5 +29,6 @@ pub mod management_result;
 pub mod operation;
 pub mod partition_table;
 pub mod provider;
+pub mod resident_firmware;
 pub mod session;
 pub mod usb_vendors;

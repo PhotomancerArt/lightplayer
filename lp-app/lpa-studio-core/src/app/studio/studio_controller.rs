@@ -4004,6 +4004,11 @@ impl StudioController {
                 projects: &sources.projects,
                 examples: &sources.examples,
                 update: self.device_update_facts(view),
+                which_board: roster
+                    .which_board
+                    .get(&view.id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
             };
             // On a board the account's list holds, Forget reads as this
             // browser's only, and Remove from your account stands after it.
@@ -7314,13 +7319,23 @@ impl StudioController {
             .roster()
             .devices()
             .iter()
+            // A name the user gave (typed at the install, or a rename) is in
+            // the intent before the next record snapshot carries it.
+            .filter(|entry| entry.intent.name.is_none())
             .filter_map(|entry| entry.record.clone())
             // The rule's own guards are in `auto_record_name`; these two are
             // repeated here only so the common case (every board named, or a
             // blank board that has not said what it is) costs a scan and
             // never a roster projection.
             .filter(|record| record.name.is_none() && record.identity.name.is_none())
-            .filter(|record| record.board_id.is_some())
+            .filter(|record| {
+                record.board_id.is_some()
+                    || self
+                        .devices
+                        .effects()
+                        .install_identity(record.device)
+                        .is_some()
+            })
             .collect();
         if unnamed.is_empty() {
             return Vec::new();
@@ -7332,7 +7347,18 @@ impl StudioController {
         for record in unnamed {
             let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
             taken.extend(minted.iter().cloned());
-            let Some(name) = crate::app::devices::auto_record_name(&record, &taken) else {
+            // What this session's install identified outranks the record's
+            // board id: the hello names the firmware's compiled-in board
+            // until a saved model is read at the next boot.
+            let installed = self
+                .devices
+                .effects()
+                .install_identity(record.device)
+                .and_then(|identity| install_display_name(&identity))
+                .map(|display| crate::app::devices::derive_flash_name(&display, &taken));
+            let Some(name) =
+                installed.or_else(|| crate::app::devices::auto_record_name(&record, &taken))
+            else {
                 continue;
             };
             minted.push(name.clone());
@@ -7383,6 +7409,10 @@ impl StudioController {
         if named {
             return None;
         }
+        // The board's model when the press knows it. Otherwise the install
+        // identifies it in its bootloader session, and the auto-namer names
+        // the board from what it found (`auto_name_actions`).
+        let board_id = board_id.as_ref()?;
         let board_display = lpa_boards::board_by_id(board_id)
             .map(|board| board.display_name.clone())
             .unwrap_or_else(|| board_id.clone());
@@ -9145,6 +9175,24 @@ impl StudioController {
                 _ => {}
             }
         }
+        // An install that stopped on a question only the user answers —
+        // replacing somebody else's firmware, or moving the board's files —
+        // resumes the agent now, saying so, rather than at the question's
+        // deadline: its Lasting answer is the user's card, not the agent's.
+        if ended.is_none()
+            && let Some(question) = self.agent_wait_question(wait.device)
+        {
+            let board = self
+                .devices
+                .roster()
+                .device(wait.device)
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| wait.board.clone());
+            self.settle_agent_wait(format!(
+                "[flashing {board:?} waits for the user: {question}]"
+            ));
+            return;
+        }
         let now = self.device_now();
         let device = self.devices.roster().device(wait.device);
         let reported = device.is_some_and(|device| device.evidence.loaded_projects().is_some());
@@ -9200,6 +9248,43 @@ impl StudioController {
         }
     }
 
+    /// The question `device`'s install is waiting on the user for, in plain
+    /// words with the offer that answers it, or `None`.
+    fn agent_wait_question(&self, device: crate::DeviceId) -> Option<String> {
+        let roster = self.device_roster_view();
+        let view = roster
+            .roster
+            .devices
+            .iter()
+            .find(|view| view.id == device)?;
+        let activity = view.activity.as_ref()?;
+        let answer = |verb: &str| {
+            roster
+                .layout
+                .get(&device)
+                .map(|layout| layout.offers_at.clone().child(verb).to_string())
+                .unwrap_or_else(|| verb.to_string())
+        };
+        if let Some(replace) = &activity.replace {
+            return Some(format!(
+                "{} Replacing it is theirs to press ({}).",
+                crate::app::devices::device_layout_view::resident_words(&replace.resident),
+                answer(crate::app::devices::device_layout_view::CONFIRM_REPLACE),
+            ));
+        }
+        activity
+            .layout
+            .as_ref()
+            .filter(|layout| layout.awaiting_consent)
+            .map(|_| {
+                format!(
+                    "the board's files move to the new layout first; continuing is theirs to \
+                     press ({}).",
+                    answer(crate::app::devices::device_layout_view::CONTINUE_UPDATE)
+                )
+            })
+    }
+
     /// What an activity the agent waited on came to, in one plain line:
     /// `[flashing "Porch" finished: it runs LightPlayer and no project
     /// yet]`, `[pushing "porch" to "Porch" finished: it runs it now]`,
@@ -9223,6 +9308,7 @@ impl StudioController {
             (Kind::RemoveProject, _) => format!("removing the project from {board:?}"),
             (Kind::Identify, _) => format!("identifying {board:?}"),
             (Kind::Update, _) => format!("updating {board:?}"),
+            (Kind::SetBoard, _) => format!("saving which board {board:?} is"),
         };
         match outcome {
             ActivityOutcome::Succeeded { summary } => {
@@ -10944,6 +11030,18 @@ fn agent_actions_under(
         })
         .collect();
     serde_json::Value::from(lines)
+}
+
+/// The name an install's identification gives a board: its model's when
+/// one fit, else its chip's ("ESP32-C6"), else none.
+fn install_display_name(identity: &lpa_devices::BoardIdentity) -> Option<String> {
+    match &identity.board_id {
+        Some(board_id) => lpa_boards::board_by_id(board_id).map(|board| board.display_name.clone()),
+        None => identity
+            .chip
+            .as_deref()
+            .and_then(crate::app::devices::chip_display_name),
+    }
 }
 
 #[cfg(test)]

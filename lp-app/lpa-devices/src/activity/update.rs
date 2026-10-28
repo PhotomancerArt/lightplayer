@@ -367,7 +367,8 @@ impl UpdateActivity {
             }
             ActivityMarker::Started { .. }
             | ActivityMarker::Progress { .. }
-            | ActivityMarker::LayoutVerdict { .. } => ActivityStep::nothing(),
+            | ActivityMarker::LayoutVerdict { .. }
+            | ActivityMarker::BoardIdentified { .. } => ActivityStep::nothing(),
         }
     }
 
