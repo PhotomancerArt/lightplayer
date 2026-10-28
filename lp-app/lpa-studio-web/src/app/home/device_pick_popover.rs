@@ -991,7 +991,7 @@ pub(crate) fn BoardPickPanel(
                 }
             }
             p { class: panel_foot_class(),
-                "The pin map is written to the device, so the board must be right; the chip guard makes a wrong pick fail safely."
+                "Studio saves the board's pin map on it and restarts it. Picked the wrong one? Change board, in the Hardware row's details."
             }
         }
     }

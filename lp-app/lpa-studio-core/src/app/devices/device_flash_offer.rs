@@ -235,7 +235,7 @@ pub fn set_board_offer(view: &DeviceView, prefix: OfferPath, fits: &[String]) ->
     });
     Some(UiOffer::with_params(
         prefix.child(SET_BOARD),
-        "board",
+        "chip",
         params,
         binder,
         template,
