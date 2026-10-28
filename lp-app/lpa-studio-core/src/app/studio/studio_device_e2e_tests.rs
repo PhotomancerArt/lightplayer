@@ -319,7 +319,9 @@ const SCRIPTED_PREFLIGHT_MAC: &str = "60:55:F9:0A:0B:0C";
 
 impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
-        let info = fake_link_info(&self.endpoint);
+        let mut info = fake_link_info(&self.endpoint);
+        let (vendor, product) = self.device.usb_vid_pid();
+        info.usb = Some(lpa_devices::link::UsbIds { vendor, product });
         GrantedLink {
             link: Box::new(EnumeratedPort {
                 inner: bench_link(info.clone(), &self.device),
@@ -457,8 +459,8 @@ impl DeviceTransport for ScriptedTransport {
             // The layout read (C6 repartition), against the scripted board's
             // own flash image: a blank chip or a board already on the fake
             // package's layout comes back plain, a legacy board migrates.
-            DeviceEffectCall::InspectLayout { .. } => {
-                let inspection = self.device.fake_inspect_layout();
+            DeviceEffectCall::InspectLayout { build } => {
+                let inspection = self.device.fake_inspect_layout_for(&build);
                 Box::pin(core::future::ready(Ok(DeviceEffectFacts {
                     summary: "read the board's layout".to_string(),
                     probed_mac: inspection.probed_mac.clone(),
@@ -3568,13 +3570,15 @@ fn blank_board() -> FakeEsp32Device {
 
 /// The board pick a C6 boot banner resolves to, through the REAL join
 /// (chip necessary, board refinement, served build required — no fallback).
+/// The C6 board the fake board's fingerprint names: a C6 with 4 MB of
+/// flash on its own USB is the XIAO (the scripted inspection reports a 4 MB
+/// part).
 fn c6_board_choice() -> crate::FlashBoardChoice {
-    let offer = crate::flash_offer(Some("esp32c6"));
-    offer
+    crate::flash_offer(Some("esp32c6"))
         .candidates
-        .first()
-        .cloned()
-        .expect("the checked-in catalog serves a C6 build")
+        .into_iter()
+        .find(|choice| choice.board_id == "seeed/xiao-esp32-c6")
+        .expect("the checked-in catalog serves the XIAO C6")
 }
 
 /// M2's walk, end to end through the real effects layer: a blank board's
@@ -3600,11 +3604,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     let target = pending.device;
     let choice = c6_board_choice();
 
-    bench.press_device(
-        target,
-        "flash",
-        OfferArgs::new().with("board", &choice.board_id),
-    );
+    bench.press_device(target, "flash", OfferArgs::new());
 
     // The gesture adopts: the pending card becomes a device card, busy
     // flashing, with the effect's progress visibly on it (the 2026-07-28
@@ -3679,7 +3679,7 @@ fn a_usb_install_of_a_split_package_keeps_its_engine() {
         "bundle/firmware/",
     );
 
-    flash_the_blank_board_to_ready(&mut bench, &tasks, &choice);
+    flash_the_blank_board_to_ready(&mut bench, &tasks);
 
     let engine_sha = lpc_firmware_release::sha256_hex(&bundle.engine);
     bench.run_until(&tasks, "the installed engine to be kept", |_| {
@@ -3727,7 +3727,7 @@ fn an_install_whose_engine_cannot_be_kept_still_succeeds() {
         "bundle/firmware",
     );
 
-    flash_the_blank_board_to_ready(&mut bench, &tasks, &choice);
+    flash_the_blank_board_to_ready(&mut bench, &tasks);
 
     assert!(
         !bundle.urls.borrow().is_empty(),
@@ -3742,11 +3742,7 @@ fn an_install_whose_engine_cannot_be_kept_still_succeeds() {
 
 /// Flash the bench's blank board from its pending card and wait for Ready
 /// with a successful outcome.
-fn flash_the_blank_board_to_ready(
-    bench: &mut DeviceBench,
-    tasks: &TaskPool,
-    choice: &crate::FlashBoardChoice,
-) {
+fn flash_the_blank_board_to_ready(bench: &mut DeviceBench, tasks: &TaskPool) {
     bench.run_until(tasks, "the blank verdict to settle", |bench| {
         bench
             .view()
@@ -3755,11 +3751,7 @@ fn flash_the_blank_board_to_ready(
             .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
-    bench.press_device(
-        target,
-        "flash",
-        OfferArgs::new().with("board", &choice.board_id),
-    );
+    bench.press_device(target, "flash", OfferArgs::new());
     bench.run_until(tasks, "the flashed board to land Ready", |bench| {
         bench
             .view()
@@ -3856,14 +3848,11 @@ fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
             .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
-    let choice = c6_board_choice();
 
     bench.press_device(
         target,
         "flash",
-        OfferArgs::new()
-            .with("board", &choice.board_id)
-            .with("name", "Porch lantern"),
+        OfferArgs::new().with("name", "Porch lantern"),
     );
     bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
         bench
@@ -3899,13 +3888,8 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
             .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
-    let choice = c6_board_choice();
 
-    bench.press_device(
-        target,
-        "flash",
-        OfferArgs::new().with("board", &choice.board_id),
-    );
+    bench.press_device(target, "flash", OfferArgs::new());
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
             .view()
@@ -3948,13 +3932,8 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
             .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
-    let choice = c6_board_choice();
 
-    bench.press_device(
-        target,
-        "flash",
-        OfferArgs::new().with("board", &choice.board_id),
-    );
+    bench.press_device(target, "flash", OfferArgs::new());
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
             .view()
@@ -3999,13 +3978,8 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
             .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
-    let choice = c6_board_choice();
 
-    bench.press_device(
-        target,
-        "flash",
-        OfferArgs::new().with("board", &choice.board_id),
-    );
+    bench.press_device(target, "flash", OfferArgs::new());
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
             .view()
@@ -5949,7 +5923,7 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
 /// so it is Routine (Q3), and a press through the offer runs the same flash
 /// the picker's button does — named after the board, back to Ready.
 #[test]
-fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
+fn a_blank_boards_flash_offer_takes_no_board_and_flashes_through_a_press() {
     let device = light_player("dev_wipeme");
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-offer-flash");
     bench.run_until(&tasks, "the hello to settle the link", |bench| {
@@ -5980,34 +5954,20 @@ fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
         offer.consequence().is_routine(),
         "a blank chip loses nothing"
     );
-    let choice = c6_board_choice();
-    let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
-        panic!("board is a choice: {:?}", offer.params());
-    };
-    assert!(
-        options.iter().any(|option| option.value == choice.board_id),
-        "{options:?}"
-    );
     let readout = bench.controller.app_agent_readout_for_test().render();
     assert!(
         readout.contains("- devices/mac-6055f90a0b0c/flash: Flash firmware"),
         "{readout}"
     );
-    assert!(readout.contains("  takes board: one of "), "{readout}");
-    assert!(
-        readout.contains("; name: optional text; all_boards: true or false [now false]\n"),
-        "the chip narrowed the list, so show-all is offered: {readout}"
-    );
-
     assert!(
         offer
             .press(&crate::OfferArgs::new().with("board", "no-such-board"))
             .is_err(),
-        "an unknown board is refused before anything is dispatched"
+        "a board is not something the install takes"
     );
     let action = offer
-        .press(&crate::OfferArgs::new().with("board", &choice.board_id))
-        .expect("a candidate binds");
+        .press(&crate::OfferArgs::new())
+        .expect("one press binds");
     drive(bench.controller.dispatch(action)).expect("the bound flash dispatches");
     bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
         bench
@@ -6327,7 +6287,7 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
         .get(&crate::OfferPath::parse(&format!("{prefix}/flash")).unwrap())
         .unwrap();
     let action = offer
-        .press(&crate::OfferArgs::new().with("board", c6_board_choice().board_id))
+        .press(&crate::OfferArgs::new())
         .expect("a C6 board binds");
     drive(bench.controller.dispatch(action)).expect("the bound flash dispatches");
     bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
@@ -6348,15 +6308,16 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
     );
 }
 
-/// The app agent flashes a board that runs somebody else's firmware: a
-/// guessed board is refused with every board the chip takes, a press with
-/// none is refused naming the choices, and a press with a board — Lasting,
-/// the firmware on it is lost — becomes a card that hands the user the
-/// Flash offer pre-filled with the agent's board. Nothing is flashed until
-/// the user presses; they pick ANOTHER board on the card, that board is the
-/// one flashed, the card settles, and the agent hears what they changed.
+/// The app agent installs LightPlayer on a board that runs somebody else's
+/// firmware (plan `lp2025/2026-10-28-0025-install-without-board-pick`). The
+/// press is Routine — nothing is written before the board is read — so the
+/// agent presses it outright; the install reads the board in its bootloader
+/// and stops at the one question it asks, which names what the board runs.
+/// Replace is Lasting: it becomes a card the user answers, and nothing is
+/// written until they do. Then the board installs, its model recognised from
+/// its 4 MB flash, and is named after it.
 #[test]
-fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
+fn the_agents_install_over_firmware_stops_at_the_users_replace() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-agent-flash");
     bench.run_until(&tasks, "the foreign verdict to settle", |bench| {
@@ -6366,128 +6327,91 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let flash = "devices/new-1/flash".to_string();
-    let path = crate::OfferPath::parse(&flash).unwrap();
+    let flash = "devices/new-1/flash";
     let offer = bench
         .controller
         .view()
         .offers
-        .get(&path)
+        .get(&crate::OfferPath::parse(flash).unwrap())
         .cloned()
         .expect("the foreign board's Flash");
     assert!(
-        offer.consequence().arms(),
-        "flashing over firmware loses it: Lasting"
-    );
-    let fits = crate::flash_offer(Some("esp32c6")).candidates;
-    let [agents, users, ..] = fits.as_slice() else {
-        panic!("two C6 boards fit, so the pick is the user's: {fits:?}");
-    };
-    let readout = bench.controller.app_agent_readout_for_test().render();
-    assert!(
-        readout.contains(&format!(
-            "- {flash}: Flash firmware [choose a board in args] [needs the user's click]\n"
-        )),
-        "{readout}"
-    );
-    assert!(
-        readout.contains(&format!("  takes board: one of {} (", agents.board_id)),
-        "{readout}"
+        offer.consequence().is_routine(),
+        "nothing is written before the board is read"
     );
 
-    // A guess is refused with every board the chip takes.
-    let refused = act(&mut bench, &flash, &[("board", "esp8266-board")]);
-    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
-        panic!("a board that is not an option is refused: {refused:?}");
-    };
+    let outcome = act(&mut bench, flash, &[]);
     assert!(
-        reason.contains("`board` must be one of ") && reason.contains("It takes board: one of "),
-        "{reason}"
-    );
-    for fit in &fits {
-        assert!(reason.contains(&fit.board_id), "{reason}");
-    }
-    // No board: two fit, so nothing is preselected and the board is the
-    // user's to name.
-    let refused = act(&mut bench, &flash, &[]);
-    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
-        panic!("a missing board is refused: {refused:?}");
-    };
-    assert!(
-        reason.contains("`board` is required: choose a board. It takes board: one of "),
-        "{reason}"
-    );
-
-    // The agent's board: a card, pre-filled, and nothing flashed.
-    let outcome = act(&mut bench, &flash, &[("board", &agents.board_id)]);
-    assert!(
-        matches!(&outcome, lpa_agent::ActOutcome::NeedsUser { card, .. } if card == "c1"),
+        matches!(&outcome, lpa_agent::ActOutcome::Done { .. }),
         "{outcome:?}"
     );
-    let card = app_cards(&mut bench).remove(0);
-    assert!(card.is_pending());
-    assert_eq!(card.offer.as_ref(), Some(&path), "the card names the offer");
-    assert_eq!(
-        card.args,
-        crate::OfferArgs::new().with("board", &agents.board_id),
-        "the agent's board is the pre-selection"
+    bench.run_until(&tasks, "the replace question", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .values()
+            .any(|layout| {
+                layout
+                    .panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.title == "Replace this board's firmware?")
+            })
+    });
+    let roster = bench.controller.device_roster_view();
+    let panel = roster
+        .layout
+        .values()
+        .find_map(|layout| layout.panel.clone())
+        .expect("the question's panel");
+    assert!(
+        panel.body.starts_with("This board is running WLED 0.15.0."),
+        "{}",
+        panel.body
     );
-    assert!(card.destructive, "the firmware on it is lost for good");
+    assert_eq!(panel.download, None, "no LightPlayer files to back up");
+    let replace = panel.continue_action.clone().expect("Replace");
+    assert!(
+        replace.to_string().ends_with("/confirm-replace"),
+        "{replace}"
+    );
+
+    // The agent cannot press it: a card, and nothing is written.
+    let outcome = act(&mut bench, &replace.to_string(), &[]);
+    assert!(
+        matches!(&outcome, lpa_agent::ActOutcome::NeedsUser { .. }),
+        "{outcome:?}"
+    );
     for _ in 0..20 {
         bench.step(&tasks);
     }
     assert!(
-        bench.view().devices.is_empty() && bench.view().pending[0].needs_firmware(),
-        "nothing runs before the user's click: {:?}",
-        bench.view()
+        bench.manifest_writes.borrow().is_empty(),
+        "nothing written before the user's yes"
+    );
+    assert!(
+        bench.view().devices[0].activity.is_some(),
+        "the install waits on the question"
     );
 
-    // The user picks another board on the card's own picker and presses.
-    let user_args = card.args.clone().with("board", &users.board_id);
-    let action = bench
-        .controller
-        .view()
-        .offers
-        .get(&path)
-        .expect("still offered")
-        .press(&user_args)
-        .expect("the user's board binds");
-    assert!(
-        !card.press.same_op(&action),
-        "another board is another op; the card answers to its offer"
-    );
-    drive(bench.controller.dispatch(action)).expect("the user's flash dispatches");
-    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+    // The user's yes.
+    bench
+        .press_lasting(&replace, OfferArgs::new())
+        .expect("Replace continues the install");
+    bench.run_until(&tasks, "the installed board to land Ready", |bench| {
         bench
             .view()
             .devices
             .first()
             .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
     });
+    let xiao = c6_board_choice();
     assert_eq!(
         bench.manifest_writes.borrow().as_slice(),
-        [lpa_boards::runtime_manifest_json(&users.board_id).expect("a served board")],
-        "the user's board was flashed, not the agent's"
+        [lpa_boards::runtime_manifest_json(&xiao.board_id).expect("a served board")],
+        "the 4 MB C6 is the XIAO, stamped with no pick"
     );
-    assert_eq!(
-        bench.view().devices[0].title,
-        users.title,
-        "named after the user's board"
-    );
-    let card = app_cards(&mut bench).remove(0);
-    assert!(
-        matches!(card.state, crate::UiAgentCardState::Done { .. }),
-        "{card:?}"
-    );
-    assert_eq!(card.user_args.as_ref(), Some(&user_args));
-    assert!(
-        card.resume_text().contains(&format!(
-            " with board = {} (you chose {})",
-            users.board_id, agents.board_id
-        )),
-        "the agent hears what the user changed: {}",
-        card.resume_text()
-    );
+    assert_eq!(bench.view().devices[0].title, xiao.title);
 }
 
 /// A Routine verb with a value is pressed outright: the agent renames a
@@ -7469,8 +7393,8 @@ fn flashing_a_sim_ends_with_the_scripted_summary_and_no_fake_facts() {
     // "the board never answered"). This row pins the unparked ladder.
     bench.unoffered_gesture(DeviceAction::Flash {
         device: target,
-        board_id: choice.board_id.clone(),
-        build_id: choice.build_id.clone(),
+        board_id: Some(choice.board_id.clone()),
+        build: lpa_devices::FlashBuildChoice::Fixed(choice.build_id.clone()),
         park_first: false,
         name: None,
         restore_backup: false,
@@ -9365,10 +9289,16 @@ fn a_board_whose_files_do_not_fit_is_refused_untouched() {
     assert_eq!(panel.title, "This board's files don't fit the new firmware");
     assert!(panel.continue_action.is_none());
     assert!(
-        offer(&bench, &panel.download)
-            .meta()
-            .enablement
-            .is_enabled(),
+        offer(
+            &bench,
+            panel
+                .download
+                .as_ref()
+                .expect("a refusal keeps its download")
+        )
+        .meta()
+        .enablement
+        .is_enabled(),
         "the files can still be saved"
     );
     assert_eq!(device.fake_board_files().0, before, "nothing was written");

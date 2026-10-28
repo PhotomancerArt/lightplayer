@@ -13,12 +13,12 @@
 
 use lpa_devices::view::LoadedProject;
 use lpa_devices::wire::BoardFs;
-use lpa_devices::{Action, DeviceId, DeviceView, LayoutVerdict};
+use lpa_devices::{Action, DeviceId, DeviceView, LayoutVerdict, Resident};
 
 use super::device_backup_import::DeviceRestoreFromFileOp;
 use super::device_backup_op::DeviceBackupOp;
 use super::device_backup_store::BackupEntry;
-use super::device_flash::{FirmwareVerb, firmware_verb};
+use super::device_flash::{FirmwareVerb, firmware_verb, flash_target_for};
 use super::device_layout_step::LayoutStaging;
 use super::device_start_fresh_op::DeviceStartFreshOp;
 use super::devices_op::DevicesOp;
@@ -26,6 +26,9 @@ use crate::{ActionConfirmation, OfferPath, UiAction, UiOffer, UiOfferTree, byte_
 
 /// `devices/<board>/continue-update`: the question's Continue.
 pub const CONTINUE_UPDATE: &str = "continue-update";
+/// `devices/<board>/confirm-replace`: the install's Replace, over somebody
+/// else's firmware.
+pub const CONFIRM_REPLACE: &str = "confirm-replace";
 /// `devices/<board>/cancel-update`: the question's Cancel.
 pub const CANCEL_UPDATE: &str = "cancel-update";
 /// `devices/<board>/download-backup`: the backup, as a file.
@@ -164,7 +167,9 @@ pub struct UiLayoutPanel {
     pub body: String,
     /// Fewer than a quarter free, or the backup could not be stored here.
     pub warning: Option<String>,
-    pub download: OfferPath,
+    /// Download backup — `None` on the replace question, which has no
+    /// LightPlayer files to back up.
+    pub download: Option<OfferPath>,
     /// `None` on a refusal. Its offer is disabled until the backup is safe
     /// (stored, or downloaded).
     pub continue_action: Option<OfferPath>,
@@ -219,6 +224,17 @@ pub fn device_layout_view(
         project_note: None,
     };
 
+    // The install's one question, while a Flash waits on it: the board runs
+    // somebody else's firmware.
+    if let Some(replace) = view
+        .activity
+        .as_ref()
+        .and_then(|activity| activity.replace.as_ref())
+    {
+        layout.panel = Some(replace_panel(device, &replace.resident, &mut publish));
+        return Some(layout);
+    }
+
     // The question, while a Flash waits on it.
     if let Some(flash_layout) = view
         .activity
@@ -250,11 +266,11 @@ pub fn device_layout_view(
                  again."
             ),
             warning: None,
-            download: publish(
+            download: Some(publish(
                 DOWNLOAD_BACKUP,
                 "download",
                 DeviceBackupOp::action_for(device),
-            ),
+            )),
             continue_action: None,
             cancel: None,
         });
@@ -287,31 +303,26 @@ pub fn device_layout_view(
     if fs == BoardFs::LegacyHeld {
         layout.line =
             Some("This board's files are waiting — Finish update moves them.".to_string());
-        if let Some(FirmwareVerb::Update(choice)) = firmware_verb(view) {
+        if firmware_verb(view) == Some(FirmwareVerb::Update)
+            && let Ok(target) = flash_target_for(view)
+        {
             layout.finish_update = Some(publish(
                 FINISH_UPDATE,
                 "upload",
-                DevicesOp::action_for(Action::Flash {
-                    device,
-                    board_id: choice.board_id.clone(),
-                    build_id: choice.build_id.clone(),
-                    park_first: choice.park_first,
-                    name: None,
-                    restore_backup: false,
-                })
-                .with_label("Finish update")
-                .with_summary(
-                    "Write the firmware again and move this board's waiting files onto it.",
-                )
-                // Lasting, as every Flash is (D7) — with words that say what
-                // this one changes for good: the old layout is retired.
-                .lasting(ActionConfirmation::new(
-                    "Finish moving this board's files?",
-                    "The board gets the new firmware again, its waiting files move to the new \
+                DevicesOp::action_for(target.action(device, false))
+                    .with_label("Finish update")
+                    .with_summary(
+                        "Write the firmware again and move this board's waiting files onto it.",
+                    )
+                    // Lasting, as every Flash is (D7) — with words that say what
+                    // this one changes for good: the old layout is retired.
+                    .lasting(ActionConfirmation::new(
+                        "Finish moving this board's files?",
+                        "The board gets the new firmware again, its waiting files move to the new \
                      layout, and the old layout is retired. Studio asks once more, with a \
                      backup, before the files move.",
-                    "finish",
-                )),
+                        "finish",
+                    )),
             ));
         }
         return Some(layout);
@@ -370,19 +381,13 @@ pub fn device_layout_view(
                 .to_string(),
         });
         if let Some(entry) = pending
-            && let Some(FirmwareVerb::Update(choice)) = firmware_verb(view)
+            && firmware_verb(view) == Some(FirmwareVerb::Update)
+            && let Ok(target) = flash_target_for(view)
         {
             layout.restore = Some(publish(
                 RESTORE_FILES,
                 "upload",
-                DevicesOp::action_for(Action::Flash {
-                    device,
-                    board_id: choice.board_id.clone(),
-                    build_id: choice.build_id.clone(),
-                    park_first: choice.park_first,
-                    name: None,
-                    restore_backup: true,
-                })
+                DevicesOp::action_for(target.action(device, true))
                 // Short: the line above it already names the backup's date,
                 // and the row also holds Download backup.
                 .with_label("Restore files")
@@ -430,17 +435,79 @@ pub fn device_layout_view(
     None
 }
 
+/// The install's one question: the board runs somebody else's firmware
+/// (or one that does not say what it is), and installing LightPlayer
+/// replaces it. The words name what is there when the board's own app
+/// description says (plan `lp2025/2026-10-28-0025-install-without-board-pick`,
+/// D2); Replace is Lasting — the agent hands it to the user.
+fn replace_panel(
+    device: DeviceId,
+    resident: &Resident,
+    publish: &mut impl FnMut(&str, &str, UiAction) -> OfferPath,
+) -> UiLayoutPanel {
+    let running = resident_words(resident);
+    let body = format!(
+        "{running} Installing LightPlayer replaces it, and anything stored with it may go too. \
+         Your library copies are untouched."
+    );
+    let confirm = DevicesOp::action_for(Action::ConfirmFlashReplace { device }).lasting(
+        ActionConfirmation::new("Replace what this board runs?", body.clone(), "replace"),
+    );
+    UiLayoutPanel {
+        title: "Replace this board's firmware?".to_string(),
+        body,
+        warning: None,
+        download: None,
+        continue_action: Some(publish(CONFIRM_REPLACE, "flash", confirm)),
+        cancel: Some(publish(
+            CANCEL_UPDATE,
+            "revert",
+            DevicesOp::action_for(Action::CancelActivity { device }),
+        )),
+    }
+}
+
+/// One sentence for what a board runs, in plain words: its own name for
+/// itself when that name means something to a person.
+pub fn resident_words(resident: &Resident) -> String {
+    match resident {
+        Resident::Foreign {
+            project_name,
+            version,
+        } => {
+            let version = version
+                .as_deref()
+                .filter(|version| !version.to_ascii_lowercase().starts_with("esp-idf"));
+            match project_name.as_deref() {
+                // An Arduino or PlatformIO build reports the framework's own
+                // project, not the sketch's: WLED says this too.
+                Some("arduino-lib-builder") => {
+                    "This board is running an Arduino sketch.".to_string()
+                }
+                Some(name) => match version {
+                    Some(version) => format!("This board is running {name} {version}."),
+                    None => format!("This board is running {name}."),
+                },
+                None => "This board is running another firmware.".to_string(),
+            }
+        }
+        Resident::Unrecognized => "Studio can't tell what this board is running.".to_string(),
+        Resident::Blank => "This board is blank.".to_string(),
+        Resident::LightPlayer => "This board is running LightPlayer.".to_string(),
+    }
+}
+
 fn question_panel(
     device: DeviceId,
     verdict: &LayoutVerdict,
     staged: Option<&LayoutStaging>,
     publish: &mut impl FnMut(&str, &str, UiAction) -> OfferPath,
 ) -> UiLayoutPanel {
-    let download = publish(
+    let download = Some(publish(
         DOWNLOAD_BACKUP,
         "download",
         DeviceBackupOp::action_for(device),
-    );
+    ));
     let cancel = Some(publish(
         CANCEL_UPDATE,
         "revert",
@@ -747,6 +814,7 @@ mod tests {
                 awaiting_consent: true,
             }),
             update: None,
+            replace: None,
             flash_step: None,
         });
         let mut offers = UiOfferTree::new();
@@ -1009,6 +1077,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,

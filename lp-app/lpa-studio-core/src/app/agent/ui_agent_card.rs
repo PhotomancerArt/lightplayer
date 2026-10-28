@@ -231,8 +231,8 @@ mod tests {
         let path = OfferPath::parse("devices/mac-a0f26287b48c/flash").unwrap();
         let flash = DevicesOp::action_for(lpa_devices::Action::Flash {
             device: lpa_devices::DeviceId(3),
-            board_id: "xiao".to_string(),
-            build_id: "b".to_string(),
+            board_id: Some("xiao".to_string()),
+            build: lpa_devices::FlashBuildChoice::Fixed("b".to_string()),
             park_first: false,
             name: None,
             restore_backup: false,
@@ -243,8 +243,8 @@ mod tests {
 
         let other_board = DevicesOp::action_for(lpa_devices::Action::Flash {
             device: lpa_devices::DeviceId(3),
-            board_id: "devkit".to_string(),
-            build_id: "b".to_string(),
+            board_id: Some("devkit".to_string()),
+            build: lpa_devices::FlashBuildChoice::Fixed("b".to_string()),
             park_first: false,
             name: None,
             restore_backup: false,

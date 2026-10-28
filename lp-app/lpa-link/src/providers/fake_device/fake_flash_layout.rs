@@ -32,6 +32,8 @@ use super::fake_device_script::{
 /// What the scripted device answers to a chip probe during a layout
 /// operation.
 const FAKE_CHIP_NAME: &str = "ESP32-C6 (fake)";
+/// The scripted board's flash chip JEDEC id: 4 MB.
+pub(crate) const FAKE_FLASH_ID: u32 = 0x0016_4020;
 
 /// The scripted chip's flash size.
 const FAKE_FLASH_LEN: usize = 0x40_0000;
@@ -61,6 +63,17 @@ pub fn fake_firmware_image() -> Vec<u8> {
 }
 
 impl FakeEsp32Device {
+    /// `InspectLayout { build }` on the scripted board: its inspection, with
+    /// the build `build` gives the board's chip — as a real session picks
+    /// it once the SYNC names the chip.
+    pub fn fake_inspect_layout_for(&self, build: &crate::FlashBuild) -> LinkLayoutInspection {
+        let mut inspection = self.fake_inspect_layout();
+        inspection.build_id = build
+            .build_for_chip(self.bootloader_chip_name())
+            .map(str::to_string);
+        inspection
+    }
+
     /// `InspectLayout` on the scripted board.
     pub fn fake_inspect_layout(&self) -> LinkLayoutInspection {
         let flash = flash_image_of(&self.flash_state());
@@ -78,10 +91,12 @@ impl FakeEsp32Device {
         }
         let (efuse_mac, _) = self.board_constants();
         LinkLayoutInspection {
-            chip_name: Some(FAKE_CHIP_NAME.to_string()),
+            chip_name: Some(self.bootloader_chip_name().to_string()),
             probed_mac: efuse_mac,
             build_id: None,
-            flash_id: None,
+            // A 4 MB part, as a XIAO ESP32-C6 carries (XMC, 0x20), unless
+            // the test made the probe read nothing.
+            flash_id: self.flash_id(),
             target_table: fake_target_table().to_bytes(),
             target_image_len: FAKE_FIRMWARE_LEN,
             target_fs: crate::FsKind::Littlefs,
@@ -214,6 +229,10 @@ impl FakeEsp32Device {
 /// The flash a boot state implies.
 fn flash_image_of(boot: &FakeBootState) -> Vec<u8> {
     let mut flash = vec![0xFFu8; FAKE_FLASH_LEN];
+    if matches!(boot, FakeBootState::ForeignFirmware) {
+        write_foreign_firmware(&mut flash);
+        return flash;
+    }
     let FakeBootState::LightPlayer(lp) = boot else {
         return flash;
     };
@@ -234,6 +253,35 @@ fn flash_image_of(boot: &FakeBootState) -> Vec<u8> {
     let start = geometry.offset as usize;
     flash[start..start + image.len()].copy_from_slice(&image);
     flash
+}
+
+/// Somebody else's firmware, as an ESP-IDF build lays it out: the default
+/// single-app table (nvs, phy_init, factory at `0x10000`) and an app image
+/// whose description names its project — what the install's replace
+/// question reads.
+fn write_foreign_firmware(flash: &mut [u8]) {
+    let entry = |label: &str, kind, subtype, offset, size| crate::PartitionEntry {
+        label: label.to_string(),
+        kind,
+        subtype,
+        offset,
+        size,
+        flags: 0,
+    };
+    let table = PartitionTable::new(vec![
+        entry("nvs", 1, 2, 0x9000, 0x6000),
+        entry("phy_init", 1, 1, 0xF000, 0x1000),
+        entry("factory", 0, 0, 0x1_0000, 0x10_0000),
+    ])
+    .to_bytes();
+    let at = PARTITION_TABLE_OFFSET as usize;
+    flash[at..at + table.len()].copy_from_slice(&table);
+    let app = &mut flash[0x1_0000..0x1_0120];
+    app.fill(0);
+    app[0] = 0xE9;
+    app[0x20..0x24].copy_from_slice(&0xABCD_5432u32.to_le_bytes());
+    app[0x30..0x30 + 6].copy_from_slice(b"0.15.0");
+    app[0x50..0x50 + 4].copy_from_slice(b"WLED");
 }
 
 /// Every file the scripted board holds, as a tree.

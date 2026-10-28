@@ -117,7 +117,7 @@ impl BoardIdentity {
 }
 
 /// The replace question, as the card shows it while the install waits.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FlashReplaceView {
     pub resident: Resident,
 }

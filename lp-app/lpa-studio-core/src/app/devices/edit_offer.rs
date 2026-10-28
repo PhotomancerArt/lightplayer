@@ -105,6 +105,7 @@ mod tests {
                     cancellable: true,
                     cancel_requested: false,
                     layout: None,
+                    replace: None,
                     flash_step: None,
                     update: None,
                 })
@@ -158,6 +159,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             update_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],

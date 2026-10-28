@@ -142,7 +142,10 @@ mod tests {
         let reads = vec![(RESIDENT_TABLE_READ, vec![0xFF; PARTITION_TABLE_LEN])];
         assert_eq!(next_resident_read(&[]), Some(RESIDENT_TABLE_READ));
         assert_eq!(next_resident_read(&reads), None);
-        assert_eq!(ResidentFirmware::from_reads(&reads), ResidentFirmware::Blank);
+        assert_eq!(
+            ResidentFirmware::from_reads(&reads),
+            ResidentFirmware::Blank
+        );
         assert!(!ResidentFirmware::Blank.is_replaced_by_install());
     }
 
@@ -205,7 +208,10 @@ mod tests {
             ResidentFirmware::from_reads(&garbage),
             ResidentFirmware::Unrecognized
         );
-        assert_eq!(ResidentFirmware::from_reads(&[]), ResidentFirmware::Unrecognized);
+        assert_eq!(
+            ResidentFirmware::from_reads(&[]),
+            ResidentFirmware::Unrecognized
+        );
 
         let app_read = LinkFlashRegion {
             offset: 0x10000,

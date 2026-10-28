@@ -294,6 +294,8 @@ pub(crate) mod tests {
         LinkLayoutInspection {
             chip_name: Some("esp32c6".to_string()),
             probed_mac: Some("10:BD:A3:B0:8E:30".to_string()),
+            build_id: None,
+            flash_id: None,
             target_table: target.to_bytes(),
             target_image_len: 0x2D_0000,
             target_fs: lpa_link::FsKind::Littlefs,

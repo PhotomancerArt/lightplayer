@@ -191,8 +191,10 @@ pub(crate) fn surface_state(input: &BoardCardInput<'_>) -> SurfaceState {
             ActivityKind::Erase => EraseFailed,
             ActivityKind::RemoveProject => RemoveFailed,
             // A failed identify is the board's own state now (not
-            // answering, needs firmware): `failed_kind` never names it.
-            ActivityKind::Identify => AllWell,
+            // answering, needs firmware): `failed_kind` never names it. A
+            // board model that was not saved changes nothing on the board:
+            // its row says so, and the board is as it was.
+            ActivityKind::Identify | ActivityKind::SetBoard => AllWell,
         };
     }
     if let Some(update) = input
@@ -363,7 +365,8 @@ fn working(input: &BoardCardInput<'_>) -> Option<SurfaceState> {
             ActivityKind::Erase => SurfaceState::Erasing,
             ActivityKind::Push => SurfaceState::Sending,
             ActivityKind::RemoveProject => SurfaceState::Removing,
-            ActivityKind::Identify => SurfaceState::Identifying,
+            // Saving which board it is: finding out, by asking the user.
+            ActivityKind::Identify | ActivityKind::SetBoard => SurfaceState::Identifying,
         });
     }
     let story = input

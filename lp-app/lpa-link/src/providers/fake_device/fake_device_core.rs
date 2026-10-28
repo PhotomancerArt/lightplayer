@@ -101,6 +101,7 @@ impl FakeEsp32Device {
                 script,
                 efuse_mac,
                 board_link,
+                flash_id: Some(super::fake_flash_layout::FAKE_FLASH_ID),
                 phase,
                 out: VecDeque::new(),
                 out_since: None,
@@ -370,6 +371,42 @@ impl FakeEsp32Device {
 
     /// The board's efuse MAC and link configuration — what survives any
     /// flash.
+    /// Make the board's flash id probe read `id` (`None`: nothing, as a C6
+    /// rev 2 over USB-Serial-JTAG can).
+    pub fn set_flash_id_for_test(&self, id: Option<u32>) {
+        self.lock().flash_id = id;
+    }
+
+    /// What the board's flash id probe reads.
+    pub(crate) fn flash_id(&self) -> Option<u32> {
+        self.lock().flash_id
+    }
+
+    /// The USB vendor/product the board enumerates as: a classic ESP32
+    /// behind a CH340 bridge, as a QuinLED Dig2Go is; a C6 on its own
+    /// USB-Serial-JTAG otherwise.
+    pub fn usb_vid_pid(&self) -> (u16, u16) {
+        match self.bootloader_chip_name().starts_with("ESP32-D0WD") {
+            true => (0x1a86, 0x7523),
+            false => (0x303a, 0x1001),
+        }
+    }
+
+    /// What the board's bootloader names itself as, the way esptool-js
+    /// reports it: the chip the script's ROM banner is.
+    pub(crate) fn bootloader_chip_name(&self) -> &'static str {
+        let classic = self
+            .lock()
+            .script
+            .rom_banner
+            .iter()
+            .any(|line| line == super::fake_device_script::CLASSIC_ESP32_ROM_BANNER);
+        match classic {
+            true => "ESP32-D0WD-V3 (revision v3.0)",
+            false => "ESP32-C6 (fake)",
+        }
+    }
+
     pub(crate) fn board_constants(&self) -> (Option<String>, lpc_wire::lp_link::LinkConfig) {
         let core = self.lock();
         (core.efuse_mac.clone(), core.board_link.clone())
@@ -448,6 +485,10 @@ pub(crate) struct FakeDeviceCore {
     /// same reason: the transport (USB-Serial-JTAG, or a classic's UART
     /// behind a bridge) is the board's, and a flash does not change it.
     board_link: lpc_wire::lp_link::LinkConfig,
+    /// What the board's flash chip answers to a JEDEC id probe: 4 MB, as a
+    /// XIAO ESP32-C6's does, unless a test says the probe reads nothing (a
+    /// C6 rev 2 over USB-Serial-JTAG can).
+    flash_id: Option<u32>,
     phase: FakePhase,
     /// Device→host bytes not yet served to the reader.
     out: VecDeque<u8>,

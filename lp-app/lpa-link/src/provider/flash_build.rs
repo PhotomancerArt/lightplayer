@@ -95,7 +95,10 @@ mod tests {
 
     #[test]
     fn a_chip_the_table_lacks_gets_nothing_not_the_nearest() {
-        assert_eq!(table().build_for_chip("ESP32-S3 (QFN56) (revision v0.2)"), None);
+        assert_eq!(
+            table().build_for_chip("ESP32-S3 (QFN56) (revision v0.2)"),
+            None
+        );
         assert_eq!(table().build_for_chip("ESP8266"), None);
         assert_eq!(table().build_for_chip(""), None);
     }

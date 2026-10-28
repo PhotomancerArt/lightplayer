@@ -474,8 +474,8 @@ fn manage_fake_device(
             device.reset_runtime();
             Ok(LinkManagementResult::ResetRuntime)
         }
-        LinkManagementRequest::InspectLayout { .. } => Ok(LinkManagementResult::InspectLayout(
-            device.fake_inspect_layout(),
+        LinkManagementRequest::InspectLayout { build } => Ok(LinkManagementResult::InspectLayout(
+            device.fake_inspect_layout_for(&build),
         )),
         LinkManagementRequest::FlashFirmware { build_id, plan } => {
             match &plan {

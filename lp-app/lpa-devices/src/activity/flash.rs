@@ -2189,7 +2189,11 @@ mod tests {
             &mut activity,
             &evidence,
             &config,
-            identity(Some("esp32c6-4mb"), Some("seeed/xiao-esp32-c6"), Resident::Blank),
+            identity(
+                Some("esp32c6-4mb"),
+                Some("seeed/xiao-esp32-c6"),
+                Resident::Blank,
+            ),
         );
         assert!(
             matches!(
@@ -2227,7 +2231,10 @@ mod tests {
         else {
             panic!("no build ends the install: {step:?}");
         };
-        assert!(message.contains("no firmware for this chip (esp32c6)"), "{message}");
+        assert!(
+            message.contains("no firmware for this chip (esp32c6)"),
+            "{message}"
+        );
         assert!(message.contains("Nothing was written"), "{message}");
         assert!(matches!(
             commands.as_slice(),
@@ -2264,7 +2271,9 @@ mod tests {
             Some(wled)
         );
         assert!(
-            !activity.layout_view().is_some_and(|view| view.awaiting_consent),
+            !activity
+                .layout_view()
+                .is_some_and(|view| view.awaiting_consent),
             "no files question"
         );
 
@@ -2315,7 +2324,9 @@ mod tests {
             identity(Some("esp32c6-4mb"), None, Resident::Unrecognized),
         );
         let late = Millis(5_000).plus_ms(config.flash_consent_ms);
-        let step = with_ctx(&evidence, &config, |ctx| activity.handle(late, &timer(), ctx));
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(late, &timer(), ctx)
+        });
         assert!(matches!(
             step,
             ActivityStep::Done {
@@ -2387,7 +2398,11 @@ mod tests {
             &mut activity,
             &evidence,
             &config,
-            identity(Some("esp32c6-4mb"), Some("seeed/xiao-esp32-c6"), Resident::LightPlayer),
+            identity(
+                Some("esp32c6-4mb"),
+                Some("seeed/xiao-esp32-c6"),
+                Resident::LightPlayer,
+            ),
         );
         assert!(matches!(
             step,

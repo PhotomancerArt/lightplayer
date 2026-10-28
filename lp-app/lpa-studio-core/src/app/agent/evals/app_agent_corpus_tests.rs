@@ -153,11 +153,7 @@ fn the_device_seat_connects_flashes_and_pushes_on_a_scripted_model() {
         ],
         // The run the person's click resumes: flash the blank board.
         vec![
-            act_turn(
-                "f1",
-                "devices/new-1/flash",
-                &[("board", "seeed/xiao-esp32-c6")],
-            ),
+            act_turn("f1", "devices/new-1/flash", &[]),
             say("Flashing LightPlayer onto it."),
         ],
         // The run the flash's end resumes ("it runs LightPlayer and no
@@ -225,11 +221,7 @@ fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
             // The board is the only unidentified entry: `new-1`, whatever
             // its roster handle (the sim's record pushed those past
             // 9223372036854775807).
-            act_turn(
-                "f1",
-                "devices/new-1/flash",
-                &[("board", "seeed/xiao-esp32-c6")],
-            ),
+            act_turn("f1", "devices/new-1/flash", &[]),
             say("Flashing LightPlayer onto it."),
         ],
         // The run the flash's end resumes.
@@ -317,9 +309,13 @@ fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
     assert_eq!(device.flashed, ["seeed/xiao-esp32-c6"]);
 }
 
-/// S19's board stands up: a classic ESP32 running WLED, its flash a card
-/// pre-filled with the agent's pick, and the person's click on it with the
-/// Dig2Go chosen flashes the Dig2Go's pin map.
+/// S19's board stands up (plan
+/// `lp2025/2026-10-28-0025-install-without-board-pick`): a classic ESP32
+/// running WLED. The agent presses Install — Routine, nothing is written
+/// before the board is read — and is resumed by the install's one question;
+/// Replace is a card the person clicks. Four classic boards fit, so the
+/// agent then answers "Which board is this?" with the Dig2Go, and that is
+/// the pin map the board keeps.
 #[test]
 fn the_wled_controller_flash_is_a_card_the_person_answers_with_their_board() {
     let mut scenario = Scenario::load("s19-sean-wled-controller").expect("S19");
@@ -327,10 +323,10 @@ fn the_wled_controller_flash_is_a_card_the_person_answers_with_their_board() {
     scenario.user.replies.clear();
     scenario.checks = vec![
         CheckSpec::CardHanded {
-            offer: "devices/*/flash".into(),
+            offer: "devices/*/confirm-replace".into(),
         },
         CheckSpec::Never {
-            what: "pressed:devices/*/flash".into(),
+            what: "pressed:devices/*/confirm-replace".into(),
         },
         CheckSpec::BoardFirmware {
             is: super::app_agent_check_spec::FirmwareIs::Flashed,
@@ -349,23 +345,29 @@ fn the_wled_controller_flash_is_a_card_the_person_answers_with_their_board() {
         .find(|offer| offer.path.to_string().ends_with("/flash"))
         .map(|offer| offer.path.to_string())
         .expect("the classic's flash is offered");
-    let options = seat
-        .offer_tree()
-        .iter()
-        .find(|offer| offer.path.to_string() == flash)
-        .map(|offer| format!("{:?}", offer.params()))
-        .expect("the flash");
-    assert!(
-        options.contains("quinled/dig2go"),
-        "the Dig2Go is a pick for a classic chip: {options}"
-    );
+    let board = flash.trim_end_matches("/flash").to_string();
     drop(seat);
 
-    // The agent picks the DOM-Z-102; the person picks their Dig2Go.
     let scripts = vec![
         vec![
-            act_turn("f1", &flash, &[("board", "domraem/dom-z-102")]),
-            say("Click Flash on the card: it replaces WLED, and its settings and presets."),
+            act_turn("f1", &flash, &[]),
+            say("Reading the controller first."),
+        ],
+        vec![
+            act_turn("r1", &format!("{board}/confirm-replace"), &[]),
+            say("Click Replace on the card: it replaces WLED, and its settings and presets."),
+        ],
+        // Resumed by the click while the install runs: it asks, and the
+        // person's answer comes once the board is up.
+        vec![say("Installing now. Which controller is it, exactly?")],
+        vec![
+            // The board's own ref once it said hello: its MAC.
+            act_turn(
+                "b1",
+                "devices/mac-6055f90a0b0c/set-board",
+                &[("board", "quinled/dig2go")],
+            ),
+            say("Saved it as your Dig2Go."),
         ],
         vec![say("Flashed.")],
     ];
@@ -376,20 +378,10 @@ fn the_wled_controller_flash_is_a_card_the_person_answers_with_their_board() {
         outcome.failures(),
         outcome.transcript.steps
     );
-    let clicked = outcome
-        .transcript
-        .steps
-        .iter()
-        .find_map(|step| match step {
-            EvalStep::CardClicked { args, .. } => Some(args.clone()),
-            _ => None,
-        })
-        .expect("the person clicked the flash card");
-    assert_eq!(clicked["board"], "quinled/dig2go");
     assert_eq!(
         outcome.device.expect("a board").flashed,
         ["quinled/dig2go"],
-        "the person's pick was flashed"
+        "the Dig2Go's pin map, from the agent's answer"
     );
 }
 

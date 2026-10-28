@@ -317,6 +317,14 @@ impl ActivityCell {
         }
     }
 
+    /// A Flash activity's replace question, while it waits on the user.
+    pub fn flash_replace(&self) -> Option<super::FlashReplaceView> {
+        match &self.reducer {
+            Reducer::Flash(flash) => flash.replace_view(),
+            _ => None,
+        }
+    }
+
     /// An Update activity's stage, progress and outcome, for the card's
     /// words.
     pub fn update_view(&self) -> Option<UpdateActivityView> {

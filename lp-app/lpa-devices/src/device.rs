@@ -23,6 +23,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::activity::FlashBuildChoice;
 use crate::activity::activity_cell::Reducer;
 use crate::activity::erase::EraseActivity;
 use crate::activity::flash::FlashActivity;
@@ -30,7 +31,6 @@ use crate::activity::identify::IdentifyActivity;
 use crate::activity::push::PushActivity;
 use crate::activity::remove_project::RemoveProjectActivity;
 use crate::activity::set_board::SetBoardActivity;
-use crate::activity::FlashBuildChoice;
 use crate::activity::update::{UPDATE_DEADLINE_MS, UpdateActivity};
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityStep, UpdateIntentFacts,
@@ -1127,6 +1127,12 @@ impl Device {
                     // is over (its hello would say so too).
                     ActivityKind::Flash | ActivityKind::Update if outcome.is_success() => {
                         self.erased = false;
+                        // The flash ended on the new firmware's own hello: it
+                        // has been heard, so a hello in this same event is not
+                        // the late one an earlier identify was waiting for
+                        // (re-identifying would replace the install's outcome
+                        // on the card with the identify's).
+                        self.late_hello_reidentifies = false;
                     }
                     _ => {}
                 }

@@ -197,6 +197,12 @@ pub struct Evidence {
     /// detach.
     #[serde(default)]
     link_carries_update_channel: bool,
+    /// The current link's USB vendor/product, as its [`LinkInfo`](crate::LinkInfo)
+    /// said at attach and open — which bridge the board sits behind
+    /// (Espressif's native USB, a CH340, …), for the install's board guess
+    /// and whether it parks the chip first. Cleared on detach.
+    #[serde(default)]
+    link_usb: Option<crate::link::UsbIds>,
     observations: Observations,
 }
 
@@ -223,6 +229,7 @@ impl Evidence {
                     since: now,
                 };
                 self.link_carries_update_channel = info.carries_update_channel;
+                self.link_usb = info.usb;
                 self.begin_window(now);
                 // A borrow belongs to the link it was taken on. This is a
                 // different link, so nothing is holding it.
@@ -237,6 +244,7 @@ impl Evidence {
             Event::LinkDetached { .. } => {
                 self.presence = Presence::Detached { since: now };
                 self.link_carries_update_channel = false;
+                self.link_usb = None;
                 self.begin_window(now);
                 // Unplugged mid-effect: the release event the effect will
                 // eventually raise addresses a link this device no longer
@@ -467,6 +475,11 @@ impl Evidence {
         self.link_carries_update_channel && self.presence.is_attached()
     }
 
+    /// The current link's USB vendor/product, when it is a USB link.
+    pub fn link_usb(&self) -> Option<crate::link::UsbIds> {
+        self.link_usb.filter(|_| self.presence.is_attached())
+    }
+
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -591,6 +604,7 @@ impl Evidence {
             LinkEvent::Opened { info } => {
                 self.presence = Presence::Open { link, since: now };
                 self.link_carries_update_channel = info.carries_update_channel;
+                self.link_usb = info.usb;
                 // It opened, so no other tab holds it now.
                 self.link_held_by_tab = false;
                 // A fresh port is a fresh window: whatever we concluded
